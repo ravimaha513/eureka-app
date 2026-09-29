@@ -141,7 +141,7 @@ The scale (hundreds of users), the access model and the need for one small team 
 | Data access | Drizzle ORM + node-postgres, SQL-first migrations | Full control of SQL, needed for scope predicates and RLS; typed queries | Kysely or raw SQL |
 | Database | PostgreSQL 16 on Amazon RDS Multi-AZ | Relational integrity; Row-Level Security; `pg_trgm` and full-text search at this volume; exclusion constraints for effective dating | Aurora, read replicas, partitioning, OpenSearch for search, warehouse via CDC |
 | Authentication | Direct OIDC with Google Workspace from the API acting as Backend-for-Frontend | Company SSO; step-up via `prompt=login`; `hd` domain claim available; no tokens in the browser | Cognito, Auth0 or Okta as a broker when a second IdP is needed |
-| Jobs and events | Transactional outbox + Postgres job queue (`pg-boss`, SKIP LOCKED) in the worker | No extra infrastructure; exactly-once intent, at-least-once delivery; easy reschedule of interview-related jobs | SQS, then Amazon MSK, fed from the same outbox |
+| Jobs and events | Transactional outbox + a Postgres job table (`job_run`, leases and SKIP LOCKED) in the worker; pg-boss was rejected because it needs DDL rights at runtime | No extra infrastructure; exactly-once intent, at-least-once delivery; easy reschedule of interview-related jobs | SQS, then Amazon MSK, fed from the same outbox |
 | Files | S3 with SSE-KMS; presigned POST into a quarantine prefix; GuardDuty Malware Protection; promotion on clean scan | Files never pass through the API; scanning before availability | Same |
 | Email | Amazon SES with DKIM, SPF, DMARC | Transactional email | SendGrid or Postmark |
 | Compute | ECS on Fargate (api, worker) behind an ALB; rolling deploys with circuit breaker | No servers to patch; autoscaling | EKS when many services exist |
@@ -245,7 +245,7 @@ TLS 1.2+ everywhere; RDS, snapshots and S3 encrypted with KMS; the database is i
 ## A7. Asynchronous processing
 
 - Side effects are written as `outbox_event` rows in the same transaction as the business change.
-- The worker polls the outbox and a `pg-boss` queue (SKIP LOCKED). Handlers are idempotent and deduplicate on event id.
+- The worker polls the outbox and the `job_run` table (leases, SKIP LOCKED). Handlers are idempotent and deduplicate on event id.
 - Timed work is polled rather than scheduled one-by-one. Example: every 5 minutes, find interviews with `ends_at + 60 min <= now()` and no feedback email sent. Reschedules and cancellations need no schedule cleanup.
 
 ## A8. Deployment and environments

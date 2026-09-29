@@ -138,7 +138,7 @@ These rules apply in every phase:
   - first-placement detection
   - notifications to HR, Accounts and Immigration (FR-PLC-01 to 07)
 - Role dashboards (manager, lead, location) with activity counts and "needs attention".
-- Worker: outbox relay, `pg-boss` queue, feedback-email job, SES integration.
+- Worker: outbox relay, `job_run` lease-based jobs (runner built in Phase 1), feedback-email job, SES integration.
 - **Data migration:**
   - CSV import pipeline with normalization, cross-sheet matching and review queues
   - reconciliation report
