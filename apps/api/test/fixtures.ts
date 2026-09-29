@@ -19,6 +19,8 @@ export const U = {
   ceo: uid(1), om: uid(2), ad: uid(3), m1: uid(4), m2: uid(5),
   l1: uid(6), l2: uid(7), l3: uid(8), r1a: uid(9), r1b: uid(10), r2a: uid(11), r3a: uid(12),
   coach: uid(13), locD: uid(14), locA: uid(15), hr: uid(16), acct: uid(17), admin: uid(18), imm: uid(19),
+  // Second org admin: role requests for restricted roles need a second approver (admin-api.md AD-3).
+  admin2: uid(20),
 };
 
 export const USERS: Record<keyof typeof U, UserDef> = {
@@ -41,6 +43,7 @@ export const USERS: Record<keyof typeof U, UserDef> = {
   acct: { id: U.acct, roles: [{ role: "accounts" }] },
   admin: { id: U.admin, roles: [{ role: "org_admin" }] },
   imm: { id: U.imm, roles: [{ role: "immigration" }] },
+  admin2: { id: U.admin2, roles: [{ role: "org_admin" }] },
 };
 
 export const T = { t1: uid(101), t2: uid(102), t3: uid(103) };

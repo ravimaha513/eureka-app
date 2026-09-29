@@ -346,3 +346,13 @@ export const GRANTS: Record<Role, Grants> = {
 export function grantFor(role: Role, permission: Permission): Scope | undefined {
   return GRANTS[role][permission];
 }
+
+/**
+ * Restricted roles need a second approver when granted (admin-api.md AD-3):
+ * org_admin, and every role holding a permission in RESTRICTED_PERMISSIONS.
+ * The migration runner copies this into eureka.role.is_restricted, which the
+ * database approval functions read.
+ */
+export function isRestrictedRole(role: Role): boolean {
+  return role === "org_admin" || RESTRICTED_PERMISSIONS.some((p) => GRANTS[role][p] !== undefined);
+}

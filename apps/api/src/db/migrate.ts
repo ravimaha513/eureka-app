@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { GRANTS, HOTLIST_VISIBILITY, LOCATION_ROLES, ROLES, ROLE_LABELS, SALES_ROLES } from "@eureka/shared";
+import { GRANTS, HOTLIST_VISIBILITY, LOCATION_ROLES, ROLES, ROLE_LABELS, SALES_ROLES, isRestrictedRole } from "@eureka/shared";
 
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../../db/migrations");
 
@@ -47,10 +47,10 @@ export async function seedCatalog(client: pg.Client | pg.PoolClient): Promise<vo
   try {
     for (const role of ROLES) {
       await client.query(
-        `INSERT INTO eureka.role (key, label, is_sales, is_location_bound) VALUES ($1,$2,$3,$4)
+        `INSERT INTO eureka.role (key, label, is_sales, is_location_bound, is_restricted) VALUES ($1,$2,$3,$4,$5)
          ON CONFLICT (key) DO UPDATE SET label = EXCLUDED.label, is_sales = EXCLUDED.is_sales,
-           is_location_bound = EXCLUDED.is_location_bound`,
-        [role, ROLE_LABELS[role], SALES_ROLES.includes(role), LOCATION_ROLES.includes(role)],
+           is_location_bound = EXCLUDED.is_location_bound, is_restricted = EXCLUDED.is_restricted`,
+        [role, ROLE_LABELS[role], SALES_ROLES.includes(role), LOCATION_ROLES.includes(role), isRestrictedRole(role)],
       );
     }
     await client.query("DELETE FROM eureka.role_permission");

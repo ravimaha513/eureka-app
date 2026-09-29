@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GRANTS, PERMISSIONS, ROLES, LOCATION_ROLES, RESTRICTED_PERMISSIONS } from "./catalog.js";
+import { GRANTS, PERMISSIONS, ROLES, LOCATION_ROLES, RESTRICTED_PERMISSIONS, isRestrictedRole } from "./catalog.js";
 import {
   activityVisible,
   applyCandidateFieldPolicy,
@@ -63,6 +63,14 @@ describe("catalog integrity", () => {
     for (const role of ROLES) {
       const holds = RESTRICTED_PERMISSIONS.filter((p) => GRANTS[role][p]);
       if (holds.length) expect(["hr", "accounts", "immigration"]).toContain(role);
+    }
+  });
+
+  it("restricted roles (second approver) are org_admin, HR, Accounts and Immigration", () => {
+    expect(ROLES.filter(isRestrictedRole).sort()).toEqual(["accounts", "hr", "immigration", "org_admin"]);
+    for (const role of ROLES) {
+      const holdsRestricted = RESTRICTED_PERMISSIONS.some((p) => GRANTS[role][p]);
+      expect(isRestrictedRole(role), role).toBe(role === "org_admin" || holdsRestricted);
     }
   });
 
