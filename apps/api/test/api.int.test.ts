@@ -206,16 +206,16 @@ describe("candidate endpoints", () => {
   it("Hot List is open to everyone (OD-01): other team's candidate listed with masked phone, profile still 404", async () => {
     const other = candidates.find((c) => c.teamId === T.t2 && c.visibility === "team" && c.marketingStatus === "active")!;
     for (const key of ["r1a", "admin"] as const) {
-      const items = [];
+      const items: { id: string; phoneMasked: boolean }[] = [];
       let cursor: string | null = null;
       do {
-        const page = (await call(key, "GET", `/api/v1/hotlist?limit=100${cursor ? `&cursor=${cursor}` : ""}`)).json();
+        const page: { items: typeof items; nextCursor: string | null } = (await call(key, "GET", `/api/v1/hotlist?limit=100${cursor ? `&cursor=${cursor}` : ""}`)).json();
         items.push(...page.items);
         cursor = page.nextCursor;
       } while (cursor);
-      const row = items.find((i: { id: string }) => i.id === other.id);
+      const row = items.find((i) => i.id === other.id);
       expect(row, key).toBeDefined();
-      expect(row.phoneMasked).toBe(true);
+      expect(row!.phoneMasked).toBe(true);
     }
     expect((await call("r1a", "GET", `/api/v1/candidates/${other.id}`)).statusCode).toBe(404);
   });
