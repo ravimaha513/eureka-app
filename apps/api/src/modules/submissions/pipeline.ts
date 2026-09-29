@@ -34,13 +34,24 @@ export function submissionTransitionAllowed(from: string, to: string): boolean {
   return FORWARD[from as SubmissionStatus] === to;
 }
 
+/** Interview time limits, also enforced by the database (migration 0019). */
+export const MAX_INTERVIEW_MS = 12 * 60 * 60 * 1000;
+export const MIN_INTERVIEW_START = Date.parse("2000-01-01T00:00:00Z");
+export function interviewTimesProblem(startsAt: string, endsAt: string): string | null {
+  const s = Date.parse(startsAt), e = Date.parse(endsAt);
+  if (!(e > s)) return "endsAt must be after startsAt";
+  if (e - s > MAX_INTERVIEW_MS) return "an interview can last at most 12 hours";
+  if (s < MIN_INTERVIEW_START) return "startsAt is too far in the past";
+  return null;
+}
+
 export const CALL_STATUSES = ["scheduled", "in_progress", "completed", "rescheduled", "cancelled", "no_invite"] as const;
 
 /** Query-string timestamp: a date (YYYY-MM-DD) or an ISO date-time with offset. */
 export const QueryInstant = z.union([z.string().date(), z.string().datetime({ offset: true })]);
 
 /** Keyset cursor "<epoch microseconds>.<uuid>", exact to the microsecond. */
-export const Cursor = z.string().regex(/^\d{1,17}\.[0-9a-f-]{36}$/i, "invalid cursor");
+export const Cursor = z.string().regex(/^-?\d{1,17}\.[0-9a-f-]{36}$/i, "invalid cursor");
 export function splitCursor(cursor: string): [string, string] {
   const i = cursor.indexOf(".");
   return [cursor.slice(0, i), cursor.slice(i + 1)];

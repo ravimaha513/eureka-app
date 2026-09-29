@@ -152,11 +152,11 @@ describe("lists return exactly the engine-visible rows (differential)", () => {
     const seeded = new Set(seed.submissions.map((s) => s.id));
     const got = items.map((i) => i.id as string).filter((id) => seeded.has(id)).sort();
     expect(got).toEqual(seed.submissions.filter((s) => activityVisible(scope, s)).map((s) => s.id).sort());
-    // Field policy: rate only where rate:read covers the row.
+    // Field policy: rate only where rate:read covers the actor snapshot (the team that negotiated it).
     const rateScope = resolveScope(access, "rate:read");
     for (const item of items.filter((i) => seeded.has(i.id as string))) {
       const s = seed.submissions.find((x) => x.id === item.id)!;
-      expect("rate" in item, `${key} rate ${s.id}`).toBe(activityVisible(rateScope, s));
+      expect("rate" in item, `${key} rate ${s.id}`).toBe(ownsActivity(rateScope, s));
       if ("rate" in item) expect(item.rate).toBe(55);
     }
   });

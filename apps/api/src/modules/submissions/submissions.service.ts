@@ -129,7 +129,8 @@ export class SubmissionsService {
   /** Field policy (design B4.6): rate only when rate:read covers the row; otherwise the key is omitted. */
   present(access: UserAccess, r: SubmissionRow) {
     const rateScope = resolveScope(access, "rate:read");
-    const showRate = activityVisible(rateScope, activityRef(r));
+    // Rates follow the team that negotiated them (the actor snapshot), not candidate ownership.
+    const showRate = ownsActivity(rateScope, activityRef(r));
     return {
       id: r.id,
       candidateId: r.candidate_id,
@@ -234,7 +235,7 @@ export class SubmissionsService {
       }
       await this.audit.record(c, {
         actorId: user.id, action: "submission.status", entityType: "submission", entityId: id,
-        changes: { from: row.status, to: status, ...(body.rejectionReason ? { rejectionReason: body.rejectionReason } : {}) },
+        changes: { from: row.status, to: status, ...(body.rejectionReason ? { rejectionReasonGiven: true } : {}) },
       });
       return { id, status, rejectionReason: body.rejectionReason ?? null };
     });

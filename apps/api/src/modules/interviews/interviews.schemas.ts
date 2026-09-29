@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CALL_STATUSES, Cursor, QueryInstant } from "../submissions/pipeline.js";
+import { CALL_STATUSES, Cursor, QueryInstant, interviewTimesProblem } from "../submissions/pipeline.js";
 
 const uuid = z.string().uuid();
 /** Only https links are stored (no javascript: or data: URLs reach the board). */
@@ -32,7 +32,10 @@ export const CreateInterview = z
     inviteReceived: z.boolean().optional(),
   })
   .strict()
-  .refine((b) => Date.parse(b.endsAt) > Date.parse(b.startsAt), { message: "endsAt must be after startsAt", path: ["endsAt"] });
+  .superRefine((b, ctx) => {
+    const problem = interviewTimesProblem(b.startsAt, b.endsAt);
+    if (problem) ctx.addIssue({ code: "custom", message: problem, path: ["endsAt"] });
+  });
 export type CreateInterview = z.infer<typeof CreateInterview>;
 
 /**

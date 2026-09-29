@@ -14,6 +14,7 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import { TERMINAL_SUBMISSION_STATUSES, fromMicros, mapPipelineError, splitCursor, toMicros } from "../submissions/pipeline.js";
+import { interviewTimesProblem } from "../submissions/pipeline.js";
 import {
   COLUMN,
   LOCATION_FIELDS,
@@ -109,6 +110,14 @@ export function feedbackKinds(access: UserAccess, a: ActivityRef): FeedbackKind[
 export class InterviewsService {
   constructor(private readonly db: DbService, private readonly audit: AuditService) {}
 
+  /** A coach must be an active user holding the interview_coach role. */
+  private async assertCoach(c: pg.PoolClient, coachId: string) {
+    const { rowCount } = await c.query(
+      `SELECT 1 FROM eureka.user_role ur JOIN eureka.app_user u ON u.id = ur.user_id
+       WHERE ur.user_id = $1 AND ur.role_key = 'interview_coach' AND ur.valid @> now() AND u.status = 'active'`, [coachId]);
+    if (!rowCount) throw new UnprocessableEntityException("invalid_coach");
+  }
+
   present(access: UserAccess, r: InterviewRow) {
     return {
       id: r.id,
@@ -195,6 +204,7 @@ export class InterviewsService {
         throw new ForbiddenException("Not permitted");
       }
       if (TERMINAL_SUBMISSION_STATUSES.has(sub.status as never)) throw new UnprocessableEntityException("submission_closed");
+      if (body.coachId) await this.assertCoach(c, body.coachId);
       let id: string;
       try {
         const ins = await c.query<{ id: string }>(
@@ -227,18 +237,25 @@ export class InterviewsService {
       const otter = body.otterUrl !== undefined ? body.otterUrl : row.otter_url;
       const recording = body.recordingUrl !== undefined ? body.recordingUrl : row.recording_url;
       if (!consent && (otter !== null || recording !== null)) throw new UnprocessableEntityException("consent_required");
-      const starts = Date.parse(body.startsAt ?? row.starts_at.toISOString());
-      const ends = Date.parse(body.endsAt ?? row.ends_at.toISOString());
-      if (!(ends > starts)) throw new UnprocessableEntityException("endsAt must be after startsAt");
+      const timeProblem = interviewTimesProblem(body.startsAt ?? row.starts_at.toISOString(), body.endsAt ?? row.ends_at.toISOString());
+      if (timeProblem) throw new UnprocessableEntityException(timeProblem);
+      if (body.coachId) await this.assertCoach(c, body.coachId);
 
       const params: unknown[] = [id];
       const sets = fields.map((f) => { params.push(body[f]); return `${COLUMN[f]} = $${params.length}`; });
+      let updated = 0;
       try {
-        await c.query(`UPDATE eureka.interview SET ${sets.join(", ")} WHERE id = $1`, params);
+        updated = (await c.query(`UPDATE eureka.interview SET ${sets.join(", ")} WHERE id = $1`, params)).rowCount ?? 0;
       } catch (err) {
         mapPipelineError(err);
       }
-      await this.audit.record(c, { actorId: user.id, action: "interview.updated", entityType: "interview", entityId: id, changes: body });
+      if (updated !== 1) throw new ForbiddenException("Not permitted"); // RLS refused the row
+      // Recording/Otter links are shareable secrets: audit that they changed, not their value.
+      const changes: Record<string, unknown> = { ...body };
+      for (const k of ["otterUrl", "recordingUrl"] as const) {
+        if (k in body) changes[k] = body[k] === null ? "cleared" : "set";
+      }
+      await this.audit.record(c, { actorId: user.id, action: "interview.updated", entityType: "interview", entityId: id, changes });
       return this.present(user.access, await this.load(c, user, id));
     });
   }
