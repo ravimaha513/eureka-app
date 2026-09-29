@@ -1,0 +1,28 @@
+# Accepted Checkov findings, each with a reason. Everything else must pass.
+framework: [terraform]
+skip-check:
+  # Standard KMS key policy: account root administers the key; "*" means "this key".
+  - CKV_AWS_109
+  - CKV_AWS_111
+  - CKV_AWS_356
+  # Log4j: not a Java stack; AWSManagedRulesKnownBadInputsRuleSet (enabled) already includes Log4JRCE.
+  - CKV_AWS_192
+  - CKV2_AWS_47
+  # ALB accepts only CloudFront origin-facing IPs plus a secret header; WAF is attached at CloudFront.
+  - CKV2_AWS_28
+  # TLS terminates at the ALB; ALB to task hop is inside private subnets (re-evaluate with mTLS in Phase 5).
+  - CKV_AWS_378
+  # Single S3 origin for the SPA; failover not needed at this scale.
+  - CKV_AWS_310
+  # Secret rotation is a Phase 5 item (Secrets Manager rotation Lambda for DB role passwords).
+  - CKV2_AWS_57
+  # Cross-region replication: RDS snapshots are copied cross-region (design A8); audit bucket replication in Phase 5.
+  - CKV_AWS_144
+  # Only the documents bucket needs events (GuardDuty scan results); others do not.
+  - CKV2_AWS_62
+  # Audit (Object Lock retention) and state buckets intentionally have no expiry lifecycle.
+  - CKV2_AWS_61
+  # Bootstrap state bucket: access logging not required (CloudTrail data events cover it).
+  - CKV_AWS_18
+  # AZ list is sliced to the first two; new AZs do not change placement.
+  - CKV_AWS_394

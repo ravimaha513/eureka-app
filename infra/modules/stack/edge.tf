@@ -1,0 +1,424 @@
+# Edge (design A5 "Edge", A6.5): CloudFront serves the SPA from S3 (OAC) and
+# forwards /api/* to the ALB over HTTPS with a secret origin header. WAF with
+# AWS managed rules and a per-IP rate limit. Security headers on every response.
+
+data "aws_route53_zone" "main" {
+  count        = local.use_domain ? 1 : 0
+  name         = var.hosted_zone_name
+  private_zone = false
+}
+
+locals {
+  origin_host = local.use_domain ? "origin-${var.domain_name}" : ""
+}
+
+# ----- Certificates (DNS validated) -----
+resource "aws_acm_certificate" "cdn" {
+  count             = local.use_domain ? 1 : 0
+  provider          = aws.us_east_1
+  domain_name       = var.domain_name
+  validation_method = "DNS"
+  lifecycle { create_before_destroy = true }
+}
+
+resource "aws_acm_certificate" "origin" {
+  domain_name       = local.use_domain ? local.origin_host : "origin.${local.name}.invalid"
+  validation_method = "DNS"
+  lifecycle {
+    create_before_destroy = true
+    precondition {
+      condition     = local.use_domain
+      error_message = "domain_name and hosted_zone_name must be set: CloudFront reaches the ALB over HTTPS on origin-<domain>."
+    }
+  }
+}
+
+resource "aws_route53_record" "cert_validation" {
+  for_each = local.use_domain ? {
+    for o in concat(tolist(aws_acm_certificate.cdn[0].domain_validation_options), tolist(aws_acm_certificate.origin.domain_validation_options)) :
+    o.domain_name => o
+  } : {}
+  zone_id         = data.aws_route53_zone.main[0].zone_id
+  name            = each.value.resource_record_name
+  type            = each.value.resource_record_type
+  records         = [each.value.resource_record_value]
+  ttl             = 300
+  allow_overwrite = true
+}
+
+resource "aws_acm_certificate_validation" "cdn" {
+  count                   = local.use_domain ? 1 : 0
+  provider                = aws.us_east_1
+  certificate_arn         = aws_acm_certificate.cdn[0].arn
+  validation_record_fqdns = [for r in aws_route53_record.cert_validation : r.fqdn if r.name == tolist(aws_acm_certificate.cdn[0].domain_validation_options)[0].resource_record_name]
+}
+
+resource "aws_acm_certificate_validation" "origin" {
+  certificate_arn         = aws_acm_certificate.origin.arn
+  validation_record_fqdns = [for r in aws_route53_record.cert_validation : r.fqdn if r.name == tolist(aws_acm_certificate.origin.domain_validation_options)[0].resource_record_name]
+}
+
+resource "aws_route53_record" "origin" {
+  count   = local.use_domain ? 1 : 0
+  zone_id = data.aws_route53_zone.main[0].zone_id
+  name    = local.origin_host
+  type    = "A"
+  alias {
+    name                   = aws_lb.api.dns_name
+    zone_id                = aws_lb.api.zone_id
+    evaluate_target_health = true
+  }
+}
+
+resource "aws_route53_record" "app" {
+  count   = local.use_domain ? 1 : 0
+  zone_id = data.aws_route53_zone.main[0].zone_id
+  name    = var.domain_name
+  type    = "A"
+  alias {
+    name                   = aws_cloudfront_distribution.main.domain_name
+    zone_id                = aws_cloudfront_distribution.main.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+# ----- WAF -----
+resource "aws_wafv2_web_acl" "main" {
+  provider = aws.us_east_1
+  name     = local.name
+  scope    = "CLOUDFRONT"
+  default_action {
+    allow {}
+  }
+
+  dynamic "rule" {
+    for_each = {
+      AWSManagedRulesCommonRuleSet          = 10
+      AWSManagedRulesKnownBadInputsRuleSet  = 20
+      AWSManagedRulesSQLiRuleSet            = 30
+      AWSManagedRulesAmazonIpReputationList = 40
+    }
+    content {
+      name     = rule.key
+      priority = rule.value
+      override_action {
+        none {}
+      }
+      statement {
+        managed_rule_group_statement {
+          vendor_name = "AWS"
+          name        = rule.key
+          # Uploads go directly to S3, so API bodies are small JSON; keep the size rule.
+        }
+      }
+      visibility_config {
+        cloudwatch_metrics_enabled = true
+        metric_name                = "${local.name}-${rule.key}"
+        sampled_requests_enabled   = true
+      }
+    }
+  }
+
+  rule {
+    name     = "rate-limit-per-ip"
+    priority = 5
+    action {
+      block {}
+    }
+    statement {
+      rate_based_statement {
+        limit              = var.waf_rate_limit_per_5min
+        aggregate_key_type = "IP"
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-rate"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "login-rate-limit"
+    priority = 6
+    action {
+      block {}
+    }
+    statement {
+      rate_based_statement {
+        limit              = 100
+        aggregate_key_type = "IP"
+        scope_down_statement {
+          byte_match_statement {
+            search_string         = "/api/auth/"
+            positional_constraint = "STARTS_WITH"
+            field_to_match {
+              uri_path {}
+            }
+            text_transformation {
+              priority = 0
+              type     = "NONE"
+            }
+          }
+        }
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-login-rate"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = local.name
+    sampled_requests_enabled   = true
+  }
+}
+
+# ----- CloudFront -----
+resource "aws_cloudfront_origin_access_control" "web" {
+  name                              = "${local.name}-web"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+resource "aws_cloudfront_response_headers_policy" "security" {
+  name = "${local.name}-security"
+  security_headers_config {
+    strict_transport_security {
+      access_control_max_age_sec = 63072000
+      include_subdomains         = true
+      preload                    = true
+      override                   = true
+    }
+    content_type_options { override = true }
+    frame_options {
+      frame_option = "DENY"
+      override     = true
+    }
+    referrer_policy {
+      referrer_policy = "strict-origin-when-cross-origin"
+      override        = true
+    }
+    content_security_policy {
+      content_security_policy = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://*.amazonaws.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com; object-src 'none'"
+      override                = true
+    }
+  }
+}
+
+data "aws_cloudfront_cache_policy" "optimized" { name = "Managed-CachingOptimized" }
+data "aws_cloudfront_cache_policy" "disabled" { name = "Managed-CachingDisabled" }
+data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" { name = "Managed-AllViewerExceptHostHeader" }
+
+resource "aws_cloudfront_distribution" "main" {
+  enabled             = true
+  is_ipv6_enabled     = true
+  comment             = local.name
+  default_root_object = "index.html"
+  price_class         = "PriceClass_100"
+  aliases             = local.use_domain ? [var.domain_name] : []
+  web_acl_id          = aws_wafv2_web_acl.main.arn
+  http_version        = "http2and3"
+
+  origin {
+    origin_id                = "web"
+    domain_name              = aws_s3_bucket.b["web"].bucket_regional_domain_name
+    origin_access_control_id = aws_cloudfront_origin_access_control.web.id
+  }
+
+  origin {
+    origin_id   = "api"
+    domain_name = local.use_domain ? local.origin_host : aws_lb.api.dns_name
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+      origin_read_timeout    = 30
+    }
+    custom_header {
+      name  = "X-Origin-Verify"
+      value = random_password.origin_secret.result
+    }
+  }
+
+  default_cache_behavior {
+    target_origin_id           = "web"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    compress                   = true
+    cache_policy_id            = data.aws_cloudfront_cache_policy.optimized.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
+  }
+
+  ordered_cache_behavior {
+    path_pattern               = "/api/*"
+    target_origin_id           = "api"
+    viewer_protocol_policy     = "https-only"
+    allowed_methods            = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods             = ["GET", "HEAD"]
+    compress                   = true
+    cache_policy_id            = data.aws_cloudfront_cache_policy.disabled.id
+    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
+  }
+
+  # SPA routing: unknown paths return index.html.
+  custom_error_response {
+    error_code         = 403
+    response_code      = 200
+    response_page_path = "/index.html"
+  }
+  custom_error_response {
+    error_code         = 404
+    response_code      = 200
+    response_page_path = "/index.html"
+  }
+
+  restrictions {
+    geo_restriction {
+      # Staff are in the US and India (design AS-05).
+      restriction_type = "whitelist"
+      locations        = ["US", "IN"]
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = !local.use_domain
+    acm_certificate_arn            = local.use_domain ? aws_acm_certificate_validation.cdn[0].certificate_arn : null
+    ssl_support_method             = local.use_domain ? "sni-only" : null
+    minimum_protocol_version       = "TLSv1.2_2021"
+  }
+
+  logging_config {
+    bucket          = aws_s3_bucket.b["logs"].bucket_domain_name
+    prefix          = "cloudfront/"
+    include_cookies = false
+  }
+}
+
+resource "aws_s3_bucket_policy" "web" {
+  bucket = aws_s3_bucket.b["web"].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "CloudFrontRead"
+        Effect    = "Allow"
+        Principal = { Service = "cloudfront.amazonaws.com" }
+        Action    = "s3:GetObject"
+        Resource  = "${aws_s3_bucket.b["web"].arn}/*"
+        Condition = { StringEquals = { "AWS:SourceArn" = aws_cloudfront_distribution.main.arn } }
+      },
+      {
+        Sid       = "DenyInsecureTransport"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource  = [aws_s3_bucket.b["web"].arn, "${aws_s3_bucket.b["web"].arn}/*"]
+        Condition = { Bool = { "aws:SecureTransport" = "false" } }
+      },
+    ]
+  })
+}
+
+# CloudFront needs KMS decrypt for the web bucket objects.
+resource "aws_kms_key_policy" "data" {
+  key_id = aws_kms_key.data.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AccountAdmin"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "CloudFrontDecryptWebAssets"
+        Effect    = "Allow"
+        Principal = { Service = "cloudfront.amazonaws.com" }
+        Action    = ["kms:Decrypt"]
+        Resource  = "*"
+        Condition = { StringEquals = { "AWS:SourceArn" = aws_cloudfront_distribution.main.arn } }
+      },
+    ]
+  })
+}
+
+# ALB access logs delivery (regional ELB account via service principal).
+resource "aws_s3_bucket_policy" "logs_delivery" {
+  bucket = aws_s3_bucket.b["logs"].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "ELBLogDelivery"
+        Effect    = "Allow"
+        Principal = { Service = "logdelivery.elasticloadbalancing.amazonaws.com" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.b["logs"].arn}/alb/AWSLogs/${data.aws_caller_identity.current.account_id}/*"
+      },
+      {
+        Sid       = "DenyInsecureTransport"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource  = [aws_s3_bucket.b["logs"].arn, "${aws_s3_bucket.b["logs"].arn}/*"]
+        Condition = { Bool = { "aws:SecureTransport" = "false" } }
+      },
+    ]
+  })
+}
+
+# WAF logs (names must start with aws-waf-logs-); auth headers and cookies redacted.
+resource "aws_kms_key" "waf_logs" {
+  provider            = aws.us_east_1
+  description         = "${local.name} WAF logs (us-east-1)"
+  enable_key_rotation = true
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AccountAdmin"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "CloudWatchLogs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.us-east-1.amazonaws.com" }
+        Action    = ["kms:Encrypt*", "kms:Decrypt*", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:Describe*"]
+        Resource  = "*"
+        Condition = { ArnLike = { "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:aws-waf-logs-${local.name}" } }
+      },
+    ]
+  })
+}
+
+resource "aws_cloudwatch_log_group" "waf" {
+  provider          = aws.us_east_1
+  name              = "aws-waf-logs-${local.name}"
+  retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.waf_logs.arn
+}
+
+resource "aws_wafv2_web_acl_logging_configuration" "main" {
+  provider                = aws.us_east_1
+  resource_arn            = aws_wafv2_web_acl.main.arn
+  log_destination_configs = [aws_cloudwatch_log_group.waf.arn]
+  redacted_fields {
+    single_header { name = "cookie" }
+  }
+  redacted_fields {
+    single_header { name = "x-csrf-token" }
+  }
+}

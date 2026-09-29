@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { GRANTS, LOCATION_ROLES, ROLES, ROLE_LABELS, SALES_ROLES } from "@eureka/shared";
@@ -69,8 +69,38 @@ export async function seedCatalog(client: pg.Client | pg.PoolClient): Promise<vo
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const url = process.env.MIGRATION_DATABASE_URL;
-  if (!url) throw new Error("MIGRATION_DATABASE_URL is required");
-  migrate(url).then(() => console.log("migrations applied"));
+/** Builds the admin URL from MIGRATION_DATABASE_URL or from RDS master secret parts (ECS migrate task). */
+export function adminUrlFromEnv(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.MIGRATION_DATABASE_URL) return env.MIGRATION_DATABASE_URL;
+  const { DB_HOST, DB_NAME, DB_MASTER_USERNAME, DB_MASTER_PASSWORD } = env;
+  if (!DB_HOST || !DB_NAME || !DB_MASTER_USERNAME || !DB_MASTER_PASSWORD) {
+    throw new Error("Set MIGRATION_DATABASE_URL, or DB_HOST, DB_NAME, DB_MASTER_USERNAME and DB_MASTER_PASSWORD");
+  }
+  const u = new URL(`postgres://${DB_HOST}:5432/${DB_NAME}`);
+  u.username = encodeURIComponent(DB_MASTER_USERNAME);
+  u.password = encodeURIComponent(DB_MASTER_PASSWORD);
+  u.searchParams.set("sslmode", "verify-full");
+  return u.toString();
+}
+
+/** Sets application role passwords from Secrets Manager values injected by ECS. */
+export async function setRolePasswords(adminUrl: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const client = new pg.Client({ connectionString: adminUrl });
+  await client.connect();
+  try {
+    for (const [role, pw] of [["eureka_app", env.APP_DB_PASSWORD], ["eureka_worker", env.WORKER_DB_PASSWORD]] as const) {
+      if (!pw) continue;
+      const lit = (await client.query<{ q: string }>("SELECT quote_literal($1) AS q", [pw])).rows[0]!.q;
+      await client.query(`ALTER ROLE ${role} PASSWORD ${lit}`);
+    }
+  } finally {
+    await client.end();
+  }
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  const url = adminUrlFromEnv();
+  await migrate(url);
+  await setRolePasswords(url);
+  console.log("migrations applied");
 }

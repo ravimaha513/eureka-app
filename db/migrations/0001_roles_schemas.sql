@@ -7,13 +7,24 @@ BEGIN
     CREATE ROLE eureka_owner NOLOGIN;              -- owns tables; never used by the app
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authz_definer') THEN
-    CREATE ROLE authz_definer NOLOGIN BYPASSRLS;   -- owns authz functions only
+    CREATE ROLE authz_definer NOLOGIN;             -- owns authz functions; reads via explicit policies (0009)
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'eureka_app') THEN
     CREATE ROLE eureka_app LOGIN;                  -- API; no BYPASSRLS, owns nothing
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'eureka_worker') THEN
     CREATE ROLE eureka_worker LOGIN;               -- worker; no BYPASSRLS
+  END IF;
+END $$;
+
+-- On Amazon RDS the migration user is rds_superuser, not a true superuser.
+-- PostgreSQL 16 does not let a non-superuser act as roles it created unless
+-- granted explicitly. The migration user administers the owner roles only
+-- (it needs their ownership rights to run DDL); it never joins the app roles.
+DO $$
+BEGIN
+  IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
+    EXECUTE format('GRANT eureka_owner, authz_definer TO %I WITH SET TRUE, INHERIT TRUE', current_user);
   END IF;
 END $$;
 

@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+.git
+.github
+infra
+docs
+**/e2e-artifacts
+**/test-results
+**/playwright-report
+**/coverage
+*.log

@@ -34,7 +34,7 @@ Pass 2 findings and their resolution in v0.3:
 
 | Finding | Resolution in v0.3 |
 |---|---|
-| N1: SECURITY DEFINER functions unhardened; conflict with FORCE RLS | `authz_definer` owner role with BYPASSRLS; `search_path` pinned; EXECUTE revoked from PUBLIC; identity and org tables on the no-RLS allow-list with column-level SELECT; views use `security_invoker` (B4.8) |
+| N1: SECURITY DEFINER functions unhardened; conflict with FORCE RLS | `authz_definer` owner role (no BYPASSRLS; reads through explicit `TO authz_definer` policies, because Amazon RDS cannot grant BYPASSRLS); `search_path` pinned; EXECUTE revoked from PUBLIC; identity and org tables on the no-RLS allow-list with column-level SELECT; views use `security_invoker` (B4.8) |
 | N2: RLS blocks cross-entity side-effect writes | Candidate status and bench changes only through `app.transition_candidate`, a definer function that checks the triggering permission; first-placement computed in a definer function (B4.8) |
 | N3: Protected-column trigger was a partial blocklist; rating grant blocked | Allowlist trigger: every changed column must be covered by a permission on that row; location branch for rating in the UPDATE policy; activity snapshots set by trigger, never by the client (B4.8) |
 | N4: Catalog gaps vs SRS | Lead `candidate:create` at team scope; `candidate:assign` at org for the Offshore Manager; new `assignment:read` for Sales at read scope; `visa:read` marked restricted; interview creation authorized against the parent submission; unused scope ranking removed |
@@ -599,7 +599,7 @@ CREATE POLICY candidate_update ON candidate FOR UPDATE TO eureka_app
 ### B4.8 Database hardening details
 
 **Function ownership and hardening (N1).**
-- A NOLOGIN role `authz_definer` with BYPASSRLS owns schema `authz` and every function in it; no other role has CREATE on that schema.
+- A NOLOGIN role `authz_definer` owns schema `authz` and every function in it; no other role has CREATE on that schema. It does **not** have BYPASSRLS: the RDS master user is not a superuser and cannot grant it. Instead, migration 0009 adds explicit policies `TO authz_definer` (SELECT on candidate, submission and interview; UPDATE on candidate for `authz.transition_candidate`), and column grants limit what it can change. CI proves migrations apply as a plain CREATEROLE user, the same privileges RDS gives its master user.
 - Every function declares `SET search_path = pg_catalog, pg_temp` and uses fully qualified names.
 - `REVOKE ALL ON FUNCTION … FROM PUBLIC`; EXECUTE is granted only to `eureka_app` and `eureka_worker`.
 - Identity and org tables (`app_user`, `user_role`, `role_permission`, `team`, `team_member`, `reporting_line`, `reporting_closure`, `coach_assignment`, `session`, `location` and other reference lists) are on the RLS allow-list. The application role has SELECT only on the columns it needs, and writes go only through admin endpoints that check `access:manage`. This avoids recursion when the `authz` functions read them.

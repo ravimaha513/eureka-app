@@ -14,6 +14,8 @@ All sample data in this repository is fictional.
 | `apps/api` | NestJS API and worker |
 | `apps/web` | React web app |
 | `db/migrations` | SQL migrations including RLS policies |
+| `infra` | AWS Terraform/Terragrunt and deploy runbook ([infra/README.md](infra/README.md)) |
+| `Dockerfile` | One ARM64 image for the API, worker and migration task |
 
 ## Develop
 
@@ -33,3 +35,8 @@ NODE_ENV=development AUTH_MODE=dev SESSION_SECRET=$(openssl rand -hex 32) \
 pnpm --filter @eureka/web dev          # http://localhost:5173, pick a fictional user to sign in
 pnpm --filter @eureka/web e2e          # Playwright role journeys against the running stack
 ```
+
+## Deploy
+
+AWS (ECS Fargate, RDS, CloudFront) via GitHub Actions with OIDC; no AWS keys in the repo.
+One-time setup and the deploy flow are in [infra/README.md](infra/README.md).

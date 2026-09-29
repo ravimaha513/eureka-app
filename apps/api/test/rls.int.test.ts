@@ -33,7 +33,8 @@ describe("RLS coverage and hardening", () => {
 
   it("application roles cannot bypass RLS and own no tables", async () => {
     const { rows } = await db.admin.query(`
-      SELECT rolname, rolbypassrls, rolsuper FROM pg_roles WHERE rolname IN ('eureka_app','eureka_worker')`);
+      SELECT rolname, rolbypassrls, rolsuper FROM pg_roles WHERE rolname IN ('eureka_app','eureka_worker','authz_definer')`);
+    expect(rows).toHaveLength(3);
     for (const r of rows) expect([r.rolbypassrls, r.rolsuper]).toEqual([false, false]);
     const owned = await db.admin.query(`
       SELECT count(*)::int AS n FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner

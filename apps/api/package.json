@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "swc src -d dist --strip-leading-paths --ignore 'src/db/seed-dev.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed-dev.ts",
     "dev": "node --watch --import @swc-node/register/esm-register src/main.ts",
-    "start": "node --import @swc-node/register/esm-register src/main.ts"
+    "start": "node --conditions=eureka-dist dist/main.js"
   },
   "dependencies": {
     "@eureka/shared": "workspace:*",
@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@swc-node/register": "^1.12.1",
+    "@swc/cli": "^0.8.1",
     "@swc/core": "^1.16.2",
     "@types/pg": "^8.23.1",
     "unplugin-swc": "^2.0.0"

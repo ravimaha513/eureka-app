@@ -1,0 +1,162 @@
+name: deploy
+# Staging deploys on every push to main after CI passes; production is manual
+# and gated by the "production" GitHub environment (required reviewers).
+# AWS access uses GitHub OIDC -> eureka-github-deploy-<env> (infra/bootstrap);
+# there are no long-lived AWS keys in this repository or its secrets.
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_VERSION: 1.10.5
+  TG_VERSION: 0.77.22
+  TG_NON_INTERACTIVE: "true"
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04-arm # native ARM64 build for Fargate Graviton
+    timeout-minutes: 60
+    environment: ${{ inputs.environment || 'staging' }}
+    concurrency:
+      group: deploy-${{ inputs.environment || 'staging' }}
+      cancel-in-progress: false
+    env:
+      ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+      AWS_REGION: ${{ (inputs.environment || 'staging') == 'production' && 'us-east-1' || 'us-east-2' }}
+      IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      TF_VAR_image_tag: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/eureka-github-deploy-${{ env.ENVIRONMENT }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: eureka-deploy-${{ github.run_id }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Install Terragrunt
+        run: |
+          curl -fsSL -o /usr/local/bin/terragrunt \
+            "https://github.com/gruntwork-io/terragrunt/releases/download/v${TG_VERSION}/terragrunt_linux_arm64"
+          chmod +x /usr/local/bin/terragrunt
+          terragrunt --version
+
+      # 1. Registry first, so the image can be pushed before any task references it.
+      - name: Ensure ECR repository
+        working-directory: infra/live/${{ env.ENVIRONMENT }}
+        run: terragrunt apply -auto-approve -input=false -target=aws_ecr_repository.api
+
+      # 2. Build and push the API image (one image serves api, worker and migrate).
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          provenance: true
+          sbom: true
+          tags: ${{ steps.ecr.outputs.registry }}/eureka-${{ env.ENVIRONMENT }}-api:${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 3. Migrations run before the new API code is rolled out (expand/contract).
+      #    The targeted apply also creates the network and database on the first run.
+      - name: Update migrate task definition
+        working-directory: infra/live/${{ env.ENVIRONMENT }}
+        run: terragrunt apply -auto-approve -input=false -target=aws_ecs_task_definition.migrate
+
+      - name: Read stack outputs
+        id: out
+        working-directory: infra/live/${{ env.ENVIRONMENT }}
+        run: |
+          terragrunt output -json > /tmp/out.json
+          {
+            echo "cluster=$(jq -r .ecs_cluster.value /tmp/out.json)"
+            echo "migrate_td=$(jq -r .migrate_task_definition.value /tmp/out.json)"
+            echo "subnets=$(jq -r '.private_subnet_ids.value | join(",")' /tmp/out.json)"
+            echo "sg=$(jq -r .tasks_security_group_id.value /tmp/out.json)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run migrations
+        run: |
+          set -euo pipefail
+          TASK=$(aws ecs run-task \
+            --cluster "${{ steps.out.outputs.cluster }}" \
+            --task-definition "${{ steps.out.outputs.migrate_td }}" \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ steps.out.outputs.subnets }}],securityGroups=[${{ steps.out.outputs.sg }}],assignPublicIp=DISABLED}" \
+            --started-by "gha-${{ github.run_id }}" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "migrate task: $TASK"
+          aws ecs wait tasks-stopped --cluster "${{ steps.out.outputs.cluster }}" --tasks "$TASK"
+          CODE=$(aws ecs describe-tasks --cluster "${{ steps.out.outputs.cluster }}" --tasks "$TASK" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          REASON=$(aws ecs describe-tasks --cluster "${{ steps.out.outputs.cluster }}" --tasks "$TASK" \
+            --query 'tasks[0].stoppedReason' --output text)
+          echo "exit code: $CODE ($REASON)"
+          test "$CODE" = "0"
+
+      # 4. Everything else, including the API/worker services on the new image.
+      - name: Apply stack
+        working-directory: infra/live/${{ env.ENVIRONMENT }}
+        run: |
+          terragrunt apply -auto-approve -input=false
+          terragrunt output -json > /tmp/out.json
+
+      - name: Wait for API service to stabilise
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$(jq -r .ecs_cluster.value /tmp/out.json)" \
+            --services "$(jq -r .api_service.value /tmp/out.json)"
+
+      # 5. Web app: immutable hashed assets cached for a year; index.html never cached.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @eureka/web...
+      - run: pnpm --filter @eureka/web build
+      - name: Publish web
+        run: |
+          set -euo pipefail
+          BUCKET=$(jq -r .web_bucket.value /tmp/out.json)
+          DIST=$(jq -r .cloudfront_distribution_id.value /tmp/out.json)
+          aws s3 sync apps/web/dist "s3://$BUCKET" --delete --exclude index.html \
+            --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp apps/web/dist/index.html "s3://$BUCKET/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate"
+          aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/index.html" "/"
+
+      - name: Smoke test
+        run: |
+          URL=$(jq -r .app_url.value /tmp/out.json)
+          for i in $(seq 1 10); do
+            curl -fsS "$URL/api/health" && exit 0
+            sleep 15
+          done
+          exit 1
