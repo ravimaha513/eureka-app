@@ -408,6 +408,22 @@ Triggers on `user_role`, `reporting_line`, `team_member` and `coach_assignment` 
 
 **Submission:** `submitted → under_review → interview_requested → interview_scheduled → interview_completed → selected`. `rejected` or `withdrawn` is allowed from any non-terminal state.
 
+Built in migration 0017 (2026-09-29): submission status changes only through the definer function `authz.transition_submission(id, to, reason)`; the application role has no UPDATE on `submission`, and a trigger refuses status changes outside the function. Steps are strictly forward (no skipping); `selected`, `rejected` and `withdrawn` are terminal. `rejected` requires a non-blank `rejection_reason` (also a table CHECK) and no other status accepts one. Every check is NULL-safe (a NULL target, id or user context is refused). Permission is `submission:update` on the actor snapshot, as the RLS update policy. `status_changed_at` and `status_changed_by` are recorded. Interviews cannot be opened on a terminal submission. Not yet done: `candidate_event` and outbox rows (tables not built), and automatic `interview_scheduled` when an interview is created.
+
+**Interview (migration 0017):**
+
+| Rule | Enforcement |
+|---|---|
+| Sales grants (own, team, hierarchy on the actor snapshot) edit `round`, `starts_at`, `ends_at`, `otter_url`, `recording_url`, `coach_id`, `invite_received`, `call_status` | Trigger `interview_guard`, column grants, per-role allowlist in the API (422 `field_not_permitted`) |
+| Location grants (on `interview.location_id`) edit `cleared`, `consent_captured`, `system_name`, `call_status`; `cleared_at` and `cleared_by` are set by the server | same |
+| Coaches have no `interview:update`; they add feedback | catalog |
+| Recording or Otter links only while `consent_captured` (AS-12) | CHECK `interview_recording_consent`; API 422 `consent_required` |
+| No overlapping live interviews for one candidate, across teams | `EXCLUDE USING gist (candidate_id WITH =, tstzrange(starts_at, ends_at) WITH &&) WHERE call_status NOT IN ('cancelled','rescheduled','no_invite')`; API 409 `interview_conflict` without naming the other record |
+| New interviews start `scheduled`, not cleared, without consent | trigger |
+| `client_id` is a snapshot from the submission | snapshot trigger |
+
+**Interview feedback:** append-only (`interview_feedback`, no UPDATE or DELETE, trigger refuses both even for the owner). `kind` is derived from the grant that covers the interview, the way interview visibility is defined in B4.4: `coach` (coached teams), `location` (location grants), `client` (Sales grants; the recruiter relays the client's feedback). `candidate` is reserved for the public token form (B5.4). Readable wherever the interview is readable.
+
 **Placement:** `confirmed → paperwork → bgc → ready → joined`. `backout` is allowed from any state before `joined`. `bgc_failed` is allowed from any state, including after `joined` (FR-PLC-06); from `joined` it also ends the assignment.
 
 Transitions are table-driven in the service layer; each writes a `candidate_event` and an outbox event.
@@ -421,6 +437,7 @@ Transitions are table-driven in the service layer; each writes a `candidate_even
 - **Duplicate checks** (candidate by email/phone/DOB, submission to the same client within 90 days) call the security-definer function `authz.check_duplicate(...)`. It returns only "possible duplicate", the owning team's name and a contact, and every call is audited.
 - `If-Match` with `row_version` on updates. `Idempotency-Key` on placement and payment creation.
 - Statement timeout 5 s for API requests.
+- Pipeline error codes (problem `detail`): `invalid_transition`, `rejection_reason_required`, `rejection_reason_not_allowed`, `submission_closed`, `field_not_permitted: <fields>`, `consent_required`, `kind_required`, `kind_not_permitted` (422); `interview_conflict` (409). List cursors are opaque keyset cursors.
 
 Core MVP endpoints:
 
@@ -434,10 +451,10 @@ Core MVP endpoints:
 | PUT /candidates/{id}/visibility | candidate.visibility:update | Lead and above |
 | PUT /candidates/{id}/technical-rating | candidate.rating:update | Location roles |
 | GET /hotlist | hotlist:read | marketable statuses, saved view filters |
-| GET, POST /submissions; PATCH /submissions/{id}/status | submission:* | create requires the candidate to be visible |
-| GET /interviews?date=&location= | interview:read | |
-| POST /interviews; PATCH /interviews/{id} | interview:create, interview:update | `cleared` toggle is an update |
-| POST /interviews/{id}/feedback | interview.feedback:create | location admin or coach feedback |
+| GET, POST /submissions; GET /submissions/{id}; PATCH /submissions/{id}/status | submission:* | create requires the candidate to be visible; list filters status, candidateId, recruiterId, from, to; `rate` only when `rate:read` covers the row |
+| GET /interviews?from=&to=&status=&teamId=&locationId=&candidateId=&cleared=; GET /interviews/{id} | interview:read | board rows carry `editableFields` and `feedbackKinds` hints |
+| POST /interviews; PATCH /interviews/{id} | interview:create, interview:update | create is authorized against the parent submission; PATCH fields depend on the grant kind (B2.6) |
+| GET, POST /interviews/{id}/feedback | interview:read, interview.feedback:create | coach, location admin or client (Sales) feedback; `kind` required only when the caller holds more than one |
 | GET, POST /public/feedback/{token} | token | GET renders, POST consumes |
 | GET, POST /placements | placement:read, placement:create | rate omitted without rate:read |
 | GET /admin/users; PUT /admin/users/{id}/roles | access:manage | no self-change; second approver for restricted roles |
