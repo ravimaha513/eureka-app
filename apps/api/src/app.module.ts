@@ -18,6 +18,8 @@ import { MeController } from "./modules/identity/me.controller.js";
 import { CandidatesController } from "./modules/candidates/candidates.controller.js";
 import { CandidatesService } from "./modules/candidates/candidates.service.js";
 import { SubmissionsController, SubmissionsService } from "./modules/submissions/submissions.controller.js";
+import { AdminController, TeamsController } from "./modules/admin/admin.controller.js";
+import { AdminService } from "./modules/admin/admin.service.js";
 
 @Controller("api")
 class HealthController {
@@ -36,11 +38,14 @@ export class AppModule {
   static forConfig(config: AppConfig): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, AuthController, MeController, CandidatesController, SubmissionsController],
+      controllers: [
+        HealthController, AuthController, MeController, CandidatesController, SubmissionsController,
+        AdminController, TeamsController,
+      ],
       providers: [
         { provide: CONFIG, useValue: config },
         DbService, SessionService, AccessService, AuditService, OidcService,
-        CandidatesService, SubmissionsService,
+        CandidatesService, SubmissionsService, AdminService,
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],
