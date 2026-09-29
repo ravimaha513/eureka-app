@@ -21,9 +21,10 @@ describe("role-aware navigation", () => {
   it.each([
     ["recruiter", ["Hot List", "Submissions", "Interviews", "Placements"], ["Users & Access", "Payments", "Employees"]],
     ["location_ops_admin", ["Hot List", "Interviews"], ["Performance", "Payments", "Users & Access"]],
-    ["hr", ["Employees", "Paperwork & BGC"], ["Hot List", "Payments", "Users & Access"]],
-    ["accounts", ["Payments", "Employees"], ["Hot List", "Users & Access"]],
-    ["org_admin", ["Users & Access"], ["Hot List", "Candidates", "Employees", "Payments"]],
+    // Hot List is open to every signed-in user (OD-01).
+    ["hr", ["Employees", "Paperwork & BGC", "Hot List"], ["Payments", "Users & Access"]],
+    ["accounts", ["Payments", "Employees", "Hot List"], ["Users & Access"]],
+    ["org_admin", ["Users & Access", "Hot List"], ["Candidates", "Employees", "Payments"]],
   ] as const)("%s sees only its screens", (role, shown, hidden) => {
     const labels = visibleNav(meFor(role).capabilities).map((n) => n.label);
     for (const s of shown) expect(labels).toContain(s);
@@ -39,7 +40,8 @@ describe("role-aware navigation", () => {
     wrap(<Shell me={meFor("org_admin")} onSignOut={() => undefined} />);
     const nav = screen.getByRole("complementary", { name: "Main navigation" });
     expect(within(nav).getByRole("button", { name: "Users & Access" })).toBeInTheDocument();
-    expect(within(nav).queryByRole("button", { name: "Hot List" })).not.toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "Hot List" })).toBeInTheDocument();
+    expect(within(nav).queryByRole("button", { name: "Payments" })).not.toBeInTheDocument();
   });
 });
 

@@ -230,10 +230,10 @@ These rules apply in every phase:
 
 | Before | Decision |
 |---|---|
-| Phase 1 | OD-01 (Hot List rule), D-01, D-02, OD-07 (recruiter move) |
+| Phase 1 | ~~OD-01~~, ~~D-01~~, ~~OD-07~~ decided 2026-09-29; D-02 still open |
 | Phase 2 | OD-05 (thresholds and targets), statuses and row-color mapping for migration (SRS Q6) |
-| Phase 3 | OD-03 (retention), OD-04 (DOB visibility) |
-| Phase 4 | OD-02 (incentive formula), OD-06 (sample profile) |
+| Phase 3 | ~~OD-03~~ decided (3 years; inactive after 6 months); OD-04 (DOB visibility) |
+| Phase 4 | OD-02 formula (direction decided: placement-count based, manager-set amount), OD-06 (sample profile) |
 
 ## Progress so far
 

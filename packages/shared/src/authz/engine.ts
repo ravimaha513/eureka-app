@@ -1,5 +1,7 @@
 import {
   GRANTS,
+  HOTLIST_STATUSES,
+  HOTLIST_VISIBILITY,
   SALES_ROLES,
   type Permission,
   type Role,
@@ -39,7 +41,11 @@ export interface EffectiveScope {
   locationIds: ReadonlySet<string>;
   /** Candidates marked "Open to all teams" are visible (Sales roles only). */
   allTeams: boolean;
+  /** hotlist:read only: every Hot List candidate is visible (HOTLIST_VISIBILITY = "everyone"). */
+  hotlistOpen: boolean;
 }
+
+const HOTLIST_STATUS_SET: ReadonlySet<string> = new Set(HOTLIST_STATUSES);
 
 /** Statuses in which an "Open to all teams" candidate is shown to other teams. */
 export const MARKETABLE_STATUSES = new Set(["active", "full_of_interviews"]);
@@ -56,7 +62,12 @@ const ALL_TEAMS_PERMISSIONS = new Set<Permission>([
  * Resolve the union of all grants the user holds for a permission.
  * Returns null when the user holds no grant (deny).
  */
-export function resolveScope(user: UserAccess, permission: Permission): EffectiveScope | null {
+export function resolveScope(
+  user: UserAccess,
+  permission: Permission,
+  hotlistVisibility: "everyone" | "team" = HOTLIST_VISIBILITY,
+): EffectiveScope | null {
+  const hotlistOpen = permission === "hotlist:read" && hotlistVisibility === "everyone";
   const recruiterIds = new Set<string>();
   const teamIds = new Set<string>();
   const locationIds = new Set<string>();
@@ -100,8 +111,8 @@ export function resolveScope(user: UserAccess, permission: Permission): Effectiv
     }
   }
 
-  if (!granted) return null;
-  return { all, recruiterIds, teamIds, locationIds, allTeams };
+  if (!granted && !hotlistOpen) return null;
+  return { all, recruiterIds, teamIds, locationIds, allTeams, hotlistOpen };
 }
 
 export function can(user: UserAccess, permission: Permission): boolean {
@@ -132,6 +143,12 @@ export function candidateVisible(scope: EffectiveScope | null, c: CandidateRef):
   return (
     scope.allTeams && c.visibility === "all_teams" && MARKETABLE_STATUSES.has(c.marketingStatus)
   );
+}
+
+/** Hot List membership for a hotlist:read scope. */
+export function hotlistVisible(scope: EffectiveScope | null, c: CandidateRef): boolean {
+  if (!scope || !HOTLIST_STATUS_SET.has(c.marketingStatus)) return false;
+  return scope.hotlistOpen || candidateVisible(scope, c);
 }
 
 /** Submissions, interviews and placements carry a snapshot of the acting team. */
@@ -195,8 +212,12 @@ export function applyCandidateFieldPolicy(
 }
 
 /** Capability list for the web app's navigation (presentation only). */
-export function capabilities(user: UserAccess): Permission[] {
+export function capabilities(
+  user: UserAccess,
+  hotlistVisibility: "everyone" | "team" = HOTLIST_VISIBILITY,
+): Permission[] {
   const perms = new Set<Permission>();
+  if (hotlistVisibility === "everyone") perms.add("hotlist:read");
   for (const a of user.roles) {
     for (const p of Object.keys(GRANTS[a.role]) as Permission[]) perms.add(p);
   }

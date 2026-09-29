@@ -203,6 +203,23 @@ describe("candidate endpoints", () => {
     expect(theirs.phone).toMatch(/^•••-•••-\d\d$/);
   });
 
+  it("Hot List is open to everyone (OD-01): other team's candidate listed with masked phone, profile still 404", async () => {
+    const other = candidates.find((c) => c.teamId === T.t2 && c.visibility === "team" && c.marketingStatus === "active")!;
+    for (const key of ["r1a", "admin"] as const) {
+      const items = [];
+      let cursor: string | null = null;
+      do {
+        const page = (await call(key, "GET", `/api/v1/hotlist?limit=100${cursor ? `&cursor=${cursor}` : ""}`)).json();
+        items.push(...page.items);
+        cursor = page.nextCursor;
+      } while (cursor);
+      const row = items.find((i: { id: string }) => i.id === other.id);
+      expect(row, key).toBeDefined();
+      expect(row.phoneMasked).toBe(true);
+    }
+    expect((await call("r1a", "GET", `/api/v1/candidates/${other.id}`)).statusCode).toBe(404);
+  });
+
   it("lead changes visibility; recruiter cannot", async () => {
     expect((await call("r1a", "PUT", `/api/v1/candidates/${own().id}/visibility`, { visibility: "all_teams" })).statusCode).toBe(403);
     expect((await call("l1", "PUT", `/api/v1/candidates/${teammate().id}/visibility`, { visibility: "all_teams" })).statusCode).toBe(200);

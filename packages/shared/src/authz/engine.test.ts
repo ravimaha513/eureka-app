@@ -4,6 +4,8 @@ import {
   activityVisible,
   applyCandidateFieldPolicy,
   candidateVisible,
+  capabilities,
+  hotlistVisible,
   resolveScope,
   type CandidateRef,
   type UserAccess,
@@ -195,5 +197,35 @@ describe("field policy", () => {
 
   it("HR sees DOB", () => {
     expect(applyCandidateFieldPolicy(HR, cand({}), fields).dob).toBe("1994-03-12");
+  });
+});
+
+describe("Hot List visibility policy (OD-01)", () => {
+  const otherTeam = cand({ recruiterId: "R2a", teamId: "T2", locationId: LOC_A });
+  const users = { R1a, HR, COACH, ADMIN };
+
+  it("everyone: every signed-in user sees every Hot List candidate", () => {
+    for (const u of Object.values(users)) {
+      const scope = resolveScope(u, "hotlist:read", "everyone");
+      expect(hotlistVisible(scope, otherTeam)).toBe(true);
+      expect(capabilities(u, "everyone")).toContain("hotlist:read");
+    }
+  });
+
+  it("everyone: candidates outside Hot List statuses stay hidden", () => {
+    expect(hotlistVisible(resolveScope(HR, "hotlist:read", "everyone"), cand({ marketingStatus: "placed" }))).toBe(false);
+  });
+
+  it("everyone: profiles and activity permissions are unchanged", () => {
+    expect(candidateVisible(resolveScope(R1a, "candidate:read", "everyone"), otherTeam)).toBe(false);
+    expect(candidateVisible(resolveScope(R1a, "submission:create", "everyone"), otherTeam)).toBe(false);
+    expect(resolveScope(ADMIN, "candidate:read", "everyone")).toBeNull();
+  });
+
+  it("team: restores AS-07 (own hierarchy plus Open-to-all-teams)", () => {
+    expect(hotlistVisible(resolveScope(R1a, "hotlist:read", "team"), otherTeam)).toBe(false);
+    expect(hotlistVisible(resolveScope(R1a, "hotlist:read", "team"), { ...otherTeam, visibility: "all_teams" })).toBe(true);
+    expect(resolveScope(ADMIN, "hotlist:read", "team")).toBeNull();
+    expect(capabilities(ADMIN, "team")).not.toContain("hotlist:read");
   });
 });

@@ -28,7 +28,7 @@ locals {
   use_fargate_spot  = false
 
   audit_lock_mode = "COMPLIANCE"
-  audit_lock_days = 2555 # 7 years (design A6.4)
+  audit_lock_days = 1095 # 3 years (OD-03). COMPLIANCE mode cannot be shortened later.
   log_retention_days = 30
   waf_rate_limit_per_5min = 3000
 }

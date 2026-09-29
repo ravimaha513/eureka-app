@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { GRANTS, LOCATION_ROLES, ROLES, ROLE_LABELS, SALES_ROLES } from "@eureka/shared";
+import { GRANTS, HOTLIST_VISIBILITY, LOCATION_ROLES, ROLES, ROLE_LABELS, SALES_ROLES } from "@eureka/shared";
 
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../../db/migrations");
 
@@ -41,7 +41,7 @@ export async function migrate(adminUrl: string): Promise<void> {
   }
 }
 
-/** Replaces role and role_permission rows with the catalog contents. */
+/** Replaces role and role_permission rows and policy settings with the catalog contents. */
 export async function seedCatalog(client: pg.Client | pg.PoolClient): Promise<void> {
   await client.query("BEGIN");
   try {
@@ -62,6 +62,8 @@ export async function seedCatalog(client: pg.Client | pg.PoolClient): Promise<vo
         );
       }
     }
+    await client.query(
+      "UPDATE authz.policy_setting SET value = $1 WHERE key = 'hotlist_visibility'", [HOTLIST_VISIBILITY]);
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");

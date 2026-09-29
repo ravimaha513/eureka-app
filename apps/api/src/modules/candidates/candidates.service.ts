@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type pg from "pg";
 import {
+  HOTLIST_STATUSES,
   MARKETABLE_STATUSES,
   applyCandidateFieldPolicy,
   ownsCandidate,
@@ -37,7 +38,6 @@ interface CandidateRow {
   row_version: number;
 }
 
-const HOTLIST_STATUSES = ["active", "on_hold", "full_of_interviews", "confirmation", "bench", "stopped"];
 
 /**
  * Application-layer scope predicate (design B4.4). Parameterized; RLS applies
@@ -45,7 +45,10 @@ const HOTLIST_STATUSES = ["active", "on_hold", "full_of_interviews", "confirmati
  */
 export function scopePredicate(scope: EffectiveScope, params: unknown[], alias = "c"): string {
   const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
-  if (scope.all) return "true";
+  if (scope.all || scope.hotlistOpen) {
+    // hotlistOpen: every Hot List candidate (the caller filters by HOTLIST_STATUSES).
+    return scope.all ? "true" : `${alias}.marketing_status = ANY(${p([...HOTLIST_STATUSES])}::text[])`;
+  }
   const parts = [
     `${alias}.recruiter_id = ANY(${p([...scope.recruiterIds])}::uuid[])`,
     `${alias}.team_id = ANY(${p([...scope.teamIds])}::uuid[])`,
@@ -115,7 +118,7 @@ export class CandidatesService {
     if (!scope) throw new ForbiddenException();
     const params: unknown[] = [];
     const where = [scopePredicate(scope, params)];
-    if (perm === "hotlist:read") { params.push(HOTLIST_STATUSES); where.push(`c.marketing_status = ANY($${params.length}::text[])`); }
+    if (perm === "hotlist:read") { params.push([...HOTLIST_STATUSES]); where.push(`c.marketing_status = ANY($${params.length}::text[])`); }
     if (q.status) { params.push(q.status); where.push(`c.marketing_status = $${params.length}`); }
     if (q.technology) { params.push(q.technology); where.push(`t.name = $${params.length}`); }
     if (q.visibility) { params.push(q.visibility); where.push(`c.visibility = $${params.length}`); }

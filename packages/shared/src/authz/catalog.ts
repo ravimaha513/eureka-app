@@ -5,6 +5,19 @@
  * file, so they cannot drift apart. Changes here require code review.
  */
 
+/**
+ * Hot List visibility policy (OD-01, decided 2026-09-29): "everyone" means every
+ * signed-in user sees every candidate in a Hot List status, with contact details
+ * masked unless they own the candidate. Candidate profiles, submissions,
+ * interviews and placements stay scoped. Set to "team" to restore AS-07 (team
+ * hierarchy plus Open-to-all-teams candidates). The migration runner copies this
+ * value into eureka.authz_policy, where RLS reads it.
+ */
+export const HOTLIST_VISIBILITY: "everyone" | "team" = "everyone";
+
+/** Statuses shown on the Hot List. */
+export const HOTLIST_STATUSES = ["active", "on_hold", "full_of_interviews", "confirmation", "bench", "stopped"] as const;
+
 export const SCOPES = ["own", "team", "coached", "hierarchy", "location", "org"] as const;
 export type Scope = (typeof SCOPES)[number];
 

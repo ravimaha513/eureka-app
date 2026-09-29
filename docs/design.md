@@ -74,14 +74,14 @@ Pass 2 findings and their resolution in v0.3:
 | AS-04 | Google Workspace is the identity provider for all staff; 2-Step Verification is enforced by Workspace policy, with security keys for HR, Accounts, Immigration and admin organizational units. | A second IdP (Entra ID, Okta) is added behind an OIDC broker such as Cognito or Auth0 (A10). |
 | AS-05 | Users are in the US (Eastern, Central) and India. Timestamps stored in UTC and shown in the user's zone; interview times also shown in EST. | None. |
 | AS-06 | "Highest privilege" for location_incharge means highest **within a location**. System administration is the separate `org_admin` role, which holds no data permissions. | Grants for that role change only. |
-| AS-07 | Hot List visibility: a candidate belongs to one team. The team's hierarchy and its Interview Coaches see it. A candidate marked **Open to all teams** is visible to all Sales roles while its status is Active or Full of Interviews. | One predicate in B4.4 changes. |
+| AS-07 | **Decided (OD-01, 2026-09-29): the Hot List is visible to every signed-in user, for now.** Every candidate in a Hot List status (active, on hold, full of interviews, confirmation, bench, stopped) is listed for everyone; phone numbers are masked unless the viewer owns the candidate, DOB is always masked. Candidate profiles, updates, submissions, interviews and placements stay scoped as before. The previous rule (team hierarchy and coaches, plus **Open to all teams** candidates for Sales roles while Active or Full of Interviews) is kept behind one switch, `HOTLIST_VISIBILITY = "team"` in the catalog, enforced in both the engine (`hotlistVisible`) and RLS (`candidate_hotlist_read`, migration 0010). | Flip the switch and deploy. |
 | AS-08 | Candidate and employee are one `person` with role-specific child records. A placement creates an assignment, not a new person. | Data model split. |
 | AS-09 | Paperwork, payroll, E-Verify, offer-letter and 1099 companies are one `legal_entity` list with type flags. | Split lists. |
-| AS-10 | Incentive formula undefined; MVP records the inputs and payment status only. | Incentive engine in Phase 3. |
+| AS-10 | **Partly decided (OD-02):** incentives grow with the number of placements, and the manager sets a custom amount; the exact formula is TBD. MVP records placements, the manager-entered amount and payment status; no formula is computed. | Incentive engine once the formula is fixed (Phase 4). |
 | AS-11 | Availability 99.5% in business hours of both regions; RPO 15 min; RTO 4 h. | Multi-region design. |
 | AS-12 | Interview recording consent is captured outside the app; the app stores a "consent captured" flag per interview. | Block recording links without consent. |
-| AS-13 | Retention: I-9 copies for the later of 3 years after hire or 1 year after employment ends; other candidate data 7 years after last activity, then purged. | Retention job parameters. |
-| AS-14 | "Any candidate" in SRS 5 (Lead, Manager, AD may log submissions for any candidate) means any candidate the user can see, including Open-to-all-teams candidates. | Grant scope widens to org for those permissions (D-01). |
+| AS-13 | **Decided (OD-03):** candidate data is kept 3 years after last activity, then purged. A candidate with no activity for 6 months becomes inactive (off the Hot List, kept read-only). I-9 copies keep the federal minimum, which can be longer: the later of 3 years after hire or 1 year after employment ends. Audit exports are locked for 3 years. | Retention job parameters. |
+| AS-14 | **Confirmed (D-01):** "any candidate" in SRS 5 (Lead, Manager, AD may log submissions) means only candidates the user can see through their own scope, including Open-to-all-teams candidates. Seeing a candidate on the open Hot List does not by itself allow logging a submission. | Grant scope widens to org for those permissions. |
 
 ## A3. System context
 
@@ -210,7 +210,7 @@ TLS 1.2+ everywhere; RDS, snapshots and S3 encrypted with KMS; the database is i
   - exports
   - role changes
   - failed authorization on existing records
-- A nightly job exports the previous day's rows to an S3 bucket with Object Lock (compliance mode, 7 years) and records a SHA-256 digest of each export file. Per-row hash chaining is deferred (A10).
+- A nightly job exports the previous day's rows to an S3 bucket with Object Lock (compliance mode, 3 years per OD-03) and records a SHA-256 digest of each export file. Per-row hash chaining is deferred (A10).
 
 ### A6.5 Application controls
 
@@ -632,7 +632,7 @@ CREATE POLICY candidate_update ON candidate FOR UPDATE TO eureka_app
 **Team invariants (N5).**
 - A trigger enforces that `candidate.recruiter_id`, when set, is an active member of `candidate.team_id`.
 - A trigger on `team` and `reporting_line` enforces that a team's lead reports within the hierarchy that owns the team.
-- `team:move_member` applies OD-07 in the same transaction.
+- `team:move_member` applies OD-07 in the same transaction: the mover's candidates stay with the old team and are reassigned to the chosen recruiter (default: the old team's lead).
 
 **Minor items (N8 to N13).**
 - **Residual risk (N8):** an injected `set_config('eureka.user_id', …)` would impersonate another user at the database layer. The residual risk is accepted. It is mitigated by parameterized queries everywhere, CodeQL SQL-injection rules, and a lint rule forbidding raw SQL outside `db/` and `authz`. A signed actor token checked by `authz_definer` is the Phase 4 option.
@@ -743,15 +743,15 @@ Tests are written with each feature.
 
 | ID | Item | Owner |
 |---|---|---|
-| D-01 | SRS "Lead/Manager/AD can add for any candidate" implemented as any candidate visible to them (AS-14) | Sales leadership to confirm |
+| D-01 | SRS "Lead/Manager/AD can add for any candidate" implemented as any candidate visible to them (AS-14) | **Confirmed 2026-09-29** |
 | D-02 | Recruiters see teammates' candidates but only their own submissions, interviews and placements (matches SRS 5 rows) | Confirm |
-| OD-01 | Confirm AS-07 Hot List rule | Sales leadership |
-| OD-02 | Incentive formula (AS-10) | CEO, Accounts |
-| OD-03 | Retention periods (AS-13) | Legal, HR |
+| OD-01 | Hot List rule (AS-07) | **Decided 2026-09-29:** visible to everyone for now; switchable |
+| OD-02 | Incentive formula (AS-10) | **Partly decided:** placement-count based, manager-set custom amount; formula TBD (CEO, Accounts) |
+| OD-03 | Retention periods (AS-13) | **Decided 2026-09-29:** 3 years; inactive after 6 months without activity; I-9 federal minimum applies |
 | OD-04 | Whether Sales roles may see DOB (currently no) | HR, Legal |
 | OD-05 | Candidate-unresponsive threshold, bench threshold, recruiter targets | Sales leadership |
 | OD-06 | Definition of "sample profile" (SRS 4.12) | Sales leadership |
-| OD-07 | When a recruiter moves team, do their candidates move with them or stay with the team? (default: stay with the team and become unassigned) | Sales leadership |
+| OD-07 | When a recruiter moves team, their candidates stay with the old team and are **reassigned to a new recruiter** in the same transaction. The person making the move picks the new recruiter (a member of the old team); if none is picked, the old team's lead gets them. | **Decided 2026-09-29** |
 
 ---
 
