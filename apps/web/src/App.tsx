@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api, setCsrf, type Candidate, type Me } from "./api";
 import { visibleNav, type NavItem } from "./nav";
+import { AccessPage } from "./admin/AccessPage";
 
 const DEV_USERS = [
   ["r1a", "Recruiter (Team Rohit)"], ["l1", "Lead (Team Rohit)"], ["m1", "Manager"], ["ad", "Associate Director"],
@@ -105,7 +106,9 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         <div className="top"><span className="rolepill">{me.roles.map((r) => r.label).join(" · ")}</span></div>
         <div className="content">
           {!current ? <p className="empty">Your role has no screens yet.</p>
-            : current.key === "hotlist" || current.key === "candidates" ? <HotList /> : <Placeholder item={current} />}
+            : current.key === "hotlist" || current.key === "candidates" ? <HotList />
+            : current.key === "access" ? <AccessPage me={me} />
+            : <Placeholder item={current} />}
         </div>
       </main>
     </div>
