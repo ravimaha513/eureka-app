@@ -135,7 +135,7 @@ jobs:
             --services "$(jq -r .api_service.value /tmp/out.json)"
 
       # 5. Web app: immutable hashed assets cached for a year; index.html never cached.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 22
