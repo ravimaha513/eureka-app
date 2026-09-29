@@ -57,7 +57,7 @@ describe("Hot List", () => {
     wrap(<HotList />);
     const cell = await screen.findByText("•••-•••-42");
     expect(cell).toHaveClass("masked");
-    expect(screen.getByText("all teams")).toBeInTheDocument();
+    expect(screen.getByText("Open to all teams", { selector: ".badge" })).toBeInTheDocument();
     expect(screen.getByText("Unassigned")).toBeInTheDocument();
   });
 });

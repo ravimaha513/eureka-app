@@ -93,3 +93,40 @@ td.rowactions > button + button { margin-left: 6px; }
 .note.warn { background: #fff7e6; color: #92400e; border: 1px solid #fde68a; }
 .formerr { margin: 4px 0 8px; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+
+/* Sales: Hot List, Candidates, candidate profile */
+.pagehead { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.tablewrap { overflow-x: auto; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--pri-700); text-align: left; }
+.linkbtn:hover b { text-decoration: underline; }
+.linkbtn:focus-visible, .switch:focus-visible, .field textarea:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; border-radius: 4px; }
+h1:focus { outline: none; }
+.listfoot { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.badge.stopped, .badge.terminated { background: #fef2f2; color: #b91c1c; }
+.badge.confirmation, .badge.placed { background: #ecfdf3; color: #15803d; }
+.backbtn { align-self: flex-start; }
+.drawerback { place-items: stretch end; padding: 0; }
+.drawer { background: var(--surface); width: min(400px, 100%); height: 100vh; padding: 20px 22px; overflow: auto; box-shadow: -12px 0 40px rgba(15, 23, 42, .2); display: flex; flex-direction: column; gap: 16px; }
+.drawer:focus { outline: none; }
+.drawerhead { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.drawerhead h2 { font-size: 16px; }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; }
+.facts dt { color: var(--muted); font-weight: 600; font-size: 12px; }
+.facts dd { margin: 0; color: var(--text2); }
+.profilegrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+.card.pad { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.card.pad h2 { font-size: 15px; }
+.notfound { padding: 28px; display: flex; flex-direction: column; gap: 6px; }
+.manageblock { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line2); }
+.manageblock h3 { font-size: 13px; }
+.manageblock .hint { margin-bottom: 0; }
+.switch { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 3px 12px 3px 3px; font-weight: 600; color: var(--text2); align-self: flex-start; }
+.switch .knob { width: 34px; height: 20px; border-radius: 999px; background: #e2e8f0; position: relative; transition: background .15s; }
+.switch .knob::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .2); transition: transform .15s; }
+.switch.on .knob { background: var(--pri); }
+.switch.on .knob::after { transform: translateX(14px); }
+.switch:disabled { opacity: .6; cursor: progress; }
+.field [aria-invalid="true"] { border-color: #b91c1c; }
+.fieldhint { margin-bottom: 0; }
+.fielderr { font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .switch .knob, .switch .knob::after { transition: none; } }

@@ -1,8 +1,14 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, api, setCsrf, type Candidate, type Me } from "./api";
+import { ApiError, api, setCsrf, type Me } from "./api";
 import { visibleNav, type NavItem } from "./nav";
 import { AccessPage } from "./admin/AccessPage";
+import { CandidateProfile } from "./sales/CandidateProfile";
+import { CandidatesPage } from "./sales/CandidatesPage";
+import { HotListPage } from "./sales/HotListPage";
+
+/** The Hot List screen (kept under its original name for existing callers). */
+export const HotList = HotListPage;
 
 const DEV_USERS = [
   ["r1a", "Recruiter (Team Rohit)"], ["l1", "Lead (Team Rohit)"], ["m1", "Manager"], ["ad", "Associate Director"],
@@ -36,48 +42,6 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
   );
 }
 
-export function HotList() {
-  const [tab, setTab] = useState<"mine" | "all_teams">("mine");
-  const q = useQuery({
-    queryKey: ["hotlist", tab],
-    queryFn: () => api<{ items: Candidate[] }>(`/api/v1/hotlist?limit=200${tab === "all_teams" ? "&visibility=all_teams" : ""}`),
-  });
-  return (
-    <>
-      <div><h1>Hot List</h1><p className="sub">Candidates ready for marketing. Visibility follows your team, plus anyone marked “Open to all teams”.</p></div>
-      <div className="tabs">
-        <button className="tab" aria-pressed={tab === "mine"} onClick={() => setTab("mine")}>Visible to me</button>
-        <button className="tab" aria-pressed={tab === "all_teams"} onClick={() => setTab("all_teams")}>Open to all teams</button>
-      </div>
-      <div className="card">
-        {q.isLoading ? <p className="empty">Loading…</p> : q.error ? <p className="empty error">{(q.error as Error).message}</p> : (
-          <table>
-            <thead><tr><th>Candidate</th><th>Technology</th><th>Status</th><th>Pri</th><th>Team</th><th>Recruiter</th><th>Location</th><th>Phone</th></tr></thead>
-            <tbody>
-              {q.data!.items.map((c) => (
-                <tr key={c.id}>
-                  <td><b>{c.name}</b></td>
-                  <td>{c.technology}</td>
-                  <td>
-                    <span className={`badge ${c.status}`}>{c.status.replace(/_/g, " ")}</span>{" "}
-                    {c.visibility === "all_teams" && <span className="badge all_teams">all teams</span>}
-                  </td>
-                  <td><span className={`prio ${c.priority}`}>{c.priority}</span></td>
-                  <td>{c.team.name}</td>
-                  <td>{c.recruiter?.name ?? "Unassigned"}</td>
-                  <td>{c.location.name}</td>
-                  <td className={c.phoneMasked ? "masked" : ""} title={c.phoneMasked ? "Masked: not your team's candidate" : undefined}>{c.phone ?? "—"}</td>
-                </tr>
-              ))}
-              {q.data!.items.length === 0 && <tr><td colSpan={8} className="empty">No candidates in your scope.</td></tr>}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </>
-  );
-}
-
 function Placeholder({ item }: { item: NavItem }) {
   return <div><h1>{item.label}</h1><p className="sub">Planned in a later phase (see implementation plan).</p></div>;
 }
@@ -85,6 +49,20 @@ function Placeholder({ item }: { item: NavItem }) {
 export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const items = useMemo(() => visibleNav(me.capabilities), [me.capabilities]);
   const [active, setActive] = useState(items.find((i) => i.key === "hotlist")?.key ?? items[0]?.key);
+  // Open candidate profile. The list stays mounted (hidden) so its filters, page
+  // and scroll survive, and focus returns to the row that opened the profile.
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const [restoreFocus, setRestoreFocus] = useState(false);
+  const openProfile = (id: string) => { opener.current = document.activeElement as HTMLElement | null; setProfileId(id); };
+  const closeProfile = () => { setProfileId(null); setRestoreFocus(true); };
+  useEffect(() => {
+    if (!restoreFocus) return;
+    setRestoreFocus(false);
+    const el = opener.current;
+    if (el && el.isConnected && !el.closest("[hidden]")) el.focus();
+    else document.querySelector<HTMLElement>(".content h1")?.focus();
+  }, [restoreFocus]);
   const sections = [...new Set(items.map((i) => i.section))];
   const current = items.find((i) => i.key === active);
   return (
@@ -95,7 +73,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <div key={s}>
             <div className="navsec">{s}</div>
             {items.filter((i) => i.section === s).map((i) => (
-              <button key={i.key} className="nav" aria-current={i.key === active ? "page" : undefined} onClick={() => setActive(i.key)}>{i.label}</button>
+              <button key={i.key} className="nav" aria-current={i.key === active ? "page" : undefined} onClick={() => { setActive(i.key); setProfileId(null); }}>{i.label}</button>
             ))}
           </div>
         ))}
@@ -106,7 +84,16 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         <div className="top"><span className="rolepill">{me.roles.map((r) => r.label).join(" · ")}</span></div>
         <div className="content">
           {!current ? <p className="empty">Your role has no screens yet.</p>
-            : current.key === "hotlist" || current.key === "candidates" ? <HotList />
+            : current.key === "hotlist" || current.key === "candidates" ? (
+              <>
+                <div className="panel" hidden={profileId !== null}>
+                  {current.key === "hotlist"
+                    ? <HotListPage key="hotlist" me={me} onOpenProfile={openProfile} />
+                    : <CandidatesPage key="candidates" me={me} onOpenProfile={openProfile} />}
+                </div>
+                {profileId && <CandidateProfile key={profileId} id={profileId} me={me} onBack={closeProfile} backLabel={`Back to ${current.label}`} />}
+              </>
+            )
             : current.key === "access" ? <AccessPage me={me} />
             : <Placeholder item={current} />}
         </div>
