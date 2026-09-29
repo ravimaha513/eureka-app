@@ -95,6 +95,7 @@ td.rowactions > button + button { margin-left: 6px; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 
 /* Sales: Hot List, Candidates, candidate profile */
+[hidden] { display: none !important; } /* layout classes like .panel must not un-hide a hidden element */
 .pagehead { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .tablewrap { overflow-x: auto; }
 .linkbtn { background: none; border: 0; padding: 0; color: var(--pri-700); text-align: left; }
