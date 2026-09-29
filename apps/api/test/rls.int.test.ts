@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { HOTLIST_STATUSES, activityVisible, candidateVisible, hotlistVisible, resolveScope } from "@eureka/shared";
+import { activityVisible, candidateVisible, hotlistVisible, ownsCandidate, resolveScope } from "@eureka/shared";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { CLIENT_ID, LOC, T, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 
@@ -75,32 +75,54 @@ describe("RLS coverage and hardening", () => {
 describe("differential: database RLS alone matches the application engine", () => {
   const users = Object.keys(U) as (keyof typeof U)[];
 
-  // Readable rows = candidate:read scope plus the Hot List (OD-01 policy).
   const setPolicy = (v: "everyone" | "team") =>
     db.admin.query(`UPDATE authz.policy_setting SET value = $1 WHERE key = 'hotlist_visibility'`, [v]);
-  const readable = (key: keyof typeof U) =>
-    asUser(db.app, U[key], async (c) =>
-      (await c.query<{ id: string }>(`SELECT id FROM eureka.candidate`)).rows.map((r) => r.id).sort());
+  const ids = (rows: { id: string }[]) => rows.map((r) => r.id).sort();
 
+  // Base-table RLS never depends on the Hot List policy (review of 0010).
   describe.each(["everyone", "team"] as const)("Hot List policy %s", (policy) => {
     beforeAll(() => setPolicy(policy));
     afterAll(() => setPolicy("everyone"));
 
-    it.each(users)("candidate visibility for %s", async (key) => {
+    it.each(users)("candidate rows readable by %s = engine candidate:read", async (key) => {
       const access = toUserAccess(key);
-      const expected = candidates
-        .filter((c) => candidateVisible(resolveScope(access, "candidate:read"), c)
-          || hotlistVisible(resolveScope(access, "hotlist:read", policy), c))
-        .map((c) => c.id).sort();
-      expect(await readable(key)).toEqual(expected);
+      const expected = candidates.filter((c) => candidateVisible(resolveScope(access, "candidate:read"), c)).map((c) => c.id).sort();
+      const actual = await asUser(db.app, access.userId, async (c) => ids((await c.query(`SELECT id FROM eureka.candidate`)).rows));
+      expect(actual).toEqual(expected);
+      const persons = await asUser(db.app, access.userId, async (c) => (await c.query(`SELECT count(*)::int n FROM eureka.person`)).rows[0].n);
+      expect(persons).toBe(expected.length);
+    });
+
+    it.each(users)("authz.hotlist_page for %s = engine hotlistVisible under the open policy only", async (key) => {
+      const access = toUserAccess(key);
+      const expected = policy === "everyone"
+        ? candidates.filter((c) => hotlistVisible(resolveScope(access, "hotlist:read", "everyone"), c)).map((c) => c.id).sort()
+        : [];
+      const rows = await asUser(db.app, access.userId, async (c) =>
+        (await c.query<{ id: string; phone: string | null; phone_masked: boolean; readable: boolean; technical_rating: number | null }>(
+          `SELECT * FROM authz.hotlist_page(NULL, NULL, NULL, NULL, NULL, 500)`)).rows);
+      expect(ids(rows)).toEqual(expected);
+      const phoneScope = resolveScope(access, "candidate.phone:read");
+      const readScope = resolveScope(access, "candidate:read");
+      for (const r of rows) {
+        const cand = candidates.find((c) => c.id === r.id)!;
+        const owned = phoneScope !== null && ownsCandidate(phoneScope, cand);
+        expect(r.phone_masked, r.id).toBe(!owned);
+        if (!owned) expect(r.phone).toMatch(/^•••-•••-\d\d$/);
+        expect(r.readable).toBe(candidateVisible(readScope, cand));
+      }
     });
   });
 
-  it("the Hot List statuses in SQL match the catalog", async () => {
-    const { rows } = await db.admin.query<{ def: string }>(
-      `SELECT pg_get_expr(polqual, polrelid) AS def FROM pg_policy WHERE polname = 'candidate_hotlist_read'`);
-    for (const s of HOTLIST_STATUSES) expect(rows[0]!.def).toContain(`'${s}'`);
-    expect(rows[0]!.def.match(/'[a-z_]+'::text/g)).toHaveLength(HOTLIST_STATUSES.length);
+  it("an unknown or inactive user id sees no Hot List", async () => {
+    const unknown = await asUser(db.app, "00000000-0000-0000-0000-00000000dead", async (c) =>
+      (await c.query(`SELECT count(*)::int n FROM authz.hotlist_page(NULL, NULL, NULL, NULL, NULL, 500)`)).rows[0].n);
+    expect(unknown).toBe(0);
+  });
+
+  it("the policy setting only accepts known values and is not writable by the app", async () => {
+    await expect(db.admin.query(`UPDATE authz.policy_setting SET value = 'all' WHERE key = 'hotlist_visibility'`)).rejects.toThrow(/policy_setting_value/);
+    await expect(asUser(db.app, U.admin, (c) => c.query(`UPDATE authz.policy_setting SET value = 'team'`))).rejects.toThrow(/permission denied/);
   });
 
   describe("submissions", () => {
@@ -113,7 +135,7 @@ describe("differential: database RLS alone matches the application engine", () =
       for (const cand of candidates) {
         const actors = new Set<string>();
         if (cand.recruiterId) actors.add(cand.recruiterId);
-        if (cand.visibility === "all_teams" && cand.marketingStatus !== "on_hold") actors.add(U.r2a);
+        if (cand.visibility === "all_teams" && ["active", "full_of_interviews"].includes(cand.marketingStatus)) actors.add(U.r2a);
         for (const actor of actors) {
           const id = await asUser(db.app, actor, async (c) =>
             (await c.query<{ id: string }>(
@@ -283,12 +305,11 @@ describe("write-side guards (design B4.7, B4.8)", () => {
     expect((await db.worker.query(`UPDATE eureka.interview SET feedback_email_sent_at = now() WHERE id = $1`, [rows[0].id])).rowCount).toBe(0);
   });
 
-  it("org_admin sees no business data beyond the Hot List", async () => {
-    const rows = await asUser(db.app, U.admin, async (c) =>
-      (await c.query<{ marketing_status: string }>(`SELECT marketing_status FROM eureka.candidate`)).rows);
-    for (const r of rows) expect(HOTLIST_STATUSES as readonly string[]).toContain(r.marketing_status);
-    const subs = await asUser(db.app, U.admin, async (c) => (await c.query(`SELECT count(*)::int n FROM eureka.submission`)).rows[0].n);
-    expect(subs).toBe(0);
+  it("org_admin reads no business tables (the open Hot List is a function, not RLS)", async () => {
+    for (const t of ["candidate", "person", "submission", "interview"]) {
+      const n = await asUser(db.app, U.admin, async (c) => (await c.query(`SELECT count(*)::int n FROM eureka.${t}`)).rows[0].n);
+      expect(n, t).toBe(0);
+    }
   });
 
   it("reporting line cycles are rejected", async () => {

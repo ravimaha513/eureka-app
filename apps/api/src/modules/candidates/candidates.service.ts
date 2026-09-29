@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { ForbiddenException, HttpException, HttpStatus, Injectable, Logger, NotFoundException, type OnModuleInit } from "@nestjs/common";
 import type pg from "pg";
 import {
   HOTLIST_STATUSES,
+  HOTLIST_VISIBILITY,
   MARKETABLE_STATUSES,
   applyCandidateFieldPolicy,
   ownsCandidate,
@@ -15,6 +16,7 @@ import {
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
+import { RateLimiter } from "../../platform/rate-limit.js";
 import type { CandidateListQuery, CreateCandidate, ProfileUpdate } from "./candidates.schemas.js";
 
 interface CandidateRow {
@@ -68,9 +70,48 @@ const toRef = (r: Pick<CandidateRow, "recruiter_id" | "team_id" | "location_id" 
   marketingStatus: r.marketing_status,
 });
 
+interface HotlistRow {
+  id: string;
+  first_name: string;
+  last_name: string;
+  technology: string;
+  team_id: string;
+  team_name: string;
+  recruiter_id: string | null;
+  recruiter_name: string | null;
+  location_id: string;
+  location_name: string;
+  visibility: "team" | "all_teams";
+  marketing_status: string;
+  priority: string;
+  marketing_start_date: string | null;
+  technical_rating: number | null;
+  phone: string | null;
+  phone_masked: boolean;
+  readable: boolean;
+}
+
+/** Hot List pages per user per minute (anti-scraping; design A-threats "mass export"). */
+export const HOTLIST_PAGES_PER_MINUTE = 60;
+
 @Injectable()
-export class CandidatesService {
+export class CandidatesService implements OnModuleInit {
+  private readonly log = new Logger(CandidatesService.name);
+  private readonly hotlistLimiter = new RateLimiter(HOTLIST_PAGES_PER_MINUTE, 60_000);
+
   constructor(private readonly db: DbService, private readonly audit: AuditService) {}
+
+  /** The engine reads the Hot List switch from code, RLS/functions from the database; they must agree. */
+  async onModuleInit() {
+    try {
+      const { rows } = await this.db.system((c) => c.query<{ v: string }>("SELECT authz.hotlist_visibility() AS v"));
+      if (rows[0]?.v !== HOTLIST_VISIBILITY) {
+        this.log.error(`Hot List policy mismatch: code=${HOTLIST_VISIBILITY} database=${rows[0]?.v}; run migrations`);
+      }
+    } catch (err) {
+      this.log.warn(`Could not read Hot List policy: ${(err as Error).message}`);
+    }
+  }
 
   private baseSelect = `
     SELECT c.id, p.first_name, p.last_name, p.phone_e164, p.dob_year, t.name AS technology,
@@ -116,6 +157,12 @@ export class CandidatesService {
   async list(user: AuthedUser, perm: "candidate:read" | "hotlist:read", q: CandidateListQuery) {
     const scope = resolveScope(user.access, perm);
     if (!scope) throw new ForbiddenException();
+    if (perm === "hotlist:read") {
+      if (!this.hotlistLimiter.take(user.id)) {
+        throw new HttpException("Too many Hot List requests; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
+      }
+      if (scope.hotlistOpen) return this.openHotlist(user, q);
+    }
     const params: unknown[] = [];
     const where = [scopePredicate(scope, params)];
     if (perm === "hotlist:read") { params.push([...HOTLIST_STATUSES]); where.push(`c.marketing_status = ANY($${params.length}::text[])`); }
@@ -133,6 +180,53 @@ export class CandidatesService {
     const page = rows.slice(0, q.limit);
     return {
       items: page.map((r) => this.present(user.access, r)),
+      nextCursor: rows.length > q.limit ? page[page.length - 1]!.id : null,
+    };
+  }
+
+  /**
+   * Open Hot List (OD-01): served by authz.hotlist_page, which returns only list
+   * columns with phones masked in SQL, so base-table RLS stays scoped. Every page
+   * read is audited.
+   */
+  private async openHotlist(user: AuthedUser, q: CandidateListQuery) {
+    const search = q.search ? `%${q.search.replace(/[%_\\]/g, "\\$&")}%` : null;
+    const rows = await this.db.withUser(user.id, async (c) => {
+      const r = (await c.query<HotlistRow>(
+        `SELECT * FROM authz.hotlist_page($1, $2, $3, $4, $5, $6)`,
+        [q.status ?? null, q.technology ?? null, q.visibility ?? null, search, q.cursor ?? null, q.limit + 1],
+      )).rows;
+      await this.audit.record(c, {
+        actorId: user.id, action: "hotlist.read", entityType: "candidate",
+        changes: { filters: { status: q.status, technology: q.technology, visibility: q.visibility, search: q.search ? true : undefined }, rows: Math.min(r.length, q.limit) },
+      });
+      return r;
+    });
+    const page = rows.slice(0, q.limit);
+    return {
+      items: page.map((r) => {
+        const days = r.marketing_start_date
+          ? Math.floor((Date.now() - Date.parse(r.marketing_start_date)) / 86_400_000)
+          : null;
+        return {
+          id: r.id,
+          name: `${r.first_name} ${r.last_name}`,
+          technology: r.technology,
+          status: r.marketing_status,
+          visibility: r.visibility,
+          priority: r.priority,
+          team: { id: r.team_id, name: r.team_name },
+          recruiter: r.recruiter_id ? { id: r.recruiter_id, name: r.recruiter_name } : null,
+          location: { id: r.location_id, name: r.location_name },
+          marketingStartDate: r.marketing_start_date,
+          daysInMarket: days,
+          technicalRating: r.technical_rating,
+          phone: r.phone,
+          phoneMasked: r.phone_masked,
+          dobMasked: null,
+          canOpenProfile: r.readable,
+        };
+      }),
       nextCursor: rows.length > q.limit ? page[page.length - 1]!.id : null,
     };
   }

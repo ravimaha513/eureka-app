@@ -127,5 +127,23 @@ export async function seedFixtures(admin: pg.Pool): Promise<FixtureCandidate[]> 
           out.push({ id: c.rows[0]!.id, teamId, recruiterId, locationId, visibility, marketingStatus });
         }
   }
+  // Remaining statuses (other Hot List statuses and non-Hot-List ones), appended
+  // after the main grid so tests that pick "the first matching candidate" are stable.
+  for (const [teamId, recs] of Object.entries(recruitersByTeam)) {
+    for (const recruiterId of [recs[0]!, null])
+      for (const visibility of ["team", "all_teams"] as const)
+        for (const marketingStatus of ["bench", "stopped", "confirmation", "placed", "in_training", "terminated"]) {
+          n++;
+          const locationId = n % 2 ? LOC.dallas : LOC.austin;
+          const p = await admin.query<{ id: string }>(
+            `INSERT INTO eureka.person (first_name, last_name, phone_e164) VALUES ($1,$2,$3) RETURNING id`,
+            [`Cand${n}`, "Test", `+1469555${n.toString().padStart(4, "0")}`]);
+          const c = await admin.query<{ id: string }>(
+            `INSERT INTO eureka.candidate (person_id, technology_id, team_id, recruiter_id, location_id, visibility, marketing_status)
+             VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+            [p.rows[0]!.id, TECH_ID, teamId, recruiterId, locationId, visibility, marketingStatus]);
+          out.push({ id: c.rows[0]!.id, teamId, recruiterId, locationId, visibility, marketingStatus });
+        }
+  }
   return out;
 }

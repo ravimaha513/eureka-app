@@ -62,8 +62,10 @@ export async function seedCatalog(client: pg.Client | pg.PoolClient): Promise<vo
         );
       }
     }
-    await client.query(
-      "UPDATE authz.policy_setting SET value = $1 WHERE key = 'hotlist_visibility'", [HOTLIST_VISIBILITY]);
+    const policy = await client.query(
+      `INSERT INTO authz.policy_setting (key, value) VALUES ('hotlist_visibility', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [HOTLIST_VISIBILITY]);
+    if (policy.rowCount !== 1) throw new Error("hotlist_visibility policy was not written");
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");

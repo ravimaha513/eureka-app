@@ -254,6 +254,22 @@ describe("candidate endpoints", () => {
 });
 
 describe("submissions", () => {
+  it("D-01: a lead cannot log a submission for a candidate seen only on the open Hot List", async () => {
+    const hotOnly = candidates.find((c) => c.teamId === T.t2 && c.visibility === "team" && c.marketingStatus === "active")!;
+    const r = await call("l1", "POST", "/api/v1/submissions", { candidateId: hotOnly.id, jobTitle: "Java Developer", clientId: CLIENT_ID });
+    expect([403, 404]).toContain(r.statusCode);
+  });
+
+  it("Hot List pages are audited and rate limited per user", async () => {
+    const before = (await db.admin.query(`SELECT count(*)::int n FROM eureka.audit_event WHERE action = 'hotlist.read' AND actor_id = $1`, [U.coach])).rows[0].n;
+    expect((await call("coach", "GET", "/api/v1/hotlist?limit=5")).statusCode).toBe(200);
+    const after = (await db.admin.query(`SELECT count(*)::int n FROM eureka.audit_event WHERE action = 'hotlist.read' AND actor_id = $1`, [U.coach])).rows[0].n;
+    expect(after).toBe(before + 1);
+    let status = 200;
+    for (let i = 0; i < 70 && status === 200; i++) status = (await call("coach", "GET", "/api/v1/hotlist?limit=1")).statusCode;
+    expect(status).toBe(429);
+  });
+
   it("recruiter submits an Open-to-all-teams candidate; second submission to the same client warns", async () => {
     const cand = candidates.find((c) => c.teamId === T.t3 && c.visibility === "all_teams" && c.marketingStatus === "active")!;
     const first = await call("r1a", "POST", "/api/v1/submissions", { candidateId: cand.id, jobTitle: "Java Developer", clientId: CLIENT_ID });

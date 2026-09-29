@@ -490,7 +490,7 @@ The catalog is in `packages/shared/src/authz/catalog.ts`. It defines the followi
 Notes:
 
 - Recruiters see their whole team's candidates and Hot List, but read and update only their own submissions, interviews and placements (SRS 5). They can log a submission or placement for any candidate they can see, including Open-to-all-teams candidates (SRS "any Hotlist candidate").
-- Leads, Managers and ADs log activity for any candidate they can see (AS-14, deviation D-01).
+- Leads, Managers and ADs log activity for any candidate visible through their own scope, including Open-to-all-teams candidates, but not candidates seen only on the open Hot List (AS-14, D-01 confirmed).
 - Offshore Manager and CEO are read-only on Sales data at org scope. The CEO also sees employees and invoices; neither sees restricted documents or DOB.
 
 ### B4.3 Scope resolution
@@ -575,6 +575,8 @@ CREATE POLICY candidate_update ON candidate FOR UPDATE TO eureka_app
 **Worker role:** `eureka_worker` has no BYPASSRLS and is a member of `eureka_app` only `WITH INHERIT FALSE, SET TRUE`. It can switch role to act for a user, but gains none of the app's privileges by default (a gap found by the integration tests). It has its own policies (`TO eureka_worker`) and column grants limited to what each job reads. For example, the feedback-email job reads interview id, times and candidate first name and email, and writes `feedback_email_sent_at`. When a job acts for a user (for example a scheduled export), it sets that user's id and runs under the user's policies.
 
 **Reports:** report queries run against base tables (or `security_invoker` views) under the caller's RLS. Materialized views are not used in MVP because RLS does not apply to them.
+
+**Open Hot List (OD-01).** Base-table RLS does not change with the Hot List switch. The open Hot List is served by one SECURITY DEFINER function, `authz.hotlist_page(...)` (migration 0011), which returns only list columns for active users, masks the phone in SQL unless the caller owns the candidate for `candidate.phone:read`, returns the technical rating only for candidates the caller can read, and never returns DOB or email. Each page read is audited (`hotlist.read`) and limited to 60 pages per user per minute. The switch lives in `authz.policy_setting` (seeded from the catalog, CHECK-constrained, not writable by the app); the API logs an error at startup if code and database disagree.
 
 ### B4.6 Field policy
 
