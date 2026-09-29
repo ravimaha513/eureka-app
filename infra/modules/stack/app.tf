@@ -306,7 +306,7 @@ resource "aws_lb_listener_rule" "from_cloudfront" {
 
 # ---------- Task definitions ----------
 locals {
-  image = "${aws_ecr_repository.api.repository_url}:${var.image_tag}"
+  image           = "${aws_ecr_repository.api.repository_url}:${var.image_tag}"
   public_base_url = local.use_domain ? "https://${var.domain_name}" : "https://${aws_cloudfront_distribution.main.domain_name}"
   common_env = [
     { name = "NODE_ENV", value = "production" },

@@ -50,13 +50,28 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.10.5
-      - name: terraform fmt (warn only until the first formatted commit)
-        run: terraform fmt -check -recursive infra || echo "::warning::run terraform fmt -recursive infra"
+      - name: terraform fmt
+        run: terraform fmt -check -recursive infra
       - name: terraform validate
         run: |
-          cd infra/modules/stack
-          terraform init -backend=false
-          terraform validate
+          set -uo pipefail
+          # Terragrunt generates provider.tf at deploy time; mirror it here so the
+          # aliased us_east_1 provider resolves when the module is validated alone.
+          cat > infra/modules/stack/provider_ci.tf <<'TF'
+          provider "aws" { region = "us-east-2" }
+          provider "aws" {
+            alias  = "us_east_1"
+            region = "us-east-1"
+          }
+          TF
+          rc=0
+          for dir in infra/modules/stack infra/bootstrap; do
+            terraform -chdir=$dir init -backend=false -input=false >/dev/null || { echo "::error::init failed in $dir"; rc=1; continue; }
+            terraform -chdir=$dir validate -json > /tmp/v.json || true
+            jq -r --arg d "$dir" '.diagnostics[]? | "::\(.severity) file=\($d)/\(.range.filename // ""),line=\(.range.start.line // 1)::\(.summary): \(.detail // "")"' /tmp/v.json
+            jq -e '.valid' /tmp/v.json >/dev/null || rc=1
+          done
+          exit $rc
       - name: Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
