@@ -33,12 +33,15 @@ const CODES: Record<string, (code: string) => HttpException> = {
   not_a_member: (c) => new UnprocessableEntityException(c),
   same_team: (c) => new UnprocessableEntityException(c),
   lead_of_team: (c) => new UnprocessableEntityException(c),
+  has_reports: (c) => new UnprocessableEntityException(c),
+  separation_of_duties: (c) => new UnprocessableEntityException(c),
   already_member: (c) => new ConflictException(c),
   role_already_held: (c) => new ConflictException(c),
   request_pending: (c) => new ConflictException(c),
   request_not_pending: (c) => new ConflictException(c),
   request_expired: (c) => new ConflictException(c),
   last_admin: (c) => new ConflictException(c),
+  requester_not_admin: (c) => new ConflictException(c),
 };
 
 export function mapAdminError(err: unknown): never {

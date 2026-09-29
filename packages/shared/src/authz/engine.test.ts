@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GRANTS, PERMISSIONS, ROLES, LOCATION_ROLES, RESTRICTED_PERMISSIONS, isRestrictedRole } from "./catalog.js";
+import { GRANTS, PERMISSIONS, ROLES, LOCATION_ROLES, RESTRICTED_PERMISSIONS, ORG_SENSITIVE_PERMISSIONS, isRestrictedRole } from "./catalog.js";
 import {
   activityVisible,
   applyCandidateFieldPolicy,
@@ -66,11 +66,13 @@ describe("catalog integrity", () => {
     }
   });
 
-  it("restricted roles (second approver) are org_admin, HR, Accounts and Immigration", () => {
-    expect(ROLES.filter(isRestrictedRole).sort()).toEqual(["accounts", "hr", "immigration", "org_admin"]);
+  it("restricted roles (second approver): org_admin, restricted-permission holders, org-wide sensitive holders", () => {
+    expect(ROLES.filter(isRestrictedRole).sort()).toEqual(
+      ["accounts", "associate_hr", "bu_head", "ceo", "documents_team", "hr", "immigration", "offshore_manager", "org_admin"]);
     for (const role of ROLES) {
       const holdsRestricted = RESTRICTED_PERMISSIONS.some((p) => GRANTS[role][p]);
-      expect(isRestrictedRole(role), role).toBe(role === "org_admin" || holdsRestricted);
+      const orgSensitive = ORG_SENSITIVE_PERMISSIONS.some((p) => GRANTS[role][p] === "org");
+      expect(isRestrictedRole(role), role).toBe(role === "org_admin" || holdsRestricted || orgSensitive);
     }
   });
 

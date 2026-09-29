@@ -232,11 +232,11 @@ describe("users", () => {
 
 describe("role requests (AD-3, AD-4, AD-6, AD-7)", () => {
   it("a non-restricted role applies immediately", async () => {
-    const r = await call("admin", "POST", "/api/v1/admin/role-requests", { userId: U.coach, role: "documents_team" });
+    const r = await call("admin", "POST", "/api/v1/admin/role-requests", { userId: U.coach, role: "recruiter" });
     expect(r.statusCode).toBe(201);
     expect(r.json()).toEqual({ id: expect.any(String), status: "applied" });
     const me = (await call("coach", "GET", "/api/v1/me")).json();
-    expect(me.roles.map((x: { key: string }) => x.key).sort()).toEqual(["documents_team", "interview_coach"]);
+    expect(me.roles.map((x: { key: string }) => x.key).sort()).toEqual(["interview_coach", "recruiter"]);
   });
 
   it("a restricted role needs a second admin: requester and grantee cannot approve, another admin can", async () => {
@@ -266,21 +266,16 @@ describe("role requests (AD-3, AD-4, AD-6, AD-7)", () => {
     expect((await call("admin2", "POST", `/api/v1/admin/role-requests/${id}/approve`)).statusCode).toBe(409);
   });
 
-  it("the grantee cannot approve their own restricted role", async () => {
+  it("separation of duties: an admin cannot be given a business role (and so cannot approve their own)", async () => {
     const r = await call("admin", "POST", "/api/v1/admin/role-requests", { userId: U.admin2, role: "accounts" });
-    expect(r.json().status).toBe("pending_approval");
-    const res = await call("admin2", "POST", `/api/v1/admin/role-requests/${r.json().id}/approve`);
-    expect(res.statusCode).toBe(403);
-    expect(res.json().detail).toBe("second_approver_required");
-    const rej = await call("admin2", "POST", `/api/v1/admin/role-requests/${r.json().id}/reject`);
-    expect(rej.json().detail).toBe("self_change");
-    const withdraw = await call("admin", "POST", `/api/v1/admin/role-requests/${r.json().id}/reject`);
-    expect(withdraw.statusCode).toBe(200);
-    expect(withdraw.json()).toEqual({ status: "rejected" });
+    expect(r.statusCode).toBe(422);
+    expect(r.json().detail).toBe("separation_of_duties");
   });
 
   it("org_admin is itself restricted", async () => {
-    const r = await call("admin", "POST", "/api/v1/admin/role-requests", { userId: U.ceo, role: "org_admin" });
+    const created = await call("admin", "POST", "/api/v1/admin/users", { email: "fresh-admin@eureka.example", displayName: "Fresh Admin" });
+    expect(created.statusCode).toBe(201);
+    const r = await call("admin", "POST", "/api/v1/admin/role-requests", { userId: created.json().id, role: "org_admin" });
     expect(r.json().status).toBe("pending_approval");
     expect((await call("admin2", "POST", `/api/v1/admin/role-requests/${r.json().id}/reject`)).statusCode).toBe(200);
   });

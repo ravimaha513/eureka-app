@@ -10,9 +10,10 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 |---|---|
 | AD-1 | Everything under `/api/v1/admin/*` requires `access:manage` (org scope; only `org_admin` holds it). `org_admin` still has no data permissions. |
 | AD-2 | Nobody can change their own roles, status or reporting line (403 `self_change`). |
-| AD-3 | Granting a **restricted role** needs a second approver: another `access:manage` holder who is neither the grantee nor the requester. Restricted roles are `org_admin` and every role that holds a permission in `RESTRICTED_PERMISSIONS` (HR, Accounts, Immigration). Other roles apply immediately. |
+| AD-3 | Granting a **restricted role** needs a second approver: another `access:manage` holder who is neither the grantee nor the requester, while the grantee is active and the requester is still an admin. Restricted roles: `org_admin`, every role holding a permission in `RESTRICTED_PERMISSIONS` (HR, Accounts, Immigration), and every role holding an org-wide sensitive permission (`ORG_SENSITIVE_PERMISSIONS`: rates, invoices, employees, phones, assignment, team moves, documents), which today adds CEO, BU Head, Offshore Manager, Associate HR and Documents Team. Other roles apply immediately. |
+| AD-3a | Separation of duties: an `org_admin` holds no business role, and a user with a business role cannot be made `org_admin` (422 `separation_of_duties`). Use a separate admin account. |
 | AD-4 | Revoking a role, or deactivating a user, is immediate and needs no approval. Least privilege: removing access is never slowed down. |
-| AD-5 | Deactivation sets `status = 'inactive'`, ends open role, team and coach rows (`valid` upper bound = now), revokes all sessions and bumps `access_version`. Reactivation restores the status only. Roles must be granted again. |
+| AD-5 | Deactivation sets `status = 'inactive'`, ends open role, team, coach and reporting-line rows, closes pending role requests for or by the user, revokes all sessions and bumps `access_version`. It is refused while the user leads a team (`lead_of_team`) or has direct reports (`has_reports`). Reactivation restores the status only. Roles, teams and a manager must be set again. |
 | AD-6 | Location-bound roles (`location_incharge`, `location_ops_admin`) require `locationId`; other roles reject it. |
 | AD-7 | Every change writes an `audit_event` in the same transaction. Role requests are stored in `role_request` with requester, approver and decision time. A pending request expires after 7 days. |
 | AD-8 | Moving a recruiter between teams (OD-07) needs `team:move_member` covering **both** teams in the actor's scope. Their candidates stay with the old team and go to `reassignTo`, which must be an active member or the lead of the old team. It defaults to the old team's lead. It all runs in one transaction in a definer function. |
@@ -53,8 +54,8 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 `self_change`, `second_approver_required`, `restricted_role`, `location_required`, `location_not_allowed`, `already_member`, `not_in_scope`, `invalid_reassign_target`, `cycle`.
 
 Added during implementation:
-- 409: `email_exists`, `role_already_held`, `request_pending`, `request_not_pending`, `request_expired`, `last_admin`
-- 422: `email_domain`, `unknown_role`, `invalid_manager`, `invalid_lead`, `user_inactive`, `not_a_member`, `same_team`, `lead_of_team`
+- 409: `email_exists`, `role_already_held`, `request_pending`, `request_not_pending`, `request_expired`, `last_admin`, `requester_not_admin`
+- 422: `email_domain`, `unknown_role`, `invalid_manager`, `invalid_lead`, `user_inactive`, `not_a_member`, `same_team`, `lead_of_team`, `has_reports`, `separation_of_duties`
 
 ## Implementation notes
 

@@ -349,10 +349,28 @@ export function grantFor(role: Role, permission: Permission): Scope | undefined 
 
 /**
  * Restricted roles need a second approver when granted (admin-api.md AD-3):
- * org_admin, and every role holding a permission in RESTRICTED_PERMISSIONS.
+ * org_admin, every role holding a permission in RESTRICTED_PERMISSIONS, and
+ * every role holding an organisation-wide sensitive permission
+ * (ORG_SENSITIVE_PERMISSIONS at "org" scope). Security review 2026-09-29: one
+ * admin must not be able to hand out org-wide phones, rates, invoices or
+ * documents alone.
  * The migration runner copies this into eureka.role.is_restricted, which the
  * database approval functions read.
  */
+export const ORG_SENSITIVE_PERMISSIONS: readonly Permission[] = [
+  "rate:read",
+  "invoice:read",
+  "employee:read",
+  "candidate.phone:read",
+  "candidate:assign",
+  "team:move_member",
+  "document:read",
+];
+
 export function isRestrictedRole(role: Role): boolean {
-  return role === "org_admin" || RESTRICTED_PERMISSIONS.some((p) => GRANTS[role][p] !== undefined);
+  return (
+    role === "org_admin" ||
+    RESTRICTED_PERMISSIONS.some((p) => GRANTS[role][p] !== undefined) ||
+    ORG_SENSITIVE_PERMISSIONS.some((p) => GRANTS[role][p] === "org")
+  );
 }

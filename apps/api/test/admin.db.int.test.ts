@@ -123,9 +123,9 @@ describe("role requests (AD-3, AD-6)", () => {
     (await db.admin.query(`SELECT count(*)::int n FROM eureka.user_role WHERE user_id = $1 AND role_key = $2 AND valid @> now()`, [user, role])).rows[0].n > 0;
 
   it("a non-restricted role applies immediately", async () => {
-    const r = await request(U.admin, U.coach, "documents_team");
+    const r = await request(U.admin, U.coach, "lead");
     expect(r.request_status).toBe("applied");
-    expect(await holds(U.coach, "documents_team")).toBe(true);
+    expect(await holds(U.coach, "lead")).toBe(true);
   });
 
   it("a restricted role waits for a second admin who is neither requester nor grantee", async () => {
@@ -292,5 +292,37 @@ describe("safety rails (migration 0014)", () => {
 
   it("an admin can revoke another admin while one remains", async () => {
     await asUser(db.app, U.admin, (c) => c.query(`SELECT authz.revoke_role($1, 'org_admin', NULL)`, [U.admin2]));
+  });
+});
+
+describe("security review follow-ups (migration 0018)", () => {
+  it("a request cannot be approved after the grantee was deactivated, and deactivation closes it", async () => {
+    const { rows } = await asUser(db.app, U.admin, (c) => c.query(`SELECT * FROM authz.request_role($1, 'hr', NULL)`, [U.r3a]), true);
+    const id = rows[0].request_id;
+    await asUser(db.app, U.admin, (c) => c.query(`SELECT authz.admin_set_user_status($1, false)`, [U.r3a]), true);
+    const st = (await db.admin.query(`SELECT status FROM eureka.role_request WHERE id = $1`, [id])).rows[0].status;
+    expect(st).toBe("rejected");
+    await expect(asUser(db.app, U.admin2, (c) => c.query(`SELECT authz.approve_role_request($1)`, [id])))
+      .rejects.toThrow(/request_not_pending|user_inactive/);
+    await asUser(db.app, U.admin, (c) => c.query(`SELECT authz.admin_set_user_status($1, true)`, [U.r3a]), true);
+    const roles = (await db.admin.query(`SELECT count(*)::int n FROM eureka.user_role WHERE user_id = $1 AND valid @> now()`, [U.r3a])).rows[0].n;
+    expect(roles).toBe(0);
+  });
+
+  it("org-wide sensitive roles (e.g. ceo) need a second approver", async () => {
+    const { rows } = await asUser(db.app, U.admin, (c) => c.query(`SELECT * FROM authz.request_role($1, 'ceo', NULL)`, [U.hr]), true);
+    expect(rows[0].request_status).toBe("pending_approval");
+  });
+
+  it("separation of duties: an admin cannot also hold a data role", async () => {
+    await expect(asUser(db.app, U.admin, (c) => c.query(`SELECT * FROM authz.request_role($1, 'recruiter', NULL)`, [U.admin2])))
+      .rejects.toThrow(/separation_of_duties/);
+    await expect(asUser(db.app, U.admin, (c) => c.query(`SELECT * FROM authz.request_role($1, 'org_admin', NULL)`, [U.l1])))
+      .rejects.toThrow(/separation_of_duties/);
+  });
+
+  it("a manager with direct reports cannot be deactivated", async () => {
+    await expect(asUser(db.app, U.admin, (c) => c.query(`SELECT authz.admin_set_user_status($1, false)`, [U.m1])))
+      .rejects.toThrow(/has_reports|lead_of_team/);
   });
 });
