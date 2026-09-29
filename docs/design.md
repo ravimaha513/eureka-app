@@ -1,0 +1,788 @@
+# Eureka App: System Design (HLD and LLD)
+
+Version 0.3 (revised after two independent reviews) · September 2026 · Related: Eureka App SRS v0.1, Mock screens (SRS 9.2), Implementation Plan v0.1
+
+## How to read this document
+
+Part A is the high-level design: goals, assumptions, architecture, technology choices, security and deployment. Part B is the low-level design: repository layout, data model, the authorization engine, APIs, flows, jobs and testing. Part C traces every SRS requirement to the design. Items marked **AS-nn** are assumptions standing in for answers to open questions in SRS section 13; each says what changes if it is wrong.
+
+### Review history
+
+The design was reviewed twice by an independent reviewer acting as judge. Pass 1 on v0.1 scored 6/10 (revise). Pass 2 on v0.2 scored 7/10 (approve with changes, no blockers). Version 0.3 applies the pass-2 changes (second table below).
+
+Pass 1 findings and their resolution in v0.2:
+
+| Finding | Resolution in v0.2 |
+|---|---|
+| Team scope resolved to the recruiter only; unassigned candidates invisible to leads | Teams are first-class (`team`, `team_member`); candidates carry `team_id`; scope rules rewritten (B4.3) |
+| RLS trusted scope lists computed by the app; app could set an "all" flag | Only the user id is passed to the database; RLS policies compute scope from database tables through `authz` functions (B4.5) |
+| Reports and many tables bypassed RLS | RLS on every table holding personal data, money or documents, default deny, CI check; no materialized views in MVP (B4.5, B7) |
+| Per-table BYPASSRLS for workers is impossible | Worker role has no BYPASSRLS; explicit worker policies and grants per table (B4.5) |
+| Write-side authorization undefined, mass assignment | WITH CHECK policies, protected-column triggers, per-role write schemas, dedicated endpoints for narrow grants (B4.7) |
+| Grants table incomplete and inconsistent with SRS | Grants live in code and the table in B4.2 is generated from it; all 16 roles covered; deviations recorded (B4.2, B10) |
+| Recruiters could not see phone numbers | `candidate.phone:read` granted at read scope to Sales and Location roles, masked for other teams' all-teams candidates (B4.6) |
+| MFA and step-up not enforceable through Cognito federation | Direct Google OIDC from the BFF; step-up with `prompt=login&max_age=0` and `auth_time` check; MFA via Workspace 2-Step Verification (A6.1) |
+| Cache invalidation across tasks, closure table undated | `access_version` counter checked per request; closure rebuilt in-transaction with cycle check; single active manager enforced by exclusion constraint; team snapshots on activity rows (B4.3, B2) |
+| Admin self-escalation | Grants are code-reviewed, not editable at runtime; `access:manage` cannot change the holder's own roles; restricted roles need a second approver (A6.2) |
+| Existence oracles from duplicate checks and errors | Security-definer duplicate check returning minimal info; generic 409/422 errors; read-before-write 404/403 rule (B3) |
+| Functional gaps (vendors, checklists, bench, notifications) | Added tables, states and jobs; traceability in Part C |
+| Encryption vs search | Phone stored in plain text under field policy; DOB and visa number encrypted with blind index for DOB; key scheme defined (A6.3) |
+| Feedback link burned by mail scanners; CSRF not session-bound | GET renders, POST consumes; random token stored hashed; CSRF token is HMAC of session id (A6.1) |
+| Over-engineering for MVP | Deferred: SQS, EventBridge per-interview schedules, materialized views, audit hash chain, blue/green, Cognito (A5, A10) |
+
+Pass 2 findings and their resolution in v0.3:
+
+| Finding | Resolution in v0.3 |
+|---|---|
+| N1: SECURITY DEFINER functions unhardened; conflict with FORCE RLS | `authz_definer` owner role with BYPASSRLS; `search_path` pinned; EXECUTE revoked from PUBLIC; identity and org tables on the no-RLS allow-list with column-level SELECT; views use `security_invoker` (B4.8) |
+| N2: RLS blocks cross-entity side-effect writes | Candidate status and bench changes only through `app.transition_candidate`, a definer function that checks the triggering permission; first-placement computed in a definer function (B4.8) |
+| N3: Protected-column trigger was a partial blocklist; rating grant blocked | Allowlist trigger: every changed column must be covered by a permission on that row; location branch for rating in the UPDATE policy; activity snapshots set by trigger, never by the client (B4.8) |
+| N4: Catalog gaps vs SRS | Lead `candidate:create` at team scope; `candidate:assign` at org for the Offshore Manager; new `assignment:read` for Sales at read scope; `visa:read` marked restricted; interview creation authorized against the parent submission; unused scope ranking removed |
+| N5: Team membership and reporting line can disagree | Invariants enforced by trigger: recruiter must be an active member of the candidate's team; team lead's reporting line must match the team's place in the hierarchy; OD-07 records the recruiter-move rule (B4.8) |
+| N6: Google step-up parameters not documented | Phase 0 spike; fallback is in-app WebAuthn step-up for restricted roles (A6.1) |
+| N7: Authorization matrix generated from the catalog is tautological | Hand-written golden expectations from SRS 5 tested against the catalog (`srs-golden.test.ts`, B8) |
+| N8 to N13 | Residual-risk note for injected user id; `SET LOCAL ROLE` for worker-on-behalf; separate export timeout; advisory lock on closure rebuild and wider version bumps; composite, rate-limited duplicate check; approver constraints; designation is a label only; placement location snapshot (B4.8) |
+
+---
+
+# Part A: High-Level Design
+
+## A1. Goals and non-goals
+
+**Goals**
+
+1. Replace the four Google Sheets and the placement Google Form with one system of record for candidates, submissions, interviews, placements, paperwork, employees and payments.
+2. Enforce role-based access so each user sees only the candidates, activity, fields and reports that their role and position in the hierarchy allow (SRS section 5), enforced twice: in the application and in the database.
+3. Protect sensitive personal and immigration data with encryption, field masking and audit.
+4. Automate the notifications in SRS 4.14.
+5. Start as one deployable service a small team can run, with a clear path to split and scale.
+
+**Non-goals for MVP**
+
+- Candidate self-service portal (candidates only receive single-use links for feedback).
+- Payroll, invoicing or accounting (Eureka records invoice and payment facts entered by Accounts).
+- E-signature, job-board integrations, native mobile apps.
+- Otter.ai or Google Drive API integration (links only).
+
+## A2. Assumptions
+
+| ID | Assumption | If wrong |
+|---|---|---|
+| AS-01 | ~250 internal users (≈180 Sales, ≈40 location/ops, ≈30 HR/Accounts/Immigration/leadership); peak 120 concurrent. | Above ~2,000 users, add read replicas and a connection pooler (A10). |
+| AS-02 | Per year: ~3,000 new candidates, ~60,000 submissions, ~15,000 interviews, ~400 placements, ~25,000 documents (≈40 GB). | 10× still fits one Postgres primary; beyond that, partition activity tables by month. |
+| AS-03 | One organization. `org_id` exists on every table for a future second brand, but is not used in policies until then. | Multi-tenant SaaS adds tenant predicates to RLS and per-tenant keys. |
+| AS-04 | Google Workspace is the identity provider for all staff; 2-Step Verification is enforced by Workspace policy, with security keys for HR, Accounts, Immigration and admin organizational units. | A second IdP (Entra ID, Okta) is added behind an OIDC broker such as Cognito or Auth0 (A10). |
+| AS-05 | Users are in the US (Eastern, Central) and India. Timestamps stored in UTC and shown in the user's zone; interview times also shown in EST. | None. |
+| AS-06 | "Highest privilege" for location_incharge means highest **within a location**. System administration is the separate `org_admin` role, which holds no data permissions. | Grants for that role change only. |
+| AS-07 | Hot List visibility: a candidate belongs to one team. The team's hierarchy and its Interview Coaches see it. A candidate marked **Open to all teams** is visible to all Sales roles while its status is Active or Full of Interviews. | One predicate in B4.4 changes. |
+| AS-08 | Candidate and employee are one `person` with role-specific child records. A placement creates an assignment, not a new person. | Data model split. |
+| AS-09 | Paperwork, payroll, E-Verify, offer-letter and 1099 companies are one `legal_entity` list with type flags. | Split lists. |
+| AS-10 | Incentive formula undefined; MVP records the inputs and payment status only. | Incentive engine in Phase 3. |
+| AS-11 | Availability 99.5% in business hours of both regions; RPO 15 min; RTO 4 h. | Multi-region design. |
+| AS-12 | Interview recording consent is captured outside the app; the app stores a "consent captured" flag per interview. | Block recording links without consent. |
+| AS-13 | Retention: I-9 copies for the later of 3 years after hire or 1 year after employment ends; other candidate data 7 years after last activity, then purged. | Retention job parameters. |
+| AS-14 | "Any candidate" in SRS 5 (Lead, Manager, AD may log submissions for any candidate) means any candidate the user can see, including Open-to-all-teams candidates. | Grant scope widens to org for those permissions (D-01). |
+
+## A3. System context
+
+- **Actors:** internal staff by role; candidates (feedback links only); vendors (emails from users, no access).
+- **Identity:** Google Workspace (OIDC).
+- **Email:** Amazon SES.
+- **Object storage:** private S3 bucket for resumes and compliance documents.
+- **Otter.ai and Google Drive:** URLs on interview records.
+- **Future:** accounting import, calendar invites, data warehouse.
+
+## A4. Architecture overview
+
+Eureka is a **modular monolith**: one API service and one worker service from the same codebase, one PostgreSQL database, and a static single-page web app.
+
+```
+ Browser (React SPA)
+   │  HTTPS; session cookie (httpOnly, Secure, SameSite=Lax)
+   ▼
+ CloudFront + WAF ──► SPA assets (S3)
+   │ /api/*
+   ▼
+ ALB ──► API service (NestJS on Node 22)          ──► PostgreSQL 16 (RDS Multi-AZ)
+            BFF auth · RBAC · field policy               RLS on all sensitive tables
+            │                                              job queue (outbox + SKIP LOCKED)
+            ├──► S3 (SSE-KMS) via presigned URLs            ▲
+            ▼                                               │
+        Google OIDC                      Worker service ───┘ (same codebase)
+                                          jobs: emails, reminders, retention, audit export
+                                          └──► SES
+```
+
+Modules own their tables and expose service interfaces; no module reads another module's tables directly.
+
+| Module | Owns | SRS |
+|---|---|---|
+| identity | users, sessions, role assignments | 4.1, 5 |
+| org | locations, teams, team members, reporting lines, coach assignments | 4.1 |
+| candidates | person, candidate, batches, resumes, notes, timeline events, sample profiles | 4.2, 4.12 |
+| marketing | submissions, preferred vendors | 4.3, 4.4, 4.13 |
+| interviews | interviews, feedback, feedback tokens | 4.5 |
+| placements | placements, assignments, contacts | 4.6, 4.9 |
+| compliance | documents, checklists, BGC, work authorization | 4.7, 4.8 |
+| finance | invoices, payments | 4.10 |
+| reporting | scoped report queries and exports | 4.11, 4.15 |
+| notifications | rules, templates, delivery log, in-app inbox | 4.14 |
+| audit | append-only audit log and access log | NFR-SEC-04 |
+| files | upload/download orchestration and scan status | 4.7 |
+
+## A5. Technology choices
+
+The scale (hundreds of users), the access model and the need for one small team to move fast point to a single-language TypeScript stack on AWS.
+
+| Layer | Choice | Why | Swap path |
+|---|---|---|---|
+| Web app | React 18, TypeScript, Vite, TanStack Router/Query/Table, Tailwind CSS, shadcn/ui (Radix) | Data-heavy grids with saved views and column pickers; accessible components; no SSR needed for an authenticated internal app | Next.js if public pages appear |
+| API and worker | Node.js 22 LTS, NestJS 10 (Fastify adapter), Zod | Modules match the modular monolith; guards and interceptors fit layered authorization; one language and shared Zod schemas across web and API | Java 21 + Spring Boot fits the same design equally well; extract modules into services when needed |
+| Data access | Drizzle ORM + node-postgres, SQL-first migrations | Full control of SQL, needed for scope predicates and RLS; typed queries | Kysely or raw SQL |
+| Database | PostgreSQL 16 on Amazon RDS Multi-AZ | Relational integrity; Row-Level Security; `pg_trgm` and full-text search at this volume; exclusion constraints for effective dating | Aurora, read replicas, partitioning, OpenSearch for search, warehouse via CDC |
+| Authentication | Direct OIDC with Google Workspace from the API acting as Backend-for-Frontend | Company SSO; step-up via `prompt=login`; `hd` domain claim available; no tokens in the browser | Cognito, Auth0 or Okta as a broker when a second IdP is needed |
+| Jobs and events | Transactional outbox + Postgres job queue (`pg-boss`, SKIP LOCKED) in the worker | No extra infrastructure; exactly-once intent, at-least-once delivery; easy reschedule of interview-related jobs | SQS, then Amazon MSK, fed from the same outbox |
+| Files | S3 with SSE-KMS; presigned POST into a quarantine prefix; GuardDuty Malware Protection; promotion on clean scan | Files never pass through the API; scanning before availability | Same |
+| Email | Amazon SES with DKIM, SPF, DMARC | Transactional email | SendGrid or Postmark |
+| Compute | ECS on Fargate (api, worker) behind an ALB; rolling deploys with circuit breaker | No servers to patch; autoscaling | EKS when many services exist |
+| Edge | CloudFront + AWS WAF | Static hosting, L7 protection, rate limits | Same |
+| Secrets and keys | Secrets Manager; KMS keys: `eureka-data` (RDS, S3 general), `eureka-restricted` (restricted documents), `eureka-field` (field encryption), `eureka-bidx` (blind index HMAC) | Key separation limits blast radius | Same |
+| IaC and CI/CD | Terraform; separate AWS accounts for dev, staging, prod; GitHub Actions with OIDC to AWS; pnpm workspaces | Reviewable, repeatable; no long-lived cloud keys | Same |
+| Observability | OpenTelemetry → CloudWatch and X-Ray; Sentry for the web app | Traces across API, worker and database | Grafana or Datadog |
+| Testing | Vitest, Supertest, real PostgreSQL for integration and RLS, Playwright per role, k6, OWASP ZAP baseline | Authorization is the top risk and needs tests against the real database | Same |
+
+## A6. Security architecture
+
+Target: OWASP ASVS 4.0 Level 2 overall; Level 3 controls around restricted documents and access management.
+
+### A6.1 Authentication
+
+- **Sign-in:** OIDC Authorization Code flow with PKCE between the API (confidential client) and Google. The API validates issuer, audience, nonce, signature, expiry and the `hd` claim (company domain). The user must exist and be active in Eureka.
+- **Account linking:** by Google `sub` only. Email matching is allowed once, for a pre-provisioned user with no `sub` recorded yet, and is audited.
+- **Session:** server-side row (`session`); cookie `eureka_sid` holds a 256-bit random id (stored hashed); httpOnly, Secure, SameSite=Lax, Path=/. Lifetime 12 h absolute, 60 min idle. Tokens never reach the browser.
+- **Step-up:** restricted actions (viewing I-9, DL or work-authorization files; approving role grants) require a fresh authentication within 15 minutes. Google's documented `prompt` values do not include `login`, and `auth_time` is not a documented Google claim, so a Phase 0 spike tests `max_age` and the returned claims. If Google cannot prove a fresh sign-in, step-up is done in the app with WebAuthn (a security key or passkey registered in Eureka by each user in HR, Accounts, Immigration and admin roles), and those roles get a 15-minute idle timeout.
+- **MFA:** enforced by Google Workspace 2-Step Verification (AS-04).
+- **CSRF:** SameSite cookie plus `X-CSRF-Token` header equal to HMAC-SHA256(server secret, session id), required on every state-changing request.
+- **Session invalidation:** on role change, deactivation or logout; `access_version` mismatch forces re-evaluation (B4.3).
+- **Candidate feedback links:** random 256-bit token, stored as SHA-256 hash, bound to one interview, 48-hour expiry. `GET` renders the form (no personal data shown beyond first name, client name and date); only `POST` consumes the token. `/api/public/*` is rate-limited per IP and token.
+- **Development mode:** a development identity provider is enabled only when `AUTH_MODE=dev`; the production configuration refuses to start with it.
+
+### A6.2 Authorization model
+
+Every request passes three checks on the server:
+
+1. **Permission (RBAC):** roles map to permissions (catalog in B4.1).
+2. **Data scope:** each grant carries a scope (`own`, `team`, `coached`, `hierarchy`, `location`, `org`), resolved from teams, reporting lines, coach assignments and location roles.
+3. **Field policy:** sensitive fields are masked or removed unless a field permission covers the record.
+
+The database enforces rows independently with RLS policies that compute scope from its own tables (B4.5). The web app hides navigation and actions from a capability list (`GET /api/v1/me`), for presentation only.
+
+**Governance of access:**
+
+- Grants (role → permission → scope) are defined in code (`packages/shared/src/authz/catalog.ts`), seeded by migration, and changed only through reviewed pull requests. They are not editable at runtime.
+- Role assignments (user → role, location, validity) are data, managed by `access:manage` holders in the admin screen.
+- A user cannot change their own role assignments.
+- Assigning a role that holds a restricted permission requires a second approver with `access:manage`.
+- `org_admin` holds no data permissions.
+- Every role change is audited and notifies org admins.
+
+### A6.3 Data protection
+
+| Class | Examples | Controls |
+|---|---|---|
+| Restricted | I-9, driving license, work-authorization copies, visa numbers | Separate S3 prefix and KMS key; `document.restricted:read`; step-up; every view and download audited; presigned GET TTL 5 min |
+| Confidential | DOB, phone, personal email, rates, invoice amounts | Field permissions and masking; DOB and visa number encrypted in the application |
+| Internal | Names, technology, status, client names | Standard RBAC scope |
+
+**Field encryption scheme:** envelope encryption with AES-256-GCM. A data key per field class is generated by KMS (`eureka-field`) and cached in memory for up to 24 hours. The ciphertext stores the key id, IV and tag. A rotation job re-encrypts rows under the current key.
+
+**Searchable encrypted fields:** DOB gets a blind index `dob_bidx = HMAC-SHA256(bidx key, normalized value)` for exact-match duplicate detection. Phone numbers are stored in plain text (normalized to E.164) because recruiters search and call them; they are protected by field policy, audit of exports and RLS.
+
+TLS 1.2+ everywhere; RDS, snapshots and S3 encrypted with KMS; the database is in private subnets only.
+
+### A6.4 Audit
+
+- `audit_event` is append-only: the application role has INSERT only; UPDATE, DELETE and TRUNCATE are revoked.
+- Each row records actor, action, entity, before/after values for changed fields (sensitive values redacted), request id and IP.
+- Always logged:
+  - views and downloads of restricted documents
+  - reveals of DOB
+  - exports
+  - role changes
+  - failed authorization on existing records
+- A nightly job exports the previous day's rows to an S3 bucket with Object Lock (compliance mode, 7 years) and records a SHA-256 digest of each export file. Per-row hash chaining is deferred (A10).
+
+### A6.5 Application controls
+
+- Zod validation on every endpoint, with per-role write schemas (B4.7).
+- Headers: CSP without inline scripts, HSTS, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.
+- Rate limits: WAF per IP; API per user; stricter limits on login, public and export endpoints.
+- **Uploads:**
+  - presigned POST with content-length-range (15 MB) and a fixed key into `quarantine/`
+  - allowlisted types (PDF, DOCX, PNG, JPEG), checked by magic bytes after upload
+  - GuardDuty scan; on clean, the worker copies the file to `clean/` (or `restricted/`) and marks it available; infected files are deleted and the uploader notified
+- Exports: `report:export`, scope-limited, capped at 50,000 rows, audited; phone masked in exports.
+- CI security: Dependabot, `pnpm audit`, CodeQL, secret scanning, ECR image scanning, nightly ZAP baseline.
+- Least-privilege IAM for task roles.
+
+### A6.6 Threat model (STRIDE)
+
+| Threat | Example | Mitigation |
+|---|---|---|
+| Spoofing | Stolen session cookie | httpOnly/Secure cookie, idle timeout, step-up for restricted actions, revoke on role change |
+| Spoofing | Link-scanner or forwarded feedback link | GET does not consume; minimal data on form; single use on POST; rate limit |
+| Tampering | Recruiter edits another team's candidate through the API | Scope check in API + RLS WITH CHECK; authorization matrix tests |
+| Tampering | Mass assignment (changing `recruiter_id`, `team_id`, `visibility`) | Per-role write schemas; protected-column trigger checks permission (B4.7) |
+| Tampering | SQL injection sets session settings | Only `eureka.user_id` is read by policies and set via `set_config` with bound parameters; scope is computed in the database; parameterized queries everywhere |
+| Repudiation | Disputed rate change | Audit with before/after; Object Lock export |
+| Information disclosure | Mass export of Hot List | Export permission, row cap, phone masking, audit, rate limit |
+| Information disclosure | Existence oracle through duplicate checks or error codes | Security-definer duplicate check with minimal output; generic 409/422; 404 for out-of-scope records |
+| Information disclosure | Reports bypass row security | Reports query base tables through RLS; no materialized views in MVP |
+| Denial of service | Expensive queries | Statement timeout (5 s API), pagination caps, indexes on scope columns, rate limits |
+| Elevation of privilege | Admin grants self restricted access | No self-assignment; second approver for restricted roles; grants in code; alerts |
+| Elevation of privilege | Worker compromise reads everything | Worker role without BYPASSRLS; per-table worker policies and grants |
+
+## A7. Asynchronous processing
+
+- Side effects are written as `outbox_event` rows in the same transaction as the business change.
+- The worker polls the outbox and a `pg-boss` queue (SKIP LOCKED). Handlers are idempotent and deduplicate on event id.
+- Timed work is polled rather than scheduled one-by-one. Example: every 5 minutes, find interviews with `ends_at + 60 min <= now()` and no feedback email sent. Reschedules and cancellations need no schedule cleanup.
+
+## A8. Deployment and environments
+
+- AWS accounts `eureka-dev`, `eureka-staging`, `eureka-prod` under AWS Organizations; region us-east-1.
+- VPC with public subnets (ALB only) and private subnets (ECS, RDS); VPC endpoints for S3, Secrets Manager, KMS, SES.
+- ECS rolling deploys with the deployment circuit breaker.
+- Migrations run as a one-off task before the deploy and follow expand/contract so old and new code both work.
+- Backups: RDS PITR (35 days) and a daily snapshot copied to us-west-2.
+
+## A9. Observability
+
+- Structured JSON logs with request id and user id; no personal data in logs.
+- OpenTelemetry traces.
+- Dashboards for p95 latency, error rate, job backlog and failures.
+- Alerts on 5xx rate, dead-lettered jobs, repeated authorization denials on existing records, failed logins and export spikes.
+
+## A10. Scale and evolution
+
+| Trigger | Change |
+|---|---|
+| Report queries affect transactional latency | Read replica for reports (RLS applies on replicas); later CDC to a warehouse with its own access model |
+| Fuzzy search across resumes | OpenSearch fed from the outbox, with scope filters applied at query time |
+| Job volume or many event consumers | Move queue to SQS, then MSK, fed from the same outbox |
+| Module needs independent scaling | Extract it (notifications or reporting first); its tables move with it |
+| Second identity provider | Put an OIDC broker (Cognito, Auth0, Okta) in front; the BFF interface is unchanged |
+| Stronger tamper evidence required | Add per-row hash chain with a single-writer audit sequence |
+| Second company or brand | Enable `org_id` predicates in RLS |
+
+## A11. Non-functional requirements mapping
+
+| NFR | Design element |
+|---|---|
+| NFR-SEC-01 | Google SSO with 2SV and step-up (A6.1) |
+| NFR-SEC-02 | KMS, field encryption (A6.3) |
+| NFR-SEC-03 | Server-side RBAC + independent RLS (A6.2, B4) |
+| NFR-SEC-04 | Append-only audit, Object Lock export (A6.4) |
+| NFR-SEC-05 | Export permission, caps, masking, audit (A6.5) |
+| NFR-CMP-01 | Retention job (B6), consent flag (AS-12) |
+| NFR-PRF-01 | Indexed scope columns, pagination; p95 < 500 ms target |
+| NFR-SCL-01 | Stateless API tasks, autoscaling (A8) |
+| NFR-AVL-01, NFR-BKP-01 | Multi-AZ, PITR, cross-region snapshots (A8) |
+| NFR-USE-01, 02 | TanStack Table grids, saved views, status badges |
+| NFR-TZ-01 | UTC storage, per-user display (AS-05) |
+| NFR-DQ-01 | Zod validation, constraints, enums |
+
+---
+
+# Part B: Low-Level Design
+
+## B1. Repository layout
+
+```
+eureka-app/
+  apps/
+    api/              NestJS: HTTP entrypoint and worker entrypoint
+      src/modules/<module>/   controller, service, repository, dto
+      src/platform/           auth, authz guard, db (request transaction), audit, outbox, config
+    web/              React SPA
+  packages/
+    shared/           authz catalog and engine, Zod schemas, enums, DTO types
+  db/
+    migrations/       ordered SQL migrations (schema, RLS, grants)
+    seed/             fictional development data
+  infra/              Terraform modules and environments
+  docs/               design, implementation plan, ADRs
+```
+
+## B2. Data model
+
+Every table has `id uuid` (UUIDv7), `org_id uuid`, `created_at`, `created_by`, `updated_at`, `updated_by`, and `row_version int` for optimistic concurrency. Money is `numeric(12,2)` with `currency char(3)`. Retirable records have `deleted_at`.
+
+### B2.1 Organization and identity
+
+| Table | Key columns and constraints |
+|---|---|
+| `location` | name, kind (`training`,`gh`,`office`,`remote`), state, timezone |
+| `app_user` | email citext unique, display_name, designation, status, primary_location_id, google_sub unique, access_version int |
+| `role` | key (16 roles, seeded from the catalog) |
+| `role_permission` | role_key, permission, scope; seeded by migration from the catalog; application role has SELECT only |
+| `user_role` | user_id, role_key, location_id (required for location roles, CHECK), valid tstzrange, approved_by (required for restricted roles) |
+| `reporting_line` | user_id, manager_id, valid tstzrange; EXCLUDE USING gist (user_id WITH =, valid WITH &&) to allow one manager at a time; CHECK manager_id <> user_id |
+| `reporting_closure` | ancestor_id, descendant_id, depth; current lines only; rebuilt by trigger on `reporting_line` in the same transaction; trigger rejects cycles |
+| `team` | name, lead_id → app_user, location_id |
+| `team_member` | team_id, user_id, valid tstzrange; EXCLUDE (user_id WITH =, valid WITH &&) so a recruiter is in one team at a time |
+| `coach_assignment` | coach_id, team_id, valid tstzrange |
+| `session` | id_hash, user_id, created_at, last_seen_at, expires_at, auth_time, access_version, revoked_at |
+
+Triggers on `user_role`, `reporting_line`, `team_member` and `coach_assignment` increment `app_user.access_version` for affected users.
+
+### B2.2 Candidates and marketing
+
+| Table | Key columns and constraints |
+|---|---|
+| `person` | first_name, last_name, personal_email, phone_e164, dob_enc, dob_bidx, dob_year |
+| `candidate` | person_id, technology_id, batch_id, team_id, recruiter_id (nullable), location_id, gh_location_id, marketing_status, visibility (`team`,`all_teams`), priority (P1–P3), marketing_email, vitel_number, marketing_start_date, marketing_locations text[], technical_rating smallint 1–5, in_person_ok, eligibility jsonb, everify_entity_id, offer_letter_entity_id, entity_1099_id, office, bench_since date; indexes (team_id), (recruiter_id), (location_id), (visibility, marketing_status), trigram on names and emails |
+| `candidate_assignment_history` | candidate_id, team_id, recruiter_id, valid tstzrange (for FR-ORG-04) |
+| `candidate_event` | candidate_id, type, at, actor_id, ref_type, ref_id, summary (timeline for FR-CAN-10) |
+| `technology` | name unique, active |
+| `batch` | location_id, technology_id, start_month, size_planned, status |
+| `resume` | candidate_id, file_id, version, is_current (partial unique on candidate_id where is_current) |
+| `candidate_note` | candidate_id, body, author_id |
+| `sample_profile` | technology_id, team_id, recruiter_id, file_id, title (placeholder until SRS 4.12 is defined) |
+| `submission` | candidate_id, recruiter_id, team_id (snapshot), lead_id, manager_id, ad_id (snapshots), location_id (candidate's at time), submitted_at, job_title, client_id, implementation_partner_id, vendor_id, rate, rate_type, status, rejection_reason; index (candidate_id, client_id, submitted_at) |
+| `client`, `vendor`, `implementation_partner` | name unique, contacts jsonb |
+| `preferred_vendor` | submitted_by, company, contact_name, email, phone, technologies text[], notes, status |
+
+### B2.3 Interviews
+
+| Table | Key columns |
+|---|---|
+| `interview` | candidate_id, submission_id, recruiter_id, team_id and hierarchy snapshots, client_id, vendor_id, round, starts_at, ends_at, location_id, system_name, coach_id, invite_received bool, call_status, cleared bool, cleared_at, cleared_by, otter_url, recording_url, consent_captured, feedback_email_sent_at; index (location_id, starts_at), (team_id, starts_at) |
+| `interview_feedback` | interview_id, source (`candidate`,`client`,`location_admin`,`coach`), rating, format, topics text[], difficult_questions, duration_min, next_step, submitted_at, submitted_by |
+| `feedback_token` | interview_id, token_hash unique, expires_at, used_at |
+
+### B2.4 Placements, employment, compliance, finance
+
+| Table | Key columns |
+|---|---|
+| `placement` | candidate_id, submission_id, recruiter_id, location_id and hierarchy snapshots, client_id, implementation_partner_id, vendor_id, paperwork_entity_id, placement_type (`c2c`,`w2`,`1099`), rate, is_first_placement, work_mode, project_city, project_state, tentative_start, status |
+| `placement_contact` | placement_id, kind (`vendor_poc`,`invoicing_poc`,`client_manager`), name, email, phone |
+| `assignment` | person_id, placement_id, assignment_no, start_date, end_date, end_reason, payroll_entity_id, everify_date, onboarded_date |
+| `legal_entity` | name, kinds text[] |
+| `checklist_template` | kind (`paperwork`,`onboarding`), placement_type, items jsonb (doc_type, owner_role, required) |
+| `checklist_item` | owner_type (`placement`,`assignment`), owner_id, doc_type, owner_role, required, status, document_id |
+| `document` | candidate_id or placement_id (two nullable FKs, CHECK exactly one), doc_type, classification, file_id, status, verified_by, verified_at, expires_on |
+| `file_object` | s3_key, kms_key_alias, sha256, size, mime, scan_status (`pending`,`clean`,`infected`) |
+| `bgc` | placement_id unique, bgc_company, initiated_at, helped_by, education_level, employment_years, address_years, status (`not_started`,`initiated`,`in_progress`,`cleared`,`failed`), notes |
+| `work_authorization` | person_id, type, number_enc, valid_from, valid_to |
+| `invoice` | placement_id, number, invoice_date, period_start, period_end, timesheet_submitted_on, hours, amount, terms_days, expected_date GENERATED (invoice_date + terms_days) |
+| `payment` | invoice_id, received_date, amount |
+| view `invoice_status` | derives `received`, `delayed` (expected_date < current_date and unpaid) or `pending`; nothing stored that can drift |
+
+### B2.5 Platform tables
+
+| Table | Purpose |
+|---|---|
+| `outbox_event` | id, type, payload jsonb, created_at, processed_at, attempts |
+| `notification` | recipient_id, type, entity ref, title, body, read_at |
+| `notification_delivery` | notification_id, channel, sent_at, error |
+| `audit_event` | seq bigserial, at, actor_id, action, entity_type, entity_id, changes jsonb (redacted), request_id, ip |
+| `saved_view` | user_id, screen, name, filters jsonb, columns jsonb |
+| `idempotency_key` | key, user_id, endpoint, response_hash, created_at (placements and payments only) |
+
+### B2.6 State machines
+
+**Candidate marketing status**
+
+| From | To |
+|---|---|
+| `in_training` | `active` |
+| `active` | `on_hold`, `stopped`, `full_of_interviews`, `confirmation` |
+| `on_hold`, `full_of_interviews` | `active` |
+| `confirmation` | `placed` (when the assignment starts), `active` (backout or BGC failed) |
+| `placed` | `bench` (assignment ended; the team is reassigned through FR-EMP-05 and the candidate returns to the Hot List) |
+| `bench` | `active` |
+| any | `terminated` |
+
+`Active/Remote` and `Active/All Teams` from the sheets become `active` with `work_mode_pref=remote` and `visibility=all_teams`.
+
+**Submission:** `submitted → under_review → interview_requested → interview_scheduled → interview_completed → selected`. `rejected` or `withdrawn` is allowed from any non-terminal state.
+
+**Placement:** `confirmed → paperwork → bgc → ready → joined`. `backout` is allowed from any state before `joined`. `bgc_failed` is allowed from any state, including after `joined` (FR-PLC-06); from `joined` it also ends the assignment.
+
+Transitions are table-driven in the service layer; each writes a `candidate_event` and an outbox event.
+
+## B3. API design
+
+- REST under `/api/v1`, JSON; OpenAPI 3.1 generated from Zod schemas.
+- Cursor pagination (limit ≤ 200); allow-listed filters and sort keys.
+- Errors are RFC 9457 problem details.
+- **Read-before-write rule:** the target is first read under the caller's read scope. Not visible → 404. Visible but the action is not permitted → 403. Constraint violations are mapped to generic 409 or 422 responses that never name another team's record.
+- **Duplicate checks** (candidate by email/phone/DOB, submission to the same client within 90 days) call the security-definer function `authz.check_duplicate(...)`. It returns only "possible duplicate", the owning team's name and a contact, and every call is audited.
+- `If-Match` with `row_version` on updates. `Idempotency-Key` on placement and payment creation.
+- Statement timeout 5 s for API requests.
+
+Core MVP endpoints:
+
+| Method and path | Permission | Notes |
+|---|---|---|
+| GET /me | authenticated | user, roles, capabilities, teams, locations |
+| GET /candidates, GET /candidates/{id} | candidate:read | visibility policy, field policy |
+| POST /candidates | candidate:create | team defaults to caller's team |
+| PATCH /candidates/{id} | candidate:update | per-role write schema |
+| PUT /candidates/{id}/assignment | candidate:assign | team and recruiter change |
+| PUT /candidates/{id}/visibility | candidate.visibility:update | Lead and above |
+| PUT /candidates/{id}/technical-rating | candidate.rating:update | Location roles |
+| GET /hotlist | hotlist:read | marketable statuses, saved view filters |
+| GET, POST /submissions; PATCH /submissions/{id}/status | submission:* | create requires the candidate to be visible |
+| GET /interviews?date=&location= | interview:read | |
+| POST /interviews; PATCH /interviews/{id} | interview:create, interview:update | `cleared` toggle is an update |
+| POST /interviews/{id}/feedback | interview.feedback:create | location admin or coach feedback |
+| GET, POST /public/feedback/{token} | token | GET renders, POST consumes |
+| GET, POST /placements | placement:read, placement:create | rate omitted without rate:read |
+| GET /admin/users; PUT /admin/users/{id}/roles | access:manage | no self-change; second approver for restricted roles |
+
+## B4. Authorization engine
+
+### B4.1 Permission catalog
+
+The catalog is in `packages/shared/src/authz/catalog.ts`. It defines the following.
+
+**Scopes:** `own`, `team`, `coached`, `hierarchy`, `location`, `org`.
+
+**Permissions:**
+
+| Area | Permissions |
+|---|---|
+| Candidates | `candidate:read`, `candidate:create`, `candidate:update`, `candidate:assign`, `candidate.visibility:update`, `candidate.rating:update`, `candidate.phone:read`, `candidate.dob:read`, `hotlist:read` |
+| Submissions | `submission:read`, `submission:create`, `submission:update` |
+| Interviews | `interview:read`, `interview:create`, `interview:update`, `interview.feedback:create` |
+| Placements | `placement:read`, `placement:create`, `placement:update`, `placement.bgc_status:update`, `rate:read` |
+| Documents and compliance | `document:read`, `document:upload`, `document:verify`, `document.restricted:read`, `bgc:update`, `visa:read`, `visa:update` |
+| Employees and finance | `employee:read`, `assignment:update`, `invoice:read`, `invoice:update` |
+| Reports | `report:read`, `report:export`, `performance:read` |
+| Vendors and teams | `vendor.preferred:create`, `vendor.preferred:read`, `team:move_member`, `designation:change` |
+| Administration | `access:manage`, `audit:read` |
+
+**Restricted permissions (second approver):** `document.restricted:read`, `candidate.dob:read`, `visa:update`.
+
+### B4.2 Role grants (generated from the catalog)
+
+| Role | Grants by scope |
+|---|---|
+| Recruiter | **own:** assignment:read, candidate:create, candidate:update, document:read, document:upload, interview.feedback:create, interview:create, interview:read, interview:update, performance:read, placement:read, placement:update, report:read, submission:read, submission:update, vendor.preferred:create<br>**team:** candidate.phone:read, candidate:read, hotlist:read, placement:create, submission:create |
+| Lead (Sales) | **own:** vendor.preferred:create<br>**team:** assignment:read, candidate.phone:read, candidate.visibility:update, candidate:assign, candidate:create, candidate:read, candidate:update, document:read, document:upload, hotlist:read, interview.feedback:create, interview:create, interview:read, interview:update, performance:read, placement:create, placement:read, placement:update, report:export, report:read, submission:create, submission:read, submission:update, vendor.preferred:read |
+| Manager (Sales) | **hierarchy:** assignment:read, candidate.phone:read, candidate.visibility:update, candidate:assign, candidate:create, candidate:read, candidate:update, designation:change, document:read, document:upload, hotlist:read, interview.feedback:create, interview:create, interview:read, interview:update, performance:read, placement.bgc_status:update, placement:create, placement:read, placement:update, rate:read, report:export, report:read, submission:create, submission:read, submission:update, team:move_member, vendor.preferred:read |
+| Associate Director | **hierarchy:** assignment:read, candidate.phone:read, candidate.visibility:update, candidate:assign, candidate:create, candidate:read, candidate:update, designation:change, document:read, document:upload, hotlist:read, interview.feedback:create, interview:create, interview:read, interview:update, performance:read, placement.bgc_status:update, placement:create, placement:read, placement:update, rate:read, report:export, report:read, submission:create, submission:read, submission:update, team:move_member, vendor.preferred:read |
+| Offshore Office Manager | **org:** assignment:read, candidate.phone:read, candidate:assign, candidate:read, designation:change, hotlist:read, interview:read, performance:read, placement:read, rate:read, report:export, report:read, submission:read, team:move_member, vendor.preferred:read |
+| CEO | **org:** assignment:read, candidate:read, employee:read, hotlist:read, interview:read, invoice:read, performance:read, placement:read, rate:read, report:export, report:read, submission:read, vendor.preferred:read |
+| Location Incharge | **location:** candidate.phone:read, candidate.rating:update, candidate:read, hotlist:read, interview.feedback:create, interview:read, interview:update, performance:read, placement:read, report:read, submission:read |
+| Location Ops Admin | **location:** candidate.phone:read, candidate.rating:update, candidate:read, hotlist:read, interview.feedback:create, interview:read, interview:update, placement:read, report:read, submission:read |
+| HR | **org:** assignment:read, assignment:update, bgc:update, candidate.dob:read, candidate.phone:read, candidate:read, document.restricted:read, document:read, document:upload, document:verify, employee:read, placement:read, report:read, visa:read |
+| Associate HR | **org:** assignment:read, assignment:update, candidate.phone:read, candidate:read, document:read, document:upload, employee:read, placement:read |
+| Accounts | **org:** assignment:read, assignment:update, candidate:read, document.restricted:read, document:read, employee:read, invoice:read, invoice:update, placement:read, rate:read, report:read |
+| Immigration | **org:** assignment:read, candidate.dob:read, candidate.phone:read, candidate:read, document.restricted:read, document:read, document:upload, document:verify, employee:read, visa:read, visa:update |
+| Interview Coach | **coached:** candidate:read, hotlist:read, interview.feedback:create, interview:read |
+| Documents Team | **org:** candidate:read, document:read, document:upload, document:verify |
+| BU Head | **org:** assignment:read, employee:read, placement:read, report:read |
+| Org Admin | **org:** access:manage, audit:read |
+
+Notes:
+
+- Recruiters see their whole team's candidates and Hot List, but read and update only their own submissions, interviews and placements (SRS 5). They can log a submission or placement for any candidate they can see, including Open-to-all-teams candidates (SRS "any Hotlist candidate").
+- Leads, Managers and ADs log activity for any candidate they can see (AS-14, deviation D-01).
+- Offshore Manager and CEO are read-only on Sales data at org scope. The CEO also sees employees and invoices; neither sees restricted documents or DOB.
+
+### B4.3 Scope resolution
+
+Input, loaded once per request from current rows:
+
+- the user's roles (with location ids)
+- teams the user belongs to or leads
+- subordinate users (reporting closure)
+- teams led by the user or subordinates
+- coached teams
+
+For each grant the user holds for the permission:
+
+| Scope | Adds |
+|---|---|
+| own | recruiter ids: {user} |
+| team | recruiter ids: {user}; team ids: user's teams |
+| coached | team ids: coached teams |
+| hierarchy | recruiter ids: {user} ∪ subordinates; team ids: user's teams ∪ teams led within the subtree |
+| location | location ids: grant's location |
+| org | all |
+
+The all-teams flag is set when a Sales role grants `candidate:read`, `hotlist:read`, `submission:create` or `placement:create`. No grant means deny.
+
+**Staleness:** each session stores the `access_version` it was evaluated with; every request compares it with `app_user.access_version` (one indexed read) and reloads access data on mismatch. There is no time-based cache.
+
+### B4.4 Visibility rules per entity
+
+| Entity | Visible when |
+|---|---|
+| Candidate | all; or recruiter_id ∈ recruiter ids; or team_id ∈ team ids; or location_id ∈ location ids; or (all-teams flag and visibility = all_teams and status ∈ {active, full_of_interviews}) |
+| Submission, interview, placement | all; or recruiter_id (actor) ∈ recruiter ids; or team_id snapshot ∈ team ids; or location_id ∈ location ids; or the candidate is visible through ownership (not through the all-teams rule). The team that owns a candidate therefore sees other teams' activity on it, while all-teams viewers see only their own activity. |
+| Interview location scope | `interview.location_id` (where the candidate interviews) |
+| Documents, BGC, work authorization | document:read scope over the owning candidate or placement; restricted classification additionally needs `document.restricted:read` |
+| Employees, assignments | employee:read (org-scoped roles only) |
+| Invoices, payments | invoice:read |
+| Preferred vendors | submitter, or `vendor.preferred:read` holders whose hierarchy contains the submitter (superiors only, FR-VEN-02) |
+
+These rules are implemented in `packages/shared/src/authz/engine.ts` and unit-tested.
+
+### B4.5 Database enforcement (RLS)
+
+**Principles:**
+
+- The API opens a transaction per request and calls `SELECT set_config('eureka.user_id', $1, true)` with a bound parameter. No other scope data is passed to the database.
+- Policies call `STABLE SECURITY DEFINER` functions in schema `authz`, owned by a role that is not the application role. The functions compute scope from `user_role`, `role_permission`, `team_member`, `reporting_closure` and `coach_assignment`. Each function is wrapped as `(SELECT authz.team_ids('candidate:read'))` so it is evaluated once per statement, not per row.
+- The application role `eureka_app` owns no tables, has no BYPASSRLS, and gets only the table and column privileges it needs.
+- RLS is ENABLED and FORCED on every table holding personal data, money or documents, including:
+  - person, candidate, candidate_note, candidate_event, resume
+  - submission, interview, interview_feedback
+  - placement, placement_contact, assignment
+  - document, file_object, bgc, work_authorization
+  - invoice, payment
+  - preferred_vendor, saved_view, notification
+- The default is deny: a table with RLS and no matching policy returns no rows.
+- A CI test fails if any table outside an allow-list of reference tables (location, technology, client and similar) lacks `relrowsecurity` and `relforcerowsecurity`.
+
+**Example (candidate):**
+
+```sql
+CREATE POLICY candidate_read ON candidate FOR SELECT TO eureka_app USING (
+  (SELECT authz.has_org('candidate:read'))
+  OR recruiter_id = ANY ((SELECT authz.recruiter_ids('candidate:read')))
+  OR team_id      = ANY ((SELECT authz.team_ids('candidate:read')))
+  OR location_id  = ANY ((SELECT authz.location_ids('candidate:read')))
+  OR ((SELECT authz.all_teams('candidate:read'))
+      AND visibility = 'all_teams' AND marketing_status IN ('active','full_of_interviews'))
+);
+
+CREATE POLICY candidate_update ON candidate FOR UPDATE TO eureka_app
+  USING (
+    recruiter_id = ANY ((SELECT authz.recruiter_ids('candidate:update')))
+    OR team_id = ANY ((SELECT authz.team_ids('candidate:update')))
+    OR (SELECT authz.has_org('candidate:update')))
+  WITH CHECK (
+    recruiter_id = ANY ((SELECT authz.recruiter_ids('candidate:update')))
+    OR team_id = ANY ((SELECT authz.team_ids('candidate:update')))
+    OR (SELECT authz.has_org('candidate:update')));
+```
+
+**Worker role:** `eureka_worker` has no BYPASSRLS. It has its own policies (`TO eureka_worker`) and column grants limited to what each job reads. For example, the feedback-email job reads interview id, times and candidate first name and email, and writes `feedback_email_sent_at`. When a job acts for a user (for example a scheduled export), it sets that user's id and runs under the user's policies.
+
+**Reports:** report queries run against base tables (or `security_invoker` views) under the caller's RLS. Materialized views are not used in MVP because RLS does not apply to them.
+
+### B4.6 Field policy
+
+| Field | Rule |
+|---|---|
+| person.phone_e164 | Shown with `candidate.phone:read` when the candidate is visible through ownership; masked (last two digits) when visible only through the all-teams rule, and in exports |
+| person.dob | Only with `candidate.dob:read`; otherwise `•• / •• / YYYY`; each reveal audited |
+| placement.rate, invoice amounts | Omitted without `rate:read` or `invoice:read` |
+| work_authorization.number | Only with `visa:read` |
+| document download URL | Restricted documents need `document.restricted:read` and step-up |
+
+### B4.7 Write-side controls
+
+- Per-role Zod write schemas define which fields each role may send (e.g., recruiters cannot send `team_id`, `recruiter_id`, `visibility`, `technical_rating`). Unknown fields are rejected, not ignored.
+- Narrow grants use dedicated endpoints (`/assignment`, `/visibility`, `/technical-rating`, `/work-authorization`).
+- A `BEFORE UPDATE` trigger on `candidate` rejects changes to protected columns unless the corresponding permission holds in the database:
+  - `team_id` and `recruiter_id`: `authz.has_perm('candidate:assign')`
+  - `visibility`: `candidate.visibility:update`
+  - `technical_rating`: `candidate.rating:update`
+- INSERT and UPDATE policies have WITH CHECK clauses so a row cannot be moved out of the caller's scope.
+
+### B4.8 Database hardening details
+
+**Function ownership and hardening (N1).**
+- A NOLOGIN role `authz_definer` with BYPASSRLS owns schema `authz` and every function in it; no other role has CREATE on that schema.
+- Every function declares `SET search_path = pg_catalog, pg_temp` and uses fully qualified names.
+- `REVOKE ALL ON FUNCTION … FROM PUBLIC`; EXECUTE is granted only to `eureka_app` and `eureka_worker`.
+- Identity and org tables (`app_user`, `user_role`, `role_permission`, `team`, `team_member`, `reporting_line`, `reporting_closure`, `coach_assignment`, `session`, `location` and other reference lists) are on the RLS allow-list. The application role has SELECT only on the columns it needs, and writes go only through admin endpoints that check `access:manage`. This avoids recursion when the `authz` functions read them.
+- All views, including `invoice_status` and report views, are declared `WITH (security_invoker = true)`.
+- Integration tests call each definer function as `eureka_app`.
+
+**Cross-entity writes (N2).**
+- `candidate.marketing_status` and `candidate.bench_since` are protected columns. They change only through `app.transition_candidate(candidate_id, event, ref_id)`, a definer function that:
+  - checks the permission of the triggering action on the referenced row (for example `placement:create` on the placement, `assignment:update` on the assignment)
+  - validates the transition
+  - writes the `candidate_event`
+- First-placement detection runs in a definer function that reads assignment history without exposing it.
+- Checklist items and timeline events are inserted by definer functions tied to the triggering action.
+
+**Column allowlist trigger (N3).**
+- A `BEFORE UPDATE` trigger on each protected table compares every column with `IS DISTINCT FROM`. Each changed column must be covered by a permission the caller holds on that row:
+
+| Columns | Permission |
+|---|---|
+| Profile fields | `candidate:update` |
+| `technical_rating` | `candidate.rating:update` |
+| `team_id`, `recruiter_id` | `candidate:assign` |
+| `visibility` | `candidate.visibility:update` |
+| `location_id`, `person_id`, `org_id` | never changeable from the API |
+
+- The candidate UPDATE policy includes a location branch for `candidate.rating:update`; the trigger stops that branch from touching other columns.
+- A `BEFORE INSERT` trigger fills the snapshot columns on submission, interview and placement (team, lead, manager, AD, location) from the actor's current `team_member` and closure rows and rejects any value the client supplies.
+- Interview creation is authorized against the parent submission: the caller must be able to update that submission.
+
+**Team invariants (N5).**
+- A trigger enforces that `candidate.recruiter_id`, when set, is an active member of `candidate.team_id`.
+- A trigger on `team` and `reporting_line` enforces that a team's lead reports within the hierarchy that owns the team.
+- `team:move_member` applies OD-07 in the same transaction.
+
+**Minor items (N8 to N13).**
+- **Residual risk (N8):** an injected `set_config('eureka.user_id', …)` would impersonate another user at the database layer. The residual risk is accepted. It is mitigated by parameterized queries everywhere, CodeQL SQL-injection rules, and a lint rule forbidding raw SQL outside `db/` and `authz`. A signed actor token checked by `authz_definer` is the Phase 4 option.
+- **Worker on behalf of a user (N9):** the worker runs `SET LOCAL ROLE eureka_app` plus `eureka.user_id`.
+- **Timeouts (N9):** exports and org-wide reports use a separate 60-second statement timeout.
+- **Job queue (N9):** the `pgboss` schema is on the allow-list and reachable only by the worker.
+- **Closure rebuild (N10):** serialized with `pg_advisory_xact_lock`. The `access_version` bump covers the moved user, all ancestors of the old and new positions, and the leads and coaches of affected teams.
+- **Duplicate check (N11):** requires name plus email or phone, is rate-limited per user, and alerts on high volume.
+- **Approvals (N12):** `user_role` has `CHECK (approved_by <> user_id AND approved_by <> created_by)`. `app_user.designation` is a display label and never maps to a role.
+- **Placement location (N13):** placements carry a `location_id` snapshot.
+
+## B5. Key flows
+
+1. **Login:**
+   1. `GET /api/auth/login` redirects to Google with state, nonce, PKCE and `hd`.
+   2. Google returns the user to `GET /api/auth/callback`.
+   3. The API exchanges the code and validates the ID token. It links the user by `sub`, creates a session, sets the cookie and redirects to `/`.
+   4. An unknown or inactive user gets 403, which is audited.
+2. **Hot List:**
+   1. `GET /api/v1/hotlist?technology=…` validates the session and access_version.
+   2. The API resolves the scope, then opens a transaction and sets `eureka.user_id`.
+   3. The query applies the scope predicate (the engine) while RLS applies independently.
+   4. The field policy is applied, and the response returns a cursor.
+3. **Create placement:**
+   1. Validate the request, apply the read-before-write rule and check `placement:create`.
+   2. In one transaction:
+      - insert the placement and contacts
+      - set candidate status to `confirmation`
+      - create checklist items from the template for the placement type
+      - write a `candidate_event` and outbox `placement.created`
+   3. The worker notifies the Lead, Manager, HR, Accounts and Immigration.
+4. **Interview feedback:**
+   1. The worker polls for interviews due for a feedback email.
+   2. It creates a token and sends the email.
+   3. The candidate opens the form (GET) and submits (POST).
+   4. The API inserts `interview_feedback` and notifies the recruiter and coach.
+5. **Restricted document download:**
+   1. Read under scope.
+   2. Check `document.restricted:read` and `auth_time` (step-up), and confirm `scan_status = clean`.
+   3. Audit `document.viewed`.
+   4. Return a presigned GET URL (5 min).
+6. **Project exit (FR-EMP-03 to 05):**
+   1. HR or Accounts records the end date and reason on the assignment.
+   2. The candidate moves to `bench`.
+   3. The outbox notifies admin teams, the BU and the CEO.
+   4. A Manager assigns a team (`candidate:assign`). This notifies the new Lead and Manager and returns the candidate to the Hot List.
+
+## B6. Jobs (worker)
+
+| Job | Frequency | Action | SRS |
+|---|---|---|---|
+| feedback-email | every 5 min | Email feedback link 60 min after interview end | FR-INT-05, FR-NTF-01 |
+| candidate-unresponsive | daily | Warn candidate after N days without response (configurable) | FR-NTF-02 |
+| documents-pending | daily | Remind assigned Documents Team member | FR-VIS-04, FR-NTF-03 |
+| paperwork-pending | daily | Remind TL, recruiter, manager | FR-NTF-04 |
+| bench-time | daily | Notify POC, TL, recruiter, manager, CEO when bench > N days | FR-NTF-05 |
+| recruiter-target | weekly | Notify recruiters below target, TL, manager | FR-NTF-06, FR-PRF-04 |
+| first-payment | on `payment.created` | Notify recruiter, TL, manager on first payment for a placement | FR-PAY-05, FR-NTF-07 |
+| payment-delay | daily | Notify recruiter and TL for delayed invoices | FR-PAY-06, FR-NTF-08 |
+| project-exit | on `assignment.ended` | Notify admin teams, BU, CEO | FR-EMP-04, FR-NTF-09 |
+| team-assigned | on `candidate.assigned` | Notify new Lead and Manager | FR-EMP-05, FR-NTF-10 |
+| visa-expiry | daily | 90/60/30-day notices to HR and Immigration | FR-VIS-03, FR-NTF-11 |
+| retention | nightly | Purge per AS-13 | NFR-CMP-01 |
+| audit-export | nightly | Export and digest to Object Lock bucket | NFR-SEC-04 |
+| key-rotation | monthly | Re-encrypt fields under the current data key | A6.3 |
+
+## B7. Reporting
+
+- Reports are parameterized SQL over base tables under the caller's RLS, grouped by date, recruiter, team, location and technology.
+- Activity rows carry team and hierarchy snapshots, so reports attribute work to the team at the time (FR-ORG-04).
+- Exports stream CSV under the same scope, mask phone numbers, are capped at 50,000 rows and are audited.
+- Materialized views or a warehouse are added only when measured load requires it (A10).
+
+## B8. Testing strategy
+
+Tests are written with each feature.
+
+| Level | What | Tooling | Gate |
+|---|---|---|---|
+| Unit | Catalog integrity, scope resolution, visibility rules, field policy, state machines, date math | Vitest | Every PR; ≥ 90% line coverage of `packages/shared/src/authz` |
+| Integration | Repositories and services against real PostgreSQL with migrations | Vitest + Postgres (local cluster or CI service container) | Every PR |
+| RLS | Policies with the app role; **differential tests** that run queries with the application predicate removed and confirm RLS alone returns the same rows; WITH CHECK and protected-column trigger tests; worker role tests | Vitest + Postgres | Every PR |
+| RLS coverage | Every non-reference table has RLS enabled and forced | SQL assertion in CI | Every PR |
+| SRS golden expectations | Hand-written from SRS 5 (role × record position × action), tested against the catalog; deviations listed with D-xx references | Vitest | Every PR |
+| Authorization matrix | Generated from the catalog: every role × endpoint × record position (own, teammate, other team, all-teams, other location) → expected status and masked fields | Vitest + Supertest | Every PR |
+| Mass assignment | Each role sends forbidden fields → 422 | Vitest + Supertest | Every PR |
+| API contract | OpenAPI snapshot and breaking-change diff | openapi-diff | Every PR |
+| End-to-end | Per-role journeys: recruiter logs submission, lead sees team, location admin clears an interview, HR opens a restricted document with step-up | Playwright | Nightly, pre-release |
+| Security | ZAP baseline, dependency, secret and image scans, CodeQL | CI | Every PR / nightly |
+| Performance | Hot List and interview board p95 < 500 ms at 120 concurrent users, 50k candidates | k6 | Pre-release |
+
+## B9. Data migration from sheets
+
+1. Export each sheet to CSV.
+2. Normalize:
+   - technology names to the standard list
+   - statuses, mapping row colors per the answer to SRS Q6
+   - dates, detecting DD/MM vs MM/DD per row and sending ambiguous values to a review list
+3. Match people across sheets:
+   1. by marketing email
+   2. then by phone
+   3. then by name + DOB blind index
+   4. anything unresolved goes to a review queue
+4. Load to staging, reconcile counts per sheet, get sign-off, then load production.
+5. Keep the sheets read-only in parallel for two weeks.
+
+## B10. Deviations and open decisions
+
+| ID | Item | Owner |
+|---|---|---|
+| D-01 | SRS "Lead/Manager/AD can add for any candidate" implemented as any candidate visible to them (AS-14) | Sales leadership to confirm |
+| D-02 | Recruiters see teammates' candidates but only their own submissions, interviews and placements (matches SRS 5 rows) | Confirm |
+| OD-01 | Confirm AS-07 Hot List rule | Sales leadership |
+| OD-02 | Incentive formula (AS-10) | CEO, Accounts |
+| OD-03 | Retention periods (AS-13) | Legal, HR |
+| OD-04 | Whether Sales roles may see DOB (currently no) | HR, Legal |
+| OD-05 | Candidate-unresponsive threshold, bench threshold, recruiter targets | Sales leadership |
+| OD-06 | Definition of "sample profile" (SRS 4.12) | Sales leadership |
+| OD-07 | When a recruiter moves team, do their candidates move with them or stay with the team? (default: stay with the team and become unassigned) | Sales leadership |
+
+---
+
+# Part C: Requirements traceability
+
+| SRS requirement | Design |
+|---|---|
+| FR-ORG-01, 02 | B2.1 location, team, reporting_line, closure |
+| FR-ORG-03 | `team:move_member`, `designation:change` (B4.2) |
+| FR-ORG-04 | Effective-dated team membership; snapshots on activity rows (B2) |
+| FR-ORG-05 | Reference tables (technology, client, vendor, legal_entity, location) |
+| FR-ORG-06 | `app_user.status`, sessions revoked on deactivation |
+| FR-CAN-01, 05, 06 | `person`, `candidate` columns (B2.2) |
+| FR-CAN-02 | `batch` |
+| FR-CAN-03 | `candidate.rating:update`, `/technical-rating` |
+| FR-CAN-04 | `in_person_ok`, `eligibility jsonb` |
+| FR-CAN-07 | `resume` with `is_current` |
+| FR-CAN-08 | Visibility rules (B4.4), RLS (B4.5) |
+| FR-CAN-09 | `authz.check_duplicate` with email, phone, DOB blind index (B3) |
+| FR-CAN-10 | `candidate_event` timeline |
+| FR-HOT-01 to 07 | `/hotlist`, saved views, visibility and field policy, exports (B3, B4) |
+| FR-SUB-01 to 06 | `submission`, state machine, 90-day duplicate warning (B2.2, B2.6, B3) |
+| FR-INT-01 to 10 | `interview` (invite_received, cleared, links, location, system_name), feedback, conflict check on (candidate_id, starts_at overlap), jobs (B2.3, B6) |
+| FR-PLC-01 to 07 | `placement`, first-placement detection from assignment history, bgc_failed transition, numeric rate (B2.4, B2.6) |
+| FR-BGC-01 to 03, FR-PPR-01 to 03 | `bgc`, `document`, `checklist_template`, `checklist_item`, `placement_contact` |
+| FR-VIS-01 to 04 | `work_authorization`, visa-expiry and documents-pending jobs |
+| FR-EMP-01 to 09 | `assignment`, project exit flow, onboarding checklist, joinings/exits reports (B5.6, B7) |
+| FR-PAY-01 to 06 | `invoice`, `payment`, `invoice_status` view, payment jobs |
+| FR-PRF-01 to 04 | Performance reports under scope; recruiter-target job |
+| FR-SMP-01 | `sample_profile` placeholder (OD-06) |
+| FR-VEN-01 to 03 | `preferred_vendor`, superiors-only rule (B4.4) |
+| FR-NTF-01 to 11 | Jobs and events (B6) |
+| FR-RPT-01 to 11 | Scoped report queries and exports (B7) |
+| NFRs | A11 |
