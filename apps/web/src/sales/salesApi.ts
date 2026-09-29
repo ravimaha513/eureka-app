@@ -1,0 +1,112 @@
+/** Typed client for the candidate, Hot List and submission API (apps/api/src/modules/candidates, submissions). */
+import { api, type Candidate } from "../api";
+
+export interface CandidateProfile extends Candidate {
+  marketingStartDate: string | null;
+  /** Masked date of birth ("•• / •• / 1994") on the profile only; never on the Hot List. */
+  dobMasked: string | null;
+  rowVersion: number;
+}
+
+export interface Page<T> { items: T[]; nextCursor: string | null }
+
+export type Visibility = "team" | "all_teams";
+export type Priority = "P1" | "P2" | "P3";
+
+export interface ListFilters {
+  search?: string;
+  status?: string;
+  technology?: string;
+  visibility?: Visibility | "";
+  cursor?: string | null;
+  limit?: number;
+}
+
+/** Profile fields a `candidate:update` holder may change (ProfileUpdate schema; strict). */
+export interface ProfileUpdate {
+  priority?: Priority;
+  marketingEmail?: string;
+  vitelNumber?: string;
+  marketingStartDate?: string;
+  inPersonOk?: boolean;
+  technologyId?: string;
+}
+
+export interface CreateCandidate {
+  firstName: string;
+  lastName: string;
+  phone?: string;
+  technologyId: string;
+  locationId: string;
+}
+
+export interface CreateSubmission {
+  candidateId: string;
+  jobTitle: string;
+  clientId: string;
+  vendorId?: string;
+  rate?: number;
+}
+
+/** Every marketing status in the domain model, in lifecycle order. */
+export const STATUSES = [
+  "in_training", "active", "on_hold", "full_of_interviews", "confirmation", "bench", "stopped", "placed", "terminated",
+] as const;
+
+/** Statuses shown on the Hot List (HOTLIST_STATUSES in @eureka/shared). */
+export const HOTLIST_STATUS_OPTIONS = ["active", "on_hold", "full_of_interviews", "confirmation", "bench", "stopped"] as const;
+
+/**
+ * Allowed status changes, mirroring authz.transition_candidate (migration 0015).
+ * Presentation only: the database decides and answers 422 for anything else.
+ */
+export const TRANSITIONS: Record<string, readonly string[]> = {
+  in_training: ["active", "terminated"],
+  active: ["on_hold", "stopped", "full_of_interviews", "confirmation", "terminated"],
+  on_hold: ["active", "terminated"],
+  full_of_interviews: ["active", "terminated"],
+  confirmation: ["active", "terminated"],
+  bench: ["active", "terminated"],
+  stopped: ["terminated"],
+};
+
+export const statusLabel = (s: string) => {
+  const t = s.replace(/_/g, " ");
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+const enc = encodeURIComponent;
+const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
+
+function listQuery(f: ListFilters): string {
+  const q = new URLSearchParams();
+  if (f.search) q.set("search", f.search);
+  if (f.status) q.set("status", f.status);
+  if (f.technology) q.set("technology", f.technology);
+  if (f.visibility) q.set("visibility", f.visibility);
+  if (f.cursor) q.set("cursor", f.cursor);
+  q.set("limit", String(f.limit ?? 50));
+  return q.toString();
+}
+
+export const salesApi = {
+  hotlist: (f: ListFilters) => api<Page<Candidate>>(`/api/v1/hotlist?${listQuery(f)}`),
+  candidates: (f: ListFilters) => api<Page<Candidate>>(`/api/v1/candidates?${listQuery(f)}`),
+  candidate: (id: string) => api<CandidateProfile>(`/api/v1/candidates/${enc(id)}`),
+  create: (b: CreateCandidate) => api<{ id: string }>("/api/v1/candidates", { method: "POST", ...json(b) }),
+  update: (id: string, b: ProfileUpdate) => api<{ id: string }>(`/api/v1/candidates/${enc(id)}`, { method: "PATCH", ...json(b) }),
+  setVisibility: (id: string, visibility: Visibility) =>
+    api<{ id: string; visibility: Visibility }>(`/api/v1/candidates/${enc(id)}/visibility`, { method: "PUT", ...json({ visibility }) }),
+  setRating: (id: string, rating: number) =>
+    api<{ id: string; technicalRating: number }>(`/api/v1/candidates/${enc(id)}/technical-rating`, { method: "PUT", ...json({ rating }) }),
+  transition: (id: string, to: string) =>
+    api<{ id: string; status: string }>(`/api/v1/candidates/${enc(id)}/transition`, { method: "POST", ...json({ to }) }),
+  submit: (b: CreateSubmission) =>
+    api<{ id: string; duplicateWarning: boolean }>("/api/v1/submissions", { method: "POST", ...json(b) }),
+};
+
+export const salesKeys = {
+  hotlist: ["hotlist"] as const,
+  candidates: ["candidates"] as const,
+  candidate: (id: string) => ["candidate", id] as const,
+};

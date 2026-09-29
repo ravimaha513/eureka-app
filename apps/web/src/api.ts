@@ -21,11 +21,21 @@ export interface Candidate {
   technicalRating: number | null;
   phone: string | null;
   phoneMasked: boolean;
+  /** ISO date the candidate started marketing (list and profile responses). */
+  marketingStartDate?: string | null;
+  /** Open Hot List only: false when the profile belongs to a team outside the user's scope (it would 404). */
+  canOpenProfile?: boolean;
 }
 
+/** One entry of an RFC 9457 validation problem's `errors` array (422). */
+export interface FieldIssue { path: string; message: string }
+
 export class ApiError extends Error {
-  /** RFC 9457 `detail` (the machine-readable error code in this API) and `title`, when the server sent them. */
-  constructor(public status: number, message: string, public detail?: string, public title?: string) {
+  /**
+   * RFC 9457 `detail` (the machine-readable error code in this API) and `title`, when the server sent them.
+   * `errors` carries the per-field issues of a 422 validation problem.
+   */
+  constructor(public status: number, message: string, public detail?: string, public title?: string, public errors?: FieldIssue[]) {
     super(message);
   }
 }
@@ -46,8 +56,9 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     },
   });
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { detail?: string; title?: string };
-    throw new ApiError(res.status, body.detail ?? body.title ?? res.statusText, body.detail, body.title);
+    const body = (await res.json().catch(() => ({}))) as { detail?: string; title?: string; errors?: unknown };
+    const errors = Array.isArray(body.errors) ? (body.errors as FieldIssue[]) : undefined;
+    throw new ApiError(res.status, body.detail ?? body.title ?? res.statusText, body.detail, body.title, errors);
   }
   if (res.status === 204) return undefined as T;
   const text = await res.text();
