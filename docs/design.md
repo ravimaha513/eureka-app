@@ -698,7 +698,7 @@ CREATE POLICY candidate_update ON candidate FOR UPDATE TO eureka_app
 | team-assigned | on `candidate.assigned` | Notify new Lead and Manager | FR-EMP-05, FR-NTF-10 |
 | visa-expiry | daily | 90/60/30-day notices to HR and Immigration | FR-VIS-03, FR-NTF-11 |
 | retention | nightly | Purge per AS-13 | NFR-CMP-01 |
-| audit-export | nightly | Export and digest to Object Lock bucket | NFR-SEC-04 |
+| audit-export | daily 03:30 America/New_York (run key = UTC day exported; catches up 3 days) | Previous UTC day of `audit_event` as gzip JSON Lines to `audit/YYYY/MM/DD/audit-events.jsonl.gz` in the Object Lock bucket (x-amz-checksum-sha256, bucket-default SSE-KMS); SHA-256, row count and seq range appended to `audit_export` (worker: SELECT/INSERT only, triggers block UPDATE/DELETE). Runs once per key via advisory lock + `job_run` (migration 0016; a table instead of pg-boss so the worker needs no DDL) | NFR-SEC-04 |
 | key-rotation | monthly | Re-encrypt fields under the current data key | A6.3 |
 
 ## B7. Reporting
