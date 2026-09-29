@@ -271,3 +271,26 @@ describe("move member (OD-07, AD-8)", () => {
     expect(r.reassigned_to).toBe(U.r1a);
   });
 });
+
+describe("safety rails (migration 0014)", () => {
+  it("a team lead cannot be deactivated until the team has a new lead", async () => {
+    await expect(asUser(db.app, U.admin, (c) => c.query(`SELECT authz.admin_set_user_status($1, false)`, [U.l2])))
+      .rejects.toThrow(/lead_of_team/);
+  });
+
+  it("the rail refuses a state with no active org_admin (defence in depth: self-change already keeps the actor)", async () => {
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query(`UPDATE eureka.user_role SET valid = tstzrange(lower(valid), now()) WHERE role_key = 'org_admin'`);
+      await expect(c.query(`SELECT authz.assert_admin_remains()`)).rejects.toThrow(/last_admin/);
+    } finally {
+      await c.query("ROLLBACK");
+      c.release();
+    }
+  });
+
+  it("an admin can revoke another admin while one remains", async () => {
+    await asUser(db.app, U.admin, (c) => c.query(`SELECT authz.revoke_role($1, 'org_admin', NULL)`, [U.admin2]));
+  });
+});

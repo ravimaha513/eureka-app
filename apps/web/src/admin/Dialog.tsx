@@ -19,11 +19,25 @@ export function Dialog({ title, onClose, children, describedBy }: {
     const node = ref.current!;
     const first = node.querySelector<HTMLElement>("[data-autofocus]") ?? node.querySelector<HTMLElement>(FOCUSABLE);
     (first ?? node).focus();
-    return () => { if (opener && document.contains(opener)) opener.focus(); };
+    // Escape works even when focus fell to <body> (e.g. the submit button was
+    // disabled while busy), and focus that escapes the dialog is pulled back.
+    const onDocKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); onCloseRef.current(); }
+    };
+    const onFocusIn = (e: FocusEvent) => {
+      if (!node.contains(e.target as Node)) node.focus();
+    };
+    document.addEventListener("keydown", onDocKey);
+    document.addEventListener("focusin", onFocusIn);
+    return () => {
+      document.removeEventListener("keydown", onDocKey);
+      document.removeEventListener("focusin", onFocusIn);
+      if (opener && document.contains(opener)) opener.focus();
+    };
   }, []);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") { e.stopPropagation(); onCloseRef.current(); return; }
+    if (e.key === "Escape") return; // handled on document
     if (e.key !== "Tab") return;
     const items = [...ref.current!.querySelectorAll<HTMLElement>(FOCUSABLE)];
     if (items.length === 0) { e.preventDefault(); return; }

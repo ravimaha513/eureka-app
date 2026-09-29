@@ -11,6 +11,20 @@ export const ERROR_MESSAGES: Record<string, string> = {
   not_in_scope: "That's outside your scope. You need the permission for both teams or people involved.",
   invalid_reassign_target: "Candidates can only go to an active member or the lead of the old team.",
   cycle: "That would create a reporting loop (someone would end up managing themselves).",
+  lead_of_team: "This person leads a team. Give the team a new lead first, then deactivate them.",
+  last_admin: "At least one active admin must remain.",
+  email_exists: "A user with this email already exists.",
+  email_domain: "That email isn't allowed. Use an address in the company's Google domain.",
+  role_already_held: "This person already has that role.",
+  request_pending: "A request for this role is already waiting for approval.",
+  request_not_pending: "This request has already been decided.",
+  request_expired: "This request expired. Ask for the role again.",
+  user_inactive: "This person is deactivated. Reactivate them first.",
+  invalid_manager: "Pick an active manager.",
+  invalid_lead: "Pick an active person as the lead.",
+  not_a_member: "This person isn't in that team any more. Refresh and try again.",
+  same_team: "Pick a different team.",
+  unknown_role: "That role doesn't exist. Refresh and try again.",
 };
 
 /** What each operation's plain HTTP failures mean when the server sends no known code. */

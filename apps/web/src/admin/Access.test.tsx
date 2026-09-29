@@ -236,6 +236,15 @@ describe("Users tab", () => {
     expect(opener).toHaveFocus();
   });
 
+  it("closes on Escape even when focus has fallen to the page body (e.g. after a failed submit)", async () => {
+    renderPage();
+    fireEvent.click(within(await row("Priya Rao")).getByRole("button", { name: "Deactivate Priya Rao" }));
+    await screen.findByRole("dialog");
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("grant role: location only for location-bound roles, second-approver note for restricted roles", async () => {
     routes["POST /api/v1/admin/role-requests"] = (_u, init) =>
       JSON.parse(String(init.body)).role === "hr" ? { status: 201, body: { id: "rq9", status: "pending_approval" } } : { status: 201, body: { id: "rq8", status: "applied" } };
