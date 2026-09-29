@@ -20,8 +20,9 @@ const WorkerConfigSchema = z
     // Audit export target: an S3 bucket (AWS) or a local directory (development, tests).
     AUDIT_BUCKET: z.string().min(3).optional(),
     EXPORT_DIR: z.string().min(1).optional(),
-    // How many past UTC days the audit export catches up on after downtime.
-    AUDIT_EXPORT_CATCHUP_DAYS: z.coerce.number().int().min(1).max(30).default(3),
+    // At most this many missing UTC days are exported per tick while catching up
+    // (every day since the last export is caught up eventually; see audit-export.ts).
+    AUDIT_EXPORT_MAX_DAYS_PER_TICK: z.coerce.number().int().min(1).max(31).default(7),
   })
   .superRefine((c, ctx) => {
     if (!c.AUDIT_BUCKET && !c.EXPORT_DIR) {

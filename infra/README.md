@@ -215,21 +215,50 @@ Migrations must be backward compatible with the running version
 
 ## Turning on the worker
 
-The worker runs scheduled jobs from the `eureka.job_run` table (migration 0016).
-Today that is **audit-export**: every day at 03:30 America/New_York it writes the
+The worker runs scheduled jobs from the `eureka.job_run` table (migrations 0016,
+0020). Today that is **audit-export**: every day at 03:30 America/New_York it writes the
 previous UTC day of `audit_event` to
 `s3://<audit bucket>/audit/YYYY/MM/DD/audit-events.jsonl.gz` (gzip JSON Lines,
-uploaded with `x-amz-checksum-sha256`, SSE-KMS and Object Lock from the bucket
-defaults) and appends the SHA-256, row count and seq range to
-`eureka.audit_export`. It catches up on the last 3 days after downtime; days
-already exported are skipped, and two tasks never export the same day.
+uploaded create-only with `If-None-Match: *` and `x-amz-checksum-sha256`; SSE-KMS
+and Object Lock from the bucket defaults) and appends the SHA-256, row count and
+seq range to `eureka.audit_export`.
+
+- **Catch-up.** The due days come from the ledger, not a fixed look-back: every
+  UTC day from the first exported day up to the latest due day that has no
+  `audit_export` row, oldest first, at most `AUDIT_EXPORT_MAX_DAYS_PER_TICK`
+  (default 7) per tick. After any downtime every missed day is exported.
+- **One runner per day.** A task claims a (job, day) with a lease in `job_run`
+  (`lease_until`, 2 minutes, renewed every 30 s while it works). A second task
+  sees the live lease and moves on; if the holder dies, its lease expires and
+  another task takes over. Renewals and the final status update are fenced on
+  `attempts`, so a task that lost its lease aborts and cannot overwrite the new
+  holder's result.
+- **Retries.** A failed day waits `next_attempt_at`: 1 min, doubling per attempt,
+  capped at 6 h. From the 8th failed attempt on, each failure logs
+  `"msg":"job failed repeatedly","alert":true`. A retry after a failed ledger
+  insert gets 412 from S3; the worker then compares the stored object's SHA-256
+  (HeadObject) with its own and, if equal, only inserts the ledger row, so
+  retries add no Object Lock versions. A different object under the key is an
+  error (alert-worthy: investigate before anything else).
+- **Behind.** When the latest exported day is more than one day before
+  yesterday the worker logs `"msg":"audit export is behind","alert":true` (at
+  most hourly). Put CloudWatch metric filters on `"alert":true`.
+- **Integrity.** The database sets `job_run.started_at`/`finished_at`, rejects
+  run keys in the future and refuses to mark an audit-export day succeeded
+  without its `audit_export` row (migration 0020); the ledger is the evidence.
 
 To turn it on, set `worker_desired_count = 1` in `infra/live/<env>/env.hcl` and
-deploy (one task is enough; more are safe but idle). The worker needs migration
-0016 applied first, which the deploy's migrate step does. Its task role can only
-`s3:PutObject` under `audit/*` in the audit bucket and `kms:GenerateDataKey` on
+deploy (one task is enough; more are safe but idle). The worker needs
+migrations 0016 and 0020 applied first, which the deploy's migrate step does.
+Its task role can only `s3:PutObject` and `s3:GetObject` (used for HeadObject
+after a 412) under `audit/*` in the audit bucket and `kms:GenerateDataKey` on
 the data key through S3; its task definition gets `DATABASE_URL` (the
-`eureka_worker` role) and `AUDIT_BUCKET`, nothing else. Logs are JSON lines in
+`eureka_worker` role) and `AUDIT_BUCKET`, nothing else. S3 calls time out
+(5 s connect, 30 s request, 3 attempts). The audit bucket policy denies
+uploads that name any encryption other than the data key (a missing header is
+allowed, since the worker relies on the bucket default). On SIGTERM the worker
+exits non-zero if a job was still running or the database pool did not close
+in time. Logs are JSON lines in
 `/eureka/<env>/worker`: look for `"msg":"job succeeded","job":"audit-export"`.
 Check an export with:
 

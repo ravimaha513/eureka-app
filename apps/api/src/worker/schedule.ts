@@ -48,6 +48,17 @@ export function dailyDueAt(dateKey: string, hh: number, mm: number, timeZone: st
   return due;
 }
 
+/** Whole days from `from` to `to` ("YYYY-MM-DD" keys; negative when `to` is earlier). */
+export function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+}
+
+/** The latest UTC day whose daily run is due at `now` (yesterday once hh:mm local has passed). */
+export function latestDueDailyKey(now: Date, hh: number, mm: number, timeZone: string): string {
+  const yesterday = addDays(utcDateKey(now), -1);
+  return dailyDueAt(yesterday, hh, mm, timeZone).getTime() <= now.getTime() ? yesterday : addDays(yesterday, -1);
+}
+
 /**
  * Run keys (UTC dates) of a daily job that are due at `now`, oldest first,
  * looking back `catchupDays` days so a worker that was down catches up.

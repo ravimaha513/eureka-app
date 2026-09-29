@@ -64,21 +64,61 @@ resource "aws_s3_bucket_logging" "b" {
   target_prefix = "s3/${each.key}/"
 }
 
-# web, documents and logs have their own policies (edge.tf, below) that include this deny.
+# Audit bucket policy (the resource name predates the encryption statements;
+# kept to avoid replacing the policy). web, documents and logs have their own
+# policies (edge.tf, below) that include the TLS deny.
+#
+# Encryption: objects must end up under the data key. The worker sends no SSE
+# headers and relies on the bucket default (SSE-KMS, data key), so the denies
+# only fire when a header IS present and names something else
+# (StringNotEqualsIfExists): an explicit other KMS key, a non-KMS algorithm
+# such as AES256, or "aws:kms" without a key id (which means aws/s3). A deny
+# on a missing header would block the worker.
 resource "aws_s3_bucket_policy" "tls_only" {
   for_each = { for k, v in aws_s3_bucket.b : k => v if k == "audit" }
   bucket   = each.value.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Sid       = "DenyInsecureTransport"
-      Effect    = "Deny"
-      Principal = "*"
-      Action    = "s3:*"
-      Resource  = [each.value.arn, "${each.value.arn}/*"]
-      Condition = { Bool = { "aws:SecureTransport" = "false" } }
-    }]
+    Statement = [
+      {
+        Sid       = "DenyInsecureTransport"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource  = [each.value.arn, "${each.value.arn}/*"]
+        Condition = { Bool = { "aws:SecureTransport" = "false" } }
+      },
+      {
+        Sid       = "DenyOtherKmsKey"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:PutObject"
+        Resource  = "${each.value.arn}/*"
+        Condition = { StringNotEqualsIfExists = { "s3:x-amz-server-side-encryption-aws-kms-key-id" = aws_kms_key.data.arn } }
+      },
+      {
+        Sid       = "DenyNonKmsEncryption"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:PutObject"
+        Resource  = "${each.value.arn}/*"
+        Condition = { StringNotEqualsIfExists = { "s3:x-amz-server-side-encryption" = "aws:kms" } }
+      },
+      {
+        # "aws:kms" without a key id selects the AWS-managed aws/s3 key, not the data key.
+        Sid       = "DenyKmsWithoutKeyId"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:PutObject"
+        Resource  = "${each.value.arn}/*"
+        Condition = {
+          StringEquals = { "s3:x-amz-server-side-encryption" = "aws:kms" }
+          Null         = { "s3:x-amz-server-side-encryption-aws-kms-key-id" = "true" }
+        }
+      },
+    ]
   })
+  depends_on = [aws_s3_bucket_public_access_block.b]
 }
 
 # Restricted documents must be written with the restricted KMS key.

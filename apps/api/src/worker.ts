@@ -1,6 +1,6 @@
 /**
  * Worker entrypoint (design A7, B6). Runs scheduled jobs from eureka.job_run
- * as eureka_worker (no BYPASSRLS, owns nothing; grants in migration 0016).
+ * as eureka_worker (no BYPASSRLS, owns nothing; grants in migrations 0016, 0020).
  * Jobs: audit-export (nightly, 03:30 America/New_York). Phase 2 adds the
  * feedback email and outbox relay; Phase 3 reminders and retention.
  */
@@ -21,8 +21,13 @@ const pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: config.DB
 pool.on("error", (err) => log.error("idle database client error", errorFields(err)));
 await pool.query("SELECT 1");
 
+// Bounded S3 calls: a hung connection must not hold a job (and its lease) forever.
 const sink: ExportSink = config.AUDIT_BUCKET
-  ? new S3Sink(new S3Client({ region: config.AWS_REGION }), config.AUDIT_BUCKET)
+  ? new S3Sink(new S3Client({
+    region: config.AWS_REGION,
+    maxAttempts: 3,
+    requestHandler: { requestTimeout: 30_000, connectionTimeout: 5_000 },
+  }), config.AUDIT_BUCKET)
   : new DirSink(config.EXPORT_DIR!);
 
 const heartbeat = () => {
@@ -32,21 +37,27 @@ const heartbeat = () => {
     .catch((err) => log.warn("heartbeat write failed", errorFields(err)));
 };
 
-const jobs = [auditExportJob(sink, config.AUDIT_EXPORT_CATCHUP_DAYS)];
+const jobs = [auditExportJob(sink, config.AUDIT_EXPORT_MAX_DAYS_PER_TICK)];
 const runner = new JobRunner(pool, jobs, log, heartbeat);
 runner.start(config.JOB_TICK_SECONDS * 1000);
 log.info("worker started", { jobs: jobs.map((j) => j.name), sink: sink.kind, tickSeconds: config.JOB_TICK_SECONDS });
 
+const POOL_END_TIMEOUT_MS = 3_000;
 let shuttingDown = false;
 const shutdown = async (signal: string) => {
   if (shuttingDown) return;
   shuttingDown = true;
   log.info("worker stopping", { signal, graceSeconds: config.SHUTDOWN_GRACE_SECONDS });
   const clean = await runner.stop(config.SHUTDOWN_GRACE_SECONDS * 1000);
-  if (!clean) log.warn("job still running at shutdown; it will be retried", { signal });
-  await pool.end().catch(() => undefined);
-  log.info("worker stopped", { clean });
-  process.exit(0);
+  if (!clean) log.warn("job still running at shutdown; it is retried once its lease expires", { signal });
+  let timer: NodeJS.Timeout | undefined;
+  const poolClosed = await Promise.race([
+    pool.end().then(() => true, (err) => { log.warn("closing the database pool failed", errorFields(err)); return false; }),
+    new Promise<boolean>((r) => { timer = setTimeout(() => r(false), POOL_END_TIMEOUT_MS); }),
+  ]);
+  clearTimeout(timer);
+  log.info("worker stopped", { clean, poolClosed });
+  process.exit(clean && poolClosed ? 0 : 1);
 };
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));

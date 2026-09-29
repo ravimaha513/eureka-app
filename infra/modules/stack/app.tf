@@ -135,10 +135,14 @@ resource "aws_iam_role_policy" "api" {
 }
 
 # Worker task role. Least privilege: only what the implemented jobs use.
-#   audit-export: single-part PutObject (no multipart, so no kms:Decrypt) of
-#   audit/*; SSE-KMS with the data key is the bucket default, so the role
-#   needs kms:GenerateDataKey on that key, only when called through S3.
-# No read, delete or retention-change rights on the audit bucket. Document
+#   audit-export: single-part, create-only (If-None-Match: *) PutObject (no
+#   multipart, so no kms:Decrypt) of audit/*; SSE-KMS with the data key is the
+#   bucket default, so the role needs kms:GenerateDataKey on that key, only when
+#   called through S3. s3:GetObject on audit/* is for HeadObject only: after a
+#   412 the job compares the existing object's SHA-256 with its own (object
+#   metadata). No kms:Decrypt is granted, so a GET of an object body fails;
+#   HEAD reads metadata only.
+# No list, delete or retention-change rights on the audit bucket. Document
 # promotion and email grants are added with the jobs that need them (Phase 2).
 resource "aws_iam_role" "worker" {
   name               = "${local.name}-worker-task"
@@ -154,6 +158,12 @@ resource "aws_iam_role_policy" "worker" {
         Sid      = "AuditExportWrite"
         Effect   = "Allow"
         Action   = ["s3:PutObject"]
+        Resource = "${aws_s3_bucket.b["audit"].arn}/audit/*"
+      },
+      {
+        Sid      = "AuditExportVerify"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
         Resource = "${aws_s3_bucket.b["audit"].arn}/audit/*"
       },
       {
