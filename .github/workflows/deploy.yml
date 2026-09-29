@@ -87,10 +87,28 @@ jobs:
           cache-to: type=gha,mode=max
 
       # 3. Migrations run before the new API code is rolled out (expand/contract).
-      #    The targeted apply also creates the network and database on the first run.
+      #    -target only pulls in what a resource references, so everything the
+      #    migrate task needs at run time but does not reference is listed here:
+      #    the cluster, internet egress for the public subnets (route table
+      #    associations -> route table -> internet gateway), the S3 gateway
+      #    endpoint, the jobs security group rules and the database ingress from
+      #    it, and the execution role policies (image pull, logs, secrets).
+      #    The task definition itself pulls in the database, SSM parameters, KMS
+      #    key, log group and execution role. On later runs this only updates
+      #    the image tag of the migrate task definition.
       - name: Update migrate task definition
         working-directory: infra/live/${{ env.ENVIRONMENT }}
-        run: terragrunt apply -auto-approve -input=false -target=aws_ecs_task_definition.migrate
+        run: |
+          terragrunt apply -auto-approve -input=false \
+            -target=aws_ecs_task_definition.migrate \
+            -target=aws_ecs_cluster.main \
+            -target=aws_route_table_association.public \
+            -target=aws_vpc_endpoint.s3 \
+            -target=aws_vpc_security_group_egress_rule.jobs_https \
+            -target=aws_vpc_security_group_egress_rule.jobs_db \
+            -target=aws_vpc_security_group_ingress_rule.db_from_jobs \
+            -target=aws_iam_role_policy_attachment.execution \
+            -target=aws_iam_role_policy.execution_secrets
 
       - name: Read stack outputs
         id: out
@@ -101,7 +119,7 @@ jobs:
             echo "cluster=$(jq -r .ecs_cluster.value /tmp/out.json)"
             echo "migrate_td=$(jq -r .migrate_task_definition.value /tmp/out.json)"
             echo "subnets=$(jq -r '.public_subnet_ids.value | join(",")' /tmp/out.json)"
-            echo "sg=$(jq -r .tasks_security_group_id.value /tmp/out.json)"
+            echo "sg=$(jq -r .jobs_security_group_id.value /tmp/out.json)"
           } >> "$GITHUB_OUTPUT"
 
       - name: Run migrations

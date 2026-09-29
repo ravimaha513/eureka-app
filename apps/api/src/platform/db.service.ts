@@ -12,7 +12,7 @@ export class DbService implements OnModuleDestroy {
   readonly pool: pg.Pool;
 
   constructor(@Inject(CONFIG) config: AppConfig) {
-    this.pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 20 });
+    this.pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: config.DB_POOL_MAX });
     this.pool.on("connect", (c) => {
       void c.query("SET statement_timeout = '5s'");
     });

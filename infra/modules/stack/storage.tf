@@ -2,7 +2,8 @@
 #   documents: private; quarantine/ -> clean/ or restricted/ after malware scan
 #   audit:     Object Lock (compliance in production) for daily audit exports
 #   web:       SPA assets, served only through CloudFront (OAC)
-#   logs:      access logs for the buckets and CloudFront
+#   logs:      S3 server access logs for the other buckets only (CloudFront
+#              standard logs are off; see .checkov.yaml CKV_AWS_86)
 
 locals {
   buckets = {

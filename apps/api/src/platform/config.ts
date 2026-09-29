@@ -1,9 +1,24 @@
 import { z } from "zod";
 
+/** Placeholder Terraform writes to SSM until the real Google OAuth values are set. */
+const PLACEHOLDER = "set-me";
+
+/** ORIGIN_VERIFY_SECRET may hold several comma-separated secrets (rotation). */
+export function parseSecretList(value: string): string[] {
+  return value.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
 const ConfigSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     DATABASE_URL: z.string().url(),
+    // Connections per process. RDS db.t4g.micro allows roughly 80-110 connections
+    // and a rolling deploy can briefly run twice the API tasks plus the worker,
+    // so keep this small in AWS (the task definitions set 5).
+    DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(10),
+    // Seconds to keep serving after SIGTERM before closing, so API Gateway and
+    // Cloud Map stop routing to this task before its connections go away.
+    DRAIN_SECONDS: z.coerce.number().int().min(0).max(120).default(15),
     SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
     AUTH_MODE: z.enum(["google", "dev"]).default("google"),
     GOOGLE_CLIENT_ID: z.string().optional(),
@@ -14,19 +29,38 @@ const ConfigSchema = z
     SESSION_ABSOLUTE_HOURS: z.coerce.number().int().positive().default(12),
     // Shared secret CloudFront adds as X-Origin-Verify. The API Gateway endpoint
     // is publicly addressable, so requests without it (bypassing CloudFront and
-    // its WAF) are rejected. Required in production.
-    ORIGIN_VERIFY_SECRET: z.string().min(32, "ORIGIN_VERIFY_SECRET must be at least 32 characters").optional(),
+    // its WAF) are rejected. Required in production. For rotation it may be a
+    // comma-separated list ("new,old"); a request matching any entry is accepted.
+    ORIGIN_VERIFY_SECRET: z.string().optional(),
   })
   .superRefine((c, ctx) => {
     // Design A6.1: the development identity provider can never run in production.
     if (c.NODE_ENV === "production" && c.AUTH_MODE === "dev") {
       ctx.addIssue({ code: "custom", message: "AUTH_MODE=dev is not allowed in production" });
     }
+    if (c.ORIGIN_VERIFY_SECRET !== undefined) {
+      const secrets = parseSecretList(c.ORIGIN_VERIFY_SECRET);
+      if (secrets.length === 0 || secrets.some((s) => s.length < 32)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "ORIGIN_VERIFY_SECRET must be at least 32 characters (every entry, when comma-separated)",
+        });
+      }
+    }
     if (c.NODE_ENV === "production" && !c.ORIGIN_VERIFY_SECRET) {
       ctx.addIssue({ code: "custom", message: "ORIGIN_VERIFY_SECRET is required in production" });
     }
-    if (c.AUTH_MODE === "google" && (!c.GOOGLE_CLIENT_ID || !c.GOOGLE_CLIENT_SECRET || !c.GOOGLE_HOSTED_DOMAIN)) {
-      ctx.addIssue({ code: "custom", message: "Google OIDC settings are required when AUTH_MODE=google" });
+    if (c.AUTH_MODE === "google") {
+      if (!c.GOOGLE_CLIENT_ID || !c.GOOGLE_CLIENT_SECRET || !c.GOOGLE_HOSTED_DOMAIN) {
+        ctx.addIssue({ code: "custom", message: "Google OIDC settings are required when AUTH_MODE=google" });
+      } else if (c.GOOGLE_CLIENT_ID.trim() === PLACEHOLDER || c.GOOGLE_CLIENT_SECRET.trim() === PLACEHOLDER) {
+        // Terraform creates the SSM parameters with this placeholder; refuse to
+        // start until the real OAuth client is entered (infra/README.md step 4).
+        ctx.addIssue({
+          code: "custom",
+          message: `GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET are still the "${PLACEHOLDER}" placeholder; set the real Google OAuth client in SSM`,
+        });
+      }
     }
   });
 

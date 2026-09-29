@@ -226,6 +226,33 @@ resource "aws_vpc_security_group_egress_rule" "tasks_db" {
   description                  = "Postgres"
 }
 
+# Worker and migrate tasks accept no inbound traffic at all; they only need
+# HTTPS (ECR, SSM, Secrets Manager, S3, SES) and Postgres.
+resource "aws_security_group" "jobs" {
+  name        = "${local.name}-jobs"
+  description = "ECS worker and migrate tasks: no ingress; egress HTTPS and Postgres"
+  vpc_id      = aws_vpc.main.id
+  tags        = { Name = "${local.name}-jobs" }
+}
+
+resource "aws_vpc_security_group_egress_rule" "jobs_https" {
+  security_group_id = aws_security_group.jobs.id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  description       = "HTTPS to AWS APIs"
+}
+
+resource "aws_vpc_security_group_egress_rule" "jobs_db" {
+  security_group_id            = aws_security_group.jobs.id
+  referenced_security_group_id = aws_security_group.db.id
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
+  description                  = "Postgres"
+}
+
 # Cloud Map: ECS registers each healthy API task (SRV record carries the port).
 resource "aws_service_discovery_private_dns_namespace" "main" {
   name = "${local.name}.local"
@@ -242,9 +269,9 @@ resource "aws_service_discovery_service" "api" {
       ttl  = 10
     }
   }
-  health_check_custom_config {
-    failure_threshold = 1
-  }
+  # failure_threshold is deprecated (AWS always uses 1); an empty block keeps
+  # ECS-reported task health driving registration.
+  health_check_custom_config {}
 }
 
 resource "aws_apigatewayv2_vpc_link" "api" {
@@ -286,10 +313,13 @@ resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.api.id
   name        = "$default"
   auto_deploy = true
-  # Hard ceiling on request volume (and therefore cost) if the endpoint is abused.
+  # Ceiling on request volume (and therefore cost) if the execute-api endpoint
+  # is flooded directly. HTTP APIs cannot have WAF, and this limit is shared by
+  # all callers, so a direct flood can also throttle real users; see
+  # infra/README.md "Known risks" for the ceiling and the mitigation path.
   default_route_settings {
-    throttling_burst_limit = 100
-    throttling_rate_limit  = 50
+    throttling_burst_limit = 300
+    throttling_rate_limit  = 100
   }
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.apigw.arn
@@ -314,6 +344,9 @@ locals {
     { name = "AWS_REGION", value = var.aws_region },
     { name = "DOCUMENTS_BUCKET", value = aws_s3_bucket.b["documents"].id },
     { name = "FIELD_KMS_KEY_ARN", value = aws_kms_key.restricted.arn },
+    # db.t4g.micro allows ~80-110 connections; a rollout can briefly run up to
+    # 2 x api_max_count API tasks plus the worker, so keep each pool small.
+    { name = "DB_POOL_MAX", value = "5" },
   ]
   app_secrets = [
     { name = "SESSION_SECRET", valueFrom = aws_ssm_parameter.generated["app/session_secret"].arn },
@@ -344,10 +377,19 @@ resource "aws_ecs_task_definition" "api" {
     operating_system_family = "LINUX"
   }
   volume { name = "tmp" }
+  lifecycle {
+    precondition {
+      condition     = var.google_hosted_domain != ""
+      error_message = "google_hosted_domain is empty: set it to the company Google Workspace domain in infra/live/<env>/env.hcl before deploying the API."
+    }
+  }
   container_definitions = jsonencode([merge(local.container_base, {
     name         = "api"
     portMappings = [{ containerPort = 3000, protocol = "tcp" }]
     environment  = concat(local.common_env, [{ name = "PORT", value = "3000" }])
+    # SIGTERM starts a 15 s drain (DRAIN_SECONDS) before the server closes;
+    # allow for that plus in-flight requests before ECS sends SIGKILL.
+    stopTimeout = 30
     secrets = concat(local.app_secrets, [
       { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.generated["db/app/url"].arn },
       { name = "ORIGIN_VERIFY_SECRET", valueFrom = aws_ssm_parameter.generated["app/origin_secret"].arn },
@@ -403,6 +445,7 @@ resource "aws_ecs_task_definition" "worker" {
 
 # Run by CI before each deploy (design A8): applies migrations as the RDS
 # master user and sets the application role passwords from Secrets Manager.
+# No task role: it calls no AWS APIs; its secrets are injected by the execution role.
 resource "aws_ecs_task_definition" "migrate" {
   family                   = "${local.name}-migrate"
   requires_compatibilities = ["FARGATE"]
@@ -410,7 +453,6 @@ resource "aws_ecs_task_definition" "migrate" {
   cpu                      = 256
   memory                   = 512
   execution_role_arn       = aws_iam_role.execution.arn
-  task_role_arn            = aws_iam_role.worker.arn
   runtime_platform {
     cpu_architecture        = "ARM64"
     operating_system_family = "LINUX"
@@ -485,9 +527,10 @@ resource "aws_ecs_service" "worker" {
     capacity_provider = "FARGATE_SPOT"
     weight            = 1
   }
+  # Public IP for egress only; the jobs security group has no ingress rules.
   network_configuration {
     subnets          = aws_subnet.public[*].id
-    security_groups  = [aws_security_group.tasks.id]
+    security_groups  = [aws_security_group.jobs.id]
     assign_public_ip = true
   }
   deployment_circuit_breaker {

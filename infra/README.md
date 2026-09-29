@@ -20,14 +20,14 @@ infra/
   bootstrap/            one-time: state bucket + GitHub OIDC deploy roles (local state)
   terragrunt.hcl        root: remote state, providers, default tags
   live/staging/         env.hcl  (us-east-2, small, Spot, audit lock GOVERNANCE)
-  live/production/      env.hcl  (us-east-1, Multi-AZ, audit lock COMPLIANCE 7y)
+  live/production/      env.hcl  (us-east-1, single-AZ db.t4g.micro, audit lock COMPLIANCE 3y)
   modules/stack/        the whole environment
     main.tf       VPC, public/private subnets, S3 gateway endpoint, flow logs (no NAT)
     kms.tf        keys: data, restricted
     database.tf   RDS PostgreSQL 16 (TLS only, managed master secret), SSM parameters
     storage.tf    S3: documents (quarantine -> clean/restricted, GuardDuty scan), audit (Object Lock), web, logs
     app.tf        ECR, ECS Fargate ARM64 (api, worker, migrate), API Gateway HTTP API + VPC link + Cloud Map
-    edge.tf       CloudFront + WAF (5 rules), ACM, Route 53, security headers
+    edge.tf       CloudFront + WAF (5 rules), SPA rewrite function, ACM, Route 53, security headers
   .checkov.yaml   accepted Checkov skips, each with a reason
 ```
 
@@ -35,14 +35,35 @@ infra/
 
 ```
 Browser ──HTTPS──> CloudFront (WAF, security headers)
-                     ├── /*      -> S3 web bucket (OAC)
+                     ├── /*      -> viewer-request function (extensionless paths -> /index.html)
+                     │              -> S3 web bucket (OAC)
                      └── /api/*  -> API Gateway HTTP API (throttled) -> VPC link -> Cloud Map
-                                     └── ECS Fargate "api" (public subnet, inbound only from the VPC link;
+                                     └── ECS Fargate "api" (public subnet, "tasks" SG: inbound only from the VPC link;
                                          rejects requests without CloudFront's X-Origin-Verify secret)
                                             └── RDS PostgreSQL (private subnet, no internet route; TLS verify-full, RLS)
-ECS "migrate" task: runs before each rollout as the RDS master user
-ECS "worker":       desired_count 0 until Phase 2
+ECS "migrate" task: runs before each rollout as the RDS master user ("jobs" SG: no inbound at all)
+ECS "worker":       desired_count 0 until Phase 2 ("jobs" SG)
 ```
+
+Notes:
+
+- The only request the API accepts without the origin secret is `GET /api/health`
+  from loopback (the ECS container health check). The same path through API
+  Gateway needs the secret like everything else.
+- `ORIGIN_VERIFY_SECRET` accepts a comma-separated list (each entry 32+
+  characters), so a rotation can be staged without downtime: API gets
+  `new,old` and rolls, CloudFront switches its header to `new`, API gets `new`
+  alone. Both values are Terraform-managed today (`random_password.origin_secret`
+  feeds CloudFront and `/eureka/<env>/app/origin_secret`), so make those steps
+  as Terraform changes rather than by hand.
+- API Gateway access logs record `$context.identity.sourceIp`, which is a
+  CloudFront edge address, not the client. Use WAF sampled requests (or, later,
+  the `CloudFront-Viewer-Address` header in app logs) for client IPs.
+- Each process opens at most `DB_POOL_MAX` (5 in AWS) database connections:
+  db.t4g.micro allows roughly 80–110 and a rolling deploy can briefly run up to
+  6 API tasks plus the worker.
+- On SIGTERM the API keeps serving for 15 s (`DRAIN_SECONDS`) so API Gateway
+  stops routing to it, then closes; the container `stopTimeout` is 30 s.
 
 ## Cost
 
@@ -64,7 +85,26 @@ prices, tens of users, under 1M requests/month:
 | **Total** | **~$30** |
 
 If the distribution is not enrolled in the CloudFront Free plan, WAF adds about
-$10/month (web ACL + 5 rules).
+$10/month (web ACL + 5 rules). Once it is enrolled, the web ACL cannot be
+detached from the distribution, so `aws_wafv2_web_acl.main` has
+`prevent_destroy`: rule changes apply in place, but a change that would replace
+or delete the web ACL fails at plan time. To remove it, cancel the plan in the
+CloudFront console first, then lift the guard.
+
+What the table does not include (usually small, but not fixed):
+
+- **Public IPv4 per running task** ($0.005/hour each): the table assumes one
+  API task. A rolling deploy briefly doubles it, autoscaling adds up to two
+  more, and the worker (Phase 2) and each migrate run add one while running.
+- **RDS CPU credits**: t4g instances run in *unlimited* mode; sustained CPU
+  above the baseline bills surplus credits (about $0.075 per vCPU-hour).
+- **GuardDuty Malware Protection for S3**: billed per GB scanned and per object
+  evaluated; negligible for résumé-sized files at tens of users, but it grows
+  with upload volume.
+- **Route 53 hosted zone**: $0.50/month if a new zone is created for the
+  custom domain (none if the zone already exists).
+- **Abuse**: the API Gateway endpoint is public, so a direct flood is billed
+  (see "Known risks" below).
 
 What was removed and why:
 
@@ -108,7 +148,11 @@ hourly): `cd infra/live/staging && terragrunt apply`, then `terragrunt destroy`.
 
 3. **Decide the open values** in `live/production/env.hcl` (marked `TODO`):
    - `google_hosted_domain` (required): your Google Workspace domain. Only
-     accounts in that domain can sign in.
+     accounts in that domain can sign in. While it is empty, the first deploy
+     still creates the network, database and migrate task and runs migrations
+     (step 3 of the workflow), but the full apply (step 4) stops at plan time
+     with a precondition error on `aws_ecs_task_definition.api`, so no API
+     service is created and the deploy fails.
    - Hostname and hosted zone (optional): leave empty to use the
      `https://dxxxx.cloudfront.net` address until a real domain exists.
    - For staging later: `eureka.spokenly.click` is taken by spokenly staging;
@@ -117,16 +161,27 @@ hourly): `cd infra/live/staging && terragrunt apply`, then `terragrunt destroy`.
 4. **Google OAuth client** (Google Cloud console → APIs & Services → Credentials):
    - Type: Web application.
    - Authorized redirect URI: `https://<app host>/api/auth/callback`.
-   - After the first deploy creates the parameters, set the real values and
-     restart the API:
+   - Terraform creates `/eureka/<env>/app/google_client_{id,secret}` with the
+     placeholder value `set-me` and never overwrites them afterwards. The API
+     refuses to start while either value is still `set-me` (config check), so
+     on a first deploy without real values the API tasks exit on start, the
+     service never becomes stable, and the workflow fails at "Wait for API
+     service to stabilise" (the migrate step and the rest of the stack are
+     already in place by then). The worker is at `desired_count = 0`, so it
+     is not affected.
+   - Easiest order: create just the parameters first, set them, then push:
      ```sh
+     cd infra/live/production
+     terragrunt apply -target=aws_ssm_parameter.google
      aws ssm put-parameter --overwrite --type SecureString --key-id alias/eureka-production-data \
        --name /eureka/production/app/google_client_id --value '<client id>'
      aws ssm put-parameter --overwrite --type SecureString --key-id alias/eureka-production-data \
        --name /eureka/production/app/google_client_secret --value '<client secret>'
-     aws ecs update-service --cluster eureka-production --service api --force-new-deployment
      ```
-   Until this is done the API fails its config check on start (by design).
+   - If a deploy already ran with the placeholders, run the two `put-parameter`
+     commands and then
+     `aws ecs update-service --cluster eureka-production --service api --force-new-deployment`
+     (or re-run the deploy workflow).
 
 5. **CloudFront Free plan** (makes CloudFront and WAF $0): CloudFront console →
    the `eureka-production` distribution → Pricing plan → Free. The plan
@@ -142,13 +197,37 @@ The workflow, per environment:
 
 1. `terragrunt apply -target=aws_ecr_repository.api`
 2. Build the ARM64 image natively and push it, tagged with the git SHA (immutable tags, SBOM + provenance).
-3. Apply the migrate task definition, run it, and fail the deploy if it exits non-zero.
+3. Targeted apply of the migrate task definition plus what it needs at run time
+   but does not reference (cluster, public subnet routing, S3 endpoint, "jobs"
+   security group rules, database ingress, execution role policies); on the
+   first run this creates the network and database. Run it in the "jobs"
+   security group and fail the deploy if it exits non-zero.
 4. Full `terragrunt apply` with `image_tag = <sha>`; wait for the API service to be stable.
 5. Build the web app, sync to S3 (hashed assets immutable, `index.html` no-cache), invalidate CloudFront.
 6. Smoke test `GET /api/health`.
 
 Migrations must be backward compatible with the running version
 (expand → deploy → contract), because step 3 runs before the new API is live.
+
+## Known risks
+
+- **The API Gateway endpoint is public.** `https://<id>.execute-api.<region>.amazonaws.com`
+  is reachable directly, bypassing CloudFront, and HTTP APIs cannot have a WAF
+  web ACL. The app rejects such requests (origin secret, 403), but API Gateway
+  still accepts and bills them, and they count against the stage throttle
+  (burst 300, 100 requests/second), which is shared by every caller.
+  - *Availability*: a sustained direct flood can exhaust that throttle, so
+    real users coming through CloudFront get 429s for as long as it lasts.
+  - *Cost ceiling*: at most 100 requests/second ≈ 260M requests/month ≈
+    $260/month of API Gateway requests (about $1 per million), plus CloudWatch
+    ingestion for the access log line of each request (about $0.50/GB).
+  - *If it is abused*: move the origin behind something that is not publicly
+    addressable. Either a CloudFront VPC origin to an internal ALB (about
+    +$20/month; the ALB can then carry the WAF too), or a Lambda REQUEST
+    authorizer on the route that checks the origin header, with authorizer
+    caching keyed on that header so rejected floods are cheap and never reach
+    the tasks.
+- **Access logs show CloudFront, not clients.** See the notes under "What runs where".
 
 ## Local checks
 

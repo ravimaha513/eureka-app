@@ -51,7 +51,11 @@ export class AppModule {
 export async function createApp(config: AppConfig): Promise<NestFastifyApplication> {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule.forConfig(config),
-    new FastifyAdapter({ trustProxy: true, bodyLimit: 1_048_576 }),
+    // trustProxy stays off: X-Forwarded-For is client-controlled (CloudFront and
+    // API Gateway append to it) and nothing reads req.ip yet. When a client IP is
+    // needed, derive it from CloudFront's CloudFront-Viewer-Address header on
+    // requests that passed the origin guard.
+    new FastifyAdapter({ trustProxy: false, bodyLimit: 1_048_576 }),
     { logger: config.NODE_ENV === "test" ? false : ["error", "warn", "log"] },
   );
   await app.register(cookie as never);

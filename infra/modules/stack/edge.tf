@@ -55,6 +55,11 @@ resource "aws_wafv2_web_acl" "main" {
   provider = aws.us_east_1
   name     = local.name
   scope    = "CLOUDFRONT"
+  # Once the distribution is on a CloudFront flat-rate plan, this web ACL cannot
+  # be detached from it, so Terraform must never try to destroy or replace it
+  # (the apply would fail halfway). Changes to rules are in-place updates.
+  # To remove it: cancel the plan in the console first, then lift this guard.
+  lifecycle { prevent_destroy = true }
   default_action {
     allow {}
   }
@@ -173,10 +178,33 @@ resource "aws_cloudfront_response_headers_policy" "security" {
       override        = true
     }
     content_security_policy {
-      content_security_policy = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://*.amazonaws.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com; object-src 'none'"
+      content_security_policy = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://${aws_s3_bucket.b["documents"].bucket_regional_domain_name}; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com; object-src 'none'"
       override                = true
     }
   }
+}
+
+# SPA routing: a request whose last path segment has no "." (a client-side
+# route such as /candidates/123) is served index.html. Asset paths (with an
+# extension) pass through untouched, so a missing asset is an error rather than
+# HTML, and /api/* never runs this function (it is on the default behavior only),
+# so API 403/404 responses reach the browser unchanged.
+resource "aws_cloudfront_function" "spa_rewrite" {
+  name    = "${local.name}-spa-rewrite"
+  runtime = "cloudfront-js-2.0"
+  comment = "Rewrite extensionless SPA routes to /index.html"
+  publish = true
+  code    = <<-EOT
+    function handler(event) {
+      var request = event.request;
+      var uri = request.uri;
+      var last = uri.substring(uri.lastIndexOf("/") + 1);
+      if (last.indexOf(".") === -1) {
+        request.uri = "/index.html";
+      }
+      return request;
+    }
+  EOT
 }
 
 data "aws_cloudfront_cache_policy" "optimized" { name = "Managed-CachingOptimized" }
@@ -223,6 +251,10 @@ resource "aws_cloudfront_distribution" "main" {
     compress                   = true
     cache_policy_id            = data.aws_cloudfront_cache_policy.optimized.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.spa_rewrite.arn
+    }
   }
 
   ordered_cache_behavior {
@@ -237,17 +269,9 @@ resource "aws_cloudfront_distribution" "main" {
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
   }
 
-  # SPA routing: unknown paths return index.html.
-  custom_error_response {
-    error_code         = 403
-    response_code      = 200
-    response_page_path = "/index.html"
-  }
-  custom_error_response {
-    error_code         = 404
-    response_code      = 200
-    response_page_path = "/index.html"
-  }
+  # No custom_error_response: it would apply to every origin, turning API
+  # 403/404 problem responses into 200 index.html. SPA routing is done by the
+  # spa_rewrite viewer-request function on the default behavior instead.
 
   restrictions {
     geo_restriction {

@@ -6,6 +6,10 @@ output "ecs_cluster" { value = aws_ecs_cluster.main.name }
 output "migrate_task_definition" { value = aws_ecs_task_definition.migrate.family }
 output "public_subnet_ids" { value = aws_subnet.public[*].id }
 output "tasks_security_group_id" { value = aws_security_group.tasks.id }
+output "jobs_security_group_id" {
+  description = "Security group for one-off tasks (migrate) and the worker: egress only."
+  value       = aws_security_group.jobs.id
+}
 output "db_endpoint" { value = aws_db_instance.main.address }
 output "ssm_prefix" {
   description = "Set <prefix>/app/google_client_id and google_client_secret here once."
