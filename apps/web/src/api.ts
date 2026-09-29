@@ -24,7 +24,8 @@ export interface Candidate {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  /** RFC 9457 `detail` (the machine-readable error code in this API) and `title`, when the server sent them. */
+  constructor(public status: number, message: string, public detail?: string, public title?: string) {
     super(message);
   }
 }
@@ -46,7 +47,9 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { detail?: string; title?: string };
-    throw new ApiError(res.status, body.detail ?? body.title ?? res.statusText);
+    throw new ApiError(res.status, body.detail ?? body.title ?? res.statusText, body.detail, body.title);
   }
-  return (res.status === 204 ? undefined : await res.json()) as T;
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
