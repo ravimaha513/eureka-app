@@ -28,7 +28,8 @@ env:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    # Skipped until infra/bootstrap has run and the AWS_ACCOUNT_ID repository variable is set.
+    if: vars.AWS_ACCOUNT_ID != '' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04-arm # native ARM64 build for Fargate Graviton
     timeout-minutes: 60
     environment: ${{ inputs.environment || 'staging' }}
