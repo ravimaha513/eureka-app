@@ -134,7 +134,12 @@ resource "aws_iam_role_policy" "api" {
   })
 }
 
-# Worker task role: promote scanned files, write audit exports, send email.
+# Worker task role. Least privilege: only what the implemented jobs use.
+#   audit-export: single-part PutObject (no multipart, so no kms:Decrypt) of
+#   audit/*; SSE-KMS with the data key is the bucket default, so the role
+#   needs kms:GenerateDataKey on that key, only when called through S3.
+# No read, delete or retention-change rights on the audit bucket. Document
+# promotion and email grants are added with the jobs that need them (Phase 2).
 resource "aws_iam_role" "worker" {
   name               = "${local.name}-worker-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
@@ -146,30 +151,20 @@ resource "aws_iam_role_policy" "worker" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:GetObjectTagging", "s3:DeleteObject"]
-        Resource = "${aws_s3_bucket.b["documents"].arn}/quarantine/*"
-      },
-      {
+        Sid      = "AuditExportWrite"
         Effect   = "Allow"
         Action   = ["s3:PutObject"]
-        Resource = ["${aws_s3_bucket.b["documents"].arn}/clean/*", "${aws_s3_bucket.b["documents"].arn}/restricted/*"]
+        Resource = "${aws_s3_bucket.b["audit"].arn}/audit/*"
       },
       {
+        Sid      = "AuditExportEncrypt"
         Effect   = "Allow"
-        Action   = ["s3:PutObject"]
-        Resource = "${aws_s3_bucket.b["audit"].arn}/*"
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
-        Resource = [aws_kms_key.data.arn, aws_kms_key.restricted.arn]
-      },
-      {
-        Effect    = "Allow"
-        Action    = ["ses:SendEmail", "ses:SendRawEmail"]
-        Resource  = "*"
-        Condition = { StringLike = { "ses:FromAddress" = "*@${local.use_domain ? var.domain_name : "example.invalid"}" } }
+        Action   = ["kms:GenerateDataKey"]
+        Resource = aws_kms_key.data.arn
+        Condition = {
+          StringEquals = { "kms:ViaService" = "s3.${var.aws_region}.amazonaws.com" }
+          StringLike   = { "kms:EncryptionContext:aws:s3:arn" = "${aws_s3_bucket.b["audit"].arn}*" }
+        }
       },
     ]
   })
@@ -425,13 +420,33 @@ resource "aws_ecs_task_definition" "worker" {
     operating_system_family = "LINUX"
   }
   volume { name = "tmp" }
+  # The worker gets its own environment: no session secret, OAuth client or
+  # document settings (it does not use them). See apps/api/src/worker/config.ts.
   container_definitions = jsonencode([merge(local.container_base, {
-    name        = "worker"
-    command     = ["node", "dist/worker.js"]
-    environment = local.common_env
-    secrets = concat(local.app_secrets, [
+    name    = "worker"
+    command = ["node", "dist/worker.js"]
+    environment = [
+      { name = "NODE_ENV", value = "production" },
+      { name = "NODE_EXTRA_CA_CERTS", value = "/app/certs/rds-global-bundle.pem" },
+      { name = "AWS_REGION", value = var.aws_region },
+      { name = "AUDIT_BUCKET", value = aws_s3_bucket.b["audit"].id },
+      { name = "DB_POOL_MAX", value = "3" },
+      { name = "SHUTDOWN_GRACE_SECONDS", value = "20" },
+      { name = "HEARTBEAT_FILE", value = "/tmp/worker-heartbeat" },
+    ]
+    secrets = [
       { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.generated["db/worker/url"].arn },
-    ])
+    ]
+    # SIGTERM gives the running job up to 20 s (SHUTDOWN_GRACE_SECONDS).
+    stopTimeout = 30
+    # Liveness: the scheduler touches the heartbeat file every tick (60 s).
+    healthCheck = {
+      command     = ["CMD", "node", "-e", "const s=require('fs').statSync('/tmp/worker-heartbeat');process.exit(Date.now()-s.mtimeMs<300000?0:1)"]
+      interval    = 60
+      timeout     = 5
+      retries     = 3
+      startPeriod = 60
+    }
     logConfiguration = {
       logDriver = "awslogs"
       options = {

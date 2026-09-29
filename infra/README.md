@@ -42,7 +42,7 @@ Browser ──HTTPS──> CloudFront (WAF, security headers)
                                          rejects requests without CloudFront's X-Origin-Verify secret)
                                             └── RDS PostgreSQL (private subnet, no internet route; TLS verify-full, RLS)
 ECS "migrate" task: runs before each rollout as the RDS master user ("jobs" SG: no inbound at all)
-ECS "worker":       desired_count 0 until Phase 2 ("jobs" SG)
+ECS "worker":       desired_count 0 until turned on ("jobs" SG); nightly audit export -> audit bucket
 ```
 
 Notes:
@@ -213,6 +213,31 @@ The workflow, per environment:
 Migrations must be backward compatible with the running version
 (expand → deploy → contract), because step 3 runs before the new API is live.
 
+## Turning on the worker
+
+The worker runs scheduled jobs from the `eureka.job_run` table (migration 0016).
+Today that is **audit-export**: every day at 03:30 America/New_York it writes the
+previous UTC day of `audit_event` to
+`s3://<audit bucket>/audit/YYYY/MM/DD/audit-events.jsonl.gz` (gzip JSON Lines,
+uploaded with `x-amz-checksum-sha256`, SSE-KMS and Object Lock from the bucket
+defaults) and appends the SHA-256, row count and seq range to
+`eureka.audit_export`. It catches up on the last 3 days after downtime; days
+already exported are skipped, and two tasks never export the same day.
+
+To turn it on, set `worker_desired_count = 1` in `infra/live/<env>/env.hcl` and
+deploy (one task is enough; more are safe but idle). The worker needs migration
+0016 applied first, which the deploy's migrate step does. Its task role can only
+`s3:PutObject` under `audit/*` in the audit bucket and `kms:GenerateDataKey` on
+the data key through S3; its task definition gets `DATABASE_URL` (the
+`eureka_worker` role) and `AUDIT_BUCKET`, nothing else. Logs are JSON lines in
+`/eureka/<env>/worker`: look for `"msg":"job succeeded","job":"audit-export"`.
+Check an export with:
+
+```sh
+aws s3api head-object --bucket <audit bucket> --key audit/YYYY/MM/DD/audit-events.jsonl.gz --checksum-mode ENABLED
+# ChecksumSHA256 (base64) matches eureka.audit_export.sha256_hex (hex) for that day
+```
+
 ## Known risks
 
 - **The API Gateway endpoint is public.** `https://<id>.execute-api.<region>.amazonaws.com`
@@ -246,9 +271,9 @@ checkov -d infra --config-file infra/.checkov.yaml --framework terraform
 |---|---|---|---|
 | Secrets Manager: RDS managed master secret | RDS | master user/password (rotated by RDS) | migrate task only |
 | SSM `/eureka/<env>/db/{app,worker}/{password,url}` | Terraform (random) | DB role credentials | api, worker, migrate |
-| SSM `/eureka/<env>/app/session_secret` | Terraform (random) | session/CSRF HMAC key | api, worker |
+| SSM `/eureka/<env>/app/session_secret` | Terraform (random) | session/CSRF HMAC key | api |
 | SSM `/eureka/<env>/app/origin_secret` | Terraform (random) | CloudFront → API shared secret | CloudFront, api |
-| SSM `/eureka/<env>/app/google_client_{id,secret}` | you | Google OAuth client | api, worker |
+| SSM `/eureka/<env>/app/google_client_{id,secret}` | you | Google OAuth client | api |
 
 All SSM values are SecureString encrypted with the `data` KMS key. Nothing from
 spokenly's secrets or `.env` files is reused.
