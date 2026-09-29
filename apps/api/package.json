@@ -9,7 +9,8 @@
     "test": "vitest run",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed-dev.ts",
-    "dev": "tsx watch src/main.ts"
+    "dev": "node --watch --import @swc-node/register/esm-register src/main.ts",
+    "start": "node --import @swc-node/register/esm-register src/main.ts"
   },
   "dependencies": {
     "@eureka/shared": "workspace:*",
@@ -25,6 +26,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@swc-node/register": "^1.12.1",
     "@swc/core": "^1.16.2",
     "@types/pg": "^8.23.1",
     "unplugin-swc": "^2.0.0"

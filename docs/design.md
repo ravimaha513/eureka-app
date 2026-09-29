@@ -572,7 +572,7 @@ CREATE POLICY candidate_update ON candidate FOR UPDATE TO eureka_app
     OR (SELECT authz.has_org('candidate:update')));
 ```
 
-**Worker role:** `eureka_worker` has no BYPASSRLS. It has its own policies (`TO eureka_worker`) and column grants limited to what each job reads. For example, the feedback-email job reads interview id, times and candidate first name and email, and writes `feedback_email_sent_at`. When a job acts for a user (for example a scheduled export), it sets that user's id and runs under the user's policies.
+**Worker role:** `eureka_worker` has no BYPASSRLS and is a member of `eureka_app` only `WITH INHERIT FALSE, SET TRUE`. It can switch role to act for a user, but gains none of the app's privileges by default (a gap found by the integration tests). It has its own policies (`TO eureka_worker`) and column grants limited to what each job reads. For example, the feedback-email job reads interview id, times and candidate first name and email, and writes `feedback_email_sent_at`. When a job acts for a user (for example a scheduled export), it sets that user's id and runs under the user's policies.
 
 **Reports:** report queries run against base tables (or `security_invoker` views) under the caller's RLS. Materialized views are not used in MVP because RLS does not apply to them.
 

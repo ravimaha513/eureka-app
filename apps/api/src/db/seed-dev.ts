@@ -16,7 +16,13 @@ const admin = new pg.Pool({ connectionString: url });
 const { rows } = await admin.query("SELECT count(*)::int AS n FROM eureka.app_user");
 if (rows[0].n === 0) {
   const candidates = await seedFixtures(admin);
-  await admin.query(`UPDATE eureka.candidate SET marketing_start_date = current_date - (random() * 40)::int`);
+  // Seed-only backfill as superuser; triggers are skipped for this one statement's session.
+  const c = await admin.connect();
+  await c.query("SET session_replication_role = replica");
+  await c.query(`UPDATE eureka.candidate SET marketing_start_date = current_date - (random() * 40)::int,
+    priority = (ARRAY['P1','P2','P3'])[1 + floor(random() * 3)::int]`);
+  await c.query("RESET session_replication_role");
+  c.release();
   console.log(`seeded ${candidates.length} fictional candidates; sign in as e.g. r1a@eureka.example, l1@eureka.example, m1@eureka.example, locD@eureka.example`);
 } else {
   console.log("database already has users; skipping fixtures");
