@@ -379,7 +379,7 @@ resource "aws_ecs_task_definition" "api" {
   volume { name = "tmp" }
   lifecycle {
     precondition {
-      condition     = var.google_hosted_domain != ""
+      condition     = trimspace(var.google_hosted_domain) != ""
       error_message = "google_hosted_domain is empty: set it to the company Google Workspace domain in infra/live/<env>/env.hcl before deploying the API."
     }
   }

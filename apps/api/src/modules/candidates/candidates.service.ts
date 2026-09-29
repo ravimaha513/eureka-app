@@ -91,13 +91,33 @@ interface HotlistRow {
   readable: boolean;
 }
 
-/** Hot List pages per user per minute (anti-scraping; design A-threats "mass export"). */
+/**
+ * Hot List pages per user per minute (anti-scraping; design A-threats "mass
+ * export"). Counted per API task, so the effective ceiling is this times the
+ * number of running tasks.
+ */
 export const HOTLIST_PAGES_PER_MINUTE = 60;
 
 @Injectable()
 export class CandidatesService implements OnModuleInit {
   private readonly log = new Logger(CandidatesService.name);
   private readonly hotlistLimiter = new RateLimiter(HOTLIST_PAGES_PER_MINUTE, 60_000);
+  /** The database is the source of truth for the Hot List switch (cached briefly). */
+  private hotlistPolicy: "everyone" | "team" = HOTLIST_VISIBILITY;
+  private hotlistPolicyAt = 0;
+
+  private async currentHotlistPolicy(): Promise<"everyone" | "team"> {
+    if (Date.now() - this.hotlistPolicyAt < 30_000) return this.hotlistPolicy;
+    try {
+      const { rows } = await this.db.system((c) => c.query<{ v: string }>("SELECT authz.hotlist_visibility() AS v"));
+      const v = rows[0]?.v;
+      this.hotlistPolicy = v === "everyone" ? "everyone" : "team"; // anything unexpected fails closed
+      this.hotlistPolicyAt = Date.now();
+    } catch (err) {
+      this.log.warn(`Could not read Hot List policy: ${(err as Error).message}`);
+    }
+    return this.hotlistPolicy;
+  }
 
   constructor(private readonly db: DbService, private readonly audit: AuditService) {}
 
@@ -155,7 +175,9 @@ export class CandidatesService implements OnModuleInit {
   }
 
   async list(user: AuthedUser, perm: "candidate:read" | "hotlist:read", q: CandidateListQuery) {
-    const scope = resolveScope(user.access, perm);
+    const scope = perm === "hotlist:read"
+      ? resolveScope(user.access, perm, await this.currentHotlistPolicy())
+      : resolveScope(user.access, perm);
     if (!scope) throw new ForbiddenException();
     if (perm === "hotlist:read") {
       if (!this.hotlistLimiter.take(user.id)) {
@@ -198,7 +220,8 @@ export class CandidatesService implements OnModuleInit {
       )).rows;
       await this.audit.record(c, {
         actorId: user.id, action: "hotlist.read", entityType: "candidate",
-        changes: { filters: { status: q.status, technology: q.technology, visibility: q.visibility, search: q.search ? true : undefined }, rows: Math.min(r.length, q.limit) },
+        changes: { filters: { status: q.status, technology: q.technology, visibility: q.visibility, search: q.search ? true : undefined }, rows: Math.min(r.length, q.limit),
+          firstId: r[0]?.id ?? null, lastId: r[Math.min(r.length, q.limit) - 1]?.id ?? null },
       });
       return r;
     });

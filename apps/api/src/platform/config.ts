@@ -18,7 +18,7 @@ const ConfigSchema = z
     DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(10),
     // Seconds to keep serving after SIGTERM before closing, so API Gateway and
     // Cloud Map stop routing to this task before its connections go away.
-    DRAIN_SECONDS: z.coerce.number().int().min(0).max(120).default(15),
+    DRAIN_SECONDS: z.coerce.number().int().min(0).max(25).default(15), // ECS stopTimeout is 30 s
     SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
     AUTH_MODE: z.enum(["google", "dev"]).default("google"),
     GOOGLE_CLIENT_ID: z.string().optional(),

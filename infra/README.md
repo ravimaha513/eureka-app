@@ -127,6 +127,10 @@ interruptions) or a 1-year RDS reservation (about 30% off).
 
 Staging, when you need it, costs about $25–35/month while it exists (billed
 hourly): `cd infra/live/staging && terragrunt apply`, then `terragrunt destroy`.
+The WAF web ACL has `prevent_destroy`, so a staging teardown first removes it
+from state (`terragrunt state rm aws_wafv2_web_acl.main`), then deletes it in
+the console after the distribution is gone. Never do this for production while
+it is on a flat-rate plan.
 
 ## One-time setup (you run this, from a machine with admin AWS credentials)
 

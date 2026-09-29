@@ -126,6 +126,19 @@ describe("differential: database RLS alone matches the application engine", () =
       .rejects.toThrow(/not permitted/);
   });
 
+  it("a transition to NULL is refused by the transition check", async () => {
+    const c = candidates.find((x) => x.recruiterId === U.r1a && x.marketingStatus === "active")!;
+    await expect(asUser(db.app, U.r1a, (cl) => cl.query(`SELECT authz.transition_candidate($1, NULL)`, [c.id])))
+      .rejects.toThrow(/invalid transition/);
+  });
+
+  it("a 200-row Hot List page resolves the caller's scope once (fast)", async () => {
+    await asUser(db.app, U.r1a, (c) => c.query(`SELECT count(*) FROM authz.hotlist_page(NULL, NULL, NULL, NULL, NULL, 200)`));
+    const t0 = performance.now();
+    await asUser(db.app, U.r1a, (c) => c.query(`SELECT count(*) FROM authz.hotlist_page(NULL, NULL, NULL, NULL, NULL, 200)`));
+    expect(performance.now() - t0).toBeLessThan(250);
+  });
+
   it("an unknown or inactive user id sees no Hot List", async () => {
     const unknown = await asUser(db.app, "00000000-0000-0000-0000-00000000dead", async (c) =>
       (await c.query(`SELECT count(*)::int n FROM authz.hotlist_page(NULL, NULL, NULL, NULL, NULL, 500)`)).rows[0].n);

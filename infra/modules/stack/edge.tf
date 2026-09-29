@@ -192,14 +192,14 @@ resource "aws_cloudfront_response_headers_policy" "security" {
 resource "aws_cloudfront_function" "spa_rewrite" {
   name    = "${local.name}-spa-rewrite"
   runtime = "cloudfront-js-2.0"
-  comment = "Rewrite extensionless SPA routes to /index.html"
+  comment = "Serve /index.html for SPA routes; real assets have known extensions"
   publish = true
   code    = <<-EOT
+    var ASSET = /\.(js|mjs|css|map|svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf|json|txt|webmanifest|xml)$/i;
     function handler(event) {
       var request = event.request;
-      var uri = request.uri;
-      var last = uri.substring(uri.lastIndexOf("/") + 1);
-      if (last.indexOf(".") === -1) {
+      // Route ids may contain dots (e.g. an email); only known asset types go to S3.
+      if (!ASSET.test(request.uri)) {
         request.uri = "/index.html";
       }
       return request;
