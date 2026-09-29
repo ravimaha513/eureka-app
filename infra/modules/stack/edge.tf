@@ -1,6 +1,8 @@
 # Edge (design A5 "Edge", A6.5): CloudFront serves the SPA from S3 (OAC) and
-# forwards /api/* to the ALB over HTTPS with a secret origin header. WAF with
-# AWS managed rules and a per-IP rate limit. Security headers on every response.
+# forwards /api/* to the API Gateway HTTP API with a secret origin header that
+# the app checks. WAF with AWS managed rules and per-IP rate limits (5 rules,
+# the limit of the CloudFront flat-rate Free plan, which includes WAF at $0).
+# Security headers on every response.
 
 data "aws_route53_zone" "main" {
   count        = local.use_domain ? 1 : 0
@@ -8,11 +10,7 @@ data "aws_route53_zone" "main" {
   private_zone = false
 }
 
-locals {
-  origin_host = local.use_domain ? "origin-${var.domain_name}" : ""
-}
-
-# ----- Certificates (DNS validated) -----
+# ----- Certificate (DNS validated; only when a custom domain is set) -----
 resource "aws_acm_certificate" "cdn" {
   count             = local.use_domain ? 1 : 0
   provider          = aws.us_east_1
@@ -21,22 +19,9 @@ resource "aws_acm_certificate" "cdn" {
   lifecycle { create_before_destroy = true }
 }
 
-resource "aws_acm_certificate" "origin" {
-  domain_name       = local.use_domain ? local.origin_host : "origin.${local.name}.invalid"
-  validation_method = "DNS"
-  lifecycle {
-    create_before_destroy = true
-    precondition {
-      condition     = local.use_domain
-      error_message = "domain_name and hosted_zone_name must be set: CloudFront reaches the ALB over HTTPS on origin-<domain>."
-    }
-  }
-}
-
 resource "aws_route53_record" "cert_validation" {
   for_each = local.use_domain ? {
-    for o in concat(tolist(aws_acm_certificate.cdn[0].domain_validation_options), tolist(aws_acm_certificate.origin.domain_validation_options)) :
-    o.domain_name => o
+    for o in aws_acm_certificate.cdn[0].domain_validation_options : o.domain_name => o
   } : {}
   zone_id         = data.aws_route53_zone.main[0].zone_id
   name            = each.value.resource_record_name
@@ -50,24 +35,7 @@ resource "aws_acm_certificate_validation" "cdn" {
   count                   = local.use_domain ? 1 : 0
   provider                = aws.us_east_1
   certificate_arn         = aws_acm_certificate.cdn[0].arn
-  validation_record_fqdns = [for r in aws_route53_record.cert_validation : r.fqdn if r.name == tolist(aws_acm_certificate.cdn[0].domain_validation_options)[0].resource_record_name]
-}
-
-resource "aws_acm_certificate_validation" "origin" {
-  certificate_arn         = aws_acm_certificate.origin.arn
-  validation_record_fqdns = [for r in aws_route53_record.cert_validation : r.fqdn if r.name == tolist(aws_acm_certificate.origin.domain_validation_options)[0].resource_record_name]
-}
-
-resource "aws_route53_record" "origin" {
-  count   = local.use_domain ? 1 : 0
-  zone_id = data.aws_route53_zone.main[0].zone_id
-  name    = local.origin_host
-  type    = "A"
-  alias {
-    name                   = aws_lb.api.dns_name
-    zone_id                = aws_lb.api.zone_id
-    evaluate_target_health = true
-  }
+  validation_record_fqdns = [for r in aws_route53_record.cert_validation : r.fqdn]
 }
 
 resource "aws_route53_record" "app" {
@@ -95,8 +63,9 @@ resource "aws_wafv2_web_acl" "main" {
     for_each = {
       AWSManagedRulesCommonRuleSet          = 10
       AWSManagedRulesKnownBadInputsRuleSet  = 20
-      AWSManagedRulesSQLiRuleSet            = 30
       AWSManagedRulesAmazonIpReputationList = 40
+      # SQLi rule set dropped to stay within 5 rules: every query is
+      # parameterized and row access is enforced by RLS.
     }
     content {
       name     = rule.key
@@ -232,7 +201,7 @@ resource "aws_cloudfront_distribution" "main" {
 
   origin {
     origin_id   = "api"
-    domain_name = local.use_domain ? local.origin_host : aws_lb.api.dns_name
+    domain_name = replace(aws_apigatewayv2_api.api.api_endpoint, "https://", "")
     custom_origin_config {
       http_port              = 80
       https_port             = 443
@@ -242,7 +211,7 @@ resource "aws_cloudfront_distribution" "main" {
     }
     custom_header {
       name  = "X-Origin-Verify"
-      value = random_password.origin_secret.result
+      value = random_password.origin_secret.result # checked by the API (origin guard)
     }
   }
 
@@ -293,12 +262,6 @@ resource "aws_cloudfront_distribution" "main" {
     acm_certificate_arn            = local.use_domain ? aws_acm_certificate_validation.cdn[0].certificate_arn : null
     ssl_support_method             = local.use_domain ? "sni-only" : null
     minimum_protocol_version       = "TLSv1.2_2021"
-  }
-
-  logging_config {
-    bucket          = aws_s3_bucket.b["logs"].bucket_domain_name
-    prefix          = "cloudfront/"
-    include_cookies = false
   }
 }
 
@@ -352,18 +315,19 @@ resource "aws_kms_key_policy" "data" {
   })
 }
 
-# ALB access logs delivery (regional ELB account via service principal).
-resource "aws_s3_bucket_policy" "logs_delivery" {
+# Logs bucket: S3 server access logs from the other buckets.
+resource "aws_s3_bucket_policy" "logs" {
   bucket = aws_s3_bucket.b["logs"].id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid       = "ELBLogDelivery"
+        Sid       = "S3ServerAccessLogs"
         Effect    = "Allow"
-        Principal = { Service = "logdelivery.elasticloadbalancing.amazonaws.com" }
+        Principal = { Service = "logging.s3.amazonaws.com" }
         Action    = "s3:PutObject"
-        Resource  = "${aws_s3_bucket.b["logs"].arn}/alb/AWSLogs/${data.aws_caller_identity.current.account_id}/*"
+        Resource  = "${aws_s3_bucket.b["logs"].arn}/s3/*"
+        Condition = { StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id } }
       },
       {
         Sid       = "DenyInsecureTransport"
@@ -375,50 +339,4 @@ resource "aws_s3_bucket_policy" "logs_delivery" {
       },
     ]
   })
-}
-
-# WAF logs (names must start with aws-waf-logs-); auth headers and cookies redacted.
-resource "aws_kms_key" "waf_logs" {
-  provider            = aws.us_east_1
-  description         = "${local.name} WAF logs (us-east-1)"
-  enable_key_rotation = true
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "AccountAdmin"
-        Effect    = "Allow"
-        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
-        Action    = "kms:*"
-        Resource  = "*"
-      },
-      {
-        Sid       = "CloudWatchLogs"
-        Effect    = "Allow"
-        Principal = { Service = "logs.us-east-1.amazonaws.com" }
-        Action    = ["kms:Encrypt*", "kms:Decrypt*", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:Describe*"]
-        Resource  = "*"
-        Condition = { ArnLike = { "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:aws-waf-logs-${local.name}" } }
-      },
-    ]
-  })
-}
-
-resource "aws_cloudwatch_log_group" "waf" {
-  provider          = aws.us_east_1
-  name              = "aws-waf-logs-${local.name}"
-  retention_in_days = var.log_retention_days
-  kms_key_id        = aws_kms_key.waf_logs.arn
-}
-
-resource "aws_wafv2_web_acl_logging_configuration" "main" {
-  provider                = aws.us_east_1
-  resource_arn            = aws_wafv2_web_acl.main.arn
-  log_destination_configs = [aws_cloudwatch_log_group.waf.arn]
-  redacted_fields {
-    single_header { name = "cookie" }
-  }
-  redacted_fields {
-    single_header { name = "x-csrf-token" }
-  }
 }

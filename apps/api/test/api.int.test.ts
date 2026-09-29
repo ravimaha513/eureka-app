@@ -69,6 +69,34 @@ describe("authentication and session", () => {
       .toThrow(/not allowed in production/);
   });
 
+  it("production requires the CloudFront origin secret", () => {
+    expect(() => loadConfig({ NODE_ENV: "production", AUTH_MODE: "google", SESSION_SECRET: SECRET, DATABASE_URL: "postgres://x@y/z",
+      GOOGLE_CLIENT_ID: "c", GOOGLE_CLIENT_SECRET: "s", GOOGLE_HOSTED_DOMAIN: "eureka.example" }))
+      .toThrow(/ORIGIN_VERIFY_SECRET is required/);
+  });
+
+  it("with an origin secret, only requests carrying it reach the API (health stays open)", async () => {
+    const url = new URL(process.env.TEST_PG_ADMIN_URL ?? "postgres://postgres:postgres@127.0.0.1:5432");
+    const origin = "cloudfront-origin-secret-cloudfront-origin-secret";
+    const guarded = await createApp(loadConfig({
+      NODE_ENV: "test", AUTH_MODE: "dev", SESSION_SECRET: SECRET, ORIGIN_VERIFY_SECRET: origin,
+      DATABASE_URL: `postgres://eureka_app:eureka_app_test@${url.host}/${db.name}`,
+    }));
+    try {
+      const direct = await guarded.inject({ method: "GET", url: "/api/v1/me" });
+      expect(direct.statusCode).toBe(403);
+      expect(direct.headers["content-type"]).toContain("application/problem+json");
+      const wrong = await guarded.inject({ method: "POST", url: "/api/auth/dev-login", headers: { "x-origin-verify": "nope" },
+        payload: { email: "r1a@eureka.example" } });
+      expect(wrong.statusCode).toBe(403);
+      expect((await guarded.inject({ method: "GET", url: "/api/health" })).statusCode).toBe(200);
+      const viaCdn = await guarded.inject({ method: "GET", url: "/api/v1/me", headers: { "x-origin-verify": origin } });
+      expect(viaCdn.statusCode).toBe(401); // passes the guard, then needs a session
+    } finally {
+      await guarded.close();
+    }
+  });
+
   it("unknown users cannot sign in", async () => {
     const r = await app.inject({ method: "POST", url: "/api/auth/dev-login", payload: { email: "nobody@eureka.example" } });
     expect(r.statusCode).toBe(403);

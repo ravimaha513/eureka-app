@@ -33,8 +33,7 @@ resource "aws_s3_bucket_ownership_controls" "b" {
   for_each = aws_s3_bucket.b
   bucket   = each.value.id
   rule {
-    # CloudFront standard logging still needs ACLs on the logs bucket.
-    object_ownership = each.key == "logs" ? "BucketOwnerPreferred" : "BucketOwnerEnforced"
+    object_ownership = "BucketOwnerEnforced"
   }
 }
 
@@ -49,7 +48,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "b" {
   bucket   = each.value.id
   rule {
     apply_server_side_encryption_by_default {
-      # Logs bucket uses SSE-S3 because CloudFront/S3 log delivery cannot use KMS.
+      # Logs bucket uses SSE-S3: S3 server access log delivery cannot use SSE-KMS.
       sse_algorithm     = each.key == "logs" ? "AES256" : "aws:kms"
       kms_master_key_id = each.key == "logs" ? null : aws_kms_key.data.arn
     }
@@ -153,7 +152,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "logs" {
     id     = "expire-logs"
     status = "Enabled"
     filter {}
-    expiration { days = local.is_prod ? 365 : 30 }
+    expiration { days = local.is_prod ? 90 : 14 }
     noncurrent_version_expiration { noncurrent_days = 7 }
     abort_incomplete_multipart_upload { days_after_initiation = 1 }
   }

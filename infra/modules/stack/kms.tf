@@ -1,12 +1,10 @@
-# Separate keys limit blast radius (design A5 "Secrets and keys", A6.3).
-locals {
-  kms_keys = {
-    data       = "RDS, general S3 objects, secrets"
-    restricted = "Restricted documents (I-9, driving license, work authorization)"
-    field      = "Application field encryption data keys (DOB, visa number)"
-    logs       = "CloudWatch log groups"
-  }
-}
+# Two customer-managed keys ($1/month each):
+#   data       RDS, S3 objects, ECR, SSM parameters
+#   restricted restricted documents (I-9, driving license, work authorization)
+#              and application field encryption (DOB, visa number); the
+#              encryption context separates the two uses.
+# CloudWatch log groups use the default service encryption: the app never logs
+# document contents or restricted fields.
 
 data "aws_iam_policy_document" "kms_base" {
   statement {
@@ -20,28 +18,10 @@ data "aws_iam_policy_document" "kms_base" {
   }
 }
 
-data "aws_iam_policy_document" "kms_logs" {
-  source_policy_documents = [data.aws_iam_policy_document.kms_base.json]
-  statement {
-    sid       = "CloudWatchLogs"
-    actions   = ["kms:Encrypt*", "kms:Decrypt*", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:Describe*"]
-    resources = ["*"]
-    principals {
-      type        = "Service"
-      identifiers = ["logs.${var.aws_region}.amazonaws.com"]
-    }
-    condition {
-      test     = "ArnLike"
-      variable = "kms:EncryptionContext:aws:logs:arn"
-      values   = ["arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/eureka/${var.environment}/*"]
-    }
-  }
-}
-
 # Key policy is managed in edge.tf (aws_kms_key_policy.data) because it must
 # reference the CloudFront distribution.
 resource "aws_kms_key" "data" {
-  description         = "${local.name} ${local.kms_keys.data}"
+  description         = "${local.name} data: RDS, S3, ECR, SSM"
   enable_key_rotation = true
 }
 resource "aws_kms_alias" "data" {
@@ -50,31 +30,11 @@ resource "aws_kms_alias" "data" {
 }
 
 resource "aws_kms_key" "restricted" {
-  description         = "${local.name} ${local.kms_keys.restricted}"
+  description         = "${local.name} restricted documents and field encryption"
   enable_key_rotation = true
   policy              = data.aws_iam_policy_document.kms_base.json
 }
 resource "aws_kms_alias" "restricted" {
   name          = "alias/${local.name}-restricted"
   target_key_id = aws_kms_key.restricted.id
-}
-
-resource "aws_kms_key" "field" {
-  description         = "${local.name} ${local.kms_keys.field}"
-  enable_key_rotation = true
-  policy              = data.aws_iam_policy_document.kms_base.json
-}
-resource "aws_kms_alias" "field" {
-  name          = "alias/${local.name}-field"
-  target_key_id = aws_kms_key.field.id
-}
-
-resource "aws_kms_key" "logs" {
-  description         = "${local.name} ${local.kms_keys.logs}"
-  enable_key_rotation = true
-  policy              = data.aws_iam_policy_document.kms_logs.json
-}
-resource "aws_kms_alias" "logs" {
-  name          = "alias/${local.name}-logs"
-  target_key_id = aws_kms_key.logs.id
 }

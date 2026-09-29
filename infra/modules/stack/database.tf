@@ -81,49 +81,20 @@ resource "aws_db_instance" "main" {
   auto_minor_version_upgrade          = true
   iam_database_authentication_enabled = true
 
-  performance_insights_enabled          = true
-  performance_insights_kms_key_id       = aws_kms_key.data.arn
-  performance_insights_retention_period = 7
-  monitoring_interval                   = 60
-  monitoring_role_arn                   = aws_iam_role.rds_monitoring.arn
-  enabled_cloudwatch_logs_exports       = ["postgresql", "upgrade"]
+  # Cost: no Enhanced Monitoring or Performance Insights (basic CloudWatch
+  # metrics are free); slow queries still reach CloudWatch through the log export.
+  performance_insights_enabled    = false
+  monitoring_interval             = 0
+  enabled_cloudwatch_logs_exports = ["postgresql"]
 }
 
-resource "aws_iam_role" "rds_monitoring" {
-  name = "${local.name}-rds-monitoring"
-  assume_role_policy = jsonencode({
-    Version   = "2012-10-17"
-    Statement = [{ Effect = "Allow", Principal = { Service = "monitoring.rds.amazonaws.com" }, Action = "sts:AssumeRole" }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "rds_monitoring" {
-  role       = aws_iam_role.rds_monitoring.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
-}
-
-# Application role passwords (eureka_app, eureka_worker); the migrate task sets
-# them in PostgreSQL from these secrets. Rotation: Phase 5 (Secrets Manager rotation Lambda).
+# Runtime configuration lives in SSM Parameter Store (SecureString, standard
+# tier: free) instead of Secrets Manager ($0.40 per secret per month). Only the
+# RDS master password stays in Secrets Manager, where RDS manages and rotates it.
 resource "random_password" "db_role" {
   for_each = toset(["app", "worker"])
   length   = 40
   special  = false
-}
-
-resource "aws_secretsmanager_secret" "db_role" {
-  for_each   = random_password.db_role
-  name       = "eureka/${var.environment}/db/${each.key}"
-  kms_key_id = aws_kms_key.data.arn
-}
-
-resource "aws_secretsmanager_secret_version" "db_role" {
-  for_each  = random_password.db_role
-  secret_id = aws_secretsmanager_secret.db_role[each.key].id
-  secret_string = jsonencode({
-    username = "eureka_${each.key}"
-    password = each.value.result
-    url      = "postgres://eureka_${each.key}:${each.value.result}@${aws_db_instance.main.address}:5432/eureka?sslmode=verify-full"
-  })
 }
 
 resource "random_password" "session_secret" {
@@ -131,18 +102,41 @@ resource "random_password" "session_secret" {
   special = false
 }
 
-resource "aws_secretsmanager_secret" "app" {
-  name       = "eureka/${var.environment}/app"
-  kms_key_id = aws_kms_key.data.arn
+resource "random_password" "origin_secret" {
+  length  = 48
+  special = false
 }
 
-# Google OAuth client credentials are entered once in the console (never in code).
-resource "aws_secretsmanager_secret_version" "app" {
-  secret_id = aws_secretsmanager_secret.app.id
-  secret_string = jsonencode({
-    SESSION_SECRET       = random_password.session_secret.result
-    GOOGLE_CLIENT_ID     = "set-in-console"
-    GOOGLE_CLIENT_SECRET = "set-in-console"
-  })
-  lifecycle { ignore_changes = [secret_string] }
+locals {
+  ssm_prefix = "/eureka/${var.environment}"
+  generated_params = {
+    "db/app/password"    = random_password.db_role["app"].result
+    "db/app/url"         = "postgres://eureka_app:${random_password.db_role["app"].result}@${aws_db_instance.main.address}:5432/eureka?sslmode=verify-full"
+    "db/worker/password" = random_password.db_role["worker"].result
+    "db/worker/url"      = "postgres://eureka_worker:${random_password.db_role["worker"].result}@${aws_db_instance.main.address}:5432/eureka?sslmode=verify-full"
+    "app/session_secret" = random_password.session_secret.result
+    "app/origin_secret"  = random_password.origin_secret.result
+  }
+}
+
+resource "aws_ssm_parameter" "generated" {
+  for_each = local.generated_params
+  name     = "${local.ssm_prefix}/${each.key}"
+  type     = "SecureString"
+  tier     = "Standard"
+  key_id   = aws_kms_key.data.arn
+  value    = each.value
+}
+
+# Google OAuth client credentials are entered once by hand (never in code):
+#   aws ssm put-parameter --overwrite --type SecureString --key-id alias/eureka-<env>-data \
+#     --name /eureka/<env>/app/google_client_id --value ...
+resource "aws_ssm_parameter" "google" {
+  for_each = toset(["google_client_id", "google_client_secret"])
+  name     = "${local.ssm_prefix}/app/${each.key}"
+  type     = "SecureString"
+  tier     = "Standard"
+  key_id   = aws_kms_key.data.arn
+  value    = "set-me"
+  lifecycle { ignore_changes = [value] }
 }

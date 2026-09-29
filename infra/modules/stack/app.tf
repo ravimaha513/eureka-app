@@ -1,5 +1,7 @@
 # Compute (design A5 "Compute", A8): ECR, ECS Fargate API and worker, one-off
-# migrate task, ALB reachable only from CloudFront with a shared origin secret.
+# migrate task. No load balancer: CloudFront -> API Gateway HTTP API -> VPC link
+# -> Cloud Map -> API tasks. At this app's volume that costs cents instead of
+# ~$25/month for an ALB and its public IPs.
 
 resource "aws_ecr_repository" "api" {
   name                 = "${local.name}-api"
@@ -16,8 +18,8 @@ resource "aws_ecr_lifecycle_policy" "api" {
   policy = jsonencode({
     rules = [{
       rulePriority = 1
-      description  = "Keep last 30 images"
-      selection    = { tagStatus = "any", countType = "imageCountMoreThan", countNumber = 30 }
+      description  = "Keep last 10 images"
+      selection    = { tagStatus = "any", countType = "imageCountMoreThan", countNumber = 10 }
       action       = { type = "expire" }
     }]
   })
@@ -26,8 +28,9 @@ resource "aws_ecr_lifecycle_policy" "api" {
 resource "aws_ecs_cluster" "main" {
   name = local.name
   setting {
+    # Container Insights bills custom metrics per task; basic ECS metrics are free.
     name  = "containerInsights"
-    value = "enabled"
+    value = "disabled"
   }
 }
 
@@ -40,7 +43,6 @@ resource "aws_cloudwatch_log_group" "app" {
   for_each          = toset(["api", "worker", "migrate"])
   name              = "/eureka/${var.environment}/${each.key}"
   retention_in_days = var.log_retention_days
-  kms_key_id        = aws_kms_key.logs.arn
 }
 
 # ---------- IAM ----------
@@ -76,12 +78,14 @@ resource "aws_iam_role_policy" "execution_secrets" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = ["secretsmanager:GetSecretValue"]
-        Resource = concat(
-          [for s in aws_secretsmanager_secret.db_role : s.arn],
-          [aws_secretsmanager_secret.app.arn, aws_db_instance.main.master_user_secret[0].secret_arn],
-        )
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameters"]
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.ssm_prefix}/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = [aws_db_instance.main.master_user_secret[0].secret_arn]
       },
       {
         Effect   = "Allow"
@@ -118,7 +122,7 @@ resource "aws_iam_role_policy" "api" {
       {
         Effect   = "Allow"
         Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
-        Resource = [aws_kms_key.data.arn, aws_kms_key.restricted.arn, aws_kms_key.field.arn]
+        Resource = [aws_kms_key.data.arn, aws_kms_key.restricted.arn]
       },
       {
         Effect    = "Allow"
@@ -159,7 +163,7 @@ resource "aws_iam_role_policy" "worker" {
       {
         Effect   = "Allow"
         Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
-        Resource = [aws_kms_key.data.arn, aws_kms_key.restricted.arn, aws_kms_key.field.arn]
+        Resource = [aws_kms_key.data.arn, aws_kms_key.restricted.arn]
       },
       {
         Effect    = "Allow"
@@ -171,29 +175,16 @@ resource "aws_iam_role_policy" "worker" {
   })
 }
 
-# ---------- Networking for tasks and ALB ----------
-data "aws_ec2_managed_prefix_list" "cloudfront" {
-  name = "com.amazonaws.global.cloudfront.origin-facing"
-}
-
-resource "aws_security_group" "alb" {
-  name        = "${local.name}-alb"
-  description = "ALB: HTTPS from CloudFront only"
+# ---------- Networking: API Gateway HTTP API -> VPC link -> tasks ----------
+resource "aws_security_group" "vpc_link" {
+  name        = "${local.name}-vpc-link"
+  description = "API Gateway VPC link ENIs: to API tasks only"
   vpc_id      = aws_vpc.main.id
-  tags        = { Name = "${local.name}-alb" }
+  tags        = { Name = "${local.name}-vpc-link" }
 }
 
-resource "aws_vpc_security_group_ingress_rule" "alb_from_cloudfront" {
-  security_group_id = aws_security_group.alb.id
-  prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront.id
-  ip_protocol       = "tcp"
-  from_port         = 443
-  to_port           = 443
-  description       = "HTTPS from CloudFront origin-facing IPs"
-}
-
-resource "aws_vpc_security_group_egress_rule" "alb_to_tasks" {
-  security_group_id            = aws_security_group.alb.id
+resource "aws_vpc_security_group_egress_rule" "vpc_link_to_tasks" {
+  security_group_id            = aws_security_group.vpc_link.id
   referenced_security_group_id = aws_security_group.tasks.id
   ip_protocol                  = "tcp"
   from_port                    = 3000
@@ -203,18 +194,18 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_tasks" {
 
 resource "aws_security_group" "tasks" {
   name        = "${local.name}-tasks"
-  description = "ECS tasks: API port from ALB; egress HTTPS and Postgres"
+  description = "ECS tasks: API port from the VPC link only; egress HTTPS and Postgres"
   vpc_id      = aws_vpc.main.id
   tags        = { Name = "${local.name}-tasks" }
 }
 
-resource "aws_vpc_security_group_ingress_rule" "tasks_from_alb" {
+resource "aws_vpc_security_group_ingress_rule" "tasks_from_vpc_link" {
   security_group_id            = aws_security_group.tasks.id
-  referenced_security_group_id = aws_security_group.alb.id
+  referenced_security_group_id = aws_security_group.vpc_link.id
   ip_protocol                  = "tcp"
   from_port                    = 3000
   to_port                      = 3000
-  description                  = "API from ALB"
+  description                  = "API from API Gateway VPC link"
 }
 
 resource "aws_vpc_security_group_egress_rule" "tasks_https" {
@@ -235,72 +226,78 @@ resource "aws_vpc_security_group_egress_rule" "tasks_db" {
   description                  = "Postgres"
 }
 
-resource "aws_lb" "api" {
-  name                       = "${local.name}-api"
-  load_balancer_type         = "application"
-  internal                   = false
-  subnets                    = aws_subnet.public[*].id
-  security_groups            = [aws_security_group.alb.id]
-  drop_invalid_header_fields = true
-  enable_deletion_protection = local.is_prod
-  access_logs {
-    bucket  = aws_s3_bucket.b["logs"].id
-    prefix  = "alb"
-    enabled = true
-  }
-  depends_on = [aws_s3_bucket_policy.logs_delivery]
+# Cloud Map: ECS registers each healthy API task (SRV record carries the port).
+resource "aws_service_discovery_private_dns_namespace" "main" {
+  name = "${local.name}.local"
+  vpc  = aws_vpc.main.id
 }
 
-resource "aws_lb_target_group" "api" {
-  name        = "${local.name}-api"
-  port        = 3000
-  protocol    = "HTTP"
-  target_type = "ip"
-  vpc_id      = aws_vpc.main.id
-  health_check {
-    path                = "/api/health"
-    matcher             = "200"
-    interval            = 15
-    healthy_threshold   = 2
-    unhealthy_threshold = 3
-  }
-  deregistration_delay = 20
-}
-
-resource "random_password" "origin_secret" {
-  length  = 48
-  special = false
-}
-
-resource "aws_lb_listener" "https" {
-  load_balancer_arn = aws_lb.api.arn
-  port              = 443
-  protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.origin.certificate_arn
-  default_action {
-    type = "fixed-response"
-    fixed_response {
-      content_type = "text/plain"
-      message_body = "Forbidden"
-      status_code  = "403"
+resource "aws_service_discovery_service" "api" {
+  name = "api"
+  dns_config {
+    namespace_id   = aws_service_discovery_private_dns_namespace.main.id
+    routing_policy = "MULTIVALUE"
+    dns_records {
+      type = "SRV"
+      ttl  = 10
     }
   }
+  health_check_custom_config {
+    failure_threshold = 1
+  }
 }
 
-# Only requests carrying CloudFront's secret header reach the API.
-resource "aws_lb_listener_rule" "from_cloudfront" {
-  listener_arn = aws_lb_listener.https.arn
-  priority     = 10
-  condition {
-    http_header {
-      http_header_name = "X-Origin-Verify"
-      values           = [random_password.origin_secret.result]
-    }
+resource "aws_apigatewayv2_vpc_link" "api" {
+  name               = local.name
+  security_group_ids = [aws_security_group.vpc_link.id]
+  subnet_ids         = aws_subnet.public[*].id
+}
+
+resource "aws_apigatewayv2_api" "api" {
+  name          = local.name
+  protocol_type = "HTTP"
+  description   = "Eureka API origin for CloudFront; requests without the origin secret are rejected by the app"
+}
+
+resource "aws_apigatewayv2_integration" "api" {
+  api_id                 = aws_apigatewayv2_api.api.id
+  integration_type       = "HTTP_PROXY"
+  integration_method     = "ANY"
+  connection_type        = "VPC_LINK"
+  connection_id          = aws_apigatewayv2_vpc_link.api.id
+  integration_uri        = aws_service_discovery_service.api.arn
+  payload_format_version = "1.0"
+  timeout_milliseconds   = 29000
+}
+
+# Authorization is done by the application (session + RBAC + RLS), not API Gateway.
+resource "aws_apigatewayv2_route" "api" {
+  api_id    = aws_apigatewayv2_api.api.id
+  route_key = "ANY /api/{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.api.id}"
+}
+
+resource "aws_cloudwatch_log_group" "apigw" {
+  name              = "/eureka/${var.environment}/apigw"
+  retention_in_days = var.log_retention_days
+}
+
+resource "aws_apigatewayv2_stage" "default" {
+  api_id      = aws_apigatewayv2_api.api.id
+  name        = "$default"
+  auto_deploy = true
+  # Hard ceiling on request volume (and therefore cost) if the endpoint is abused.
+  default_route_settings {
+    throttling_burst_limit = 100
+    throttling_rate_limit  = 50
   }
-  action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.api.arn
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.apigw.arn
+    format = jsonencode({
+      requestId        = "$context.requestId", ip = "$context.identity.sourceIp", method = "$context.httpMethod",
+      path             = "$context.path", status = "$context.status", latencyMs = "$context.responseLatency",
+      integrationError = "$context.integrationErrorMessage"
+    })
   }
 }
 
@@ -316,12 +313,12 @@ locals {
     { name = "NODE_EXTRA_CA_CERTS", value = "/app/certs/rds-global-bundle.pem" },
     { name = "AWS_REGION", value = var.aws_region },
     { name = "DOCUMENTS_BUCKET", value = aws_s3_bucket.b["documents"].id },
-    { name = "FIELD_KMS_KEY_ARN", value = aws_kms_key.field.arn },
+    { name = "FIELD_KMS_KEY_ARN", value = aws_kms_key.restricted.arn },
   ]
   app_secrets = [
-    { name = "SESSION_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:SESSION_SECRET::" },
-    { name = "GOOGLE_CLIENT_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:GOOGLE_CLIENT_ID::" },
-    { name = "GOOGLE_CLIENT_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:GOOGLE_CLIENT_SECRET::" },
+    { name = "SESSION_SECRET", valueFrom = aws_ssm_parameter.generated["app/session_secret"].arn },
+    { name = "GOOGLE_CLIENT_ID", valueFrom = aws_ssm_parameter.google["google_client_id"].arn },
+    { name = "GOOGLE_CLIENT_SECRET", valueFrom = aws_ssm_parameter.google["google_client_secret"].arn },
   ]
   container_base = {
     image                  = local.image
@@ -352,7 +349,8 @@ resource "aws_ecs_task_definition" "api" {
     portMappings = [{ containerPort = 3000, protocol = "tcp" }]
     environment  = concat(local.common_env, [{ name = "PORT", value = "3000" }])
     secrets = concat(local.app_secrets, [
-      { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.db_role["app"].arn}:url::" },
+      { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.generated["db/app/url"].arn },
+      { name = "ORIGIN_VERIFY_SECRET", valueFrom = aws_ssm_parameter.generated["app/origin_secret"].arn },
     ])
     healthCheck = {
       # The runtime image has no curl/wget; use Node's fetch.
@@ -390,7 +388,7 @@ resource "aws_ecs_task_definition" "worker" {
     command     = ["node", "dist/worker.js"]
     environment = local.common_env
     secrets = concat(local.app_secrets, [
-      { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.db_role["worker"].arn}:url::" },
+      { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.generated["db/worker/url"].arn },
     ])
     logConfiguration = {
       logDriver = "awslogs"
@@ -430,8 +428,8 @@ resource "aws_ecs_task_definition" "migrate" {
     secrets = [
       { name = "DB_MASTER_USERNAME", valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:username::" },
       { name = "DB_MASTER_PASSWORD", valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:password::" },
-      { name = "APP_DB_PASSWORD", valueFrom = "${aws_secretsmanager_secret.db_role["app"].arn}:password::" },
-      { name = "WORKER_DB_PASSWORD", valueFrom = "${aws_secretsmanager_secret.db_role["worker"].arn}:password::" },
+      { name = "APP_DB_PASSWORD", valueFrom = aws_ssm_parameter.generated["db/app/password"].arn },
+      { name = "WORKER_DB_PASSWORD", valueFrom = aws_ssm_parameter.generated["db/worker/password"].arn },
     ]
     logConfiguration = {
       logDriver = "awslogs"
@@ -456,15 +454,17 @@ resource "aws_ecs_service" "api" {
     capacity_provider = var.use_fargate_spot ? "FARGATE_SPOT" : "FARGATE"
     weight            = 1
   }
+  # Public subnet + public IP replaces a NAT gateway for egress; inbound is
+  # limited to the VPC link by the tasks security group.
   network_configuration {
-    subnets          = aws_subnet.private[*].id
+    subnets          = aws_subnet.public[*].id
     security_groups  = [aws_security_group.tasks.id]
-    assign_public_ip = false
+    assign_public_ip = true
   }
-  load_balancer {
-    target_group_arn = aws_lb_target_group.api.arn
-    container_name   = "api"
-    container_port   = 3000
+  service_registries {
+    registry_arn   = aws_service_discovery_service.api.arn
+    container_name = "api"
+    container_port = 3000
   }
   deployment_circuit_breaker {
     enable   = true
@@ -473,7 +473,6 @@ resource "aws_ecs_service" "api" {
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
   lifecycle { ignore_changes = [desired_count] }
-  depends_on = [aws_lb_listener_rule.from_cloudfront]
 }
 
 resource "aws_ecs_service" "worker" {
@@ -487,9 +486,9 @@ resource "aws_ecs_service" "worker" {
     weight            = 1
   }
   network_configuration {
-    subnets          = aws_subnet.private[*].id
+    subnets          = aws_subnet.public[*].id
     security_groups  = [aws_security_group.tasks.id]
-    assign_public_ip = false
+    assign_public_ip = true
   }
   deployment_circuit_breaker {
     enable   = true

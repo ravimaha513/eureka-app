@@ -49,18 +49,11 @@ resource "aws_subnet" "private" {
   tags              = { Name = "${local.name}-private-${count.index + 1}", Tier = "private" }
 }
 
-resource "aws_eip" "nat" {
-  count  = var.nat_gateway_count
-  domain = "vpc"
-  tags   = { Name = "${local.name}-nat-${count.index + 1}" }
-}
-
-resource "aws_nat_gateway" "main" {
-  count         = var.nat_gateway_count
-  allocation_id = aws_eip.nat[count.index].id
-  subnet_id     = aws_subnet.public[count.index].id
-  tags          = { Name = "${local.name}-nat-${count.index + 1}" }
-}
+# Cost model (infra/README.md "Cost"): no NAT gateway and no interface
+# endpoints (~$120/month per environment). API tasks run in public subnets with
+# a public IP for egress (ECR, Secrets/SSM, Google OIDC); their security group
+# accepts traffic only from the API Gateway VPC link. The database stays in
+# private subnets that have no route to the internet at all.
 
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
@@ -77,56 +70,28 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
+# Private subnets: local VPC traffic only (RDS).
 resource "aws_route_table" "private" {
-  count  = length(aws_subnet.private)
   vpc_id = aws_vpc.main.id
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main[min(count.index, var.nat_gateway_count - 1)].id
-  }
-  tags = { Name = "${local.name}-private-${count.index + 1}" }
+  tags   = { Name = "${local.name}-private" }
 }
 
 resource "aws_route_table_association" "private" {
   count          = length(aws_subnet.private)
   subnet_id      = aws_subnet.private[count.index].id
-  route_table_id = aws_route_table.private[count.index].id
+  route_table_id = aws_route_table.private.id
 }
 
-# S3 traffic stays inside AWS; interface endpoints avoid NAT for AWS APIs.
+# Free gateway endpoint: task <-> S3 traffic stays on the AWS network.
 resource "aws_vpc_endpoint" "s3" {
   vpc_id            = aws_vpc.main.id
   service_name      = "com.amazonaws.${var.aws_region}.s3"
   vpc_endpoint_type = "Gateway"
-  route_table_ids   = aws_route_table.private[*].id
+  route_table_ids   = [aws_route_table.public.id, aws_route_table.private.id]
   tags              = { Name = "${local.name}-s3" }
 }
 
-resource "aws_security_group" "endpoints" {
-  name        = "${local.name}-endpoints"
-  description = "Interface VPC endpoints: HTTPS from the VPC"
-  vpc_id      = aws_vpc.main.id
-  ingress {
-    description = "HTTPS from VPC"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
-  tags = { Name = "${local.name}-endpoints" }
-}
-
-resource "aws_vpc_endpoint" "interface" {
-  for_each            = toset(["secretsmanager", "kms", "logs", "ecr.api", "ecr.dkr", "sts"])
-  vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.${var.aws_region}.${each.key}"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = aws_subnet.private[*].id
-  security_group_ids  = [aws_security_group.endpoints.id]
-  private_dns_enabled = true
-  tags                = { Name = "${local.name}-${each.key}" }
-}
-
+# Rejected traffic only; volume is small, so CloudWatch ingestion is cents.
 resource "aws_flow_log" "vpc" {
   vpc_id               = aws_vpc.main.id
   traffic_type         = "REJECT"
@@ -138,7 +103,6 @@ resource "aws_flow_log" "vpc" {
 resource "aws_cloudwatch_log_group" "flow" {
   name              = "/eureka/${var.environment}/vpc-flow"
   retention_in_days = var.log_retention_days
-  kms_key_id        = aws_kms_key.logs.arn
 }
 
 resource "aws_iam_role" "flow_logs" {

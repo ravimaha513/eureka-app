@@ -1,6 +1,8 @@
 name: deploy
-# Staging deploys on every push to main after CI passes; production is manual
-# and gated by the "production" GitHub environment (required reviewers).
+# Every push to main that passes CI deploys to production (the only environment
+# that runs by default, to keep cost down; see infra/README.md "Cost").
+# Optional approval: add required reviewers to the "production" GitHub environment.
+# Staging is deployed only by hand (Run workflow -> staging) after creating it.
 # AWS access uses GitHub OIDC -> eureka-github-deploy-<env> (infra/bootstrap);
 # there are no long-lived AWS keys in this repository or its secrets.
 
@@ -14,8 +16,8 @@ on:
       environment:
         description: Target environment
         type: choice
-        options: [staging, production]
-        default: staging
+        options: [production, staging]
+        default: production
 
 permissions:
   contents: read
@@ -32,13 +34,13 @@ jobs:
     if: vars.AWS_ACCOUNT_ID != '' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04-arm # native ARM64 build for Fargate Graviton
     timeout-minutes: 60
-    environment: ${{ inputs.environment || 'staging' }}
+    environment: ${{ inputs.environment || 'production' }}
     concurrency:
-      group: deploy-${{ inputs.environment || 'staging' }}
+      group: deploy-${{ inputs.environment || 'production' }}
       cancel-in-progress: false
     env:
-      ENVIRONMENT: ${{ inputs.environment || 'staging' }}
-      AWS_REGION: ${{ (inputs.environment || 'staging') == 'production' && 'us-east-1' || 'us-east-2' }}
+      ENVIRONMENT: ${{ inputs.environment || 'production' }}
+      AWS_REGION: ${{ (inputs.environment || 'production') == 'production' && 'us-east-1' || 'us-east-2' }}
       IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
       TF_VAR_image_tag: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
@@ -98,7 +100,7 @@ jobs:
           {
             echo "cluster=$(jq -r .ecs_cluster.value /tmp/out.json)"
             echo "migrate_td=$(jq -r .migrate_task_definition.value /tmp/out.json)"
-            echo "subnets=$(jq -r '.private_subnet_ids.value | join(",")' /tmp/out.json)"
+            echo "subnets=$(jq -r '.public_subnet_ids.value | join(",")' /tmp/out.json)"
             echo "sg=$(jq -r .tasks_security_group_id.value /tmp/out.json)"
           } >> "$GITHUB_OUTPUT"
 
@@ -109,7 +111,7 @@ jobs:
             --cluster "${{ steps.out.outputs.cluster }}" \
             --task-definition "${{ steps.out.outputs.migrate_td }}" \
             --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[${{ steps.out.outputs.subnets }}],securityGroups=[${{ steps.out.outputs.sg }}],assignPublicIp=DISABLED}" \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ steps.out.outputs.subnets }}],securityGroups=[${{ steps.out.outputs.sg }}],assignPublicIp=ENABLED}" \
             --started-by "gha-${{ github.run_id }}" \
             --query 'tasks[0].taskArn' --output text)
           echo "migrate task: $TASK"

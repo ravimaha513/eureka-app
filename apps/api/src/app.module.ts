@@ -11,6 +11,7 @@ import { CONFIG, type AppConfig } from "./platform/config.js";
 import { DbService } from "./platform/db.service.js";
 import { ProblemFilter } from "./platform/errors.js";
 import { OidcService } from "./platform/oidc.service.js";
+import { originGuard } from "./platform/origin-guard.js";
 import { SessionService } from "./platform/session.service.js";
 import { AuthController } from "./modules/identity/auth.controller.js";
 import { MeController } from "./modules/identity/me.controller.js";
@@ -55,6 +56,7 @@ export async function createApp(config: AppConfig): Promise<NestFastifyApplicati
   );
   await app.register(cookie as never);
   const fastify = app.getHttpAdapter().getInstance();
+  if (config.ORIGIN_VERIFY_SECRET) fastify.addHook("onRequest", originGuard(config.ORIGIN_VERIFY_SECRET));
   fastify.addHook("onSend", async (_req, reply) => {
     reply.header("x-content-type-options", "nosniff");
     reply.header("referrer-policy", "strict-origin-when-cross-origin");
