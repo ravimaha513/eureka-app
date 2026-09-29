@@ -114,6 +114,18 @@ describe("differential: database RLS alone matches the application engine", () =
     });
   });
 
+  it("authz.owns is never NULL (unassigned candidates)", async () => {
+    const n = await asUser(db.app, U.r2a, async (c) =>
+      (await c.query(`SELECT authz.owns('candidate:update', NULL, $1, $2) IS NULL AS isnull`, [T.t1, LOC.dallas])).rows[0].isnull);
+    expect(n).toBe(false);
+  });
+
+  it("status transition of another team's unassigned Open-to-all-teams candidate is refused in the database", async () => {
+    const c = candidates.find((x) => x.teamId === T.t1 && x.recruiterId === null && x.visibility === "all_teams" && x.marketingStatus === "active")!;
+    await expect(asUser(db.app, U.r2a, (cl) => cl.query(`SELECT authz.transition_candidate($1, 'on_hold')`, [c.id])))
+      .rejects.toThrow(/not permitted/);
+  });
+
   it("an unknown or inactive user id sees no Hot List", async () => {
     const unknown = await asUser(db.app, "00000000-0000-0000-0000-00000000dead", async (c) =>
       (await c.query(`SELECT count(*)::int n FROM authz.hotlist_page(NULL, NULL, NULL, NULL, NULL, 500)`)).rows[0].n);
