@@ -5,6 +5,7 @@ import {
   SALES_ROLES,
   type Permission,
   type Role,
+  type Scope,
 } from "./catalog.js";
 
 /**
@@ -113,6 +114,39 @@ export function resolveScope(
 
   if (!granted && !hotlistOpen) return null;
   return { all, recruiterIds, teamIds, locationIds, allTeams, hotlistOpen };
+}
+
+/**
+ * Like resolveScope, but only counts grants whose scope kind is in `scopes`.
+ * Used where the kind of grant decides what a caller may do, e.g. Sales grants
+ * edit interview logistics while location grants toggle `cleared` (design B4.7).
+ */
+export function resolveScopeFor(
+  user: UserAccess,
+  permission: Permission,
+  scopes: readonly Scope[],
+): EffectiveScope | null {
+  const kinds = new Set<Scope>(scopes);
+  const roles = user.roles.filter((a) => {
+    const s = GRANTS[a.role][permission];
+    return s !== undefined && kinds.has(s);
+  });
+  if (roles.length === 0) return null;
+  return resolveScope({ ...user, roles }, permission, "team");
+}
+
+/** Covered through the actor snapshot only (writes; mirrors authz.owns on the activity row). */
+export function ownsActivity(
+  scope: EffectiveScope | null,
+  a: Pick<ActivityRef, "recruiterId" | "teamId" | "locationId">,
+): boolean {
+  if (!scope) return false;
+  return (
+    scope.all ||
+    scope.recruiterIds.has(a.recruiterId) ||
+    (a.teamId !== null && scope.teamIds.has(a.teamId)) ||
+    (a.locationId !== null && scope.locationIds.has(a.locationId))
+  );
 }
 
 export function can(user: UserAccess, permission: Permission): boolean {
