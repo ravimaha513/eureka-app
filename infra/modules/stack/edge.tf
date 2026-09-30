@@ -267,6 +267,10 @@ resource "aws_cloudfront_distribution" "main" {
     cache_policy_id            = data.aws_cloudfront_cache_policy.disabled.id
     origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.api_viewer_ip.arn
+    }
   }
 
   # No custom_error_response: it would apply to every origin, turning API
@@ -287,6 +291,21 @@ resource "aws_cloudfront_distribution" "main" {
     ssl_support_method             = local.use_domain ? "sni-only" : null
     minimum_protocol_version       = "TLSv1.2_2021"
   }
+}
+
+# Override any caller-supplied header with CloudFront's observed client address.
+# The API trusts this only after validating the origin-verification secret.
+resource "aws_cloudfront_function" "api_viewer_ip" {
+  name    = "${local.name}-api-viewer-ip"
+  runtime = "cloudfront-js-2.0"
+  publish = true
+  code    = <<-JS
+    function handler(event) {
+      var request = event.request;
+      request.headers['x-eureka-viewer-ip'] = { value: event.viewer.ip };
+      return request;
+    }
+  JS
 }
 
 resource "aws_s3_bucket_policy" "web" {

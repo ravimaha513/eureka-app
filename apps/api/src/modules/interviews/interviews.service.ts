@@ -110,6 +110,18 @@ export function feedbackKinds(access: UserAccess, a: ActivityRef): FeedbackKind[
 export class InterviewsService {
   constructor(private readonly db: DbService, private readonly audit: AuditService) {}
 
+  /** Minimal staff directory for the scheduling picker; no email or role metadata. */
+  async coaches(user: AuthedUser) {
+    return this.db.withUser(user.id, async (c) => ({
+      items: (await c.query<{ id: string; name: string }>(
+        `SELECT DISTINCT u.id, u.display_name AS name
+         FROM eureka.app_user u JOIN eureka.user_role ur ON ur.user_id = u.id
+         WHERE u.status = 'active' AND ur.role_key = 'interview_coach' AND ur.valid @> now()
+         ORDER BY name, u.id`,
+      )).rows,
+    }));
+  }
+
   /** A coach must be an active user holding the interview_coach role. */
   private async assertCoach(c: pg.PoolClient, coachId: string) {
     const { rowCount } = await c.query(
@@ -158,6 +170,7 @@ export class InterviewsService {
     if (q.teamId) where.push(`i.team_id = ${p(q.teamId)}`);
     if (q.locationId) where.push(`i.location_id = ${p(q.locationId)}`);
     if (q.candidateId) where.push(`i.candidate_id = ${p(q.candidateId)}`);
+    if (q.clientId) where.push(`i.client_id = ${p(q.clientId)}`);
     if (q.submissionId) where.push(`i.submission_id = ${p(q.submissionId)}`);
     if (q.cleared !== undefined) where.push(`i.cleared = ${p(q.cleared)}`);
     if (q.cursor) {
@@ -291,13 +304,14 @@ export class InterviewsService {
     return this.db.withUser(user.id, async (c) => {
       await this.load(c, user, id);
       const { rows } = await c.query<{ id: string; kind: string; rating: number | null; notes: string | null;
-        created_at: Date; author_id: string | null; author_name: string | null }>(
-        `SELECT f.id, f.kind, f.rating, f.notes, f.created_at, f.author_id, u.display_name AS author_name
+        created_at: Date; author_id: string | null; author_name: string | null; format: string | null; topics: string[] | null; difficult_questions: string | null; duration_min: number | null; next_step: string | null }>(
+        `SELECT f.id, f.kind, f.rating, f.notes, f.created_at, f.author_id, u.display_name AS author_name, f.format, f.topics, f.difficult_questions, f.duration_min, f.next_step
          FROM eureka.interview_feedback f LEFT JOIN eureka.app_user u ON u.id = f.author_id
          WHERE f.interview_id = $1 ORDER BY f.created_at, f.id`, [id]);
       return {
         items: rows.map((r) => ({
           id: r.id, kind: r.kind, rating: r.rating, notes: r.notes, createdAt: r.created_at,
+          format: r.format, topics: r.topics, difficultQuestions: r.difficult_questions, durationMin: r.duration_min, nextStep: r.next_step,
           author: r.author_id ? { id: r.author_id, name: r.author_name } : null,
         })),
       };

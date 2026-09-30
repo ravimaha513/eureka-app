@@ -1,0 +1,18 @@
+.feedback-page { min-height: 100vh; padding: 48px 16px; background: #f4f5fa; color: #17213a; }
+.feedback-card { max-width: 600px; margin: 0 auto; padding: 32px; background: white; border: 1px solid #dce0eb; border-radius: 16px; box-shadow: 0 12px 40px #1827540a; }
+.feedback-brand { color: #5144d8; font-weight: 750; font-size: 18px; margin-bottom: 24px; }
+.feedback-card h1 { font-size: 28px; margin-bottom: 18px; }
+.feedback-card p { line-height: 1.6; }
+.feedback-date, .feedback-hint { color: #5b6476; }
+.feedback-card fieldset { border: 0; padding: 0; margin: 28px 0; min-width: 0; }
+.feedback-card legend, .feedback-label { font-weight: 600; margin-bottom: 12px; }
+.feedback-card legend span, .feedback-label span { font-weight: 400; }
+.feedback-ratings { display: flex; gap: 10px; margin-top: 12px; }
+.feedback-ratings label { display: flex; align-items: center; justify-content: center; gap: 8px; flex: 1; min-height: 48px; border: 1px solid #c6cbda; border-radius: 8px; cursor: pointer; }
+.feedback-ratings label:has(input:checked) { background: #efedff; border-color: #5144d8; }
+.feedback-label { display: block; margin-top: 26px; }
+.feedback-card textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 12px; font: inherit; line-height: 1.5; border: 1px solid #c6cbda; border-radius: 8px; }
+.feedback-card input[type="text"], .feedback-card input[type="number"], .feedback-card select { width: 100%; padding: 12px; box-sizing: border-box; border: 1px solid #c6cbda; border-radius: 8px; font: inherit; background: white; }
+.feedback-hint { font-size: 13px; margin: 10px 0 20px; }
+.feedback-error { padding: 12px 16px; background: #fff0f0; border-radius: 8px; color: #9c2222; }
+@media (max-width: 480px) { .feedback-page { padding: 16px 12px; } .feedback-card { padding: 24px 18px; } .feedback-ratings { gap: 6px; } .feedback-ratings label { gap: 4px; } }

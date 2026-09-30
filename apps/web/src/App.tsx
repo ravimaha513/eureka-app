@@ -5,6 +5,7 @@ import { visibleNav, type NavItem } from "./nav";
 import { AccessPage } from "./admin/AccessPage";
 import { CandidateProfile } from "./sales/CandidateProfile";
 import { CandidatesPage } from "./sales/CandidatesPage";
+import { InterviewsPage } from "./interviews/InterviewsPage";
 import { HotListPage } from "./sales/HotListPage";
 
 /** The Hot List screen (kept under its original name for existing callers). */
@@ -94,6 +95,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                 {profileId && <CandidateProfile key={profileId} id={profileId} me={me} onBack={closeProfile} backLabel={`Back to ${current.label}`} />}
               </>
             )
+            : current.key === "interviews" ? <InterviewsPage me={me} />
             : current.key === "access" ? <AccessPage me={me} />
             : <Placeholder item={current} />}
         </div>

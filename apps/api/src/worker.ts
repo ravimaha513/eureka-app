@@ -7,6 +7,8 @@
 import { utimes, writeFile } from "node:fs/promises";
 import { S3Client } from "@aws-sdk/client-s3";
 import pg from "pg";
+import { LocalMail, SesMail } from "./worker/feedback-mail.js";
+import { feedbackEmailJob, feedbackNotificationJob } from "./worker/jobs/feedback-email.js";
 import { loadWorkerConfig } from "./worker/config.js";
 import { auditExportJob } from "./worker/jobs/audit-export.js";
 import { createLogger, errorFields } from "./worker/log.js";
@@ -38,6 +40,11 @@ const heartbeat = () => {
 };
 
 const jobs = [auditExportJob(sink, config.AUDIT_EXPORT_MAX_DAYS_PER_TICK)];
+if (config.FEEDBACK_MAIL_MODE !== "disabled") {
+  const mail = config.FEEDBACK_MAIL_MODE === "local" ? new LocalMail(config.FEEDBACK_MAIL_DIR!) : new SesMail(config.AWS_REGION!, config.FEEDBACK_FROM_EMAIL!);
+  const origin = new URL(config.FEEDBACK_PUBLIC_ORIGIN!).origin;
+  jobs.push(feedbackEmailJob(mail, origin, config.FEEDBACK_TOKEN_KEY!), feedbackNotificationJob(mail, origin));
+}
 const runner = new JobRunner(pool, jobs, log, heartbeat);
 runner.start(config.JOB_TICK_SECONDS * 1000);
 log.info("worker started", { jobs: jobs.map((j) => j.name), sink: sink.kind, tickSeconds: config.JOB_TICK_SECONDS });

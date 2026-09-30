@@ -33,6 +33,15 @@ variable "api_memory" { type = number }
 variable "api_desired_count" { type = number }
 variable "api_max_count" { type = number }
 variable "worker_desired_count" { type = number }
+variable "feedback_from_email" {
+  description = "Verified SES sender for interview feedback. Empty disables feedback mail."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.feedback_from_email == "" || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.feedback_from_email))
+    error_message = "feedback_from_email must be empty or an email address."
+  }
+}
 variable "use_fargate_spot" { type = bool }
 
 variable "image_tag" {

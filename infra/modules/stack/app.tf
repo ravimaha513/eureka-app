@@ -143,7 +143,7 @@ resource "aws_iam_role_policy" "api" {
 #   metadata). No kms:Decrypt is granted, so a GET of an object body fails;
 #   HEAD reads metadata only.
 # No list, delete or retention-change rights on the audit bucket. Document
-# promotion and email grants are added with the jobs that need them (Phase 2).
+# promotion grants are added with the jobs that need them.
 resource "aws_iam_role" "worker" {
   name               = "${local.name}-worker-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
@@ -177,6 +177,20 @@ resource "aws_iam_role_policy" "worker" {
         }
       },
     ]
+  })
+}
+
+resource "aws_iam_role_policy" "worker_feedback" {
+  count = var.feedback_from_email != "" ? 1 : 0
+  role  = aws_iam_role.worker.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Action    = ["ses:SendEmail"]
+      Resource  = "arn:aws:ses:${var.aws_region}:${var.account_id}:identity/*"
+      Condition = { StringEquals = { "ses:FromAddress" = var.feedback_from_email } }
+    }]
   })
 }
 
@@ -330,7 +344,7 @@ resource "aws_apigatewayv2_stage" "default" {
     destination_arn = aws_cloudwatch_log_group.apigw.arn
     format = jsonencode({
       requestId        = "$context.requestId", ip = "$context.identity.sourceIp", method = "$context.httpMethod",
-      path             = "$context.path", status = "$context.status", latencyMs = "$context.responseLatency",
+      route            = "$context.routeKey", status = "$context.status", latencyMs = "$context.responseLatency",
       integrationError = "$context.integrationErrorMessage"
     })
   }
@@ -435,18 +449,24 @@ resource "aws_ecs_task_definition" "worker" {
   container_definitions = jsonencode([merge(local.container_base, {
     name    = "worker"
     command = ["node", "dist/worker.js"]
-    environment = [
+    environment = concat([
       { name = "NODE_ENV", value = "production" },
       { name = "NODE_EXTRA_CA_CERTS", value = "/app/certs/rds-global-bundle.pem" },
       { name = "AWS_REGION", value = var.aws_region },
       { name = "AUDIT_BUCKET", value = aws_s3_bucket.b["audit"].id },
+      { name = "FEEDBACK_MAIL_MODE", value = var.feedback_from_email != "" ? "ses" : "disabled" },
       { name = "DB_POOL_MAX", value = "3" },
       { name = "SHUTDOWN_GRACE_SECONDS", value = "20" },
       { name = "HEARTBEAT_FILE", value = "/tmp/worker-heartbeat" },
-    ]
-    secrets = [
+      ], var.feedback_from_email != "" ? [
+      { name = "FEEDBACK_FROM_EMAIL", value = var.feedback_from_email },
+      { name = "FEEDBACK_PUBLIC_ORIGIN", value = local.public_base_url },
+    ] : [])
+    secrets = concat([
       { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.generated["db/worker/url"].arn },
-    ]
+      ], var.feedback_from_email != "" ? [
+      { name = "FEEDBACK_TOKEN_KEY", valueFrom = aws_ssm_parameter.generated["worker/feedback_token_key"].arn },
+    ] : [])
     # SIGTERM gives the running job up to 20 s (SHUTDOWN_GRACE_SECONDS).
     stopTimeout = 30
     # Liveness: the scheduler touches the heartbeat file every tick (60 s).

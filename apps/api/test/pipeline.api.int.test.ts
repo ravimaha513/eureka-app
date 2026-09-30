@@ -96,6 +96,7 @@ describe("authorization matrix (generated from the catalog)", () => {
     { perm: "interview:read", method: "GET", url: () => `/api/v1/interviews/${sample().id}` },
     { perm: "interview:read", method: "GET", url: () => `/api/v1/interviews/${sample().id}/feedback` },
     { perm: "interview:create", method: "POST", url: () => "/api/v1/interviews", body: {} },
+    { perm: "interview:create", method: "GET", url: () => "/api/v1/interviews/coaches" },
     { perm: "interview:update", method: "PATCH", url: () => `/api/v1/interviews/${sample().id}`, body: { bogus: 1 } },
     { perm: "interview.feedback:create", method: "POST", url: () => `/api/v1/interviews/${sample().id}/feedback`, body: {} },
   ];
@@ -104,6 +105,28 @@ describe("authorization matrix (generated from the catalog)", () => {
     const res = await call(key, e.method, e.url(), e.body);
     if (can(toUserAccess(key), e.perm)) expect(res.statusCode, res.body).not.toBe(403);
     else expect(res.statusCode, res.body).toBe(403);
+  });
+});
+
+describe("interview coach picker", () => {
+  it("filters client history without widening the caller's scope", async () => {
+    const all = await call("r1a", "GET", "/api/v1/interviews");
+    const filtered = await call("r1a", "GET", `/api/v1/interviews?clientId=${CLIENT_ID}`);
+    expect(filtered.statusCode).toBe(200);
+    expect(filtered.json().items.map((i: { id: string }) => i.id)).toEqual(
+      all.json().items.filter((i: { client: { id: string } | null }) => i.client?.id === CLIENT_ID).map((i: { id: string }) => i.id),
+    );
+    const absent = await call("r1a", "GET", "/api/v1/interviews?clientId=00000000-0000-4000-8000-000000000001");
+    expect(absent.statusCode).toBe(200);
+    expect(absent.json().items).toEqual([]);
+  });
+  it("returns only active coaches and minimal display fields", async () => {
+    const res = await call("r1a", "GET", "/api/v1/interviews/coaches");
+    expect(res.statusCode).toBe(200);
+    const items = res.json().items as { id: string; name: string }[];
+    expect(items.map((i) => i.id)).toContain(U.coach);
+    expect(items.map((i) => i.id)).not.toContain(U.r1a);
+    for (const item of items) expect(Object.keys(item).sort()).toEqual(["id", "name"]);
   });
 });
 

@@ -16,6 +16,11 @@ const WorkerConfigSchema = z
     SHUTDOWN_GRACE_SECONDS: z.coerce.number().int().min(0).max(25).default(20),
     // Liveness file touched on every tick; the ECS health check reads its mtime.
     HEARTBEAT_FILE: z.string().default("/tmp/worker-heartbeat"),
+    FEEDBACK_MAIL_MODE: z.enum(["disabled", "local", "ses"]).default("disabled"),
+    FEEDBACK_MAIL_DIR: z.string().min(1).optional(),
+    FEEDBACK_FROM_EMAIL: z.string().email().optional(),
+    FEEDBACK_PUBLIC_ORIGIN: z.string().url().optional(),
+    FEEDBACK_TOKEN_KEY: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
     AWS_REGION: z.string().optional(),
     // Audit export target: an S3 bucket (AWS) or a local directory (development, tests).
     AUDIT_BUCKET: z.string().min(3).optional(),
@@ -25,6 +30,16 @@ const WorkerConfigSchema = z
     AUDIT_EXPORT_MAX_DAYS_PER_TICK: z.coerce.number().int().min(1).max(31).default(7),
   })
   .superRefine((c, ctx) => {
+    if (c.FEEDBACK_MAIL_MODE !== "disabled") {
+      if (!c.FEEDBACK_PUBLIC_ORIGIN || !c.FEEDBACK_TOKEN_KEY) ctx.addIssue({ code: "custom", message: "Feedback requires FEEDBACK_PUBLIC_ORIGIN and FEEDBACK_TOKEN_KEY" });
+      if (c.FEEDBACK_PUBLIC_ORIGIN) {
+        const url = new URL(c.FEEDBACK_PUBLIC_ORIGIN);
+        if (url.username || url.password || url.pathname !== "/" || url.search || url.hash || !["http:", "https:"].includes(url.protocol)) ctx.addIssue({code:"custom",message:"Feedback origin must be an HTTP(S) origin without a path or credentials"});
+        if (c.NODE_ENV === "production" && url.protocol !== "https:") ctx.addIssue({code:"custom",message:"Production feedback requires HTTPS"});
+      }
+      if (c.FEEDBACK_MAIL_MODE === "local" && (!c.FEEDBACK_MAIL_DIR || c.NODE_ENV === "production")) ctx.addIssue({ code: "custom", message: "Local feedback mail requires FEEDBACK_MAIL_DIR and a non-production environment" });
+      if (c.FEEDBACK_MAIL_MODE === "ses" && (!c.FEEDBACK_FROM_EMAIL || !c.AWS_REGION)) ctx.addIssue({ code: "custom", message: "SES feedback requires FEEDBACK_FROM_EMAIL and AWS_REGION" });
+    }
     if (!c.AUDIT_BUCKET && !c.EXPORT_DIR) {
       ctx.addIssue({ code: "custom", message: "Set AUDIT_BUCKET (S3) or EXPORT_DIR (local) for the audit export" });
     }

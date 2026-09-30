@@ -13,6 +13,7 @@ export const InterviewListQuery = z
     teamId: uuid.optional(),
     locationId: uuid.optional(),
     candidateId: uuid.optional(),
+    clientId: uuid.optional(),
     submissionId: uuid.optional(),
     cleared: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
     cursor: Cursor.optional(),

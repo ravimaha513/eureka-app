@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { FeedbackController } from "./modules/feedback/feedback.controller.js";
 import { Controller, Get, type DynamicModule, Module } from "@nestjs/common";
 import { APP_FILTER, APP_GUARD } from "@nestjs/core";
 import { NestFactory } from "@nestjs/core";
@@ -41,7 +42,7 @@ export class AppModule {
     return {
       module: AppModule,
       controllers: [
-        HealthController, AuthController, MeController, CandidatesController, SubmissionsController, InterviewsController,
+        FeedbackController, HealthController, AuthController, MeController, CandidatesController, SubmissionsController, InterviewsController,
         AdminController, TeamsController,
       ],
       providers: [

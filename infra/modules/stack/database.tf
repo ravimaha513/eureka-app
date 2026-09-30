@@ -116,15 +116,20 @@ resource "random_password" "origin_secret" {
   special = false
 }
 
+resource "random_id" "feedback_token_key" {
+  byte_length = 32
+}
+
 locals {
   ssm_prefix = "/eureka/${var.environment}"
   generated_params = {
-    "db/app/password"    = random_password.db_role["app"].result
-    "db/app/url"         = "postgres://eureka_app:${random_password.db_role["app"].result}@${aws_db_instance.main.address}:5432/eureka?sslmode=verify-full"
-    "db/worker/password" = random_password.db_role["worker"].result
-    "db/worker/url"      = "postgres://eureka_worker:${random_password.db_role["worker"].result}@${aws_db_instance.main.address}:5432/eureka?sslmode=verify-full"
-    "app/session_secret" = random_password.session_secret.result
-    "app/origin_secret"  = random_password.origin_secret.result
+    "db/app/password"           = random_password.db_role["app"].result
+    "db/app/url"                = "postgres://eureka_app:${random_password.db_role["app"].result}@${aws_db_instance.main.address}:5432/eureka?sslmode=verify-full"
+    "db/worker/password"        = random_password.db_role["worker"].result
+    "db/worker/url"             = "postgres://eureka_worker:${random_password.db_role["worker"].result}@${aws_db_instance.main.address}:5432/eureka?sslmode=verify-full"
+    "app/session_secret"        = random_password.session_secret.result
+    "app/origin_secret"         = random_password.origin_secret.result
+    "worker/feedback_token_key" = random_id.feedback_token_key.hex
   }
 }
 

@@ -7,6 +7,12 @@ import { InterviewsService } from "./interviews.service.js";
 export class InterviewsController {
   constructor(private readonly svc: InterviewsService) {}
 
+  @Get("coaches")
+  @RequirePermission("interview:create")
+  coaches(@CurrentUser() user: AuthedUser) {
+    return this.svc.coaches(user);
+  }
+
   /** Interview board: date range, call status, team, location, candidate filters. */
   @Get()
   @RequirePermission("interview:read")
