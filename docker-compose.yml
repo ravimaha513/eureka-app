@@ -1,0 +1,20 @@
+# Local development only: PostgreSQL 16 for `pnpm local` (scripts/local-dev.sh).
+# Port 55432 avoids clashing with a Postgres already installed on the machine.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: eureka
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - eureka-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d eureka"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  eureka-pg:

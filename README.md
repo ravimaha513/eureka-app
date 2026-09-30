@@ -17,13 +17,27 @@ All sample data in this repository is fictional.
 | `infra` | AWS Terraform/Terragrunt and deploy runbook ([infra/README.md](infra/README.md)) |
 | `Dockerfile` | One ARM64 image for the API, worker and migration task |
 
+## Run it locally (one command)
+
+Needs Node 22+ and Docker Desktop running.
+
+```bash
+pnpm local            # or ./scripts/local-dev.sh; add --reset to start from a fresh database
+```
+
+It starts PostgreSQL 16 in Docker (port 55432), applies migrations, seeds fictional
+users and candidates, then runs the API (:3000) and web app (:5173) and opens the
+browser. Pick a fictional user on the sign-in screen, for example
+"Recruiter (Team Rohit)", "Lead (Team Rohit)", "Location Ops Admin (Dallas)" or
+"Org Admin". Ctrl-C stops everything; the database keeps its data between runs.
+
 ## Develop
 
 Requires Node 22, pnpm 10 and PostgreSQL 16.
 
 ```bash
 pnpm install
-pnpm -r test          # 328 unit + integration tests (creates throwaway databases)
+pnpm -r test          # unit + integration tests (create throwaway databases)
 pnpm docs:grants      # regenerate the grants table used in docs/design.md
 
 # run locally with fictional data

@@ -6,7 +6,8 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "docs:grants": "pnpm --filter @eureka/shared exec tsx scripts/grants-table.ts"
+    "docs:grants": "pnpm --filter @eureka/shared exec tsx scripts/grants-table.ts",
+    "local": "./scripts/local-dev.sh"
   },
   "engines": {
     "node": ">=22"
