@@ -91,6 +91,15 @@ let n = 0;
 /** A fresh candidate owned by r1a (as superuser), so writes on it never collide with other cases. */
 const freshOwn = () => newCandidate(db, { teamId: T.t1, recruiterId: U.r1a, locationId: LOC.dallas });
 
+/** A staged import batch with one sales row (as the import CLI would open it with an admin's ticket). */
+async function importBatch(): Promise<string> {
+  const ticket = (await ok("admin", "POST", "/api/v1/imports/tickets", {})).ticket as string;
+  const id = (await rows(`SELECT authz.import_open_batch($1, md5(random()::text) || md5(random()::text), '{}', false) AS id`, [ticket]))[0]!.id as string;
+  await rows(`INSERT INTO eureka.import_row (batch_id, sheet, row_no, row_key, raw, norm, state, reasons)
+              VALUES ($1, 'sales', 2, md5(random()::text) || md5(random()::text), '{}', '{}', 'review', '{missing:name}')`, [id]);
+  return id;
+}
+
 /** An interview on r1a's fresh candidate through the API; `hoursAgo` places it in the past. */
 async function interviewOf(hoursAgo = -24) {
   const cand = await freshOwn();
@@ -420,11 +429,43 @@ const CASES: RejectCase[] = [
     // A recruiter writes client feedback only; coach and location feedback need those grants.
     notPermitted: { fields: { kind: "coach" }, detail: /^kind_not_permitted$/ },
   },
+  // sheet import (docs/import.md): a staged batch with one row, opened as the migration task would
+  {
+    route: "POST /api/v1/imports/:id/decisions", actor: "admin",
+    prepare: async () => {
+      const id = await importBatch();
+      return {
+        url: `/api/v1/imports/${id}/decisions`, body: { sheet: "sales", rowNo: 2, action: "reject" },
+        state: () => rows(`SELECT count(*)::int AS n FROM eureka.import_decision`),
+      };
+    },
+    forbidden: { decidedBy: U.admin2, decidedAt: PAST, rowKey: "a".repeat(64), approvedReasons: ["missing:name"], batchId: FOREIGN_ID },
+  },
+  {
+    route: "POST /api/v1/imports/:id/approve", actor: "admin2",
+    prepare: async () => {
+      const id = await importBatch();
+      return {
+        url: `/api/v1/imports/${id}/approve`, body: { digest: "0".repeat(64) },
+        state: () => rows(`SELECT status, approved_by, approved_digest FROM eureka.import_batch WHERE id = $1`, [id]),
+      };
+    },
+    forbidden: { approvedBy: U.admin, status: "approved", operatorId: U.admin2, placementsCommit: true, approvedAt: PAST },
+  },
 ];
 
 /** Endpoints that read no body: what they change comes from the URL and the session only. */
 interface IgnoreCase { route: string; run: () => Promise<void> }
 const IGNORED: IgnoreCase[] = [
+  {
+    route: "POST /api/v1/imports/tickets",
+    run: async () => {
+      const r = await call("admin", "POST", "/api/v1/imports/tickets", { ...SERVER_MANAGED, createdBy: U.admin2, expiresAt: "2099-01-01T00:00:00Z" });
+      expect(r.statusCode, r.body).toBe(201);
+      const t = await rows(`SELECT created_by, expires_at < now() + interval '25 hours' AS soon FROM eureka.import_ticket ORDER BY created_at DESC LIMIT 1`);
+      expect(t).toEqual([{ created_by: U.admin, soon: true }]);
+    },
+  },
   {
     route: "POST /api/auth/logout",
     run: async () => {

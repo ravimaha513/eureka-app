@@ -148,9 +148,7 @@ export class ImportsController {
   @Post(":id/decisions")
   @HttpCode(200)
   decide(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
-    const d = Decision.safeParse(body);
-    if (!d.success) throw new UnprocessableEntityException(d.error.issues.map((i) => i.message).join("; "));
-    return this.svc.decide(user, id, d.data);
+    return this.svc.decide(user, id, Decision.parse(body));
   }
 
   @Get(":id/preview")
@@ -161,8 +159,6 @@ export class ImportsController {
   @Post(":id/approve")
   @HttpCode(200)
   approve(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
-    const a = Approve.safeParse(body);
-    if (!a.success) throw new UnprocessableEntityException("digest is required (from GET /api/v1/imports/:id/preview)");
-    return this.svc.approve(user, id, a.data.digest);
+    return this.svc.approve(user, id, Approve.parse(body).digest);
   }
 }
