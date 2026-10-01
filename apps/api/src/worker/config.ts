@@ -53,6 +53,8 @@ const WorkerConfigSchema = z
     RESUME_SCAN_TIMEOUT_MINUTES: z.coerce.number().int().min(5).max(1440).default(60),
     // After the 5-minute presigned POST expires, wait this long for the object before marking the upload expired.
     RESUME_UPLOAD_GRACE_MINUTES: z.coerce.number().int().min(1).max(120).default(10),
+    // More object versions than this under one quarantine key (a replayed presigned POST) logs an alert.
+    RESUME_MAX_KEY_VERSIONS: z.coerce.number().int().min(1).max(100).default(3),
   })
   .superRefine((c, ctx) => {
     if (c.FEEDBACK_MAIL_MODE !== "disabled") {

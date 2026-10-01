@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { RESUME_MAX_BYTES, isResumeContentType } from "@eureka/shared";
-import { contentMatches, resumeCleanKey, resumeQuarantineKey } from "../../platform/storage/content.js";
+import { resumeCleanKey, resumeQuarantineKey } from "../../platform/storage/content.js";
+import { inspectResume } from "../../platform/storage/content-inspect.js";
 import { ObjectTooLargeError, type DocumentStore, type ScanVerdict } from "../document-store.js";
 import { errorFields } from "../log.js";
 import type { JobDefinition } from "../runner.js";
@@ -30,12 +31,15 @@ export interface ResumeScanOptions {
   uploadGraceMs: number;
   /** From creation, how long a scan may take before the upload is failed with TIMEOUT. */
   scanTimeoutMs: number;
+  /** More object versions than this under one quarantine key logs an alert (replayed presigned POST). */
+  maxVersionsPerKey: number;
 }
 
 export const DEFAULT_RESUME_SCAN_OPTIONS: ResumeScanOptions = {
   batchSize: 50,
   uploadGraceMs: 10 * 60_000,
   scanTimeoutMs: 60 * 60_000,
+  maxVersionsPerKey: 3,
 };
 
 interface PendingRow { id: string; content_type: string; size_bytes: number; created_at: Date; upload_expires_at: Date }
@@ -58,6 +62,10 @@ export function decideScan(v: ScanVerdict, row: Pick<PendingRow, "created_at" | 
 }
 
 type Outcome = { status: "clean" | "infected" | "failed" | "rejected" | "expired"; result: string; sha256?: string; size?: number };
+
+/** Type, magic bytes and active content (macros, external templates, PDF JavaScript...): content-inspect.ts. */
+const contentProblem = (contentType: string, body: Buffer) =>
+  isResumeContentType(contentType) ? inspectResume(body, contentType) : "BAD_CONTENT";
 
 const code = (s: string) => (/^[A-Z_]{1,40}$/.test(s) ? s : "FAILED");
 
@@ -86,8 +94,13 @@ export function resumeScanJob(store: DocumentStore, opts: ResumeScanOptions = DE
       const row = (await pending(pool, id))[0];
       if (!row) return { skipped: "not_pending" };
       const key = resumeQuarantineKey(id);
-      const d = decideScan(await store.verdict(key, signal), row, new Date(), opts);
+      const verdict = await store.verdict(key, signal);
+      const d = decideScan(verdict, row, new Date(), opts);
       if (d.kind === "wait") throw new Error("scan result no longer available; retrying");
+      // The presigned POST can be replayed until it expires; many versions under one key means someone is trying.
+      if (verdict.state !== "missing" && (verdict.versions ?? 1) > opts.maxVersionsPerKey) {
+        log.error("many uploads to one quarantine key", { resumeId: id, versions: verdict.versions, alert: true });
+      }
 
       let outcome: Outcome;
       let deleteVersion: string | null = null;
@@ -107,14 +120,14 @@ export function resumeScanJob(store: DocumentStore, opts: ResumeScanOptions = DE
           if (!(err instanceof ObjectTooLargeError)) throw err;
         }
         deleteVersion = d.versionId;
-        if (!body || body.length !== row.size_bytes) {
-          outcome = { status: "rejected", result: "SIZE_MISMATCH" };
-        } else if (!isResumeContentType(row.content_type) || !contentMatches(body, row.content_type)) {
-          outcome = { status: "rejected", result: "BAD_CONTENT" };
+        const problem = body && body.length === row.size_bytes ? contentProblem(row.content_type, body) : "SIZE_MISMATCH";
+        if (problem || !body) {
+          outcome = { status: "rejected", result: problem ?? "SIZE_MISMATCH" };
         } else {
           const sha = createHash("sha256").update(body).digest();
           signal.throwIfAborted();
-          // Idempotent: a retry after a failed database update rewrites the same bytes.
+          // Create-only: a retry after a failed database update finds the same
+          // bytes (checksum compared); different bytes under the key fail the run.
           await store.putClean(resumeCleanKey(id), body, sha, row.content_type, signal);
           outcome = { status: "clean", result: "NO_THREATS_FOUND", sha256: sha.toString("hex"), size: body.length };
         }

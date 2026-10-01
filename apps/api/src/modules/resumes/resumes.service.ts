@@ -19,8 +19,12 @@ import { DOCUMENT_STORAGE, type DocumentStorage } from "../../platform/storage/d
 import { scopePredicate } from "../candidates/candidates.service.js";
 import type { ResumeUpload } from "./resumes.schemas.js";
 
-/** Presigned POST lifetime; matches upload_expires_at in migration 0036 (5 minutes). */
-export const RESUME_UPLOAD_TTL_SECONDS = 300;
+/**
+ * Presigned POST lifetime (review: short, it can be replayed until it expires).
+ * The database upload window (upload_expires_at, migration 0036: 5 minutes) is
+ * the upper bound the worker uses before marking an upload expired.
+ */
+export const RESUME_UPLOAD_TTL_SECONDS = 120;
 /** Presigned GET lifetime: long enough to start the download, short enough not to be shared. */
 export const RESUME_DOWNLOAD_TTL_SECONDS = 60;
 export const RESUME_UPLOADS_PER_MINUTE = 10;

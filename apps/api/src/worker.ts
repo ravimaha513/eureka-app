@@ -74,6 +74,7 @@ if (config.DOCUMENTS_BUCKET || config.LOCAL_STORAGE_DIR) {
     ...DEFAULT_RESUME_SCAN_OPTIONS,
     scanTimeoutMs: config.RESUME_SCAN_TIMEOUT_MINUTES * 60_000,
     uploadGraceMs: config.RESUME_UPLOAD_GRACE_MINUTES * 60_000,
+    maxVersionsPerKey: config.RESUME_MAX_KEY_VERSIONS,
   }));
 } else {
   log.warn("resume-scan is off (set DOCUMENTS_BUCKET or LOCAL_STORAGE_DIR); uploaded resumes stay pending");

@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
   GetObjectTaggingCommand,
+  HeadObjectCommand,
   ListObjectVersionsCommand,
   PutObjectCommand,
   type S3Client,
@@ -19,8 +20,11 @@ import { fakeScanResult, localPath } from "../platform/storage/local-files.js";
  */
 export type ScanVerdict =
   | { state: "missing" }
-  | { state: "pending"; versionId: string }
-  | { state: "scanned"; result: string; versionId: string };
+  | { state: "pending"; versionId: string; versions?: number }
+  | { state: "scanned"; result: string; versionId: string; versions?: number };
+
+/** A different object already exists under a clean/ key (create-only write refused). */
+export class CleanObjectConflictError extends Error {}
 
 export interface DocumentStore {
   readonly kind: "s3" | "local";
@@ -41,7 +45,8 @@ export class ObjectTooLargeError extends Error {}
  * S3 (infra/modules/stack/app.tf, worker role): ListBucketVersions limited to
  * quarantine/resumes/ (a missing object is then "no versions" instead of an
  * ambiguous 403), Get(Object|ObjectVersion)(Tagging) and DeleteObjectVersion
- * on quarantine/resumes/*, PutObject on clean/resumes/*. Encryption is the
+ * on quarantine/resumes/*, PutObject (create-only) and GetObject (HeadObject
+ * checksum after a 412) on clean/resumes/*. Encryption is the
  * bucket default (SSE-KMS, data key).
  */
 export class S3DocumentStore implements DocumentStore {
@@ -51,11 +56,15 @@ export class S3DocumentStore implements DocumentStore {
   async verdict(key: string, signal?: AbortSignal): Promise<ScanVerdict> {
     const list = await this.s3.send(new ListObjectVersionsCommand({ Bucket: this.bucket, Prefix: key, MaxKeys: 50 }), { abortSignal: signal });
     const deleted = (list.DeleteMarkers ?? []).some((d) => d.Key === key && d.IsLatest);
-    const latest = (list.Versions ?? []).find((v) => v.Key === key && v.IsLatest);
+    const versions = (list.Versions ?? []).filter((v) => v.Key === key);
+    const latest = versions.find((v) => v.IsLatest);
     if (deleted || !latest?.VersionId) return { state: "missing" };
+    // The latest version decides: a newer upload that is not scanned yet means wait, even if an older one was clean.
     const tags = await this.s3.send(new GetObjectTaggingCommand({ Bucket: this.bucket, Key: key, VersionId: latest.VersionId }), { abortSignal: signal });
     const result = tags.TagSet?.find((t) => t.Key === SCAN_TAG)?.Value;
-    return result ? { state: "scanned", result, versionId: latest.VersionId } : { state: "pending", versionId: latest.VersionId };
+    return result
+      ? { state: "scanned", result, versionId: latest.VersionId, versions: versions.length }
+      : { state: "pending", versionId: latest.VersionId, versions: versions.length };
   }
 
   async read(key: string, versionId: string, maxBytes: number, signal?: AbortSignal): Promise<Buffer> {
@@ -73,10 +82,23 @@ export class S3DocumentStore implements DocumentStore {
 
   async putClean(key: string, body: Buffer, sha256: Buffer, contentType: string, signal?: AbortSignal): Promise<void> {
     if (!key.startsWith("clean/")) throw new Error("promotion writes clean/ only");
-    await this.s3.send(new PutObjectCommand({
-      Bucket: this.bucket, Key: key, Body: body, ContentType: contentType, ContentLength: body.length,
-      ChecksumSHA256: sha256.toString("base64"),
-    }), { abortSignal: signal });
+    const checksum = sha256.toString("base64");
+    try {
+      // Create-only: a clean object is never overwritten (a retry finds its own bytes, compared below).
+      await this.s3.send(new PutObjectCommand({
+        Bucket: this.bucket, Key: key, Body: body, ContentType: contentType, ContentLength: body.length,
+        ChecksumSHA256: checksum, IfNoneMatch: "*",
+      }), { abortSignal: signal });
+      return;
+    } catch (err) {
+      const e = err as { name?: string; $metadata?: { httpStatusCode?: number } } | null;
+      if (e?.name !== "PreconditionFailed" && e?.$metadata?.httpStatusCode !== 412) throw err;
+    }
+    // HeadObject (s3:GetObject on clean/resumes/*, metadata only).
+    const head = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key, ChecksumMode: "ENABLED" }), { abortSignal: signal });
+    if (head.ChecksumSHA256 !== checksum || head.ContentLength !== body.length) {
+      throw new CleanObjectConflictError(`${key} already exists with different content`);
+    }
   }
 
   async deleteVersion(key: string, versionId: string, signal?: AbortSignal): Promise<void> {
@@ -120,13 +142,22 @@ export class LocalDocumentStore implements DocumentStore {
     return body;
   }
 
-  async putClean(key: string, body: Buffer): Promise<void> {
+  async putClean(key: string, body: Buffer, sha256: Buffer): Promise<void> {
     if (!key.startsWith("clean/")) throw new Error("promotion writes clean/ only");
     const path = localPath(this.root, key);
     await mkdir(dirname(path), { recursive: true });
     const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
     await writeFile(tmp, body);
-    await rename(tmp, path);
+    try {
+      await link(tmp, path); // create-only, like If-None-Match: *
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      if (!createHash("sha256").update(await readFile(path)).digest().equals(sha256)) {
+        throw new CleanObjectConflictError(`${key} already exists with different content`);
+      }
+    } finally {
+      await unlink(tmp).catch(() => undefined);
+    }
   }
 
   async deleteVersion(key: string, versionId: string): Promise<void> {

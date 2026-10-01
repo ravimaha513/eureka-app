@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
@@ -8,9 +8,9 @@ import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
 import { EICAR_TEST_STRING } from "../src/platform/storage/local-files.js";
 import { loadWorkerConfig } from "../src/worker/config.js";
-import { LocalDocumentStore } from "../src/worker/document-store.js";
+import { LocalDocumentStore, type DocumentStore } from "../src/worker/document-store.js";
 import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob, type ResumeScanOptions } from "../src/worker/jobs/resume-scan.js";
-import { silentLogger } from "../src/worker/log.js";
+import { createLogger, silentLogger } from "../src/worker/log.js";
 import { JobRunner } from "../src/worker/runner.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
 import { U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
@@ -153,6 +153,21 @@ describe("upload, scan, promote, download (local driver, fake scanner)", () => {
     expect((await post({ ...ticket.fields, tagging: "<Tagging/>" }, Buffer.alloc(100))).statusCode).toBe(400);
     expect((await post({ ...ticket.fields, signature: "AAAA" }, Buffer.alloc(100))).statusCode).toBe(403);
   });
+
+  it("signed policies are bound to their purpose: a download link is not an upload policy and vice versa", async () => {
+    const { ticket } = await upload("r1a", cand(1).id, null);
+    const dl = new URL((await call("r1a", "POST", `/api/v1/candidates/${cand(0).id}/resumes/${cleanId}/download`)).json().url, "http://x");
+    const asUpload = { key: ticket.fields.key!, "Content-Type": PDF, policy: dl.searchParams.get("policy")!, signature: dl.searchParams.get("signature")! };
+    expect((await app.inject({ method: "POST", url: ticket.url, ...form(asUpload, Buffer.alloc(100)) })).statusCode).toBe(403);
+    const asDownload = `/api/local-storage/object?policy=${ticket.fields.policy}&signature=${ticket.fields.signature}`;
+    expect((await app.inject({ method: "GET", url: asDownload })).statusCode).toBe(403);
+  });
+
+  it("the presigned upload is short-lived (120 s)", async () => {
+    const { ticket } = await upload("l1", cand(1).id, null);
+    expect(Date.parse(ticket.expiresAt) - Date.now()).toBeLessThanOrEqual(120_000);
+    expect(Date.parse(ticket.expiresAt) - Date.now()).toBeGreaterThan(100_000);
+  });
 });
 
 describe("scan outcomes", () => {
@@ -192,6 +207,34 @@ describe("scan outcomes", () => {
     expect(await exists(join(dir, "clean/resumes", id))).toBe(false);
   });
 
+  it("active content: a clean scan of a PDF with JavaScript is rejected and deleted", async () => {
+    const { id } = await upload("l1", cand(3).id, Buffer.from("%PDF-1.7\n1 0 obj << /OpenAction << /S /JavaScript /JS (app.alert(1)) >> >> endobj\n%%EOF\n"));
+    await runJob();
+    expect(await outcome(id)).toMatchObject({ status: "rejected", scan_result: "ACTIVE_CONTENT" });
+    expect(await exists(join(dir, "quarantine/resumes", id))).toBe(false);
+    expect(await exists(join(dir, "clean/resumes", id))).toBe(false);
+  });
+
+  it("promotion is create-only: a different clean object under the key fails the run instead of overwriting", async () => {
+    const { id } = await upload("l1", cand(5).id, pdf("original"));
+    await mkdir(join(dir, "clean/resumes"), { recursive: true });
+    await writeFile(join(dir, "clean/resumes", id), "someone else's bytes");
+    await runJob();
+    expect((await outcome(id)).status).toBe("pending");
+    const run = (await db.admin.query(`SELECT status, detail FROM eureka.job_run WHERE job_name = 'resume-scan' AND run_key = $1`, [id])).rows[0];
+    expect(run).toMatchObject({ status: "failed", detail: { error: expect.stringMatching(/different content/) } });
+    expect(await readFile(join(dir, "clean/resumes", id), "utf8")).toBe("someone else's bytes");
+  });
+
+  it("a retried promotion that finds its own bytes under the clean key finishes", async () => {
+    const body = pdf("retry");
+    const { id } = await upload("l1", cand(6).id, body);
+    await mkdir(join(dir, "clean/resumes"), { recursive: true });
+    await writeFile(join(dir, "clean/resumes", id), body); // as if the database update had failed after the write
+    await runJob();
+    expect(await outcome(id)).toMatchObject({ status: "clean" });
+  });
+
   it("never uploaded: expired after the upload window and grace", async () => {
     const { id } = await upload("r1a", cand(3).id, null);
     await runJob();
@@ -207,6 +250,18 @@ describe("scan outcomes", () => {
     }
     await runJob({ uploadGraceMs: 0 });
     expect(await outcome(id)).toMatchObject({ status: "expired", scan_result: "NOT_UPLOADED" });
+  });
+
+  it("logs an alert when one quarantine key holds more versions than allowed (replayed upload)", async () => {
+    const { id } = await upload("l1", cand(7).id, pdf("replayed"));
+    const local = new LocalDocumentStore(dir);
+    const replayed: DocumentStore = Object.assign(Object.create(local) as DocumentStore, {
+      verdict: async (key: string) => ({ ...(await local.verdict(key)), versions: 5 }),
+    });
+    const lines: Record<string, unknown>[] = [];
+    const log = createLogger({}, (l) => lines.push(JSON.parse(l) as Record<string, unknown>));
+    await new JobRunner(db.worker, [resumeScanJob(replayed, { ...DEFAULT_RESUME_SCAN_OPTIONS, maxVersionsPerKey: 3 })], log).tick();
+    expect(lines).toContainEqual(expect.objectContaining({ msg: "many uploads to one quarantine key", resumeId: id, versions: 5, alert: true }));
   });
 
   it("the pending cap answers 409", async () => {
