@@ -97,7 +97,9 @@ export function formatReport(r: Reconciliation, commit?: CommitResult): string {
   if (commit) {
     lines.push("");
     lines.push(`${commit.dryRun ? "Dry run (rolled back): would load" : "Loaded"}: ${commit.loaded.candidates} candidates, `
-      + `${commit.loaded.submissions} submissions, ${commit.loaded.interviews} interviews, ${commit.loaded.placements} placements`);
+      + `${commit.loaded.submissions} submissions, ${commit.loaded.interviews} interviews, ${commit.loaded.placements} placements`
+      + `; ${commit.loaded.updated} earlier imports matched by natural key`);
+    if (commit.skippedByDecision) lines.push(`  not loaded: ${commit.skippedByDecision} rows with a review decision newer than the approval`);
     for (const f of commit.failures) lines.push(`  failed: ${f.rows.join(", ")}: ${f.error}`);
     if (commit.dryRun) lines.push("Nothing was written. Approve the batch, then run commit with --commit to load.");
   }

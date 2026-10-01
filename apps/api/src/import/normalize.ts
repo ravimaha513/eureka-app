@@ -63,9 +63,13 @@ export function splitFullName(s: string | null | undefined): Norm<{ first: strin
 }
 
 /** Matching key for a name: case, accents, punctuation and spacing ignored. */
-export function nameKey(first: string, last: string): string {
-  const k = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^a-z]/g, "");
-  return `${k(first)}|${k(last)}`;
+export function nameKey(first: string, last: string): string | null {
+  // Unicode-aware: Devanagari, Tamil, Arabic... keep their letters (a Latin-only
+  // key would collapse every such name to "|" and match them all).
+  const k = (s: string) => s.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  const a = k(first);
+  const b = k(last);
+  return a && b ? `${a}|${b}` : null;
 }
 
 const EMAIL = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,}$/;
@@ -80,34 +84,61 @@ export function normalizeEmail(s: string | null | undefined): Norm<string | null
   return ok(v);
 }
 
+/**
+ * Assigned North American area codes (US, Canada and the +1 Caribbean). A
+ * 10-digit number whose area code is not here (for example an Indian mobile
+ * number typed without +91) is not guessed to be American.
+ */
+const NANP_AREA_CODES = new Set(`
+201 202 203 204 205 206 207 208 209 210 212 213 214 215 216 217 218 219 220 223 224 225 226 227 228 229 231 234 236 239
+240 242 246 248 249 250 251 252 253 254 256 257 260 262 263 264 267 268 269 270 272 274 276 279 281 283 284 289
+301 302 303 304 305 306 307 308 309 310 312 313 314 315 316 317 318 319 320 321 323 325 326 327 330 331 332 334 336 337
+339 340 341 343 345 346 347 350 351 352 354 360 361 363 364 365 367 368 380 382 385 386
+401 402 403 404 405 406 407 408 409 410 412 413 414 415 416 417 418 419 423 424 425 428 430 431 432 434 435 437 438 440
+441 442 443 445 447 448 450 458 463 464 468 469 470 472 473 474 475 478 479 480 484
+501 502 503 504 505 506 507 508 509 510 512 513 514 515 516 517 518 519 520 530 531 534 539 540 541 548 551 557 559 561
+562 563 564 567 570 571 572 573 574 575 579 580 581 582 584 585 586 587
+601 602 603 604 605 606 607 608 609 610 612 613 614 615 616 617 618 619 620 623 626 628 629 630 631 636 639 640 641 645
+646 647 649 650 651 656 657 658 659 660 661 662 664 667 669 670 671 672 678 680 681 682 683 684 686 689
+701 702 703 704 705 706 707 708 709 712 713 714 715 716 717 718 719 720 721 724 725 726 727 728 730 731 732 734 737 740
+742 743 747 753 754 757 758 760 762 763 765 767 769 770 771 772 773 774 775 778 779 780 781 782 784 785 786 787
+801 802 803 804 805 806 807 808 809 810 812 813 814 815 816 817 818 819 820 825 826 828 829 830 831 832 835 838 839 840
+843 845 847 848 849 850 854 856 857 858 859 860 861 862 863 864 865 867 868 869 870 872 873 876 878 879
+901 902 903 904 905 906 907 908 909 910 912 913 914 915 916 917 918 919 920 925 928 929 930 931 934 936 937 938 939 940
+941 942 943 945 947 948 949 951 952 954 956 959 970 971 972 973 975 978 979 980 983 984 985 986 989
+`.trim().split(/\s+/));
+
 function nanpValid(ten: string): boolean {
-  // Area code and exchange both start 2-9 (North American Numbering Plan).
-  return /^[2-9][0-9]{2}[2-9][0-9]{6}$/.test(ten);
+  // Assigned area code; exchange starts 2-9 (North American Numbering Plan).
+  return /^[2-9][0-9]{2}[2-9][0-9]{6}$/.test(ten) && NANP_AREA_CODES.has(ten.slice(0, 3));
+}
+
+/** Countries whose national trunk prefix 0 must not follow the country code. */
+const TRUNK_ZERO = ["44", "91", "61", "49", "33", "353", "64", "27", "92", "880", "234", "254"];
+
+function international(digits: string): Norm<string> {
+  if (digits.startsWith("1")) return digits.length === 11 && nanpValid(digits.slice(1)) ? ok(`+${digits}`) : fail("invalid_phone");
+  if (TRUNK_ZERO.some((cc) => digits.startsWith(`${cc}0`))) return fail("invalid_phone");
+  return /^[2-9][0-9]{7,14}$/.test(digits) ? ok(`+${digits}`) : fail("invalid_phone");
 }
 
 /**
- * E.164. Default region is the US/Canada (+1): 10 digits, or 11 starting
- * with 1. Other countries need an explicit "+" or "00" prefix; anything else
- * (letters, wrong length, invalid area code) goes to review. Extensions
- * ("x123", "ext. 4") are dropped.
+ * E.164. With region "US", 10 digits (or 11 starting with 1) with an
+ * assigned area code are +1. Other countries need an explicit "+" or "00"
+ * prefix, without the national trunk 0 ("+44 (0)20 ..." goes to review).
+ * With no region every number needs its country code. Extensions are dropped.
  */
-export function normalizePhone(s: string | null | undefined): Norm<string | null> {
+export function normalizePhone(s: string | null | undefined, region: "US" | null = "US"): Norm<string | null> {
   let v = clean(s);
   if (!v) return ok(null);
   v = v.replace(/\s*(?:ext\.?|extension|x|#)\s*\d{1,6}$/i, "");
   if (/[^0-9+().\-\s/]/.test(v)) return fail("invalid_phone");
   const plus = v.startsWith("+");
   if (v.indexOf("+") > 0 || (v.match(/\+/g) ?? []).length > 1) return fail("invalid_phone");
-  let digits = v.replace(/[^0-9]/g, "");
-  if (plus) {
-    if (digits.startsWith("1")) return digits.length === 11 && nanpValid(digits.slice(1)) ? ok(`+${digits}`) : fail("invalid_phone");
-    return /^[2-9][0-9]{7,14}$/.test(digits) ? ok(`+${digits}`) : fail("invalid_phone");
-  }
-  if (digits.startsWith("00")) {
-    digits = digits.slice(2);
-    if (digits.startsWith("1")) return digits.length === 11 && nanpValid(digits.slice(1)) ? ok(`+${digits}`) : fail("invalid_phone");
-    return /^[2-9][0-9]{7,14}$/.test(digits) ? ok(`+${digits}`) : fail("invalid_phone");
-  }
+  const digits = v.replace(/[^0-9]/g, "");
+  if (plus) return international(digits);
+  if (digits.startsWith("00")) return international(digits.slice(2));
+  if (region !== "US") return fail("phone_needs_country_code");
   if (digits.length === 10 && nanpValid(digits)) return ok(`+1${digits}`);
   if (digits.length === 11 && digits.startsWith("1") && nanpValid(digits.slice(1))) return ok(`+${digits}`);
   return fail("invalid_phone");
@@ -138,9 +169,10 @@ function fullYear(y: string, pivot: number): number {
  * Dates in mixed formats to ISO (YYYY-MM-DD): ISO, D/M/Y or M/D/Y with "/",
  * "-" or ".", "5-Jan-2026", "Jan 5, 2026", "5 January 2026", and Sheets
  * serial numbers (days since 1899-12-30). Day/month order is detected per
- * row (design B9): a part above 12 decides it; when both parts are 12 or
- * less and differ, the configured order breaks the tie, and with "detect"
- * the value goes to review as ambiguous. Two-digit years: <= pivot -> 20xx.
+ * row (design B9): with "detect" a part above 12 decides it and a value with
+ * both parts 12 or less (and different) goes to review as ambiguous. A column
+ * configured as "MDY" or "DMY" resolves those, and a value contradicting it
+ * goes to review as date_order_conflict. Two-digit years: <= pivot -> 20xx.
  */
 export function parseDate(s: string | null | undefined, order: DateOrder = "detect", pivot = 30): Norm<string | null> {
   const v = clean(s).replace(/(?:[T ]\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]\.?m\.?)?)$/i, "").trim();
@@ -152,8 +184,9 @@ export function parseDate(s: string | null | undefined, order: DateOrder = "dete
     const b = Number(m[2]);
     const y = fullYear(m[3]!, pivot);
     if (a > 12 && b > 12) return fail("invalid_date");
-    if (a > 12) return isoDate(y, b, a);
-    if (b > 12) return isoDate(y, a, b);
+    // A configured column order is checked, not overridden, by the value.
+    if (a > 12) return order === "MDY" ? fail("date_order_conflict") : isoDate(y, b, a);
+    if (b > 12) return order === "DMY" ? fail("date_order_conflict") : isoDate(y, a, b);
     if (a === b) return isoDate(y, a, b);
     if (order === "MDY") return isoDate(y, a, b);
     if (order === "DMY") return isoDate(y, b, a);
@@ -174,6 +207,14 @@ export function parseDate(s: string | null | undefined, order: DateOrder = "dete
     return isoDate(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
   }
   return fail("invalid_date");
+}
+
+/** A date of birth is plausible for a candidate aged 16 to 80 on `today` (ISO). */
+export function plausibleDob(iso: string, today: string): boolean {
+  const [y, m, d] = iso.split("-").map(Number) as [number, number, number];
+  const [ty, tm, td] = today.split("-").map(Number) as [number, number, number];
+  const age = ty - y - (tm < m || (tm === m && td < d) ? 1 : 0);
+  return age >= 16 && age <= 80;
 }
 
 /** "10:00 AM", "10am", "2:30 p.m.", "14:30", "10.30" -> "HH:MM" (24 h). */

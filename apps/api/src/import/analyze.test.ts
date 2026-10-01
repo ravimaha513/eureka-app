@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
-  identityHashes, matchPerson, normalizeRow, resolveBatch, rowKeyOf, sha256,
+  dobToken, identityHashes, makeHmac, matchPerson, normalizeRow, resolveBatch, rowKeyOf,
   type Decision, type Ledger, type RawRow, type Refs, type SalesNorm,
 } from "./analyze.js";
 import { DEFAULT_MAPPING_PATH, parseMapping, type MappingConfig } from "./mapping.js";
 
+const h = makeHmac("unit-test-key-unit-test-key-unit-test-key");
+const TODAY = "2026-10-01";
 const base = JSON.parse(readFileSync(DEFAULT_MAPPING_PATH, "utf8"));
 const cfg = (patch: (m: typeof base) => void = () => undefined): MappingConfig => {
   const m = structuredClone(base);
@@ -38,48 +40,80 @@ const placement = (rowNo: number, o: Record<string, string> = {}): RawRow => ({
   },
 });
 const emptyLedger = (): Ledger => ({ links: new Map(), identities: new Map() });
+const norm = (r: RawRow, c = cfg()) => normalizeRow(r, c, refs, h, TODAY);
+const key = (r: RawRow) => rowKeyOf(r.sheet, r.cells, h);
+const dec = (action: Decision["action"], linkRowKey: string | null = null, approvedReasons: string[] | null = null): Decision =>
+  ({ action, linkRowKey, approvedReasons });
 
 function resolve(raws: RawRow[], o: { config?: MappingConfig; ledger?: Ledger; decisions?: Map<string, Decision>; live?: Set<string> } = {}) {
   const c = o.config ?? cfg((m) => { m.placements.commit = true; });
-  const rows = raws.map((r) => normalizeRow(r, c, refs));
-  const out = resolveBatch({ rows, ledger: o.ledger ?? emptyLedger(), decisions: o.decisions ?? new Map(), liveMatches: o.live ?? new Set(), placementsCommit: c.placements.commit });
+  const rows = raws.map((r) => normalizeRow(r, c, refs, h, TODAY));
+  const out = resolveBatch({ rows, ledger: o.ledger ?? emptyLedger(), decisions: o.decisions ?? new Map(), liveMatches: o.live ?? new Set(), placementsCommit: c.placements.commit, hmac: h });
   return Object.fromEntries(out.map((r) => [`${r.sheet} ${r.rowNo}`, r]));
 }
 
-describe("row keys and normalization", () => {
-  it("row key ignores column order and surrounding whitespace, but not content", () => {
-    expect(rowKeyOf("sales", { A: "1", B: " x " })).toBe(rowKeyOf("sales", { B: "x", A: "1" }));
-    expect(rowKeyOf("sales", { A: "1" })).not.toBe(rowKeyOf("interviews", { A: "1" }));
-    expect(rowKeyOf("sales", { A: "1" })).not.toBe(rowKeyOf("sales", { A: "2" }));
+describe("keys and normalization", () => {
+  it("row key ignores column order and whitespace, and depends on the secret key", () => {
+    expect(rowKeyOf("sales", { A: "1", B: " x " }, h)).toBe(rowKeyOf("sales", { B: "x", A: "1" }, h));
+    expect(rowKeyOf("sales", { A: "1" }, h)).not.toBe(rowKeyOf("interviews", { A: "1" }, h));
+    expect(rowKeyOf("sales", { A: "1" }, h)).not.toBe(rowKeyOf("sales", { A: "1" }, makeHmac("x".repeat(40))));
+    expect(() => makeHmac("short")).toThrow(/32/);
   });
 
   it("normalizes a sales row and maps the status (Active/All Teams -> active + all_teams)", () => {
-    const r = normalizeRow(sales(2, { "First Name": "ASHA", Status: "active / all teams", Priority: "p1", "Marketing Start Date": "4-Aug-2026" }), cfg(), refs);
+    const r = norm(sales(2, { "First Name": "ASHA", Status: "active / all teams", Priority: "p1", "Marketing Start Date": "4-Aug-2026" }));
     expect(r.reasons).toEqual([]);
     expect(r.norm).toMatchObject({ firstName: "Asha", phone: "+12145550101", technologyId: "tech-java", locationId: "loc-dallas",
       ownerId: "user-r1", status: "active", visibility: "all_teams", priority: "P1", marketingStartDate: "2026-08-04" });
     expect(r.statusKey).toBe("active/all teams");
   });
 
+  it("keeps only a keyed hash of the DOB, and checks it is plausible", () => {
+    const r = norm(sales(2, { DOB: "03/15/1995" }));
+    expect((r.norm as SalesNorm).dob).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(r)).not.toMatch(/1995/);
+    expect(norm(sales(2, { DOB: "03/15/2020" })).reasons).toEqual(["implausible_dob:dob"]);
+    expect(norm(sales(2, { DOB: "05/06/1992" })).reasons).toEqual(["ambiguous_date:dob"]);
+    expect(dobToken("1995-03-15", "detect", 30, TODAY, h)).toBe(dobToken("15/03/1995", "detect", 30, TODAY, h));
+    // A stored token is read back as-is (re-analysis never sees the date).
+    const t = dobToken("1995-03-15", "detect", 30, TODAY, h);
+    expect((norm(sales(2, { DOB: t })).norm as SalesNorm).dob).toBe(t.slice(5));
+  });
+
+  it("date order per column: a configured order resolves ambiguity and flags contradictions", () => {
+    const mdy = cfg((m) => { m.sheets.sales.dateOrders = { marketingStartDate: "MDY" }; });
+    expect(norm(sales(2, { "Marketing Start Date": "05/06/2026" }), mdy).norm).toMatchObject({ marketingStartDate: "2026-05-06" });
+    expect(norm(sales(2, { "Marketing Start Date": "25/06/2026" }), mdy).reasons).toEqual(["date_order_conflict:marketingStartDate"]);
+    expect(norm(sales(2, { "Marketing Start Date": "05/06/2026" })).reasons).toEqual(["ambiguous_date:marketingStartDate"]);
+    expect(() => cfg((m) => { m.sheets.sales.dateOrders = { nope: "MDY" }; })).toThrow(/names no mapped column/);
+  });
+
+  it("phones: bare numbers need an assigned +1 area code, or a country code when no region is set", () => {
+    expect(norm(sales(2, { Phone: "9876543210" })).reasons).toEqual(["invalid_phone:phone"]);
+    const noRegion = cfg((m) => { m.defaults.phoneRegion = null; });
+    expect(norm(sales(2), noRegion).reasons).toEqual(["phone_needs_country_code:phone"]);
+    expect(norm(sales(2, { Phone: "+1 214 555 0101" }), noRegion).reasons).toEqual([]);
+  });
+
   it("collects every problem on a row as field-level reasons", () => {
-    const r = normalizeRow(sales(2, { Phone: "12", Technology: "Cobol", Location: "Mars", "Recruiter Email": "gone@x.example", Status: "Hot", Priority: "urgent" }), cfg(), refs);
+    const r = norm(sales(2, { Phone: "12", Technology: "Cobol", Location: "Mars", "Recruiter Email": "gone@x.example", Status: "Hot", Priority: "urgent" }));
     expect(r.reasons.sort()).toEqual(["inactive_owner:owner", "invalid_phone:phone", "invalid_priority:priority",
       "unconfirmed_status:status", "unknown_location:location", "unknown_technology:technology"]);
   });
 
   it("row colour: placeholders and unmapped colours go to review; a confirmed colour must agree with the text", () => {
     const withGreen = cfg((m) => { m.rowColors.sales["#00ff00"] = { status: "on_hold" }; });
-    const go = (o: Record<string, string>, c = withGreen) => normalizeRow(sales(2, { "Row Color": "", ...o }), c, refs).reasons;
+    const go = (o: Record<string, string>, c = withGreen) => norm(sales(2, { "Row Color": "", ...o }), c).reasons;
     expect(go({ "Row Color": "#B7E1CD" })).toEqual(["unconfirmed_row_color:rowColor"]);
     expect(go({ "Row Color": "#123456" })).toEqual(["unmapped_row_color:rowColor"]);
     expect(go({ "Row Color": "#00ff00" })).toEqual(["status_color_conflict:rowColor"]);
     expect(go({ "Row Color": "#00ff00", Status: "On Hold" })).toEqual([]);
-    expect(normalizeRow(sales(2, { "Row Color": "#00ff00", Status: "" }), withGreen, refs).norm).toMatchObject({ status: "on_hold" });
+    expect(norm(sales(2, { "Row Color": "#00ff00", Status: "" }), withGreen).norm).toMatchObject({ status: "on_hold" });
     expect(go({ Status: "" })).toEqual(["missing:status"]);
   });
 
   it("interview time: end time or duration, time-zone abbreviations, defaults", () => {
-    const n = (o: Record<string, string>) => normalizeRow(interview(2, o), cfg(), refs);
+    const n = (o: Record<string, string>) => norm(interview(2, o));
     expect(n({ "End Time": "11:30 AM", "Time Zone": "est" }).norm).toMatchObject({ startLocal: "2026-09-01T10:00", minutes: 90, timeZone: "America/New_York" });
     expect(n({ "Duration (min)": "45 min", "Time Zone": "Asia/Kolkata" }).norm).toMatchObject({ minutes: 45, timeZone: "Asia/Kolkata" });
     expect(n({}).norm).toMatchObject({ minutes: 60, timeZone: "America/Chicago", round: "Not recorded" });
@@ -89,23 +123,32 @@ describe("row keys and normalization", () => {
   });
 });
 
-describe("matching (email, then phone, then name + DOB; a name alone is only a suggestion)", () => {
-  const strong = new Map<string, string>([
-    [sha256("email:a@x.io"), "A"], [sha256("phone:+12145550101"), "B"], [sha256("namedob:asha|verma|1995-03-15"), "C"],
-  ]);
-  const names = new Map([[sha256("name:asha|verma"), new Set(["C"])], [sha256("name:ravi|kumar"), new Set(["D", "E"])]]);
-  const id = (o: Partial<{ emails: string[]; phone: string | null; nameKey: string | null; dob: string | null }>) =>
+describe("matching (email, then phone; name + DOB or a name alone is only a suggestion)", () => {
+  const ids = (o: Partial<{ emails: string[]; phone: string | null; nameKey: string | null; dob: string | null }>) =>
     ({ emails: [], phone: null, nameKey: null, dob: null, ...o });
-  it("prefers email, then phone, then name + DOB", () => {
-    expect(matchPerson(id({ emails: ["a@x.io"] }), strong, names)).toEqual({ personKey: "A", reason: null });
-    expect(matchPerson(id({ phone: "+12145550101" }), strong, names)).toEqual({ personKey: "B", reason: null });
-    expect(matchPerson(id({ nameKey: "asha|verma", dob: "1995-03-15" }), strong, names)).toEqual({ personKey: "C", reason: null });
+  const strong = new Map<string, string>([
+    [h("email:a@x.io"), "A"], [h("phone:+12145550101"), "B"], [h("namedob:asha|verma|d1"), "C"],
+  ]);
+  const names = new Map([[h("name:asha|verma"), new Set(["C"])], [h("name:ravi|kumar"), new Set(["D", "E"])]]);
+  it("email, then phone; name + DOB is a reviewable suggestion", () => {
+    expect(matchPerson(ids({ emails: ["a@x.io"] }), strong, names, h)).toEqual({ personKey: "A", reason: null });
+    expect(matchPerson(ids({ phone: "+12145550101" }), strong, names, h)).toEqual({ personKey: "B", reason: null });
+    expect(matchPerson(ids({ nameKey: "asha|verma", dob: "d1" }), strong, names, h)).toEqual({ personKey: "C", reason: "name_dob_match" });
   });
   it("conflicting, ambiguous, name-only and missing matches go to review", () => {
-    expect(matchPerson(id({ emails: ["a@x.io"], phone: "+12145550101" }), strong, names).reason).toBe("conflicting_match");
-    expect(matchPerson(id({ nameKey: "asha|verma" }), strong, names)).toEqual({ personKey: "C", reason: "name_only_match" });
-    expect(matchPerson(id({ nameKey: "ravi|kumar" }), strong, names)).toEqual({ personKey: null, reason: "ambiguous_match" });
-    expect(matchPerson(id({ emails: ["z@x.io"] }), strong, names)).toEqual({ personKey: null, reason: "no_candidate_match" });
+    expect(matchPerson(ids({ emails: ["a@x.io"], phone: "+12145550101" }), strong, names, h).reason).toBe("conflicting_match");
+    expect(matchPerson(ids({ nameKey: "asha|verma" }), strong, names, h)).toEqual({ personKey: "C", reason: "name_only_match" });
+    expect(matchPerson(ids({ nameKey: "ravi|kumar" }), strong, names, h)).toEqual({ personKey: null, reason: "ambiguous_match" });
+    expect(matchPerson(ids({ emails: ["z@x.io"] }), strong, names, h)).toEqual({ personKey: null, reason: "no_candidate_match" });
+  });
+  it("non-Latin names keep their letters (they do not all collapse to one key)", () => {
+    const a = norm(sales(2, { "First Name": "राम", "Last Name": "शर्मा", "Marketing Email": "", Phone: "" }));
+    const b = norm(sales(3, { "First Name": "सीता", "Last Name": "वर्मा", "Marketing Email": "", Phone: "" }));
+    expect(a.identity.nameKey).not.toBe(b.identity.nameKey);
+    expect(a.identity.nameKey).not.toBe("|");
+    const r = resolve([sales(2, { "First Name": "राम", "Last Name": "शर्मा", "Marketing Email": "", Phone: "" }),
+      sales(3, { "First Name": "सीता", "Last Name": "वर्मा", "Marketing Email": "", Phone: "" })]);
+    expect(r["sales 3"]!.state).toBe("clean");
   });
 });
 
@@ -124,6 +167,7 @@ describe("resolveBatch", () => {
     expect((r["interviews 2"]!.norm as { ownerId: string }).ownerId).toBe("user-r1");
     expect(r["placements 2"]!.state).toBe("clean");
     expect(r["sales 2"]!.state).toBe("clean");
+    expect((r["sales 2"]!.norm as SalesNorm).identities).toHaveLength(2); // email, phone
   });
 
   it("holds activity of a person who cannot load, and placements while placement loading is off", () => {
@@ -144,40 +188,51 @@ describe("resolveBatch", () => {
     expect(resolve([sales(2), placement(2, { Status: "BGC Failed" })])["placements 2"]!.reasons).toEqual(["placement_status_not_importable"]);
   });
 
-  it("applies reviewer decisions: approve drops the bad field, reject, link", () => {
+  it("approve clears only the reasons the reviewer accepted, dropping the bad field", () => {
     const bad = sales(2, { Phone: "12" });
-    const key = rowKeyOf("sales", bad.cells);
-    const approved = resolve([bad], { decisions: new Map([[`sales:${key}`, { action: "approve", linkRowKey: null }]]) });
+    const k = `sales:${key(bad)}`;
+    const approved = resolve([bad], { decisions: new Map([[k, dec("approve", null, ["invalid_phone:phone"])]]) });
     expect(approved["sales 2"]).toMatchObject({ state: "clean", reasons: [] });
     expect((approved["sales 2"]!.norm as SalesNorm).phone).toBe(null);
-    const rejected = resolve([bad], { decisions: new Map([[`sales:${key}`, { action: "reject", linkRowKey: null }]]) });
+    // The same row with a new problem the reviewer never saw stays in review.
+    const changed = sales(2, { Phone: "12" });
+    const c2 = cfg((m) => { m.placements.commit = true; m.statuses.sales["active"] = null; });
+    const again = resolve([changed], { config: c2, decisions: new Map([[k, dec("approve", null, ["invalid_phone:phone"])]]) });
+    expect(again["sales 2"]!.reasons).toEqual(["unconfirmed_status:status"]);
+    // An approval without accepted reasons clears nothing.
+    expect(resolve([bad], { decisions: new Map([[k, dec("approve", null, [])]]) })["sales 2"]!.reasons).toEqual(["invalid_phone:phone"]);
+    const rejected = resolve([bad], { decisions: new Map([[k, dec("reject")]]) });
     expect(rejected["sales 2"]).toMatchObject({ state: "rejected", reasons: ["rejected_by_reviewer"] });
-    const stray = interview(3, { "Candidate Name": "Someone Else", "Candidate Email": "" });
-    const s2 = sales(2);
-    const linked = resolve([s2, stray], { decisions: new Map([[`interviews:${rowKeyOf("interviews", stray.cells)}`,
-      { action: "link", linkRowKey: rowKeyOf("sales", s2.cells) }]]) });
-    expect(linked["interviews 3"]).toMatchObject({ state: "clean", personKey: rowKeyOf("sales", s2.cells) });
-    // Blocking reasons are not cleared by an approval.
-    const blocked = sales(2, { Status: "Hot" });
-    const b = resolve([blocked], { decisions: new Map([[`sales:${rowKeyOf("sales", blocked.cells)}`, { action: "approve", linkRowKey: null }]]) });
-    expect(b["sales 2"]!.reasons).toEqual(["unconfirmed_status:status"]);
   });
 
-  it("skips rows and people already loaded by an earlier batch, and attaches new activity to them", () => {
+  it("link attaches a stray row to a sales row", () => {
+    const stray = interview(3, { "Candidate Name": "Someone Else", "Candidate Email": "" });
+    const s2 = sales(2);
+    const linked = resolve([s2, stray], { decisions: new Map([[`interviews:${key(stray)}`, dec("link", key(s2))]]) });
+    expect(linked["interviews 3"]).toMatchObject({ state: "clean", personKey: key(s2) });
+  });
+
+  it("skips rows and people already loaded by email or phone; name + DOB alone goes to review", () => {
     const s = sales(2);
     const ledger = emptyLedger();
-    for (const h of identityHashes({ emails: ["asha@m.example"], phone: null, nameKey: null, dob: null }).strong) {
-      ledger.identities.set(h, { candidateId: "cand-1", ownerId: "user-r1" });
+    for (const x of identityHashes({ emails: ["asha@m.example"], phone: null, nameKey: null, dob: null }, h).strong) {
+      ledger.identities.set(x, { candidateId: "cand-1", ownerId: "user-r1" });
     }
     const r = resolve([sales(3, { Status: "On Hold" }), interview(2)], { ledger });
     expect(r["sales 3"]).toMatchObject({ state: "skipped", reasons: ["person_already_imported"], personKey: "ledger:cand-1" });
     expect(r["interviews 2"]).toMatchObject({ state: "clean", personKey: "ledger:cand-1" });
-    ledger.links.set(`sales:${rowKeyOf("sales", s.cells)}`, "cand-1");
+    ledger.links.set(`sales:${key(s)}`, "cand-1");
     expect(resolve([s], { ledger })["sales 2"]).toMatchObject({ state: "skipped", reasons: ["already_imported"] });
+
+    const dobOnly = emptyLedger();
+    const withDob = sales(4, { "Marketing Email": "new@m.example", Phone: "214-555-0144", DOB: "1995-03-15" });
+    const nd = identityHashes(normalizeRow(withDob, cfg(), refs, h, TODAY).identity, h).nameDob!;
+    dobOnly.identities.set(nd, { candidateId: "cand-2", ownerId: "user-r1" });
+    expect(resolve([withDob], { ledger: dobOnly })["sales 4"]).toMatchObject({ state: "review", reasons: ["matches_imported_person"] });
   });
 
   it("flags a person whose email or phone a live candidate already uses", () => {
     const s = sales(2);
-    expect(resolve([s], { live: new Set([rowKeyOf("sales", s.cells)]) })["sales 2"]!.reasons).toEqual(["matches_existing_candidate"]);
+    expect(resolve([s], { live: new Set([key(s)]) })["sales 2"]!.reasons).toEqual(["matches_existing_candidate"]);
   });
 });
