@@ -479,7 +479,8 @@ describe("RLS differential: placement visibility in the database matches the eng
     expect(rows).toHaveLength(2);
     for (const r of rows) {
       expect(r.def, r.polname).toMatch(/EXISTS/);
-      expect(r.def, r.polname).not.toMatch(/\bIN \(/);
+      // No scan of every visible placement (0023); the owned-candidate set may be an IN (hashed, 0038).
+      expect(r.def, r.polname).not.toMatch(/placement_id IN \(/);
       expect(r.def, r.polname).not.toMatch(/candidate_owned\(|authz\.owns\(/);
     }
     const asg = rows.find((r) => r.polname === "assignment_read")!.def as string;
@@ -491,5 +492,17 @@ describe("RLS differential: placement visibility in the database matches the eng
     const { rows } = await db.admin.query(`SELECT pg_get_expr(polqual, polrelid) AS def FROM pg_policy WHERE polname = 'placement_read'`);
     expect(rows[0].def).not.toMatch(/candidate_owned\(/);
     expect(rows[0].def).toMatch(/owned_candidate_ids/);
+  });
+
+  it.each([
+    ["placement", "placement_read", "placement:read"],
+    ["assignment", "assignment_read", "assignment:read"],
+  ] as const)("the %s read policy probes a hashed owned-candidate set, never an array per row (0038)", async (table, policy, perm) => {
+    const plan = await asUser(db.app, U.r1a, async (c) =>
+      (await c.query<{ "QUERY PLAN": string }>(`EXPLAIN SELECT count(*) FROM eureka.${table}`)).rows.map((r) => r["QUERY PLAN"]).join("\n"));
+    expect(plan).toMatch(/hashed SubPlan/);
+    expect(plan).not.toMatch(/candidate_id = ANY/);
+    const { rows } = await db.admin.query(`SELECT pg_get_expr(polqual, polrelid) AS def FROM pg_policy WHERE polname = $1`, [policy]);
+    expect(rows[0].def).toMatch(new RegExp(`unnest\\(\\( SELECT authz\\.owned_candidate_ids\\('${perm}'`));
   });
 });

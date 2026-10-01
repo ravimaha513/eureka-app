@@ -187,6 +187,23 @@ describe("authz.hotlist_export (differential against the engine)", () => {
     expect(rows[0]!.src).toMatch(/50001/);
   });
 
+  it("plans each call with its arguments (0038): every filter, the escape and the limit clamp still apply", async () => {
+    const all = await exportAs(U.ceo);
+    const byId = new Map(candidates.map((c) => [c.id, c]));
+    const ids = (rows: Row[]) => rows.map((r) => r.id);
+    expect(ids(await exportAs(U.ceo, 60_000, [null, "Java", null, null]))).toEqual(ids(all));
+    expect(await exportAs(U.ceo, 60_000, [null, "Cobol", null, null])).toEqual([]);
+    expect(ids(await exportAs(U.ceo, 60_000, [null, null, "all_teams", null])))
+      .toEqual(ids(all).filter((id) => byId.get(id)!.visibility === "all_teams"));
+    expect(await exportAs(U.ceo, 60_000, [null, null, null, "%Cand\\_%"])).toEqual([]);
+    expect(await exportAs(U.ceo, 0)).toHaveLength(1);
+    const { rows } = await db.admin.query<{ lang: string; src: string }>(`
+      SELECT l.lanname AS lang, p.prosrc AS src FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
+      WHERE p.oid = 'authz.hotlist_export(text,text,text,text,int)'::regprocedure`);
+    expect(rows[0]!.lang).toBe("plpgsql");
+    expect(rows[0]!.src).toMatch(/RETURN QUERY EXECUTE \$q\$[\s\S]*\$q\$ USING p_status, p_technology, p_visibility, p_search, p_limit;/);
+  });
+
   it("a deactivated user exports nothing", async () => {
     await db.admin.query(`UPDATE eureka.app_user SET status = 'inactive' WHERE id = $1`, [U.m2]);
     try {
