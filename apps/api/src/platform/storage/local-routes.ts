@@ -68,7 +68,7 @@ export async function registerLocalStorageRoutes(app: FastifyInstance, storage: 
         return problem(reply, 400, "Unexpected form fields");
       }
       const policy = storage.verify<LocalUploadPolicy>(fields.get("policy")!, fields.get("signature")!);
-      if (!policy) return problem(reply, 403, "Invalid or expired policy");
+      if (!policy || policy.purpose !== "upload" || !policy.key.startsWith("quarantine/")) return problem(reply, 403, "Invalid or expired policy");
       if (fields.get("key") !== policy.key || fields.get("Content-Type") !== policy.contentType) {
         return problem(reply, 403, "Policy condition failed");
       }
@@ -84,7 +84,7 @@ export async function registerLocalStorageRoutes(app: FastifyInstance, storage: 
     scope.get(LOCAL_DOWNLOAD_PATH, async (req, reply) => {
       const q = req.query as { policy?: string; signature?: string };
       const policy = q.policy && q.signature ? storage.verify<LocalDownloadPolicy>(q.policy, q.signature) : null;
-      if (!policy || !policy.key.startsWith("clean/")) return problem(reply, 403, "Invalid or expired link");
+      if (!policy || policy.purpose !== "download" || !policy.key.startsWith("clean/")) return problem(reply, 403, "Invalid or expired link");
       let body: Buffer;
       try { body = await readFile(localPath(storage.root, policy.key)); } catch { return problem(reply, 404, "Not Found"); }
       return reply

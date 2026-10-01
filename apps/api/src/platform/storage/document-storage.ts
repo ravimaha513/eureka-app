@@ -80,8 +80,9 @@ export class S3DocumentStorage implements DocumentStorage {
 }
 
 /** Fields the local POST accepts, in the S3 spirit: everything signed, nothing else allowed. */
-export interface LocalUploadPolicy { key: string; contentType: string; size: number; expiresAt: string }
-export interface LocalDownloadPolicy { key: string; contentType: string; fileName: string; expiresAt: string }
+/** `purpose` binds a signature to one route: an upload policy is never a download link and vice versa. */
+export interface LocalUploadPolicy { purpose: "upload"; key: string; contentType: string; size: number; expiresAt: string }
+export interface LocalDownloadPolicy { purpose: "download"; key: string; contentType: string; fileName: string; expiresAt: string }
 
 export const LOCAL_UPLOAD_PATH = "/api/local-storage/upload";
 export const LOCAL_DOWNLOAD_PATH = "/api/local-storage/object";
@@ -121,7 +122,7 @@ export class LocalDocumentStorage implements DocumentStorage {
   async presignUpload(r: UploadRequest): Promise<UploadTicket> {
     quarantineOnly(r.key);
     const expiresAt = new Date(Date.now() + r.expiresSeconds * 1000).toISOString();
-    const policy = this.encode({ key: r.key, contentType: r.contentType, size: r.size, expiresAt } satisfies LocalUploadPolicy);
+    const policy = this.encode({ purpose: "upload", key: r.key, contentType: r.contentType, size: r.size, expiresAt } satisfies LocalUploadPolicy);
     return {
       url: LOCAL_UPLOAD_PATH,
       fields: { key: r.key, "Content-Type": r.contentType, policy, signature: this.sign(policy) },
@@ -133,7 +134,7 @@ export class LocalDocumentStorage implements DocumentStorage {
     cleanOnly(r.key);
     attachmentDisposition(r.fileName);
     const expiresAt = new Date(Date.now() + r.expiresSeconds * 1000).toISOString();
-    const policy = this.encode({ key: r.key, contentType: r.contentType, fileName: r.fileName, expiresAt } satisfies LocalDownloadPolicy);
+    const policy = this.encode({ purpose: "download", key: r.key, contentType: r.contentType, fileName: r.fileName, expiresAt } satisfies LocalDownloadPolicy);
     return `${LOCAL_DOWNLOAD_PATH}?policy=${policy}&signature=${this.sign(policy)}`;
   }
 }
