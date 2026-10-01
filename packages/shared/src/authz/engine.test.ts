@@ -10,6 +10,7 @@ import {
   type CandidateRef,
   type UserAccess,
 } from "./engine.js";
+import { canCreateBatch } from "./actions.js";
 
 // Fixture org: manager M leads nothing directly but has leads L1 (team T1) and L2 (team T2).
 // Recruiters R1a, R1b in T1; R2a in T2. Location Dallas = LOC_D.
@@ -237,5 +238,12 @@ describe("Hot List visibility policy (OD-01)", () => {
     expect(hotlistVisible(resolveScope(R1a, "hotlist:read", "team"), { ...otherTeam, visibility: "all_teams" })).toBe(true);
     expect(resolveScope(ADMIN, "hotlist:read", "team")).toBeNull();
     expect(capabilities(ADMIN, "team")).not.toContain("hotlist:read");
+  });
+});
+
+describe("batch planning (canCreateBatch)", () => {
+  it("is Sales leadership only: leads and managers yes; recruiters, location, coaches, HR and admins no", () => {
+    expect([L1, M].map(canCreateBatch)).toEqual([true, true]);
+    expect([R1a, LOCADM, COACH, HR, ADMIN].map(canCreateBatch)).toEqual([false, false, false, false, false]);
   });
 });
