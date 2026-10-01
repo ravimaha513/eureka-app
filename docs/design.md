@@ -465,6 +465,9 @@ Core MVP endpoints:
 | PUT /candidates/{id}/visibility | candidate.visibility:update | Lead and above |
 | PUT /candidates/{id}/technical-rating | candidate.rating:update | Location roles |
 | GET /hotlist | hotlist:read | marketable statuses, saved view filters |
+| GET, POST /hotlist/views; PATCH, DELETE /hotlist/views/{id} | hotlist:read | the caller's own saved filter sets only (RLS on `hotlist_view`, migration 0025); max 50 per user, names unique per user |
+| POST /hotlist/bulk/status, POST /hotlist/bulk/visibility | candidate:update, candidate.visibility:update | up to 100 ids; each record goes through its single-record path (404/403/422 per record) and reports its own result; `terminated` and `confirmation` are not offered in bulk |
+| POST /hotlist/export | report:export | CSV of the filtered Hot List limited to the caller's `report:export` scope, phones always masked, capped at 50,000 rows (`x-export-truncated`), 60 s timeout, 5 per user per 10 minutes, audited as `hotlist.export` (filter summary and row count only) |
 | GET, POST /submissions; GET /submissions/{id}; PATCH /submissions/{id}/status | submission:* | create requires the candidate to be visible; list filters status, candidateId, recruiterId, from, to; `rate` only when `rate:read` covers the row |
 | GET /interviews?from=&to=&status=&teamId=&locationId=&candidateId=&cleared=; GET /interviews/{id} | interview:read | board rows carry `editableFields` and `feedbackKinds` hints |
 | POST /interviews; PATCH /interviews/{id} | interview:create, interview:update | create is authorized against the parent submission; PATCH fields depend on the grant kind (B2.6) |
