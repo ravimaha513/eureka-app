@@ -15,7 +15,7 @@ like `/submissions`. Design references: B2.2 (`placement`, `placement_contact`,
 | PL-4 | States: `confirmed → paperwork → bgc → ready → joined`; `backout` from any state before `joined`; `bgc_failed` from any state including `joined` (needs `placement.bgc_status:update`). Forward steps cannot be skipped. All changes go through a definer function (NULL-safe). |
 | PL-5 | Side effects in the same transaction: creating a placement moves the candidate to `confirmation`; `joined` moves it to `placed` and opens an `assignment` (assignment_no = next per person); `backout` or `bgc_failed` before joining moves it back to `active`; `bgc_failed` after `joined` ends the open assignment (end_reason `bgc_failed`) and moves the candidate to `bench`. |
 | PL-6 | `rate` is returned only when `rate:read` covers the placement's actor snapshot (same rule as submissions). Rates and contact emails/phones are never written to the audit log. |
-| PL-7 | Notifications to HR, Accounts and Immigration are recorded as `outbox_event` rows (type `placement.created`, `placement.state_changed`) in the same transaction; delivery is a later worker job. |
+| PL-7 | Notifications to HR, Accounts and Immigration are recorded as `outbox_event` rows (type `placement.created`, `placement.state_changed`) in the same transaction; delivered by the worker job `outbox-delivery` (migration 0024). |
 | PL-8 | `Idempotency-Key` header is required on `POST /placements` (design B3); a repeat with the same key and body returns the first response. |
 | PL-9 | Every write is audited. |
 
@@ -90,7 +90,14 @@ and `packages/shared/src/authz/{state-machines,actions}.ts`. Deviations and prec
   `projectCity` ≤ 80 characters; `projectState` 2–40 letters (name or code); `tentativeStart` between
   2000-01-01 and 2100-12-31; up to 10 contacts, contact `name` ≤ 120, `email` valid ≤ 254, `phone` E.164.
   The same limits are table CHECKs.
-- **Outbox** rows hold ids, states and the recipient groups only; no worker reads them yet.
+- **Outbox** rows hold ids, states and the recipient groups only. Delivery (migration 0024, worker job
+  `outbox-delivery`, design B6): groups map to roles `hr`, `accounts`, `immigration` (not `associate_hr`);
+  each active role holder gets one email per event with the event, the statuses, the placement id and a
+  sign-in link, never names, rates, contacts or reasons. Recipients are fixed when the event is first
+  processed. At most one email per recipient per event: a crash after the provider accepted a message leaves
+  the recipient `in_doubt` (alerted, not resent). Published rows are pruned after `OUTBOX_RETENTION_DAYS`
+  (default 30, minimum 7); Idempotency-Key rows are deleted after 24 hours (daily job), so a key can be
+  replayed for at least 24 hours.
 
 ### Lookups visibility (least privilege)
 `GET /api/v1/lookups` accepts any signed-in user and always returns all six keys, but their content depends on permissions: `technologies` and `locations` for everyone; `coaches` only with `interview:create` or `interview:update`; `clients`, `vendors` and `implementationPartners` only with `submission:read`, `submission:create` or `placement:read`. Withheld lists are `[]` (not missing, not 403); the web pickers then offer a paste-an-ID input, and the server validates every ID on write.

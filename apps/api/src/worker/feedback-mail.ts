@@ -4,12 +4,20 @@ import { join } from "node:path";
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 export interface Mail { id: string; to: string; subject: string; text: string }
 export interface MailTransport { send(mail: Mail, signal: AbortSignal): Promise<void> }
+/**
+ * The message was definitely not sent (the provider answered with a client
+ * error, or the local write failed), so it is safe to retry. Any other error
+ * from send() leaves the outcome unknown.
+ */
+export class MailRejected extends Error {}
 export class LocalMail implements MailTransport {
   constructor(private readonly directory: string) {}
   async send(mail: Mail, signal: AbortSignal) {
-    signal.throwIfAborted();
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    await writeFile(join(this.directory, `${mail.id}.json`), JSON.stringify(mail, null, 2), { mode: 0o600 });
+    try {
+      signal.throwIfAborted();
+      await mkdir(this.directory, { recursive: true, mode: 0o700 });
+      await writeFile(join(this.directory, `${mail.id}.json`), JSON.stringify(mail, null, 2), { mode: 0o600 });
+    } catch { throw new MailRejected("Local email write failed"); }
   }
 }
 export class SesMail implements MailTransport {
@@ -24,7 +32,13 @@ export class SesMail implements MailTransport {
           Subject: { Data: mail.subject, Charset: "UTF-8" }, Body: { Text: { Data: mail.text, Charset: "UTF-8" } },
         } }, EmailTags: [{ Name: "delivery", Value: mail.id }],
       }), { abortSignal: signal });
-    } catch { throw new Error("Feedback email delivery failed"); } // provider errors can contain recipient details
+    } catch (err) {
+      // Provider errors can contain recipient details: never pass them on. A 4xx
+      // answer (validation, throttling) means SES did not accept the message.
+      const status = (err as { $metadata?: { httpStatusCode?: number } } | null)?.$metadata?.httpStatusCode;
+      if (status !== undefined && status >= 400 && status < 500) throw new MailRejected("Email delivery rejected");
+      throw new Error("Email delivery failed");
+    }
   }
 }
 /** Persist only an AEAD-encrypted retry copy. Validation uses a separate SHA-256 hash.
