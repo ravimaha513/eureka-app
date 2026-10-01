@@ -38,7 +38,11 @@ export function CreateBatchDialog({ onClose, onCreated }: { onClose: () => void;
       setErrors(perField);
       setFormError(_form ?? (err instanceof ApiError && err.status === 409
         ? "A batch for this location, technology and month already exists."
-        : err instanceof ApiError && err.status === 403 ? "Only leads and managers can plan batches." : salesError(err)));
+        : err instanceof ApiError && err.status === 403
+          ? (err.detail === "location_not_in_scope"
+            ? "You can plan batches only for locations where your teams work."
+            : "Only leads and managers can plan batches.")
+          : salesError(err)));
     } finally { setBusy(false); }
   };
 
