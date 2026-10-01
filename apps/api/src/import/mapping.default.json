@@ -4,7 +4,8 @@
     "dateOrder": "detect",
     "twoDigitYearPivot": 30,
     "timeZone": "America/Chicago",
-    "interviewMinutes": 60
+    "interviewMinutes": 60,
+    "phoneRegion": "US"
   },
   "sheets": {
     "sales": {

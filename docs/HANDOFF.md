@@ -49,12 +49,13 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   `OUTBOX_MAIL_MODE`, `OUTBOX_FROM_EMAIL`, `APP_PUBLIC_ORIGIN` (Terraform does not set them yet); set
   `OUTBOX_DELIVER_SINCE` on first enable. Hardening (0029): rejection cap (`failed`), lease-safe in-doubt,
   no-recipient alert, delete/truncate guards, job_run retention for outbox-delivery.
-- Sheet migration (`docs/import.md`, migration 0028): CSV import CLI run as the `eureka_import`
-  role (NOLOGIN outside the migration window). Normalizes and matches rows across the Sales,
-  interview and placement sheets into staging tables, review queue with reasons, reconciliation
-  report, dry-run commit by default; `--commit` loads one person per transaction as the row's
-  owner through the app's RLS, guards and definer functions, after sign-off by a second person
-  holding `access:manage`. Idempotent via a ledger; imported interviews skip feedback emails.
+- Sheet migration (`docs/import.md`, migrations 0028 and 0033): CSV import CLI run as the
+  `eureka_import` role (NOLOGIN outside the migration window, no role memberships). Normalizes and
+  matches the Sales, interview and placement sheets into staging tables with a review queue and a
+  reconciliation report. Tickets, review decisions and sign-off are authenticated API calls by org
+  admins (`/api/v1/imports`, second person approves, digest-bound and expiring). Each person loads
+  through `authz.import_load_person` (definer, same RLS checks, guards, transitions and audit as the
+  API); a ledger with keyed hashes and natural keys keeps re-runs idempotent.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 - First-admin bootstrap (migration 0037): `dist/db/bootstrap.js` as a one-off migrate task creates two
   `org_admin` users for hosted-domain emails, only while no active `org_admin` exists (exit 3 otherwise,
@@ -102,7 +103,7 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   they name the candidate or client? Today: `hr`, `accounts`, `immigration` only, ids and statuses only.
 - Sheet import (`docs/import.md`): status and row-colour mapping (SRS Q6); may historical
   placements emit outbox notifications; joined placements' assignment start date; who signs off a
-  batch (org admin assumed); is `eureka_import` acting as the API role acceptable for the window?
+  batch (org admin assumed); may the sheet set `all_teams` visibility without a lead?
 
 ## Waiting on Ravi (not code)
 

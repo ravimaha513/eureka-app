@@ -6,18 +6,19 @@
  * The database layer (stage.ts) supplies reference lists, the commit ledger,
  * decisions and live-duplicate hits; nothing here touches the database.
  */
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { OPEN_PLACEMENT_STATUSES, type CandidateStatus, type PlacementStatus } from "@eureka/shared";
 import type { CallStatus, MappingConfig, SalesTarget, Sheet } from "./mapping.js";
 import {
   clean, labelKey, lookupLabel, nameKey, normalizeColor, normalizeEmail, normalizeName, normalizePhone,
   normalizePlacementType, normalizeState, normalizeText, normalizeWorkMode, parseDate, parseRate, parseTime,
-  splitFullName, validTimeZone, type Mapped, type Norm,
+  plausibleDob, splitFullName, validTimeZone, type DateOrder, type Mapped, type Norm,
 } from "./normalize.js";
 
 export type RowState = "clean" | "review" | "rejected" | "skipped" | "held" | "committed";
 
-export interface RawRow { sheet: Sheet; rowNo: number; cells: Record<string, string> }
+/** rowKey: set when re-analysing stored rows (computed from the original cells at staging). */
+export interface RawRow { sheet: Sheet; rowNo: number; cells: Record<string, string>; rowKey?: string }
 
 export interface Refs {
   /** lower-case name -> id */
@@ -37,13 +38,17 @@ export interface Ledger {
   identities: Map<string, { candidateId: string; ownerId: string }>;
 }
 
-export interface Decision { action: "approve" | "reject" | "link"; linkRowKey: string | null }
+/** approvedReasons: the reasons the reviewer accepted (only these are cleared). */
+export interface Decision { action: "approve" | "reject" | "link"; linkRowKey: string | null; approvedReasons: string[] | null }
 
+/** dob is the keyed hash of the date (see dobToken), never the date. */
 export interface Identity { emails: string[]; phone: string | null; nameKey: string | null; dob: string | null }
 
 export interface SalesNorm {
   firstName: string | null; lastName: string | null; personalEmail: string | null; marketingEmail: string | null;
   phone: string | null; dob: string | null; technologyId: string | null; locationId: string | null;
+  /** Keyed identity hashes recorded in the ledger when the person is loaded. */
+  identities: string[];
   ownerId: string | null; status: CandidateStatus | null; visibility: "team" | "all_teams";
   priority: "P1" | "P2" | "P3" | null; marketingStartDate: string | null;
 }
@@ -82,20 +87,60 @@ export interface StagedRow extends Omit<NormalizedRow, "identity"> {
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
-/** Stable key of a source row: sheet + cells sorted by header (column order does not matter). */
-export function rowKeyOf(sheet: Sheet, cells: Record<string, string>): string {
-  const entries = Object.entries(cells).map(([k, v]) => [k.trim().toLowerCase(), clean(v)] as const)
-    .filter(([, v]) => v !== "").sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return sha256(`${sheet}\u0000${JSON.stringify(entries)}`);
+/** Keyed hash (HMAC-SHA256, hex) for row keys and identity keys. */
+export type Hmac = (s: string) => string;
+export function makeHmac(key: string): Hmac {
+  if (!key || key.length < 32) throw new Error("IMPORT_HMAC_KEY must be at least 32 characters");
+  return (s: string) => createHmac("sha256", key).update(s).digest("hex");
 }
 
-export function identityHashes(id: Identity): { strong: string[]; name: string | null } {
-  const strong = [
-    ...id.emails.map((e) => sha256(`email:${e}`)),
-    ...(id.phone ? [sha256(`phone:${id.phone}`)] : []),
-    ...(id.nameKey && id.dob ? [sha256(`namedob:${id.nameKey}|${id.dob}`)] : []),
-  ];
-  return { strong, name: id.nameKey ? sha256(`name:${id.nameKey}`) : null };
+/** Stable key of a source row: sheet + cells sorted by header (column order does not matter). */
+export function rowKeyOf(sheet: Sheet, cells: Record<string, string>, h: Hmac): string {
+  const entries = Object.entries(cells).map(([k, v]) => [k.trim().toLowerCase(), clean(v)] as const)
+    .filter(([, v]) => v !== "").sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return h(`row:${sheet}\u0000${JSON.stringify(entries)}`);
+}
+
+export interface IdentityHashes { emails: string[]; phone: string | null; nameDob: string | null; strong: string[]; name: string | null }
+export function identityHashes(id: Identity, h: Hmac): IdentityHashes {
+  const emails = id.emails.map((e) => h(`email:${e}`));
+  const phone = id.phone ? h(`phone:${id.phone}`) : null;
+  const nameDob = id.nameKey && id.dob ? h(`namedob:${id.nameKey}|${id.dob}`) : null;
+  return {
+    emails, phone, nameDob,
+    strong: [...emails, ...(phone ? [phone] : []), ...(nameDob ? [nameDob] : [])],
+    name: id.nameKey ? h(`name:${id.nameKey}`) : null,
+  };
+}
+
+const DOB_TOKEN = "#dob:";
+/**
+ * DOB is needed only for matching. Staging replaces the cell with a token:
+ * the keyed hash of the parsed date, or the reason it could not be used.
+ */
+export function dobToken(cell: string, order: DateOrder, pivot: number, today: string, h: Hmac): string {
+  if (cell.startsWith(DOB_TOKEN) || !clean(cell)) return cell;
+  const d = parseDate(cell, order, pivot);
+  if (!d.ok) return `${DOB_TOKEN}!${d.reason}`;
+  if (d.value === null) return "";
+  if (!plausibleDob(d.value, today)) return `${DOB_TOKEN}!implausible_dob`;
+  return `${DOB_TOKEN}${h(`dob:${d.value}`)}`;
+}
+
+export const todayIso = () => new Date().toISOString().slice(0, 10);
+
+/** The cells as stored: DOB replaced by its token. */
+export function redactCells(row: RawRow, cfg: MappingConfig, h: Hmac, today = todayIso()): Record<string, string> {
+  const sheetCfg = cfg.sheets[row.sheet];
+  const header = (sheetCfg.columns as Record<string, string | undefined>).dob;
+  if (!header) return row.cells;
+  const out = { ...row.cells };
+  for (const k of Object.keys(out)) {
+    if (k.trim().toLowerCase() === header.toLowerCase()) {
+      out[k] = dobToken(out[k] ?? "", sheetCfg.dateOrders.dob ?? cfg.defaults.dateOrder, cfg.defaults.twoDigitYearPivot, today, h);
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,9 +152,10 @@ export const DROPPABLE_FIELDS = new Set([
   "phone", "personalEmail", "marketingEmail", "email", "dob", "priority", "marketingStartDate",
   "vendor", "implementationPartner", "rate", "projectCity", "projectState", "statusReason",
 ]);
-/** Row-level reasons a reviewer may approve. */
+/** Row-level reasons a reviewer may approve. Must match authz.import_reason_approvable (0033). */
 export const APPROVABLE_REASONS = new Set([
   "probable_duplicate", "possible_duplicate_name", "matches_existing_candidate", "name_only_match",
+  "name_dob_match", "matches_imported_person",
 ]);
 /** Reasons that put a dependent row on hold rather than in review (not the row's own fault). */
 const HOLD_REASONS = new Set(["candidate_not_loadable", "placements_commit_disabled"]);
@@ -222,16 +268,20 @@ function identityOf(first: string | null, last: string | null, emails: (string |
   };
 }
 
-export function normalizeRow(row: RawRow, cfg: MappingConfig, refs: Refs): NormalizedRow {
+export function normalizeRow(row: RawRow, cfg: MappingConfig, refs: Refs, h: Hmac, today = todayIso()): NormalizedRow {
   const sheetCfg = cfg.sheets[row.sheet];
   const cols = sheetCfg.columns as Cols;
-  const order = sheetCfg.dateOrder ?? cfg.defaults.dateOrder;
   const pivot = cfg.defaults.twoDigitYearPivot;
-  const n = new RowNormalizer(row.cells, cols);
-  const rowKey = rowKeyOf(row.sheet, row.cells);
+  const dateOf = (field: string): Norm<string | null> => parseDate(n.cell(field), sheetCfg.dateOrders[field] ?? cfg.defaults.dateOrder, pivot);
+  const rowKey = row.rowKey ?? rowKeyOf(row.sheet, row.cells, h);
+  const cells = redactCells(row, cfg, h, today);
+  const n = new RowNormalizer(cells, cols);
   const { first, last } = n.names();
-  const phone = n.take("phone", normalizePhone(n.cell("phone")));
-  const dob = n.take("dob", parseDate(n.cell("dob"), order, pivot));
+  const phone = n.take("phone", normalizePhone(n.cell("phone"), cfg.defaults.phoneRegion));
+  const token = n.cell("dob");
+  const dob = token.startsWith(DOB_TOKEN)
+    ? (token.startsWith(`${DOB_TOKEN}!`) ? n.take<string>("dob", { ok: false, reason: token.slice(DOB_TOKEN.length + 1) }) : token.slice(DOB_TOKEN.length))
+    : null;
   let norm: AnyNorm;
   let identity: Identity;
   let statusKey: string;
@@ -253,13 +303,15 @@ export function normalizeRow(row: RawRow, cfg: MappingConfig, refs: Refs): Norma
       locationId: n.ref("location", refs.locations, "unknown_location", true),
       ownerId: n.owner(refs, true),
       status: target?.status ?? null, visibility: target?.visibility ?? "team", priority,
-      marketingStartDate: n.take("marketingStartDate", parseDate(n.cell("marketingStartDate"), order, pivot)),
+      marketingStartDate: n.take("marketingStartDate", dateOf("marketingStartDate")),
+      identities: [],
     } satisfies SalesNorm;
     identity = identityOf(first, last, [marketingEmail, personalEmail], phone, dob);
+    (norm as SalesNorm).identities = identityHashes(identity, h).strong;
     statusKey = labelKey(n.cell("status")) || "(blank)";
   } else if (row.sheet === "interviews") {
     const email = n.take("email", normalizeEmail(n.cell("email")));
-    const date = n.required("date", n.take("date", parseDate(n.cell("date"), order, pivot)));
+    const date = n.required("date", n.take("date", dateOf("date")));
     const start = n.required("startTime", n.take("startTime", parseTime(n.cell("startTime"))));
     let minutes = cfg.defaults.interviewMinutes;
     const end = n.take("endTime", parseTime(n.cell("endTime")));
@@ -310,14 +362,14 @@ export function normalizeRow(row: RawRow, cfg: MappingConfig, refs: Refs): Norma
       workMode: n.required("workMode", n.take("workMode", normalizeWorkMode(n.cell("workMode")))),
       projectCity: n.take("projectCity", normalizeText(n.cell("projectCity"), 80)),
       projectState: n.take("projectState", normalizeState(n.cell("projectState"))),
-      tentativeStart: n.required("tentativeStart", n.take("tentativeStart", parseDate(n.cell("tentativeStart"), order, pivot))),
+      tentativeStart: n.required("tentativeStart", n.take("tentativeStart", dateOf("tentativeStart"))),
       status: n.status<PlacementStatus>(cfg.statuses.placements, cfg.rowColors.placements, (a, b) => a === b),
       statusReason: n.take("statusReason", normalizeText(n.cell("statusReason"), 500)),
     } satisfies PlacementNorm;
     identity = identityOf(first, last, [email], phone, dob);
     statusKey = labelKey(n.cell("status")) || "(blank)";
   }
-  return { sheet: row.sheet, rowNo: row.rowNo, rowKey, raw: row.cells, norm, statusKey, reasons: [...new Set(n.reasons)], identity };
+  return { sheet: row.sheet, rowNo: row.rowNo, rowKey, raw: cells, norm, statusKey, reasons: [...new Set(n.reasons)], identity };
 }
 
 // ---------------------------------------------------------------------------
@@ -330,18 +382,29 @@ export interface ResolveInput {
   /** rowKeys of sales rows whose email or phone is used by a live (non-imported) candidate */
   liveMatches: Set<string>;
   placementsCommit: boolean;
+  hmac: Hmac;
 }
 
 const dkey = (sheet: Sheet, rowKey: string) => `${sheet}:${rowKey}`;
 
+function salesIdentity(n: SalesNorm): Identity {
+  return identityOf(n.firstName, n.lastName, [n.marketingEmail, n.personalEmail], n.phone, n.dob);
+}
+
 export function resolveBatch(input: ResolveInput): StagedRow[] {
-  const { rows, ledger, decisions, liveMatches } = input;
+  const { rows, ledger, decisions, liveMatches, hmac: h } = input;
   const out = rows.map((r): StagedRow & { identity: Identity; final?: boolean } => ({
     sheet: r.sheet, rowNo: r.rowNo, rowKey: r.rowKey, raw: r.raw, norm: { ...r.norm } as AnyNorm,
     statusKey: r.statusKey, reasons: [...r.reasons], identity: r.identity, state: "clean", personKey: null,
   }));
   const setFinal = (r: (typeof out)[number], state: RowState, reasons: string[]) => {
     r.state = state; r.reasons = reasons; r.final = true;
+  };
+  const approve = (r: (typeof out)[number]) => {
+    const dec = decisions.get(dkey(r.sheet, r.rowKey));
+    if (dec?.action !== "approve") return;
+    applyApproval(r, dec.approvedReasons ?? []);
+    if (r.sheet === "sales") r.identity = salesIdentity(r.norm as SalesNorm);
   };
 
   // 1-3: exact duplicate rows, already-loaded rows, reviewer rejections.
@@ -373,30 +436,35 @@ export function resolveBatch(input: ResolveInput): StagedRow[] {
   };
   for (const r of out) {
     if (r.sheet !== "sales") continue;
-    const { strong, name } = identityHashes(r.identity);
     if (r.final) {
       // An already-loaded row still names its person, for links and name suggestions.
-      if (r.personKey?.startsWith("ledger:")) { salesByKey.set(r.rowKey, r); addName(name, r.personKey); }
+      if (r.personKey?.startsWith("ledger:")) { salesByKey.set(r.rowKey, r); addName(identityHashes(r.identity, h).name, r.personKey); }
       continue;
     }
     salesByKey.set(r.rowKey, r);
     const dec = decisions.get(dkey("sales", r.rowKey));
-    const ledgerHit = strong.map((h) => strongIndex.get(h)).find((p) => p?.startsWith("ledger:"));
-    if (ledgerHit) { r.personKey = ledgerHit; setFinal(r, "skipped", ["person_already_imported"]); addName(name, ledgerHit); continue; }
     if (dec?.action === "link") { r.personKey = dec.linkRowKey; setFinal(r, "rejected", ["merged_into_row"]); continue; }
-    const strongHit = strong.map((h) => strongIndex.get(h)).find((p) => p !== undefined);
-    const nameHit = !strongHit && name ? [...(nameIndex.get(name) ?? [])][0] : undefined;
+    approve(r);
+    const ids = identityHashes(r.identity, h);
+    // Email or phone of a person loaded earlier: the same person (skipped).
+    // Name + DOB alone is not proof: review.
+    const byContact = [...ids.emails, ...(ids.phone ? [ids.phone] : [])].map((x) => strongIndex.get(x));
+    const ledgerHit = byContact.find((p) => p?.startsWith("ledger:"));
+    if (ledgerHit) { r.personKey = ledgerHit; setFinal(r, "skipped", ["person_already_imported"]); addName(ids.name, ledgerHit); continue; }
+    const ledgerDob = ids.nameDob ? strongIndex.get(ids.nameDob) : undefined;
+    const strongHit = ids.strong.map((x) => strongIndex.get(x)).find((p) => p !== undefined && !p.startsWith("ledger:"));
+    const nameHit = !strongHit && !ledgerDob && ids.name ? [...(nameIndex.get(ids.name) ?? [])][0] : undefined;
     if (strongHit) { r.reasons.push("probable_duplicate"); r.personKey = strongHit; }
+    else if (ledgerDob?.startsWith("ledger:")) { r.reasons.push("matches_imported_person"); r.personKey = ledgerDob; }
     else if (nameHit) { r.reasons.push("possible_duplicate_name"); r.personKey = nameHit; }
     if (liveMatches.has(r.rowKey)) r.reasons.push("matches_existing_candidate");
-    const approved = dec?.action === "approve";
-    if (approved) applyApproval(r);
-    const isDuplicate = r.reasons.includes("probable_duplicate") || r.reasons.includes("possible_duplicate_name");
+    approve(r);
+    const isDuplicate = ["probable_duplicate", "possible_duplicate_name", "matches_imported_person"].some((x) => r.reasons.includes(x));
     if (!isDuplicate) {
       r.personKey = r.rowKey;
       ownerOf.set(r.rowKey, (r.norm as SalesNorm).ownerId);
-      for (const h of strong) if (!strongIndex.has(h)) strongIndex.set(h, r.rowKey);
-      addName(name, r.rowKey);
+      for (const x of ids.strong) if (!strongIndex.has(x)) strongIndex.set(x, r.rowKey);
+      addName(ids.name, r.rowKey);
     }
   }
 
@@ -409,11 +477,11 @@ export function resolveBatch(input: ResolveInput): StagedRow[] {
       if (target?.personKey) r.personKey = target.personKey;
       else r.reasons.push("invalid_link");
     } else {
-      const m = matchPerson(r.identity, strongIndex, nameIndex);
+      const m = matchPerson(r.identity, strongIndex, nameIndex, h);
       r.personKey = m.personKey;
       if (m.reason) r.reasons.push(m.reason);
     }
-    if (dec?.action === "approve") applyApproval(r);
+    approve(r);
   }
 
   // 6: placements per person: one live (open or joined) placement each, importable statuses only.
@@ -458,6 +526,7 @@ export function resolveBatch(input: ResolveInput): StagedRow[] {
   for (const r of out) {
     if (r.final) continue;
     r.reasons = [...new Set(r.reasons)];
+    if (r.sheet === "sales") (r.norm as SalesNorm).identities = identityHashes(salesIdentity(r.norm as SalesNorm), h).strong;
     if (r.reasons.length > 0) { r.state = "review"; continue; }
     if (r.sheet === "sales") { r.state = "clean"; continue; }
     const pk = r.personKey!;
@@ -473,11 +542,15 @@ export function resolveBatch(input: ResolveInput): StagedRow[] {
   return out.map(({ identity: _i, final: _f, ...rest }) => rest);
 }
 
-/** Approval: clear approvable reasons, dropping the rejected field values. */
-function applyApproval(r: { reasons: string[]; norm: AnyNorm }) {
+/**
+ * Approval: clear the reasons the reviewer accepted (and only those), dropping
+ * the rejected field values. A reason that appeared after the decision stays.
+ */
+function applyApproval(r: { reasons: string[]; norm: AnyNorm }, accepted: string[]) {
+  const ok = new Set(accepted.filter(approvable));
   const keep: string[] = [];
   for (const reason of r.reasons) {
-    if (!approvable(reason)) { keep.push(reason); continue; }
+    if (!ok.has(reason)) { keep.push(reason); continue; }
     const field = reason.split(":")[1];
     if (field) (r.norm as unknown as Record<string, unknown>)[NORM_FIELD[field] ?? field] = null;
   }
@@ -485,17 +558,18 @@ function applyApproval(r: { reasons: string[]; norm: AnyNorm }) {
 }
 
 /**
- * Cross-sheet match (design B9 step 3): marketing/personal email, then phone,
- * then name + DOB. A name alone is only a suggestion for review. Conflicting
- * or multiple hits go to review.
+ * Cross-sheet match (design B9 step 3): marketing/personal email, then phone.
+ * Name + DOB, and a name alone, are suggestions for review. Conflicting or
+ * multiple hits go to review.
  */
-export function matchPerson(id: Identity, strongIndex: Map<string, string>, nameIndex: Map<string, Set<string>>):
+export function matchPerson(id: Identity, strongIndex: Map<string, string>, nameIndex: Map<string, Set<string>>, h: Hmac):
   { personKey: string | null; reason: string | null } {
-  const hit = (hashes: string[]) => new Set(hashes.map((h) => strongIndex.get(h)).filter((p): p is string => !!p));
-  const byEmail = hit(id.emails.map((e) => sha256(`email:${e}`)));
-  const byPhone = hit(id.phone ? [sha256(`phone:${id.phone}`)] : []);
-  const byNameDob = hit(id.nameKey && id.dob ? [sha256(`namedob:${id.nameKey}|${id.dob}`)] : []);
-  for (const tier of [byEmail, byPhone, byNameDob]) {
+  const ids = identityHashes(id, h);
+  const hit = (hashes: string[]) => new Set(hashes.map((x) => strongIndex.get(x)).filter((p): p is string => !!p));
+  const byEmail = hit(ids.emails);
+  const byPhone = hit(ids.phone ? [ids.phone] : []);
+  const byNameDob = hit(ids.nameDob ? [ids.nameDob] : []);
+  for (const tier of [byEmail, byPhone]) {
     if (tier.size > 1) return { personKey: null, reason: "ambiguous_match" };
     if (tier.size === 1) {
       const p = [...tier][0]!;
@@ -503,7 +577,9 @@ export function matchPerson(id: Identity, strongIndex: Map<string, string>, name
       return conflict ? { personKey: null, reason: "conflicting_match" } : { personKey: p, reason: null };
     }
   }
-  const byName = id.nameKey ? nameIndex.get(sha256(`name:${id.nameKey}`)) : undefined;
+  if (byNameDob.size === 1) return { personKey: [...byNameDob][0]!, reason: "name_dob_match" };
+  if (byNameDob.size > 1) return { personKey: null, reason: "ambiguous_match" };
+  const byName = ids.name ? nameIndex.get(ids.name) : undefined;
   if (byName && byName.size === 1) return { personKey: [...byName][0]!, reason: "name_only_match" };
   if (byName && byName.size > 1) return { personKey: null, reason: "ambiguous_match" };
   return { personKey: null, reason: "no_candidate_match" };

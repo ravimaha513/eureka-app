@@ -85,6 +85,8 @@ const PlacementColumns = z.object({
 }).strict();
 
 const dateOrder = z.enum(["detect", "MDY", "DMY"]);
+/** Day/month order per date column (field name -> order); unset columns use defaults.dateOrder. */
+const dateOrders = z.record(z.string(), dateOrder).default({});
 
 const SalesTarget = z.object({
   status: z.enum(CANDIDATE_STATUSES),
@@ -109,11 +111,13 @@ export const MappingConfig = z.object({
     twoDigitYearPivot: z.number().int().min(0).max(99).default(30),
     timeZone: z.string().refine(validTimeZone, "unknown IANA time zone").default("America/Chicago"),
     interviewMinutes: z.number().int().min(5).max(720).default(60),
+    /** "US": 10-digit numbers with an assigned +1 area code are US/Canada; null: every phone needs its country code. */
+    phoneRegion: z.enum(["US"]).nullable().default("US"),
   }).strict(),
   sheets: z.object({
-    sales: z.object({ columns: SalesColumns, dateOrder: dateOrder.optional() }).strict(),
-    interviews: z.object({ columns: InterviewColumns, dateOrder: dateOrder.optional() }).strict(),
-    placements: z.object({ columns: PlacementColumns, dateOrder: dateOrder.optional() }).strict(),
+    sales: z.object({ columns: SalesColumns, dateOrders }).strict(),
+    interviews: z.object({ columns: InterviewColumns, dateOrders }).strict(),
+    placements: z.object({ columns: PlacementColumns, dateOrders }).strict(),
   }).strict(),
   statuses: z.object({
     sales: keyed(SalesTarget),
@@ -156,6 +160,9 @@ export function parseMapping(json: unknown): MappingConfig {
   const cfg = r.data;
   for (const sheet of SHEETS) {
     const c = cfg.sheets[sheet].columns as Record<string, string | undefined>;
+    for (const f of Object.keys(cfg.sheets[sheet].dateOrders)) {
+      if (!c[f]) throw new Error(`Invalid mapping config: sheets.${sheet}.dateOrders.${f} names no mapped column`);
+    }
     if (!c.fullName && !(c.firstName && c.lastName)) {
       throw new Error(`Invalid mapping config: sheets.${sheet}.columns needs fullName or firstName and lastName`);
     }

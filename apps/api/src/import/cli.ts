@@ -1,39 +1,44 @@
 /**
- * Sheet migration CLI (docs/import.md). Connects as eureka_import:
- *   IMPORT_DATABASE_URL=postgres://eureka_import:...@host/db \
+ * Sheet migration CLI (docs/import.md). Connects as eureka_import and needs
+ * the keyed-hash secret:
+ *   IMPORT_DATABASE_URL=postgres://eureka_import@host/db  (password via PGPASSWORD or ~/.pgpass)
+ *   IMPORT_HMAC_KEY=<at least 32 characters, from Secrets Manager>
  *   pnpm --filter @eureka/api exec tsx src/import/cli.ts <command> [options]
  *
- *   stage    --sales a.csv --interviews b.csv --placements c.csv --operator you@x [--mapping m.json]
- *   review   --batch ID
- *   resolve  --batch ID --sheet sales|interviews|placements --row N --action approve|reject|link [--sales-row N] --by reviewer@x
- *   approve  --batch ID --by org-admin@x
- *   commit   --batch ID [--commit]        (dry run unless --commit)
- *   report   --batch ID
- *   purge    --batch ID
- * Add --json for machine-readable output.
+ *   stage      --sales a.csv --interviews b.csv --placements c.csv --ticket T [--mapping m.json]
+ *   reanalyse  --batch ID              (after review decisions made in the API)
+ *   review     --batch ID
+ *   commit     --batch ID [--commit]   (dry run unless --commit)
+ *   report     --batch ID
+ *   purge      --batch ID | --expired
+ * Review decisions and approval are API calls by signed-in org admins
+ * (POST /api/v1/imports/...). Add --json for machine-readable output.
  */
 import { readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import pg from "pg";
+import { makeHmac } from "./analyze.js";
 import { commitBatch } from "./commit.js";
-import { DEFAULT_MAPPING_PATH, SHEETS, type Sheet } from "./mapping.js";
+import { DEFAULT_MAPPING_PATH } from "./mapping.js";
 import { formatReport, reconcile } from "./report.js";
-import { approveBatch, decide, listReview, purgeBatch, type ReviewAction } from "./review.js";
-import { stage } from "./stage.js";
+import { listReview, purgeBatch, purgeExpired } from "./review.js";
+import { recompute, stage } from "./stage.js";
 
-const USAGE = `usage: cli.ts <stage|review|resolve|approve|commit|report|purge> [options]  (see docs/import.md)`;
+const USAGE = `usage: cli.ts <stage|reanalyse|review|commit|report|purge> [options]  (see docs/import.md)`;
 
-export async function run(argv: string[], pool: pg.Pool, out: (s: string) => void = console.log): Promise<void> {
+export async function run(
+  argv: string[], pool: pg.Pool, out: (s: string) => void = console.log, env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
   const [command, ...rest] = argv;
   const { values: v } = parseArgs({
     args: rest,
     options: {
       sales: { type: "string" }, interviews: { type: "string" }, placements: { type: "string" },
-      mapping: { type: "string" }, operator: { type: "string" }, batch: { type: "string" },
-      sheet: { type: "string" }, row: { type: "string" }, action: { type: "string" }, "sales-row": { type: "string" },
-      by: { type: "string" }, commit: { type: "boolean", default: false }, json: { type: "boolean", default: false },
+      mapping: { type: "string" }, ticket: { type: "string" }, batch: { type: "string" },
+      commit: { type: "boolean", default: false }, expired: { type: "boolean", default: false },
+      json: { type: "boolean", default: false },
     },
     strict: true,
   });
@@ -43,6 +48,7 @@ export async function run(argv: string[], pool: pg.Pool, out: (s: string) => voi
     return x;
   };
   const print = (obj: unknown, text: string) => out(v.json ? JSON.stringify(obj, null, 2) : text);
+  const hmac = () => makeHmac(env.IMPORT_HMAC_KEY ?? "");
   // Least privilege: never run the import as the owner, a superuser or the API role.
   const who = (await pool.query<{ u: string }>("SELECT current_user AS u")).rows[0]?.u;
   if (who !== "eureka_import") throw new Error(`Connect as eureka_import (connected as ${who})`);
@@ -50,9 +56,17 @@ export async function run(argv: string[], pool: pg.Pool, out: (s: string) => voi
   switch (command) {
     case "stage": {
       const mappingText = readFileSync(v.mapping ?? DEFAULT_MAPPING_PATH, "utf8");
-      const r = await stage(pool, { sales: v.sales, interviews: v.interviews, placements: v.placements }, mappingText, need("operator"));
+      const r = await stage(pool, { sales: v.sales, interviews: v.interviews, placements: v.placements }, mappingText,
+        { ticket: v.ticket, hmac: hmac() });
       const rep = await reconcile(pool, r.batchId);
-      print({ ...r, report: rep }, `${r.created ? "Staged new" : "Re-analysed existing"} batch ${r.batchId} (dry run: nothing loaded)\n\n${formatReport(rep)}`);
+      print({ ...r, report: rep }, `${r.created ? "Staged new" : "Re-analysed open"} batch ${r.batchId} (nothing loaded)\n\n${formatReport(rep)}`);
+      return;
+    }
+    case "reanalyse": {
+      const batch = need("batch");
+      await recompute(pool, batch, hmac());
+      const rep = await reconcile(pool, batch);
+      print(rep, formatReport(rep));
       return;
     }
     case "review": {
@@ -61,26 +75,6 @@ export async function run(argv: string[], pool: pg.Pool, out: (s: string) => voi
         `${i.sheet} row ${i.rowNo}  [${i.state}]  ${i.reasons.join(", ")}`
         + `${i.salesRow ? `  (person: sales row ${i.salesRow})` : ""}`
         + `${i.approvable ? "  approvable" : ""}${i.commitError ? `  commit error: ${i.commitError}` : ""}`).join("\n"));
-      return;
-    }
-    case "resolve": {
-      const sheet = need("sheet") as Sheet;
-      if (!SHEETS.includes(sheet)) throw new Error(`--sheet must be one of ${SHEETS.join(", ")}`);
-      const row = Number(need("row"));
-      const action = need("action");
-      let a: ReviewAction;
-      if (action === "approve" || action === "reject") a = { action };
-      else if (action === "link") a = { action, salesRowNo: Number(need("sales-row")) };
-      else throw new Error("--action must be approve, reject or link");
-      const batch = need("batch");
-      await decide(pool, batch, sheet, row, a, need("by"));
-      print({ ok: true }, `Recorded ${action} for ${sheet} row ${row}; batch re-analysed (any approval was withdrawn).`);
-      return;
-    }
-    case "approve": {
-      const batch = need("batch");
-      await approveBatch(pool, batch, need("by"));
-      print({ ok: true }, `Batch ${batch} approved. Run commit without --commit to rehearse, then with --commit to load.`);
       return;
     }
     case "commit": {
@@ -96,6 +90,11 @@ export async function run(argv: string[], pool: pg.Pool, out: (s: string) => voi
       return;
     }
     case "purge": {
+      if (v.expired) {
+        const r = await purgeExpired(pool);
+        print(r, `Purged ${r.batches} batches older than the configured retention (${r.rows} rows cleared).`);
+        return;
+      }
       const n = await purgeBatch(pool, need("batch"));
       print({ purgedRows: n }, `Cleared stored cells of ${n} rows.`);
       return;
