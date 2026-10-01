@@ -9,7 +9,7 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - `pnpm -r typecheck` and `pnpm -r test` must pass before every commit (integration tests need
   PostgreSQL 16 at `TEST_PG_ADMIN_URL`, default `postgres://postgres:postgres@127.0.0.1:5432`).
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0039**) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0040**) and must apply as a
   non-superuser (Amazon RDS master): CI checks this.
 - Commit small and atomic; get an independent review of every security-relevant change.
 
@@ -60,10 +60,12 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   through `authz.import_load_person` (definer, same RLS checks, guards, transitions and audit as the
   API); a ledger with keyed hashes and natural keys keeps re-runs idempotent.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
-- First-admin bootstrap (migration 0037): `dist/db/bootstrap.js` as a one-off migrate task creates two
-  `org_admin` users for hosted-domain emails, only while no active `org_admin` exists (exit 3 otherwise,
-  idempotent for the same admins), audited as system without email; first Google sign-in links by email.
-  Optional `--demo-data` loads a fictional org (`@demo.invalid`, cannot sign in) on non-production stacks.
+- First-admin bootstrap (migrations 0037, 0039): `dist/db/bootstrap.js` as a one-off migrate task creates two
+  `org_admin` users for hosted-domain emails; break-glass only: refuses while an active `org_admin` exists
+  (exit 3; idempotent for the same admins; after a first bootstrap a lock-out recovery needs `--recover`),
+  audited as system without email; first Google sign-in links by email (the email must be in the domain).
+  Optional `--demo-data` loads a fictional org (`@demo.invalid`, cannot sign in) only where `EUREKA_ENVIRONMENT`
+  is `staging`/`local` and the stack has no real users or candidates.
   Runbook: infra/README.md "First admin (bootstrap)".
 
 ## Next tasks (Phase 2 to MVP), in suggested order

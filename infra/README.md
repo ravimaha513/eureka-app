@@ -223,7 +223,7 @@ one-off task on the migrate task definition, like the restore check: that
 task has the RDS master credentials, `APP_DB_PASSWORD` and
 `GOOGLE_HOSTED_DOMAIN`, and runs in the "jobs" security group.
 
-What it does and refuses (database function `authz.bootstrap_admins`, migration 0037):
+What it does and refuses (database function `authz.bootstrap_admins`, migrations 0037 and 0039):
 
 - Creates **two** `org_admin` users for Google Workspace emails in
   `google_hosted_domain` (staging and production: `aceintegrator.com`).
@@ -237,11 +237,19 @@ What it does and refuses (database function `authz.bootstrap_admins`, migration 
   AD-3a). Use accounts that will never need a business role (e.g. a separate
   `ravi.admin@` account), because a user with a business role cannot be
   `org_admin` and vice versa.
-- **Refuses (exit 3) while any active `org_admin` exists**, so it is no
-  backdoor later; further admins go through Users & Access with a second
-  approver. Running it again with exactly the current admins changes nothing
-  and exits 0. Emails outside the hosted domain, or an existing account that
-  is inactive or holds a role, are refused too. Exit 2 means bad arguments.
+- **Break-glass only: refuses (exit 3) while an active `org_admin` exists.**
+  While the org is administered it adds nobody; further admins go through
+  Users & Access with a second approver. Running it again with exactly the
+  current admins changes nothing and exits 0. It only works when no active
+  admin is left, and after a first bootstrap that lock-out recovery also
+  needs `--recover` (audited with `recover: true`). Anyone holding the RDS
+  master secret could write the database directly anyway; the point is that
+  the supported tool cannot bypass the second-approver rule. Emails outside
+  the hosted domain, or an existing account that is inactive or holds a
+  role, are refused too. Exit 2 means bad arguments.
+- Runs in a READ COMMITTED transaction under the admin-count advisory lock,
+  so concurrent runs cannot both create admins (the function refuses any
+  other isolation level).
 - Audits each grant (`audit_event.action = 'admin.bootstrap'`, no actor,
   `changes = {actor: "system:bootstrap", role: "org_admin", ...}`, no email)
   in the same transaction. The task log line carries user ids, not emails.
@@ -281,15 +289,16 @@ aws logs get-log-events --log-group-name "/eureka/$ENV/migrate" --log-stream-nam
 
 Without terragrunt, set `CLUSTER=eureka-staging`, `TASK_FAMILY=eureka-staging-migrate`
 and read `SUBNETS` / `SECURITY_GROUP` (`eureka-staging-jobs`) from the VPC console. If the
-deployed migrate task definition predates `GOOGLE_HOSTED_DOMAIN`, add
-`environment: [{name: "GOOGLE_HOSTED_DOMAIN", value: "aceintegrator.com"}]` to the
-container override.
+deployed migrate task definition predates `GOOGLE_HOSTED_DOMAIN` and `EUREKA_ENVIRONMENT`,
+redeploy first (preferred), or add
+`environment: [{name: "GOOGLE_HOSTED_DOMAIN", value: "aceintegrator.com"}, {name: "EUREKA_ENVIRONMENT", value: "staging"}]`
+to the container override (staging only; never set `EUREKA_ENVIRONMENT` by hand for production).
 
 ### Production (later)
 
 The same commands with `ENV=production; export AWS_REGION=us-east-1`, and
-**never** `--demo-data` (it refuses any host or database name containing
-"prod" anyway). Do it right after the first successful production deploy
+**never** `--demo-data` (it refuses there anyway: the migrate task's
+`EUREKA_ENVIRONMENT` is `production`, not on the allow-list). Do it right after the first successful production deploy
 and record it in the operations log.
 
 ### After the bootstrap: users, roles, second approval
@@ -315,8 +324,11 @@ candidates and 12 submissions. Demo users have `@demo.invalid` emails, outside
 the hosted domain, so nobody can sign in as them, and only non-restricted
 roles (no approval is bypassed). Candidates and submissions are written as
 each demo recruiter through the app role, RLS and audit, like the API.
-It refuses production-looking targets and a database that already holds real
-candidates; a re-run adds nothing. The admins see none of it (no data role):
+It runs only where `EUREKA_ENVIRONMENT` is `staging` (Terraform sets it on the
+migrate task) or `local` (set it yourself for local development), and also
+refuses hosts or database names containing "prod" and any stack with real data:
+a candidate outside the demo teams, or any user besides the active org admins.
+So load it in the bootstrap run, before creating users; a re-run adds nothing. The admins see none of it (no data role):
 to show it, create a business account for the presenter in Users & Access and
 give it, for example, Location Ops Admin for "Demo Dallas" (24 candidates), or
 Associate Director and make the demo managers report to it (all 32).
