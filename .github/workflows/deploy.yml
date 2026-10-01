@@ -44,7 +44,7 @@ jobs:
       IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
       TF_VAR_image_tag: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
