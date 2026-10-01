@@ -34,11 +34,15 @@ say "Installing dependencies"
 pnpm install --frozen-lockfile
 
 say "Applying migrations and seeding fictional data"
-MIGRATION_DATABASE_URL="$ADMIN_URL" APP_DB_PASSWORD="$APP_PASSWORD" \
+MIGRATION_DATABASE_URL="$ADMIN_URL" APP_DB_PASSWORD="$APP_PASSWORD" WORKER_DB_PASSWORD="$APP_PASSWORD" \
   pnpm --filter @eureka/api exec tsx src/db/seed-dev.ts
 
-# Same host/database as the admin URL, but as the least-privilege API role.
+# Same host/database as the admin URL, but as the least-privilege API and worker roles.
 APP_URL="postgres://eureka_app:${APP_PASSWORD}@${ADMIN_URL#*@}"
+WORKER_URL="postgres://eureka_worker:${APP_PASSWORD}@${ADMIN_URL#*@}"
+# Local document storage (resumes) shared by the API and the worker; no AWS.
+LOCAL_DIR="$PWD/.local"
+mkdir -p "$LOCAL_DIR/documents" "$LOCAL_DIR/audit-export"
 
 pids=()
 cleanup() { say "Stopping"; for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done; }
@@ -46,7 +50,15 @@ trap cleanup EXIT INT TERM
 
 say "Starting API on http://localhost:$API_PORT"
 ( cd apps/api && NODE_ENV=development AUTH_MODE=dev SESSION_SECRET="local-dev-session-secret-local-dev-session" \
-    DATABASE_URL="$APP_URL" PORT="$API_PORT" pnpm dev ) &
+    DATABASE_URL="$APP_URL" PORT="$API_PORT" LOCAL_STORAGE_DIR="$LOCAL_DIR/documents" pnpm dev ) &
+pids+=($!)
+
+# Worker: resume scan-and-promote with the fake malware scanner (EICAR test
+# string = infected), audit export to a local directory.
+say "Starting worker (fake malware scanner, local storage)"
+( cd apps/api && NODE_ENV=development DATABASE_URL="$WORKER_URL" JOB_TICK_SECONDS=5 \
+    LOCAL_STORAGE_DIR="$LOCAL_DIR/documents" EXPORT_DIR="$LOCAL_DIR/audit-export" HEARTBEAT_FILE="$LOCAL_DIR/worker-heartbeat" \
+    pnpm exec tsx src/worker.ts ) &
 pids+=($!)
 
 for _ in $(seq 1 60); do curl -fsS "http://localhost:$API_PORT/api/health" >/dev/null 2>&1 && break; sleep 1; done
