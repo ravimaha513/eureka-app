@@ -1,11 +1,22 @@
 import { randomUUID } from "node:crypto";
-import { ForbiddenException, HttpException, HttpStatus, Injectable, Logger, NotFoundException, type OnModuleInit } from "@nestjs/common";
+import {
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnprocessableEntityException,
+  type OnModuleInit,
+} from "@nestjs/common";
 import type pg from "pg";
 import {
   HOTLIST_STATUSES,
   HOTLIST_VISIBILITY,
   MARKETABLE_STATUSES,
   applyCandidateFieldPolicy,
+  candidateActions,
+  candidateTransitionAllowed,
   ownsCandidate,
   resolveScope,
   type CandidateRef,
@@ -272,10 +283,20 @@ export class CandidatesService implements OnModuleInit {
     const scope = resolveScope(user.access, "candidate:read");
     if (!scope) throw new NotFoundException();
     const params: unknown[] = [id];
-    const row = await this.db.withUser(user.id, async (c) =>
-      (await c.query<CandidateRow>(`${this.baseSelect} WHERE c.id = $1 AND ${scopePredicate(scope, params)}`, params)).rows[0]);
-    if (!row) throw new NotFoundException();
-    return this.present(user.access, row);
+    const found = await this.db.withUser(user.id, async (c) => {
+      const r = (await c.query<CandidateRow>(`${this.baseSelect} WHERE c.id = $1 AND ${scopePredicate(scope, params)}`, params)).rows[0];
+      // Only a candidate in confirmation can have an open placement (PL-5).
+      const open = r?.marketing_status === "confirmation"
+        ? (await c.query<{ o: boolean }>(`SELECT authz.candidate_has_open_placement($1) AS o`, [id])).rows[0]!.o
+        : false;
+      return r ? { row: r, open } : undefined;
+    });
+    if (!found) throw new NotFoundException();
+    return {
+      ...this.present(user.access, found.row),
+      /** Hints for the UI (docs/placements-api.md); every write is checked again. */
+      actions: candidateActions(user.access, toRef(found.row), found.open),
+    };
   }
 
   async updateProfile(user: AuthedUser, id: string, body: ProfileUpdate) {
@@ -316,9 +337,17 @@ export class CandidatesService implements OnModuleInit {
 
   async transition(user: AuthedUser, id: string, to: string) {
     return this.db.withUser(user.id, async (c) => {
-      await this.loadForWrite(c, user, id, "candidate:update");
-      const { rows } = await c.query<{ s: string }>(`SELECT authz.transition_candidate($1, $2) AS s`, [id, to]);
-      await this.audit.record(c, { actorId: user.id, action: "candidate.transition", entityType: "candidate", entityId: id, changes: { to } });
+      const row = await this.loadForWrite(c, user, id, "candidate:update");
+      if (!candidateTransitionAllowed(row.marketing_status, to)) throw new UnprocessableEntityException("invalid_transition");
+      let rows: { s: string }[];
+      try {
+        rows = (await c.query<{ s: string }>(`SELECT authz.transition_candidate($1, $2) AS s`, [id, to])).rows;
+      } catch (err) {
+        // The placement drives the candidate until it joins or backs out (migration 0022).
+        if ((err as { message?: string }).message === "placement_open") throw new UnprocessableEntityException("placement_open");
+        throw err;
+      }
+      await this.audit.record(c, { actorId: user.id, action: "candidate.transition", entityType: "candidate", entityId: id, changes: { from: row.marketing_status, to } });
       return { id, status: rows[0]!.s };
     });
   }

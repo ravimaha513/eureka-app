@@ -7,32 +7,16 @@ import {
 } from "@nestjs/common";
 import { z } from "zod";
 
-export const SUBMISSION_STATUSES = [
-  "submitted", "under_review", "interview_requested", "interview_scheduled",
-  "interview_completed", "selected", "rejected", "withdrawn",
-] as const;
-export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];
-
-export const TERMINAL_SUBMISSION_STATUSES: ReadonlySet<SubmissionStatus> = new Set(["selected", "rejected", "withdrawn"]);
-
-const FORWARD: Partial<Record<SubmissionStatus, SubmissionStatus>> = {
-  submitted: "under_review",
-  under_review: "interview_requested",
-  interview_requested: "interview_scheduled",
-  interview_scheduled: "interview_completed",
-  interview_completed: "selected",
-};
-
 /**
- * Submission state machine (design B2.6). Mirrors authz.transition_submission
- * (migration 0017), which the database enforces independently.
+ * Submission state machine (design B2.6): single copy in @eureka/shared,
+ * mirroring authz.transition_submission (migration 0017).
  */
-export function submissionTransitionAllowed(from: string, to: string): boolean {
-  if (TERMINAL_SUBMISSION_STATUSES.has(from as SubmissionStatus)) return false;
-  if (!(SUBMISSION_STATUSES as readonly string[]).includes(from)) return false;
-  if (to === "rejected" || to === "withdrawn") return true;
-  return FORWARD[from as SubmissionStatus] === to;
-}
+export {
+  SUBMISSION_STATUSES,
+  TERMINAL_SUBMISSION_STATUSES,
+  submissionTransitionAllowed,
+  type SubmissionStatus,
+} from "@eureka/shared";
 
 /** Interview time limits, also enforced by the database (migration 0019). */
 export const MAX_INTERVIEW_MS = 12 * 60 * 60 * 1000;

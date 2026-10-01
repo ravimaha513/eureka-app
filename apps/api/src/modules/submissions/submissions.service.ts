@@ -6,6 +6,8 @@ import {
   candidateVisible,
   ownsActivity,
   resolveScope,
+  submissionActions,
+  type CandidateRef,
   type EffectiveScope,
   type UserAccess,
 } from "@eureka/shared";
@@ -112,6 +114,13 @@ const activityRef = (r: SubmissionRow) => ({
   },
 });
 
+/** The candidate as the caller sees it (the join runs under candidate RLS; null when not readable). */
+const visibleCandidate = (r: SubmissionRow): CandidateRef | null =>
+  r.c_team === null || r.visibility === null || r.marketing_status === null ? null : {
+    recruiterId: r.c_recruiter, teamId: r.c_team, locationId: r.c_location,
+    visibility: r.visibility, marketingStatus: r.marketing_status,
+  };
+
 /**
  * Activity visibility predicate (design B4.4): the actor snapshot on `s`, or
  * the candidate owned through the caller's scope (never the all-teams rule).
@@ -148,6 +157,8 @@ export class SubmissionsService {
       rejectionReason: r.rejection_reason,
       submittedAt: r.submitted_at,
       statusChangedAt: r.status_changed_at,
+      /** Hints for the UI (docs/placements-api.md); every write is checked again. */
+      actions: submissionActions(access, activityRef(r), r.status, visibleCandidate(r)),
     };
   }
 
