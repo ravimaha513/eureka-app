@@ -43,8 +43,11 @@ export class ApiError extends Error {
 let csrfToken = "";
 export const setCsrf = (t: string) => { csrfToken = t; };
 
-/** Same-origin fetch with the session cookie; CSRF header on writes (design A6.1). */
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+/**
+ * Same-origin fetch with the session cookie; CSRF header on writes (design A6.1).
+ * Resolves with the raw response when it is OK; throws ApiError otherwise.
+ */
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase();
   const res = await fetch(path, {
     ...init,
@@ -60,6 +63,12 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const errors = Array.isArray(body.errors) ? (body.errors as FieldIssue[]) : undefined;
     throw new ApiError(res.status, body.detail ?? body.title ?? res.statusText, body.detail, body.title, errors);
   }
+  return res;
+}
+
+/** JSON API call (see apiFetch). */
+export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await apiFetch(path, init);
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;

@@ -1,5 +1,5 @@
 /** Typed client for the candidate, Hot List and submission API (apps/api/src/modules/candidates, submissions). */
-import { api, type Candidate } from "../api";
+import { api, apiFetch, type Candidate } from "../api";
 
 export interface CandidateProfile extends Candidate {
   marketingStartDate: string | null;
@@ -117,8 +117,61 @@ export const salesApi = {
     api<{ id: string; duplicateWarning: boolean }>("/api/v1/submissions", { method: "POST", ...json(b) }),
 };
 
+/** Filters a saved view stores (the Hot List filters, no paging). */
+export interface ViewFilters {
+  search?: string;
+  status?: string;
+  technology?: string;
+  visibility?: Visibility;
+}
+
+export interface SavedView { id: string; name: string; filters: ViewFilters; createdAt: string; updatedAt: string }
+
+/** Statuses offered in bulk (BULK_STATUSES in apps/api/src/modules/hotlist); terminated and confirmation stay per record. */
+export const BULK_STATUS_OPTIONS = ["active", "on_hold", "full_of_interviews", "stopped"] as const;
+
+export type BulkError = "not_found" | "forbidden" | "invalid_transition" | "placement_open" | "failed";
+export interface BulkResponse { succeeded: number; failed: number; results: { id: string; ok: boolean; error?: BulkError }[] }
+
+export interface ExportResult { blob: Blob; filename: string; rows: number; truncated: boolean }
+
+/** Only the filters the API accepts, with empty values dropped. */
+export function viewFilters(f: ListFilters): ViewFilters {
+  const out: ViewFilters = {};
+  if (f.search) out.search = f.search;
+  if (f.status) out.status = f.status;
+  if (f.technology) out.technology = f.technology;
+  if (f.visibility) out.visibility = f.visibility;
+  return out;
+}
+
+export const hotlistApi = {
+  views: () => api<{ items: SavedView[] }>("/api/v1/hotlist/views"),
+  createView: (name: string, filters: ViewFilters) =>
+    api<SavedView>("/api/v1/hotlist/views", { method: "POST", ...json({ name, filters }) }),
+  updateView: (id: string, b: { name?: string; filters?: ViewFilters }) =>
+    api<SavedView>(`/api/v1/hotlist/views/${enc(id)}`, { method: "PATCH", ...json(b) }),
+  deleteView: (id: string) => api<void>(`/api/v1/hotlist/views/${enc(id)}`, { method: "DELETE" }),
+  bulkStatus: (ids: string[], to: string) =>
+    api<BulkResponse>("/api/v1/hotlist/bulk/status", { method: "POST", ...json({ ids, to }) }),
+  bulkVisibility: (ids: string[], visibility: Visibility) =>
+    api<BulkResponse>("/api/v1/hotlist/bulk/visibility", { method: "POST", ...json({ ids, visibility }) }),
+  /** CSV of the current view; the server caps, masks and audits it. */
+  exportCsv: async (filters: ViewFilters): Promise<ExportResult> => {
+    const res = await apiFetch("/api/v1/hotlist/export", { method: "POST", ...json(filters) });
+    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "hotlist.csv";
+    return {
+      blob: await res.blob(),
+      filename: name,
+      rows: Number(res.headers.get("x-export-rows") ?? 0),
+      truncated: res.headers.get("x-export-truncated") === "true",
+    };
+  },
+};
+
 export const salesKeys = {
   hotlist: ["hotlist"] as const,
   candidates: ["candidates"] as const,
   candidate: (id: string) => ["candidate", id] as const,
+  hotlistViews: ["hotlist-views"] as const,
 };

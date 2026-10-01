@@ -59,6 +59,7 @@ beforeEach(() => {
   setCsrf("tok");
   calls = [];
   routes = {
+    "GET /api/v1/hotlist/views": () => ({ body: { items: [] } }),
     "GET /api/v1/hotlist": (u) => ({ body: { items: u.searchParams.get("cursor") ? [FOREIGN] : [OWN, FOREIGN], nextCursor: u.searchParams.get("cursor") ? null : OTHER } }),
     "GET /api/v1/candidates": () => ({ body: { items: [OWN], nextCursor: null } }),
     [`GET /api/v1/candidates/${CID}`]: () => ({ body: PROFILE }),
@@ -91,14 +92,15 @@ describe("Hot List", () => {
   it("masks other teams' phones with a hidden explanation, labels Open to all teams, never shows DOB", async () => {
     wrap(<HotListPage me={RECRUITER} onOpenProfile={() => undefined} />);
     const foreign = await rowOf("Divya Menon");
-    const phoneCell = within(foreign).getAllByRole("cell")[7]!;
+    // The recruiter may change status, so the first column holds the row-selection checkbox.
+    const phoneCell = within(foreign).getAllByRole("cell")[8]!;
     expect(phoneCell).toHaveClass("masked");
     expect(within(phoneCell).getByText("•••-•••-42")).toHaveAttribute("aria-hidden", "true");
     expect(within(phoneCell).getByText(/Phone hidden, ends in 42\. Not your team's candidate\./)).toHaveClass("sr-only");
     expect(within(foreign).getByText("Open to all teams")).toHaveClass("badge");
     expect(within(await rowOf("Asha Iyer")).getByText("+14695550001")).toBeInTheDocument();
     expect(screen.queryByText(/date of birth|1994/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("2 candidates on page 1, more on the next page.");
+    expect(screen.getByText("2 candidates on page 1, more on the next page.")).toHaveAttribute("role", "status");
   });
 
   it("links only openable profiles and explains the others", async () => {
