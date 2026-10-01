@@ -211,6 +211,7 @@ describe("candidate_event: rows written for each action", () => {
   it("the internal writer and trigger functions are not executable by the app", async () => {
     await expect(asUser(db.app, U.l1, (c) => c.query(
       `SELECT authz.add_candidate_event($1, 'candidate.created', NULL, NULL, NULL, 'active')`, [candidates[0]!.id]))).rejects.toThrow(/permission denied/);
+    await expect(asUser(db.app, U.l1, (c) => c.query(`SELECT authz.batch_manager()`))).rejects.toThrow(/permission denied/);
   });
 });
 

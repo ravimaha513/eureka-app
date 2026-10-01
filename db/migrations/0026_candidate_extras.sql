@@ -370,8 +370,8 @@ CREATE TRIGGER candidate_event_update AFTER UPDATE ON eureka.placement
   FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status)
   EXECUTE FUNCTION authz.candidate_event_on_activity();
 
--- EXECUTE: the app calls the batch functions and the duplicate check; the
--- writer and trigger functions are internal (no app grant).
+-- EXECUTE: the app calls create_batch and the duplicate check; batch_manager,
+-- the writer and the trigger functions are internal (no app grant).
 REVOKE ALL ON FUNCTION authz.batch_manager() FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.create_batch(uuid, uuid, date, integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.candidate_batch_check() FROM PUBLIC;
@@ -379,6 +379,5 @@ REVOKE ALL ON FUNCTION authz.add_candidate_event(uuid, text, text, uuid, text, t
 REVOKE ALL ON FUNCTION authz.candidate_event_on_candidate() FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.candidate_event_on_activity() FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.candidate_duplicates(text, text, text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION authz.batch_manager() TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.create_batch(uuid, uuid, date, integer) TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.candidate_duplicates(text, text, text, text) TO eureka_app;
