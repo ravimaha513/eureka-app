@@ -40,6 +40,12 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - Placements: schema (0022/0023), state machine, first-placement, assignments, outbox rows,
   idempotency keys, Placements screen and Create placement dialog; lookups with least privilege.
 - Worker: lease-based job runner, nightly audit export to Object Lock storage.
+- Sheet migration (`docs/import.md`, migration 0028): CSV import CLI run as the `eureka_import`
+  role (NOLOGIN outside the migration window). Normalizes and matches rows across the Sales,
+  interview and placement sheets into staging tables, review queue with reasons, reconciliation
+  report, dry-run commit by default; `--commit` loads one person per transaction as the row's
+  owner through the app's RLS, guards and definer functions, after sign-off by a second person
+  holding `access:manage`. Idempotent via a ledger; imported interviews skip feedback emails.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
@@ -52,8 +58,8 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 3. **Candidate extras:** batches, resumes, `candidate_event` timeline, full duplicate check
    (email, phone, DOB blind index).
 4. **Dashboards:** manager, lead and location views with activity counts and "needs attention".
-5. **Sheet migration:** CSV import with normalization, cross-sheet matching, review queues,
-   reconciliation report.
+5. **Sheet migration:** built (see Built). Left: the SRS Q6 status/row-colour mapping, a decision
+   on loading historical placements (`placements.commit`), weekly dry runs on real exports.
 6. **Launch checks:** k6 load test (120 users, 50k candidates, p95 < 500 ms), ZAP baseline,
    restore-from-backup drill.
 7. Fix older dialogs' focus after a failed submit (Create candidate, Log submission).
@@ -66,6 +72,9 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - May a candidate who failed BGC after joining be re-placed into the same job?
 - Should the manual candidate edge `active → confirmation` be removed now that placements drive it?
 - Does a pre-join `bgc_failed` count as an earlier placement for first-placement detection?
+- Sheet import (`docs/import.md`): status and row-colour mapping (SRS Q6); may historical
+  placements emit outbox notifications; joined placements' assignment start date; who signs off a
+  batch (org admin assumed); is `eureka_import` acting as the API role acceptable for the window?
 
 ## Waiting on Ravi (not code)
 
