@@ -7,17 +7,20 @@ const pct = (n: number, max: number) => (max > 0 ? Math.max(n > 0 ? 2 : 0, Math.
 export interface Bar { key: string; label: string; value: number; hint?: string }
 
 /** Horizontal bars scaled to the largest value. */
-export function BarChart({ bars, label, tone = 0, scaleTo }: { bars: Bar[]; label: string; tone?: number; scaleTo?: number }) {
+export function BarChart({ bars, label, tone = 0, scaleTo, varied = false }: { bars: Bar[]; label: string; tone?: number; scaleTo?: number; varied?: boolean }) {
   const max = scaleTo ?? Math.max(0, ...bars.map((b) => b.value));
   return (
     <div className="chart bars" role="img" aria-label={`${label}: ${bars.map((b) => `${b.label} ${b.value}`).join(", ")}`}>
       {bars.map((b, i) => (
         <div key={b.key} className="barrow" aria-hidden="true">
           <span className="barlabel" title={b.label}>{b.label}</span>
-          <span className="bartrack">
-            <span className={`barfill c${(tone + i) % 6}`} style={{ width: `${pct(b.value, max)}%` } as CSSProperties} />
+          <span className="barmain">
+            <span className="bartrack">
+              <span className={`barfill c${varied ? (tone + i) % 6 : tone % 6}`} style={{ width: `${pct(b.value, max)}%` } as CSSProperties} />
+            </span>
+            {b.hint && <span className="barhint">{b.hint}</span>}
           </span>
-          <span className="barvalue">{b.value}{b.hint && <span className="barhint"> {b.hint}</span>}</span>
+          <span className="barvalue">{b.value}</span>
         </div>
       ))}
       {bars.length === 0 && <p className="muted">No data.</p>}
@@ -33,7 +36,7 @@ export function Funnel({ stages, label }: { stages: { key: string; label: string
     const hint = i > 0 && prev ? `(${Math.round((s.value / prev) * 100)}% of ${stages[i - 1]!.label.toLowerCase()})` : undefined;
     return { ...s, hint };
   });
-  return <BarChart bars={bars} label={label} scaleTo={top} />;
+  return <BarChart bars={bars} label={label} scaleTo={top} varied />;
 }
 
 /** Donut of parts of a whole, with a legend. */
