@@ -36,6 +36,12 @@ beforeAll(async () => {
   await seedFixtures(db.admin);
   // The role is NOLOGIN by default; operations enable LOGIN only for the migration window.
   await db.admin.query(`ALTER ROLE eureka_import LOGIN PASSWORD 'eureka_import_test'`);
+  // Roles are cluster-wide: a database migrated by an older branch (0028 without 0033) on a
+  // shared development cluster re-grants the membership 0033 removed. Remove it again here.
+  for (const g of (await db.admin.query(`SELECT gr.rolname AS grantor FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member
+      JOIN pg_roles gr ON gr.oid = m.grantor WHERE r.rolname = 'eureka_import'`)).rows) {
+    await db.admin.query(`REVOKE eureka_app FROM eureka_import GRANTED BY "${g.grantor}" CASCADE`);
+  }
   const u = new URL(ADMIN_BASE);
   imp = new pg.Pool({ connectionString: `postgres://eureka_import:eureka_import_test@${u.host}/${db.name}`, max: 2 });
   app = await createApp(loadConfig({
