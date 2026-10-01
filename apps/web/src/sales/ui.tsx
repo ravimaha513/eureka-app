@@ -47,20 +47,29 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
  * Side drawer (modal): focus moves in on open, Tab is trapped, Escape and the
  * backdrop close it, and focus returns to the opener. Same contract as admin/Dialog.
  */
-export function Drawer({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Drawer({ title, onClose, children, suspended = false, wide = false, closeLabel = "Close quick view" }: {
+  title: string; onClose: () => void; children: ReactNode;
+  /** True while a dialog opened from the drawer is on top: the drawer then leaves Escape and focus to it. */
+  suspended?: boolean;
+  wide?: boolean;
+  closeLabel?: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const suspendedRef = useRef(suspended);
+  suspendedRef.current = suspended;
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     const node = ref.current!;
     (node.querySelector<HTMLElement>("[data-autofocus]") ?? node).focus();
     const onKey = (e: KeyboardEvent) => {
+      if (suspendedRef.current) return;
       if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); onCloseRef.current(); }
     };
-    const onFocusIn = (e: FocusEvent) => { if (!node.contains(e.target as Node)) node.focus(); };
+    const onFocusIn = (e: FocusEvent) => { if (!suspendedRef.current && !node.contains(e.target as Node)) node.focus(); };
     document.addEventListener("keydown", onKey);
     document.addEventListener("focusin", onFocusIn);
     return () => {
@@ -80,11 +89,12 @@ export function Drawer({ title, onClose, children }: { title: string; onClose: (
   };
 
   return (
-    <div className="backdrop drawerback" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div ref={ref} className="drawer" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={onKeyDown}>
+    <div className="backdrop drawerback" onMouseDown={(e) => { if (e.target === e.currentTarget && !suspendedRef.current) onClose(); }}>
+      <div ref={ref} className={`drawer${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={onKeyDown}
+        aria-hidden={suspended || undefined}>
         <header className="drawerhead">
           <h2 id={titleId}>{title}</h2>
-          <button type="button" className="btn sm" onClick={onClose} aria-label="Close quick view">Close</button>
+          <button type="button" className="btn sm" onClick={onClose} aria-label={closeLabel}>Close</button>
         </header>
         {children}
       </div>

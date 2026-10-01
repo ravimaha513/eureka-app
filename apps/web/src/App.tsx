@@ -7,6 +7,7 @@ import { CandidateProfile } from "./sales/CandidateProfile";
 import { CandidatesPage } from "./sales/CandidatesPage";
 import { InterviewsPage } from "./interviews/InterviewsPage";
 import { HotListPage } from "./sales/HotListPage";
+import { SubmissionsPage } from "./pipeline/SubmissionsPage";
 
 /** The Hot List screen (kept under its original name for existing callers). */
 export const HotList = HotListPage;
@@ -95,6 +96,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                 {profileId && <CandidateProfile key={profileId} id={profileId} me={me} onBack={closeProfile} backLabel={`Back to ${current.label}`} />}
               </>
             )
+            : current.key === "submissions" ? <SubmissionsPage me={me} />
             : current.key === "interviews" ? <InterviewsPage me={me} />
             : current.key === "access" ? <AccessPage me={me} />
             : <Placeholder item={current} />}

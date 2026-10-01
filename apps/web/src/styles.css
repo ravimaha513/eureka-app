@@ -131,3 +131,27 @@ h1:focus { outline: none; }
 .fieldhint { margin-bottom: 0; }
 .fielderr { font-size: 12px; }
 @media (prefers-reduced-motion: reduce) { .switch .knob, .switch .knob::after { transition: none; } }
+/* Submissions and placements */
+.filters { display: flex; flex-direction: column; gap: 10px; }
+.chipfilter { display: flex; flex-direction: column; gap: 4px; }
+.chiplabel { font-weight: 600; color: var(--text2); font-size: 12px; }
+.tabs.wrap { flex-wrap: wrap; }
+.badge.st-under_review, .badge.st-paperwork, .badge.st-bgc { background: #fff7e6; color: #b45309; }
+.badge.st-interview_requested, .badge.st-interview_scheduled, .badge.st-interview_completed, .badge.st-ready { background: var(--pri-50); color: var(--pri-700); }
+.badge.st-selected, .badge.st-joined, .badge.st-confirmed { background: #ecfdf3; color: #15803d; }
+.badge.st-rejected, .badge.st-withdrawn, .badge.st-backout, .badge.st-bgc_failed { background: #fef2f2; color: #b91c1c; }
+.badge.first { background: #f5f3ff; color: #6d28d9; }
+.drawer.wide { width: min(560px, 100%); }
+.field textarea { border-radius: 8px; border: 1px solid var(--line); padding: 8px 10px; font: inherit; color: var(--text); resize: vertical; width: 100%; }
+.check { display: inline-flex; gap: 6px; align-items: center; font-weight: 600; color: var(--text2); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.grid2 .field input, .grid2 .field select, .contactrow .field input, .contactrow .field select { min-width: 0; }
+.contacts { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 4px 0 12px; display: flex; flex-direction: column; gap: 10px; }
+.contacts legend { font-weight: 600; color: var(--text2); font-size: 12px; padding: 0 4px; }
+.contacts .hint { margin-bottom: 0; }
+.contactrow { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line2); }
+.contactrow .field { margin-bottom: 8px; }
+.contactrow .rmcontact { grid-column: 1 / -1; justify-self: end; }
+.addcontact { align-self: flex-start; }
+table.mini th, table.mini td { padding: 6px 8px; }
+@media (max-width: 520px) { .grid2, .contactrow { grid-template-columns: 1fr; } }
