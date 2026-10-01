@@ -65,6 +65,8 @@ const SUBMITTED = 3;
 /** Refuses anything that could be production: host, database name or the server's current database. */
 export async function checkDemoTarget(adminUrl: string): Promise<void> {
   const u = new URL(adminUrl);
+  const named = `${u.hostname}/${decodeURIComponent(u.pathname.replace(/^\//, ""))}`;
+  if (/prod/i.test(named)) throw Object.assign(new Error(`demo data refused on ${named}: looks like production`), { refused: true });
   const c = new pg.Client({ connectionString: adminUrl });
   await c.connect();
   let current: string;
@@ -73,8 +75,7 @@ export async function checkDemoTarget(adminUrl: string): Promise<void> {
   } finally {
     await c.end();
   }
-  const target = `${u.hostname}/${decodeURIComponent(u.pathname.replace(/^\//, ""))}/${current}`;
-  if (/prod/i.test(target)) throw Object.assign(new Error(`demo data refused on ${target}: looks like production`), { refused: true });
+  if (/prod/i.test(current)) throw Object.assign(new Error(`demo data refused on database ${current}: looks like production`), { refused: true });
 }
 
 export interface DemoResult { org: "created" | "existing"; candidatesCreated: number; submissionsCreated: number }
