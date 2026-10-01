@@ -44,3 +44,39 @@ These are hints computed by the engine; the server still enforces every rule.
 
 ## Error codes
 `submission_not_selected`, `placement_exists`, `invalid_transition`, `reason_required`, `idempotency_key_required`, `idempotency_key_reused` (same key, different body), `not_permitted`, plus the existing validation errors.
+
+## Implementation notes (backend, 2026-09-30)
+
+Built in migration `0022_placements.sql`, `apps/api/src/modules/placements`, `apps/api/src/modules/lookups`,
+and `packages/shared/src/authz/{state-machines,actions}.ts`. Deviations and precisions:
+
+- **PL-1 authorization.** Creating needs `placement:create` **and** `submission:update` on the submission's
+  actor snapshot (like interviews), and the candidate must be visible for `placement:create` (the
+  Open-to-all-teams rule applies, as for `submission:create`). Order of checks: 404 submission not visible,
+  403 not placeable, 422 `submission_not_selected`, 409 `placement_exists`, 422 `candidate_not_available`,
+  403 candidate no longer visible.
+- **Candidate status at creation.** The candidate must be `active` or `full_of_interviews`
+  (new code `candidate_not_available`, 422). A candidate moved to `confirmation` by hand must be moved back
+  to `active` first. `full_of_interviews → confirmation` is a new edge, used only by placements.
+- **Open placement locks the candidate.** While a placement is `confirmed`..`ready`, manual candidate
+  transitions are refused with 422 `placement_open`, and `actions.transition` is `[]`.
+- **Reasons.** `reason` is required (non-blank) for `backout` and `bgc_failed` (`reason_required`), optional
+  otherwise, max 500 characters; stored on the placement, never in the audit (only `reasonGiven: true`).
+- **`bgc_failed`** needs `placement:update` and `placement.bgc_status:update` (Manager, AD).
+- **Side effects of backing out** move the candidate to `active` only if it is still in `confirmation`; a
+  candidate terminated meanwhile stays terminated. `joined` requires the candidate in `confirmation`.
+- **Assignment** `startDate` is the day the placement is marked `joined` (not `tentativeStart`);
+  `assignmentNo` is the next number per person.
+- **Idempotency-Key**: printable ASCII, 1–200 characters. Missing or malformed → **400**
+  `idempotency_key_required`. Keys are per user and endpoint; the body hash ignores key order. A repeat
+  returns the same 201 body; a failed request (any 4xx) does not consume the key.
+- **Extra fields** (additive): `Placement.implementationPartner: {id,name}|null`; `team` and `location` may
+  be `null` (the actor had no team); `candidate.name` is `null` when the caller cannot read the candidate's
+  person row; `assignment` is `null` (not omitted) before joining. Lookups add
+  `implementationPartners: [{id,name}]` (new reference table `implementation_partner`).
+- **List filters** `from`/`to` apply to `createdAt`; order is `createdAt` descending.
+- **Validation** (422): `rate` > 0 and ≤ 1000 with two decimals (hourly, same bound as submissions);
+  `projectCity` ≤ 80 characters; `projectState` 2–40 letters (name or code); `tentativeStart` between
+  2000-01-01 and 2100-12-31; up to 10 contacts, contact `name` ≤ 120, `email` valid ≤ 254, `phone` E.164.
+  The same limits are table CHECKs.
+- **Outbox** rows hold ids, states and the recipient groups only; no worker reads them yet.

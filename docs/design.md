@@ -383,12 +383,12 @@ Triggers on `user_role`, `reporting_line`, `team_member` and `coach_assignment` 
 
 | Table | Purpose |
 |---|---|
-| `outbox_event` | id, type, payload jsonb, created_at, processed_at, attempts |
+| `outbox_event` | id, type, aggregate_type, aggregate_id, payload jsonb (ids and states only, no PII), created_at, published_at (migration 0022; no delivery job yet) |
 | `notification` | recipient_id, type, entity ref, title, body, read_at |
 | `notification_delivery` | notification_id, channel, sent_at, error |
 | `audit_event` | seq bigserial, at, actor_id, action, entity_type, entity_id, changes jsonb (redacted), request_id, ip |
 | `saved_view` | user_id, screen, name, filters jsonb, columns jsonb |
-| `idempotency_key` | key, user_id, endpoint, response_hash, created_at (placements and payments only) |
+| `idempotency_key` | key, user_id, endpoint, request_hash (SHA-256 of the canonical body), response jsonb, created_at; PK (user_id, endpoint, key); RLS: own rows only (migration 0022; placements now, payments later) |
 
 ### B2.6 State machines
 
@@ -426,7 +426,19 @@ Built in migration 0017 (2026-09-29): submission status changes only through the
 
 **Placement:** `confirmed → paperwork → bgc → ready → joined`. `backout` is allowed from any state before `joined`. `bgc_failed` is allowed from any state, including after `joined` (FR-PLC-06); from `joined` it also ends the assignment.
 
-Transitions are table-driven in the service layer; each writes a `candidate_event` and an outbox event.
+Built in migration 0022 (2026-09-30), contract in `docs/placements-api.md` (PL-1..PL-9):
+
+| Rule | Enforcement |
+|---|---|
+| Created only from a `selected` submission by a caller holding `placement:create` **and** `submission:update` on its actor snapshot, with the candidate visible for `placement:create` (incl. Open-to-all-teams) and in `active` or `full_of_interviews` | `authz.create_placement` (definer); the app has no INSERT/UPDATE/DELETE on `placement`, `placement_contact`, `assignment`, `outbox_event`; trigger `placement_write_guard` refuses any writer other than `authz_definer` |
+| Snapshots (candidate, person, recruiter, team, location, client, vendor) and `is_first_placement` set by the database | same function; `is_first_placement` = no earlier placement for the person that reached `joined` or is not `backout` |
+| One active placement per submission; one open (pre-join) placement per candidate | partial unique indexes; API 409 `placement_exists` |
+| Forward steps one at a time; `backout` before `joined`; `bgc_failed` from any live state including `joined` (needs `placement.bgc_status:update` as well as `placement:update`); `backout`/`bgc_failed` need a reason | `authz.transition_placement` (NULL-safe); table CHECK on the reason |
+| Candidate side effects: create → `confirmation`; `joined` → `placed` + new `assignment` (number per person, start = the day marked joined); `backout`/`bgc_failed` before joining → `active` (only if still in `confirmation`); `bgc_failed` after joining → assignment ended (`bgc_failed`) and candidate → `bench` | internal definer `authz.candidate_status_by_placement` (not executable by the app; authorized by the placement action, N2). Adds the edge `full_of_interviews → confirmation` for placements only |
+| While a placement is open, manual candidate transitions are refused (`placement_open`) | `authz.transition_candidate` (replaced in 0022) |
+| `placement.created` / `placement.state_changed` outbox rows in the same transaction (HR, Accounts, Immigration) | both functions |
+
+Not yet done: `candidate_event` rows (table not built) and the outbox delivery job.
 
 ## B3. API design
 
@@ -437,7 +449,9 @@ Transitions are table-driven in the service layer; each writes a `candidate_even
 - **Duplicate checks** (candidate by email/phone/DOB, submission to the same client within 90 days) call the security-definer function `authz.check_duplicate(...)`. It returns only "possible duplicate", the owning team's name and a contact, and every call is audited.
 - `If-Match` with `row_version` on updates. `Idempotency-Key` on placement and payment creation.
 - Statement timeout 5 s for API requests.
-- Pipeline error codes (problem `detail`): `invalid_transition`, `rejection_reason_required`, `rejection_reason_not_allowed`, `submission_closed`, `field_not_permitted: <fields>`, `consent_required`, `kind_required`, `kind_not_permitted` (422); `interview_conflict` (409). List cursors are opaque keyset cursors.
+- Pipeline error codes (problem `detail`): `invalid_transition`, `rejection_reason_required`, `rejection_reason_not_allowed`, `submission_closed`, `field_not_permitted: <fields>`, `consent_required`, `kind_required`, `kind_not_permitted` (422); `interview_conflict` (409). Placement codes: `submission_not_selected`, `candidate_not_available`, `invalid_transition`, `reason_required`, `placement_open` (candidate transition) (422); `placement_exists`, `idempotency_key_reused` (409); `idempotency_key_required` (400). List cursors are opaque keyset cursors.
+- `Idempotency-Key` (POST /placements): stored per (user, endpoint, key) in the same transaction as the create, with a SHA-256 of the canonical (key-order independent) body. A repeat with the same body returns the stored response; a different body gets 409. A failed request rolls back and does not consume its key.
+- Read endpoints carry action hints computed by the engine (`packages/shared/src/authz/actions.ts`): `actions` on GET /candidates/{id} and on submission items, `allowedTransitions` on placements. The state machines live once in `packages/shared/src/authz/state-machines.ts`; integration tests check that every hint matches what the server does.
 
 Core MVP endpoints:
 
@@ -456,7 +470,8 @@ Core MVP endpoints:
 | POST /interviews; PATCH /interviews/{id} | interview:create, interview:update | create is authorized against the parent submission; PATCH fields depend on the grant kind (B2.6) |
 | GET, POST /interviews/{id}/feedback | interview:read, interview.feedback:create | coach, location admin or client (Sales) feedback; `kind` required only when the caller holds more than one |
 | GET, POST /public/feedback/{token} | token | GET renders, POST consumes |
-| GET, POST /placements | placement:read, placement:create | rate omitted without rate:read |
+| GET, POST /placements; GET /placements/{id}; PATCH /placements/{id}/status | placement:read, placement:create, placement:update | rate omitted without rate:read; POST needs Idempotency-Key; `bgc_failed` also needs placement.bgc_status:update |
+| GET /lookups | authenticated | technologies (active), clients, vendors, implementation partners, locations, coaches; id and name only |
 | GET /admin/users; PUT /admin/users/{id}/roles | access:manage | no self-change; second approver for restricted roles |
 
 ## B4. Authorization engine
