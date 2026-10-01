@@ -9,7 +9,27 @@ export interface MailTransport { send(mail: Mail, signal: AbortSignal): Promise<
  * error, or the local write failed), so it is safe to retry. Any other error
  * from send() leaves the outcome unknown.
  */
-export class MailRejected extends Error {}
+export class MailRejected extends Error {
+  /** Rate or account-level limit (SES 429 / throttling / sending paused): retry without counting it against the recipient. */
+  constructor(message: string, readonly throttled = false) { super(message); }
+}
+const THROTTLED = new Set(["TooManyRequestsException", "ThrottlingException", "LimitExceededException", "SendingPausedException"]);
+/**
+ * Maps an SES client error to what the caller may do: an HTTP 4xx answer
+ * means SES did not accept the message (MailRejected; throttled for 429 and
+ * rate/sending-paused errors); 5xx, timeouts, aborts and network errors leave
+ * the outcome unknown (plain Error). Provider messages can contain recipient
+ * details and are never passed on.
+ */
+export function classifySesError(err: unknown): Error {
+  const e = err as { name?: string; $metadata?: { httpStatusCode?: number } } | null;
+  const status = e?.$metadata?.httpStatusCode;
+  if (status !== undefined && status >= 400 && status < 500) {
+    const throttled = status === 429 || THROTTLED.has(e?.name ?? "");
+    return new MailRejected(throttled ? "Email delivery throttled" : "Email delivery rejected", throttled);
+  }
+  return new Error("Email delivery failed");
+}
 export class LocalMail implements MailTransport {
   constructor(private readonly directory: string) {}
   async send(mail: Mail, signal: AbortSignal) {
@@ -21,9 +41,9 @@ export class LocalMail implements MailTransport {
   }
 }
 export class SesMail implements MailTransport {
-  private readonly client: SESv2Client;
-  constructor(region: string, private readonly from: string) {
-    this.client = new SESv2Client({ region, maxAttempts: 1, requestHandler: { requestTimeout: 15_000, connectionTimeout: 5_000 } });
+  private readonly client: Pick<SESv2Client, "send">;
+  constructor(region: string, private readonly from: string, client?: Pick<SESv2Client, "send">) {
+    this.client = client ?? new SESv2Client({ region, maxAttempts: 1, requestHandler: { requestTimeout: 15_000, connectionTimeout: 5_000 } });
   }
   async send(mail: Mail, signal: AbortSignal) {
     try {
@@ -32,13 +52,7 @@ export class SesMail implements MailTransport {
           Subject: { Data: mail.subject, Charset: "UTF-8" }, Body: { Text: { Data: mail.text, Charset: "UTF-8" } },
         } }, EmailTags: [{ Name: "delivery", Value: mail.id }],
       }), { abortSignal: signal });
-    } catch (err) {
-      // Provider errors can contain recipient details: never pass them on. A 4xx
-      // answer (validation, throttling) means SES did not accept the message.
-      const status = (err as { $metadata?: { httpStatusCode?: number } } | null)?.$metadata?.httpStatusCode;
-      if (status !== undefined && status >= 400 && status < 500) throw new MailRejected("Email delivery rejected");
-      throw new Error("Email delivery failed");
-    }
+    } catch (err) { throw classifySesError(err); }
   }
 }
 /** Persist only an AEAD-encrypted retry copy. Validation uses a separate SHA-256 hash.
