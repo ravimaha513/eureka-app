@@ -279,7 +279,7 @@ GRANT SELECT (id, status, operator_id) ON eureka.import_batch TO authz_definer;
 GRANT UPDATE (status, approved_by, approved_at) ON eureka.import_batch TO authz_definer;
 GRANT SELECT (candidate_id) ON eureka.import_identity TO authz_definer;
 
--- Reference lists resolved while staging (no personal data).
+-- Reference lists resolved while staging, and staff emails to resolve row owners.
 GRANT SELECT (id, name) ON eureka.technology, eureka.location, eureka.client, eureka.vendor,
   eureka.implementation_partner TO eureka_import;
 GRANT SELECT (id, email, status) ON eureka.app_user TO eureka_import;
