@@ -75,11 +75,57 @@ describe("differential: RLS alone matches the engine", () => {
     expect(actual).toEqual(expected);
   });
 
-  it("the policy evaluates scope once per statement (InitPlans), not per row", async () => {
-    const plan = await asUser(db.app, U.l1, async (c) =>
-      (await c.query<{ "QUERY PLAN": string }>(`EXPLAIN SELECT id FROM eureka.resume`)).rows.map((r) => r["QUERY PLAN"]).join("\n"));
-    expect(plan).toMatch(/InitPlan/);
-  });
+  /** Calls of every authz.* function while `sql` runs as eureka_app for `userId` (track_functions, as ownedCandidateCalls). */
+  async function authzCalls(userId: string, sql: string): Promise<{ calls: number; rows: number }> {
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL track_functions = 'all'");
+      await c.query("SELECT set_config('eureka.user_id', $1, true)", [userId]);
+      const count = async () => Number((await c.query<{ n: string }>(
+        `SELECT coalesce(sum(pg_stat_get_xact_function_calls(p.oid)), 0)::bigint AS n
+         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'authz'`)).rows[0]!.n);
+      const before = await count();
+      await c.query("SET LOCAL ROLE eureka_app");
+      const rows = (await c.query(sql)).rowCount ?? 0;
+      await c.query("RESET ROLE");
+      return { calls: (await count()) - before, rows };
+    } finally {
+      await c.query("ROLLBACK").catch(() => undefined);
+      c.release();
+    }
+  }
+
+  it.each(["l1", "m1", "r1a", "hr"] as const)(
+    "rule 3: authz calls for %s do not grow with the number of resume rows (scope evaluated once per statement)", async (key) => {
+      const one = await authzCalls(U[key], `SELECT id FROM eureka.resume`);
+      // Double the table: a second resume for every candidate.
+      const c = await db.admin.connect();
+      try {
+        await c.query("BEGIN");
+        await c.query("SET LOCAL session_replication_role = replica");
+        await c.query(`INSERT INTO eureka.resume (candidate_id, status, scan_result, content_type, size_bytes, sha256_hex, version, is_current,
+            uploaded_by, upload_expires_at, scanned_at)
+          SELECT candidate_id, 'clean', 'NO_THREATS_FOUND', content_type, 10, sha256_hex, 200 + $1::int, false, uploaded_by, now(), now()
+          FROM eureka.resume WHERE version = 100`, [Object.keys(U).indexOf(key)]);
+        await c.query("COMMIT");
+        const two = await authzCalls(U[key], `SELECT id FROM eureka.resume`);
+        expect(two.rows).toBe(one.rows * 2);
+        expect(one.calls).toBeGreaterThan(0);
+        expect(two.calls).toBe(one.calls);
+      } finally {
+        c.release();
+        const d = await db.admin.connect();
+        try {
+          await d.query("BEGIN");
+          await d.query("SET LOCAL session_replication_role = replica");
+          await d.query("DELETE FROM eureka.resume WHERE version > 100");
+          await d.query("COMMIT");
+        } finally {
+          d.release();
+        }
+      }
+    });
 
   it("sanity: some users see some resumes and some see none", async () => {
     const counts = await Promise.all(users.map((k) =>
