@@ -50,6 +50,13 @@ pnpm --filter @eureka/web dev          # http://localhost:5173, pick a fictional
 pnpm --filter @eureka/web e2e          # Playwright role journeys against the running stack
 ```
 
+E2E environment: `E2E_BASE_URL` (web app, default http://localhost:5173), `PW_CHROMIUM` (a
+preinstalled Chromium binary instead of `playwright install`) and `E2E_DATABASE_URL` (superuser
+URL of the stack's database, e.g. `postgres://postgres:postgres@127.0.0.1:5432/eureka_dev`; only
+the candidate feedback journey needs it, to mint a feedback link as the worker would, and it skips
+without it). Journeys create their own records, so they can run in parallel and be repeated on one
+seeded database.
+
 ## Deploy
 
 AWS (ECS Fargate, RDS, CloudFront) via GitHub Actions with OIDC; no AWS keys in the repo.
