@@ -4,14 +4,15 @@ import { loadWorkerConfig } from "../src/worker/config.js";
 import { MailRejected, type Mail, type MailTransport } from "../src/worker/feedback-mail.js";
 import {
   cleanupIdempotencyKeys, deliverEvent, dueOutboxEvents, idempotencyCleanupJob, outboxDeliveryJob, outboxPruneJob, pruneOutbox,
+  pruneOutboxJobRuns,
 } from "../src/worker/jobs/outbox.js";
-import { silentLogger } from "../src/worker/log.js";
+import { createLogger, silentLogger } from "../src/worker/log.js";
 import { JobRunner } from "../src/worker/runner.js";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, T, U, seedFixtures } from "./fixtures.js";
 import { createPlacement, newCandidate, selectedSubmission, transitionPlacement } from "./placement-seed.js";
 
-/** Outbox delivery, pruning and idempotency-key cleanup (migration 0024, worker jobs). */
+/** Outbox delivery, pruning and idempotency-key cleanup (migrations 0024, 0029; worker jobs). */
 let db: TestDb;
 const ORIGIN = "https://eureka.example";
 const extra: Record<string, string> = {};
@@ -141,11 +142,11 @@ describe("outbox_event privileges (migration 0024)", () => {
     expect(await denied(db.worker, "UPDATE eureka.outbox_delivery SET status = 'sent' WHERE event_id = $1", [eventId]))
       .toMatch(/invalid outbox delivery change/);
     await db.worker.query("UPDATE eureka.outbox_delivery SET status = 'skipped' WHERE event_id = $1", [eventId]);
-    // Final rows cannot be reopened.
+    // The worker's update policy no longer matches a final row.
     expect((await db.worker.query("UPDATE eureka.outbox_delivery SET status = 'pending' WHERE event_id = $1", [eventId])).rowCount).toBe(0);
     const cols = await db.admin.query(`SELECT column_name FROM information_schema.columns
       WHERE table_schema = 'eureka' AND table_name = 'outbox_delivery' ORDER BY ordinal_position`);
-    expect(cols.rows.map((r) => r.column_name)).toEqual(["event_id", "user_id", "status", "created_at", "attempt_at", "done_at"]);
+    expect(cols.rows.map((r) => r.column_name)).toEqual(["event_id", "user_id", "status", "created_at", "attempt_at", "done_at", "rejections"]);
     // Recipients cannot be added to a published event.
     await force("DELETE FROM eureka.outbox_delivery WHERE event_id = $1", [eventId]);
     await db.worker.query("UPDATE eureka.outbox_event SET published_at = now() WHERE id = $1", [eventId]);
@@ -171,7 +172,7 @@ describe("outbox delivery", () => {
     const { placementId, eventId } = await newPlacement();
     const mail = new FakeMail();
     const r = await deliverEvent(db.worker, mail, ORIGIN, eventId, ctx());
-    expect(r).toEqual({ alreadyPublished: false, recipients: 4, sent: 4, skipped: 0, inDoubt: 0 });
+    expect(r).toEqual({ alreadyPublished: false, recipients: 4, sent: 4, skipped: 0, inDoubt: 0, failed: 0 });
     expect(mail.to()).toEqual(EXPECTED);
     expect(await publishedAt(eventId)).not.toBeNull();
     expect(Object.values(await deliveries(eventId))).toEqual(["sent", "sent", "sent", "sent"]);
@@ -231,7 +232,7 @@ describe("outbox delivery", () => {
     const { eventId } = await newPlacement();
     let reject = true;
     const mail = new FakeMail((m) => (reject && m.to === "imm@eureka.example" ? new MailRejected("throttled") : null));
-    await expect(deliverEvent(db.worker, mail, ORIGIN, eventId, ctx())).rejects.toThrow(/rejected by the provider; retry pending/);
+    await expect(deliverEvent(db.worker, mail, ORIGIN, eventId, ctx())).rejects.toThrow(/rejected or throttled by the provider; retry pending/);
     expect(await publishedAt(eventId)).toBeNull();
     expect((await deliveries(eventId))[U.imm]).toBe("pending");
     reject = false;
@@ -254,6 +255,10 @@ describe("outbox delivery", () => {
     expect(mail.sent).toHaveLength(1);
     const first = mail.sent[0]!.to;
     expect(Object.values(await deliveries(eventId)).filter((s) => s === "sending")).toHaveLength(1);
+    // Before the crashed run's lease has expired the row is left alone.
+    await expect(deliverEvent(db.worker, mail, ORIGIN, eventId, ctx())).rejects.toThrow(/still open/);
+    // Time travel past the lease window.
+    await force("UPDATE eureka.outbox_delivery SET attempt_at = now() - interval '3 minutes' WHERE event_id = $1 AND status = 'sending'", [eventId]);
 
     const r = await deliverEvent(db.worker, mail, ORIGIN, eventId, ctx());
     expect(r).toMatchObject({ sent: 3, inDoubt: 1 });
@@ -274,7 +279,7 @@ describe("outbox delivery", () => {
   it("runs under the job runner: one key per event, done once", async () => {
     const { eventId } = await newPlacement();
     const mail = new FakeMail();
-    const job = outboxDeliveryJob(mail, ORIGIN, 500);
+    const job = outboxDeliveryJob(mail, ORIGIN, { batchSize: 500 });
     const keys = await job.dueKeys(new Date(), { pool: db.worker, log: silentLogger });
     expect(keys).toContain(eventId);
     const runner = new JobRunner(db.worker, [job], silentLogger);
@@ -289,13 +294,214 @@ describe("outbox delivery", () => {
 
   it("a failing event backs off and does not block the batch", async () => {
     const { eventId } = await newPlacement();
-    const job = outboxDeliveryJob(new FakeMail(() => new MailRejected("down")), ORIGIN, 500);
+    const job = outboxDeliveryJob(new FakeMail(() => new MailRejected("down")), ORIGIN, { batchSize: 500 });
     const runner = new JobRunner(db.worker, [job], silentLogger);
     expect(await runner.runOnce(job, eventId)).toBe("failed");
     expect(await dueOutboxEvents(db.worker, 500)).not.toContain(eventId);
     await db.admin.query("UPDATE eureka.job_run SET next_attempt_at = now() - interval '1 second' WHERE run_key = $1", [eventId]);
     expect(await dueOutboxEvents(db.worker, 500)).toContain(eventId);
     await deliverEvent(db.worker, new FakeMail(), ORIGIN, eventId, ctx());
+  });
+});
+
+/** Runs fn on a superuser connection acting as eureka_owner, then rolls back. */
+async function asOwner<T>(fn: (c: pg.PoolClient) => Promise<T>, noForce = false): Promise<T> {
+  const c = await db.admin.connect();
+  try {
+    await c.query("BEGIN");
+    await c.query("SET LOCAL ROLE eureka_owner");
+    if (noForce) await c.query("ALTER TABLE eureka.outbox_delivery NO FORCE ROW LEVEL SECURITY");
+    return await fn(c);
+  } finally {
+    await c.query("ROLLBACK").catch(() => undefined);
+    c.release();
+  }
+}
+const err = (p: Promise<unknown>) => p.then(() => "allowed", (e: Error) => e.message);
+
+/** A delivered event whose rows are all final (sent). */
+async function deliveredEvent() {
+  const { eventId } = await newPlacement();
+  await deliverEvent(db.worker, new FakeMail(), ORIGIN, eventId, ctx());
+  return eventId;
+}
+
+describe("outbox hardening (migration 0029)", () => {
+  it("final delivery rows cannot be reopened, even by a superuser bypassing RLS or the owner without FORCE", async () => {
+    const eventId = await deliveredEvent();
+    expect(await denied(db.admin, "UPDATE eureka.outbox_delivery SET status = 'pending' WHERE event_id = $1", [eventId]))
+      .toMatch(/invalid outbox delivery change/);
+    expect(await denied(db.admin, "UPDATE eureka.outbox_delivery SET rejections = 3 WHERE event_id = $1", [eventId]))
+      .toMatch(/invalid outbox delivery change/);
+    // The owner under FORCE ROW LEVEL SECURITY has no policy: it sees no rows at all.
+    expect(await asOwner((c) => c.query("UPDATE eureka.outbox_delivery SET status = 'pending' WHERE event_id = $1", [eventId])
+      .then((r) => r.rowCount))).toBe(0);
+    // The owner can lift FORCE (it owns the table); the trigger still refuses.
+    expect(await asOwner((c) => err(c.query("UPDATE eureka.outbox_delivery SET status = 'pending' WHERE event_id = $1", [eventId])), true))
+      .toMatch(/invalid outbox delivery change/);
+  });
+
+  it("delivery rows cannot be deleted or truncated except with their pruned event", async () => {
+    const eventId = await deliveredEvent();
+    expect(await denied(db.worker, "DELETE FROM eureka.outbox_delivery WHERE event_id = $1", [eventId])).toMatch(/permission denied/);
+    expect(await denied(db.worker, "TRUNCATE eureka.outbox_delivery")).toMatch(/permission denied/);
+    expect(await denied(db.admin, "DELETE FROM eureka.outbox_delivery WHERE event_id = $1", [eventId]))
+      .toMatch(/removed only with their event/);
+    expect(await denied(db.admin, "TRUNCATE eureka.outbox_delivery")).toMatch(/never truncated/);
+    expect(await asOwner((c) => err(c.query("DELETE FROM eureka.outbox_delivery WHERE event_id = $1", [eventId])), true))
+      .toMatch(/removed only with their event/);
+    expect(await asOwner((c) => err(c.query("TRUNCATE eureka.outbox_delivery")))).toMatch(/never truncated/);
+    expect(Object.keys(await deliveries(eventId))).toHaveLength(4);
+    // The cascade from a prunable event is allowed.
+    await force("UPDATE eureka.outbox_event SET published_at = now() - interval '8 days' WHERE id = $1", [eventId]);
+    expect((await db.worker.query("DELETE FROM eureka.outbox_event WHERE id = $1", [eventId])).rowCount).toBe(1);
+    expect(Object.keys(await deliveries(eventId))).toHaveLength(0);
+  });
+
+  it("counts definite rejections per recipient and gives up after the maximum; throttling is not counted", async () => {
+    const { eventId } = await newPlacement();
+    let throttled = 0;
+    const mail = new FakeMail((m) => {
+      if (m.to === "acct@eureka.example") return new MailRejected("bad address");
+      if (m.to === "imm@eureka.example" && throttled < 3) { throttled++; return new MailRejected("slow down", true); }
+      return null;
+    });
+    const rej = async () => (await db.admin.query(
+      "SELECT user_id, rejections, status FROM eureka.outbox_delivery WHERE event_id = $1 AND user_id IN ($2, $3) ORDER BY user_id",
+      [eventId, U.acct, U.imm])).rows.map((r) => [r.user_id === U.acct ? "acct" : "imm", r.status, r.rejections]);
+    await expect(deliverEvent(db.worker, mail, ORIGIN, eventId, ctx(), { maxRejections: 2 })).rejects.toThrow(/retry pending/);
+    expect((await rej()).sort()).toEqual([["acct", "pending", 1], ["imm", "pending", 0]]);
+    await expect(deliverEvent(db.worker, mail, ORIGIN, eventId, ctx(), { maxRejections: 2 })).rejects.toThrow(/retry pending/);
+    expect((await rej()).sort()).toEqual([["acct", "failed", 2], ["imm", "pending", 0]]);
+    await expect(deliverEvent(db.worker, mail, ORIGIN, eventId, ctx(), { maxRejections: 2 })).rejects.toThrow(/retry pending/);
+    const r = await deliverEvent(db.worker, mail, ORIGIN, eventId, ctx(), { maxRejections: 2 });
+    expect(r).toMatchObject({ sent: 3, failed: 1 });
+    expect((await rej()).sort()).toEqual([["acct", "failed", 2], ["imm", "sent", 0]]);
+    expect(mail.to()).toEqual(["dual@eureka.example", "hr@eureka.example", "imm@eureka.example"]);
+    expect(await publishedAt(eventId)).not.toBeNull();
+    // The worker cannot move the count by itself.
+    const { eventId: other } = await newPlacement();
+    await db.worker.query("INSERT INTO eureka.outbox_delivery (event_id, user_id) VALUES ($1, $2)", [other, U.hr]);
+    expect(await denied(db.worker, "UPDATE eureka.outbox_delivery SET rejections = 1 WHERE event_id = $1", [other]))
+      .toMatch(/invalid outbox delivery change/);
+    expect(await denied(db.worker, "INSERT INTO eureka.outbox_delivery (event_id, user_id, rejections) VALUES ($1, $2, 3)", [other, U.acct]))
+      .toMatch(/permission denied/);
+    // Final rows are out of the worker's reach.
+    expect((await db.worker.query("UPDATE eureka.outbox_delivery SET rejections = 0 WHERE event_id = $1", [eventId])).rowCount).toBe(0);
+  });
+
+  it("two workers interleaved by a lease takeover never send twice, and a fresh send is not marked in doubt", async () => {
+    const { eventId } = await newPlacement();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let first = "";
+    const slow = new FakeMail();
+    const slowSend = slow.send.bind(slow);
+    slow.send = async (m: Mail) => { if (!first) { first = m.to; await gate; } return slowSend(m); };
+    const lines: string[] = [];
+    const log = createLogger({}, (l) => lines.push(l));
+
+    // Worker A starts and blocks inside the provider call for its first recipient.
+    const a = deliverEvent(db.worker, slow, ORIGIN, eventId, { ...ctx(), log });
+    while (!first) await new Promise((r) => setTimeout(r, 10));
+    // Worker B takes over (A's lease expired): the young `sending` row is not touched.
+    const fast = new FakeMail();
+    await expect(deliverEvent(db.worker, fast, ORIGIN, eventId, { ...ctx(), log })).rejects.toThrow(/still open/);
+    expect(fast.to()).not.toContain(first);
+    expect(fast.sent).toHaveLength(3);
+    expect(Object.values(await deliveries(eventId)).filter((s) => s === "in_doubt")).toHaveLength(0);
+    release();
+    await a;                                                    // A records its send; the others were taken by B
+    expect([...slow.to(), ...fast.to()].sort()).toEqual(EXPECTED);
+    expect(Object.values(await deliveries(eventId))).toEqual(["sent", "sent", "sent", "sent"]);
+    expect(await publishedAt(eventId)).not.toBeNull();
+  });
+
+  it("a stale send is marked in doubt by the next worker; the late final update is logged, not applied", async () => {
+    const { eventId } = await newPlacement();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let first = "";
+    const slow = new FakeMail();
+    const slowSend = slow.send.bind(slow);
+    slow.send = async (m: Mail) => { if (!first) { first = m.to; await gate; } return slowSend(m); };
+    const lines: string[] = [];
+    const log = createLogger({}, (l) => lines.push(l));
+    const a = deliverEvent(db.worker, slow, ORIGIN, eventId, { ...ctx(), log });
+    while (!first) await new Promise((r) => setTimeout(r, 10));
+    // A has been stuck longer than the lease: B marks the row in doubt and finishes the rest.
+    const fast = new FakeMail();
+    const r = await deliverEvent(db.worker, fast, ORIGIN, eventId, { ...ctx(), log }, { staleSendingMs: 0 });
+    expect(r).toMatchObject({ sent: 3, inDoubt: 1 });
+    expect(fast.to()).not.toContain(first);
+    release();
+    await a;
+    expect(lines.some((l) => l.includes("outcome not recorded") && l.includes('"alert":true'))).toBe(true);
+    expect(Object.values(await deliveries(eventId)).sort()).toEqual(["in_doubt", "sent", "sent", "sent"]);
+    expect([...slow.to(), ...fast.to()].sort()).toEqual(EXPECTED);  // still one email each
+  });
+
+  it("an event without recipients stays unpublished, alerts and is retried", async () => {
+    const id = (await db.admin.query<{ id: string }>("SELECT gen_random_uuid() AS id")).rows[0]!.id;
+    await force(`INSERT INTO eureka.outbox_event (id, type, aggregate_type, aggregate_id, payload)
+      VALUES ($1, 'placement.created', 'placement', gen_random_uuid(),
+              '{"status":"confirmed","notify":["immigration"]}')`, [id]);
+    await db.admin.query("UPDATE eureka.app_user SET status = 'inactive' WHERE id = $1", [U.imm]);
+    const lines: string[] = [];
+    const log = createLogger({}, (l) => lines.push(l));
+    try {
+      await expect(deliverEvent(db.worker, new FakeMail(), ORIGIN, id, { ...ctx(), log })).rejects.toThrow(/no recipients/);
+      expect(lines.some((l) => l.includes("no recipients") && l.includes('"alert":true'))).toBe(true);
+      expect(await publishedAt(id)).toBeNull();
+      expect(await deliveries(id)).toEqual({});
+    } finally {
+      await db.admin.query("UPDATE eureka.app_user SET status = 'active' WHERE id = $1", [U.imm]);
+    }
+    const mail = new FakeMail();
+    await deliverEvent(db.worker, mail, ORIGIN, id, ctx());
+    expect(mail.to()).toEqual(["imm@eureka.example"]);
+  });
+
+  it("prunes old succeeded outbox-delivery job_run rows only, through a definer function", async () => {
+    const key = () => db.admin.query<{ k: string }>("SELECT gen_random_uuid()::text AS k").then((r) => r.rows[0]!.k);
+    const keys = { old: await key(), recent: await key(), failed: await key() };
+    const row = (job: string, k: string, status: string, age: string) => force(
+      `INSERT INTO eureka.job_run (job_name, run_key, status, finished_at, lease_until)
+       VALUES ($1, $2, $3, now() - $4::interval, NULL)`, [job, k, status, age]);
+    await row("outbox-delivery", keys.old, "succeeded", "40 days");
+    await row("outbox-delivery", keys.recent, "succeeded", "2 days");
+    await row("outbox-delivery", keys.failed, "failed", "40 days");
+    await row("audit-export", "2019-01-01", "succeeded", "400 days");
+
+    expect(await denied(db.worker, "DELETE FROM eureka.job_run WHERE run_key = $1", [keys.old])).toMatch(/permission denied/);
+    await expect(pruneOutboxJobRuns(db.worker, 3, ctx())).rejects.toThrow(/between 7 and 3650/);
+    expect(await pruneOutboxJobRuns(db.worker, 30, ctx())).toBe(1);
+    const left = (await db.admin.query("SELECT run_key FROM eureka.job_run WHERE run_key = ANY ($1)",
+      [[...Object.values(keys), "2019-01-01"]])).rows.map((r) => r.run_key).sort();
+    expect(left).toEqual([keys.recent, keys.failed, "2019-01-01"].sort());
+    // Nobody else deletes job_run history, superuser included.
+    expect(await denied(db.admin, "DELETE FROM eureka.job_run WHERE run_key = '2019-01-01'")).toMatch(/job_run rows are kept/);
+    expect(await denied(db.admin, "TRUNCATE eureka.job_run")).toMatch(/job_run rows are kept/);
+    const fn = await db.admin.query(`SELECT has_function_privilege('eureka_app', 'eureka.prune_outbox_job_runs(integer)', 'EXECUTE') AS app,
+      has_function_privilege('eureka_worker', 'eureka.prune_outbox_job_runs(integer)', 'EXECUTE') AS worker`);
+    expect(fn.rows[0]).toEqual({ app: false, worker: true });
+  });
+
+  it("OUTBOX_DELIVER_SINCE marks older events published without sending", async () => {
+    const { eventId: old } = await newPlacement();
+    const { eventId: fresh } = await newPlacement();
+    await force("UPDATE eureka.outbox_event SET created_at = now() - interval '2 days' WHERE id = $1", [old]);
+    const mail = new FakeMail();
+    const lines: string[] = [];
+    const log = createLogger({}, (l) => lines.push(l));
+    const job = outboxDeliveryJob(mail, ORIGIN, { batchSize: 500, deliverSince: new Date(Date.now() - 86_400_000) });
+    const keys = await job.dueKeys(new Date(), { pool: db.worker, log });
+    expect(keys).not.toContain(old);
+    expect(keys).toContain(fresh);
+    expect(await publishedAt(old)).not.toBeNull();
+    expect(mail.sent).toHaveLength(0);
+    expect(lines.some((l) => l.includes("OUTBOX_DELIVER_SINCE") && l.includes('"skipped":1'))).toBe(true);
+    expect(() => loadWorkerConfig({ DATABASE_URL: "postgres://w@h/d", EXPORT_DIR: "/tmp/x", OUTBOX_DELIVER_SINCE: "yesterday" })).toThrow();
   });
 });
 
