@@ -18,7 +18,7 @@ afterAll(async () => {
 // Tables deliberately without RLS: identity/org/reference data (design B4.8, N1).
 const RLS_ALLOW_LIST = new Set([
   "location", "app_user", "role", "role_permission", "user_role", "team", "team_member",
-  "reporting_line", "reporting_closure", "coach_assignment", "session", "technology", "client", "vendor",
+  "reporting_line", "reporting_closure", "coach_assignment", "session", "technology", "client", "vendor", "implementation_partner",
 ]);
 
 describe("RLS coverage and hardening", () => {
