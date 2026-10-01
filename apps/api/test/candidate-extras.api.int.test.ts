@@ -7,6 +7,7 @@ import { DUPLICATE_CHECKS_PER_MINUTE } from "../src/modules/candidates/candidate
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, T, TECH_ID, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 import { seedPipeline } from "./pipeline-seed.js";
+import { createPlacement, newCandidate, selectedSubmission, transitionPlacement } from "./placement-seed.js";
 
 /** API contract for batches, the candidate timeline and the duplicate check (migration 0026). */
 let db: TestDb;
@@ -175,6 +176,69 @@ describe("timeline", () => {
         (await c.query<{ id: string }>(`SELECT id::text FROM eureka.candidate_event WHERE candidate_id = $1`, [cand.id])).rows.map((r) => r.id).sort());
       expect(res.json().items.map((e: { id: string }) => e.id).sort(), `${key} ${cand.id}`).toEqual(rls);
     }
+  });
+});
+
+describe("review follow-ups (0032)", () => {
+  it("an Open-to-all-teams viewer from another team gets no actors, no placement history and nothing from before the opening", async () => {
+    const cand = await newCandidate(db, { teamId: T.t3, recruiterId: U.r3a, locationId: LOC.austin });
+    await call("locA", "PUT", `/api/v1/candidates/${cand.id}/technical-rating`, { rating: 2 }); // before opening
+    const sub = await selectedSubmission(db, U.r3a, cand.id);
+    const pl = await createPlacement(db, U.r3a, sub);
+    await transitionPlacement(db, U.r3a, pl.id, "backout", "Withdrew");
+    expect((await call("l3", "PUT", `/api/v1/candidates/${cand.id}/visibility`, { visibility: "all_teams" })).statusCode).toBe(200);
+    await call("r3a", "POST", `/api/v1/candidates/${cand.id}/transition`, { to: "on_hold" });
+    await call("r3a", "POST", `/api/v1/candidates/${cand.id}/transition`, { to: "active" });
+
+    const viewer = (await call("r1a", "GET", `/api/v1/candidates/${cand.id}/timeline`)).json().items as
+      { type: string; actor: unknown; ref: { type: string } | null; from: string | null; to: string | null }[];
+    expect(viewer.map((e) => [e.type, e.from, e.to])).toEqual([
+      ["candidate.status_changed", "on_hold", "active"],
+      ["candidate.status_changed", "active", "on_hold"],
+      ["candidate.visibility_changed", "team", "all_teams"],
+    ]);
+    expect(viewer.every((e) => e.actor === null)).toBe(true);
+
+    const owner = (await call("l3", "GET", `/api/v1/candidates/${cand.id}/timeline`)).json().items as typeof viewer;
+    expect(owner.filter((e) => e.ref?.type === "placement").map((e) => [e.type, e.to])).toEqual(expect.arrayContaining([
+      ["candidate.status_changed", "active"], ["candidate.status_changed", "confirmation"], ["placement.created", "confirmed"],
+    ]));
+    expect(owner.find((e) => e.type === "candidate.rating_changed")!.actor).toMatchObject({ name: "locA" });
+  });
+
+  it("batch status: Sales leadership of the location moves it on; others get 403/404/422", async () => {
+    const id = (await call("l1", "POST", "/api/v1/batches", { locationId: LOC.austin, technologyId: TECH_ID, startMonth: "2028-02" })).json().id;
+    expect((await call("r1a", "PUT", `/api/v1/batches/${id}/status`, { to: "in_training" })).statusCode).toBe(403);
+    expect((await call("admin", "PUT", `/api/v1/batches/${id}/status`, { to: "in_training" })).statusCode).toBe(403);
+    expect((await call("hr", "PUT", `/api/v1/batches/${id}/status`, { to: "in_training" })).statusCode).toBe(403);
+    expect((await call("l1", "PUT", `/api/v1/batches/00000000-0000-4000-8000-00000000dead/status`, { to: "in_training" })).statusCode).toBe(404);
+    const bad = await call("l1", "PUT", `/api/v1/batches/${id}/status`, { to: "completed" });
+    expect([bad.statusCode, bad.json().detail]).toEqual([422, "invalid_transition"]);
+    expect((await call("l1", "PUT", `/api/v1/batches/${id}/status`, { to: "planned" })).statusCode).toBe(422);
+    expect((await call("l1", "PUT", `/api/v1/batches/${id}/status`, { to: "in_training" })).json()).toEqual({ id, status: "in_training" });
+    const audit = await db.admin.query(`SELECT changes FROM eureka.audit_event WHERE action = 'batch.status' AND entity_id = $1`, [id]);
+    expect(audit.rows).toEqual([{ changes: { from: "planned", to: "in_training" } }]);
+  });
+
+  it("creating a batch outside the caller's locations is 403", async () => {
+    const houston = "00000000-0000-0000-0000-00000000b002";
+    await db.admin.query(`INSERT INTO eureka.location (id, name, kind) VALUES ($1, 'Houston', 'training')`, [houston]);
+    const r = await call("l1", "POST", "/api/v1/batches", { locationId: houston, technologyId: TECH_ID, startMonth: "2028-03" });
+    expect([r.statusCode, r.json().detail]).toEqual([403, "location_not_in_scope"]);
+  });
+
+  it("profile edits audit the marketing email and VITEL number redacted", async () => {
+    const own = candidates.find((c) => c.recruiterId === U.r1a && c.visibility === "team")!;
+    expect((await call("r1a", "PATCH", `/api/v1/candidates/${own.id}`, { marketingEmail: "secret@mkt.example", vitelNumber: "+14695550999" })).statusCode).toBe(200);
+    const { rows } = await db.admin.query(
+      `SELECT changes FROM eureka.audit_event WHERE action = 'candidate.updated' AND entity_id = $1 ORDER BY seq DESC LIMIT 1`, [own.id]);
+    expect(rows[0].changes).toEqual({ marketingEmail: "[redacted]", vitelNumber: "[redacted]" });
+  });
+
+  it("a national 0 after the country code is refused with an explanation", async () => {
+    const r = await call("r1a", "POST", "/api/v1/candidates", { firstName: "T", lastName: "Z", technologyId: TECH_ID, locationId: LOC.dallas, phone: "+91 098765 43210" });
+    expect(r.statusCode).toBe(422);
+    expect(r.json().errors[0]).toEqual({ path: "phone", message: expect.stringContaining("Leave out the national 0") });
   });
 });
 

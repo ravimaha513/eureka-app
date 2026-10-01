@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { normalizeEmail, normalizePhoneE164 } from "@eureka/shared";
+import { PHONE_PROBLEM_MESSAGES, normalizeEmail, normalizePhoneE164, phoneProblem } from "@eureka/shared";
 
 const uuid = z.string().uuid();
 
@@ -25,7 +25,7 @@ export const HotlistQuery = CandidateListQuery.omit({ batchId: true });
 const Phone = z.string().max(40).transform((v, ctx) => {
   const p = normalizePhoneE164(v);
   if (!p) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Use international format with the country code, e.g. +14695550142" });
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: PHONE_PROBLEM_MESSAGES[phoneProblem(v) ?? "invalid"] });
     return z.NEVER;
   }
   return p;
@@ -97,6 +97,9 @@ export const TimelineQuery = z
 export type TimelineQuery = z.infer<typeof TimelineQuery>;
 
 export const BATCH_STATUSES = ["planned", "in_training", "completed", "cancelled"] as const;
+export type BatchStatus = (typeof BATCH_STATUSES)[number];
+/** Target of PUT /batches/:id/status ("planned" is only ever the starting state). */
+export const BatchStatusChange = z.object({ to: z.enum(["in_training", "completed", "cancelled"]) }).strict();
 
 export const BatchListQuery = z
   .object({
