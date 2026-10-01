@@ -16,6 +16,8 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1142.0",
     "@aws-sdk/client-sesv2": "^3.1143.0",
+    "@aws-sdk/s3-presigned-post": "^3.1142.0",
+    "@aws-sdk/s3-request-presigner": "^3.1142.0",
     "@eureka/shared": "workspace:*",
     "@fastify/cookie": "^9.4.0",
     "@nestjs/common": "^10.4.22",
