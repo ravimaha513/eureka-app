@@ -267,6 +267,95 @@ aws s3api head-object --bucket <audit bucket> --key audit/YYYY/MM/DD/audit-event
 # ChecksumSHA256 (base64) matches eureka.audit_export.sha256_hex (hex) for that day
 ```
 
+## Launch checks
+
+The MVP exit criteria (docs/implementation-plan.md) need three checks against a
+running stack. None of them runs on push or pull request.
+
+- **Load test (k6):** `loadtest/README.md`. 120 users over 50k fictional
+  candidates; pass is p95 < 500 ms and < 1% errors.
+- **ZAP baseline:** Actions → zap-baseline → Run workflow, with the URL of the
+  stack (e.g. `https://eureka-staging.spokenly.click`). It spiders the site
+  (plus the AJAX spider for the SPA) and runs ZAP's passive rules only, no
+  attack payloads. `.zap/rules.tsv` sets each alert to FAIL (fails the job),
+  WARN (reported) or IGNORE (noise such as cache and timestamp notices); the
+  HTML/JSON report is attached to the run as `zap-baseline-report`. To accept
+  a finding, change its line in the rules file with a reason in the commit.
+  The scan is unauthenticated: it covers the web app shell, security headers,
+  cookies and the API's unauthenticated answers.
+- **Restore drill:** below.
+
+## Restore drill
+
+Goal: prove a backup can be turned into a working database within the RTO,
+and measure how much data a restore would lose (RPO). Run it on staging first,
+then on production before launch and after any change to the database setup;
+the plan asks for a weekly check once live. A drill costs about one hour of a
+db.t4g.micro (cents) and touches the live database only through describe calls.
+
+Targets to confirm with Ravi (proposed): **RTO 2 hours, RPO 15 minutes.**
+Automated backups give point-in-time restore to within about 5 minutes
+(`backup_retention_period` days back); a snapshot restore loses everything since
+that night's backup window (07:00–08:00 UTC).
+
+### Automated: `infra/scripts/restore-drill.sh`
+
+```sh
+infra/scripts/restore-drill.sh staging                   # point-in-time (latest restorable time)
+infra/scripts/restore-drill.sh production --snapshot latest
+infra/scripts/restore-drill.sh staging --keep            # leave the copy up for inspection
+```
+
+It needs admin AWS credentials, `jq`, `node` and `terragrunt` (for the stack
+outputs; or set `CLUSTER`, `TASK_FAMILY`, `SUBNETS`, `SECURITY_GROUP`). Steps:
+
+1. Reads the source instance (`eureka-<env>`): subnet group, security group,
+   parameter group and class, and its latest restorable time.
+2. Restores into a **new** instance `eureka-<env>-drill-<UTC timestamp>`
+   (point-in-time with `--use-latest-restorable-time`, or from a snapshot),
+   private, single-AZ, tagged `purpose=restore-drill`. The copy is encrypted
+   with the same KMS key and keeps the app and worker role passwords.
+3. Waits until it is available (typically 10–30 minutes), then sets the copy's
+   master password to the current value of the RDS-managed secret (RDS rotates
+   it, so an older restore point can hold an older password).
+4. Runs the restore check inside the VPC: a one-off task on the migrate task
+   definition with the command `node dist/db/restore-check.js` and `DB_HOST`
+   pointed at the copy. The check is read-only and fails when
+   - any migration shipped in the image is not applied (`public.schema_migration`),
+   - RLS is not enabled and forced on person, candidate, submission, interview,
+     audit_event or placement,
+   - the `eureka_app` role cannot log in, sees any candidate without a user
+     context (RLS must fail closed), or sees none for a recruiter who has some.
+   It prints one JSON line with row counts and the newest write.
+5. Prints the report: RPO (drill start minus restore point), time to
+   available, RTO (drill start to verified), and the check's exit code.
+6. Deletes the copy (`--skip-final-snapshot --delete-automated-backups`) on
+   exit, also on failure, unless `--keep`. It only ever deletes an
+   identifier containing `-drill-`.
+
+Record each run (date, environment, source, RPO, RTO, pass/fail) in the
+operations log. A failed check or an RTO over target is a launch blocker.
+
+### By hand (what to do in a real incident)
+
+1. Pick the restore point: console → RDS → `eureka-<env>` → Actions → Restore
+   to point in time (or Snapshots → Restore). New identifier, same subnet
+   group `eureka-<env>`, security group `eureka-<env>-db`, parameter group
+   `eureka-<env>-pg16`, not publicly accessible.
+2. Verify it with the restore check (step 4 above).
+3. Cut over: Terraform owns `aws_db_instance.main`, so the safest switch is to
+   rename. Stop traffic (`aws ecs update-service --cluster eureka-<env> --service
+   api --desired-count 0`), rename the broken instance out of the way
+   (`aws rds modify-db-instance --db-instance-identifier eureka-<env>
+   --new-db-instance-identifier eureka-<env>-old --apply-immediately`), rename
+   the restored one to `eureka-<env>`, then re-run the deploy workflow: the SSM
+   URLs point at the instance address, which follows the identifier. Expect
+   `terragrunt plan` drift on settings the restore did not copy (backup
+   retention, log exports, deletion protection); apply it.
+4. Smoke test: `GET /api/health`, sign in, open the Hot List.
+5. Keep the old instance until the incident review is done, then delete it with
+   a final snapshot.
+
 ## Known risks
 
 - **The API Gateway endpoint is public.** `https://<id>.execute-api.<region>.amazonaws.com`

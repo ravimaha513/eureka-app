@@ -54,8 +54,13 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 4. **Dashboards:** manager, lead and location views with activity counts and "needs attention".
 5. **Sheet migration:** CSV import with normalization, cross-sheet matching, review queues,
    reconciliation report.
-6. **Launch checks:** k6 load test (120 users, 50k candidates, p95 < 500 ms), ZAP baseline,
-   restore-from-backup drill.
+6. **Launch checks:** tooling is in place, nothing has been run against AWS yet.
+   k6: `loadtest/` + `db:seed-load` (50k fictional candidates; minted sessions for stacks
+   without dev sign-in). ZAP: manual `zap-baseline` workflow + `.zap/rules.tsv`. Restore drill:
+   `infra/scripts/restore-drill.sh` + `dist/db/restore-check.js` (infra/README.md). First local
+   k6 run does NOT pass: Hot List p95 ~720 ms, and the unfiltered submissions list for broad
+   scopes (manager, location admin) takes ~2 s idle and hit the 5 s statement timeout under load
+   (loadtest/README.md). Tune these, then run on staging (raise its WAF per-IP limit first).
 7. ~~Fix older dialogs' focus after a failed submit~~ Done: Create candidate and Log submission
    use `useFocusAfterFailure` (sales/ui.tsx): after a validation or API error, focus goes to the
    first invalid field, else to the `role="alert"` form error. Use it in new forms too.
