@@ -26,7 +26,8 @@ pnpm local            # or ./scripts/local-dev.sh; add --reset to start from a f
 ```
 
 It starts PostgreSQL 16 in Docker (port 55432), applies migrations, seeds fictional
-users and candidates, then runs the API (:3000) and web app (:5173) and opens the
+users and candidates plus a sample pipeline (about 48 submissions at every stage, past and
+upcoming interviews with feedback, and placements from Confirmed to Joined and Backout), then runs the API (:3000) and web app (:5173) and opens the
 browser. Pick a fictional user on the sign-in screen, for example
 "Recruiter (Team Rohit)", "Lead (Team Rohit)", "Location Ops Admin (Dallas)" or
 "Org Admin". Ctrl-C stops everything; the database keeps its data between runs.
@@ -48,6 +49,9 @@ NODE_ENV=development AUTH_MODE=dev SESSION_SECRET=$(openssl rand -hex 32) \
   DATABASE_URL=postgres://eureka_app:devpass@127.0.0.1:5432/eureka_dev pnpm --filter @eureka/api dev
 pnpm --filter @eureka/web dev          # http://localhost:5173, pick a fictional user to sign in
 pnpm --filter @eureka/web e2e          # Playwright role journeys against the running stack
+# an existing dev database: re-running the seed applies new migrations and adds the sample
+# pipeline once (it skips users and candidates that are already there)
+MIGRATION_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/eureka_dev pnpm --filter @eureka/api db:seed
 ```
 
 E2E environment: `E2E_BASE_URL` (web app, default http://localhost:5173), `PW_CHROMIUM` (a

@@ -6,6 +6,7 @@
 import pg from "pg";
 import { migrate } from "./migrate.js";
 import { seedFixtures } from "../../test/fixtures.js";
+import { seedDevPipeline } from "./dev-pipeline.js";
 
 if (process.env.NODE_ENV === "production") throw new Error("seed-dev must not run in production");
 const url = process.env.MIGRATION_DATABASE_URL;
@@ -26,6 +27,11 @@ if (rows[0].n === 0) {
   console.log(`seeded ${candidates.length} fictional candidates; sign in as e.g. r1a@eureka.example, l1@eureka.example, m1@eureka.example, locD@eureka.example`);
 } else {
   console.log("database already has users; skipping fixtures");
+}
+// Fictional submissions, interviews, feedback and placements (skipped when submissions already exist).
+if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-0000-0000-000000000009'")).rowCount) {
+  const p = await seedDevPipeline(admin);
+  if (p.submissions) console.log(`seeded pipeline: ${p.submissions} submissions, ${p.interviews} interviews, ${p.feedback} feedback, ${p.placements} placements`);
 }
 if (process.env.APP_DB_PASSWORD) {
   await admin.query(`ALTER ROLE eureka_app PASSWORD '${process.env.APP_DB_PASSWORD.replace(/'/g, "''")}'`);
