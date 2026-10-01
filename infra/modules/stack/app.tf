@@ -523,6 +523,8 @@ resource "aws_ecs_task_definition" "migrate" {
       { name = "DB_HOST", value = aws_db_instance.main.address },
       { name = "DB_NAME", value = "eureka" },
       { name = "NODE_EXTRA_CA_CERTS", value = "/app/certs/rds-global-bundle.pem" },
+      # Read only by the one-off first-admin bootstrap (dist/db/bootstrap.js): admins must be in the domain the API accepts.
+      { name = "GOOGLE_HOSTED_DOMAIN", value = var.google_hosted_domain },
     ]
     secrets = [
       { name = "DB_MASTER_USERNAME", valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:username::" },
