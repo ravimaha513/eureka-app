@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { activityVisible, resolveScope, type ActivityRef } from "@eureka/shared";
-import { asUser, createTestDb, type TestDb } from "./db-harness.js";
+import { asUser, createTestDb, ownedCandidateCalls, type TestDb } from "./db-harness.js";
 import { LOC, T, U, seedFixtures, toUserAccess } from "./fixtures.js";
 import { createPlacement, extraUser, newCandidate, selectedSubmission, transitionPlacement, transitionPlacementRow } from "./placement-seed.js";
 
@@ -479,7 +479,8 @@ describe("RLS differential: placement visibility in the database matches the eng
     expect(rows).toHaveLength(2);
     for (const r of rows) {
       expect(r.def, r.polname).toMatch(/EXISTS/);
-      expect(r.def, r.polname).not.toMatch(/\bIN \(/);
+      // No scan of every visible placement (0023); the owned-candidate set may be an IN (hashed, 0038).
+      expect(r.def, r.polname).not.toMatch(/placement_id IN \(/);
       expect(r.def, r.polname).not.toMatch(/candidate_owned\(|authz\.owns\(/);
     }
     const asg = rows.find((r) => r.polname === "assignment_read")!.def as string;
@@ -491,5 +492,27 @@ describe("RLS differential: placement visibility in the database matches the eng
     const { rows } = await db.admin.query(`SELECT pg_get_expr(polqual, polrelid) AS def FROM pg_policy WHERE polname = 'placement_read'`);
     expect(rows[0].def).not.toMatch(/candidate_owned\(/);
     expect(rows[0].def).toMatch(/owned_candidate_ids/);
+  });
+
+  it.each([
+    ["placement", "placement_read", "placement:read"],
+    ["assignment", "assignment_read", "assignment:read"],
+  ] as const)("the %s read policy probes a hashed owned-candidate set, never an array per row (0038)", async (table, policy, perm) => {
+    const plan = await asUser(db.app, U.r1a, async (c) =>
+      (await c.query<{ "QUERY PLAN": string }>(`EXPLAIN SELECT count(*) FROM eureka.${table}`)).rows.map((r) => r["QUERY PLAN"]).join("\n"));
+    expect(plan).toMatch(/hashed SubPlan/);
+    expect(plan).not.toMatch(/candidate_id = ANY/);
+    const { rows } = await db.admin.query(`SELECT pg_get_expr(polqual, polrelid) AS def FROM pg_policy WHERE polname = $1`, [policy]);
+    expect(rows[0].def).toMatch(new RegExp(`unnest\\(\\( SELECT authz\\.owned_candidate_ids\\('${perm}'`));
+  });
+
+  // assignment_read resolves assignment:read and, through its placement probe, placement_read resolves placement:read.
+  it.each([["placement", 1], ["assignment", 2]] as const)("the %s read policy calls owned_candidate_ids once per statement and permission", async (table, perms) => {
+    // l3 (team t3) rejects the other teams' rows on the actor branches, so the ownership branch is probed per row.
+    const total = (await db.admin.query(`SELECT count(*)::int AS n FROM eureka.${table}`)).rows[0].n as number;
+    const { calls, rows } = await ownedCandidateCalls(db.admin, U.l3, `SELECT * FROM eureka.${table}`);
+    expect(rows).toBeGreaterThan(0);
+    expect(total - rows).toBeGreaterThan(1); // per-row resolution would then report more than `perms` calls
+    expect(calls).toBe(perms);
   });
 });

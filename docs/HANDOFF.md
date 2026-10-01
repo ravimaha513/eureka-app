@@ -9,7 +9,7 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - `pnpm -r typecheck` and `pnpm -r test` must pass before every commit (integration tests need
   PostgreSQL 16 at `TEST_PG_ADMIN_URL`, default `postgres://postgres:postgres@127.0.0.1:5432`).
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0032**) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0039**) and must apply as a
   non-superuser (Amazon RDS master): CI checks this.
 - Commit small and atomic; get an independent review of every security-relevant change.
 
@@ -19,7 +19,10 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 2. Every function in schemas `authz`/`eureka`: `REVOKE ALL ... FROM PUBLIC`, pinned
    `SET search_path = pg_catalog, pg_temp`, EXECUTE granted to exactly the role that needs it.
 3. RLS read policies never call definer functions per row; use
-   `col = ANY ((SELECT authz.x('perm'))::uuid[])` (InitPlan) and `EXISTS` by primary key.
+   `col = ANY ((SELECT authz.x('perm'))::uuid[])` (InitPlan) for small sets (user, team, location
+   ids), `col IN (SELECT pg_catalog.unnest((SELECT authz.x('perm'))))` (InitPlan feeding a hashed
+   SubPlan: one hash probe per row) for large sets such as `owned_candidate_ids` (0034/0038; `= ANY`
+   searches the array linearly per row), and `EXISTS` by primary key.
 4. Clients never set server-managed columns (status, snapshots, timestamps): BEFORE INSERT guards.
 5. No rates, phones, emails, free-text reasons or recording links in `audit_event` or `outbox_event`.
 6. Writes to sensitive tables only through SECURITY DEFINER functions that re-check permission
@@ -83,7 +86,9 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
    scopes (manager, location admin) takes ~2 s idle and hit the 5 s statement timeout under load
    (loadtest/README.md). Tuned since (0027 list-order indexes; 0034 hashed owned-candidate set in
    the activity read policies, custom-planned `authz.hotlist_page`): all three lists < 60 ms p95
-   idle for manager, location admin and lead. Re-run k6 locally, then on staging (raise its WAF
+   idle for manager, location admin and lead; 0038 does the same for placements/assignments and
+   `authz.hotlist_export`. Local k6 re-run (120 VUs) now passes: p95 156 ms overall, Hot List
+   113 ms, board 214 ms, 0% failed (loadtest/README.md). Next: run on staging (raise its WAF
    per-IP limit first).
 7. ~~Fix older dialogs' focus after a failed submit~~ Done: Create candidate and Log submission
    use `useFocusAfterFailure` (sales/ui.tsx): after a validation or API error, focus goes to the

@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { activityVisible, resolveScope } from "@eureka/shared";
-import { asUser, createTestDb, type TestDb } from "./db-harness.js";
+import { asUser, createTestDb, ownedCandidateCalls, type TestDb } from "./db-harness.js";
 import { CLIENT_ID, LOC, T, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 import { at, seedPipeline, type PipelineSeed } from "./pipeline-seed.js";
 
@@ -291,5 +291,16 @@ describe("activity read policies (0034: owned candidates as a hashed set)", () =
     const { rows } = await db.admin.query<{ qual: string }>(
       `SELECT qual FROM pg_policies WHERE schemaname = 'eureka' AND tablename = $1 AND policyname = $2`, [table, `${table}_read`]);
     expect(rows[0]!.qual).toMatch(/unnest\(\( SELECT authz\.owned_candidate_ids/);
+  });
+
+  it.each(["submission", "interview"] as const)("the %s read policy calls owned_candidate_ids once per statement", async (table) => {
+    // l3 and r1a reject most rows on the actor branches, so the ownership branch is probed for many rows.
+    for (const key of ["l3", "r1a"] as const) {
+      const total = (await db.admin.query(`SELECT count(*)::int AS n FROM eureka.${table}`)).rows[0].n as number;
+      const { calls, rows } = await ownedCandidateCalls(db.admin, U[key], `SELECT id FROM eureka.${table}`);
+      expect(rows, key).toBeGreaterThan(0);
+      expect(total - rows, key).toBeGreaterThan(1);
+      expect(calls, key).toBe(1);
+    }
   });
 });

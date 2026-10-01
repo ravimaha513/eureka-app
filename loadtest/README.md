@@ -150,4 +150,25 @@ owned-candidate array linearly per row (~12,500 ids for a location admin:
 2.2 s just to read the visible submissions; 0034 makes it a hashed set,
 45 ms); (3) `authz.hotlist_page` ran a generic plan that sorted all ~40k
 Hot List rows per page (0034 plans each call with its actual arguments).
-Not yet re-run under k6 load.
+
+0038 applies the same two fixes to the placement and assignment read policies
+and to `authz.hotlist_export` (idle p95, before → after: placements list
+81 → 58 ms manager, 60 → 46 ms location admin, 48 → 37 ms lead; full export
+298 → 157 ms manager, 172 → 55 ms lead; export with a name search 212 → 60 ms).
+
+### Second local run (2026-10-01, after 0034 and 0038: a pass)
+
+Same setup as the first run (one API process, pool of 10, shared PostgreSQL 16,
+fresh load seed with all migrations), 120 VUs, 30 s ramp, 2 min hold, 10 s ramp
+down; 4,553 requests, 2,673 iterations:
+
+| Metric | First run | Second run | Target |
+|---|---|---|---|
+| p95, all requests | 565 ms | 156 ms | < 500 ms |
+| p95, Hot List | 719 ms | 113 ms | < 500 ms |
+| p95, interview board | 456 ms | 214 ms | < 500 ms |
+| failed requests | 0.02% | 0.00% | < 1% |
+| checks | | 100% | > 99% |
+
+Slowest single request: 663 ms (interview board). Staging (0.25 vCPU,
+db.t4g.micro) is still to be measured.
