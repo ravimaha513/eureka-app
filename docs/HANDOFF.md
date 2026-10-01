@@ -40,11 +40,15 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - Placements: schema (0022/0023), state machine, first-placement, assignments, outbox rows,
   idempotency keys, Placements screen and Create placement dialog; lookups with least privilege.
 - Worker: lease-based job runner, nightly audit export to Object Lock storage.
+- Outbox delivery (0024): placement events emailed to HR, Accounts, Immigration (one email per user per
+  event, `outbox_delivery` dedupe marker, in-doubt never resent), daily prune of published rows
+  (`OUTBOX_RETENTION_DAYS`, DB floor 7 days) and of Idempotency-Key rows older than 24 h. Enable with
+  `OUTBOX_MAIL_MODE`, `OUTBOX_FROM_EMAIL`, `APP_PUBLIC_ORIGIN` (Terraform does not set them yet).
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
-1. **Outbox delivery job (worker):** grant the worker SELECT and UPDATE(published_at) on
+1. **(Done, see Built.) Outbox delivery job (worker):** grant the worker SELECT and UPDATE(published_at) on
    `outbox_event` with a narrow policy (the 0022 write guard currently blocks this); deliver
    `placement.created` / `placement.state_changed` to HR, Accounts and Immigration via SES; prune
    published rows after N days. Also a job deleting `idempotency_key` rows older than 24 h (add an index on created_at).
@@ -66,6 +70,8 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - May a candidate who failed BGC after joining be re-placed into the same job?
 - Should the manual candidate edge `active → confirmation` be removed now that placements drive it?
 - Does a pre-join `bgc_failed` count as an earlier placement for first-placement detection?
+- Placement emails: should Associate HR (and the Lead/Manager, design C flow 3) also receive them, and may
+  they name the candidate or client? Today: `hr`, `accounts`, `immigration` only, ids and statuses only.
 
 ## Waiting on Ravi (not code)
 

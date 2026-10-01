@@ -383,7 +383,8 @@ Triggers on `user_role`, `reporting_line`, `team_member` and `coach_assignment` 
 
 | Table | Purpose |
 |---|---|
-| `outbox_event` | id, type, aggregate_type, aggregate_id, payload jsonb (ids and states only, no PII), created_at, published_at (migration 0022; no delivery job yet) |
+| `outbox_event` | id, type, aggregate_type, aggregate_id, payload jsonb (ids and states only, no PII), created_at, published_at (migration 0022; delivered and pruned by the worker, migration 0024) |
+| `outbox_delivery` | event_id, user_id, status (`pending`, `sending`, `sent`, `skipped`, `in_doubt`), created_at, attempt_at, done_at: per-recipient dedupe marker of the outbox delivery job, no addresses (migration 0024) |
 | `notification` | recipient_id, type, entity ref, title, body, read_at |
 | `notification_delivery` | notification_id, channel, sent_at, error |
 | `audit_event` | seq bigserial, at, actor_id, action, entity_type, entity_id, changes jsonb (redacted), request_id, ip |
@@ -430,7 +431,7 @@ Built in migration 0022 (2026-09-30), contract in `docs/placements-api.md` (PL-1
 
 | Rule | Enforcement |
 |---|---|
-| Created only from a `selected` submission by a caller holding `placement:create` **and** `submission:update` on its actor snapshot, with the candidate visible for `placement:create` (incl. Open-to-all-teams) and in `active` or `full_of_interviews` | `authz.create_placement` (definer); the app has no INSERT/UPDATE/DELETE on `placement`, `placement_contact`, `assignment`, `outbox_event`; trigger `placement_write_guard` refuses any writer other than `authz_definer` |
+| Created only from a `selected` submission by a caller holding `placement:create` **and** `submission:update` on its actor snapshot, with the candidate visible for `placement:create` (incl. Open-to-all-teams) and in `active` or `full_of_interviews` | `authz.create_placement` (definer); the app has no INSERT/UPDATE/DELETE on `placement`, `placement_contact`, `assignment`, `outbox_event`; trigger `placement_write_guard` refuses any writer other than `authz_definer` (on `outbox_event`, `outbox_event_guard` since 0024 also lets the worker set published_at once and prune old published rows) |
 | Snapshots (candidate, person, recruiter, team, location, client, vendor) and `is_first_placement` set by the database | same function; `is_first_placement` = no earlier placement for the person that reached `joined` or is not `backout` |
 | One active placement per submission; one open (pre-join) placement per candidate | partial unique indexes; API 409 `placement_exists` |
 | Forward steps one at a time; `backout` before `joined`; `bgc_failed` from any live state including `joined` (needs `placement.bgc_status:update` as well as `placement:update`); `backout`/`bgc_failed` need a reason | `authz.transition_placement` (NULL-safe); table CHECK on the reason |
@@ -438,7 +439,7 @@ Built in migration 0022 (2026-09-30), contract in `docs/placements-api.md` (PL-1
 | While a placement is open, manual candidate transitions are refused (`placement_open`) | `authz.transition_candidate` (replaced in 0022) |
 | `placement.created` / `placement.state_changed` outbox rows in the same transaction (HR, Accounts, Immigration) | both functions |
 
-Not yet done: `candidate_event` rows (table not built) and the outbox delivery job.
+Not yet done: `candidate_event` rows (table not built). The outbox delivery job is built (migration 0024, B6 `outbox-delivery`).
 
 ## B3. API design
 
@@ -731,6 +732,9 @@ CREATE POLICY candidate_update ON candidate FOR UPDATE TO eureka_app
 | visa-expiry | daily | 90/60/30-day notices to HR and Immigration | FR-VIS-03, FR-NTF-11 |
 | retention | nightly | Purge per AS-13 | NFR-CMP-01 |
 | audit-export | daily 03:30 America/New_York (run key = UTC day exported; due days = every day since the first exported day with no `audit_export` row, oldest first, max 7 per tick; alert log when more than one day behind) | Previous UTC day of `audit_event`, paged on the (at, seq) index and streamed through gzip + SHA-256 with a size cap, as gzip JSON Lines to `audit/YYYY/MM/DD/audit-events.jsonl.gz` in the Object Lock bucket (create-only `If-None-Match: *`, x-amz-checksum-sha256, bucket-default SSE-KMS; on 412 the stored object's checksum must match); SHA-256, row count and seq range appended to `audit_export` (worker: SELECT/INSERT only, triggers block UPDATE/DELETE). One runner per key via a lease in `job_run` (`lease_until`, renewed while running, fenced on `attempts`); failures back off exponentially (`next_attempt_at`, capped, alert after repeated failures); the database sets run timestamps, rejects future run keys and requires the ledger row before a day is marked succeeded (migrations 0016, 0020; a table instead of pg-boss so the worker needs no DDL) | NFR-SEC-04 |
+| outbox-delivery | every tick (run key = event id; up to `OUTBOX_BATCH_SIZE` unpublished events per tick, oldest first, events in backoff skipped) | Emails `placement.created` / `placement.state_changed` to every active user holding `hr`, `accounts` or `immigration` (role valid now), one email per user per event even with several roles. Recipients are fixed at the first run (`outbox_delivery` rows); before each send the user must still be active and hold the role (else `skipped`). Each row is marked `sending` (committed) before the provider call and `sent` after; a provider rejection (SES 4xx, `MailRejected`) goes back to `pending` and the event is retried with backoff; any other error, or a row still `sending` when a later run starts (crash after send), becomes `in_doubt` and is never resent (at most once per recipient, alert log). The event is marked published when every row is final. Emails carry only the event, statuses, the placement id and a sign-in link (`APP_PUBLIC_ORIGIN`); SES in production, a local directory in development (`OUTBOX_MAIL_MODE`). Worker: SELECT, UPDATE (published_at), DELETE on `outbox_event`; a trigger allows only published_at NULL→now() and only for the worker (migration 0024) | FR-NTF (placements, PL-7) |
+| outbox-prune | daily 04:00 America/New_York | Deletes events published more than `OUTBOX_RETENTION_DAYS` (default 30) days ago, with their delivery rows; the database refuses deleting unpublished rows or rows published less than 7 days ago | — |
+| idempotency-cleanup | daily 04:15 America/New_York | Deletes `idempotency_key` rows older than 24 hours (index on created_at); the worker cannot read stored responses | B3 |
 | key-rotation | monthly | Re-encrypt fields under the current data key | A6.3 |
 
 ## B7. Reporting
