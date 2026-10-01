@@ -1,9 +1,10 @@
-import { ForbiddenException, Injectable } from "@nestjs/common";
+import { ForbiddenException, HttpException, HttpStatus, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import type pg from "pg";
 import { z } from "zod";
 import { GRANTS, resolveScope, type EffectiveScope, type Permission, type UserAccess } from "@eureka/shared";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
+import { RateLimiter } from "../../platform/rate-limit.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import { QueryInstant } from "../submissions/pipeline.js";
@@ -11,6 +12,7 @@ import {
   DASHBOARD_THRESHOLDS,
   DEFAULT_PERIOD_DAYS,
   MAX_PERIOD_DAYS,
+  DASHBOARD_REQUESTS_PER_MINUTE,
   NEEDS_ATTENTION_LIMIT,
 } from "./dashboard.config.js";
 
@@ -110,12 +112,18 @@ export type AttentionKind = "submissionStale" | "interviewFeedbackMissing" | "pl
 
 @Injectable()
 export class DashboardService {
+  /** Per-user limit on these expensive queries (design A6.5). */
+  private readonly limiter = new RateLimiter(DASHBOARD_REQUESTS_PER_MINUTE, 60_000);
+
   constructor(private readonly db: DbService) {}
 
   async get(user: AuthedUser, q: DashboardQuery) {
     const report = resolveScope(user.access, "report:read");
     if (!report) throw new ForbiddenException();
     const { from, to } = resolvePeriod(q);
+    if (!this.limiter.take(user.id)) {
+      throw new HttpException("Too many dashboard requests; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
+    }
     const groupBy = q.groupBy ?? defaultGroupBy(user.access);
     const read: Scopes["read"] = {};
     for (const perm of new Set(Object.values(METRICS))) {
@@ -125,6 +133,19 @@ export class DashboardService {
     const scopes: Scopes = { report, read };
     const metrics = METRIC_KEYS.filter((m) => read[METRICS[m]]);
 
+    try {
+      return await this.load(user, scopes, metrics, groupBy, from, to);
+    } catch (err) {
+      // query_canceled: the statement timeout fired. Mapped here, not globally, so other endpoints keep their behaviour.
+      if ((err as { code?: string }).code === "57014") {
+        throw new ServiceUnavailableException("The report took too long; narrow the period and try again");
+      }
+      throw err;
+    }
+  }
+
+  private async load(user: AuthedUser, scopes: Scopes, metrics: Metric[], groupBy: GroupBy, from: Date, to: Date) {
+    const report = scopes.report;
     return this.db.withUser(user.id, async (c) => {
       // Org-wide reports get the longer report timeout (design B4.8 N9).
       if (report.all) await c.query("SET LOCAL statement_timeout = '60s'");
