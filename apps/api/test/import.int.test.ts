@@ -223,6 +223,17 @@ describe("commit", () => {
     expect(a.rows.find((x) => x.action === "candidate.visibility")!.actor_id).toBe(U.l1); // the lead, as in the app
   });
 
+  it("historical imported interviews never trigger candidate feedback emails", async () => {
+    const imported = (await db.admin.query(`SELECT entity_id FROM eureka.import_link WHERE sheet = 'interviews'`)).rows.map((r) => r.entity_id);
+    // Without the ledger check these past interviews (candidates with a personal email) would be due.
+    const wouldBeDue = await db.admin.query(`SELECT i.id FROM eureka.interview i JOIN eureka.candidate c ON c.id = i.candidate_id
+      JOIN eureka.person p ON p.id = c.person_id WHERE i.id = ANY($1::uuid[]) AND i.ends_at <= now() - interval '60 minutes'
+      AND i.call_status NOT IN ('cancelled','rescheduled','no_invite') AND p.personal_email IS NOT NULL`, [imported]);
+    expect(wouldBeDue.rows.length).toBeGreaterThan(0);
+    const due = (await db.worker.query(`SELECT id FROM eureka.feedback_due()`)).rows.map((r) => r.id);
+    expect(due.filter((id) => imported.includes(id))).toEqual([]);
+  });
+
   it("imported rows are visible exactly per RLS, like app-created ones (differential vs the engine)", async () => {
     const cands = (await db.admin.query(`SELECT c.id, c.team_id, c.recruiter_id, c.location_id, c.visibility, c.marketing_status
       FROM eureka.import_link l JOIN eureka.candidate c ON c.id = l.entity_id WHERE l.sheet = 'sales'`)).rows;

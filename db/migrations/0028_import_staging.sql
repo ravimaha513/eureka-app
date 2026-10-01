@@ -335,3 +335,22 @@ REVOKE ALL ON FUNCTION authz.import_live_match(text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION authz.import_approve_batch(uuid) TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.import_live_match(text, text) TO eureka_import;
 -- has_org / current_user_id are already executable by eureka_app (0004).
+
+-- ---------- no candidate feedback emails for imported (historical) interviews ----------
+-- eureka.feedback_due (0021) selects every past interview without a delivery;
+-- interviews loaded from the sheets are history, not new calls. Same body as
+-- 0021 plus the ledger check.
+CREATE POLICY owner_feedback_skip ON eureka.import_link FOR SELECT TO eureka_owner USING (sheet = 'interviews');
+SET ROLE eureka_owner;
+CREATE OR REPLACE FUNCTION eureka.feedback_due() RETURNS TABLE(id uuid) LANGUAGE sql SECURITY DEFINER
+SET search_path=pg_catalog,pg_temp AS $$
+ SELECT i.id FROM eureka.interview i JOIN eureka.candidate c ON c.id=i.candidate_id JOIN eureka.person p ON p.id=c.person_id
+ WHERE i.ends_at <= now()-interval '60 minutes'
+ AND i.call_status NOT IN ('cancelled','rescheduled','no_invite') AND p.personal_email IS NOT NULL
+ AND NOT EXISTS(SELECT 1 FROM eureka.feedback_delivery d WHERE d.interview_id=i.id AND d.starts_at=i.starts_at AND d.ends_at=i.ends_at AND (d.sent_at IS NOT NULL OR d.used_at IS NOT NULL))
+ AND NOT EXISTS(SELECT 1 FROM eureka.import_link l WHERE l.sheet='interviews' AND l.entity_id=i.id)
+ ORDER BY i.ends_at LIMIT 100
+$$;
+RESET ROLE;
+REVOKE ALL ON FUNCTION eureka.feedback_due() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION eureka.feedback_due() TO eureka_worker;
