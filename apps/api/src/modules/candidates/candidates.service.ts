@@ -125,6 +125,28 @@ const toRef = (r: Pick<CandidateRow, "recruiter_id" | "team_id" | "location_id" 
   marketingStatus: r.marketing_status,
 });
 
+interface ProfileExtraRow {
+  in_person_ok: boolean | null;
+  marketing_email: string | null;
+  vitel_number: string | null;
+}
+
+/**
+ * Profile-only fields of GET /candidates/:id (FR-CAN-04..06), so what Edit
+ * profile saves can be read back. `inPersonOk` goes to every profile reader.
+ * The marketing contact details follow the phone rule (design B4.6):
+ * `candidate.phone:read` over a candidate the caller owns, never through the
+ * Open-to-all-teams rule; otherwise both keys are omitted.
+ */
+export function profileExtras(access: UserAccess, ref: CandidateRef, r: ProfileExtraRow) {
+  const phoneScope = resolveScope(access, "candidate.phone:read");
+  const contact = phoneScope !== null && ownsCandidate(phoneScope, ref);
+  return {
+    inPersonOk: r.in_person_ok,
+    ...(contact ? { marketingEmail: r.marketing_email, vitelNumber: r.vitel_number } : {}),
+  };
+}
+
 interface HotlistRow {
   id: string;
   first_name: string;
@@ -342,11 +364,15 @@ export class CandidatesService implements OnModuleInit {
       const open = r?.marketing_status === "confirmation"
         ? (await c.query<{ o: boolean }>(`SELECT authz.candidate_has_open_placement($1) AS o`, [id])).rows[0]!.o
         : false;
-      return r ? { row: r, open } : undefined;
+      // Profile-only fields (not on list rows), read under the same RLS.
+      const extra = r ? (await c.query<ProfileExtraRow>(
+        `SELECT in_person_ok, marketing_email::text, vitel_number FROM eureka.candidate WHERE id = $1`, [id])).rows[0] : undefined;
+      return r && extra ? { row: r, open, extra } : undefined;
     });
     if (!found) throw new NotFoundException();
     return {
       ...this.present(user.access, found.row),
+      ...profileExtras(user.access, toRef(found.row), found.extra),
       /** Hints for the UI (docs/placements-api.md); every write is checked again. */
       actions: candidateActions(user.access, toRef(found.row), found.open),
     };

@@ -310,7 +310,7 @@ describe("placements", () => {
       expect(res.statusCode).toBe(200);
       const p = res.json();
       expect(Object.keys(p).sort()).toEqual([
-        "allowedTransitions", "assignment", "candidate", "client", "contacts", "createdAt", "id", "implementationPartner",
+        "allowedTransitions", "assignment", "candidate", "checklist", "client", "contacts", "createdAt", "id", "implementationPartner",
         "isFirstPlacement", "location", "placementType", "projectCity", "projectState", "rate", "recruiter", "status",
         "statusChangedAt", "submissionId", "team", "tentativeStart", "vendor", "workMode",
       ]);
@@ -323,6 +323,8 @@ describe("placements", () => {
       expect(p.candidate.id).toBe(m.candidate.id);
       expect(p.candidate.name).toMatch(/^PlCand\d+ Placed$/);
       expect(p.contacts).toEqual([{ id: expect.any(String), kind: "invoicing_poc", name: "Ina Voice", email: "ina@vendor.example", phone: "+14695550199" }]);
+      // No paperwork template configured in this database (migration 0035).
+      expect(p.checklist).toEqual([]);
     });
   });
 
