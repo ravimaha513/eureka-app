@@ -4,27 +4,45 @@ import { AUSTIN, apiAs, freshCandidate, login, screen, submissionWithInterview, 
 /**
  * Role dashboards (docs/dashboards-api.md) for a lead and a location admin.
  * Setup: r1a (Team Rohit) logs one interview in Dallas and one in Austin that
- * ended 29 days ago with no feedback, so both land near the top of "Interviews
- * without feedback" (oldest first, 30-day lookback). The lead sees both; the
- * Dallas location admin sees only the Dallas one.
+ * ended almost 30 days ago with no feedback, so both land at the top of
+ * "Interviews without feedback" (oldest first, 30-day lookback); afterwards
+ * feedback is added so they leave the list. The lead sees both; the Dallas
+ * location admin sees only the Dallas one.
  */
 
 async function setup(playwright: Parameters<typeof apiAs>[0], baseURL: string | undefined) {
   const run = uniq();
   const r1a = await apiAs(playwright, baseURL, "r1a@eureka.example");
-  const startsAt = new Date(Date.now() - 29 * 86_400_000);
+  // Ended 15 minutes inside the 30-day lookback: older than anything but leftovers of the last
+  // quarter hour, so they sort to the top of the oldest-first list (25 rows).
+  const startsAt = new Date(Date.now() - 30 * 86_400_000 - 45 * 60_000);
   const dallas = await freshCandidate(r1a, "DashD");
   const austin = await freshCandidate(r1a, "DashA", { locationId: AUSTIN });
-  await submissionWithInterview(r1a, dallas.id, { jobTitle: `Dash ${run}`, round: `Dash ${run} D`, startsAt });
-  await submissionWithInterview(r1a, austin.id, { jobTitle: `Dash ${run}`, round: `Dash ${run} A`, startsAt });
-  await r1a.dispose();
-  return { run, dallas, austin };
+  const ids = [
+    (await submissionWithInterview(r1a, dallas.id, { jobTitle: `Dash ${run}`, round: `Dash ${run} D`, startsAt })).interviewId!,
+    (await submissionWithInterview(r1a, austin.id, { jobTitle: `Dash ${run}`, round: `Dash ${run} A`, startsAt })).interviewId!,
+  ];
+  /** Adds feedback, so these interviews leave the (oldest-25) list and later runs find their own. */
+  const cleanup = async () => {
+    for (const id of ids) await r1a.send("POST", `/api/v1/interviews/${id}/feedback`, { notes: "E2E dashboard check done" }, 201);
+    await r1a.dispose();
+  };
+  return { run, dallas, austin, cleanup };
 }
 
 const missingFeedback = (page: Page) => page.getByRole("table", { name: "Interviews without feedback" });
 
+/** Cleanup of the running test's setup (tests in this file run one after another in one worker). */
+let pending: (() => Promise<void>) | undefined;
+test.afterEach(async () => {
+  const done = pending;
+  pending = undefined;
+  await done?.();
+});
+
 test("lead dashboard: team activity by recruiter and the team's interviews without feedback", async ({ page, playwright, baseURL }) => {
-  const { run, dallas, austin } = await setup(playwright, baseURL);
+  const { run, dallas, austin, cleanup } = await setup(playwright, baseURL);
+  pending = cleanup;
   await login(page, "l1@eureka.example");
   await screen(page, "Dashboard");
 
@@ -54,7 +72,8 @@ test("lead dashboard: team activity by recruiter and the team's interviews witho
 });
 
 test("location admin dashboard: own location only", async ({ page, playwright, baseURL }) => {
-  const { run, dallas, austin } = await setup(playwright, baseURL);
+  const { run, dallas, austin, cleanup } = await setup(playwright, baseURL);
+  pending = cleanup;
   await login(page, "locD@eureka.example");
   await screen(page, "Dashboard");
 

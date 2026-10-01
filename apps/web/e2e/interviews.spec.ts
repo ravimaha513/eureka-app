@@ -8,9 +8,13 @@ async function login(page: Page, email: string) {
   await page.reload();
   await expect(page.getByRole("complementary", { name: "Main navigation" })).toBeVisible();
 }
-async function board(page: Page) {
+async function board(page: Page, day?: string) {
   await page.getByRole("complementary", { name: "Main navigation" }).getByRole("button", { name: "Interviews", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Interviews", exact: true })).toBeVisible();
+  if (day) {
+    await page.getByLabel("From date", { exact: true }).fill(day);
+    await page.getByLabel("Through date", { exact: true }).fill(day);
+  }
 }
 
 test("recruiter schedules, location clears and coach records feedback", async ({ page }) => {
@@ -23,12 +27,13 @@ test("recruiter schedules, location clears and coach records feedback", async ({
   const response = await page.request.post("/api/v1/submissions", { headers: { "x-csrf-token": me.csrfToken }, data: { candidateId: candidate.id, clientId: "00000000-0000-0000-0000-000000000601", jobTitle } });
   expect(response.ok()).toBeTruthy();
   const submission = await response.json();
-  await board(page);
+  // A random future day: the same candidate is reused on every run, and its interviews must not overlap.
+  const day = new Date(Date.now() + (1 + Math.floor(Math.random() * 3000)) * 86400000).toISOString().slice(0, 10);
+  await board(page, day);
   await page.getByRole("button", { name: "Schedule interview" }).click();
   const schedule = page.getByRole("dialog");
   await schedule.getByRole("combobox", { name: "Submission", exact: true }).selectOption(submission.id);
   await schedule.getByLabel("Round", { exact: true }).fill(jobTitle);
-  const day = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   await schedule.getByLabel("Start", { exact: true }).fill(`${day}T10:00`);
   await schedule.getByLabel("End", { exact: true }).fill(`${day}T11:00`);
   await schedule.getByRole("combobox", { name: "Coach", exact: true }).selectOption("00000000-0000-0000-0000-000000000013");
@@ -38,7 +43,7 @@ test("recruiter schedules, location clears and coach records feedback", async ({
   await expect(row).toBeVisible();
   await expect(row).toContainText("Consent required");
 
-  await login(page, "locD@eureka.example"); await board(page);
+  await login(page, "locD@eureka.example"); await board(page, day);
   await row.getByRole("button", { name: "Edit interview" }).click();
   const edit = page.getByRole("dialog");
   await expect(edit.getByLabel("Round", { exact: true })).toHaveCount(0);
@@ -48,7 +53,7 @@ test("recruiter schedules, location clears and coach records feedback", async ({
   await expect(edit).toBeHidden();
   await expect(row).toContainText("Consent captured");
 
-  await login(page, "coach@eureka.example"); await board(page);
+  await login(page, "coach@eureka.example"); await board(page, day);
   await expect(row.getByRole("button", { name: "Edit interview" })).toHaveCount(0);
   await row.getByRole("button", { name: "Feedback", exact: true }).click();
   const feedback = page.getByRole("dialog");

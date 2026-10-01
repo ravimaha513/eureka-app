@@ -40,7 +40,14 @@ export async function cell(table: Locator, row: Locator, header: string): Promis
   const headers = (await table.locator("thead th").allTextContents()).map((h) => h.trim());
   const i = headers.indexOf(header);
   expect(i, `column ${header} in ${headers.join(" | ")}`).toBeGreaterThanOrEqual(0);
-  return row.locator("td").nth(i);
+  // nth-child, so `row` may also match several rows (the cells of that column).
+  return row.locator(`td:nth-child(${i + 1})`);
+}
+
+/** A phone cell is masked, or empty ("—") for a candidate with no phone (journeys create such candidates). */
+export async function expectMaskedPhone(phoneCell: Locator) {
+  if ((await phoneCell.innerText()).trim() === "—") return;
+  await expect(phoneCell).toHaveClass(/masked/);
 }
 
 export interface Api {

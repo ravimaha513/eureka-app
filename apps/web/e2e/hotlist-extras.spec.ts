@@ -51,10 +51,12 @@ test("a saved view stores the filters, reapplies them after a reload and can be 
   await expect(filter(page, "Visibility")).toHaveValue("all_teams");
   const rows = hotlist(page).locator("tbody tr");
   await expect(rows.first()).toBeVisible();
-  for (const row of await rows.all()) {
-    await expect(await cell(hotlist(page), row, "Status")).toContainText("On hold");
-    await expect(row.getByText("Open to all teams")).toBeVisible();
-  }
+  // Polled as a whole: other journeys may add rows meanwhile and the list refetches.
+  const status = await cell(hotlist(page), rows, "Status");
+  await expect.poll(async () => {
+    const texts = await status.allTextContents();
+    return texts.length > 0 && texts.every((t) => t.includes("On hold") && t.includes("Open to all teams"));
+  }).toBe(true);
 
   await views(page).getByRole("button", { name: "Delete", exact: true }).click();
   await page.getByRole("group", { name: "Confirm delete" }).getByRole("button", { name: "Delete view" }).click();
@@ -62,22 +64,30 @@ test("a saved view stores the filters, reapplies them after a reload and can be 
   await expect(views(page).getByRole("combobox", { name: "Saved view", exact: true }).getByRole("option", { name })).toHaveCount(0);
 });
 
-test("export is offered to a lead only, and the file is scoped and masked", async ({ page, playwright, baseURL }) => {
-  const tag = `Exp${uniq()}`;
-  const r1a = await apiAs(playwright, baseURL, "r1a@eureka.example");
-  const phone = `+1972555${String(Math.floor(Math.random() * 1e4)).padStart(4, "0")}`;
-  const c = await freshCandidate(r1a, tag, { phone, confirmDuplicate: true });
-  await r1a.send("POST", `/api/v1/candidates/${c.id}/transition`, { to: "active" });
-  expect((await r1a.send("POST", "/api/v1/hotlist/export", {}, 403))).toMatchObject({ status: 403 });
-  await r1a.dispose();
+/** Each lead with one of their recruiters (exports are rate-limited per user: 5 per 10 minutes). */
+const LEADS = [
+  { lead: "l1", recruiter: "r1a", team: "Team Rohit" },
+  { lead: "l2", recruiter: "r2a", team: "Team Anjali" },
+  { lead: "l3", recruiter: "r3a", team: "Team Vikram" },
+];
 
-  for (const email of ["r1a@eureka.example", "locD@eureka.example"]) {
+test("export: no button for a recruiter or location admin; a lead exports a scoped, masked file", async ({ page, playwright, baseURL }) => {
+  const tag = `Exp${uniq()}`;
+  const who = LEADS[Math.floor(Math.random() * LEADS.length)]!;
+  const recruiter = await apiAs(playwright, baseURL, `${who.recruiter}@eureka.example`);
+  const phone = `+1972555${String(Math.floor(Math.random() * 1e4)).padStart(4, "0")}`;
+  const c = await freshCandidate(recruiter, tag, { phone, confirmDuplicate: true });
+  await recruiter.send("POST", `/api/v1/candidates/${c.id}/transition`, { to: "active" });
+  expect((await recruiter.send("POST", "/api/v1/hotlist/export", {}, 403))).toMatchObject({ status: 403 });
+  await recruiter.dispose();
+
+  for (const email of [`${who.recruiter}@eureka.example`, "locD@eureka.example"]) {
     await login(page, email);
     await expect(hotlist(page).locator("tbody tr").first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Export CSV" })).toHaveCount(0);
   }
 
-  await login(page, "l1@eureka.example");
+  await login(page, `${who.lead}@eureka.example`);
   await search(page, tag, 1);
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export CSV" }).click();
@@ -88,7 +98,7 @@ test("export is offered to a lead only, and the file is scoped and masked", asyn
   const lines = csv.trim().split(/\r?\n/);
   expect(lines).toHaveLength(2); // header + the one filtered candidate
   expect(lines[1]).toContain(c.name);
-  expect(lines[1]).toContain("Team Rohit");
+  expect(lines[1]).toContain(who.team);
   // Phones are masked in exports even inside the lead's own scope.
   expect(lines[1]).toContain(`•••-•••-${phone.slice(-2)}`);
   expect(csv).not.toContain(phone.slice(2));

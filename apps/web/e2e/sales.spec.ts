@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { cell } from "./support";
+import { cell, expectMaskedPhone } from "./support";
 
 /**
  * Sales journeys against the full stack with the dev seed (apps/api/test/fixtures.ts):
@@ -60,7 +60,7 @@ test("recruiter filters the Hot List, opens an own candidate and logs submission
     await expect(row.getByText("Open to all teams")).toHaveCount(0);
     // Other teams' team-only candidates: phone masked and no profile link.
     if ((await (await cell(hotlist(page), row, "Team")).innerText()) !== "Team Rohit") {
-      await expect(await cell(hotlist(page), row, "Phone")).toHaveClass(/masked/);
+      await expectMaskedPhone(await cell(hotlist(page), row, "Phone"));
       await expect(row.getByText("Profile belongs to another team")).toBeVisible();
     }
   }

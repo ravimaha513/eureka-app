@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { cell } from "./support";
+import { cell, expectMaskedPhone } from "./support";
 
 async function signIn(page: Page, label: string) {
   await page.goto("/");
@@ -22,7 +22,7 @@ test("recruiter sees the whole Hot List with other teams' phones masked", async 
   for (const row of await rows.all()) {
     const team = await (await cell(table, row, "Team")).innerText();
     teams.add(team);
-    if (team !== "Team Rohit") await expect(await cell(table, row, "Phone")).toHaveClass(/masked/);
+    if (team !== "Team Rohit") await expectMaskedPhone(await cell(table, row, "Phone"));
   }
   expect(teams.size).toBeGreaterThan(1);
   await page.screenshot({ path: "e2e-artifacts/recruiter-hotlist.png", fullPage: true });
@@ -37,7 +37,7 @@ test("location admin sees all locations, with phones only for Dallas", async ({ 
   for (const row of await rows.all()) {
     const location = await (await cell(table, row, "Location")).innerText();
     locations.add(location);
-    if (location !== "Dallas") await expect(await cell(table, row, "Phone")).toHaveClass(/masked/);
+    if (location !== "Dallas") await expectMaskedPhone(await cell(table, row, "Phone"));
   }
   expect(locations.size).toBeGreaterThan(1);
   await page.screenshot({ path: "e2e-artifacts/location-admin-hotlist.png", fullPage: true });
@@ -53,5 +53,5 @@ test("org admin gets the admin screen and the masked Hot List, nothing else", as
   const table = page.getByRole("table", { name: "Hot List" });
   const rows = table.locator("tbody tr");
   await expect(rows.first()).toBeVisible();
-  for (const row of await rows.all()) await expect(await cell(table, row, "Phone")).toHaveClass(/masked/);
+  for (const row of await rows.all()) await expectMaskedPhone(await cell(table, row, "Phone"));
 });
