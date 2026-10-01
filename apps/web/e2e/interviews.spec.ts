@@ -26,12 +26,12 @@ test("recruiter schedules, location clears and coach records feedback", async ({
   await board(page);
   await page.getByRole("button", { name: "Schedule interview" }).click();
   const schedule = page.getByRole("dialog");
-  await schedule.getByLabel("Submission", { exact: true }).selectOption(submission.id);
+  await schedule.getByRole("combobox", { name: "Submission", exact: true }).selectOption(submission.id);
   await schedule.getByLabel("Round", { exact: true }).fill(jobTitle);
   const day = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   await schedule.getByLabel("Start", { exact: true }).fill(`${day}T10:00`);
   await schedule.getByLabel("End", { exact: true }).fill(`${day}T11:00`);
-  await schedule.getByLabel("Coach", { exact: true }).selectOption("00000000-0000-0000-0000-000000000013");
+  await schedule.getByRole("combobox", { name: "Coach", exact: true }).selectOption("00000000-0000-0000-0000-000000000013");
   await schedule.getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(schedule).toBeHidden();
   const row = page.locator("tbody tr").filter({ hasText: jobTitle });
@@ -53,7 +53,7 @@ test("recruiter schedules, location clears and coach records feedback", async ({
   await row.getByRole("button", { name: "Feedback", exact: true }).click();
   const feedback = page.getByRole("dialog");
   await expect(feedback.getByLabel("Feedback kind")).toHaveValue("coach");
-  await feedback.getByLabel("Rating", { exact: true }).selectOption("4");
+  await feedback.getByRole("combobox", { name: "Rating", exact: true }).selectOption("4");
   await feedback.getByLabel("Notes", { exact: true }).fill("Clear examples and thoughtful explanations.");
   await feedback.getByRole("button", { name: "Add feedback" }).click();
   await expect(feedback.getByText("Feedback added.")).toBeVisible();

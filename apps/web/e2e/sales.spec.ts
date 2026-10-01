@@ -31,7 +31,8 @@ async function filterActiveTeamOnly(page: Page) {
 
 /** Opens the first Team Rohit candidate whose profile the user can open; returns its name. */
 async function openFirstTeamRohitProfile(page: Page): Promise<string> {
-  const row = hotlist(page).getByRole("row").filter({ hasText: "Team Rohit" })
+  // The recruiter's own candidate: per-record actions hide Edit on a teammate's candidate.
+  const row = hotlist(page).getByRole("row").filter({ hasText: "Team Rohit" }).filter({ has: page.getByRole("cell", { name: "r1a", exact: true }) })
     .filter({ has: page.getByRole("button", { name: /^Open profile of / }) }).first();
   const link = row.getByRole("button", { name: /^Open profile of / });
   const name = (await link.innerText()).trim();
@@ -87,7 +88,7 @@ test("recruiter filters the Hot List, opens an own candidate and logs submission
   await dlg.getByRole("button", { name: "Log submission" }).click();
   await expect(dlg.getByLabel("Job title")).toHaveAttribute("aria-invalid", "true");
   await dlg.getByLabel("Job title").fill(job);
-  await dlg.getByLabel("Client ID").fill(CLIENT_ID);
+  await dlg.getByRole("combobox", { name: "Client", exact: true }).selectOption(CLIENT_ID);
   await dlg.getByLabel("Rate per hour (optional)").fill("65");
   await dlg.getByRole("button", { name: "Log submission" }).click();
 
@@ -102,7 +103,7 @@ test("recruiter filters the Hot List, opens an own candidate and logs submission
   await page.getByRole("button", { name: "Log submission" }).click();
   dlg = page.getByRole("dialog", { name: `Log submission for ${name}` });
   await dlg.getByLabel("Job title").fill(`${job} (again)`);
-  await dlg.getByLabel("Client ID").fill(CLIENT_ID);
+  await dlg.getByRole("combobox", { name: "Client", exact: true }).selectOption(CLIENT_ID);
   await dlg.getByRole("button", { name: "Log submission" }).click();
   await expect(done.getByRole("alert")).toContainText("already submitted to this client in the last 90 days");
   await page.screenshot({ path: "e2e-artifacts/recruiter-duplicate-submission.png", fullPage: true });
