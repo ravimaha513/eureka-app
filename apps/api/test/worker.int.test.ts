@@ -260,6 +260,35 @@ describe("audit export", () => {
     expect(row.rows[0]).toEqual({ status: "succeeded", attempts: 2, detail: { by: "b" } });
   });
 
+  it("a runner that notices its expired lease before anyone takes over records nothing, so the next runner can claim at once", async () => {
+    let aborted = false;
+    const holder: JobDefinition = {
+      name: "expired", dueKeys: () => [],
+      run: (_key, ctx) => new Promise((_res, rej) => ctx.signal.addEventListener("abort", () => {
+        aborted = true; rej(new Error("lease lost"));
+      })),
+    };
+    let runs = 0;
+    const other: JobDefinition = { name: "expired", dueKeys: () => [], run: async () => { runs++; return { by: "b" }; } };
+    const a = new JobRunner(workerPool(), [holder], silentLogger, undefined, { leaseMs: 60_000, renewMs: 50 });
+    const b = new JobRunner(workerPool(), [other], silentLogger, undefined, { leaseMs: 60_000 });
+
+    const aDone = a.runOnce(holder, "k1");
+    await new Promise((r) => setTimeout(r, 150));
+    // The lease expires and A notices at its next renewal, before B tries: the ordering CI hit.
+    await db.admin.query("UPDATE eureka.job_run SET lease_until = now() - interval '1 second' WHERE job_name = 'expired'");
+    expect(await aDone).toBe("lease-lost");
+    expect(aborted).toBe(true);
+    let row = await db.admin.query("SELECT status, attempts, next_attempt_at, detail FROM eureka.job_run WHERE job_name = 'expired'");
+    expect(row.rows[0]).toEqual({ status: "running", attempts: 1, next_attempt_at: null, detail: null });
+
+    // No backoff was recorded, so B claims straight away.
+    expect(await b.runOnce(other, "k1")).toBe("ran");
+    expect(runs).toBe(1);
+    row = await db.admin.query("SELECT status, attempts, detail FROM eureka.job_run WHERE job_name = 'expired'");
+    expect(row.rows[0]).toEqual({ status: "succeeded", attempts: 2, detail: { by: "b" } });
+  });
+
   it("an object already in the bucket with the same checksum (412) counts as written", async () => {
     const day = "2026-03-06";
     const stored = new Map<string, string>();

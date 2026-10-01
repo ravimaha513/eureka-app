@@ -181,6 +181,14 @@ export class JobRunner {
         recordedSuccess = await this.finish(job.name, runKey, attempt, "succeeded", detail, null);
       } catch (err) {
         settled = true;
+        // The lease was lost (it expired): the key is no longer ours, even if no
+        // other runner has claimed it yet. Recording a failure here would set a
+        // backoff that keeps the runner that takes over from retrying it.
+        if (lost.signal.aborted) {
+          this.log.error("job aborted after losing its lease; outcome not recorded",
+            { job: job.name, runKey, attempt, alert: true });
+          return "lease-lost";
+        }
         // A shutdown abort is not the job's fault: the next worker may retry at once.
         const retryInMs = this.abort.signal.aborted ? 0 : backoffMs(attempt, this.opts);
         const message = err instanceof Error ? err.message : String(err);
