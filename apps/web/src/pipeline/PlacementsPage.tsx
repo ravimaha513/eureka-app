@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ROLE_LABELS, type Role } from "@eureka/shared";
 import type { Me } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
 import { Drawer, Field, fmtDate } from "../sales/ui";
@@ -17,6 +18,9 @@ const EXIT_TEXT: Record<string, string> = {
   backout: "The candidate backed out before joining. They return to Active marketing.",
   bgc_failed: "The background check failed. Before joining the candidate returns to Active; after joining the open assignment ends and they move to Bench.",
 };
+
+/** "offer_letter" → "Offer letter", "i9" → "I9" (document types are snake_case keys). */
+export const docTypeLabel = (t: string) => { const s = t.replace(/_/g, " "); return s.charAt(0).toUpperCase() + s.slice(1); };
 
 const where = (p: Pick<Placement, "projectCity" | "projectState">) => [p.projectCity, p.projectState].filter(Boolean).join(", ");
 
@@ -219,6 +223,29 @@ function PlacementDrawer({ id, initial, onClose, onNotice }: {
                 </table>
               )}
             </section>
+
+            {(!full || p.checklist !== undefined) && (
+              <section className="manageblock" aria-labelledby={`${hid}-k`}>
+                <h3 id={`${hid}-k`}>Paperwork checklist</h3>
+                {!full ? <p className="muted">Loading checklist…</p> : !p.checklist?.length ? (
+                  <p className="muted">No paperwork checklist is set up for {PLACEMENT_TYPE_LABELS[p.placementType] ?? p.placementType} placements.</p>
+                ) : (
+                  <table className="mini" aria-labelledby={`${hid}-k`}>
+                    <thead><tr><th>Document</th><th>Owner</th><th>Required</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {p.checklist.map((c) => (
+                        <tr key={c.docType}>
+                          <td>{docTypeLabel(c.docType)}</td>
+                          <td>{ROLE_LABELS[c.ownerRole as Role] ?? pipelineLabel(c.ownerRole)}</td>
+                          <td>{c.required ? "Required" : "Optional"}</td>
+                          <td>{pipelineLabel(c.status)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </section>
+            )}
 
             <section className="manageblock" aria-labelledby={`${hid}-a`}>
               <h3 id={`${hid}-a`}>Assignment</h3>

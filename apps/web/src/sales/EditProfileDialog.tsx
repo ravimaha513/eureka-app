@@ -11,18 +11,26 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /**
  * Edits the profile fields a candidate:update holder may change (ProfileUpdate;
  * team, recruiter, status, visibility and rating have their own actions).
- * Only changed fields are sent. Marketing email, VITEL number and in-person
- * preference are not returned by the API, so empty means "keep as is".
+ * Only changed fields are sent. Marketing email and VITEL number start from
+ * the current values when the API returns them (they cannot be removed, only
+ * changed); otherwise empty means "keep as is". The in-person preference
+ * starts from the current value when known.
  */
 export function EditProfileDialog({ candidate, onClose, onSaved }: {
   candidate: CandidateProfile; onClose: () => void; onSaved: () => void;
 }) {
+  const initial = {
+    marketingEmail: candidate.marketingEmail ?? "",
+    vitelNumber: candidate.vitelNumber ?? "",
+    inPersonOk: (candidate.inPersonOk === true ? "yes" : candidate.inPersonOk === false ? "no" : "") as "" | "yes" | "no",
+  };
   const [v, setV] = useState({
     priority: candidate.priority as Priority,
     marketingStartDate: candidate.marketingStartDate?.slice(0, 10) ?? "",
-    marketingEmail: "", vitelNumber: "", inPersonOk: "" as "" | "yes" | "no",
+    ...initial,
     batchId: candidate.batch?.id ?? "",
   });
+  const keepHint = (known: boolean) => known ? "Can be changed but not removed." : "Leave empty to keep the current value.";
   // Batches the candidate can join: at its location, planned or in training (FR-CAN-02).
   const batches = useQuery({
     queryKey: [...salesKeys.batches, candidate.location.id],
@@ -46,9 +54,9 @@ export function EditProfileDialog({ candidate, onClose, onSaved }: {
     const body: ProfileUpdate = {};
     if (v.priority !== candidate.priority) body.priority = v.priority;
     if (v.marketingStartDate && v.marketingStartDate !== (candidate.marketingStartDate?.slice(0, 10) ?? "")) body.marketingStartDate = v.marketingStartDate;
-    if (v.marketingEmail.trim()) body.marketingEmail = v.marketingEmail.trim();
-    if (v.vitelNumber.trim()) body.vitelNumber = v.vitelNumber.trim();
-    if (v.inPersonOk) body.inPersonOk = v.inPersonOk === "yes";
+    if (v.marketingEmail.trim() && v.marketingEmail.trim() !== initial.marketingEmail) body.marketingEmail = v.marketingEmail.trim();
+    if (v.vitelNumber.trim() && v.vitelNumber.trim() !== initial.vitelNumber) body.vitelNumber = v.vitelNumber.trim();
+    if (v.inPersonOk && v.inPersonOk !== initial.inPersonOk) body.inPersonOk = v.inPersonOk === "yes";
     if (candidate.batch !== undefined && v.batchId !== (candidate.batch?.id ?? "")) body.batchId = v.batchId || null;
     if (Object.keys(body).length === 0) { setFormError("Nothing changed."); return; }
 
@@ -76,16 +84,16 @@ export function EditProfileDialog({ candidate, onClose, onSaved }: {
         <Field label="Marketing start date" error={errors.marketingStartDate}>
           {(p) => <input {...p} type="date" value={v.marketingStartDate} onChange={(e) => setV((s) => ({ ...s, marketingStartDate: e.target.value }))} />}
         </Field>
-        <Field label="Marketing email" hint="Leave empty to keep the current value." error={errors.marketingEmail}>
+        <Field label="Marketing email" hint={keepHint(candidate.marketingEmail != null)} error={errors.marketingEmail}>
           {(p) => <input {...p} type="email" value={v.marketingEmail} onChange={(e) => setV((s) => ({ ...s, marketingEmail: e.target.value }))} />}
         </Field>
-        <Field label="VITEL number" hint="Leave empty to keep the current value." error={errors.vitelNumber}>
+        <Field label="VITEL number" hint={keepHint(candidate.vitelNumber != null)} error={errors.vitelNumber}>
           {(p) => <input {...p} value={v.vitelNumber} onChange={(e) => setV((s) => ({ ...s, vitelNumber: e.target.value }))} />}
         </Field>
         <Field label="In-person interviews" error={errors.inPersonOk}>
           {(p) => (
             <select {...p} value={v.inPersonOk} onChange={(e) => setV((s) => ({ ...s, inPersonOk: e.target.value as typeof v.inPersonOk }))}>
-              <option value="">Keep as is</option><option value="yes">Open to in-person</option><option value="no">Remote only</option>
+              {initial.inPersonOk === "" && <option value="">Keep as is</option>}<option value="yes">Open to in-person</option><option value="no">Remote only</option>
             </select>
           )}
         </Field>

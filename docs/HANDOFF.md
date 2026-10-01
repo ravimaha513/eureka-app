@@ -39,6 +39,9 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   (worker job) and public feedback form.
 - Placements: schema (0022/0023), state machine, first-placement, assignments, outbox rows,
   idempotency keys, Placements screen and Create placement dialog; lookups with least privilege.
+- Phase 2 audit and gap fixes (`docs/phase2-status.md`, migration 0035): paperwork checklist created with
+  the placement from `authz.checklist_template` (no template content yet: open question), profile read-back of
+  in-person preference and marketing contacts, interview board location filter, audited 90-day duplicate answer.
 - Worker: lease-based job runner, nightly audit export to Object Lock storage.
 - Outbox delivery (0024): placement events emailed to HR, Accounts, Immigration (one email per user per
   event, `outbox_delivery` dedupe marker, in-doubt never resent), daily prune of published rows
@@ -93,6 +96,8 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - May a candidate who failed BGC after joining be re-placed into the same job?
 - Should the manual candidate edge `active → confirmation` be removed now that placements drive it?
 - Does a pre-join `bgc_failed` count as an earlier placement for first-placement detection?
+- Paperwork checklist content per placement type (documents, owner role, required), candidate `eligibility`
+  fields, marketing locations and office: see `docs/phase2-status.md`.
 - Placement emails: should Associate HR (and the Lead/Manager, design C flow 3) also receive them, and may
   they name the candidate or client? Today: `hr`, `accounts`, `immigration` only, ids and statuses only.
 - Sheet import (`docs/import.md`): status and row-colour mapping (SRS Q6); may historical

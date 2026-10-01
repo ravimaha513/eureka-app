@@ -73,6 +73,32 @@ describe("Placements list", () => {
 });
 
 describe("Placement detail", () => {
+  it("lists the paperwork checklist copied at creation", async () => {
+    api.routes["GET /api/v1/placements/p1"] = () => ({ body: { ...FULL_P1, checklist: [
+      { docType: "offer_letter", ownerRole: "hr", required: true, status: "pending" },
+      { docType: "direct_deposit", ownerRole: "accounts", required: false, status: "pending" },
+    ] } });
+    wrap(<PlacementsPage me={RECRUITER} />);
+    const drawer = await openDrawer("Asha Iyer");
+    const table = await within(drawer).findByRole("table", { name: "Paperwork checklist" });
+    const rows = within(table).getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell").map((c) => c.textContent));
+    expect(rows).toEqual([
+      ["Offer letter", "HR", "Required", "Pending"],
+      ["Direct deposit", "Accounts", "Optional", "Pending"],
+    ]);
+  });
+
+  it("says when the placement type has no checklist, and hides the section for servers without one", async () => {
+    api.routes["GET /api/v1/placements/p1"] = () => ({ body: { ...FULL_P1, checklist: [] } });
+    wrap(<PlacementsPage me={RECRUITER} />);
+    const drawer = await openDrawer("Asha Iyer");
+    expect(await within(drawer).findByText(/No paperwork checklist is set up for .* placements\./)).toBeInTheDocument();
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close placement details" }));
+    const second = await openDrawer("Divya Menon");
+    await within(second).findByText("Assignment no.");
+    expect(within(second).queryByRole("heading", { name: "Paperwork checklist" })).not.toBeInTheDocument();
+  });
+
   it("shows contacts and the assignment once the full record loads", async () => {
     wrap(<PlacementsPage me={RECRUITER} />);
     const drawer = await openDrawer("Asha Iyer");

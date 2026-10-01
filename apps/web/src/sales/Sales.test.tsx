@@ -365,6 +365,42 @@ describe("Candidate profile", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Profile saved.");
   });
 
+  it("shows the in-person preference and marketing contacts the server returns, and prefills Edit profile", async () => {
+    routes[`GET /api/v1/candidates/${CID}`] = () => ({
+      body: { ...PROFILE, inPersonOk: false, marketingEmail: "asha@mkt.example", vitelNumber: "+19725550100" },
+    });
+    routes[`PATCH /api/v1/candidates/${CID}`] = () => ({ body: { id: CID } });
+    renderProfile(RECRUITER);
+    await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
+    const facts = screen.getByRole("heading", { name: "Details" }).closest("section")!;
+    expect(within(facts).getByText("In-person interviews").nextElementSibling).toHaveTextContent("Remote only");
+    expect(within(facts).getByText("Marketing email").nextElementSibling).toHaveTextContent("asha@mkt.example");
+    expect(within(facts).getByText("VITEL number").nextElementSibling).toHaveTextContent("+19725550100");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    const dlg = screen.getByRole("dialog", { name: "Edit Asha Iyer" });
+    expect(within(dlg).getByLabelText("Marketing email")).toHaveValue("asha@mkt.example");
+    expect(within(dlg).getByLabelText("VITEL number")).toHaveValue("+19725550100");
+    expect(within(dlg).getByLabelText("Marketing email")).toHaveAccessibleDescription(expect.stringContaining("not removed"));
+    expect(within(dlg).getByLabelText("In-person interviews")).toHaveValue("no");
+    // Unchanged prefilled values are not sent.
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save changes" }));
+    expect(within(dlg).getByRole("alert")).toHaveTextContent("Nothing changed.");
+    fireEvent.change(within(dlg).getByLabelText("In-person interviews"), { target: { value: "yes" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(writes()[0]!.body).toEqual({ inPersonOk: true });
+  });
+
+  it("hides marketing contacts the server withholds and says when the in-person preference is not recorded", async () => {
+    routes[`GET /api/v1/candidates/${CID}`] = () => ({ body: { ...PROFILE, inPersonOk: null } });
+    renderProfile(RECRUITER);
+    await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
+    expect(screen.getByText("In-person interviews").nextElementSibling).toHaveTextContent("Not recorded");
+    expect(screen.queryByText("Marketing email")).not.toBeInTheDocument();
+    expect(screen.queryByText("VITEL number")).not.toBeInTheDocument();
+  });
+
   it("follows the record's actions over capabilities when the server sends them", async () => {
     routes[`GET /api/v1/candidates/${CID}`] = () => ({
       body: { ...PROFILE, actions: { edit: false, transition: ["confirmation", "terminated"], visibility: true, rating: false, logSubmission: false } },
