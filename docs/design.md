@@ -353,6 +353,18 @@ Triggers on `user_role`, `reporting_line`, `team_member` and `coach_assignment` 
 | `client`, `vendor`, `implementation_partner` | name unique, contacts jsonb |
 | `preferred_vendor` | submitted_by, company, contact_name, email, phone, technologies text[], notes, status |
 
+Built in migration 0026 (2026-10-01), candidate extras:
+
+| Rule | Enforcement |
+|---|---|
+| `batch` (location, technology, start month, size, status `planned`/`in_training`/`completed`/`cancelled`; unique per location, technology and month) is readable by every `candidate:read` holder and created only by Sales leadership: `candidate:create` at team, hierarchy or org scope (`canCreateBatch`; a recruiter's `own` grant does not qualify) | RLS; `authz.create_batch` (definer); the app has no INSERT; a write guard refuses any other writer and every UPDATE/DELETE (no status change endpoint yet) |
+| `candidate.batch_id` is a profile field (`candidate:update`) and must be a planned or in-training batch at the candidate's location | column guard (0026 replaces 0013's); trigger `candidate_batch_check`; API 422 `batch_not_allowed` |
+| `candidate_event` (id, candidate_id, type, at, actor_id, ref_type, ref_id, from_value, to_value) is append-only and written only by definer triggers on `candidate` (created, status, visibility, rating, assignment, batch), `submission` (created, status), `interview` (scheduled, call status, cleared) and `placement` (created, status). Values are state identifiers only (CHECK `^[a-z0-9_]{1,40}$`): no names, contacts, rates or reasons; the design's free-text `summary` is replaced by `from_value`/`to_value` | triggers; write guard; app has SELECT only |
+| Timeline read: the candidate must be readable (`EXISTS` by primary key under candidate RLS); events about a submission, interview or placement also need that record readable (D-02: a teammate does not see another recruiter's submissions on the timeline) | policy `candidate_event_read`; the API applies the same rule with the engine |
+| Duplicate check (FR-CAN-09, N11): name plus email or phone; matches normalized personal or marketing email (lower-case) and E.164 phone (country code required, nothing guessed) against every candidate; returns at most three rows of owning team name, team lead as contact and which supplied identifier matched; the candidate id only when the caller can read it | `authz.candidate_duplicates` (definer, `candidate:create` holders); API rate limit 20/min/user with a warning log, audited without values; `POST /candidates` answers 409 `possible_duplicate` (no details) unless `confirmDuplicate` |
+
+Not built (need other work first): **resumes** (`resume` table and upload) wait for the Phase 3 document quarantine pipeline (`file_object.scan_status`, S3, KMS); the **DOB blind index** in the duplicate check waits for OD-04 (DOB visibility) and KMS field encryption (`eureka-field`, `eureka-bidx`).
+
 ### B2.3 Interviews
 
 | Table | Key columns |
@@ -408,7 +420,7 @@ Triggers on `user_role`, `reporting_line`, `team_member` and `coach_assignment` 
 
 **Submission:** `submitted → under_review → interview_requested → interview_scheduled → interview_completed → selected`. `rejected` or `withdrawn` is allowed from any non-terminal state.
 
-Built in migration 0017 (2026-09-29): submission status changes only through the definer function `authz.transition_submission(id, to, reason)`; the application role has no UPDATE on `submission`, and a trigger refuses status changes outside the function. Steps are strictly forward (no skipping); `selected`, `rejected` and `withdrawn` are terminal. `rejected` requires a non-blank `rejection_reason` (also a table CHECK) and no other status accepts one. Every check is NULL-safe (a NULL target, id or user context is refused). Permission is `submission:update` on the actor snapshot, as the RLS update policy. `status_changed_at` and `status_changed_by` are recorded. Interviews cannot be opened on a terminal submission. Not yet done: `candidate_event` and outbox rows (tables not built), and automatic `interview_scheduled` when an interview is created.
+Built in migration 0017 (2026-09-29): submission status changes only through the definer function `authz.transition_submission(id, to, reason)`; the application role has no UPDATE on `submission`, and a trigger refuses status changes outside the function. Steps are strictly forward (no skipping); `selected`, `rejected` and `withdrawn` are terminal. `rejected` requires a non-blank `rejection_reason` (also a table CHECK) and no other status accepts one. Every check is NULL-safe (a NULL target, id or user context is refused). Permission is `submission:update` on the actor snapshot, as the RLS update policy. `status_changed_at` and `status_changed_by` are recorded. Interviews cannot be opened on a terminal submission. Not yet done: outbox rows, and automatic `interview_scheduled` when an interview is created (`candidate_event` rows: migration 0026).
 
 **Interview (migration 0017):**
 
@@ -438,7 +450,7 @@ Built in migration 0022 (2026-09-30), contract in `docs/placements-api.md` (PL-1
 | While a placement is open, manual candidate transitions are refused (`placement_open`) | `authz.transition_candidate` (replaced in 0022) |
 | `placement.created` / `placement.state_changed` outbox rows in the same transaction (HR, Accounts, Immigration) | both functions |
 
-Not yet done: `candidate_event` rows (table not built) and the outbox delivery job.
+Not yet done: the outbox delivery job (`candidate_event` rows: migration 0026).
 
 ## B3. API design
 
@@ -464,6 +476,9 @@ Core MVP endpoints:
 | PUT /candidates/{id}/assignment | candidate:assign | team and recruiter change |
 | PUT /candidates/{id}/visibility | candidate.visibility:update | Lead and above |
 | PUT /candidates/{id}/technical-rating | candidate.rating:update | Location roles |
+| GET /candidates/{id}/timeline | candidate:read | 404 unless the candidate is readable; activity events only where the activity is readable; `?cursor=&limit=` (newest first) |
+| POST /candidates/duplicate-check | candidate:create | name plus email or phone; team, contact, `matchedOn`, id only if readable; rate-limited, audited |
+| GET, POST /batches | candidate:read; Sales leadership (`canCreateBatch`) | list has a `canCreate` hint; `GET /candidates?batchId=` filters (not the Hot List) |
 | GET /hotlist | hotlist:read | marketable statuses, saved view filters |
 | GET, POST /submissions; GET /submissions/{id}; PATCH /submissions/{id}/status | submission:* | create requires the candidate to be visible; list filters status, candidateId, recruiterId, from, to; `rate` only when `rate:read` covers the row |
 | GET /interviews?from=&to=&status=&teamId=&locationId=&candidateId=&cleared=; GET /interviews/{id} | interview:read | board rows carry `editableFields` and `feedbackKinds` hints |
