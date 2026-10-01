@@ -41,6 +41,13 @@ export async function createTestDb(): Promise<TestDb> {
       await admin.end();
       const c = new pg.Client({ connectionString: `${ADMIN_BASE}/postgres` });
       await c.connect();
+      // pool.end() resolves before its connections have closed; terminating one
+      // that is still closing (DROP ... FORCE) raises an uncaught client error.
+      for (let i = 0; i < 40; i++) {
+        const n = (await c.query<{ n: number }>(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1`, [name])).rows[0]!.n;
+        if (n === 0) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
       await c.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
       await c.end();
     },
