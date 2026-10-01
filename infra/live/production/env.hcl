@@ -8,7 +8,7 @@ locals {
 
   domain_name          = "" # TODO(Ravi): production hostname, e.g. eureka.<company-domain>
   hosted_zone_name     = "" # TODO: Route 53 zone for that hostname
-  google_hosted_domain = "" # TODO: company Google Workspace domain
+  google_hosted_domain = "aceintegrator.com"
 
   vpc_cidr             = "10.40.0.0/16"
   public_subnet_cidrs  = ["10.40.1.0/24", "10.40.2.0/24"]

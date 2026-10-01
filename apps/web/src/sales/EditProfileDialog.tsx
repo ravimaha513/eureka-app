@@ -1,10 +1,11 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Dialog, DialogActions } from "../admin/Dialog";
 import { fieldErrors, salesError } from "./errors";
-import { salesApi, type CandidateProfile, type Priority, type ProfileUpdate } from "./salesApi";
+import { OPEN_BATCH_STATUSES, salesApi, salesKeys, type CandidateProfile, type Priority, type ProfileUpdate } from "./salesApi";
 import { Field } from "./ui";
 
-const FIELDS = ["priority", "marketingStartDate", "marketingEmail", "vitelNumber", "inPersonOk"] as const;
+const FIELDS = ["priority", "marketingStartDate", "marketingEmail", "vitelNumber", "inPersonOk", "batchId"] as const;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
@@ -20,7 +21,16 @@ export function EditProfileDialog({ candidate, onClose, onSaved }: {
     priority: candidate.priority as Priority,
     marketingStartDate: candidate.marketingStartDate?.slice(0, 10) ?? "",
     marketingEmail: "", vitelNumber: "", inPersonOk: "" as "" | "yes" | "no",
+    batchId: candidate.batch?.id ?? "",
   });
+  // Batches the candidate can join: at its location, planned or in training (FR-CAN-02).
+  const batches = useQuery({
+    queryKey: [...salesKeys.batches, candidate.location.id],
+    queryFn: () => salesApi.batches(candidate.location.id),
+    enabled: candidate.batch !== undefined,
+    staleTime: 60_000,
+  });
+  const openBatches = (batches.data?.items ?? []).filter((b) => OPEN_BATCH_STATUSES.includes(b.status) || b.id === candidate.batch?.id);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -39,6 +49,7 @@ export function EditProfileDialog({ candidate, onClose, onSaved }: {
     if (v.marketingEmail.trim()) body.marketingEmail = v.marketingEmail.trim();
     if (v.vitelNumber.trim()) body.vitelNumber = v.vitelNumber.trim();
     if (v.inPersonOk) body.inPersonOk = v.inPersonOk === "yes";
+    if (candidate.batch !== undefined && v.batchId !== (candidate.batch?.id ?? "")) body.batchId = v.batchId || null;
     if (Object.keys(body).length === 0) { setFormError("Nothing changed."); return; }
 
     setBusy(true);
@@ -78,6 +89,17 @@ export function EditProfileDialog({ candidate, onClose, onSaved }: {
             </select>
           )}
         </Field>
+        {candidate.batch !== undefined && (
+          <Field label="Batch" hint={`Batches at ${candidate.location.name} that are planned or in training.`} error={errors.batchId}>
+            {(p) => (
+              <select {...p} value={v.batchId} onChange={(e) => setV((s) => ({ ...s, batchId: e.target.value }))}>
+                <option value="">No batch</option>
+                {v.batchId && !openBatches.some((b) => b.id === v.batchId) && <option value={v.batchId}>{candidate.batch?.label ?? "Current batch"}</option>}
+                {openBatches.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+              </select>
+            )}
+          </Field>
+        )}
         <DialogActions onCancel={onClose} submitLabel="Save changes" busy={busy} error={formError} />
       </form>
     </Dialog>

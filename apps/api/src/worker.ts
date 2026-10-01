@@ -48,7 +48,11 @@ const jobs = [
 ];
 if (config.OUTBOX_MAIL_MODE !== "disabled") {
   const mail = config.OUTBOX_MAIL_MODE === "local" ? new LocalMail(config.OUTBOX_MAIL_DIR!) : new SesMail(config.AWS_REGION!, config.OUTBOX_FROM_EMAIL!);
-  jobs.push(outboxDeliveryJob(mail, new URL(config.APP_PUBLIC_ORIGIN!).origin, config.OUTBOX_BATCH_SIZE));
+  jobs.push(outboxDeliveryJob(mail, new URL(config.APP_PUBLIC_ORIGIN!).origin, {
+    batchSize: config.OUTBOX_BATCH_SIZE,
+    maxRejections: config.OUTBOX_MAX_REJECTIONS,
+    deliverSince: config.OUTBOX_DELIVER_SINCE ? new Date(config.OUTBOX_DELIVER_SINCE) : undefined,
+  }));
 }
 if (config.FEEDBACK_MAIL_MODE !== "disabled") {
   const mail = config.FEEDBACK_MAIL_MODE === "local" ? new LocalMail(config.FEEDBACK_MAIL_DIR!) : new SesMail(config.AWS_REGION!, config.FEEDBACK_FROM_EMAIL!);

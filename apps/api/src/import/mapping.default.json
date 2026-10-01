@@ -1,0 +1,153 @@
+{
+  "version": 1,
+  "defaults": {
+    "dateOrder": "detect",
+    "twoDigitYearPivot": 30,
+    "timeZone": "America/Chicago",
+    "interviewMinutes": 60
+  },
+  "sheets": {
+    "sales": {
+      "columns": {
+        "firstName": "First Name",
+        "lastName": "Last Name",
+        "personalEmail": "Personal Email",
+        "marketingEmail": "Marketing Email",
+        "phone": "Phone",
+        "dob": "DOB",
+        "technology": "Technology",
+        "location": "Location",
+        "owner": "Recruiter Email",
+        "status": "Status",
+        "rowColor": "Row Color",
+        "priority": "Priority",
+        "marketingStartDate": "Marketing Start Date"
+      }
+    },
+    "interviews": {
+      "columns": {
+        "fullName": "Candidate Name",
+        "email": "Candidate Email",
+        "phone": "Phone",
+        "dob": "DOB",
+        "owner": "Recruiter Email",
+        "client": "Client",
+        "vendor": "Vendor",
+        "jobTitle": "Job Title",
+        "round": "Round",
+        "date": "Interview Date",
+        "startTime": "Start Time",
+        "endTime": "End Time",
+        "durationMinutes": "Duration (min)",
+        "timeZone": "Time Zone",
+        "callStatus": "Call Status",
+        "rowColor": "Row Color"
+      }
+    },
+    "placements": {
+      "columns": {
+        "fullName": "Candidate Name",
+        "email": "Candidate Email",
+        "phone": "Phone",
+        "dob": "DOB",
+        "owner": "Recruiter Email",
+        "client": "Client",
+        "vendor": "Vendor",
+        "implementationPartner": "Implementation Partner",
+        "jobTitle": "Job Title",
+        "placementType": "Placement Type",
+        "rate": "Rate",
+        "workMode": "Work Mode",
+        "projectCity": "Project City",
+        "projectState": "Project State",
+        "tentativeStart": "Tentative Start",
+        "status": "Status",
+        "statusReason": "Status Reason",
+        "rowColor": "Row Color"
+      }
+    }
+  },
+  "statuses": {
+    "sales": {
+      "_note": "PLACEHOLDER pending SRS Q6. Only the literal status names from design B2.6 are mapped; null means a known label whose meaning is not confirmed (row goes to review).",
+      "In Training": { "status": "in_training" },
+      "Active": { "status": "active" },
+      "Active/Remote": { "status": "active" },
+      "Active/All Teams": { "status": "active", "visibility": "all_teams" },
+      "On Hold": { "status": "on_hold" },
+      "Full of Interviews": { "status": "full_of_interviews" },
+      "Confirmation": { "status": "confirmation" },
+      "Placed": { "status": "placed" },
+      "Bench": { "status": "bench" },
+      "Stopped": { "status": "stopped" },
+      "Terminated": { "status": "terminated" },
+      "Hot": null,
+      "Follow Up": null,
+      "Not Interested": null
+    },
+    "interviews": {
+      "_note": "PLACEHOLDER pending SRS Q6.",
+      "Scheduled": "scheduled",
+      "In Progress": "in_progress",
+      "Completed": "completed",
+      "Done": null,
+      "Rescheduled": "rescheduled",
+      "Cancelled": "cancelled",
+      "Canceled": "cancelled",
+      "No Invite": "no_invite"
+    },
+    "placements": {
+      "_note": "PLACEHOLDER pending SRS Q6.",
+      "Confirmed": "confirmed",
+      "Paperwork": "paperwork",
+      "BGC": "bgc",
+      "Ready": "ready",
+      "Joined": "joined",
+      "Backout": "backout",
+      "BGC Failed": "bgc_failed",
+      "Offer Accepted": null
+    }
+  },
+  "rowColors": {
+    "sales": {
+      "_note": "PLACEHOLDER pending SRS Q6: every colour is unconfirmed, so coloured rows go to review until the mapping is answered.",
+      "#00ff00": null,
+      "#ffff00": null,
+      "#ff0000": null,
+      "#b7e1cd": null,
+      "#fce8b2": null,
+      "#f4c7c3": null
+    },
+    "interviews": {},
+    "placements": {}
+  },
+  "technologies": {
+    "Java": "Java",
+    "Core Java": "Java",
+    "Java Full Stack": "Java",
+    "Python": "Python",
+    ".NET": ".NET",
+    "Dot Net": ".NET",
+    "DevOps": "DevOps",
+    "Data Engineer": "Data Engineering",
+    "Data Engineering": "Data Engineering"
+  },
+  "timeZones": {
+    "EST": "America/New_York",
+    "EDT": "America/New_York",
+    "ET": "America/New_York",
+    "CST": "America/Chicago",
+    "CDT": "America/Chicago",
+    "CT": "America/Chicago",
+    "MST": "America/Denver",
+    "MDT": "America/Denver",
+    "PST": "America/Los_Angeles",
+    "PDT": "America/Los_Angeles",
+    "PT": "America/Los_Angeles",
+    "IST": "Asia/Kolkata"
+  },
+  "placements": {
+    "commit": false,
+    "defaultBackoutReason": "Backout recorded in the placement sheet (import)"
+  }
+}

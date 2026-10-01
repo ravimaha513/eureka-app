@@ -247,6 +247,14 @@ seq range to `eureka.audit_export`.
   run keys in the future and refuses to mark an audit-export day succeeded
   without its `audit_export` row (migration 0020); the ledger is the evidence.
 
+Placement notifications (outbox delivery, migrations 0024/0029) also run in the
+worker. They stay off (`OUTBOX_MAIL_MODE=disabled`, events kept unpublished) until
+`outbox_from_email` is set in `env.hcl`; that address (like `feedback_from_email`)
+must be a verified SES identity and is the only sender the worker's IAM policy
+allows. On first enable also set `outbox_deliver_since` (RFC 3339, e.g. the deploy
+time) so older events are marked published instead of all being emailed at once.
+Staging runs the worker with both senders empty, so it sends no email.
+
 To turn it on, set `worker_desired_count = 1` in `infra/live/<env>/env.hcl` and
 deploy (one task is enough; more are safe but idle). The worker needs
 migrations 0016 and 0020 applied first, which the deploy's migrate step does.

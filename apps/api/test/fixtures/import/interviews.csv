@@ -1,0 +1,13 @@
+Candidate Name,Candidate Email,Phone,DOB,Recruiter Email,Client,Vendor,Job Title,Round,Interview Date,Start Time,End Time,Duration (min),Time Zone,Call Status,Row Color
+Asha Verma,asha.m@mktg.example,,,r1a@eureka.example,Northwind Financial,,Java Developer,L1,2026-09-01,10:00 AM,,60,CST,Completed,
+Asha Verma,,(214) 555-0101,,,Northwind Financial,,Java Developer,L2,09/23/2026,2:00 PM,3:00 PM,,EST,Scheduled,
+"Kumar, Ravi",,,1993-07-21,r1a@eureka.example,Northwind Financial,,Java Developer,L1,2026-09-10,11:30,,45,CT,Scheduled,
+Meera Iyer,,,,r2a@eureka.example,Northwind Financial,,Java Developer,L1,2026-09-12,9:00 AM,,,,Scheduled,
+John Doe,john.doe@example.com,,,r1a@eureka.example,Northwind Financial,,Java Developer,L1,2026-09-12,9:00 AM,,,,Scheduled,
+Rahul Shah,rahul.s@example.com,,,r3a@eureka.example,Northwind Financial,,Java Developer,L1,2026-09-15,10:00 AM,,,,Ghosted,
+Rahul Shah,rahul.s@example.com,,,r3a@eureka.example,Acme Unknown Corp,,Java Developer,L2,2026-09-16,10:00 AM,,,,Scheduled,
+Anil Joshi,anil.j@example.com,,,r1a@eureka.example,Northwind Financial,,Java Developer,Final,2026-09-20,3:00 PM,,,PST,Completed,
+Priya Das,priya.d@example.com,,,r1b@eureka.example,Northwind Financial,,Java Developer,L1,13/09/2026,10.30 am,,,,Cancelled,
+Neha Gupta,neha.g@example.com,,,r1b@eureka.example,Northwind Financial,,Java Developer,L1,2026-09-18,10:00 AM,,,,Scheduled,
+Rahul Shah,rahul.s@example.com,,,r3a@eureka.example,Northwind Financial,,Java Developer,L1,2026-09-15,25:00,,,,Scheduled,
+Tara Bose,tara.b@example.com,214-555-0120,,,Northwind Financial,,Java Developer,L1,"Sep 25, 2026",4:00 PM,,30,ET,Scheduled,

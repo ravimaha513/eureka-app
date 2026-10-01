@@ -353,6 +353,31 @@ Triggers on `user_role`, `reporting_line`, `team_member` and `coach_assignment` 
 | `client`, `vendor`, `implementation_partner` | name unique, contacts jsonb |
 | `preferred_vendor` | submitted_by, company, contact_name, email, phone, technologies text[], notes, status |
 
+Built in migration 0026 (2026-10-01), candidate extras:
+
+| Rule | Enforcement |
+|---|---|
+| `batch` (location, technology, start month, size, status `planned`/`in_training`/`completed`/`cancelled`; unique per location, technology and month) is readable by every `candidate:read` holder and created only by Sales leadership: `candidate:create` at team, hierarchy or org scope (`canCreateBatch`; a recruiter's `own` grant does not qualify) | RLS; `authz.create_batch` (definer); the app has no INSERT; a write guard refuses any other writer and every UPDATE/DELETE (no status change endpoint yet) |
+| `candidate.batch_id` is a profile field (`candidate:update`) and must be a planned or in-training batch at the candidate's location | column guard (0026 replaces 0013's); trigger `candidate_batch_check`; API 422 `batch_not_allowed` |
+| `candidate_event` (id, candidate_id, type, at, actor_id, ref_type, ref_id, from_value, to_value) is append-only and written only by definer triggers on `candidate` (created, status, visibility, rating, assignment, batch), `submission` (created, status), `interview` (scheduled, call status, cleared) and `placement` (created, status). Values are state identifiers only (CHECK `^[a-z0-9_]{1,40}$`): no names, contacts, rates or reasons; the design's free-text `summary` is replaced by `from_value`/`to_value` | triggers; write guard; app has SELECT only |
+| Timeline read: the candidate must be readable (`EXISTS` by primary key under candidate RLS); events about a submission, interview or placement also need that record readable (D-02: a teammate does not see another recruiter's submissions on the timeline) | policy `candidate_event_read`; the API applies the same rule with the engine |
+| Duplicate check (FR-CAN-09, N11): name plus email or phone; matches normalized personal or marketing email (lower-case) and E.164 phone (country code required, nothing guessed) against every candidate; returns at most three rows of owning team name, team lead as contact and which supplied identifier matched; the candidate id only when the caller can read it | `authz.candidate_duplicates` (definer, `candidate:create` holders); API rate limit 20/min/user with a warning log, audited without values; `POST /candidates` answers 409 `possible_duplicate` (no details) unless `confirmDuplicate` |
+
+Review follow-ups in migration 0032 (2026-10-01):
+
+| Rule | Enforcement |
+|---|---|
+| Candidate status changes driven by a placement (create, backout, BGC failed, joined) are timeline events with `ref_type = 'placement'`, so they are listed only where that placement is readable (D-02: an Open-to-all-teams viewer from another team no longer sees the placement history) | `authz.candidate_status_by_placement` records the placement in `authz.placement_status_context` (keyed by transaction id; only `authz_definer` can read or write it, so a client cannot spoof the link the way it could a GUC) and the candidate trigger reads it |
+| A viewer who reads the candidate only through Open to all teams gets no actor names and no events from before the candidate was last opened to all teams | API timeline filter (RLS keeps the coarser rule above) |
+| Batches: create and status changes only for locations in the caller's scope (team locations and candidate locations of the teams their team/hierarchy `candidate:create` grant owns; every location for an org grant). Status: `planned → in_training → completed`, `planned`/`in_training → cancelled` | `authz.batch_location_ids`, `authz.create_batch` (403 `location_not_in_scope`), `authz.set_batch_status`, `PUT /batches/{id}/status`; the write guard lets the definer change `status` only |
+| Duplicate check is three index lookups (personal email, marketing email, phone) and primary-key probes; about 100 ms → 5 ms on 50,000 candidates | `authz.candidate_duplicates` |
+| App-role candidate inserts start from server defaults (status `in_training`, visibility `team`, no rating, no bench date, version 1; timestamps set by the server) | trigger `candidate_0_insert_guard` (rule 4); seeds running as the owner or migration user are not affected |
+| Phones: a bracketed `(0)` after the country code is dropped (`+44 (0)20 …`); a bare national `0` after a trunk-prefix country code (`+91 098…`) is refused with a message instead of guessed | `normalizePhoneE164` / `phoneProblem` in `packages/shared` |
+
+TODO (retention, OD-03): there is no purge job yet. `candidate_event` and `batch` refuse DELETE from everyone, so the retention job will need its own path: a dedicated definer function (owned by `authz_definer`, executable only by the worker) that sets a transaction-local marker the write guard checks before allowing the delete. The marker must not be a plain `set_config` GUC, which any client can set; use the same pattern as `authz.placement_status_context` (a row only the definer can write, keyed by `pg_current_xact_id()`).
+
+Not built (need other work first): **resumes** (`resume` table and upload) wait for the Phase 3 document quarantine pipeline (`file_object.scan_status`, S3, KMS); the **DOB blind index** in the duplicate check waits for OD-04 (DOB visibility) and KMS field encryption (`eureka-field`, `eureka-bidx`).
+
 ### B2.3 Interviews
 
 | Table | Key columns |
@@ -409,7 +434,7 @@ Triggers on `user_role`, `reporting_line`, `team_member` and `coach_assignment` 
 
 **Submission:** `submitted → under_review → interview_requested → interview_scheduled → interview_completed → selected`. `rejected` or `withdrawn` is allowed from any non-terminal state.
 
-Built in migration 0017 (2026-09-29): submission status changes only through the definer function `authz.transition_submission(id, to, reason)`; the application role has no UPDATE on `submission`, and a trigger refuses status changes outside the function. Steps are strictly forward (no skipping); `selected`, `rejected` and `withdrawn` are terminal. `rejected` requires a non-blank `rejection_reason` (also a table CHECK) and no other status accepts one. Every check is NULL-safe (a NULL target, id or user context is refused). Permission is `submission:update` on the actor snapshot, as the RLS update policy. `status_changed_at` and `status_changed_by` are recorded. Interviews cannot be opened on a terminal submission. Not yet done: `candidate_event` and outbox rows (tables not built), and automatic `interview_scheduled` when an interview is created.
+Built in migration 0017 (2026-09-29): submission status changes only through the definer function `authz.transition_submission(id, to, reason)`; the application role has no UPDATE on `submission`, and a trigger refuses status changes outside the function. Steps are strictly forward (no skipping); `selected`, `rejected` and `withdrawn` are terminal. `rejected` requires a non-blank `rejection_reason` (also a table CHECK) and no other status accepts one. Every check is NULL-safe (a NULL target, id or user context is refused). Permission is `submission:update` on the actor snapshot, as the RLS update policy. `status_changed_at` and `status_changed_by` are recorded. Interviews cannot be opened on a terminal submission. Not yet done: outbox rows, and automatic `interview_scheduled` when an interview is created (`candidate_event` rows: migration 0026).
 
 **Interview (migration 0017):**
 
@@ -439,7 +464,7 @@ Built in migration 0022 (2026-09-30), contract in `docs/placements-api.md` (PL-1
 | While a placement is open, manual candidate transitions are refused (`placement_open`) | `authz.transition_candidate` (replaced in 0022) |
 | `placement.created` / `placement.state_changed` outbox rows in the same transaction (HR, Accounts, Immigration) | both functions |
 
-Not yet done: `candidate_event` rows (table not built). The outbox delivery job is built (migration 0024, B6 `outbox-delivery`).
+Not yet done: nothing in this list. The outbox delivery job is built (migrations 0024 and 0029, B6 `outbox-delivery`); `candidate_event` rows are written by migration 0026.
 
 ## B3. API design
 
@@ -465,6 +490,9 @@ Core MVP endpoints:
 | PUT /candidates/{id}/assignment | candidate:assign | team and recruiter change |
 | PUT /candidates/{id}/visibility | candidate.visibility:update | Lead and above |
 | PUT /candidates/{id}/technical-rating | candidate.rating:update | Location roles |
+| GET /candidates/{id}/timeline | candidate:read | 404 unless the candidate is readable; activity events only where the activity is readable; `?cursor=&limit=` (newest first) |
+| POST /candidates/duplicate-check | candidate:create | name plus email or phone; team, contact, `matchedOn`, id only if readable; rate-limited, audited |
+| GET, POST /batches; PUT /batches/{id}/status | candidate:read; Sales leadership (`canCreateBatch`) for the location | list has a `canCreate` hint; `GET /candidates?batchId=` filters (not the Hot List) |
 | GET /hotlist | hotlist:read | marketable statuses, saved view filters |
 | GET, POST /hotlist/views; PATCH, DELETE /hotlist/views/{id} | hotlist:read | the caller's own saved filter sets only (RLS on `hotlist_view`, migration 0025); max 50 per user, names unique per user |
 | POST /hotlist/bulk/status, POST /hotlist/bulk/visibility | candidate:update, candidate.visibility:update | up to 100 ids; each record goes through its single-record path (404/403/422 per record) and reports its own result; `terminated` and `confirmation` are not offered in bulk |
@@ -735,8 +763,8 @@ CREATE POLICY candidate_update ON candidate FOR UPDATE TO eureka_app
 | visa-expiry | daily | 90/60/30-day notices to HR and Immigration | FR-VIS-03, FR-NTF-11 |
 | retention | nightly | Purge per AS-13 | NFR-CMP-01 |
 | audit-export | daily 03:30 America/New_York (run key = UTC day exported; due days = every day since the first exported day with no `audit_export` row, oldest first, max 7 per tick; alert log when more than one day behind) | Previous UTC day of `audit_event`, paged on the (at, seq) index and streamed through gzip + SHA-256 with a size cap, as gzip JSON Lines to `audit/YYYY/MM/DD/audit-events.jsonl.gz` in the Object Lock bucket (create-only `If-None-Match: *`, x-amz-checksum-sha256, bucket-default SSE-KMS; on 412 the stored object's checksum must match); SHA-256, row count and seq range appended to `audit_export` (worker: SELECT/INSERT only, triggers block UPDATE/DELETE). One runner per key via a lease in `job_run` (`lease_until`, renewed while running, fenced on `attempts`); failures back off exponentially (`next_attempt_at`, capped, alert after repeated failures); the database sets run timestamps, rejects future run keys and requires the ledger row before a day is marked succeeded (migrations 0016, 0020; a table instead of pg-boss so the worker needs no DDL) | NFR-SEC-04 |
-| outbox-delivery | every tick (run key = event id; up to `OUTBOX_BATCH_SIZE` unpublished events per tick, oldest first, events in backoff skipped) | Emails `placement.created` / `placement.state_changed` to every active user holding `hr`, `accounts` or `immigration` (role valid now), one email per user per event even with several roles. Recipients are fixed at the first run (`outbox_delivery` rows); before each send the user must still be active and hold the role (else `skipped`). Each row is marked `sending` (committed) before the provider call and `sent` after; a provider rejection (SES 4xx, `MailRejected`) goes back to `pending` and the event is retried with backoff; any other error, or a row still `sending` when a later run starts (crash after send), becomes `in_doubt` and is never resent (at most once per recipient, alert log). The event is marked published when every row is final. Emails carry only the event, statuses, the placement id and a sign-in link (`APP_PUBLIC_ORIGIN`); SES in production, a local directory in development (`OUTBOX_MAIL_MODE`). Worker: SELECT, UPDATE (published_at), DELETE on `outbox_event`; a trigger allows only published_at NULL→now() and only for the worker (migration 0024) | FR-NTF (placements, PL-7) |
-| outbox-prune | daily 04:00 America/New_York | Deletes events published more than `OUTBOX_RETENTION_DAYS` (default 30) days ago, with their delivery rows; the database refuses deleting unpublished rows or rows published less than 7 days ago | — |
+| outbox-delivery | every tick (run key = event id; up to `OUTBOX_BATCH_SIZE` unpublished events per tick, oldest first, events in backoff skipped) | Emails `placement.created` / `placement.state_changed` to every active user holding `hr`, `accounts` or `immigration` (role valid now), one email per user per event even with several roles. Recipients are fixed at the first run (`outbox_delivery` rows); before each send the user must still be active and hold the role (else `skipped`). Each row is marked `sending` (committed) before the provider call and `sent` after; a provider rejection (SES 4xx, `MailRejected`) goes back to `pending` and the event is retried with backoff; throttling (429, rate or sending-paused errors) is not counted, other rejections are (`rejections`), and after `OUTBOX_MAX_REJECTIONS` (default 5) the row is `failed` (final, alert). Any other error (5xx, timeout, abort, network), or a row still `sending` for longer than the runner lease when a later run starts (crash after send), becomes `in_doubt` and is never resent (at most once per recipient, alert log); a younger `sending` row may belong to a live runner after a lease takeover and is left alone (the run retries), and a final update that matches no row is logged as an alert. An event with no recipient at all stays unpublished and alerts (retried with backoff). The event is marked published when every row is final. `OUTBOX_DELIVER_SINCE` (backlog cut-off for the first enable): unpublished events created before it are marked published without sending, logged with a count. Emails carry only the event, statuses, the placement id and a sign-in link (`APP_PUBLIC_ORIGIN`); SES in production, a local directory in development (`OUTBOX_MAIL_MODE`). Worker: SELECT, UPDATE (published_at), DELETE on `outbox_event`; a trigger allows only published_at NULL→now() and only for the worker; `outbox_delivery` rows cannot be updated out of a final state, deleted (except by the cascade of their pruned event) or truncated by anyone, owner and superuser included (migrations 0024, 0029) | FR-NTF (placements, PL-7) |
+| outbox-prune | daily 04:00 America/New_York | Deletes events published more than `OUTBOX_RETENTION_DAYS` (default 30) days ago, with their delivery rows; the database refuses deleting unpublished rows or rows published less than 7 days ago. Also deletes succeeded `outbox-delivery` `job_run` rows (one per event) finished that long ago, through the definer function `eureka.prune_outbox_job_runs` (the worker still has no DELETE on `job_run`; a trigger refuses every other `job_run` delete or truncate). Safe because delivery is deduplicated by `published_at` and `outbox_delivery`, not by `job_run` | — |
 | idempotency-cleanup | daily 04:15 America/New_York | Deletes `idempotency_key` rows older than 24 hours (index on created_at); the worker cannot read stored responses | B3 |
 | key-rotation | monthly | Re-encrypt fields under the current data key | A6.3 |
 
@@ -780,6 +808,13 @@ Tests are written with each feature.
    4. anything unresolved goes to a review queue
 4. Load to staging, reconcile counts per sheet, get sign-off, then load production.
 5. Keep the sheets read-only in parallel for two weeks.
+
+Built in migration 0028 and `apps/api/src/import/` (usage, mapping file, review reasons and
+safeguards in `docs/import.md`): staging and review tables readable only by the `eureka_import`
+role; a configurable column/status mapping whose SRS Q6 entries are placeholders (unmapped or
+unconfirmed labels go to review); commit as each row's owner through the API's policies, guards
+and definer functions after sign-off by a second person with `access:manage`; a ledger makes
+re-runs idempotent.
 
 ## B10. Deviations and open decisions
 

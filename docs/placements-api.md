@@ -94,8 +94,10 @@ and `packages/shared/src/authz/{state-machines,actions}.ts`. Deviations and prec
   `outbox-delivery`, design B6): groups map to roles `hr`, `accounts`, `immigration` (not `associate_hr`);
   each active role holder gets one email per event with the event, the statuses, the placement id and a
   sign-in link, never names, rates, contacts or reasons. Recipients are fixed when the event is first
-  processed. At most one email per recipient per event: a crash after the provider accepted a message leaves
-  the recipient `in_doubt` (alerted, not resent). Published rows are pruned after `OUTBOX_RETENTION_DAYS`
+  processed (no recipient at all: kept unpublished, alert, retried). At most one email per recipient per
+  event: a crash after the provider accepted a message leaves the recipient `in_doubt` (alerted, not
+  resent); repeated definite rejections end in `failed` (`OUTBOX_MAX_REJECTIONS`, alert). When delivery is
+  first enabled, `OUTBOX_DELIVER_SINCE` marks older events published without sending (migration 0029). Published rows are pruned after `OUTBOX_RETENTION_DAYS`
   (default 30, minimum 7); Idempotency-Key rows are deleted after 24 hours (daily job), so a key can be
   replayed for at least 24 hours.
 

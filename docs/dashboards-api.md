@@ -32,6 +32,17 @@ Every number is a count of rows the caller could list themselves:
 Org-scoped callers get a 60-second statement timeout for the request (design B4.8 N9); everyone
 else keeps the 5-second default.
 
+## Limits and errors
+
+- **Rate limit (design A6.5):** `DASHBOARD_REQUESTS_PER_MINUTE` (20) per user per API task, the
+  same in-memory fixed-window `RateLimiter` as the Hot List. Over the limit: 429 problem, detail
+  "Too many dashboard requests; try again in a minute". Requests rejected with 403 or 422 by the
+  period check are not counted.
+- **Timeout:** when the statement timeout fires (SQLSTATE 57014), the endpoint answers 503 with
+  detail "The report took too long; narrow the period and try again". The mapping is local to
+  this endpoint; other endpoints still answer 500 on a timeout (`platform/errors.ts` is unchanged,
+  so their behaviour does not shift silently).
+
 ## Request
 
 | Query | Meaning |

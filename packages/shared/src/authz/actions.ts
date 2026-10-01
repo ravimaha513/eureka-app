@@ -3,6 +3,7 @@ import {
   ownsActivity,
   ownsCandidate,
   resolveScope,
+  resolveScopeFor,
   type ActivityRef,
   type CandidateRef,
   type UserAccess,
@@ -88,4 +89,15 @@ export function placementTransitions(
   if (!ownsActivity(resolveScope(user, "placement:update"), p)) return [];
   const bgc = ownsActivity(resolveScope(user, "placement.bgc_status:update"), p);
   return placementTransitionTargets(status).filter((to) => to !== "bgc_failed" || bgc);
+}
+
+/**
+ * Batch planning (FR-CAN-02): Sales leadership, i.e. candidate:create at team,
+ * hierarchy or org scope; a recruiter's "own" grant does not qualify. Mirrors
+ * authz.batch_manager() (migration 0026).
+ */
+export const BATCH_MANAGER_SCOPES = ["team", "hierarchy", "org"] as const;
+
+export function canCreateBatch(user: UserAccess): boolean {
+  return resolveScopeFor(user, "candidate:create", BATCH_MANAGER_SCOPES) !== null;
 }

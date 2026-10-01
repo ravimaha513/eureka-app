@@ -1,11 +1,11 @@
 import type pg from "pg";
 import { MailRejected, type MailTransport } from "../feedback-mail.js";
 import type { Logger } from "../log.js";
-import type { JobDefinition } from "../runner.js";
+import { DEFAULT_RUNNER_OPTIONS, type JobDefinition } from "../runner.js";
 import { IDEMPOTENCY_CLEANUP_SCHEDULE, OUTBOX_PRUNE_SCHEDULE, dueMaintenanceKeys } from "../schedule.js";
 
 /**
- * Outbox delivery (design A7, PL-7; migration 0024). Each unpublished
+ * Outbox delivery (design A7, PL-7; migrations 0024, 0029). Each unpublished
  * `placement.created` / `placement.state_changed` event is one job_run key
  * (its id), so the runner's lease, backoff and alerting apply per event.
  *
@@ -13,12 +13,18 @@ import { IDEMPOTENCY_CLEANUP_SCHEDULE, OUTBOX_PRUNE_SCHEDULE, dueMaintenanceKeys
  *  1. Fan-out (once, in one transaction with the event row locked): one
  *     outbox_delivery row per distinct active user holding a role of the
  *     event's recipient groups. A user in several groups gets one email.
- *     Rows left in `sending` by an earlier run that died are marked in_doubt.
+ *     No recipient at all: the event stays unpublished, alert, retry.
+ *     Rows left in `sending` for longer than the lease window by an earlier
+ *     run that died are marked in_doubt (younger ones may belong to a live
+ *     runner: left alone, this run fails and retries).
  *  2. Per recipient: re-check the user is still active and still holds the
  *     role (else `skipped`), mark `sending` (committed), send, mark `sent`.
  *     A MailRejected error (provider definitely refused) puts the row back to
- *     `pending` and the run fails, so the runner retries after backoff. Any
- *     other error leaves the outcome unknown: the row becomes `in_doubt`.
+ *     `pending` and the run fails, so the runner retries after backoff;
+ *     throttling is not counted, other rejections are, and after
+ *     maxRejections the row is `failed` (final, alert). Any other error
+ *     leaves the outcome unknown: the row becomes `in_doubt`. A final update
+ *     that matches no row (taken over meanwhile) is logged as an alert.
  *  3. When every row is final, the event is marked published.
  *
  * Guarantee: an email is never sent twice to the same recipient for the same
@@ -99,7 +105,9 @@ export function renderEmail(ev: OutboxEvent, origin: string, recipientGroups: Gr
  * Locks the unpublished event, marks interrupted sends in_doubt and, the first
  * time, records the recipients. Returns null when the event is already published.
  */
-async function prepare(pool: pg.Pool, id: string, log: Logger): Promise<{ ev: OutboxEvent; groups: Group[] } | null> {
+async function prepare(
+  pool: pg.Pool, id: string, log: Logger, staleSendingMs: number,
+): Promise<{ ev: OutboxEvent; groups: Group[] } | null> {
   const c = await pool.connect();
   try {
     await c.query("BEGIN");
@@ -111,8 +119,13 @@ async function prepare(pool: pg.Pool, id: string, log: Logger): Promise<{ ev: Ou
     if (!(DELIVERED_TYPES as readonly string[]).includes(ev.type)) throw new Error("outbox event type is not delivered");
     const groups = recipientGroups(ev.payload);
 
+    // Only sends older than the lease window: a younger `sending` row may
+    // belong to a runner that is still alive (lease takeover); it is left
+    // alone and this run fails and retries later.
     const doubt = await c.query(
-      `UPDATE eureka.outbox_delivery SET status = 'in_doubt' WHERE event_id = $1 AND status = 'sending'`, [id]);
+      `UPDATE eureka.outbox_delivery SET status = 'in_doubt'
+        WHERE event_id = $1 AND status = 'sending' AND attempt_at < now() - $2 * interval '1 millisecond'`,
+      [id, staleSendingMs]);
     if (doubt.rowCount) {
       log.error("outbox delivery interrupted after the send started; not resent", {
         job: OUTBOX_DELIVERY_JOB, eventId: id, inDoubt: doubt.rowCount, alert: true });
@@ -120,12 +133,19 @@ async function prepare(pool: pg.Pool, id: string, log: Logger): Promise<{ ev: Ou
 
     const any = await c.query("SELECT 1 FROM eureka.outbox_delivery WHERE event_id = $1 LIMIT 1", [id]);
     if (!any.rowCount) {
-      await c.query(
+      const added = await c.query(
         `INSERT INTO eureka.outbox_delivery (event_id, user_id)
          SELECT DISTINCT $1::uuid, u.id
            FROM eureka.app_user u JOIN eureka.user_role ur ON ur.user_id = u.id
           WHERE u.status = 'active' AND ur.role_key = ANY ($2::text[]) AND ur.valid @> now()`,
         [id, rolesOf(groups)]);
+      if (!added.rowCount) {
+        // Nobody holds a recipient role: keep the event unpublished and retry
+        // (backoff) until someone does, rather than dropping the notification.
+        log.error("outbox event has no recipients; kept unpublished", {
+          job: OUTBOX_DELIVERY_JOB, eventId: id, groups, alert: true });
+        throw new Error("outbox event has no recipients; retry pending");
+      }
     }
     await c.query("COMMIT");
     return { ev, groups };
@@ -144,15 +164,26 @@ export interface DeliveryResult {
   sent: number;
   skipped: number;
   inDoubt: number;
+  failed: number;
 }
+
+export interface DeliveryOptions {
+  /** Definite (non-throttling) rejections after which a recipient is `failed`. */
+  maxRejections: number;
+  /** A `sending` row older than this (the runner lease) is in doubt. */
+  staleSendingMs: number;
+}
+export const DEFAULT_DELIVERY_OPTIONS: DeliveryOptions = { maxRejections: 5, staleSendingMs: DEFAULT_RUNNER_OPTIONS.leaseMs };
 
 /** Delivers one event (see the module comment). Throws when a retry is needed. */
 export async function deliverEvent(
   pool: pg.Pool, mail: MailTransport, origin: string, id: string,
   ctx: { log: Logger; signal: AbortSignal; heartbeat?: () => void },
+  options: Partial<DeliveryOptions> = {},
 ): Promise<DeliveryResult> {
-  const prepared = await prepare(pool, id, ctx.log);
-  if (!prepared) return { alreadyPublished: true, recipients: 0, sent: 0, skipped: 0, inDoubt: 0 };
+  const opts = { ...DEFAULT_DELIVERY_OPTIONS, ...options };
+  const prepared = await prepare(pool, id, ctx.log, opts.staleSendingMs);
+  if (!prepared) return { alreadyPublished: true, recipients: 0, sent: 0, skipped: 0, inDoubt: 0, failed: 0 };
   const { ev, groups } = prepared;
   const roles = rolesOf(groups);
   renderEmail(ev, origin, groups); // a malformed event fails before anyone is emailed
@@ -180,39 +211,55 @@ export async function deliverEvent(
     const { subject, text } = renderEmail(ev, origin, mine);
 
     // The dedupe marker: committed before the provider call.
-    const claimed = await pool.query(
-      `UPDATE eureka.outbox_delivery SET status = 'sending' WHERE event_id = $1 AND user_id = $2 AND status = 'pending'`,
-      [id, userId]);
-    if (claimed.rowCount !== 1) continue;
-    let outcome: "sent" | "pending" | "in_doubt";
+    const claimed = await pool.query<{ rejections: number }>(
+      `UPDATE eureka.outbox_delivery SET status = 'sending' WHERE event_id = $1 AND user_id = $2 AND status = 'pending'
+       RETURNING rejections`, [id, userId]);
+    if (claimed.rowCount !== 1) continue; // another runner took it
+    let outcome: "sent" | "pending" | "in_doubt" | "failed";
+    let counted = 0;
     try {
       await mail.send({ id: `${id}-${userId}`, to: recipient.email, subject, text }, ctx.signal);
       outcome = "sent";
     } catch (err) {
-      outcome = err instanceof MailRejected ? "pending" : "in_doubt";
+      if (!(err instanceof MailRejected)) outcome = "in_doubt";
+      else if (err.throttled) outcome = "pending";
+      else {
+        counted = 1;
+        outcome = claimed.rows[0]!.rejections + 1 >= opts.maxRejections ? "failed" : "pending";
+      }
     }
     // If this update is lost (crash, database gone), the row stays `sending`
-    // and the next run marks it in_doubt: never a second email.
-    await pool.query(
-      `UPDATE eureka.outbox_delivery SET status = $3 WHERE event_id = $1 AND user_id = $2 AND status = 'sending'`,
-      [id, userId, outcome]);
+    // and a later run marks it in_doubt: never a second email.
+    const done = await pool.query(
+      `UPDATE eureka.outbox_delivery SET status = $3, rejections = rejections + $4
+        WHERE event_id = $1 AND user_id = $2 AND status = 'sending'`,
+      [id, userId, outcome, counted]);
+    if (done.rowCount !== 1) {
+      ctx.log.error("outbox delivery row changed during the send (lease taken over?); outcome not recorded", {
+        job: OUTBOX_DELIVERY_JOB, eventId: id, userId, outcome, alert: true });
+      continue;
+    }
     if (outcome === "pending") rejected++;
     if (outcome === "in_doubt") {
       ctx.log.error("outbox email outcome unknown; not resent", {
         job: OUTBOX_DELIVERY_JOB, eventId: id, userId, alert: true });
     }
+    if (outcome === "failed") {
+      ctx.log.error("outbox email rejected repeatedly; given up", {
+        job: OUTBOX_DELIVERY_JOB, eventId: id, userId, rejections: opts.maxRejections, alert: true });
+    }
   }
-  if (rejected > 0) throw new Error(`${rejected} outbox email(s) rejected by the provider; retry pending`);
+  if (rejected > 0) throw new Error(`${rejected} outbox email(s) rejected or throttled by the provider; retry pending`);
 
   const counts = await pool.query<{ status: string; n: number }>(
     `SELECT status, count(*)::int AS n FROM eureka.outbox_delivery WHERE event_id = $1 GROUP BY status`, [id]);
   const n = (s: string) => counts.rows.find((r) => r.status === s)?.n ?? 0;
   if (n("pending") + n("sending") > 0) throw new Error("outbox deliveries still open; retry pending");
   const recipients = counts.rows.reduce((a, r) => a + r.n, 0);
-  if (recipients === 0) ctx.log.warn("outbox event has no recipients", { job: OUTBOX_DELIVERY_JOB, eventId: id, groups });
+  if (recipients === 0) throw new Error("outbox event has no recipients; retry pending");
 
   await pool.query("UPDATE eureka.outbox_event SET published_at = now() WHERE id = $1 AND published_at IS NULL", [id]);
-  return { alreadyPublished: false, recipients, sent: n("sent"), skipped: n("skipped"), inDoubt: n("in_doubt") };
+  return { alreadyPublished: false, recipients, sent: n("sent"), skipped: n("skipped"), inDoubt: n("in_doubt"), failed: n("failed") };
 }
 
 /** Unpublished deliverable events, oldest first, skipping events waiting in backoff. */
@@ -227,12 +274,38 @@ export async function dueOutboxEvents(pool: pg.Pool, batchSize: number): Promise
   return r.rows.map((x) => x.id);
 }
 
-export function outboxDeliveryJob(mail: MailTransport, origin: string, batchSize: number): JobDefinition {
+/**
+ * Backlog cut-off (OUTBOX_DELIVER_SINCE): unpublished events created before
+ * `since` are marked published without sending, so enabling delivery on a
+ * database with old events does not email them all. Returns the count.
+ */
+export async function skipBacklog(pool: pg.Pool, since: Date, log: Logger): Promise<number> {
+  const r = await pool.query(
+    `UPDATE eureka.outbox_event SET published_at = now()
+      WHERE published_at IS NULL AND created_at < $1 AND type = ANY ($2::text[])`, [since, DELIVERED_TYPES]);
+  const skipped = r.rowCount ?? 0;
+  if (skipped > 0) {
+    log.warn("outbox events before OUTBOX_DELIVER_SINCE marked published without sending", {
+      job: OUTBOX_DELIVERY_JOB, skipped, since: since.toISOString() });
+  }
+  return skipped;
+}
+
+export interface OutboxDeliveryJobOptions extends Partial<DeliveryOptions> {
+  batchSize: number;
+  /** Events created before this are never emailed (see skipBacklog). */
+  deliverSince?: Date;
+}
+
+export function outboxDeliveryJob(mail: MailTransport, origin: string, o: OutboxDeliveryJobOptions): JobDefinition {
   return {
     name: OUTBOX_DELIVERY_JOB,
-    dueKeys: (_now, { pool }) => dueOutboxEvents(pool, batchSize),
+    async dueKeys(_now, { pool, log }) {
+      if (o.deliverSince) await skipBacklog(pool, o.deliverSince, log);
+      return dueOutboxEvents(pool, o.batchSize);
+    },
     async run(id, ctx) {
-      const r = await deliverEvent(ctx.pool, mail, origin, id, ctx);
+      const r = await deliverEvent(ctx.pool, mail, origin, id, ctx, o);
       return { ...r };
     },
   };
@@ -262,6 +335,22 @@ export async function pruneOutbox(pool: pg.Pool, retentionDays: number, ctx: { s
     [retentionDays], ctx);
 }
 
+/**
+ * Deletes succeeded outbox-delivery job_run rows (one per event) finished more
+ * than `retentionDays` ago, through eureka.prune_outbox_job_runs (migration
+ * 0029; the worker has no DELETE on job_run).
+ */
+export async function pruneOutboxJobRuns(pool: pg.Pool, retentionDays: number, ctx: { signal: AbortSignal; heartbeat?: () => void }) {
+  let total = 0;
+  for (;;) {
+    ctx.signal.throwIfAborted();
+    const n = (await pool.query<{ n: number }>("SELECT eureka.prune_outbox_job_runs($1) AS n", [retentionDays])).rows[0]!.n;
+    total += n;
+    ctx.heartbeat?.();
+    if (n < 5000) return total;
+  }
+}
+
 /** Deletes Idempotency-Key rows older than 24 hours. */
 export function cleanupIdempotencyKeys(pool: pg.Pool, ctx: { signal: AbortSignal; heartbeat?: () => void }) {
   return deleteInBatches(pool,
@@ -275,7 +364,10 @@ export function outboxPruneJob(retentionDays: number): JobDefinition {
   return {
     name: OUTBOX_PRUNE_JOB,
     dueKeys: (now) => dueMaintenanceKeys(now, OUTBOX_PRUNE_SCHEDULE),
-    async run(_key, ctx) { return { deleted: await pruneOutbox(ctx.pool, retentionDays, ctx), retentionDays }; },
+    async run(_key, ctx) {
+      const deleted = await pruneOutbox(ctx.pool, retentionDays, ctx);
+      return { deleted, jobRunsDeleted: await pruneOutboxJobRuns(ctx.pool, retentionDays, ctx), retentionDays };
+    },
   };
 }
 

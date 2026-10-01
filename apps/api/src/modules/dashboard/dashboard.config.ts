@@ -24,3 +24,6 @@ export const MAX_PERIOD_DAYS = 366;
 
 /** Default period when the request names none. */
 export const DEFAULT_PERIOD_DAYS = 7;
+
+/** Dashboard requests per user per minute (per API task, like the Hot List limit). */
+export const DASHBOARD_REQUESTS_PER_MINUTE = 20;

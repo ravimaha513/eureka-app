@@ -15,6 +15,7 @@ export function useCandidateList(kind: "hotlist" | "candidates") {
   const [technology, setTechnology] = useState("");
   const [status, setStatusRaw] = useState("");
   const [visibility, setVisibilityRaw] = useState<Visibility | "">("");
+  const [batchId, setBatchIdRaw] = useState("");
   // cursors[i] loads page i; page 0 has no cursor.
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const page = cursors.length - 1;
@@ -28,7 +29,7 @@ export function useCandidateList(kind: "hotlist" | "candidates") {
     return () => clearTimeout(t);
   }, [searchInput, technologyInput, search, technology]);
 
-  const filters = { search, technology, status, visibility, cursor: cursors[page], limit: PAGE_SIZE };
+  const filters = { search, technology, status, visibility, batchId: kind === "candidates" ? batchId : "", cursor: cursors[page], limit: PAGE_SIZE };
   const q = useQuery({
     queryKey: [...(kind === "hotlist" ? salesKeys.hotlist : salesKeys.candidates), filters],
     queryFn: () => (kind === "hotlist" ? salesApi.hotlist(filters) : salesApi.candidates(filters)),
@@ -40,8 +41,9 @@ export function useCandidateList(kind: "hotlist" | "candidates") {
     searchInput, setSearchInput, technologyInput, setTechnologyInput,
     status, setStatus: (v: string) => { setStatusRaw(v); reset(); },
     visibility, setVisibility: (v: Visibility | "") => { setVisibilityRaw(v); reset(); },
-    hasFilters: Boolean(search || technology || status || visibility),
-    clear: () => { setSearchInput(""); setTechnologyInput(""); setSearch(""); setTechnology(""); setStatusRaw(""); setVisibilityRaw(""); reset(); },
+    batchId, setBatchId: (v: string) => { setBatchIdRaw(v); reset(); },
+    hasFilters: Boolean(search || technology || status || visibility || batchId),
+    clear: () => { setSearchInput(""); setTechnologyInput(""); setSearch(""); setTechnology(""); setStatusRaw(""); setVisibilityRaw(""); setBatchIdRaw(""); reset(); },
     /** Replaces every filter at once (a saved view) and returns to page 1. */
     apply: (f: ViewFilters) => {
       setSearchInput(f.search ?? ""); setSearch(f.search ?? "");

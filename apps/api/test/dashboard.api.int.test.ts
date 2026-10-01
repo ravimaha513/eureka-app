@@ -2,7 +2,7 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { can, ownsCandidate, resolveScope, type Role } from "@eureka/shared";
 import { createApp } from "../src/app.module.js";
-import { DASHBOARD_THRESHOLDS, NEEDS_ATTENTION_LIMIT } from "../src/modules/dashboard/dashboard.config.js";
+import { DASHBOARD_REQUESTS_PER_MINUTE, DASHBOARD_THRESHOLDS, NEEDS_ATTENTION_LIMIT } from "../src/modules/dashboard/dashboard.config.js";
 import { loadConfig } from "../src/platform/config.js";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { CLIENT_ID, LOC, T, U, seedFixtures, toUserAccess } from "./fixtures.js";
@@ -413,5 +413,39 @@ describe("needs attention", () => {
     for (const key of Object.keys(U) as (keyof typeof U)[]) {
       expect(can(toUserAccess(key), "report:read"), key).toBe(key in EXPECTED);
     }
+  });
+});
+
+describe("expensive-query guards", () => {
+  it("maps a statement timeout to 503 with advice to narrow the period", async () => {
+    // Hold a lock the count query needs, so the 5 s statement timeout of a non-org caller fires (57014).
+    const locker = await db.admin.connect();
+    try {
+      await locker.query("BEGIN");
+      await locker.query("LOCK TABLE eureka.submission IN ACCESS EXCLUSIVE MODE");
+      const res = await get("m2", `/api/v1/dashboard?${PERIOD}`);
+      expect(res.statusCode, res.body).toBe(503);
+      expect(res.json()).toMatchObject({ status: 503, detail: "The report took too long; narrow the period and try again" });
+    } finally {
+      await locker.query("ROLLBACK");
+      locker.release();
+    }
+    expect((await get("m2", `/api/v1/dashboard?${PERIOD}`)).statusCode).toBe(200);
+  }, 30_000);
+
+  it("limits dashboard requests per user", async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i <= DASHBOARD_REQUESTS_PER_MINUTE; i++) {
+      statuses.push((await get("l2", `/api/v1/dashboard?${PERIOD}`)).statusCode);
+      if (statuses.at(-1) === 429) break;
+    }
+    // l2 already used some of its window in earlier tests; every call before the limit succeeded.
+    expect(statuses.at(-1)).toBe(429);
+    expect(statuses.slice(0, -1).every((s) => s === 200)).toBe(true);
+    const res = await get("l2", `/api/v1/dashboard?${PERIOD}`);
+    expect(res.statusCode).toBe(429);
+    expect(res.json().detail).toMatch(/Too many dashboard requests/);
+    // Other users are unaffected.
+    expect((await get("l3", `/api/v1/dashboard?${PERIOD}`)).statusCode).toBe(200);
   });
 });

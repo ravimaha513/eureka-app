@@ -1,30 +1,43 @@
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { salesError } from "./errors";
+import { CreateBatchDialog } from "./CreateBatchDialog";
 import { CreateCandidateDialog } from "./CreateCandidateDialog";
 import { CandidateName, type ListPageProps } from "./HotListPage";
 import { ListFilters, ListFooter } from "./ListControls";
-import { STATUSES, salesKeys } from "./salesApi";
+import { STATUSES, salesApi, salesKeys } from "./salesApi";
 import { OpenToAllBadge, Phone, Priority, StatusBadge } from "./ui";
 import { useCandidateList } from "./useCandidateList";
 
-/** Candidates in the user's scope (candidate:read), with "New candidate" for candidate:create holders. */
+/**
+ * Candidates in the user's scope (candidate:read), with "New candidate" for
+ * candidate:create holders and "New batch" when the batch list says the user
+ * may plan batches. The batch filter lists every batch (FR-CAN-02).
+ */
 export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
   const caps = me?.capabilities ?? [];
   const qc = useQueryClient();
   const s = useCandidateList("candidates");
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<"candidate" | "batch" | null>(null);
+  const [message, setMessage] = useState("");
   const items = s.q.data?.items ?? [];
+  const batches = useQuery({ queryKey: salesKeys.batches, queryFn: () => salesApi.batches(), staleTime: 60_000 });
 
   return (
     <>
       <div className="pagehead">
         <div><h1 tabIndex={-1}>Candidates</h1><p className="sub">Candidates in your scope: your own, your team's, and those you manage.</p></div>
-        {caps.includes("candidate:create") && (
-          <button type="button" className="btn primary push" onClick={() => setCreating(true)}>New candidate</button>
-        )}
+        <div className="rowactions push">
+          {batches.data?.canCreate && (
+            <button type="button" className="btn" onClick={() => setCreating("batch")}>New batch</button>
+          )}
+          {caps.includes("candidate:create") && (
+            <button type="button" className="btn primary" onClick={() => setCreating("candidate")}>New candidate</button>
+          )}
+        </div>
       </div>
-      <ListFilters s={s} label="Candidates" statuses={STATUSES} />
+      {message && <p role="status" aria-live="polite" className="livemsg">{message}</p>}
+      <ListFilters s={s} label="Candidates" statuses={STATUSES} batches={batches.data?.items ?? []} />
       <div className="card tablewrap">
         {s.q.isLoading ? <p className="empty">Loading…</p> : s.q.error ? <p className="empty error" role="alert">{salesError(s.q.error)}</p> : (
           <table aria-label="Candidates" aria-busy={s.q.isFetching || undefined}>
@@ -49,15 +62,27 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
         )}
       </div>
       <ListFooter s={s} label="Candidates" />
-      {creating && (
+      {creating === "candidate" && (
         <CreateCandidateDialog
           locations={uniqueLocations(items)}
-          onClose={() => setCreating(false)}
+          onClose={() => setCreating(null)}
+          onOpenProfile={onOpenProfile && ((id) => { setCreating(null); onOpenProfile(id); })}
           onCreated={(id) => {
-            setCreating(false);
+            setCreating(null);
             void qc.invalidateQueries({ queryKey: salesKeys.candidates });
             void qc.invalidateQueries({ queryKey: salesKeys.hotlist });
+            void qc.invalidateQueries({ queryKey: salesKeys.batches });
             onOpenProfile?.(id);
+          }}
+        />
+      )}
+      {creating === "batch" && (
+        <CreateBatchDialog
+          onClose={() => setCreating(null)}
+          onCreated={() => {
+            setCreating(null);
+            setMessage("Batch created.");
+            void qc.invalidateQueries({ queryKey: salesKeys.batches });
           }}
         />
       )}

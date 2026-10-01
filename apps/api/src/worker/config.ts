@@ -39,6 +39,11 @@ const WorkerConfigSchema = z
     OUTBOX_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
     // Published outbox rows are deleted after this many days (the database refuses fewer than 7).
     OUTBOX_RETENTION_DAYS: z.coerce.number().int().min(7).max(3650).default(30),
+    // Definite (non-throttling) provider rejections per recipient before giving up (`failed`, alert).
+    OUTBOX_MAX_REJECTIONS: z.coerce.number().int().min(1).max(100).default(5),
+    // Backlog cut-off: unpublished events created before this instant are marked
+    // published without sending (set it when first enabling delivery).
+    OUTBOX_DELIVER_SINCE: z.string().datetime({ offset: true }).optional(),
   })
   .superRefine((c, ctx) => {
     if (c.FEEDBACK_MAIL_MODE !== "disabled") {

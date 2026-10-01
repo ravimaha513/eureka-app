@@ -1,0 +1,20 @@
+First Name,Last Name,Personal Email,Marketing Email,Phone,DOB,Technology,Location,Recruiter Email,Status,Row Color,Priority,Marketing Start Date
+Asha,Verma,asha.verma@example.com,asha.m@mktg.example,(214) 555-0101,03/15/1995,Java,Dallas,r1a@eureka.example,Active,,P1,2026-08-03
+RAVI,KUMAR,ravi.k@example.com,,214.555.0102,21/07/1993,core java,dallas,r1a@eureka.example,Active / All Teams,,P2,4-Aug-2026
+meera,iyer,meera.i@example.com,,+1 214 555 0103,1994-11-02,JAVA,Austin,r2a@eureka.example,On Hold,,,08/25/2026
+Sanjay,Patel,sanjay.p@example.com,,2145550104,05/06/1992,Java,Dallas,r1b@eureka.example,Active,,,
+Neha,Gupta,neha.g@example.com,,555-01,1996-02-10,Java,Dallas,r1b@eureka.example,Active,,,
+Arjun,Rao,arjun.r@example.com,,214-555-0107,,Java,Austin,r3a@eureka.example,Hot,,,
+Kavya,Nair,kavya.n@example.com,,214-555-0108,,Java,Austin,r3a@eureka.example,Active,#ff9900,,
+Asha,Verma,,ASHA.M@mktg.example,214 555 0199,,Java,Dallas,r1a@eureka.example,Active,,,
+meera,iyer,meera.i@example.com,,+1 214 555 0103,1994-11-02,JAVA,Austin,r2a@eureka.example,On Hold,,,08/25/2026
+Vikram,Singh,vikram.s@example.com,,214-555-0111,,Python,Dallas,r1a@eureka.example,Active,,,
+Deepa,Menon,deepa.m@example.com,,214-555-0112,,Java,Dallas,ghost@eureka.example,Active,,,
+Rahul,Shah,rahul.s@example.com,,214-555-0113,1990-01-30,Java,Austin,r3a@eureka.example,Full of Interviews,,P3,2026-07-01
+Priya,Das,priya.d@example.com,,214-555-0114,,Java,Dallas,r1b@eureka.example,Stopped,,,
+Anil,Joshi,anil.j@example.com,,214-555-0115,,Java,Dallas,r1a@eureka.example,Confirmation,,,
+Farah,Khan,farah.k@example.com,,214-555-0116,,Java,Austin,r2a@eureka.example,Placed,,,
+Rohan,Mehta,rohan.m@example.com,,214-555-0117,,Java,Dallas,r1a@eureka.example,Bench,,,
+,,nobody@example.com,,214-555-0118,,Java,Dallas,r1a@eureka.example,Active,,,
+Live,Match,,,+1 469 555 0001,,Java,Dallas,r1a@eureka.example,Active,,,
+Tara,Bose,tara.b@example.com,,214-555-0120,,Java,Dallas,r1a@eureka.example,active,#00FF00,,
