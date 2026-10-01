@@ -115,6 +115,8 @@ h1:focus { outline: none; }
 .facts dt { color: var(--muted); font-weight: 600; font-size: 12px; }
 .facts dd { margin: 0; color: var(--text2); }
 .profilegrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+.timeline { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid var(--line2); display: flex; flex-direction: column; gap: 8px; color: var(--text2); }
+.timeline li { font-size: 13px; }
 .card.pad { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
 .card.pad h2 { font-size: 15px; }
 .notfound { padding: 28px; display: flex; flex-direction: column; gap: 6px; }
