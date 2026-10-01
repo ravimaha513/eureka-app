@@ -198,7 +198,7 @@ BEGIN
   IF r.status IS DISTINCT FROM 'pending' THEN
     RETURN 'not_pending';
   END IF;
-  IF p_status = 'clean' THEN
+  IF p_status IS NOT DISTINCT FROM 'clean' THEN
     IF p_result IS DISTINCT FROM 'NO_THREATS_FOUND'
        OR p_size IS DISTINCT FROM r.size_bytes
        OR NOT coalesce(p_sha256 ~ '^[0-9a-f]{64}$', false) THEN
@@ -211,7 +211,7 @@ BEGIN
        SET status = 'clean', scan_result = p_result, sha256_hex = p_sha256, version = next_version, is_current = true
      WHERE id = p_id;
   ELSE
-    IF p_status = 'expired' AND NOT coalesce(pg_catalog.now() > r.upload_expires_at, false) THEN
+    IF p_status IS NOT DISTINCT FROM 'expired' AND NOT coalesce(pg_catalog.now() > r.upload_expires_at, false) THEN
       RAISE EXCEPTION 'invalid_scan_result' USING ERRCODE = 'check_violation';
     END IF;
     UPDATE eureka.resume SET status = p_status, scan_result = p_result WHERE id = p_id;
