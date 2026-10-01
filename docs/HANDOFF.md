@@ -43,7 +43,9 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - Outbox delivery (0024): placement events emailed to HR, Accounts, Immigration (one email per user per
   event, `outbox_delivery` dedupe marker, in-doubt never resent), daily prune of published rows
   (`OUTBOX_RETENTION_DAYS`, DB floor 7 days) and of Idempotency-Key rows older than 24 h. Enable with
-  `OUTBOX_MAIL_MODE`, `OUTBOX_FROM_EMAIL`, `APP_PUBLIC_ORIGIN` (Terraform does not set them yet).
+  `OUTBOX_MAIL_MODE`, `OUTBOX_FROM_EMAIL`, `APP_PUBLIC_ORIGIN` (Terraform does not set them yet); set
+  `OUTBOX_DELIVER_SINCE` on first enable. Hardening (0029): rejection cap (`failed`), lease-safe in-doubt,
+  no-recipient alert, delete/truncate guards, job_run retention for outbox-delivery.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
