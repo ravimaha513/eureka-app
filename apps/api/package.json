@@ -9,6 +9,7 @@
     "test": "vitest run",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed-dev.ts",
+    "db:seed-load": "tsx src/db/seed-load.ts",
     "dev": "node --watch --import @swc-node/register/esm-register src/main.ts",
     "start": "node --conditions=eureka-dist dist/main.js"
   },
