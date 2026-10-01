@@ -11,8 +11,9 @@ import { OpenToAllBadge, Phone, Priority, StatusBadge, fmtDate } from "./ui";
 type Modal = { kind: "edit" } | { kind: "submit" } | { kind: "terminate" };
 
 /**
- * Candidate profile (GET /api/v1/candidates/:id). Actions are shown from the
- * user's capabilities only; the API still decides per candidate (403/404).
+ * Candidate profile (GET /api/v1/candidates/:id). Actions follow the record's
+ * `actions` hints when the server sends them, otherwise the user's capabilities;
+ * the API still decides per candidate (403/404/422).
  */
 export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
   id: string; me: Pick<Me, "id" | "capabilities">; onBack: () => void; backLabel?: string;
@@ -67,11 +68,14 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
   }
 
   const c: Profile = q.data;
-  const next = TRANSITIONS[c.status] ?? [];
-  const canUpdate = caps.has("candidate:update");
-  const canVisibility = caps.has("candidate.visibility:update");
-  const canRate = caps.has("candidate.rating:update");
-  const canSubmit = caps.has("submission:create");
+  const a = c.actions;
+  const canUpdate = a ? a.edit : caps.has("candidate:update");
+  const canVisibility = a ? a.visibility : caps.has("candidate.visibility:update");
+  const canRate = a ? a.rating : caps.has("candidate.rating:update");
+  const canSubmit = a ? a.logSubmission : caps.has("submission:create");
+  const next = a ? a.transition : canUpdate ? TRANSITIONS[c.status] ?? [] : [];
+  // With hints, the status block appears only when a change is allowed; without, for candidate:update holders.
+  const showStatus = a ? next.length > 0 : canUpdate;
 
   return (
     <>
@@ -112,7 +116,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
           </dl>
         </section>
 
-        {(canVisibility || canRate || canUpdate) && (
+        {(canVisibility || canRate || showStatus) && (
           <section className="card pad" aria-labelledby="manage-h">
             <h2 id="manage-h">Manage</h2>
             {canVisibility && (
@@ -124,7 +128,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
               <RatingForm current={c.technicalRating} busy={busy === "rating"}
                 onSave={(r) => void act("rating", () => salesApi.setRating(c.id, r), `Technical rating set to ${r} of 5.`)} />
             )}
-            {canUpdate && (
+            {showStatus && (
               <div className="manageblock">
                 <h3 id="status-h">Status</h3>
                 {next.length === 0 ? <p className="muted">No status changes are available from {statusLabel(c.status)}.</p> : (

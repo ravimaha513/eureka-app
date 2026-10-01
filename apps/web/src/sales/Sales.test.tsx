@@ -361,6 +361,33 @@ describe("Candidate profile", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Profile saved.");
   });
 
+  it("follows the record's actions over capabilities when the server sends them", async () => {
+    routes[`GET /api/v1/candidates/${CID}`] = () => ({
+      body: { ...PROFILE, actions: { edit: false, transition: ["confirmation", "terminated"], visibility: true, rating: false, logSubmission: false } },
+    });
+    renderProfile(RECRUITER);
+    await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
+    // A recruiter's capabilities would show these; the record says no.
+    expect(screen.queryByRole("button", { name: "Edit profile" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Log submission" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Move to On hold" })).not.toBeInTheDocument();
+    // ...and these follow the hints even without the capability.
+    expect(screen.getByRole("switch", { name: "Open to all teams" })).toBeInTheDocument();
+    const group = screen.getByRole("group", { name: "Status" });
+    expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(["Move to Confirmation", "Terminate…"]);
+    expect(screen.queryByLabelText("Rating (1 to 5)")).not.toBeInTheDocument();
+  });
+
+  it("hides every action when the record allows none", async () => {
+    routes[`GET /api/v1/candidates/${CID}`] = () => ({
+      body: { ...PROFILE, actions: { edit: false, transition: [], visibility: false, rating: false, logSubmission: false } },
+    });
+    renderProfile(LEAD);
+    await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
+    expect(screen.queryByRole("heading", { name: "Manage" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Edit profile|Log submission|Move to/ })).not.toBeInTheDocument();
+  });
+
   it("explains a 403 on an Open-to-all-teams candidate the user can see but not change", async () => {
     routes[`PATCH /api/v1/candidates/${CID}`] = () => problem(403, { detail: "Not permitted" });
     renderProfile(RECRUITER);

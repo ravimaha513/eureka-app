@@ -6,6 +6,18 @@ export interface CandidateProfile extends Candidate {
   /** Masked date of birth ("•• / •• / 1994") on the profile only; never on the Hot List. */
   dobMasked: string | null;
   rowVersion: number;
+  /** What the caller may do on this record (docs/placements-api.md). Absent on older servers. */
+  actions?: CandidateActions;
+}
+
+/** Per-record action hints computed by the authorization engine; the server still enforces every rule. */
+export interface CandidateActions {
+  edit: boolean;
+  /** Allowed target statuses. */
+  transition: string[];
+  visibility: boolean;
+  rating: boolean;
+  logSubmission: boolean;
 }
 
 export interface Page<T> { items: T[]; nextCursor: string | null }
