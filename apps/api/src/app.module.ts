@@ -30,6 +30,7 @@ import { DashboardController, DashboardService } from "./modules/dashboard/dashb
 import { HotlistController } from "./modules/hotlist/hotlist.controller.js";
 import { HotlistService } from "./modules/hotlist/hotlist.service.js";
 import { ImportsController, ImportsService } from "./modules/imports/imports.controller.js";
+import { assertImportRoleIsolated } from "./platform/role-isolation.js";
 import { ResumesController } from "./modules/resumes/resumes.controller.js";
 import { ResumesService } from "./modules/resumes/resumes.service.js";
 import { DOCUMENT_STORAGE, LocalDocumentStorage, createDocumentStorage, type DocumentStorage } from "./platform/storage/document-storage.js";
@@ -92,5 +93,8 @@ export async function createApp(config: AppConfig): Promise<NestFastifyApplicati
     if (config.NODE_ENV === "production") reply.header("strict-transport-security", "max-age=63072000; includeSubDomains");
   });
   await app.init();
+  // Fail fast if the sheet-import role could act as another role (docs/import.md).
+  // Skipped in tests: roles are cluster-wide on a shared development server.
+  if (config.NODE_ENV !== "test") await assertImportRoleIsolated(app.get(DbService).pool);
   return app;
 }
