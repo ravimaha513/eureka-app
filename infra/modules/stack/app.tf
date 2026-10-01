@@ -569,6 +569,8 @@ resource "aws_ecs_task_definition" "migrate" {
       { name = "NODE_EXTRA_CA_CERTS", value = "/app/certs/rds-global-bundle.pem" },
       # Read only by the one-off first-admin bootstrap (dist/db/bootstrap.js): admins must be in the domain the API accepts.
       { name = "GOOGLE_HOSTED_DOMAIN", value = var.google_hosted_domain },
+      # Positive allow-list for bootstrap --demo-data (only "staging" may load fictional data).
+      { name = "EUREKA_ENVIRONMENT", value = var.environment },
     ]
     secrets = [
       { name = "DB_MASTER_USERNAME", valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:username::" },

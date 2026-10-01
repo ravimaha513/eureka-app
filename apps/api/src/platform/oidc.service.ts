@@ -79,6 +79,13 @@ export class OidcService {
     if (payload.hd !== this.config.GOOGLE_HOSTED_DOMAIN) throw new Error("account is not in the company domain");
     if (payload.email_verified !== true || typeof payload.email !== "string") throw new Error("email not verified");
     if (typeof payload.sub !== "string") throw new Error("missing sub");
+    // Users are linked by email (design A6.1), so the email itself must be in
+    // the company domain too, not only the hd claim.
+    const domain = (this.config.GOOGLE_HOSTED_DOMAIN ?? "").trim().toLowerCase();
+    const parts = payload.email.toLowerCase().split("@");
+    if (!domain || parts.length !== 2 || !parts[0] || parts[1] !== domain) {
+      throw new Error("email is not in the company domain");
+    }
     const authTime = typeof payload.auth_time === "number" ? payload.auth_time : payload.iat ?? Date.now() / 1000;
     return { sub: payload.sub, email: payload.email.toLowerCase(), authTime: new Date(authTime * 1000) };
   }

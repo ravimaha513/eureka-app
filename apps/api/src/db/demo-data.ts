@@ -14,8 +14,12 @@
  * - Org rows are written by the migration user (it owns the org tables).
  *   Candidates and submissions are written as the app role, as each demo
  *   recruiter, through RLS, the guards and audit, exactly like the API.
- * - Refuses databases that look like production, and stacks that already hold
- *   real candidates. Re-running completes what is missing and adds nothing twice.
+ * - Positive allow-list: runs only where EUREKA_ENVIRONMENT is "staging"
+ *   (Terraform sets it on the migrate task) or "local" (set it yourself for
+ *   local development); also refuses hosts and database names containing
+ *   "prod", and stacks with real data: any candidate outside the demo teams,
+ *   or any non-demo user other than the active org_admins.
+ *   Re-running completes what is missing and adds nothing twice.
  */
 import { randomUUID } from "node:crypto";
 import pg from "pg";
@@ -62,8 +66,24 @@ const PER_RECRUITER = 8;
 const ACTIVE = 6;
 const SUBMITTED = 3;
 
-/** Refuses anything that could be production: host, database name or the server's current database. */
-export async function checkDemoTarget(adminUrl: string): Promise<void> {
+export const DEMO_ENVIRONMENTS: readonly string[] = ["staging", "local"];
+const refused = (message: string) => Object.assign(new Error(message), { refused: true });
+
+/** Positive allow-list: the environment must say it is staging or local development. */
+export function checkDemoEnvironment(env: NodeJS.ProcessEnv = process.env): void {
+  const e = env.EUREKA_ENVIRONMENT;
+  if (e === undefined || !DEMO_ENVIRONMENTS.includes(e)) {
+    throw refused(`demo data refused: EUREKA_ENVIRONMENT must be one of ${DEMO_ENVIRONMENTS.join(", ")} (got ${e === undefined ? "nothing" : JSON.stringify(e)})`);
+  }
+}
+
+/**
+ * Refuses anything that could be production: an environment that is not on
+ * the allow-list, then (deny-list, defence in depth) a host, database name or
+ * server-side current database containing "prod".
+ */
+export async function checkDemoTarget(adminUrl: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  checkDemoEnvironment(env);
   const u = new URL(adminUrl);
   const named = `${u.hostname}/${decodeURIComponent(u.pathname.replace(/^\//, ""))}`;
   if (/prod/i.test(named)) throw Object.assign(new Error(`demo data refused on ${named}: looks like production`), { refused: true });
@@ -80,7 +100,8 @@ export async function checkDemoTarget(adminUrl: string): Promise<void> {
 
 export interface DemoResult { org: "created" | "existing"; candidatesCreated: number; submissionsCreated: number }
 
-export async function loadDemoData(adminUrl: string, appUrl: string): Promise<DemoResult> {
+export async function loadDemoData(adminUrl: string, appUrl: string, env: NodeJS.ProcessEnv = process.env): Promise<DemoResult> {
+  checkDemoEnvironment(env);
   for (const u of DEMO_USERS) {
     if (isRestrictedRole(u.role)) throw new Error(`demo role ${u.role} is restricted; demo data must not bypass the second approver`);
   }
@@ -98,7 +119,13 @@ export async function loadDemoData(adminUrl: string, appUrl: string): Promise<De
     const real = (await admin.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM eureka.candidate c JOIN eureka.team t ON t.id = c.team_id
        JOIN eureka.app_user u ON u.id = t.lead_id WHERE u.email::text NOT LIKE $1`, [`%@${DEMO_EMAIL_DOMAIN}`])).rows[0]!.n;
-    if (real > 0) throw Object.assign(new Error(`demo data refused: the database already holds ${real} real candidates`), { refused: true });
+    if (real > 0) throw refused(`demo data refused: the database already holds ${real} real candidates`);
+    // Nor real people: only the bootstrap admins may exist besides demo users.
+    const people = (await admin.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM eureka.app_user u WHERE u.email::text NOT LIKE $1
+         AND NOT (u.status = 'active' AND EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.user_id = u.id
+                  AND ur.role_key = 'org_admin' AND ur.valid @> now()))`, [`%@${DEMO_EMAIL_DOMAIN}`])).rows[0]!.n;
+    if (people > 0) throw refused(`demo data refused: the database already holds ${people} users besides the org admins`);
 
     const existing = await admin.query<{ id: string; email: string }>(
       `SELECT id, email::text FROM eureka.app_user WHERE email::text LIKE $1`, [`%@${DEMO_EMAIL_DOMAIN}`]);

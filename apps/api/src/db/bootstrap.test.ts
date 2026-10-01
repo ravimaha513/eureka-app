@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isRestrictedRole } from "@eureka/shared";
 import { BootstrapError, parseAdmin, parseBootstrapArgs } from "./bootstrap.js";
-import { DEMO_EMAIL_DOMAIN, DEMO_USERS, checkDemoTarget } from "./demo-data.js";
+import { DEMO_EMAIL_DOMAIN, DEMO_USERS, checkDemoEnvironment, checkDemoTarget } from "./demo-data.js";
 
 const env = { GOOGLE_HOSTED_DOMAIN: "AceIntegrator.com" };
 const fails = (argv: string[], re: RegExp, e: NodeJS.ProcessEnv = env) => {
@@ -17,10 +17,11 @@ describe("bootstrap arguments", () => {
     expect(parseBootstrapArgs(["--admin", "Ravi M <Ravi@AceIntegrator.com>", "--admin=ops@aceintegrator.com"], env)).toEqual({
       domain: "aceintegrator.com",
       demo: false,
+      recover: false,
       admins: [{ email: "ravi@aceintegrator.com", displayName: "Ravi M" }, { email: "ops@aceintegrator.com", displayName: "ops" }],
     });
-    expect(parseBootstrapArgs(["--admin", "a@aceintegrator.com", "--single-admin", "--demo-data"], env)).toMatchObject({
-      demo: true, admins: [{ email: "a@aceintegrator.com" }],
+    expect(parseBootstrapArgs(["--admin", "a@aceintegrator.com", "--single-admin", "--demo-data", "--recover"], env)).toMatchObject({
+      demo: true, recover: true, admins: [{ email: "a@aceintegrator.com" }],
     });
   });
 
@@ -55,6 +56,15 @@ describe("bootstrap arguments", () => {
     fails(["--admin", "Bad\u0007Name <a@aceintegrator.com>", "--single-admin"], /display name/);
   });
 
+  it("never puts an email into an error message (they reach CloudWatch)", () => {
+    for (const argv of [["--admin", "secret.person@gmail.com", "--single-admin"], ["--admin", "secret.person@@x", "--single-admin"]]) {
+      let msg = "";
+      try { parseBootstrapArgs(argv, env); } catch (e) { msg = (e as Error).message; }
+      expect(msg).not.toBe("");
+      expect(msg).not.toContain("secret.person");
+    }
+  });
+
   it("parses one admin spec", () => {
     expect(parseAdmin("  Jane Q. Admin   <JANE@aceintegrator.com> ", "aceintegrator.com"))
       .toEqual({ email: "jane@aceintegrator.com", displayName: "Jane Q. Admin" });
@@ -68,9 +78,20 @@ describe("demo data", () => {
     expect(DEMO_USERS.some((u) => u.role === "org_admin")).toBe(false);
   });
 
-  it("refuses production-looking hosts and database names before connecting", async () => {
-    await expect(checkDemoTarget("postgres://u:p@eureka-production.abc.us-east-1.rds.amazonaws.com:5432/eureka"))
+  it("needs EUREKA_ENVIRONMENT on the allow-list (staging or local), exactly", () => {
+    for (const e of [undefined, "", "production", "prod", "Staging", "staging ", "dev"]) {
+      expect(() => checkDemoEnvironment(e === undefined ? {} : { EUREKA_ENVIRONMENT: e }), String(e)).toThrow(/EUREKA_ENVIRONMENT/);
+    }
+    expect(() => checkDemoEnvironment({ EUREKA_ENVIRONMENT: "staging" })).not.toThrow();
+    expect(() => checkDemoEnvironment({ EUREKA_ENVIRONMENT: "local" })).not.toThrow();
+  });
+
+  it("refuses before connecting: environment not allowed, or a production-looking host or database name", async () => {
+    const staging = { EUREKA_ENVIRONMENT: "staging" };
+    await expect(checkDemoTarget("postgres://u:p@10.0.0.5:1/eureka", { EUREKA_ENVIRONMENT: "production" }))
+      .rejects.toMatchObject({ refused: true, message: expect.stringMatching(/EUREKA_ENVIRONMENT/) });
+    await expect(checkDemoTarget("postgres://u:p@eureka-production.abc.us-east-1.rds.amazonaws.com:5432/eureka", staging))
       .rejects.toMatchObject({ refused: true, message: expect.stringMatching(/looks like production/) });
-    await expect(checkDemoTarget("postgres://u:p@127.0.0.1:1/eureka_PROD")).rejects.toMatchObject({ refused: true });
+    await expect(checkDemoTarget("postgres://u:p@127.0.0.1:1/eureka_PROD", staging)).rejects.toMatchObject({ refused: true });
   });
 });
