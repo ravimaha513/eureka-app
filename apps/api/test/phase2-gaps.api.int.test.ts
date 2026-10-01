@@ -4,7 +4,7 @@ import { activityVisible, candidateVisible, ownsCandidate, resolveScope, type Ac
 import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
-import { LOC, T, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
+import { CLIENT_ID, LOC, T, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 import { newCandidate, selectedSubmission } from "./placement-seed.js";
 import { seedPipeline } from "./pipeline-seed.js";
 
@@ -197,5 +197,20 @@ describe("interview board location filter (web Location filter)", () => {
   it("never widens the scope: a Dallas location admin filtering on Austin sees nothing", async () => {
     expect((await ids("locD")).length).toBeGreaterThan(0);
     expect(await ids("locD", `&locationId=${LOC.austin}`)).toEqual([]);
+  });
+});
+
+describe("90-day duplicate submission warning (FR-SUB, design B3)", () => {
+  it("is answered yes/no and audited with the submission, without naming the earlier one", async () => {
+    const c = await newCandidate(db, { teamId: T.t1, recruiterId: U.r1a, locationId: LOC.dallas });
+    const first = await call("r1a", "POST", "/api/v1/submissions", { candidateId: c.id, jobTitle: "Java Developer", clientId: CLIENT_ID });
+    const second = await call("l1", "POST", "/api/v1/submissions", { candidateId: c.id, jobTitle: "Java Lead", clientId: CLIENT_ID });
+    expect([first.statusCode, second.statusCode]).toEqual([201, 201]);
+    expect([first.json().duplicateWarning, second.json().duplicateWarning]).toEqual([false, true]);
+    const audit = async (id: string) => (await db.admin.query(
+      `SELECT changes FROM eureka.audit_event WHERE action = 'submission.created' AND entity_id = $1`, [id])).rows[0].changes;
+    expect(await audit(first.json().id)).toEqual({ candidateId: c.id, clientId: CLIENT_ID, duplicateWarning: false });
+    expect(await audit(second.json().id)).toEqual({ candidateId: c.id, clientId: CLIENT_ID, duplicateWarning: true });
+    expect(JSON.stringify(await audit(second.json().id))).not.toContain(first.json().id);
   });
 });
