@@ -23,6 +23,9 @@ import { InterviewsController } from "./modules/interviews/interviews.controller
 import { InterviewsService } from "./modules/interviews/interviews.service.js";
 import { AdminController, TeamsController } from "./modules/admin/admin.controller.js";
 import { AdminService } from "./modules/admin/admin.service.js";
+import { PlacementsController } from "./modules/placements/placements.controller.js";
+import { PlacementsService } from "./modules/placements/placements.service.js";
+import { LookupsController, LookupsService } from "./modules/lookups/lookups.controller.js";
 
 @Controller("api")
 class HealthController {
@@ -43,12 +46,12 @@ export class AppModule {
       module: AppModule,
       controllers: [
         FeedbackController, HealthController, AuthController, MeController, CandidatesController, SubmissionsController, InterviewsController,
-        AdminController, TeamsController,
+        AdminController, TeamsController, PlacementsController, LookupsController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
         DbService, SessionService, AccessService, AuditService, OidcService,
-        CandidatesService, SubmissionsService, InterviewsService, AdminService,
+        CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService,
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],
