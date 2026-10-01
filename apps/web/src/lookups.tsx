@@ -5,14 +5,24 @@ import { api } from "./api";
 import { Field } from "./sales/ui";
 
 export interface Named { id: string; name: string }
+/**
+ * Every key is always present. `technologies` and `locations` are open to any
+ * signed-in user; `coaches` (interview:create/update) and `clients`, `vendors`,
+ * `implementationPartners` (submission:read/create or placement:read) come
+ * back as [] when the caller's role doesn't allow them.
+ */
 export interface Lookups {
   technologies: Named[];
   clients: Named[];
   vendors: Named[];
+  implementationPartners: Named[];
   locations: Named[];
   coaches: Named[];
 }
 export type LookupKind = keyof Lookups;
+
+/** Lists the server withholds (as []) from roles without the matching permission. */
+export const RESTRICTED_LOOKUPS: ReadonlySet<LookupKind> = new Set<LookupKind>(["clients", "vendors", "implementationPartners", "coaches"]);
 
 export const lookupsKey = ["lookups"] as const;
 
@@ -31,8 +41,10 @@ const OTHER = "__other__";
 
 /**
  * A labelled select fed by the lookups endpoint. While the list loads the
- * select is disabled; if it can't be loaded, the picker falls back to
- * `fallback` options (if any) plus a typed ID so the form is never blocked.
+ * select is disabled. If the list can't be loaded, or comes back empty (the
+ * server withholds restricted lists from roles that may not see them), the
+ * picker falls back to `fallback` options (if any) plus a typed ID so the
+ * form is never blocked; the hint says why.
  */
 export function LookupPicker({ kind, label, value, onChange, error, optional, placeholder, fallback = [], autoFocus }: {
   kind: LookupKind; label: string; value: string; onChange: (id: string) => void; error?: string;
@@ -42,11 +54,11 @@ export function LookupPicker({ kind, label, value, onChange, error, optional, pl
   const [typing, setTyping] = useState(false);
   const af = autoFocus ? { "data-autofocus": true } : {};
   const empty = placeholder ?? (optional ? "None" : "Choose…");
+  const rows = q.data?.[kind] ?? [];
 
-  if (q.data) {
-    const rows = q.data[kind] ?? [];
+  if (rows.length > 0) {
     return (
-      <Field label={label} error={error} hint={rows.length === 0 ? "No active entries are available." : undefined}>
+      <Field label={label} error={error}>
         {(p) => (
           <select {...p} {...af} value={value} onChange={(e) => onChange(e.target.value)}>
             <option value="" disabled={!optional}>{empty}</option>
@@ -66,14 +78,20 @@ export function LookupPicker({ kind, label, value, onChange, error, optional, pl
     );
   }
 
-  // The list is unavailable: offer what the screen already knows, then a typed ID.
-  const showInput = typing || fallback.length === 0;
+  // No list to choose from: offer what the screen already knows, then a typed ID.
+  const hint = !q.data
+    ? "The list couldn't be loaded; paste the ID instead."
+    : RESTRICTED_LOOKUPS.has(kind)
+      ? "Not available for your role; paste the ID instead."
+      : "No active entries are available; paste the ID instead.";
+  const known = fallback.some((r) => r.id === value);
+  const showInput = typing || fallback.length === 0 || (value !== "" && !known);
   return (
     <>
       {fallback.length > 0 && (
         <Field label={label} error={showInput ? undefined : error}>
           {(p) => (
-            <select {...p} {...af} value={typing ? OTHER : value} onChange={(e) => {
+            <select {...p} {...af} value={showInput ? OTHER : value} onChange={(e) => {
               const other = e.target.value === OTHER;
               setTyping(other);
               onChange(other ? "" : e.target.value);
@@ -86,8 +104,7 @@ export function LookupPicker({ kind, label, value, onChange, error, optional, pl
         </Field>
       )}
       {showInput && (
-        <Field label={fallback.length > 0 ? `${label} ID` : label} error={error}
-          hint="The list couldn't be loaded; paste the ID instead.">
+        <Field label={fallback.length > 0 ? `${label} ID` : label} error={error} hint={hint}>
           {(p) => <input {...p} {...(fallback.length === 0 ? af : {})} value={value} onChange={(e) => onChange(e.target.value.trim())} spellCheck={false} />}
         </Field>
       )}

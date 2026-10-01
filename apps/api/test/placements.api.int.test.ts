@@ -19,7 +19,7 @@ import { CLIENT_ID, LOC, T, U, seedFixtures, toUserAccess, type FixtureCandidate
 import { extraUser, newCandidate, selectedSubmission } from "./placement-seed.js";
 import { seedPipeline, type PipelineSeed } from "./pipeline-seed.js";
 
-/** API checks for docs/placements-api.md (placements, lookups, per-record actions). */
+/** API checks for docs/placements-api.md (placements, per-record actions). */
 let db: TestDb;
 let app: NestFastifyApplication;
 let candidates: FixtureCandidate[];
@@ -129,32 +129,7 @@ async function makePlacements() {
   }
 }
 
-describe("lookups", () => {
-  beforeAll(async () => {
-    await db.admin.query(`INSERT INTO eureka.vendor (name) VALUES ('Acme Staffing')`);
-    await db.admin.query(`INSERT INTO eureka.implementation_partner (name) VALUES ('Prime IP')`);
-    await db.admin.query(`INSERT INTO eureka.technology (name, active) VALUES ('Cobol', false)`);
-  });
-
-  it.each(users)("any signed-in user gets the picker lists (%s)", async (key) => {
-    const res = await call(key, "GET", "/api/v1/lookups");
-    expect(res.statusCode, res.body).toBe(200);
-    const j = res.json();
-    expect(Object.keys(j).sort()).toEqual(["clients", "coaches", "implementationPartners", "locations", "technologies", "vendors"]);
-    for (const list of Object.values(j) as { id: string; name: string }[][]) {
-      for (const item of list) expect(Object.keys(item).sort()).toEqual(["id", "name"]);
-    }
-    expect(j.technologies.map((t: { name: string }) => t.name)).toEqual(["Java"]); // inactive Cobol hidden
-    expect(j.locations.map((l: { id: string }) => l.id).sort()).toEqual([LOC.austin, LOC.dallas].sort());
-    expect(j.coaches).toEqual([{ id: U.coach, name: "coach" }]);
-    expect(j.vendors.map((v: { name: string }) => v.name)).toContain("Acme Staffing");
-    expect(j.implementationPartners.map((v: { name: string }) => v.name)).toEqual(["Prime IP"]);
-  });
-
-  it("requires a session", async () => {
-    expect((await app.inject({ method: "GET", url: "/api/v1/lookups" })).statusCode).toBe(401);
-  });
-});
+// Lookups (per-permission list visibility) are covered in lookups.int.test.ts.
 
 describe("per-record actions match what the server allows (candidates)", () => {
   const TARGETS = ["active", "on_hold", "stopped", "full_of_interviews", "confirmation", "terminated"];
