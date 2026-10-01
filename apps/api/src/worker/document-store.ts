@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { link, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { link, readFile, unlink } from "node:fs/promises";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -10,7 +9,7 @@ import {
   PutObjectCommand,
   type S3Client,
 } from "@aws-sdk/client-s3";
-import { fakeScanResult, localPath } from "../platform/storage/local-files.js";
+import { fakeScanResult, localPath, writeTempBeside } from "../platform/storage/local-files.js";
 
 /**
  * The worker's view of the documents bucket for the scan-and-promote job.
@@ -145,9 +144,7 @@ export class LocalDocumentStore implements DocumentStore {
   async putClean(key: string, body: Buffer, sha256: Buffer): Promise<void> {
     if (!key.startsWith("clean/")) throw new Error("promotion writes clean/ only");
     const path = localPath(this.root, key);
-    await mkdir(dirname(path), { recursive: true });
-    const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-    await writeFile(tmp, body);
+    const tmp = await writeTempBeside(path, body);
     try {
       await link(tmp, path); // create-only, like If-None-Match: *
     } catch (err) {

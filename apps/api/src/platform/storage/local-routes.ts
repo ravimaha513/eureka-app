@@ -1,5 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile, rename } from "node:fs/promises";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { RESUME_MAX_BYTES } from "@eureka/shared";
 import {
@@ -10,7 +9,7 @@ import {
   type LocalDownloadPolicy,
   type LocalUploadPolicy,
 } from "./document-storage.js";
-import { localPath } from "./local-files.js";
+import { localPath, writeTempBeside } from "./local-files.js";
 
 interface Part { name: string; filename?: string; data: Buffer }
 
@@ -74,10 +73,7 @@ export async function registerLocalStorageRoutes(app: FastifyInstance, storage: 
       }
       if (file.data.length !== policy.size) return problem(reply, 400, "EntityTooSmall or EntityTooLarge");
       const path = localPath(storage.root, policy.key);
-      await mkdir(dirname(path), { recursive: true });
-      const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-      await writeFile(tmp, file.data);
-      await rename(tmp, path);
+      await rename(await writeTempBeside(path, file.data), path);
       return reply.status(204).send();
     });
 

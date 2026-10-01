@@ -1,8 +1,26 @@
-import { join, resolve, sep } from "node:path";
-import { tmpdir } from "node:os";
+import { randomBytes } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join, resolve, sep } from "node:path";
 
-/** Default directory of the local document driver (API and worker must agree). */
-export const DEFAULT_LOCAL_STORAGE_DIR = join(tmpdir(), "eureka-documents");
+/**
+ * Default directory of the local document driver (API and worker must agree):
+ * under the working directory (gitignored `.local/`), never the shared OS temp
+ * directory, where other local users could pre-create or read files.
+ */
+export const DEFAULT_LOCAL_STORAGE_DIR = join(process.cwd(), ".local", "documents");
+
+/**
+ * Writes `data` to a new, unpredictably named temporary file next to `path`
+ * (owner-only directory and file, exclusive create so an existing file or
+ * symlink is never reused) and returns its path; the caller renames or links
+ * it into place.
+ */
+export async function writeTempBeside(path: string, data: Buffer): Promise<string> {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const tmp = `${path}.tmp-${randomBytes(16).toString("hex")}`;
+  await writeFile(tmp, data, { flag: "wx", mode: 0o600 });
+  return tmp;
+}
 
 /** Path of an object key under the local root; refuses keys that would escape it. */
 export function localPath(root: string, key: string): string {
