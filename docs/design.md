@@ -464,6 +464,8 @@ Built in migration 0022 (2026-09-30), contract in `docs/placements-api.md` (PL-1
 | While a placement is open, manual candidate transitions are refused (`placement_open`) | `authz.transition_candidate` (replaced in 0022) |
 | `placement.created` / `placement.state_changed` outbox rows in the same transaction (HR, Accounts, Immigration) | both functions |
 
+Built in migration 0035 (2026-10-01): the paperwork checklist is created with the placement (B5.3, N2). `authz.checklist_template` (kind, placement type, validated items; configuration owned by `authz_definer`, no app grant) is copied into `eureka.checklist_item` (placement_id, kind, position, doc_type, owner_role, required, status `pending`) by an AFTER INSERT trigger on `placement`, inside `authz.create_placement`. Items are append-only, written only by the definer, readable wherever the placement is (EXISTS by key). Deviation from B2.4: items reference the placement directly (`placement_id` with a foreign key) instead of `owner_type`/`owner_id`; onboarding items on assignments and the document link come with Phase 3. Template content is an open question (`docs/phase2-status.md`).
+
 Not yet done: nothing in this list. The outbox delivery job is built (migrations 0024 and 0029, B6 `outbox-delivery`); `candidate_event` rows are written by migration 0026.
 
 ## B3. API design
