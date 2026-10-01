@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import {
   BatchListQuery,
+  BatchStatusChange,
   CandidateListQuery,
   CreateBatch,
   CreateCandidate,
@@ -94,5 +95,12 @@ export class CandidatesController {
   @RequirePermission("candidate:create")
   createBatch(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createBatch(user, () => CreateBatch.parse(body));
+  }
+
+  /** planned -> in_training -> completed, or cancelled before completion; same permission as create. */
+  @Put("batches/:id/status")
+  @RequirePermission("candidate:create")
+  batchStatus(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.setBatchStatus(user, id, BatchStatusChange.parse(body).to);
   }
 }

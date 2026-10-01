@@ -108,10 +108,11 @@ describe("Candidates list: batches", () => {
     expect(await screen.findByRole("button", { name: "New batch" })).toBeInTheDocument();
   });
 
-  it("creates a batch: validates first, explains a 409, then posts and announces", async () => {
+  it("creates a batch: validates first, explains a 403 and a 409, then posts and announces", async () => {
     routes["GET /api/v1/batches"] = () => ({ body: { items: BATCHES, canCreate: true } });
     let n = 0;
-    routes["POST /api/v1/batches"] = () => (++n === 1 ? problem(409, { detail: "batch_exists" }) : { status: 201, body: { id: "b-new" } });
+    routes["POST /api/v1/batches"] = () => (++n === 1 ? problem(403, { detail: "location_not_in_scope" })
+      : n === 2 ? problem(409, { detail: "batch_exists" }) : { status: 201, body: { id: "b-new" } });
     wrap(<CandidatesPage me={LEAD} />);
     fireEvent.click(await screen.findByRole("button", { name: "New batch" }));
     const dlg = screen.getByRole("dialog", { name: "New batch" });
@@ -125,7 +126,9 @@ describe("Candidates list: batches", () => {
     fireEvent.change(within(dlg).getByLabelText("Start month"), { target: { value: "2026-11" } });
     fireEvent.change(within(dlg).getByLabelText("Planned size (optional)"), { target: { value: "25" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create batch" }));
-    expect(await within(dlg).findByRole("alert")).toHaveTextContent("already exists");
+    expect(await within(dlg).findByRole("alert")).toHaveTextContent("only for locations where your teams work");
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create batch" }));
+    await waitFor(() => expect(within(dlg).getByRole("alert")).toHaveTextContent("already exists"));
     expect(writes()[0]!.body).toEqual({ locationId: LOC, technologyId: TECH, startMonth: "2026-11", sizePlanned: 25 });
 
     fireEvent.click(within(dlg).getByRole("button", { name: "Create batch" }));

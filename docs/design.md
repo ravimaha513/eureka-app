@@ -363,6 +363,19 @@ Built in migration 0026 (2026-10-01), candidate extras:
 | Timeline read: the candidate must be readable (`EXISTS` by primary key under candidate RLS); events about a submission, interview or placement also need that record readable (D-02: a teammate does not see another recruiter's submissions on the timeline) | policy `candidate_event_read`; the API applies the same rule with the engine |
 | Duplicate check (FR-CAN-09, N11): name plus email or phone; matches normalized personal or marketing email (lower-case) and E.164 phone (country code required, nothing guessed) against every candidate; returns at most three rows of owning team name, team lead as contact and which supplied identifier matched; the candidate id only when the caller can read it | `authz.candidate_duplicates` (definer, `candidate:create` holders); API rate limit 20/min/user with a warning log, audited without values; `POST /candidates` answers 409 `possible_duplicate` (no details) unless `confirmDuplicate` |
 
+Review follow-ups in migration 0032 (2026-10-01):
+
+| Rule | Enforcement |
+|---|---|
+| Candidate status changes driven by a placement (create, backout, BGC failed, joined) are timeline events with `ref_type = 'placement'`, so they are listed only where that placement is readable (D-02: an Open-to-all-teams viewer from another team no longer sees the placement history) | `authz.candidate_status_by_placement` records the placement in `authz.placement_status_context` (keyed by transaction id; only `authz_definer` can read or write it, so a client cannot spoof the link the way it could a GUC) and the candidate trigger reads it |
+| A viewer who reads the candidate only through Open to all teams gets no actor names and no events from before the candidate was last opened to all teams | API timeline filter (RLS keeps the coarser rule above) |
+| Batches: create and status changes only for locations in the caller's scope (team locations and candidate locations of the teams their team/hierarchy `candidate:create` grant owns; every location for an org grant). Status: `planned → in_training → completed`, `planned`/`in_training → cancelled` | `authz.batch_location_ids`, `authz.create_batch` (403 `location_not_in_scope`), `authz.set_batch_status`, `PUT /batches/{id}/status`; the write guard lets the definer change `status` only |
+| Duplicate check is three index lookups (personal email, marketing email, phone) and primary-key probes; about 100 ms → 5 ms on 50,000 candidates | `authz.candidate_duplicates` |
+| App-role candidate inserts start from server defaults (status `in_training`, visibility `team`, no rating, no bench date, version 1; timestamps set by the server) | trigger `candidate_0_insert_guard` (rule 4); seeds running as the owner or migration user are not affected |
+| Phones: a bracketed `(0)` after the country code is dropped (`+44 (0)20 …`); a bare national `0` after a trunk-prefix country code (`+91 098…`) is refused with a message instead of guessed | `normalizePhoneE164` / `phoneProblem` in `packages/shared` |
+
+TODO (retention, OD-03): there is no purge job yet. `candidate_event` and `batch` refuse DELETE from everyone, so the retention job will need its own path: a dedicated definer function (owned by `authz_definer`, executable only by the worker) that sets a transaction-local marker the write guard checks before allowing the delete. The marker must not be a plain `set_config` GUC, which any client can set; use the same pattern as `authz.placement_status_context` (a row only the definer can write, keyed by `pg_current_xact_id()`).
+
 Not built (need other work first): **resumes** (`resume` table and upload) wait for the Phase 3 document quarantine pipeline (`file_object.scan_status`, S3, KMS); the **DOB blind index** in the duplicate check waits for OD-04 (DOB visibility) and KMS field encryption (`eureka-field`, `eureka-bidx`).
 
 ### B2.3 Interviews
@@ -479,7 +492,7 @@ Core MVP endpoints:
 | PUT /candidates/{id}/technical-rating | candidate.rating:update | Location roles |
 | GET /candidates/{id}/timeline | candidate:read | 404 unless the candidate is readable; activity events only where the activity is readable; `?cursor=&limit=` (newest first) |
 | POST /candidates/duplicate-check | candidate:create | name plus email or phone; team, contact, `matchedOn`, id only if readable; rate-limited, audited |
-| GET, POST /batches | candidate:read; Sales leadership (`canCreateBatch`) | list has a `canCreate` hint; `GET /candidates?batchId=` filters (not the Hot List) |
+| GET, POST /batches; PUT /batches/{id}/status | candidate:read; Sales leadership (`canCreateBatch`) for the location | list has a `canCreate` hint; `GET /candidates?batchId=` filters (not the Hot List) |
 | GET /hotlist | hotlist:read | marketable statuses, saved view filters |
 | GET, POST /hotlist/views; PATCH, DELETE /hotlist/views/{id} | hotlist:read | the caller's own saved filter sets only (RLS on `hotlist_view`, migration 0025); max 50 per user, names unique per user |
 | POST /hotlist/bulk/status, POST /hotlist/bulk/visibility | candidate:update, candidate.visibility:update | up to 100 ids; each record goes through its single-record path (404/403/422 per record) and reports its own result; `terminated` and `confirmation` are not offered in bulk |

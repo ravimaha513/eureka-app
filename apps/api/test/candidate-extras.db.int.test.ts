@@ -182,9 +182,10 @@ describe("candidate_event: rows written for each action", () => {
       ["submission.status_changed", "submission", "interview_scheduled", "interview_completed"],
       ["submission.status_changed", "submission", "interview_completed", "selected"],
       ["placement.created", "placement", null, "confirmed"],
-      ["candidate.status_changed", null, "active", "confirmation"],
+      // Driven by the placement (0032): listed only where the placement is readable.
+      ["candidate.status_changed", "placement", "active", "confirmation"],
       ["placement.status_changed", "placement", "confirmed", "paperwork"],
-      ["candidate.status_changed", null, "confirmation", "active"],
+      ["candidate.status_changed", "placement", "confirmation", "active"],
       ["placement.status_changed", "placement", "paperwork", "backout"],
     ]);
     expect(rows.filter((r) => r.ref_type === "placement").every((r) => r.ref_id === placement.id)).toBe(true);
@@ -317,5 +318,116 @@ describe("authz.candidate_duplicates", () => {
       await expect(check(U[key], "X", "Y", null, "+14695550001")).rejects.toThrow(/not_permitted/);
     }
     await expect(db.app.query(`SELECT * FROM authz.candidate_duplicates('X','Y',NULL,'+14695550001')`)).rejects.toThrow(/not_permitted/);
+  });
+});
+
+describe("review follow-ups (0032)", () => {
+  describe("placement-driven status events carry the placement (D-02)", () => {
+    let cand: FixtureCandidate;
+    let placementId: string;
+
+    beforeAll(async () => {
+      // Team t3's Open-to-all-teams candidate, placed by its own recruiter.
+      cand = await newCandidate(db, { teamId: T.t3, recruiterId: U.r3a, locationId: LOC.austin, visibility: "all_teams" });
+      const sub = await selectedSubmission(db, U.r3a, cand.id);
+      placementId = (await createPlacement(db, U.r3a, sub)).id;
+      await transitionPlacement(db, U.r3a, placementId, "backout", "Withdrew");
+    });
+
+    it("status changes made by create/transition_placement reference the placement; manual ones do not", async () => {
+      await asUser(db.app, U.r3a, (c) => c.query(`SELECT authz.transition_candidate($1, 'on_hold')`, [cand.id]), true);
+      await asUser(db.app, U.r3a, (c) => c.query(`SELECT authz.transition_candidate($1, 'active')`, [cand.id]), true);
+      const rows = (await events(cand.id)).filter((e) => e.type === "candidate.status_changed");
+      expect(rows.map((e) => [e.ref_type, e.ref_id, e.from_value, e.to_value])).toEqual([
+        ["placement", placementId, "active", "confirmation"],
+        ["placement", placementId, "confirmation", "active"],
+        [null, null, "active", "on_hold"],
+        [null, null, "on_hold", "active"],
+      ]);
+      expect((await db.admin.query(`SELECT count(*)::int n FROM authz.placement_status_context`)).rows[0].n).toBe(0);
+    });
+
+    it("a third-team viewer (Open to all teams) sees none of the placement history", async () => {
+      const seen = await asUser(db.app, U.r1a, async (c) =>
+        (await c.query(`SELECT type, ref_type FROM eureka.candidate_event WHERE candidate_id = $1`, [cand.id])).rows);
+      expect(seen.length).toBeGreaterThan(0); // the candidate itself is visible
+      expect(seen.filter((e) => e.ref_type === "placement" || e.ref_type === "submission")).toEqual([]);
+      const owner = await asUser(db.app, U.r3a, async (c) =>
+        (await c.query(`SELECT count(*)::int n FROM eureka.candidate_event WHERE candidate_id = $1 AND ref_type = 'placement'`, [cand.id])).rows[0].n);
+      expect(owner).toBe(4);
+    });
+
+    it("the context table cannot be read or written by the app (no spoofed placement link)", async () => {
+      await expect(asUser(db.app, U.r3a, (c) => c.query(
+        `INSERT INTO authz.placement_status_context VALUES (pg_current_xact_id(), $1, $2)`, [cand.id, placementId]))).rejects.toThrow(/permission denied/);
+      await expect(asUser(db.app, U.r3a, (c) => c.query(`SELECT * FROM authz.placement_status_context`))).rejects.toThrow(/permission denied/);
+      await expect(asUser(db.app, U.r3a, (c) => c.query(`SELECT authz.candidate_status_by_placement($1, 'confirmation')`, [cand.id])))
+        .rejects.toThrow(/permission denied/);
+    });
+  });
+
+  describe("batch scope and status", () => {
+    const HOUSTON = "00000000-0000-0000-0000-00000000b001";
+    let houston: string;
+
+    beforeAll(async () => {
+      await db.admin.query(`INSERT INTO eureka.location (id, name, kind) VALUES ($1, 'Houston', 'training')`, [HOUSTON]);
+      await newCandidate(db, { teamId: T.t3, recruiterId: U.r3a, locationId: HOUSTON });
+    });
+
+    it("create_batch is limited to locations of the caller's teams and their candidates", async () => {
+      await expect(createBatch(U.l1, HOUSTON, "2027-05-01")).rejects.toThrow(/location_not_in_scope/);
+      houston = await createBatch(U.l3, HOUSTON, "2027-05-01");
+      expect(houston).toMatch(/^[0-9a-f-]{36}$/);
+      // m2 manages l3's team through the hierarchy.
+      expect(await createBatch(U.m2, HOUSTON, "2027-06-01")).toMatch(/^[0-9a-f-]{36}$/);
+    });
+
+    const setStatus = (actor: string, id: string, to: string | null) =>
+      asUser(db.app, actor, async (c) => (await c.query(`SELECT authz.set_batch_status($1, $2) AS s`, [id, to])).rows[0].s, true);
+
+    it("moves planned -> in_training -> completed; nothing after completion", async () => {
+      expect(await setStatus(U.l3, houston, "in_training")).toBe("in_training");
+      await expect(setStatus(U.l3, houston, "planned")).rejects.toThrow(/invalid_transition/);
+      await expect(setStatus(U.l3, houston, null)).rejects.toThrow(/invalid_transition/);
+      expect(await setStatus(U.l3, houston, "completed")).toBe("completed");
+      await expect(setStatus(U.l3, houston, "cancelled")).rejects.toThrow(/invalid_transition/);
+      expect((await db.admin.query(`SELECT status FROM eureka.batch WHERE id = $1`, [houston])).rows[0].status).toBe("completed");
+    });
+
+    it("cancels a planned batch; refuses callers outside the location scope or without the grant", async () => {
+      const b = await createBatch(U.l3, HOUSTON, "2027-07-01");
+      await expect(setStatus(U.l1, b, "cancelled")).rejects.toThrow(/not_permitted/);
+      await expect(setStatus(U.r3a, b, "cancelled")).rejects.toThrow(/not_permitted/);
+      await expect(setStatus(U.admin, b, "cancelled")).rejects.toThrow(/batch_not_found/);
+      await expect(setStatus(U.l3, "00000000-0000-0000-0000-00000000dead", "cancelled")).rejects.toThrow(/batch_not_found/);
+      expect(await setStatus(U.l3, b, "cancelled")).toBe("cancelled");
+    });
+  });
+
+  describe("candidate BEFORE INSERT guard (rule 4)", () => {
+    const insert = (cols: string, vals: string) => asUser(db.app, U.l1, async (c) => {
+      const pid = (await c.query<{ id: string }>(`SELECT gen_random_uuid() AS id`)).rows[0]!.id;
+      await c.query(`INSERT INTO eureka.person (id, first_name, last_name) VALUES ($1, 'G', 'Uard')`, [pid]);
+      return (await c.query<{ marketing_status: string; created_at: Date }>(
+        `INSERT INTO eureka.candidate (person_id, technology_id, team_id, location_id${cols}) VALUES ($1, $2, $3, $4${vals})
+         RETURNING marketing_status, created_at`, [pid, TECH_ID, T.t1, LOC.dallas])).rows[0]!;
+    });
+
+    it.each([
+      [", marketing_status", ", 'active'"],
+      [", visibility", ", 'all_teams'"],
+      [", technical_rating", ", 5"],
+      [", bench_since", ", current_date"],
+      [", row_version", ", 7"],
+    ])("the app cannot insert%s", async (cols, vals) => {
+      await expect(insert(cols, vals)).rejects.toThrow(/server_managed_field/);
+    });
+
+    it("timestamps are set by the server; defaults are accepted", async () => {
+      const r = await insert(", created_at", ", '2001-01-01'");
+      expect(r.marketing_status).toBe("in_training");
+      expect(Date.now() - r.created_at.getTime()).toBeLessThan(60_000);
+    });
   });
 });

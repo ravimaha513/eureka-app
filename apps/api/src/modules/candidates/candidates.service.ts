@@ -32,6 +32,7 @@ import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
 import type {
   BatchListQuery,
+  BatchStatus,
   CandidateListQuery,
   CreateBatch,
   CreateCandidate,
@@ -81,6 +82,9 @@ const BATCH_ERRORS: Record<string, () => HttpException> = {
   invalid_batch: () => new UnprocessableEntityException("invalid_batch"),
   batch_exists: () => new ConflictException("batch_exists"),
   batch_not_allowed: () => new UnprocessableEntityException("batch_not_allowed"),
+  location_not_in_scope: () => new ForbiddenException("location_not_in_scope"),
+  batch_not_found: () => new NotFoundException(),
+  invalid_transition: () => new UnprocessableEntityException("invalid_transition"),
 };
 
 /** Maps the batch functions' and trigger's coded errors (migration 0026) to problem details. */
@@ -483,7 +487,17 @@ export class CandidatesService implements OnModuleInit {
       const row = (await c.query<CandidateRow>(`${this.baseSelect} WHERE c.id = $1 AND ${scopePredicate(readScope, params)}`, params)).rows[0];
       if (!row) throw new NotFoundException();
       const ref = toRef(row);
-      const ep: unknown[] = [id, q.cursor ?? null, q.limit + 1];
+      // A viewer who sees the candidate only through Open to all teams (another
+      // team, D-02) gets no actor names and nothing from before the candidate
+      // was last opened to all teams.
+      const owner = ownsCandidate(readScope, ref);
+      let since: string | null = null;
+      if (!owner) {
+        since = (await c.query<{ id: string | null }>(
+          `SELECT max(id)::text AS id FROM eureka.candidate_event
+           WHERE candidate_id = $1 AND type = 'candidate.visibility_changed' AND to_value = 'all_teams'`, [id])).rows[0]?.id ?? null;
+      }
+      const ep: unknown[] = [id, q.cursor ?? null, q.limit + 1, since];
       const activity = (table: string, alias: string, perm: Permission) => {
         const s = resolveScope(user.access, perm);
         if (!s) return "false";
@@ -513,7 +527,8 @@ export class CandidatesService implements OnModuleInit {
          LEFT JOIN eureka.batch b ON e.ref_type = 'batch' AND b.id = e.ref_id
          LEFT JOIN eureka.technology bt ON bt.id = b.technology_id
          LEFT JOIN eureka.location bl ON bl.id = b.location_id
-         WHERE e.candidate_id = $1 AND ($2::bigint IS NULL OR e.id < $2::bigint) AND ${visible}
+         WHERE e.candidate_id = $1 AND ($2::bigint IS NULL OR e.id < $2::bigint)
+           AND ($4::bigint IS NULL OR e.id >= $4::bigint) AND ${visible}
          ORDER BY e.id DESC LIMIT $3`, ep);
       const page = rows.slice(0, q.limit);
       return {
@@ -521,7 +536,7 @@ export class CandidatesService implements OnModuleInit {
           id: e.id,
           type: e.type,
           at: e.at.toISOString(),
-          actor: e.actor_id ? { id: e.actor_id, name: e.actor_name } : null,
+          actor: owner && e.actor_id ? { id: e.actor_id, name: e.actor_name } : null,
           ref: e.ref_type ? {
             type: e.ref_type,
             id: e.ref_id,
@@ -583,6 +598,22 @@ export class CandidatesService implements OnModuleInit {
       const id = rows[0]!.id;
       await this.audit.record(c, { actorId: user.id, action: "batch.created", entityType: "batch", entityId: id, changes: { ...body } });
       return { id };
+    });
+  }
+
+  /**
+   * Batch status (planned -> in_training -> completed; cancel before completion)
+   * through authz.set_batch_status: same permission as create, batch location
+   * in the caller's scope. Read-before-write: 404 if not visible, then 403.
+   */
+  async setBatchStatus(user: AuthedUser, id: string, to: BatchStatus) {
+    return this.db.withUser(user.id, async (c) => {
+      const b = (await c.query<{ status: string }>(`SELECT status FROM eureka.batch WHERE id = $1`, [id])).rows[0];
+      if (!b) throw new NotFoundException();
+      if (!canCreateBatch(user.access)) throw new ForbiddenException("Not permitted");
+      await c.query(`SELECT authz.set_batch_status($1, $2)`, [id, to]).catch(mapBatchError);
+      await this.audit.record(c, { actorId: user.id, action: "batch.status", entityType: "batch", entityId: id, changes: { from: b.status, to } });
+      return { id, status: to };
     });
   }
 }

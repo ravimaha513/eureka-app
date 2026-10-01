@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { normalizePhoneE164 } from "@eureka/shared";
+import { PHONE_PROBLEM_MESSAGES, normalizePhoneE164, phoneProblem } from "@eureka/shared";
 import { ApiError } from "../api";
 import { Dialog, DialogActions } from "../admin/Dialog";
 import { LookupPicker } from "../lookups";
@@ -51,7 +51,8 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
     const e: Record<string, string> = {};
     if (!v.firstName.trim()) e.firstName = "Enter a first name.";
     if (!v.lastName.trim()) e.lastName = "Enter a last name.";
-    if (v.phone.trim() && !normalizePhoneE164(v.phone)) e.phone = "Include the country code, e.g. +1 469 555 0142 or +91 98765 43210.";
+    const pp = v.phone.trim() ? phoneProblem(v.phone) : null;
+    if (pp) e.phone = PHONE_PROBLEM_MESSAGES[pp];
     if (v.email.trim() && !EMAIL.test(v.email.trim())) e.email = "Enter a valid email address.";
     if (!UUID_RE.test(v.technologyId.trim())) e.technologyId = "Choose a technology.";
     if (!UUID_RE.test(v.locationId.trim())) e.locationId = "Choose a location.";
