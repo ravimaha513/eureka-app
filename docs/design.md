@@ -796,6 +796,13 @@ Tests are written with each feature.
 4. Load to staging, reconcile counts per sheet, get sign-off, then load production.
 5. Keep the sheets read-only in parallel for two weeks.
 
+Built in migration 0028 and `apps/api/src/import/` (usage, mapping file, review reasons and
+safeguards in `docs/import.md`): staging and review tables readable only by the `eureka_import`
+role; a configurable column/status mapping whose SRS Q6 entries are placeholders (unmapped or
+unconfirmed labels go to review); commit as each row's owner through the API's policies, guards
+and definer functions after sign-off by a second person with `access:manage`; a ledger makes
+re-runs idempotent.
+
 ## B10. Deviations and open decisions
 
 | ID | Item | Owner |

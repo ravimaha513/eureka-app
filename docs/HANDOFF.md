@@ -9,7 +9,7 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - `pnpm -r typecheck` and `pnpm -r test` must pass before every commit (integration tests need
   PostgreSQL 16 at `TEST_PG_ADMIN_URL`, default `postgres://postgres:postgres@127.0.0.1:5432`).
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0024**) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0032**) and must apply as a
   non-superuser (Amazon RDS master): CI checks this.
 - Commit small and atomic; get an independent review of every security-relevant change.
 
@@ -46,6 +46,12 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   `OUTBOX_MAIL_MODE`, `OUTBOX_FROM_EMAIL`, `APP_PUBLIC_ORIGIN` (Terraform does not set them yet); set
   `OUTBOX_DELIVER_SINCE` on first enable. Hardening (0029): rejection cap (`failed`), lease-safe in-doubt,
   no-recipient alert, delete/truncate guards, job_run retention for outbox-delivery.
+- Sheet migration (`docs/import.md`, migration 0028): CSV import CLI run as the `eureka_import`
+  role (NOLOGIN outside the migration window). Normalizes and matches rows across the Sales,
+  interview and placement sheets into staging tables, review queue with reasons, reconciliation
+  report, dry-run commit by default; `--commit` loads one person per transaction as the row's
+  owner through the app's RLS, guards and definer functions, after sign-off by a second person
+  holding `access:manage`. Idempotent via a ledger; imported interviews skip feedback emails.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
@@ -58,8 +64,8 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 3. **Candidate extras:** batches, resumes, `candidate_event` timeline, full duplicate check
    (email, phone, DOB blind index).
 4. **Dashboards:** manager, lead and location views with activity counts and "needs attention".
-5. **Sheet migration:** CSV import with normalization, cross-sheet matching, review queues,
-   reconciliation report.
+5. **Sheet migration:** built (see Built). Left: the SRS Q6 status/row-colour mapping, a decision
+   on loading historical placements (`placements.commit`), weekly dry runs on real exports.
 6. **Launch checks:** tooling is in place, nothing has been run against AWS yet.
    k6: `loadtest/` + `db:seed-load` (50k fictional candidates; minted sessions for stacks
    without dev sign-in). ZAP: manual `zap-baseline` workflow + `.zap/rules.tsv`. Restore drill:
@@ -81,6 +87,9 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - Does a pre-join `bgc_failed` count as an earlier placement for first-placement detection?
 - Placement emails: should Associate HR (and the Lead/Manager, design C flow 3) also receive them, and may
   they name the candidate or client? Today: `hr`, `accounts`, `immigration` only, ids and statuses only.
+- Sheet import (`docs/import.md`): status and row-colour mapping (SRS Q6); may historical
+  placements emit outbox notifications; joined placements' assignment start date; who signs off a
+  batch (org admin assumed); is `eureka_import` acting as the API role acceptable for the window?
 
 ## Waiting on Ravi (not code)
 
