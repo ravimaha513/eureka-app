@@ -49,9 +49,9 @@ export interface BulkResult { id: string; ok: boolean; error?: BulkError }
 
 const label = (s: string) => { const t = s.replace(/_/g, " "); return t.charAt(0).toUpperCase() + t.slice(1); };
 
-/** Audit-safe summary of the filters: no free text (the name search could be a candidate's name). */
+/** Audit-safe summary of the filters: free text (name search, technology) is recorded only as a flag (rule 5). */
 export const filterSummary = (f: HotlistFilters) => ({
-  status: f.status, technology: f.technology, visibility: f.visibility, search: f.search ? true : undefined,
+  status: f.status, technology: f.technology ? true : undefined, visibility: f.visibility, search: f.search ? true : undefined,
 });
 
 const likePattern = (s: string) => `%${s.replace(/[%_\\]/g, "\\$&")}%`;

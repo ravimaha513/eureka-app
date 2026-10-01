@@ -226,6 +226,16 @@ describe("export", () => {
     expect(JSON.stringify(audit)).not.toMatch(/Cand|1469/);
   });
 
+  it("the technology filter is audited as a flag, never as text", async () => {
+    const text = "Jane Doe +14695550123 jane@example.com";
+    const r = await call("l2", "POST", "/api/v1/hotlist/export", { technology: text });
+    expect(r.statusCode).toBe(200);
+    expect(csvRows(r.body)).toHaveLength(0);
+    const audit = (await audits("hotlist.export", U.l2)).at(-1)!.changes;
+    expect(audit.filters).toEqual({ technology: true });
+    expect(JSON.stringify(audit)).not.toMatch(/Jane|Doe|1469|example\.com|@/);
+  });
+
   it("rejects unknown filters and needs the CSRF token", async () => {
     expect((await call("ad", "POST", "/api/v1/hotlist/export", { teamId: T.t1 })).statusCode).toBe(422);
     expect((await call("ad", "POST", "/api/v1/hotlist/export", {}, false)).statusCode).toBe(403);
