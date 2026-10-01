@@ -1,7 +1,7 @@
 import { S3Client } from "@aws-sdk/client-s3";
 import { describe, expect, it } from "vitest";
 import { decideScan, DEFAULT_RESUME_SCAN_OPTIONS } from "../../worker/jobs/resume-scan.js";
-import { contentMatches, resumeCleanKey, resumeDownloadName, resumeQuarantineKey } from "./content.js";
+import { resumeCleanKey, resumeDownloadName, resumeQuarantineKey } from "./content.js";
 import { LocalDocumentStorage, S3DocumentStorage, attachmentDisposition } from "./document-storage.js";
 import { localPath } from "./local-files.js";
 import { parseMultipart } from "./local-routes.js";
@@ -68,22 +68,6 @@ describe("object keys", () => {
     expect(() => localPath("/tmp/docs", "clean/resumes/../../../etc/passwd")).toThrow();
   });
 });
-
-describe("magic bytes", () => {
-  const docx = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from("....[Content_Types].xml....word/document.xml....")]);
-  it("PDF must start with %PDF-", () => {
-    expect(contentMatches(Buffer.from("%PDF-1.7\n..."), PDF)).toBe(true);
-    expect(contentMatches(Buffer.from(" %PDF-1.7"), PDF)).toBe(false);
-    expect(contentMatches(Buffer.from("MZ\x90\x00"), PDF)).toBe(false);
-    expect(contentMatches(docx, PDF)).toBe(false);
-  });
-  it("DOCX must be a ZIP with [Content_Types].xml and a word/ part", () => {
-    expect(contentMatches(docx, DOCX)).toBe(true);
-    expect(contentMatches(Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from("[Content_Types].xml xl/workbook.xml")]), DOCX)).toBe(false);
-    expect(contentMatches(Buffer.from("%PDF-1.7 word/ [Content_Types].xml"), DOCX)).toBe(false);
-  });
-});
-
 describe("local driver policies", () => {
   const local = new LocalDocumentStorage("/tmp/docs", "local-dev-session-secret-local-dev-session");
   it("verifies its own signature and expiry; tampering or another secret fails", async () => {

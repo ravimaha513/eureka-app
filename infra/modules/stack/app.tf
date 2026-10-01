@@ -125,9 +125,23 @@ resource "aws_iam_role_policy" "api" {
         Resource = "${aws_s3_bucket.b["documents"].arn}/clean/resumes/*"
       },
       {
+        # Data key only through S3 on the documents bucket (what the presigned
+        # POST/GET it signs need); no direct use of the data key.
+        Sid      = "DocumentsKmsViaS3"
         Effect   = "Allow"
         Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
-        Resource = [aws_kms_key.data.arn, aws_kms_key.restricted.arn]
+        Resource = aws_kms_key.data.arn
+        Condition = {
+          StringEquals = { "kms:ViaService" = "s3.${var.aws_region}.amazonaws.com" }
+          StringLike   = { "kms:EncryptionContext:aws:s3:arn" = "${aws_s3_bucket.b["documents"].arn}*" }
+        }
+      },
+      {
+        # Application field encryption (FIELD_KMS_KEY_ARN) calls KMS directly.
+        Sid      = "FieldEncryption"
+        Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
+        Resource = aws_kms_key.restricted.arn
       },
       {
         Effect    = "Allow"
@@ -153,7 +167,8 @@ resource "aws_iam_role_policy" "api" {
 #   tag is the source of truth). ListBucketVersions only for keys under
 #   quarantine/resumes/ (a missing upload is then "no versions", not an
 #   ambiguous 403); read the exact scanned version and its tags; delete that
-#   version (infected or promoted); write clean/resumes/. KMS through S3 on
+#   version (infected or promoted); write clean/resumes/ create-only (HeadObject to compare
+#   the checksum after a 412). KMS through S3 on
 #   the documents bucket only. No tagging rights: the scan result cannot be
 #   forged by the worker either (the bucket policy also denies it).
 resource "aws_iam_role" "worker" {
@@ -207,6 +222,14 @@ resource "aws_iam_role_policy" "worker" {
         Sid      = "ResumeScanPromote"
         Effect   = "Allow"
         Action   = ["s3:PutObject"]
+        Resource = "${aws_s3_bucket.b["documents"].arn}/clean/resumes/*"
+      },
+      {
+        # HeadObject only: after a 412 on the create-only write, compare the
+        # stored checksum with ours (metadata; the body is never read here).
+        Sid      = "ResumeScanVerifyClean"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
         Resource = "${aws_s3_bucket.b["documents"].arn}/clean/resumes/*"
       },
       {

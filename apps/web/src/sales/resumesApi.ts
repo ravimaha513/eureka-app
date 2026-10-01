@@ -81,6 +81,7 @@ const REASONS: Record<string, string> = {
   TIMEOUT: "the malware scan did not finish",
   NOT_UPLOADED: "the file never arrived",
   BAD_CONTENT: "the file is not the PDF or Word document it claims to be",
+  ACTIVE_CONTENT: "the file contains macros, scripts, embedded files or external links",
   SIZE_MISMATCH: "the file size did not match",
   UNSUPPORTED: "the file could not be scanned",
 };
