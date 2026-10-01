@@ -53,6 +53,11 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   owner through the app's RLS, guards and definer functions, after sign-off by a second person
   holding `access:manage`. Idempotent via a ledger; imported interviews skip feedback emails.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
+- First-admin bootstrap (migration 0037): `dist/db/bootstrap.js` as a one-off migrate task creates two
+  `org_admin` users for hosted-domain emails, only while no active `org_admin` exists (exit 3 otherwise,
+  idempotent for the same admins), audited as system without email; first Google sign-in links by email.
+  Optional `--demo-data` loads a fictional org (`@demo.invalid`, cannot sign in) on non-production stacks.
+  Runbook: infra/README.md "First admin (bootstrap)".
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
