@@ -52,13 +52,16 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   `OUTBOX_MAIL_MODE`, `OUTBOX_FROM_EMAIL`, `APP_PUBLIC_ORIGIN` (Terraform does not set them yet); set
   `OUTBOX_DELIVER_SINCE` on first enable. Hardening (0029): rejection cap (`failed`), lease-safe in-doubt,
   no-recipient alert, delete/truncate guards, job_run retention for outbox-delivery.
-- Sheet migration (`docs/import.md`, migrations 0028 and 0033): CSV import CLI run as the
+- Sheet migration (`docs/import.md`, migrations 0028, 0033 and 0041): CSV import CLI run as the
   `eureka_import` role (NOLOGIN outside the migration window, no role memberships). Normalizes and
   matches the Sales, interview and placement sheets into staging tables with a review queue and a
   reconciliation report. Tickets, review decisions and sign-off are authenticated API calls by org
   admins (`/api/v1/imports`, second person approves, digest-bound and expiring). Each person loads
   through `authz.import_load_person` (definer, same RLS checks, guards, transitions and audit as the
-  API); a ledger with keyed hashes and natural keys keeps re-runs idempotent.
+  API); a ledger with keyed hashes and natural keys keeps re-runs idempotent. The database verifies
+  the rows before sign-off and the approver approves a per-row preview by its digest (0041).
+  Append-only exception: the `GRANT eureka_app TO eureka_import` line was removed from 0028 after
+  it was pushed, because no environment had applied it; 0033 revokes any copy and fails if it cannot.
 - Resumes (FR-CAN-07, migration 0036, design B2.2 "Built in migration 0036"): presigned POST into
   `quarantine/resumes/<id>`, GuardDuty scan tag polled by the worker job `resume-scan`, size and
   magic-byte check, promotion to `clean/`, one current version per candidate, audited 60-second
