@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, type Me } from "../api";
 import { ConfirmDialog } from "../admin/Dialog";
+import { CandidateResumes } from "./CandidateResumes";
 import { CandidateTimeline } from "./CandidateTimeline";
 import { EditProfileDialog } from "./EditProfileDialog";
 import { salesError } from "./errors";
@@ -152,6 +153,8 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
             )}
           </section>
         )}
+
+        {caps.has("document:read") && <CandidateResumes candidateId={c.id} />}
 
         <CandidateTimeline id={c.id} />
       </div>

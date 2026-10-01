@@ -32,6 +32,11 @@ const ConfigSchema = z
     // its WAF) are rejected. Required in production. For rotation it may be a
     // comma-separated list ("new,old"); a request matching any entry is accepted.
     ORIGIN_VERIFY_SECRET: z.string().optional(),
+    // Documents (resumes): the S3 bucket in AWS; otherwise a local directory
+    // served by the API itself (development and tests only).
+    DOCUMENTS_BUCKET: z.string().min(3).optional(),
+    AWS_REGION: z.string().optional(),
+    LOCAL_STORAGE_DIR: z.string().min(1).optional(),
   })
   .superRefine((c, ctx) => {
     // Design A6.1: the development identity provider can never run in production.
@@ -49,6 +54,12 @@ const ConfigSchema = z
     }
     if (c.NODE_ENV === "production" && !c.ORIGIN_VERIFY_SECRET) {
       ctx.addIssue({ code: "custom", message: "ORIGIN_VERIFY_SECRET is required in production" });
+    }
+    if (c.NODE_ENV === "production" && !c.DOCUMENTS_BUCKET) {
+      ctx.addIssue({ code: "custom", message: "DOCUMENTS_BUCKET is required in production (the local document driver is for development)" });
+    }
+    if (c.DOCUMENTS_BUCKET && c.LOCAL_STORAGE_DIR) {
+      ctx.addIssue({ code: "custom", message: "Set only one of DOCUMENTS_BUCKET and LOCAL_STORAGE_DIR" });
     }
     if (c.AUTH_MODE === "google") {
       if (!c.GOOGLE_CLIENT_ID || !c.GOOGLE_CLIENT_SECRET || !c.GOOGLE_HOSTED_DOMAIN) {

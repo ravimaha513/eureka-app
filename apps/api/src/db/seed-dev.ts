@@ -30,4 +30,7 @@ if (rows[0].n === 0) {
 if (process.env.APP_DB_PASSWORD) {
   await admin.query(`ALTER ROLE eureka_app PASSWORD '${process.env.APP_DB_PASSWORD.replace(/'/g, "''")}'`);
 }
+if (process.env.WORKER_DB_PASSWORD) {
+  await admin.query(`ALTER ROLE eureka_worker PASSWORD '${process.env.WORKER_DB_PASSWORD.replace(/'/g, "''")}'`);
+}
 await admin.end();

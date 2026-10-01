@@ -44,6 +44,15 @@ const WorkerConfigSchema = z
     // Backlog cut-off: unpublished events created before this instant are marked
     // published without sending (set it when first enabling delivery).
     OUTBOX_DELIVER_SINCE: z.string().datetime({ offset: true }).optional(),
+    // Resume scan-and-promote (resume-scan job): the documents bucket in AWS, or
+    // the API's local document directory with the fake scanner (development).
+    // Neither: the job is off and uploads stay pending.
+    DOCUMENTS_BUCKET: z.string().min(3).optional(),
+    LOCAL_STORAGE_DIR: z.string().min(1).optional(),
+    // Uploaded but no GuardDuty result after this long: failed (TIMEOUT).
+    RESUME_SCAN_TIMEOUT_MINUTES: z.coerce.number().int().min(5).max(1440).default(60),
+    // After the 5-minute presigned POST expires, wait this long for the object before marking the upload expired.
+    RESUME_UPLOAD_GRACE_MINUTES: z.coerce.number().int().min(1).max(120).default(10),
   })
   .superRefine((c, ctx) => {
     if (c.FEEDBACK_MAIL_MODE !== "disabled") {
@@ -65,6 +74,12 @@ const WorkerConfigSchema = z
       }
       if (c.OUTBOX_MAIL_MODE === "local" && (!c.OUTBOX_MAIL_DIR || c.NODE_ENV === "production")) ctx.addIssue({ code: "custom", message: "Local outbox mail requires OUTBOX_MAIL_DIR and a non-production environment" });
       if (c.OUTBOX_MAIL_MODE === "ses" && (!c.OUTBOX_FROM_EMAIL || !c.AWS_REGION)) ctx.addIssue({ code: "custom", message: "SES outbox mail requires OUTBOX_FROM_EMAIL and AWS_REGION" });
+    }
+    if (c.DOCUMENTS_BUCKET && c.LOCAL_STORAGE_DIR) {
+      ctx.addIssue({ code: "custom", message: "Set only one of DOCUMENTS_BUCKET and LOCAL_STORAGE_DIR" });
+    }
+    if (c.NODE_ENV === "production" && c.LOCAL_STORAGE_DIR) {
+      ctx.addIssue({ code: "custom", message: "LOCAL_STORAGE_DIR (fake malware scanner) is not allowed in production" });
     }
     if (!c.AUDIT_BUCKET && !c.EXPORT_DIR) {
       ctx.addIssue({ code: "custom", message: "Set AUDIT_BUCKET (S3) or EXPORT_DIR (local) for the audit export" });
