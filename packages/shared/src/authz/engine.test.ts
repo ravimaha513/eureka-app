@@ -76,6 +76,22 @@ describe("catalog integrity", () => {
     }
   });
 
+  it("report:export never reaches past a role's candidate:read and hotlist:read scope", () => {
+    // Scope a covers scope b when every candidate b reaches is also reached by a.
+    const covers = (a: string | undefined, b: string): boolean => {
+      if (a === undefined) return false;
+      if (a === "org" || a === b) return true;
+      const line = ["own", "team", "hierarchy"];
+      return line.includes(a) && line.includes(b) && line.indexOf(a) >= line.indexOf(b);
+    };
+    for (const role of ROLES) {
+      const exp = GRANTS[role]["report:export"];
+      if (exp === undefined) continue;
+      expect(covers(GRANTS[role]["candidate:read"], exp), `${role} candidate:read`).toBe(true);
+      expect(covers(GRANTS[role]["hotlist:read"], exp), `${role} hotlist:read`).toBe(true);
+    }
+  });
+
   it("no Sales role can read DOB or restricted documents", () => {
     for (const role of ["recruiter", "lead", "manager", "assoc_director", "offshore_manager", "ceo"] as const) {
       expect(GRANTS[role]["candidate.dob:read"]).toBeUndefined();

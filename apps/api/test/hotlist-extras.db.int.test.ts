@@ -1,13 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { HOTLIST_STATUSES, candidateVisible, ownsCandidate, resolveScope } from "@eureka/shared";
+import { candidateVisible, hotlistVisible, ownsCandidate, resolveScope } from "@eureka/shared";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
-import { U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
+import { T, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 
 /** Migration 0025: saved views (RLS, guards) and authz.hotlist_export, tested in the database alone. */
 let db: TestDb;
 let candidates: FixtureCandidate[];
 const users = Object.keys(U) as (keyof typeof U)[];
-const HOT = new Set<string>(HOTLIST_STATUSES);
 
 beforeAll(async () => {
   db = await createTestDb();
@@ -117,21 +116,56 @@ describe("authz.hotlist_export (differential against the engine)", () => {
     asUser(db.app, userId, async (c) =>
       (await c.query<Row>(`SELECT * FROM authz.hotlist_export($1, $2, $3, $4, $5)`, [...args, limit])).rows);
 
-  it.each(users)("%s exports exactly the Hot List candidates in their report:export scope", async (key) => {
-    const access = toUserAccess(key);
-    const scope = resolveScope(access, "report:export");
-    const expected = scope && resolveScope(access, "hotlist:read", "team")
-      ? candidates.filter((c) => HOT.has(c.marketingStatus) && ownsCandidate(scope, c)).map((c) => c.id).sort()
-      : [];
-    const rows = await exportAs(U[key]);
-    expect(rows.map((r) => r.id).sort()).toEqual(expected);
-    const readScope = resolveScope(access, "candidate:read");
-    for (const r of rows) {
-      // Phones are always masked in exports (design B4.6), even for the owning team.
-      expect(r.phone).toMatch(/^•••-•••-\d\d$/);
-      const cand = candidates.find((c) => c.id === r.id)!;
-      expect(r.technical_rating).toBe(candidateVisible(readScope, cand) ? 4 : null);
+  const setPolicy = (v: "everyone" | "team") =>
+    db.admin.query(`UPDATE authz.policy_setting SET value = $1 WHERE key = 'hotlist_visibility'`, [v]);
+
+  // 0030: a row must be in the report:export scope AND on the caller's Hot List.
+  describe.each(["everyone", "team"] as const)("Hot List policy %s", (policy) => {
+    beforeAll(() => setPolicy(policy));
+    afterAll(() => setPolicy("everyone"));
+
+    it.each(users)("%s exports exactly the Hot List candidates in their report:export scope", async (key) => {
+      const access = toUserAccess(key);
+      const scope = resolveScope(access, "report:export");
+      const hot = resolveScope(access, "hotlist:read", policy);
+      const expected = scope
+        ? candidates.filter((c) => ownsCandidate(scope, c) && hotlistVisible(hot, c)).map((c) => c.id).sort()
+        : [];
+      const rows = await exportAs(U[key]);
+      expect(rows.map((r) => r.id).sort()).toEqual(expected);
+      const readScope = resolveScope(access, "candidate:read");
+      for (const r of rows) {
+        // Phones are always masked in exports (design B4.6), even for the owning team.
+        expect(r.phone).toMatch(/^•••-•••-\d\d$/);
+        const cand = candidates.find((c) => c.id === r.id)!;
+        expect(r.technical_rating).toBe(candidateVisible(readScope, cand) ? 4 : null);
+      }
+    });
+  });
+
+  it("under the team policy, a row outside the hotlist:read scope is not exported even inside report:export", async () => {
+    await setPolicy("team");
+    // Simulates catalog drift: the lead keeps report:export at team scope but holds
+    // hotlist:read only at own scope (rolled back). Holding the permission is not enough.
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query(`UPDATE eureka.role_permission SET scope = 'own' WHERE role_key = 'lead' AND permission = 'hotlist:read'`);
+      await c.query("SELECT set_config('eureka.user_id', $1, true)", [U.l1]);
+      await c.query("SET LOCAL ROLE eureka_app");
+      const rows = (await c.query<{ id: string; visibility: string; marketing_status: string }>(
+        `SELECT id, visibility, marketing_status FROM authz.hotlist_export(NULL, NULL, NULL, NULL, 60000)`)).rows;
+      // Only Open-to-all-teams marketable candidates remain on that Hot List (AS-07).
+      const expected = candidates.filter((x) => x.teamId === T.t1 && x.visibility === "all_teams"
+        && ["active", "full_of_interviews"].includes(x.marketingStatus)).map((x) => x.id).sort();
+      expect(rows.map((r) => r.id).sort()).toEqual(expected);
+      expect(expected.length).toBeLessThan(candidates.filter((x) => x.teamId === T.t1).length);
+    } finally {
+      await c.query("ROLLBACK");
+      c.release();
+      await setPolicy("everyone");
     }
+    expect((await exportAs(U.l1)).length).toBeGreaterThan(0);
   });
 
   it("never returns DOB, email or a raw phone column", async () => {
