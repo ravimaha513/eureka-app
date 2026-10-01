@@ -10,6 +10,11 @@ export interface CandidateProfile extends Candidate {
   actions?: CandidateActions;
   /** Training batch (FR-CAN-02); absent on older servers. */
   batch?: { id: string; label: string } | null;
+  /** Open to in-person interviews (null: not recorded); absent on older servers. */
+  inPersonOk?: boolean | null;
+  /** Marketing contacts: present only with candidate.phone:read over an owned candidate (the phone rule). */
+  marketingEmail?: string | null;
+  vitelNumber?: string | null;
 }
 
 export type BatchStatus = "planned" | "in_training" | "completed" | "cancelled";

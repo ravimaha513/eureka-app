@@ -23,7 +23,7 @@ like `/submissions`. Design references: B2.2 (`placement`, `placement_contact`,
 
 - `GET /api/v1/placements?status=&candidateId=&recruiterId=&from=&to=&cursor=&limit=` (`placement:read`) returns
   `{ items: [Placement], nextCursor }`
-- `GET /api/v1/placements/:id` returns `Placement` including `contacts` and, where the caller holds `assignment:read` on it, `assignment`.
+- `GET /api/v1/placements/:id` returns `Placement` including `contacts`, `checklist` and, where the caller holds `assignment:read` on it, `assignment`.
 - `POST /api/v1/placements` (`placement:create`, header `Idempotency-Key`) with
   `{ submissionId, placementType: "c2c"|"w2"|"1099", rate?, workMode: "onsite"|"remote"|"hybrid", projectCity?, projectState?, tentativeStart: "YYYY-MM-DD", implementationPartnerId?, contacts?: [{ kind: "vendor_poc"|"invoicing_poc"|"client_manager", name, email?, phone? }] }`
   returns 201 `{ id, isFirstPlacement }`.
@@ -103,3 +103,12 @@ and `packages/shared/src/authz/{state-machines,actions}.ts`. Deviations and prec
 
 ### Lookups visibility (least privilege)
 `GET /api/v1/lookups` accepts any signed-in user and always returns all six keys, but their content depends on permissions: `technologies` and `locations` for everyone; `coaches` only with `interview:create` or `interview:update`; `clients`, `vendors` and `implementationPartners` only with `submission:read`, `submission:create` or `placement:read`. Withheld lists are `[]` (not missing, not 403); the web pickers then offer a paste-an-ID input, and the server validates every ID on write.
+
+### Paperwork checklist (migration 0035, 2026-10-01)
+
+`GET /api/v1/placements/:id` adds `checklist: [{ docType, ownerRole, required, status }]` (detail only, not
+on list items): the paperwork items copied from `authz.checklist_template` for the placement type when the
+placement was created, in template order. Readable wherever the placement is; document types and role keys
+only. `status` is always `pending` until Phase 3 tracks documents. No template content ships yet (open
+question in `docs/phase2-status.md`), so `checklist` is `[]` until one is added; a later template change never
+rewrites existing placements.

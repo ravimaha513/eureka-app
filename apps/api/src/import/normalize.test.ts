@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clean, labelKey, lookupLabel, nameKey, normalizeColor, normalizeEmail, normalizeName, normalizePhone,
   normalizePlacementType, normalizeState, normalizeText, normalizeWorkMode, parseDate, parseRate, parseTime,
-  splitFullName, validTimeZone,
+  plausibleDob, splitFullName, validTimeZone,
 } from "./normalize.js";
 
 const v = <T>(r: { ok: true; value: T } | { ok: false; reason: string }) => (r.ok ? r.value : `!${r.reason}`);
@@ -36,7 +36,26 @@ describe("splitFullName", () => {
   });
 });
 
+describe("normalizePhone without a default region", () => {
+  it("requires the country code", () => {
+    expect(v(normalizePhone("214-555-0101", null))).toBe("!phone_needs_country_code");
+    expect(v(normalizePhone("+1 214 555 0101", null))).toBe("+12145550101");
+  });
+});
+
+describe("plausibleDob", () => {
+  it("accepts ages 16 to 80", () => {
+    expect(plausibleDob("1995-03-15", "2026-10-01")).toBe(true);
+    expect(plausibleDob("2010-10-02", "2026-10-01")).toBe(false);
+    expect(plausibleDob("1940-01-01", "2026-10-01")).toBe(false);
+  });
+});
+
 describe("nameKey", () => {
+  it("is Unicode-aware and empty-safe", () => {
+    expect(nameKey("राम", "शर्मा")).not.toBe(nameKey("सीता", "वर्मा"));
+    expect(nameKey("---", "Kumar")).toBe(null);
+  });
   it("ignores case, accents, punctuation and spacing", () => {
     expect(nameKey("José", "O'Brien")).toBe(nameKey("JOSE", "obrien"));
     expect(nameKey("Mary Ann", "Kumar")).toBe("maryann|kumar");
@@ -58,7 +77,8 @@ describe("normalizePhone (E.164, US default)", () => {
     ["2145550104", "+12145550104"], ["1-214-555-0105", "+12145550105"], ["214-555-0106 x204", "+12145550106"],
     ["+91 98765 43210", "+919876543210"], ["0091 98765 43210", "+919876543210"], ["+44 20 7946 0958", "+442079460958"], ["", null],
   ])("%j -> %j", (input, out) => expect(v(normalizePhone(input))).toBe(out));
-  it.each(["555-01", "98765 43210 1", "123-555-0101", "214-155-0101", "call me", "+1 214 555 010", "21+4555", "9876543210 91"])(
+  it.each(["555-01", "98765 43210 1", "123-555-0101", "214-155-0101", "call me", "+1 214 555 010", "21+4555", "9876543210 91",
+    "9876543210", "(987) 654-3210", "+44 (0)20 7946 0958", "+91 098765 43210", "+1 555 555 0101"])(
     "rejects %j", (input) => expect(v(normalizePhone(input))).toBe("!invalid_phone"));
 });
 
@@ -73,7 +93,8 @@ describe("parseDate (mixed formats, per-row day/month detection)", () => {
     expect(v(parseDate("05/06/1992"))).toBe("!ambiguous_date");
     expect(v(parseDate("05/06/1992", "MDY"))).toBe("1992-05-06");
     expect(v(parseDate("05/06/1992", "DMY"))).toBe("1992-06-05");
-    expect(v(parseDate("13/05/2026", "MDY"))).toBe("2026-05-13"); // a part above 12 decides it per row
+    expect(v(parseDate("13/05/2026", "MDY"))).toBe("!date_order_conflict"); // contradicts the column's order
+    expect(v(parseDate("13/05/2026"))).toBe("2026-05-13"); // detect: a part above 12 decides it per row
   });
   it.each(["31/02/2026", "13/13/2026", "2026-02-30", "Foo 3, 2026", "yesterday", "1850-01-01"])("rejects %j", (input) =>
     expect(v(parseDate(input))).toBe("!invalid_date"));

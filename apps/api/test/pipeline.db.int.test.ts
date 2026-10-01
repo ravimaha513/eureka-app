@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { activityVisible, resolveScope } from "@eureka/shared";
-import { asUser, createTestDb, type TestDb } from "./db-harness.js";
+import { asUser, createTestDb, ownedCandidateCalls, type TestDb } from "./db-harness.js";
 import { CLIENT_ID, LOC, T, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 import { at, seedPipeline, type PipelineSeed } from "./pipeline-seed.js";
 
@@ -255,5 +255,52 @@ describe("interview_feedback", () => {
     expect(await q(i.recruiterId, null, "client")).toBe(false);
     expect(await q(null, i.id, "client")).toBe(false);
     expect(await q(i.recruiterId, i.id, "client")).toBe(true);
+  });
+});
+
+describe("activity read policies (0034: owned candidates as a hashed set)", () => {
+  const visible = async (key: keyof typeof U, table: "submission" | "interview", seeded: { id: string }[]) => {
+    const ids = new Set(seeded.map((s) => s.id));
+    return asUser(db.app, U[key], async (c) =>
+      (await c.query<{ id: string }>(`SELECT id FROM eureka.${table}`)).rows.map((r) => r.id).filter((id) => ids.has(id)).sort());
+  };
+
+  it.each(users)("RLS alone returns exactly the engine-visible submissions and interviews for %s", async (key) => {
+    const access = toUserAccess(key);
+    const subScope = resolveScope(access, "submission:read");
+    const intScope = resolveScope(access, "interview:read");
+    expect(await visible(key, "submission", seed.submissions))
+      .toEqual(seed.submissions.filter((s) => activityVisible(subScope, s)).map((s) => s.id).sort());
+    expect(await visible(key, "interview", seed.interviews))
+      .toEqual(seed.interviews.filter((i) => activityVisible(intScope, i)).map((i) => i.id).sort());
+  });
+
+  it("a row admitted only through candidate ownership stays visible", async () => {
+    // r2a (team t2) submitted t3's Open-to-all-teams candidates: t3's lead sees them through the candidate only.
+    const viaCandidate = seed.submissions.filter((s) => s.recruiterId === U.r2a && s.candidate.teamId === T.t3);
+    expect(viaCandidate.length).toBeGreaterThan(0);
+    expect(await visible("l3", "submission", viaCandidate)).toEqual(viaCandidate.map((s) => s.id).sort());
+    expect(await visible("r1a", "submission", viaCandidate)).toEqual([]);
+  });
+
+  it.each(["submission", "interview"] as const)("the %s read policy probes a hashed set, never an array per row", async (table) => {
+    const plan = await asUser(db.app, U.r1a, async (c) =>
+      (await c.query<{ "QUERY PLAN": string }>(`EXPLAIN SELECT count(*) FROM eureka.${table}`)).rows.map((r) => r["QUERY PLAN"]).join("\n"));
+    expect(plan).toMatch(/hashed SubPlan/);
+    expect(plan).not.toMatch(/candidate_id = ANY/);
+    const { rows } = await db.admin.query<{ qual: string }>(
+      `SELECT qual FROM pg_policies WHERE schemaname = 'eureka' AND tablename = $1 AND policyname = $2`, [table, `${table}_read`]);
+    expect(rows[0]!.qual).toMatch(/unnest\(\( SELECT authz\.owned_candidate_ids/);
+  });
+
+  it.each(["submission", "interview"] as const)("the %s read policy calls owned_candidate_ids once per statement", async (table) => {
+    // l3 and r1a reject most rows on the actor branches, so the ownership branch is probed for many rows.
+    for (const key of ["l3", "r1a"] as const) {
+      const total = (await db.admin.query(`SELECT count(*)::int AS n FROM eureka.${table}`)).rows[0].n as number;
+      const { calls, rows } = await ownedCandidateCalls(db.admin, U[key], `SELECT id FROM eureka.${table}`);
+      expect(rows, key).toBeGreaterThan(0);
+      expect(total - rows, key).toBeGreaterThan(1);
+      expect(calls, key).toBe(1);
+    }
   });
 });

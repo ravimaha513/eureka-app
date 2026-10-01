@@ -376,7 +376,20 @@ Review follow-ups in migration 0032 (2026-10-01):
 
 TODO (retention, OD-03): there is no purge job yet. `candidate_event` and `batch` refuse DELETE from everyone, so the retention job will need its own path: a dedicated definer function (owned by `authz_definer`, executable only by the worker) that sets a transaction-local marker the write guard checks before allowing the delete. The marker must not be a plain `set_config` GUC, which any client can set; use the same pattern as `authz.placement_status_context` (a row only the definer can write, keyed by `pg_current_xact_id()`).
 
-Not built (need other work first): **resumes** (`resume` table and upload) wait for the Phase 3 document quarantine pipeline (`file_object.scan_status`, S3, KMS); the **DOB blind index** in the duplicate check waits for OD-04 (DOB visibility) and KMS field encryption (`eureka-field`, `eureka-bidx`).
+Built in migration 0036 (2026-10-01), resumes (FR-CAN-07) on the A6.5 upload pipeline:
+
+| Rule | Enforcement |
+|---|---|
+| `resume` (candidate_id, status `pending`/`clean`/`infected`/`failed`/`rejected`/`expired`, scan_result code, content_type PDF or DOCX, size_bytes ≤ 15 MB, sha256_hex, version, is_current, uploaded_by, created_at, upload_expires_at, scanned_at) holds the file metadata itself; the generic `file_object` waits for compliance documents. No file names are stored | table CHECKs; partial unique index: one current resume per candidate; unique (candidate_id, version) |
+| Read: `document:read` covering the candidate (own/team/hierarchy/location/org, never the all-teams rule) and the candidate readable | policy `resume_read` (InitPlan scope arrays, EXISTS on candidate by primary key); API `resumeAccess` in `packages/shared` |
+| Upload: `document:upload` covering the candidate; at most three pending uploads per candidate; the server sets status, uploader, timestamps and the 5-minute upload window | `authz.create_resume_upload` (definer; 404/403/422/409); guard trigger; the app has SELECT only |
+| Presigned POST into the fixed key `quarantine/resumes/<id>`: bucket, exact key, exact Content-Type, `content-length-range` = declared size, 5 minutes; the API role has no tagging rights | `S3DocumentStorage`; IAM (`app.tf`); bucket policy: only the GuardDuty role tags `quarantine/`, only the worker writes `clean/` |
+| Scan and promotion by the worker (`resume-scan`, B6), polling the `GuardDutyMalwareScanStatus` tag of the exact object version (no EventBridge rule): NO_THREATS_FOUND + size and magic bytes (PDF `%PDF-`; DOCX ZIP with `[Content_Types].xml` and `word/`) → copied to `clean/resumes/<id>`, next version, current; THREATS_FOUND → `infected`, version deleted; other results or no result within 60 min → `failed` (left to the 2-day quarantine expiry); bad bytes → `rejected`; nothing uploaded → `expired` | `authz.resume_scan_queue` / `authz.resume_scan_finish` (worker only; pending rows only; clean needs the declared size and a SHA-256); a scanned row is final except losing `is_current` |
+| Download: clean only, presigned GET of `clean/` for 60 s with `Content-Disposition: attachment` and a generated name (`resume-v2.pdf`) | `POST /candidates/{id}/resumes/{resumeId}/download`; audit `resume.downloaded` |
+| Audit: `resume.upload_requested` (candidate id, type, size), `resume.downloaded` (candidate id, version), `resume.scanned` (status, result code; worker, no actor) | no file names or personal data |
+| Local development and tests: the API serves a directory with HMAC-signed policies enforcing the same conditions; the worker uses a deterministic fake scanner (EICAR = infected); refused in production | `LocalDocumentStorage`, `LocalDocumentStore`; config checks |
+
+Not built (need other work first): the **DOB blind index** in the duplicate check waits for OD-04 (DOB visibility) and KMS field encryption (`eureka-field`, `eureka-bidx`). Resume retention (OD-03) and notifying the uploader by email of an infected file (the UI shows the outcome) are open.
 
 ### B2.3 Interviews
 
@@ -463,6 +476,8 @@ Built in migration 0022 (2026-09-30), contract in `docs/placements-api.md` (PL-1
 | Candidate side effects: create → `confirmation`; `joined` → `placed` + new `assignment` (number per person, start = the day marked joined); `backout`/`bgc_failed` before joining → `active` (only if still in `confirmation`); `bgc_failed` after joining → assignment ended (`bgc_failed`) and candidate → `bench` | internal definer `authz.candidate_status_by_placement` (not executable by the app; authorized by the placement action, N2). Adds the edge `full_of_interviews → confirmation` for placements only |
 | While a placement is open, manual candidate transitions are refused (`placement_open`) | `authz.transition_candidate` (replaced in 0022) |
 | `placement.created` / `placement.state_changed` outbox rows in the same transaction (HR, Accounts, Immigration) | both functions |
+
+Built in migration 0035 (2026-10-01): the paperwork checklist is created with the placement (B5.3, N2). `authz.checklist_template` (kind, placement type, validated items; configuration owned by `authz_definer`, no app grant) is copied into `eureka.checklist_item` (placement_id, kind, position, doc_type, owner_role, required, status `pending`) by an AFTER INSERT trigger on `placement`, inside `authz.create_placement`. Items are append-only, written only by the definer, readable wherever the placement is (EXISTS by key). Deviation from B2.4: items reference the placement directly (`placement_id` with a foreign key) instead of `owner_type`/`owner_id`; onboarding items on assignments and the document link come with Phase 3. Template content is an open question (`docs/phase2-status.md`).
 
 Not yet done: nothing in this list. The outbox delivery job is built (migrations 0024 and 0029, B6 `outbox-delivery`); `candidate_event` rows are written by migration 0026.
 
@@ -767,6 +782,7 @@ CREATE POLICY candidate_update ON candidate FOR UPDATE TO eureka_app
 | outbox-prune | daily 04:00 America/New_York | Deletes events published more than `OUTBOX_RETENTION_DAYS` (default 30) days ago, with their delivery rows; the database refuses deleting unpublished rows or rows published less than 7 days ago. Also deletes succeeded `outbox-delivery` `job_run` rows (one per event) finished that long ago, through the definer function `eureka.prune_outbox_job_runs` (the worker still has no DELETE on `job_run`; a trigger refuses every other `job_run` delete or truncate). Safe because delivery is deduplicated by `published_at` and `outbox_delivery`, not by `job_run` | — |
 | idempotency-cleanup | daily 04:15 America/New_York | Deletes `idempotency_key` rows older than 24 hours (index on created_at); the worker cannot read stored responses | B3 |
 | key-rotation | monthly | Re-encrypt fields under the current data key | A6.3 |
+| resume-scan | every tick (run key = resume id, only once its outcome is known) | Polls up to 50 pending uploads for the GuardDuty `GuardDutyMalwareScanStatus` tag on the exact object version (ListObjectVersions limited to `quarantine/resumes/`); clean → size and magic-byte check, write `clean/resumes/<id>`, `authz.resume_scan_finish` (version, current), delete the quarantine version; infected → recorded, version deleted, alert log; other results, no result after `RESUME_SCAN_TIMEOUT_MINUTES` (60) or no upload `RESUME_UPLOAD_GRACE_MINUTES` (10) after the 5-minute window → `failed` / `expired`. Audited `resume.scanned`. Local mode: fake scanner (migration 0036) | FR-CAN-07, A6.5 |
 
 ## B7. Reporting
 
@@ -809,12 +825,14 @@ Tests are written with each feature.
 4. Load to staging, reconcile counts per sheet, get sign-off, then load production.
 5. Keep the sheets read-only in parallel for two weeks.
 
-Built in migration 0028 and `apps/api/src/import/` (usage, mapping file, review reasons and
-safeguards in `docs/import.md`): staging and review tables readable only by the `eureka_import`
-role; a configurable column/status mapping whose SRS Q6 entries are placeholders (unmapped or
-unconfirmed labels go to review); commit as each row's owner through the API's policies, guards
-and definer functions after sign-off by a second person with `access:manage`; a ledger makes
-re-runs idempotent.
+Built in migrations 0028 and 0033, `apps/api/src/import/` and `/api/v1/imports` (usage, mapping
+file, review reasons and safeguards in `docs/import.md`): staging and review tables readable only
+by the `eureka_import` role; a configurable column/status mapping whose SRS Q6 entries are
+placeholders (unmapped or unconfirmed labels go to review); review decisions and sign-off by
+signed-in org admins (a second person approves; the approval is bound to a digest of the rows and
+expires); each person loads through `authz.import_load_person`, which acts as the row's owner
+under the same policies, guards, transitions and audit as the API; a ledger of keyed hashes and
+natural keys makes re-runs idempotent.
 
 ## B10. Deviations and open decisions
 

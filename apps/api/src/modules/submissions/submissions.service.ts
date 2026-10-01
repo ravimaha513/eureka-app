@@ -182,7 +182,8 @@ export class SubmissionsService {
         [body.candidateId, body.jobTitle, body.clientId, body.vendorId ?? null, body.rate ?? null]);
       await this.audit.record(c, {
         actorId: user.id, action: "submission.created", entityType: "submission", entityId: ins.rows[0]!.id,
-        changes: { candidateId: body.candidateId, clientId: body.clientId },
+        // Design B3: duplicate checks are audited (yes/no only, like the answer itself).
+        changes: { candidateId: body.candidateId, clientId: body.clientId, duplicateWarning: dup.rows[0]!.d },
       });
       return { id: ins.rows[0]!.id, duplicateWarning: dup.rows[0]!.d };
     });

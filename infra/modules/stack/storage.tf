@@ -122,6 +122,9 @@ resource "aws_s3_bucket_policy" "tls_only" {
 }
 
 # Restricted documents must be written with the restricted KMS key.
+# Scan integrity (resume-scan job): the GuardDuty scan tag is the only signal
+# that a quarantined object is safe, so only the malware-protection role may
+# tag quarantine/ objects, and only the worker may write clean/ (promotion).
 resource "aws_s3_bucket_policy" "documents" {
   bucket = aws_s3_bucket.b["documents"].id
   policy = jsonencode({
@@ -142,6 +145,22 @@ resource "aws_s3_bucket_policy" "documents" {
         Action    = "s3:PutObject"
         Resource  = "${aws_s3_bucket.b["documents"].arn}/restricted/*"
         Condition = { StringNotEquals = { "s3:x-amz-server-side-encryption-aws-kms-key-id" = aws_kms_key.restricted.arn } }
+      },
+      {
+        Sid       = "OnlyMalwareScanTagsQuarantine"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = ["s3:PutObjectTagging", "s3:PutObjectVersionTagging", "s3:DeleteObjectTagging", "s3:DeleteObjectVersionTagging"]
+        Resource  = "${aws_s3_bucket.b["documents"].arn}/quarantine/*"
+        Condition = { ArnNotEquals = { "aws:PrincipalArn" = aws_iam_role.malware_scan.arn } }
+      },
+      {
+        Sid       = "OnlyWorkerPromotesToClean"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.b["documents"].arn}/clean/*"
+        Condition = { ArnNotEquals = { "aws:PrincipalArn" = aws_iam_role.worker.arn } }
       },
     ]
   })

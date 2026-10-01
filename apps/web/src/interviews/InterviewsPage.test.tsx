@@ -6,9 +6,11 @@ import type { Me } from "../api";
 const me: Me = { id: "u", email: "a@example.com", displayName: "Recruiter", roles: [], capabilities: ["interview:read", "interview:create"], csrfToken: "t" };
 const row: Interview = { id: "i1", submissionId: "s1", candidate: { id: "c", name: "Alex Doe" }, recruiter: { id: "u", name: "Recruiter" }, team: null, location: null, client: null, round: "Technical", startsAt: "2026-10-01T14:00:00Z", endsAt: "2026-10-01T15:00:00Z", coach: null, inviteReceived: false, callStatus: "scheduled", cleared: false, consentCaptured: false, otterUrl: "https://example.com/secret", recordingUrl: null, systemName: null, editableFields: ["cleared", "consentCaptured", "systemName", "callStatus"], feedbackKinds: ["location"] };
 const json = (value: unknown) => new Response(JSON.stringify(value));
-function setup(item = row, capabilities = me.capabilities) {
+const lookups = (locations: { id: string; name: string }[]) => ({ technologies: [], clients: [], vendors: [], implementationPartners: [], coaches: [], locations });
+function setup(item = row, capabilities = me.capabilities, locations = [{ id: "dal", name: "Dallas" }]) {
  const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
    const path = String(url);
+   if (path.includes("/lookups")) return json(lookups(locations));
    if (path.includes("/feedback")) return json({ items: [] });
    if (path.includes("/coaches")) return json({ items: [{ id: "coach", name: "Coach One" }] });
    if (path.includes("/submissions")) return json({ items: [{ id: "s1", candidateName: "Alex Doe", client: "Acme", jobTitle: "Engineer", status: "submitted" }, { id: "closed", candidateName: "Closed Candidate", status: "rejected" }], nextCursor: null });
@@ -60,6 +62,19 @@ describe("interview board", () => {
    fireEvent.change(screen.getByLabelText("Coach"), { target: { value: "coach" } });
    fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/v1/interviews", expect.objectContaining({ method: "POST", body: JSON.stringify({ submissionId: "s1", round: "Technical", startsAt: new Date("2026-10-01T10:00").toISOString(), endsAt: new Date("2026-10-01T11:00").toISOString(), coachId: "coach", inviteReceived: false }) })));
+ });
+ it("filters the board by interview location when there is more than one", async () => {
+   const fetch = setup(row, me.capabilities, [{ id: "dal", name: "Dallas" }, { id: "aus", name: "Austin" }]); await screen.findByText("Alex Doe");
+   const select = await screen.findByRole("combobox", { name: "Location filter" });
+   fireEvent.change(select, { target: { value: "aus" } });
+   await waitFor(() => expect(fetch.mock.calls.some(([u]) => String(u).startsWith("/api/v1/interviews?") && new URL(String(u), "http://x").searchParams.get("locationId") === "aus")).toBe(true));
+   fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+   expect(select).toHaveValue("");
+ });
+ it("offers no location filter with a single location", async () => {
+   const fetch = setup(); await screen.findByText("Alex Doe");
+   await waitFor(() => expect(fetch.mock.calls.some(([u]) => String(u).includes("/lookups"))).toBe(true));
+   expect(screen.queryByRole("combobox", { name: "Location filter" })).not.toBeInTheDocument();
  });
  it("rejects inverted date filters without sending an invalid query", async () => {
    const fetch = setup(); await screen.findByText("Alex Doe");

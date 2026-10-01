@@ -123,7 +123,7 @@ development container, 120 VUs, 30 s ramp, 2 min hold:
 | p95, interview board | 456 ms | < 500 ms |
 | failed requests | 0.02% | < 1% |
 
-Things to look at before the staging run:
+Things to look at before the staging run (all three tuned since, below):
 
 - `GET /api/v1/submissions` without filters takes 1.7 s for a manager and
   2.4 s for a location admin even when idle (58k submissions), and under load
@@ -131,3 +131,44 @@ Things to look at before the staging run:
 - The Hot List page takes ~200 ms idle and is the slowest screen under load.
 - `GET /api/v1/interviews` without a date range takes 0.5–0.8 s for broad
   scopes (the board always sends one).
+
+### Tuning (2026-10-01, idle, same seed; service time, 20 runs, p95)
+
+| Endpoint | Manager | Location admin | Lead |
+|---|---|---|---|
+| submissions, before 0027 | 1,608 ms | 2,612 ms | 473 ms |
+| submissions, after 0027 + 0034 | 38 ms | 42 ms | 34 ms |
+| interviews (no range), before 0027 | 476 ms | 765 ms | 226 ms |
+| interviews (no range), after 0027 + 0034 | 57 ms | 45 ms | 52 ms |
+| Hot List, before 0034 | 235 ms | 236 ms | 276 ms |
+| Hot List, after 0034 | 10 ms | 16 ms | 10 ms |
+
+Causes: (1) no index matched the list order, so every visible row was
+joined and sorted before `LIMIT` (0027 added `submitted_at` / `starts_at`
+indexes); (2) the activity read policies searched the caller's
+owned-candidate array linearly per row (~12,500 ids for a location admin:
+2.2 s just to read the visible submissions; 0034 makes it a hashed set,
+45 ms); (3) `authz.hotlist_page` ran a generic plan that sorted all ~40k
+Hot List rows per page (0034 plans each call with its actual arguments).
+
+0038 applies the same two fixes to the placement and assignment read policies
+and to `authz.hotlist_export` (idle p95, before → after: placements list
+81 → 58 ms manager, 60 → 46 ms location admin, 48 → 37 ms lead; full export
+298 → 157 ms manager, 172 → 55 ms lead; export with a name search 212 → 60 ms).
+
+### Second local run (2026-10-01, after 0034 and 0038: a pass)
+
+Same setup as the first run (one API process, pool of 10, shared PostgreSQL 16,
+fresh load seed with all migrations), 120 VUs, 30 s ramp, 2 min hold, 10 s ramp
+down; 4,553 requests, 2,673 iterations:
+
+| Metric | First run | Second run | Target |
+|---|---|---|---|
+| p95, all requests | 565 ms | 156 ms | < 500 ms |
+| p95, Hot List | 719 ms | 113 ms | < 500 ms |
+| p95, interview board | 456 ms | 214 ms | < 500 ms |
+| failed requests | 0.02% | 0.00% | < 1% |
+| checks | | 100% | > 99% |
+
+Slowest single request: 663 ms (interview board). Staging (0.25 vCPU,
+db.t4g.micro) is still to be measured.

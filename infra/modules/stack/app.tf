@@ -97,6 +97,11 @@ resource "aws_iam_role_policy" "execution_secrets" {
 }
 
 # API task role: documents bucket prefixes, field-encryption key, SES send.
+# The API never handles file bytes; these rights exist so the URLs it signs
+# work: presigned POST into quarantine/resumes/ (S3 checks the signer's
+# s3:PutObject; no s3:PutObjectTagging, so an upload cannot carry the scan
+# tag) and presigned GET of clean/resumes/ only. Other document types add
+# their own prefixes when they are built (restricted/ needs step-up first).
 resource "aws_iam_role" "api" {
   name               = "${local.name}-api-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
@@ -111,13 +116,13 @@ resource "aws_iam_role_policy" "api" {
         Sid      = "UploadToQuarantineOnly"
         Effect   = "Allow"
         Action   = ["s3:PutObject"]
-        Resource = "${aws_s3_bucket.b["documents"].arn}/quarantine/*"
+        Resource = "${aws_s3_bucket.b["documents"].arn}/quarantine/resumes/*"
       },
       {
         Sid      = "ReadScannedDocuments"
         Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:GetObjectTagging"]
-        Resource = ["${aws_s3_bucket.b["documents"].arn}/clean/*", "${aws_s3_bucket.b["documents"].arn}/restricted/*"]
+        Action   = ["s3:GetObject"]
+        Resource = "${aws_s3_bucket.b["documents"].arn}/clean/resumes/*"
       },
       {
         Effect   = "Allow"
@@ -142,8 +147,15 @@ resource "aws_iam_role_policy" "api" {
 #   412 the job compares the existing object's SHA-256 with its own (object
 #   metadata). No kms:Decrypt is granted, so a GET of an object body fails;
 #   HEAD reads metadata only.
-# No list, delete or retention-change rights on the audit bucket. Document
-# promotion grants are added with the jobs that need them.
+# No list, delete or retention-change rights on the audit bucket.
+#   resume-scan (worker/jobs/resume-scan.ts): polls the GuardDuty scan tag of
+#   pending uploads (no EventBridge rule: the pending set is small and the
+#   tag is the source of truth). ListBucketVersions only for keys under
+#   quarantine/resumes/ (a missing upload is then "no versions", not an
+#   ambiguous 403); read the exact scanned version and its tags; delete that
+#   version (infected or promoted); write clean/resumes/. KMS through S3 on
+#   the documents bucket only. No tagging rights: the scan result cannot be
+#   forged by the worker either (the bucket policy also denies it).
 resource "aws_iam_role" "worker" {
   name               = "${local.name}-worker-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
@@ -174,6 +186,37 @@ resource "aws_iam_role_policy" "worker" {
         Condition = {
           StringEquals = { "kms:ViaService" = "s3.${var.aws_region}.amazonaws.com" }
           StringLike   = { "kms:EncryptionContext:aws:s3:arn" = "${aws_s3_bucket.b["audit"].arn}*" }
+        }
+      },
+      {
+        Sid      = "ResumeScanList"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucketVersions"]
+        Resource = aws_s3_bucket.b["documents"].arn
+        Condition = {
+          StringLike = { "s3:prefix" = "quarantine/resumes/*" }
+        }
+      },
+      {
+        Sid      = "ResumeScanReadQuarantine"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:GetObjectVersion", "s3:GetObjectTagging", "s3:GetObjectVersionTagging", "s3:DeleteObjectVersion"]
+        Resource = "${aws_s3_bucket.b["documents"].arn}/quarantine/resumes/*"
+      },
+      {
+        Sid      = "ResumeScanPromote"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = "${aws_s3_bucket.b["documents"].arn}/clean/resumes/*"
+      },
+      {
+        Sid      = "ResumeScanKms"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt", "kms:GenerateDataKey"]
+        Resource = aws_kms_key.data.arn
+        Condition = {
+          StringEquals = { "kms:ViaService" = "s3.${var.aws_region}.amazonaws.com" }
+          StringLike   = { "kms:EncryptionContext:aws:s3:arn" = "${aws_s3_bucket.b["documents"].arn}*" }
         }
       },
     ]
@@ -450,7 +493,7 @@ resource "aws_ecs_task_definition" "worker" {
   }
   volume { name = "tmp" }
   # The worker gets its own environment: no session secret, OAuth client or
-  # document settings (it does not use them). See apps/api/src/worker/config.ts.
+  # field-encryption key (it does not use them). See apps/api/src/worker/config.ts.
   container_definitions = jsonencode([merge(local.container_base, {
     name    = "worker"
     command = ["node", "dist/worker.js"]
@@ -459,6 +502,7 @@ resource "aws_ecs_task_definition" "worker" {
       { name = "NODE_EXTRA_CA_CERTS", value = "/app/certs/rds-global-bundle.pem" },
       { name = "AWS_REGION", value = var.aws_region },
       { name = "AUDIT_BUCKET", value = aws_s3_bucket.b["audit"].id },
+      { name = "DOCUMENTS_BUCKET", value = aws_s3_bucket.b["documents"].id },
       { name = "FEEDBACK_MAIL_MODE", value = var.feedback_from_email != "" ? "ses" : "disabled" },
       { name = "DB_POOL_MAX", value = "3" },
       { name = "SHUTDOWN_GRACE_SECONDS", value = "20" },
@@ -523,6 +567,8 @@ resource "aws_ecs_task_definition" "migrate" {
       { name = "DB_HOST", value = aws_db_instance.main.address },
       { name = "DB_NAME", value = "eureka" },
       { name = "NODE_EXTRA_CA_CERTS", value = "/app/certs/rds-global-bundle.pem" },
+      # Read only by the one-off first-admin bootstrap (dist/db/bootstrap.js): admins must be in the domain the API accepts.
+      { name = "GOOGLE_HOSTED_DOMAIN", value = var.google_hosted_domain },
     ]
     secrets = [
       { name = "DB_MASTER_USERNAME", valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:username::" },

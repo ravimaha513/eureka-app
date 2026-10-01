@@ -213,6 +213,114 @@ The workflow, per environment:
 Migrations must be backward compatible with the running version
 (expand → deploy → contract), because step 3 runs before the new API is live.
 
+## First admin (bootstrap)
+
+A freshly deployed stack has the role catalog and no users, so nobody can
+sign in (Google sign-in only admits accounts that already exist in
+`app_user`; dev sign-in is refused under `NODE_ENV=production`).
+`dist/db/bootstrap.js` creates the first administrators once. Run it as a
+one-off task on the migrate task definition, like the restore check: that
+task has the RDS master credentials, `APP_DB_PASSWORD` and
+`GOOGLE_HOSTED_DOMAIN`, and runs in the "jobs" security group.
+
+What it does and refuses (database function `authz.bootstrap_admins`, migration 0037):
+
+- Creates **two** `org_admin` users for Google Workspace emails in
+  `google_hosted_domain` (staging and production: `aceintegrator.com`).
+  Two, because granting any restricted role (HR, Accounts, Immigration,
+  CEO, ..., and `org_admin` itself) needs a second admin who is neither the
+  requester nor the grantee (docs/admin-api.md AD-3): with one admin, no
+  restricted role could ever be granted and no second admin could be added.
+  `--single-admin` creates one anyway (only for a throwaway stack that needs
+  no restricted roles).
+- The admins hold `org_admin` only and see no business data (HANDOFF rule 7,
+  AD-3a). Use accounts that will never need a business role (e.g. a separate
+  `ravi.admin@` account), because a user with a business role cannot be
+  `org_admin` and vice versa.
+- **Refuses (exit 3) while any active `org_admin` exists**, so it is no
+  backdoor later; further admins go through Users & Access with a second
+  approver. Running it again with exactly the current admins changes nothing
+  and exits 0. Emails outside the hosted domain, or an existing account that
+  is inactive or holds a role, are refused too. Exit 2 means bad arguments.
+- Audits each grant (`audit_event.action = 'admin.bootstrap'`, no actor,
+  `changes = {actor: "system:bootstrap", role: "org_admin", ...}`, no email)
+  in the same transaction. The task log line carries user ids, not emails.
+  The emails do appear in the task's command override (ECS
+  `describe-tasks`, CloudTrail), like any admin-created user's email in the
+  database.
+- The admins sign in with Google at the app URL: the first sign-in links the
+  Google account to the user by email (`google_sub` is set then), exactly
+  like a user an admin creates; later sign-ins match by `sub`.
+
+Prerequisites: a deploy of a commit that contains `dist/db/bootstrap.js` and
+migration 0037 (the deploy's migrate step applies it), real Google OAuth
+client values in SSM (step 4 of the one-time setup), and admin AWS
+credentials with `jq` and `terragrunt`.
+
+### Staging (`https://eureka-staging.spokenly.click`)
+
+```sh
+ENV=staging; export AWS_REGION=us-east-2
+OUT=$(cd infra/live/$ENV && terragrunt output -json)
+CLUSTER=$(jq -r .ecs_cluster.value <<<"$OUT")
+TASK_FAMILY=$(jq -r .migrate_task_definition.value <<<"$OUT")
+SUBNETS=$(jq -r '.public_subnet_ids.value | join(",")' <<<"$OUT")
+SECURITY_GROUP=$(jq -r .jobs_security_group_id.value <<<"$OUT")
+# Two admin accounts in aceintegrator.com; "Display Name <email>" or just the email.
+# Staging only: append "--demo-data" to the command array to load the fictional demo org (see below).
+OVERRIDES=$(jq -nc --arg a1 'First Admin <admin1@aceintegrator.com>' --arg a2 'Second Admin <admin2@aceintegrator.com>' \
+  '{containerOverrides: [{name: "migrate", command: ["node", "dist/db/bootstrap.js", "--admin", $a1, "--admin", $a2]}]}')
+TASK=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASK_FAMILY" --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[${SUBNETS}],securityGroups=[${SECURITY_GROUP}],assignPublicIp=ENABLED}" \
+  --overrides "$OVERRIDES" --started-by "bootstrap-admin" --query 'tasks[0].taskArn' --output text)
+aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK"
+aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --query 'tasks[0].containers[0].exitCode' --output text   # 0 = created or unchanged
+aws logs get-log-events --log-group-name "/eureka/$ENV/migrate" --log-stream-name "migrate/migrate/${TASK##*/}" \
+  --query 'events[].message' --output text
+```
+
+Without terragrunt, set `CLUSTER=eureka-staging`, `TASK_FAMILY=eureka-staging-migrate`
+and read `SUBNETS` / `SECURITY_GROUP` (`eureka-staging-jobs`) from the VPC console. If the
+deployed migrate task definition predates `GOOGLE_HOSTED_DOMAIN`, add
+`environment: [{name: "GOOGLE_HOSTED_DOMAIN", value: "aceintegrator.com"}]` to the
+container override.
+
+### Production (later)
+
+The same commands with `ENV=production; export AWS_REGION=us-east-1`, and
+**never** `--demo-data` (it refuses any host or database name containing
+"prod" anyway). Do it right after the first successful production deploy
+and record it in the operations log.
+
+### After the bootstrap: users, roles, second approval
+
+1. Both admins sign in (Google, hosted-domain accounts) and open Users & Access.
+2. Admin 1 creates users (`POST /admin/users`; email must be in the domain)
+   and assigns roles. Non-restricted roles (recruiter, lead, manager, associate
+   director, coach, location roles) apply immediately.
+3. Restricted roles (HR, Accounts, Immigration, CEO, BU Head, Offshore
+   Manager, Associate HR, Documents Team, `org_admin`) become pending
+   requests; **Admin 2** approves them under Role requests (the requester and
+   the grantee cannot). Pending requests expire after 7 days.
+4. To add a third admin later: create the user, request `org_admin`, have
+   the other admin approve. Neither admin can deactivate or demote the last
+   active admin (`last_admin`).
+
+### Demo data (staging only, optional)
+
+`--demo-data` also loads a small **fictional** org (apps/api/src/db/demo-data.ts,
+modeled on the seed-dev fixtures): 12 users in a sales hierarchy with three
+teams, a coach and a location ops admin for "Demo Dallas"/"Demo Austin", 32
+candidates and 12 submissions. Demo users have `@demo.invalid` emails, outside
+the hosted domain, so nobody can sign in as them, and only non-restricted
+roles (no approval is bypassed). Candidates and submissions are written as
+each demo recruiter through the app role, RLS and audit, like the API.
+It refuses production-looking targets and a database that already holds real
+candidates; a re-run adds nothing. The admins see none of it (no data role):
+to show it, create a business account for the presenter in Users & Access and
+give it, for example, Location Ops Admin for "Demo Dallas" (24 candidates), or
+Associate Director and make the demo managers report to it (all 32).
+
 ## Turning on the worker
 
 The worker runs scheduled jobs from the `eureka.job_run` table (migrations 0016,
