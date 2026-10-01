@@ -16,7 +16,7 @@ import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
 import { CLIENT_ID, LOC, T, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
-import { newCandidate, selectedSubmission } from "./placement-seed.js";
+import { extraUser, newCandidate, selectedSubmission } from "./placement-seed.js";
 import { seedPipeline, type PipelineSeed } from "./pipeline-seed.js";
 
 /** API checks for docs/placements-api.md (placements, lookups, per-record actions). */
@@ -322,6 +322,10 @@ describe("placements", () => {
       for (const m of made) {
         const res = await call(key, "GET", `/api/v1/placements/${m.id}`);
         expect(res.statusCode, `${key} ${m.id}`).toBe(activityVisible(scope, m) ? 200 : 404);
+        // The assignment key only where assignment:read covers the actor snapshot or the candidate.
+        if (res.statusCode === 200) {
+          expect("assignment" in res.json(), `${key} assignment`).toBe(activityVisible(resolveScope(access, "assignment:read"), m));
+        }
       }
     });
 
@@ -480,7 +484,7 @@ describe("placements", () => {
     });
 
     it("audit never contains rates or contact details (PL-6, PL-9)", async () => {
-      const { sub } = await fresh();
+      const { cand, sub } = await fresh();
       const res = await post("r1a", body(sub));
       const id = res.json().id as string;
       await call("r1a", "PATCH", `/api/v1/placements/${id}/status`, { to: "paperwork" });
@@ -490,6 +494,13 @@ describe("placements", () => {
       const text = JSON.stringify(rows);
       expect(text).not.toMatch(/62\.5|ina@|4695550199|Ina Voice|99\/hr/);
       expect(rows[2].changes).toEqual({ from: "paperwork", to: "backout", reasonGiven: true });
+      // Candidate side effects are audited on the candidate, marked as placement-driven.
+      const cand_ = await db.admin.query(
+        `SELECT action, actor_id, changes FROM eureka.audit_event WHERE entity_type = 'candidate' AND entity_id = $1 ORDER BY seq`, [cand.id]);
+      expect(cand_.rows).toEqual([
+        { action: "candidate.transition", actor_id: U.r1a, changes: { from: "active", to: "confirmation", via: "placement" } },
+        { action: "candidate.transition", actor_id: U.r1a, changes: { from: "confirmation", to: "active", via: "placement" } },
+      ]);
     });
   });
 
@@ -525,6 +536,46 @@ describe("placements", () => {
       expect((await call("m1", "GET", `/api/v1/candidates/${cand.id}`)).json().status).toBe("bench");
       const ev = await db.admin.query(`SELECT type FROM eureka.outbox_event WHERE aggregate_id = $1`, [id]);
       expect(ev.rows.map((r) => r.type).sort()).toEqual(["placement.created", ...Array(5).fill("placement.state_changed")]);
+    });
+
+    it("audits joined and bgc_failed candidate moves; status audit uses the locked from", async () => {
+      const { cand, id } = await placed();
+      for (const to of ["paperwork", "bgc", "ready", "joined"]) expect((await move("r1a", id, to)).statusCode).toBe(200);
+      expect((await move("m1", id, "bgc_failed", "Adverse report")).statusCode).toBe(200);
+      const st = await db.admin.query(`SELECT changes FROM eureka.audit_event WHERE action = 'placement.status' AND entity_id = $1 ORDER BY seq`, [id]);
+      expect(st.rows.map((r) => `${r.changes.from}>${r.changes.to}`))
+        .toEqual(["confirmed>paperwork", "paperwork>bgc", "bgc>ready", "ready>joined", "joined>bgc_failed"]);
+      const ca = await db.admin.query(
+        `SELECT actor_id, changes FROM eureka.audit_event WHERE entity_type = 'candidate' AND entity_id = $1 ORDER BY seq`, [cand.id]);
+      expect(ca.rows).toEqual([
+        { actor_id: U.r1a, changes: { from: "active", to: "confirmation", via: "placement" } },
+        { actor_id: U.r1a, changes: { from: "confirmation", to: "placed", via: "placement" } },
+        { actor_id: U.m1, changes: { from: "placed", to: "bench", via: "placement" } },
+      ]);
+    });
+
+    it("assignment is returned only where assignment:read covers the placement", async () => {
+      const { id } = await placed();
+      for (const to of ["paperwork", "bgc", "ready", "joined"]) expect((await move("r1a", id, to)).statusCode).toBe(200);
+      for (const key of ["r1a", "l1", "m1", "hr", "acct"] as const) {
+        const p = (await call(key, "GET", `/api/v1/placements/${id}`)).json();
+        expect(p.assignment, key).toMatchObject({ assignmentNo: 1, endDate: null });
+      }
+      // Location ops admin (Dallas) reads the placement but has no assignment:read: the key is omitted.
+      expect(can(toUserAccess("locD"), "assignment:read")).toBe(false);
+      const loc = await call("locD", "GET", `/api/v1/placements/${id}`);
+      expect(loc.statusCode, loc.body).toBe(200);
+      expect("assignment" in loc.json()).toBe(false);
+      // Immigration holds assignment:read but not placement:read.
+      expect((await call("imm", "GET", `/api/v1/placements/${id}`)).statusCode).toBe(403);
+      // Associate HR: placement:read and assignment:read at org scope.
+      await extraUser(db, "ahr-api", "associate_hr");
+      const res = await app.inject({ method: "POST", url: "/api/auth/dev-login", payload: { email: "ahr-api@eureka.example" } });
+      expect(res.statusCode).toBe(204);
+      const cookie = String(res.headers["set-cookie"]).split(";")[0]!;
+      const ahr = await app.inject({ method: "GET", url: `/api/v1/placements/${id}`, headers: { cookie } });
+      expect(ahr.statusCode, ahr.body).toBe(200);
+      expect(ahr.json().assignment).toMatchObject({ assignmentNo: 1 });
     });
 
     it("skips, NULLs and unknown targets are refused", async () => {

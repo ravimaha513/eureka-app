@@ -23,7 +23,7 @@ like `/submissions`. Design references: B2.2 (`placement`, `placement_contact`,
 
 - `GET /api/v1/placements?status=&candidateId=&recruiterId=&from=&to=&cursor=&limit=` (`placement:read`) returns
   `{ items: [Placement], nextCursor }`
-- `GET /api/v1/placements/:id` returns `Placement` including `contacts` and `assignment` (if any).
+- `GET /api/v1/placements/:id` returns `Placement` including `contacts` and, where the caller holds `assignment:read` on it, `assignment`.
 - `POST /api/v1/placements` (`placement:create`, header `Idempotency-Key`) with
   `{ submissionId, placementType: "c2c"|"w2"|"1099", rate?, workMode: "onsite"|"remote"|"hybrid", projectCity?, projectState?, tentativeStart: "YYYY-MM-DD", implementationPartnerId?, contacts?: [{ kind: "vendor_poc"|"invoicing_poc"|"client_manager", name, email?, phone? }] }`
   returns 201 `{ id, isFirstPlacement }`.
@@ -67,12 +67,23 @@ and `packages/shared/src/authz/{state-machines,actions}.ts`. Deviations and prec
   candidate terminated meanwhile stays terminated. `joined` requires the candidate in `confirmation`.
 - **Assignment** `startDate` is the day the placement is marked `joined` (not `tentativeStart`);
   `assignmentNo` is the next number per person.
+- **Assignment visibility** follows `assignment:read`, not `placement:read`: the `assignment` key is present
+  only when `assignment:read` covers the placement's actor snapshot (recruiter, team, location) or its
+  candidate, and omitted otherwise (e.g. Location Ops Admin). The database policy (migration 0023) also
+  requires the placement itself to be visible, so Immigration (`assignment:read` without `placement:read`)
+  sees no assignments.
+- **Audit.** `placement.status` records the `from` status read under the row lock by
+  `authz.transition_placement` (which returns `from_status, to_status, candidate_from, candidate_to`), never
+  the API's earlier read. Candidate status changes caused by a placement (creation → `confirmation`,
+  `joined` → `placed`, backout/`bgc_failed` → `active`, `bgc_failed` after joining → `bench`) are audited as
+  `candidate.transition` on the candidate, `{ from, to, via: "placement" }`; none is written when the
+  candidate did not move (e.g. terminated meanwhile).
 - **Idempotency-Key**: printable ASCII, 1–200 characters. Missing or malformed → **400**
   `idempotency_key_required`. Keys are per user and endpoint; the body hash ignores key order. A repeat
   returns the same 201 body; a failed request (any 4xx) does not consume the key.
 - **Extra fields** (additive): `Placement.implementationPartner: {id,name}|null`; `team` and `location` may
   be `null` (the actor had no team); `candidate.name` is `null` when the caller cannot read the candidate's
-  person row; `assignment` is `null` (not omitted) before joining. Lookups add
+  person row; `assignment` is `null` (not omitted) before joining when the caller may read it. Lookups add
   `implementationPartners: [{id,name}]` (new reference table `implementation_partner`).
 - **List filters** `from`/`to` apply to `createdAt`; order is `createdAt` descending.
 - **Validation** (422): `rate` > 0 and ≤ 1000 with two decimals (hourly, same bound as submissions);

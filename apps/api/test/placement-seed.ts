@@ -1,4 +1,4 @@
-import type { CandidateRef } from "@eureka/shared";
+import type { CandidateRef, Role, UserAccess } from "@eureka/shared";
 import { asUser, type TestDb } from "./db-harness.js";
 import { CLIENT_ID, TECH_ID, type FixtureCandidate } from "./fixtures.js";
 
@@ -51,17 +51,45 @@ export async function createPlacement(db: TestDb, actor: string | null, submissi
     a.workMode === undefined ? "onsite" : a.workMode, a.city ?? "Dallas", a.state ?? "TX",
     a.start === undefined ? "2031-01-05" : a.start, a.partner ?? null,
     a.contacts === undefined ? null : JSON.stringify(a.contacts)];
-  const run = async (q: (sql: string, params: unknown[]) => Promise<{ rows: { placement_id: string; is_first_placement: boolean }[] }>) => {
-    const r = await q(sql, params);
-    return { id: r.rows[0]!.placement_id, isFirst: r.rows[0]!.is_first_placement };
+  type Row = { placement_id: string; is_first_placement: boolean; candidate_from: string | null; candidate_to: string | null };
+  const run = async (q: (sql: string, params: unknown[]) => Promise<{ rows: Row[] }>) => {
+    const r = (await q(sql, params)).rows[0]!;
+    return { id: r.placement_id, isFirst: r.is_first_placement, candidateFrom: r.candidate_from, candidateTo: r.candidate_to };
   };
   return actor ? asUser(db.app, actor, (c) => run((s, p) => c.query(s, p)), true) : run((s, p) => db.app.query(s, p));
 }
 
-export async function transitionPlacement(db: TestDb, actor: string | null, id: string | null, to: string | null, reason: string | null = null) {
-  const sql = `SELECT authz.transition_placement($1,$2,$3) AS s`;
+export interface TransitionResult {
+  from_status: string;
+  to_status: string;
+  candidate_from: string | null;
+  candidate_to: string | null;
+}
+
+/** Calls authz.transition_placement and returns its full row (actual from/to, candidate change). */
+export async function transitionPlacementRow(
+  db: TestDb, actor: string | null, id: string | null, to: string | null, reason: string | null = null,
+): Promise<TransitionResult> {
+  const sql = `SELECT * FROM authz.transition_placement($1,$2,$3)`;
   const r = actor
-    ? await asUser(db.app, actor, (c) => c.query<{ s: string }>(sql, [id, to, reason]), true)
-    : await db.app.query<{ s: string }>(sql, [id, to, reason]);
-  return r.rows[0]!.s;
+    ? await asUser(db.app, actor, (c) => c.query<TransitionResult>(sql, [id, to, reason]), true)
+    : await db.app.query<TransitionResult>(sql, [id, to, reason]);
+  return r.rows[0]!;
+}
+
+/** The new placement status. */
+export async function transitionPlacement(db: TestDb, actor: string | null, id: string | null, to: string | null, reason: string | null = null) {
+  return (await transitionPlacementRow(db, actor, id, to, reason)).to_status;
+}
+
+/**
+ * An org-scoped user outside the shared fixtures (e.g. associate_hr), signed in
+ * as `${key}@eureka.example`. Returns the id and the engine's view of access.
+ */
+export async function extraUser(db: TestDb, key: string, role: Role): Promise<{ id: string; access: UserAccess }> {
+  const r = await db.admin.query<{ id: string }>(
+    `INSERT INTO eureka.app_user (email, display_name) VALUES ($1, $2) RETURNING id`, [`${key}@eureka.example`, key]);
+  const id = r.rows[0]!.id;
+  await db.admin.query(`INSERT INTO eureka.user_role (user_id, role_key) VALUES ($1, $2)`, [id, role]);
+  return { id, access: { userId: id, roles: [{ role }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [] } };
 }

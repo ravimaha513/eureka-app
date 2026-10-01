@@ -11,6 +11,7 @@ import type pg from "pg";
 import {
   PLACEMENT_REASON_REQUIRED,
   ownsActivity,
+  ownsCandidate,
   placementTransitionAllowed,
   placementTransitions,
   resolveScope,
@@ -34,6 +35,10 @@ interface PlacementRow {
   submission_id: string;
   candidate_id: string;
   candidate_name: string | null;
+  /** Candidate ownership (NULL when the caller cannot read the candidate row). */
+  cand_recruiter_id: string | null;
+  cand_team_id: string | null;
+  cand_location_id: string | null;
   recruiter_id: string;
   recruiter_name: string | null;
   team_id: string | null;
@@ -64,6 +69,7 @@ const SELECT = `
          pl.client_id, pl.vendor_id, pl.implementation_partner_id, pl.placement_type, pl.rate, pl.work_mode,
          pl.project_city, pl.project_state, pl.tentative_start::text AS tentative_start, pl.is_first_placement,
          pl.status, pl.status_changed_at, pl.created_at, ${toMicros("pl.created_at")} AS k,
+         c.recruiter_id AS cand_recruiter_id, c.team_id AS cand_team_id, c.location_id AS cand_location_id,
          CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name END AS candidate_name,
          ru.display_name AS recruiter_name, tm.name AS team_name, l.name AS location_name,
          cl.name AS client_name, v.name AS vendor_name, ip.name AS implementation_partner_name
@@ -161,17 +167,34 @@ export class PlacementsService {
     return rows[0];
   }
 
+  /**
+   * assignment:read covers the placement's actor snapshot or its candidate
+   * (mirrors the assignment_read policy). Candidate ownership comes from the
+   * candidate row the caller can read.
+   */
+  private assignmentVisible(access: UserAccess, r: PlacementRow): boolean {
+    const scope = resolveScope(access, "assignment:read");
+    if (!scope) return false;
+    if (ownsActivity(scope, actor(r))) return true;
+    return ownsCandidate(scope, {
+      recruiterId: r.cand_recruiter_id, teamId: r.cand_team_id, locationId: r.cand_location_id,
+      visibility: "team", marketingStatus: "",
+    });
+  }
+
   async get(user: AuthedUser, id: string) {
     return this.db.withUser(user.id, async (c) => {
       const row = await this.load(c, user, id);
       const contacts = await c.query<{ id: string; kind: string; name: string; email: string | null; phone: string | null }>(
         `SELECT id, kind, name, email, phone FROM eureka.placement_contact WHERE placement_id = $1 ORDER BY created_at, id`, [id]);
+      const base = { ...this.present(user.access, row), contacts: contacts.rows };
+      // Field policy: the assignment key only where assignment:read covers the placement.
+      if (!this.assignmentVisible(user.access, row)) return base;
       const asg = await c.query<{ assignment_no: number; start_date: string; end_date: string | null; end_reason: string | null }>(
         `SELECT assignment_no, start_date::text, end_date::text, end_reason FROM eureka.assignment WHERE placement_id = $1`, [id]);
       const a = asg.rows[0];
       return {
-        ...this.present(user.access, row),
-        contacts: contacts.rows,
+        ...base,
         assignment: a ? { assignmentNo: a.assignment_no, startDate: a.start_date, endDate: a.end_date, endReason: a.end_reason } : null,
       };
     });
@@ -214,13 +237,16 @@ export class PlacementsService {
       if (sub.status !== "selected") throw new UnprocessableEntityException("submission_not_selected");
 
       let result: { id: string; isFirstPlacement: boolean };
+      let candidateChange: { from: string | null; to: string | null };
       try {
-        const r = await c.query<{ placement_id: string; is_first_placement: boolean }>(
+        const r = await c.query<{ placement_id: string; is_first_placement: boolean; candidate_from: string | null; candidate_to: string | null }>(
           `SELECT * FROM authz.create_placement($1, $2, $3, $4, $5, $6, $7::date, $8, $9::jsonb)`,
           [body.submissionId, body.placementType, body.rate ?? null, body.workMode, body.projectCity ?? null,
             body.projectState ?? null, body.tentativeStart, body.implementationPartnerId ?? null,
             body.contacts ? JSON.stringify(body.contacts) : null]);
-        result = { id: r.rows[0]!.placement_id, isFirstPlacement: r.rows[0]!.is_first_placement };
+        const row = r.rows[0]!;
+        result = { id: row.placement_id, isFirstPlacement: row.is_first_placement };
+        candidateChange = { from: row.candidate_from, to: row.candidate_to };
       } catch (err) {
         mapPlacementError(err);
       }
@@ -235,7 +261,17 @@ export class PlacementsService {
           contactCount: body.contacts?.length ?? 0,
         },
       });
+      await this.auditCandidate(c, user, sub.candidate_id, candidateChange);
       return result;
+    });
+  }
+
+  /** PL-5 side effect on the candidate, audited like a manual candidate transition. */
+  private async auditCandidate(c: pg.PoolClient, user: AuthedUser, candidateId: string, ch: { from: string | null; to: string | null }) {
+    if (ch.to === null) return;
+    await this.audit.record(c, {
+      actorId: user.id, action: "candidate.transition", entityType: "candidate", entityId: candidateId,
+      changes: { from: ch.from, to: ch.to, via: "placement" },
     });
   }
 
@@ -250,17 +286,19 @@ export class PlacementsService {
       if (!placementTransitionAllowed(row.status, body.to)) throw new UnprocessableEntityException("invalid_transition");
       const reason = body.reason ? body.reason : null;
       if (PLACEMENT_REASON_REQUIRED.has(body.to) && reason === null) throw new UnprocessableEntityException("reason_required");
-      let status: string;
+      let t: { from_status: string; to_status: string; candidate_from: string | null; candidate_to: string | null };
       try {
-        status = (await c.query<{ s: string }>(`SELECT authz.transition_placement($1, $2, $3) AS s`, [id, body.to, reason])).rows[0]!.s;
+        t = (await c.query<typeof t>(`SELECT * FROM authz.transition_placement($1, $2, $3)`, [id, body.to, reason])).rows[0]!;
       } catch (err) {
         mapPlacementError(err);
       }
+      // The function reads the status under the row lock: audit what actually changed.
       await this.audit.record(c, {
         actorId: user.id, action: "placement.status", entityType: "placement", entityId: id,
-        changes: { from: row.status, to: status, ...(reason ? { reasonGiven: true } : {}) },
+        changes: { from: t.from_status, to: t.to_status, ...(reason ? { reasonGiven: true } : {}) },
       });
-      return { id, status };
+      await this.auditCandidate(c, user, row.candidate_id, { from: t.candidate_from, to: t.candidate_to });
+      return { id, status: t.to_status };
     });
   }
 }

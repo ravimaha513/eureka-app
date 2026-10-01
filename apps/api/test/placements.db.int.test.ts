@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { activityVisible, resolveScope, type ActivityRef } from "@eureka/shared";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, T, U, seedFixtures, toUserAccess } from "./fixtures.js";
-import { createPlacement, newCandidate, selectedSubmission, transitionPlacement } from "./placement-seed.js";
+import { createPlacement, extraUser, newCandidate, selectedSubmission, transitionPlacement, transitionPlacementRow } from "./placement-seed.js";
 
 /**
  * Database-only checks for migration 0022 (placements): every rule holds with
@@ -167,6 +167,43 @@ describe("create_placement", () => {
 });
 
 describe("transition_placement", () => {
+  it("returns the actual from/to and the candidate change it made", async () => {
+    const { cand, sub } = await ready({ marketingStatus: "full_of_interviews" });
+    const created = await createPlacement(db, U.r1a, sub);
+    expect([created.candidateFrom, created.candidateTo]).toEqual(["full_of_interviews", "confirmation"]);
+    const id = created.id;
+    expect(await transitionPlacementRow(db, U.r1a, id, "paperwork"))
+      .toEqual({ from_status: "confirmed", to_status: "paperwork", candidate_from: null, candidate_to: null });
+    for (const to of ["bgc", "ready"]) await transitionPlacement(db, U.r1a, id, to);
+    expect(await transitionPlacementRow(db, U.r1a, id, "joined"))
+      .toEqual({ from_status: "ready", to_status: "joined", candidate_from: "confirmation", candidate_to: "placed" });
+    expect(await transitionPlacementRow(db, U.m1, id, "bgc_failed", "Adverse"))
+      .toEqual({ from_status: "joined", to_status: "bgc_failed", candidate_from: "placed", candidate_to: "bench" });
+    expect((await candStatus(cand.id)).marketing_status).toBe("bench");
+
+    const b = await ready();
+    const p2 = await createPlacement(db, U.r1a, b.sub);
+    expect([p2.candidateFrom, p2.candidateTo]).toEqual(["active", "confirmation"]);
+    expect(await transitionPlacementRow(db, U.r1a, p2.id, "backout", "Declined"))
+      .toEqual({ from_status: "confirmed", to_status: "backout", candidate_from: "confirmation", candidate_to: "active" });
+
+    // A candidate moved elsewhere meanwhile is left alone: no candidate change reported.
+    const t = await ready();
+    const p3 = await createPlacement(db, U.r1a, t.sub);
+    await force(`UPDATE eureka.candidate SET marketing_status = 'terminated' WHERE id = $1`, [t.cand.id]);
+    expect(await transitionPlacementRow(db, U.r1a, p3.id, "backout", "Left"))
+      .toEqual({ from_status: "confirmed", to_status: "backout", candidate_from: null, candidate_to: null });
+  });
+
+  it("reports the status read under the lock, not a caller's earlier read", async () => {
+    const { sub } = await ready();
+    const { id } = await createPlacement(db, U.r1a, sub);
+    // Someone else moved it on after the caller looked; backout reports the real "from".
+    await transitionPlacement(db, U.l1, id, "paperwork");
+    await transitionPlacement(db, U.l1, id, "bgc");
+    expect((await transitionPlacementRow(db, U.r1a, id, "backout", "Late change")).from_status).toBe("bgc");
+  });
+
   it("walks confirmed → joined one step at a time with side effects", async () => {
     const { cand, sub } = await ready();
     const { id } = await createPlacement(db, U.r1a, sub);
@@ -370,7 +407,7 @@ describe("idempotency_key table", () => {
 });
 
 describe("RLS differential: placement visibility in the database matches the engine", () => {
-  const made: (ActivityRef & { id: string })[] = [];
+  const made: (ActivityRef & { id: string; joined: boolean })[] = [];
 
   beforeAll(async () => {
     const plan: { actor: string; cand: Parameters<typeof newCandidate>[1] }[] = [
@@ -385,12 +422,28 @@ describe("RLS differential: placement visibility in the database matches the eng
       const c = await newCandidate(db, cand);
       const sub = await selectedSubmission(db, actor, c.id);
       const { id } = await createPlacement(db, actor, sub, { contacts: [{ kind: "client_manager", name: "M" }] });
+      // Every other placement joins, so it has an assignment.
+      const joined = made.length % 2 === 0;
+      if (joined) for (const to of ["paperwork", "bgc", "ready", "joined"]) await transitionPlacement(db, actor, id, to);
       const p = await placement(id);
       const cs = await candStatus(c.id);
-      made.push({ id, recruiterId: p.recruiter_id, teamId: p.team_id, locationId: p.location_id,
+      made.push({ id, joined, recruiterId: p.recruiter_id, teamId: p.team_id, locationId: p.location_id,
         candidate: { ...c, marketingStatus: cs.marketing_status } });
     }
   }, 60_000);
+
+  /** assignment:read on the actor snapshot or the candidate, and the placement visible. */
+  const expectedAssignments = (access: Parameters<typeof resolveScope>[0]) => {
+    const read = resolveScope(access, "placement:read");
+    const asg = resolveScope(access, "assignment:read");
+    return made.filter((m) => m.joined && activityVisible(read, m) && activityVisible(asg, m)).map((m) => m.id).sort();
+  };
+  const seenAssignments = async (userId: string) => {
+    const ids = new Set(made.map((m) => m.id));
+    return asUser(db.app, userId, async (c) =>
+      (await c.query<{ placement_id: string }>(`SELECT placement_id FROM eureka.assignment`)).rows
+        .map((r) => r.placement_id).filter((i) => ids.has(i)).sort());
+  };
 
   it.each(users)("%s", async (key) => {
     const scope = resolveScope(toUserAccess(key), "placement:read");
@@ -403,6 +456,35 @@ describe("RLS differential: placement visibility in the database matches the eng
     const expected = made.filter((m) => activityVisible(scope, m)).map((m) => m.id).sort();
     expect(seen.placements).toEqual(expected);
     expect(seen.contacts).toEqual(expected);
+    expect(await seenAssignments(U[key]), "assignments").toEqual(expectedAssignments(toUserAccess(key)));
+  });
+
+  it("assignments follow assignment:read, not placement visibility", async () => {
+    // Location ops admin reads Dallas placements but holds no assignment:read.
+    expect(await seenAssignments(U.locD)).toEqual([]);
+    expect(made.some((m) => m.joined && activityVisible(resolveScope(toUserAccess("locD"), "placement:read"), m))).toBe(true);
+    // Immigration holds assignment:read (org) but cannot read placements.
+    expect(await seenAssignments(U.imm)).toEqual([]);
+    // Associate HR holds both at org scope: every assignment.
+    const ahr = await extraUser(db, "ahr-db", "associate_hr");
+    const all = made.filter((m) => m.joined).map((m) => m.id).sort();
+    expect(expectedAssignments(ahr.access)).toEqual(all);
+    expect(await seenAssignments(ahr.id)).toEqual(all);
+  });
+
+  it("contact and assignment policies probe the placement by key, with no per-row definer calls", async () => {
+    const { rows } = await db.admin.query(`
+      SELECT polname, pg_get_expr(polqual, polrelid) AS def FROM pg_policy
+      WHERE polname IN ('placement_contact_read', 'assignment_read')`);
+    expect(rows).toHaveLength(2);
+    for (const r of rows) {
+      expect(r.def, r.polname).toMatch(/EXISTS/);
+      expect(r.def, r.polname).not.toMatch(/\bIN \(/);
+      expect(r.def, r.polname).not.toMatch(/candidate_owned\(|authz\.owns\(/);
+    }
+    const asg = rows.find((r) => r.polname === "assignment_read")!.def as string;
+    expect(asg).toMatch(/owned_candidate_ids\('assignment:read'/);
+    expect(asg).not.toMatch(/placement:read/);
   });
 
   it("the read policy resolves candidate ownership once per statement", async () => {
