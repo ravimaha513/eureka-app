@@ -80,9 +80,12 @@ export class AuthController {
       const bySub = await c.query<{ id: string }>(
         `SELECT id FROM eureka.app_user WHERE google_sub = $1 AND status = 'active'`, [sub]);
       if (bySub.rows[0]) return bySub.rows[0].id;
-      const byEmail = await c.query<{ id: string }>(
+      // Defence in depth (OidcService.verify checks it too): never link an email outside the hosted domain.
+      const domain = this.config.GOOGLE_HOSTED_DOMAIN?.trim().toLowerCase();
+      const inDomain = !domain || email.toLowerCase().endsWith(`@${domain}`);
+      const byEmail = inDomain ? await c.query<{ id: string }>(
         `UPDATE eureka.app_user SET google_sub = $1
-         WHERE email = $2 AND google_sub IS NULL AND status = 'active' RETURNING id`, [sub, email]);
+         WHERE email = $2 AND google_sub IS NULL AND status = 'active' RETURNING id`, [sub, email]) : { rows: [] };
       const linked = byEmail.rows[0];
       await this.audit.record(c, {
         actorId: linked?.id ?? "00000000-0000-0000-0000-000000000000",

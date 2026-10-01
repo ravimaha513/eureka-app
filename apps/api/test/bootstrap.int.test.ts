@@ -19,6 +19,7 @@ import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 
 const DOMAIN = "eureka.example";
 const ENV = { GOOGLE_HOSTED_DOMAIN: DOMAIN };
+const DEMO_ENV = { EUREKA_ENVIRONMENT: "local" };
 const SECRET = "test-secret-test-secret-test-secret-123";
 const ADMIN_BASE = process.env.TEST_PG_ADMIN_URL ?? "postgres://postgres:postgres@127.0.0.1:5432";
 const base = new URL(ADMIN_BASE);
@@ -74,7 +75,7 @@ describe("bootstrap before any admin exists", () => {
       .rejects.toThrow(/permission denied/);
     const { rows } = await db.admin.query<{ r: string }>(
       `SELECT r FROM unnest(ARRAY['eureka_app','eureka_worker','eureka_import']) r
-       WHERE has_function_privilege(r, 'authz.bootstrap_admins(text[], text[], text)', 'EXECUTE')`);
+       WHERE has_function_privilege(r, 'authz.bootstrap_admins(text[], text[], text, boolean)', 'EXECUTE')`);
     expect(rows).toEqual([]);
   });
 
@@ -125,7 +126,7 @@ describe("bootstrap creates the first admins once", () => {
     expect(audit).toHaveLength(2);
     for (const a of audit) {
       expect(a).toMatchObject({ actor_id: null, action: "admin.bootstrap", entity_type: "app_user" });
-      expect(a.changes).toEqual({ actor: "system:bootstrap", role: "org_admin", userCreated: true, admins: 2 });
+      expect(a.changes).toEqual({ actor: "system:bootstrap", role: "org_admin", userCreated: true, admins: 2, recover: false });
       expect(JSON.stringify(a)).not.toContain("@");
     }
     expect(audit.map((a) => a.entity_id).sort()).toEqual([admin1, admin2].sort());
@@ -164,14 +165,74 @@ const token = (sub: string, email: string, hd = DOMAIN) =>
     .setIssuer("https://accounts.google.com").setAudience("client-123").setSubject(sub)
     .setIssuedAt().setExpirationTime("5m").sign(key);
 
-describe("the bootstrapped admins sign in with Google and administer", () => {
-  beforeAll(async () => {
-    const pair = await generateKeyPair("RS256");
-    key = pair.privateKey as CryptoKey;
-    const jwk = { ...(await exportJWK(pair.publicKey)), kid: "k1", alg: "RS256" };
-    app.get(OidcService).useKeySet(createLocalJWKSet({ keys: [jwk] }));
+beforeAll(async () => {
+  const pair = await generateKeyPair("RS256");
+  key = pair.privateKey as CryptoKey;
+  const jwk = { ...(await exportJWK(pair.publicKey)), kid: "k1", alg: "RS256" };
+  app.get(OidcService).useKeySet(createLocalJWKSet({ keys: [jwk] }));
+});
+
+describe("--demo-data", () => {
+  it("loads a fictional org through RLS: users cannot sign in, data shows only through role scopes", async () => {
+    const before = (await counts()).audit;
+    const r = await bootstrap(rdsUrl, args("--admin", `ravi@${DOMAIN}`, "--admin", `ops@${DOMAIN}`, "--demo-data"), appUrl, DEMO_ENV);
+    expect(r.outcome).toBe("unchanged");
+    expect(r.demo).toEqual({ org: "created", candidatesCreated: 32, submissionsCreated: 12 });
+
+    const demo = (await db.admin.query<{ id: string; email: string; google_sub: string | null; roles: string[] }>(
+      `SELECT u.id, u.email::text, u.google_sub, array_agg(ur.role_key) AS roles FROM eureka.app_user u
+       JOIN eureka.user_role ur ON ur.user_id = u.id WHERE u.email::text LIKE '%@${DEMO_EMAIL_DOMAIN}' GROUP BY u.id`)).rows;
+    expect(demo).toHaveLength(12);
+    expect(demo.every((u) => u.google_sub === null && !u.roles.includes("org_admin"))).toBe(true);
+    // Not in the hosted domain, so Google sign-in can never produce these emails.
+    await expect(app.get(OidcService).verify(await token("x", `demo-r1a@${DEMO_EMAIL_DOMAIN}`, DEMO_EMAIL_DOMAIN), "n1"))
+      .rejects.toThrow(/company domain/);
+    // Even with the company hd claim, an email outside the domain is refused, and never linked.
+    await expect(app.get(OidcService).verify(await token("x", `demo-r1a@${DEMO_EMAIL_DOMAIN}`, DOMAIN), "n1"))
+      .rejects.toThrow(/email is not in the company domain/);
+    await expect(app.get(AuthController).linkUser("x", `demo-r1a@${DEMO_EMAIL_DOMAIN}`)).rejects.toThrow(/No active Eureka account/);
+    expect((await db.admin.query(`SELECT count(*)::int AS n FROM eureka.app_user WHERE google_sub = 'x'`)).rows[0].n).toBe(0);
+
+    const id = (key: string) => demo.find((u) => u.email === `demo-${key}@${DEMO_EMAIL_DOMAIN}`)!.id;
+    const visible = (userId: string) => asUser(db.app, userId, async (c) =>
+      (await c.query<{ n: number }>("SELECT count(*)::int AS n FROM eureka.candidate")).rows[0]!.n);
+    expect(await visible(id("r1a"))).toBe(16); // team Rohit (two recruiters)
+    expect(await visible(id("r2a"))).toBe(8); // team Anjali
+    expect(await visible(id("l1"))).toBe(16); // team Rohit
+    expect(await visible(id("ad"))).toBe(32); // whole hierarchy
+    expect(await visible(id("locd"))).toBe(24); // Demo Dallas: teams Rohit and Vikram
+    expect(await visible(admin1)).toBe(0); // org_admin: no data role
+    // Candidate and submission writes were audited by their recruiter; the org by the system.
+    const audit = (await db.admin.query<{ action: string; n: number; system: boolean }>(
+      `SELECT action, count(*)::int AS n, bool_and(actor_id IS NULL) AS system FROM eureka.audit_event
+       WHERE seq > (SELECT max(seq) FROM eureka.audit_event) - 100 GROUP BY action ORDER BY action`)).rows;
+    expect(audit).toEqual(expect.arrayContaining([
+      { action: "admin.bootstrap_demo", n: 1, system: true },
+      { action: "candidate.created", n: 32, system: false },
+      { action: "submission.created", n: 12, system: false },
+    ]));
+    expect((await counts()).audit).toBeGreaterThan(before);
   });
 
+  it("re-running adds nothing", async () => {
+    const before = await counts();
+    const r = await bootstrap(rdsUrl, args("--admin", `ravi@${DOMAIN}`, "--admin", `ops@${DOMAIN}`, "--demo-data"), appUrl, DEMO_ENV);
+    expect(r.demo).toEqual({ org: "existing", candidatesCreated: 0, submissionsCreated: 0 });
+    expect(await counts()).toEqual(before);
+  });
+
+  it("refuses unless EUREKA_ENVIRONMENT is on the allow-list (staging or local)", async () => {
+    const before = await counts();
+    for (const env of [{}, { EUREKA_ENVIRONMENT: "production" }, { EUREKA_ENVIRONMENT: "Staging" }]) {
+      await expect(bootstrap(rdsUrl, args("--admin", `ravi@${DOMAIN}`, "--admin", `ops@${DOMAIN}`, "--demo-data"), appUrl, env))
+        .rejects.toMatchObject({ refused: true, message: expect.stringMatching(/EUREKA_ENVIRONMENT/) });
+      await expect(loadDemoData(rdsUrl, appUrl, env)).rejects.toMatchObject({ refused: true });
+    }
+    expect(await counts()).toEqual(before);
+  });
+});
+
+describe("the bootstrapped admins sign in with Google and administer", () => {
   async function signIn(sub: string, email: string) {
     const identity = await app.get(OidcService).verify(await token(sub, email), "n1");
     const userId = await app.get(AuthController).linkUser(identity.sub, identity.email);
@@ -212,48 +273,10 @@ describe("the bootstrapped admins sign in with Google and administer", () => {
   });
 });
 
-describe("--demo-data", () => {
-  it("loads a fictional org through RLS: users cannot sign in, data shows only through role scopes", async () => {
-    const before = (await counts()).audit;
-    const r = await bootstrap(rdsUrl, args("--admin", `ravi@${DOMAIN}`, "--admin", `ops@${DOMAIN}`, "--demo-data"), appUrl);
-    expect(r.outcome).toBe("unchanged");
-    expect(r.demo).toEqual({ org: "created", candidatesCreated: 32, submissionsCreated: 12 });
-
-    const demo = (await db.admin.query<{ id: string; email: string; google_sub: string | null; roles: string[] }>(
-      `SELECT u.id, u.email::text, u.google_sub, array_agg(ur.role_key) AS roles FROM eureka.app_user u
-       JOIN eureka.user_role ur ON ur.user_id = u.id WHERE u.email::text LIKE '%@${DEMO_EMAIL_DOMAIN}' GROUP BY u.id`)).rows;
-    expect(demo).toHaveLength(12);
-    expect(demo.every((u) => u.google_sub === null && !u.roles.includes("org_admin"))).toBe(true);
-    // Not in the hosted domain, so Google sign-in can never produce these emails.
-    await expect(app.get(OidcService).verify(await token("x", `demo-r1a@${DEMO_EMAIL_DOMAIN}`, DEMO_EMAIL_DOMAIN), "n1"))
-      .rejects.toThrow(/company domain/);
-
-    const id = (key: string) => demo.find((u) => u.email === `demo-${key}@${DEMO_EMAIL_DOMAIN}`)!.id;
-    const visible = (userId: string) => asUser(db.app, userId, async (c) =>
-      (await c.query<{ n: number }>("SELECT count(*)::int AS n FROM eureka.candidate")).rows[0]!.n);
-    expect(await visible(id("r1a"))).toBe(16); // team Rohit (two recruiters)
-    expect(await visible(id("r2a"))).toBe(8); // team Anjali
-    expect(await visible(id("l1"))).toBe(16); // team Rohit
-    expect(await visible(id("ad"))).toBe(32); // whole hierarchy
-    expect(await visible(id("locd"))).toBe(24); // Demo Dallas: teams Rohit and Vikram
-    expect(await visible(admin1)).toBe(0); // org_admin: no data role
-    // Candidate and submission writes were audited by their recruiter; the org by the system.
-    const audit = (await db.admin.query<{ action: string; n: number; system: boolean }>(
-      `SELECT action, count(*)::int AS n, bool_and(actor_id IS NULL) AS system FROM eureka.audit_event
-       WHERE seq > (SELECT max(seq) FROM eureka.audit_event) - 100 GROUP BY action ORDER BY action`)).rows;
-    expect(audit).toEqual(expect.arrayContaining([
-      { action: "admin.bootstrap_demo", n: 1, system: true },
-      { action: "candidate.created", n: 32, system: false },
-      { action: "submission.created", n: 12, system: false },
-    ]));
-    expect((await counts()).audit).toBeGreaterThan(before);
-  });
-
-  it("re-running adds nothing", async () => {
-    const before = await counts();
-    const r = await bootstrap(rdsUrl, args("--admin", `ravi@${DOMAIN}`, "--admin", `ops@${DOMAIN}`, "--demo-data"), appUrl);
-    expect(r.demo).toEqual({ org: "existing", candidatesCreated: 0, submissionsCreated: 0 });
-    expect(await counts()).toEqual(before);
+describe("--demo-data on a stack with real data", () => {
+  it("refuses a stack that holds users besides the org admins", async () => {
+    await expect(loadDemoData(rdsUrl, appUrl, DEMO_ENV))
+      .rejects.toMatchObject({ refused: true, message: expect.stringMatching(/1 users besides the org admins/) });
   });
 
   it("refuses a stack that holds real candidates", async () => {
@@ -266,6 +289,84 @@ describe("--demo-data", () => {
       `INSERT INTO eureka.person (first_name, last_name) VALUES ('Real', 'Person') RETURNING id`)).rows[0]!.id;
     await db.admin.query(`INSERT INTO eureka.candidate (person_id, technology_id, team_id, location_id) VALUES ($1,$2,$3,$4)`,
       [person, tech, team, loc]);
-    await expect(loadDemoData(rdsUrl, appUrl)).rejects.toMatchObject({ refused: true, message: expect.stringMatching(/1 real candidates/) });
+    await expect(loadDemoData(rdsUrl, appUrl, DEMO_ENV)).rejects.toMatchObject({ refused: true, message: expect.stringMatching(/1 real candidates/) });
+  });
+});
+
+describe("hardening (0039)", () => {
+  let fresh: TestDb;
+  let freshUrl: string;
+  beforeAll(async () => {
+    fresh = await createTestDb();
+    await fresh.admin.query(`GRANT CONNECT ON DATABASE ${fresh.name} TO ${rdsRole}`);
+    freshUrl = `postgres://${rdsRole}:x@${base.host}/${fresh.name}`;
+  }, 90_000);
+  afterAll(async () => {
+    await fresh?.drop();
+  });
+  const call = (c: pg.Client, emails: string[], recover = false) => c.query(
+    `SELECT * FROM authz.bootstrap_admins($1::text[], $2::text[], $3, $4)`, [emails, emails.map(() => "n"), DOMAIN, recover]);
+  const client = async () => { const c = new pg.Client({ connectionString: freshUrl }); await c.connect(); return c; };
+
+  it("refuses outside READ COMMITTED, and concurrent callers cannot both create admins", async () => {
+    const [a, b] = [await client(), await client()];
+    try {
+      for (const level of ["REPEATABLE READ", "SERIALIZABLE"]) {
+        await a.query(`BEGIN ISOLATION LEVEL ${level}`);
+        await expect(call(a, [`x@${DOMAIN}`])).rejects.toThrow(/read_committed_required/);
+        await a.query("ROLLBACK");
+      }
+      await a.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      await b.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      await call(a, [`a1@${DOMAIN}`, `a2@${DOMAIN}`]);
+      const second = call(b, [`b1@${DOMAIN}`, `b2@${DOMAIN}`]).then(() => "created", (e: Error) => e.message);
+      await new Promise((r) => setTimeout(r, 200)); // b now waits on the advisory lock
+      await a.query("COMMIT");
+      expect(await second).toBe("admin_exists");
+      await b.query("ROLLBACK");
+    } finally {
+      await a.end();
+      await b.end();
+    }
+    const admins = (await fresh.admin.query(`SELECT count(*)::int AS n FROM eureka.user_role WHERE role_key = 'org_admin'`)).rows[0].n;
+    expect(admins).toBe(2);
+  });
+
+  it("assert_admin_remains refuses outside READ COMMITTED (admin removals)", async () => {
+    const [a1, a2] = (await fresh.admin.query<{ id: string }>(
+      `SELECT id FROM eureka.app_user ORDER BY email`)).rows.map((r) => r.id);
+    const c = await fresh.app.connect();
+    try {
+      await c.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+      await c.query("SELECT set_config('eureka.user_id', $1, true)", [a1]);
+      await expect(c.query("SELECT authz.revoke_role($1, 'org_admin', NULL)", [a2])).rejects.toThrow(/read_committed_required/);
+      await c.query("ROLLBACK");
+    } finally {
+      c.release();
+    }
+  });
+
+  it("after a bootstrap, a run with no admin left needs --recover, which is audited", async () => {
+    await fresh.admin.query(`UPDATE eureka.user_role SET valid = tstzrange(lower(valid), now()) WHERE role_key = 'org_admin'`);
+    expect(await refusal(bootstrap(freshUrl, args("--admin", `r1@${DOMAIN}`, "--admin", `r2@${DOMAIN}`), null)))
+      .toMatch(/--recover/);
+    const r = await bootstrap(freshUrl, args("--admin", `r1@${DOMAIN}`, "--admin", `r2@${DOMAIN}`, "--recover"), null);
+    expect(r.outcome).toBe("created");
+    const audit = (await fresh.admin.query<{ changes: { recover: boolean } }>(
+      `SELECT changes FROM eureka.audit_event WHERE action = 'admin.bootstrap' ORDER BY seq`)).rows.map((x) => x.changes.recover);
+    expect(audit).toEqual([false, false, true, true]);
+    // --recover is no backdoor while an admin is active.
+    expect(await refusal(bootstrap(freshUrl, args("--admin", `r3@${DOMAIN}`, "--single-admin", "--recover"), null)))
+      .toMatch(/org_admin already exists/);
+  });
+
+  it("the app and worker roles cannot write actor-less bootstrap audit rows", async () => {
+    for (const pool of [fresh.app, fresh.worker]) {
+      for (const action of ["admin.bootstrap", "admin.bootstrap_demo", "admin.bootstrapX"]) {
+        await expect(pool.query(`INSERT INTO eureka.audit_event (action, entity_type) VALUES ($1, 'app_user')`, [action]))
+          .rejects.toThrow(/row-level security/);
+      }
+    }
+    await fresh.app.query(`INSERT INTO eureka.audit_event (action, entity_type) VALUES ('auth.denied', 'app_user')`);
   });
 });
