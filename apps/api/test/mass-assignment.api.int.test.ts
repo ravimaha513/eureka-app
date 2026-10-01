@@ -1,5 +1,8 @@
 import "reflect-metadata";
 import { createHash, randomBytes } from "node:crypto";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { RequestMethod, type Type } from "@nestjs/common";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -8,6 +11,11 @@ import { loadConfig, type AppConfig } from "../src/platform/config.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
 import { CLIENT_ID, LOC, T, TECH_ID, U, seedFixtures, type FixtureCandidate } from "./fixtures.js";
 import { createPlacement, newCandidate, selectedSubmission } from "./placement-seed.js";
+import { LOCAL_UPLOAD_PATH } from "../src/platform/storage/document-storage.js";
+import { LocalDocumentStore } from "../src/worker/document-store.js";
+import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob } from "../src/worker/jobs/resume-scan.js";
+import { silentLogger } from "../src/worker/log.js";
+import { JobRunner } from "../src/worker/runner.js";
 
 /**
  * Mass-assignment tests for every write endpoint (implementation plan, Phase 2;
@@ -27,6 +35,8 @@ let db: TestDb;
 let app: NestFastifyApplication;
 let config: AppConfig;
 let candidates: FixtureCandidate[];
+/** Local document driver root (the API stands in for the bucket, as in development). */
+let docs: string;
 
 type Key = keyof typeof U;
 type Method = "POST" | "PUT" | "PATCH";
@@ -41,10 +51,11 @@ const SERVER_MANAGED: Record<string, unknown> = {
 beforeAll(async () => {
   db = await createTestDb();
   candidates = await seedFixtures(db.admin);
+  docs = await mkdtemp(join(tmpdir(), "eureka-ma-docs-"));
   const url = new URL(process.env.TEST_PG_ADMIN_URL ?? "postgres://postgres:postgres@127.0.0.1:5432");
   config = loadConfig({
     NODE_ENV: "test", AUTH_MODE: "dev", SESSION_SECRET: "test-secret-test-secret-test-secret-123",
-    DATABASE_URL: `postgres://eureka_app:eureka_app_test@${url.host}/${db.name}`,
+    DATABASE_URL: `postgres://eureka_app:eureka_app_test@${url.host}/${db.name}`, LOCAL_STORAGE_DIR: docs,
   });
   app = await createApp(config);
 }, 120_000);
@@ -52,6 +63,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await app?.close();
   await db?.drop();
+  if (docs) await rm(docs, { recursive: true, force: true });
 });
 
 // ---- helpers ------------------------------------------------------------------------------------
@@ -101,6 +113,47 @@ async function interviewOf(hoursAgo = -24) {
   return { candidateId: cand.id, submissionId: sub.id as string, interviewId: int.id as string };
 }
 
+const PDF = "application/pdf";
+const pdf = (text: string) => Buffer.from(`%PDF-1.7\n% fictional resume ${text}\n%%EOF\n`);
+
+/** A browser-style multipart POST of the presigned fields plus the file (last). */
+function form(fields: Record<string, string>, file: Buffer) {
+  const b = "----eurekaMassAssignment";
+  const parts: Buffer[] = [];
+  for (const [k, v] of Object.entries(fields)) parts.push(Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
+  parts.push(Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="file"; filename="cv.pdf"\r\nContent-Type: application/octet-stream\r\n\r\n`),
+    file, Buffer.from(`\r\n--${b}--\r\n`));
+  return { payload: Buffer.concat(parts), headers: { "content-type": `multipart/form-data; boundary=${b}` } };
+}
+
+/** Requests a resume upload as r1a on a fresh own candidate; optionally uploads `file` and runs the scan. */
+async function resumeOf(file?: Buffer) {
+  const cand = await freshOwn();
+  const r = await ok("r1a", "POST", `/api/v1/candidates/${cand.id}/resumes`, { contentType: PDF, size: file?.length ?? 100 });
+  const ticket = r.upload as { url: string; fields: Record<string, string> };
+  if (file) {
+    const up = await app.inject({ method: "POST", url: ticket.url, ...form(ticket.fields, file) });
+    expect(up.statusCode, up.body).toBe(204);
+    await new JobRunner(db.worker, [resumeScanJob(new LocalDocumentStore(docs), DEFAULT_RESUME_SCAN_OPTIONS)], silentLogger).tick();
+  }
+  return { candidateId: cand.id, resumeId: r.id as string, ticket };
+}
+
+/** A staged import batch operated by `operator` (as superuser; staging itself runs as eureka_import). */
+async function stagedImport(operator: string) {
+  const digest = randomBytes(32).toString("hex");
+  // Only the CLI (import_open_batch) may write a batch; bypass the guard trigger for this fixture row.
+  const c = await db.admin.connect();
+  try {
+    await c.query("SET session_replication_role = replica");
+    return (await c.query<{ id: string }>(`INSERT INTO eureka.import_batch (source_digest, files, operator_id) VALUES ($1, '{}', $2) RETURNING id`,
+      [digest, operator])).rows[0]!.id;
+  } finally {
+    await c.query("RESET session_replication_role");
+    c.release();
+  }
+}
+
 // ---- cases --------------------------------------------------------------------------------------
 
 interface Prepared {
@@ -120,9 +173,42 @@ interface RejectCase {
   forbidden: Record<string, unknown>;
   /** Fields the schema knows but this caller may not set: refused by the service with 422 `detail`. */
   notPermitted?: { fields: Record<string, unknown>; detail: RegExp };
+  /** Where the 422 names the key: `errors` (ZodError via the problem filter, default) or `detail`. */
+  reports?: "errors" | "detail";
 }
 
 const CASES: RejectCase[] = [
+  // resumes (FR-CAN-07, migration 0036): status, scan result, version, digest, uploader and key are the server's
+  {
+    route: "POST /api/v1/candidates/:id/resumes", actor: "r1a",
+    prepare: async () => {
+      const cand = await freshOwn();
+      return {
+        url: `/api/v1/candidates/${cand.id}/resumes`, body: { contentType: PDF, size: 1234 },
+        state: () => rows(`SELECT count(*)::int AS n FROM eureka.resume`),
+      };
+    },
+    forbidden: {
+      status: "clean", scanResult: "NO_THREATS_FOUND", version: 1, isCurrent: true, sha256: "a".repeat(64), sha256Hex: "a".repeat(64),
+      uploadedBy: U.r1b, candidateId: FOREIGN_ID, key: `clean/resume/${FOREIGN_ID}`, storageKey: `clean/resume/${FOREIGN_ID}`,
+      fileName: "../../etc/passwd", scannedAt: PAST, uploadExpiresAt: "2099-01-01T00:00:00Z",
+    },
+  },
+  // sheet import sign-off (docs/import.md, migration 0033)
+  {
+    route: "POST /api/v1/imports/:id/decisions", actor: "admin2", reports: "detail",
+    prepare: async () => {
+      const batch = await stagedImport(U.admin);
+      return {
+        url: `/api/v1/imports/${batch}/decisions`, body: { sheet: "sales", rowNo: 2, action: "approve" },
+        state: () => rows(`SELECT (SELECT count(*) FROM eureka.import_decision)::int AS decisions, b.* FROM eureka.import_batch b WHERE b.id = $1`, [batch]),
+      };
+    },
+    forbidden: {
+      batchId: FOREIGN_ID, decidedBy: U.admin, decidedAt: PAST, approvedReasons: ["duplicate"], rowKey: "x", state: "clean",
+      operatorId: U.admin2, approvedBy: U.admin2, approvedAt: PAST, status: "approved", approvedDigest: "a".repeat(64),
+    },
+  },
   // identity
   {
     route: "POST /api/auth/dev-login", actor: null,
@@ -426,6 +512,64 @@ const CASES: RejectCase[] = [
 interface IgnoreCase { route: string; run: () => Promise<void> }
 const IGNORED: IgnoreCase[] = [
   {
+    route: "POST /api/v1/candidates/:id/resumes/:resumeId/download",
+    run: async () => {
+      const file = pdf("download");
+      const { candidateId, resumeId } = await resumeOf(file);
+      const other = await resumeOf(pdf("other"));
+      expect((await rows(`SELECT status, version FROM eureka.resume WHERE id = $1`, [resumeId]))).toEqual([{ status: "clean", version: 1 }]);
+      const before = await rows(`SELECT * FROM eureka.resume ORDER BY id`);
+      const r = await call("r1a", "POST", `/api/v1/candidates/${candidateId}/resumes/${resumeId}/download`, {
+        ...SERVER_MANAGED, key: `clean/resume/${other.resumeId}`, resumeId: other.resumeId, fileName: "payload.html",
+        contentType: "text/html", expiresSeconds: 86_400, version: 7, status: "clean",
+      });
+      expect(r.statusCode, r.body).toBe(200);
+      const { url, expiresAt } = r.json() as { url: string; expiresAt: string };
+      expect(Date.parse(expiresAt) - Date.now()).toBeLessThanOrEqual(60_000);
+      // The link serves this resume, as a PDF attachment named by the server.
+      const got = await app.inject({ method: "GET", url });
+      expect(got.statusCode).toBe(200);
+      expect(got.rawPayload.equals(file)).toBe(true);
+      expect(got.headers["content-type"]).toBe(PDF);
+      expect(String(got.headers["content-disposition"])).toMatch(/^attachment;/);
+      expect(String(got.headers["content-disposition"])).not.toContain("payload.html");
+      expect(await rows(`SELECT * FROM eureka.resume ORDER BY id`)).toEqual(before);
+    },
+  },
+  {
+    route: "POST /api/v1/imports/tickets",
+    run: async () => {
+      const r = await call("admin", "POST", "/api/v1/imports/tickets", {
+        ...SERVER_MANAGED, createdBy: U.admin2, operatorId: U.admin2, expiresAt: "2099-01-01T00:00:00Z", tokenHash: "a".repeat(64),
+        ticket: "chosen-by-client", batchId: FOREIGN_ID, usedAt: PAST,
+      });
+      expect(r.statusCode, r.body).toBe(201);
+      const { ticket, expiresAt } = r.json() as { ticket: string; expiresAt: string };
+      expect(ticket).not.toBe("chosen-by-client");
+      const hash = createHash("sha256").update(ticket).digest("hex");
+      const t = await rows(`SELECT created_by, expires_at, used_at, batch_id FROM eureka.import_ticket WHERE token_hash = $1`, [hash]);
+      expect(t).toEqual([{ created_by: U.admin, expires_at: new Date(expiresAt), used_at: null, batch_id: null }]);
+      expect(Date.parse(expiresAt)).toBeLessThan(Date.parse("2099-01-01T00:00:00Z"));
+      expect(await rows(`SELECT 1 FROM eureka.import_ticket WHERE token_hash = $1`, ["a".repeat(64)])).toEqual([]);
+    },
+  },
+  {
+    route: "POST /api/v1/imports/:id/approve",
+    run: async () => {
+      const batch = await stagedImport(U.admin);
+      const r = await call("admin2", "POST", `/api/v1/imports/${batch}/approve`, {
+        ...SERVER_MANAGED, status: "committed", approvedBy: U.admin, operatorId: U.admin2, approvedAt: PAST,
+        approvedDigest: "a".repeat(64), committedAt: PAST, purgedAt: PAST,
+      });
+      expect(r.statusCode, r.body).toBe(200);
+      expect(r.json()).toMatchObject({ id: batch, status: "approved" });
+      const b = (await rows(`SELECT status, operator_id, approved_by, approved_digest, committed_at, purged_at FROM eureka.import_batch WHERE id = $1`, [batch]))[0]!;
+      expect(b).toMatchObject({ status: "approved", operator_id: U.admin, approved_by: U.admin2, committed_at: null, purged_at: null });
+      expect(b.approved_digest).toMatch(/^[0-9a-f]{64}$/);
+      expect(b.approved_digest).not.toBe("a".repeat(64));
+    },
+  },
+  {
     route: "POST /api/auth/logout",
     run: async () => {
       const victim = await login("r1a");
@@ -526,6 +670,50 @@ describe("mass assignment: coverage", () => {
     expect(routes.filter((r) => !covered.includes(r)), "write routes without a mass-assignment case").toEqual([]);
     expect(covered.filter((r) => !routes.includes(r)), "cases for routes that do not exist").toEqual([]);
   });
+
+  it("the local storage upload route (registered outside Nest with the local driver) is covered below", () => {
+    expect(app.getHttpAdapter().getInstance().hasRoute({ method: "POST", url: LOCAL_UPLOAD_PATH })).toBe(true);
+  });
+});
+
+/**
+ * The local driver's upload route stands in for the S3 presigned POST: like the
+ * bucket policy, it accepts exactly the signed fields. A client cannot add its
+ * own (status, key, metadata) or change the signed ones; nothing is stored.
+ */
+describe("mass assignment: local storage upload accepts only the signed fields", () => {
+  const quarantined = async () => (await readdir(join(docs, "quarantine", "resume")).catch(() => [] as string[])).sort();
+  const file = Buffer.alloc(100, 0x41); // the ticket is for 100 bytes
+
+  it.each([
+    ["an extra status field", { status: "clean" }],
+    ["an extra metadata field", { "x-amz-meta-scan": "NO_THREATS_FOUND" }],
+    ["an extra key field", { key2: `clean/resume/${FOREIGN_ID}` }],
+  ])("%s → 400, nothing stored, the resume stays pending", async (_n, extra) => {
+    const { resumeId, ticket } = await resumeOf();
+    const before = await quarantined();
+    const res = await app.inject({ method: "POST", url: ticket.url, ...form({ ...ticket.fields, ...extra }, file) });
+    expect(res.statusCode, res.body).toBe(400);
+    expect(await quarantined()).toEqual(before);
+    expect((await rows(`SELECT status FROM eureka.resume WHERE id = $1`, [resumeId]))[0]!.status).toBe("pending");
+  });
+
+  it.each([
+    ["a different key", { key: `clean/resume/${FOREIGN_ID}` }],
+    ["a different Content-Type", { "Content-Type": "text/html" }],
+  ])("%s → 403, nothing stored", async (_n, change) => {
+    const { ticket } = await resumeOf();
+    const before = await quarantined();
+    const res = await app.inject({ method: "POST", url: ticket.url, ...form({ ...ticket.fields, ...change }, file) });
+    expect(res.statusCode, res.body).toBe(403);
+    expect(await quarantined()).toEqual(before);
+  });
+
+  it("the unchanged signed fields are accepted (control)", async () => {
+    const { ticket } = await resumeOf();
+    const res = await app.inject({ method: "POST", url: ticket.url, ...form(ticket.fields, file) });
+    expect(res.statusCode, res.body).toBe(204);
+  });
 });
 
 describe("mass assignment: strict bodies refuse server-managed and foreign fields", () => {
@@ -538,8 +726,9 @@ describe("mass assignment: strict bodies refuse server-managed and foreign field
     const res = await call(c.actor, method, p.url, { ...p.body, [field]: value }, p.headers);
     expect(res.statusCode, res.body).toBe(422);
     // The unknown key is the only problem: the rest of the body is valid.
-    const errors = res.json().errors as { path: string; message: string }[];
-    expect(errors, res.body).toEqual([{ path: "", message: `Unrecognized key(s) in object: '${field}'` }]);
+    const unknownKey = `Unrecognized key(s) in object: '${field}'`;
+    if (c.reports === "detail") expect(res.json().detail, res.body).toBe(unknownKey);
+    else expect(res.json().errors, res.body).toEqual([{ path: "", message: unknownKey }]);
     expect([await p.state(), await auditHead()]).toEqual(before);
   });
 
