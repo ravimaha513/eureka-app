@@ -2,11 +2,10 @@
 -- docs/import.md).
 --
 -- Nothing here writes live tables. The import CLI connects as eureka_import,
--- which can only touch these staging tables and read reference lists. To load
--- a row it switches (SET LOCAL ROLE) to eureka_app and sets eureka.user_id to
--- the sheet row's owner, so every live write passes exactly the API's RLS
--- policies, BEFORE INSERT guards and definer functions (rules 4 and 6). It
--- never runs as a definer and never gets BYPASSRLS.
+-- which can only touch these staging tables and read reference lists. Rows
+-- are loaded by authz.import_load_person (0033). eureka_import is never a
+-- member of eureka_app (an earlier draft granted that; it was removed before
+-- any environment applied this file, see 0033 and docs/HANDOFF.md).
 --
 -- Least privilege (rule 7):
 --   * eureka_import is NOLOGIN; operations enable LOGIN only for the
@@ -26,9 +25,6 @@ BEGIN
     CREATE ROLE eureka_import NOLOGIN;
   END IF;
 END $$;
--- Acts for a row's owner through the API role's policies; gains none of its
--- privileges by default (same shape as the worker grant in 0001).
-GRANT eureka_app TO eureka_import WITH INHERIT FALSE, SET TRUE;
 GRANT USAGE ON SCHEMA eureka, authz TO eureka_import;
 
 SET ROLE eureka_owner;
