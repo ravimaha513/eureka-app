@@ -1,11 +1,12 @@
 import { useId, useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { BarChart, Donut, Funnel } from "./Charts";
 import { pipelineError } from "../pipeline/errors";
 import { pipelineLabel } from "../pipeline/pipelineApi";
 import { fmtDate } from "../sales/ui";
 import {
   GROUP_LABELS, METRIC_HINTS, METRIC_LABELS, PERIODS, UNGROUPED,
-  dashboardApi, periodRange, type AttentionItem, type AttentionKind, type Dashboard, type GroupBy,
+  dashboardApi, periodRange, type AttentionItem, type AttentionKind, type Dashboard, type GroupBy, type Metric,
 } from "./dashboardApi";
 
 /** Where a "needs attention" row can be opened. */
@@ -21,6 +22,9 @@ const TARGET_LABEL: Record<DashboardTarget, string> = { submissions: "Submission
 
 /** A local calendar day for an instant (period bounds are local midnights). */
 const fmtDay = (ms: number) => new Date(ms).toLocaleDateString(undefined, { dateStyle: "medium" });
+
+/** Pipeline order for the funnel chart. */
+const FUNNEL: Metric[] = ["submissions", "interviewsScheduled", "interviewsCleared", "placementsCreated", "placementsJoined"];
 
 const days = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
 
@@ -72,6 +76,9 @@ export function DashboardPage({ canOpen = () => false, onOpen }: {
     placeholderData: keepPreviousData,
   });
   const d = q.data;
+  const [chartMetric, setChartMetric] = useState<Metric | undefined>(undefined);
+  const shownMetric = d && d.metrics.length > 0 ? (chartMetric && d.metrics.includes(chartMetric) ? chartMetric : d.metrics[0]!) : undefined;
+  const funnel = d ? FUNNEL.filter((m) => d.metrics.includes(m)).map((m) => ({ key: m, label: METRIC_LABELS[m], value: d.totals[m] ?? 0 })) : [];
   const shownGroup = d?.groupBy ?? groupBy ?? "recruiter";
 
   return (
@@ -122,6 +129,39 @@ export function DashboardPage({ canOpen = () => false, onOpen }: {
           </section>
 
           {d.metrics.length > 0 && (
+            <div className="chartgrid">
+              {funnel.length > 1 && (
+                <section className="card chartcard" aria-label="Pipeline funnel">
+                  <h3 className="charttitle">Pipeline funnel</h3>
+                  <Funnel stages={funnel} label="Pipeline funnel" />
+                </section>
+              )}
+              {shownMetric && d.groups.length > 0 && (
+                <section className="card chartcard" aria-label={`${METRIC_LABELS[shownMetric]} by ${GROUP_LABELS[d.groupBy].toLowerCase()}`}>
+                  <h3 className="charttitle">By {GROUP_LABELS[d.groupBy].toLowerCase()}</h3>
+                  <div className="tabs wrap" role="group" aria-label="Metric to chart">
+                    {d.metrics.map((m) => (
+                      <button key={m} type="button" className="tab sm" aria-pressed={shownMetric === m} onClick={() => setChartMetric(m)}>{METRIC_LABELS[m]}</button>
+                    ))}
+                  </div>
+                  <BarChart tone={d.metrics.indexOf(shownMetric)} label={`${METRIC_LABELS[shownMetric]} by ${GROUP_LABELS[d.groupBy].toLowerCase()}`}
+                    bars={[...d.groups]
+                      .sort((a, b) => (b.counts[shownMetric] ?? 0) - (a.counts[shownMetric] ?? 0))
+                      .slice(0, 10)
+                      .map((g) => ({ key: g.id ?? "none", label: g.name ?? UNGROUPED[d.groupBy], value: g.counts[shownMetric] ?? 0 }))} />
+                </section>
+              )}
+              {d.needsAttention.sections.length > 0 && (
+                <section className="card chartcard" aria-label="Needs attention overview">
+                  <h3 className="charttitle">Needs attention</h3>
+                  <Donut label="Needs attention by kind" centre="open items"
+                    parts={d.needsAttention.sections.map((s) => ({ key: s.kind, label: ATTENTION[s.kind].title, value: s.total }))} />
+                </section>
+              )}
+            </div>
+          )}
+
+          {d.metrics.length > 0 && (
             <div className="card tablewrap">
               <table aria-label={`Activity by ${GROUP_LABELS[d.groupBy].toLowerCase()}`}>
                 <thead><tr>
@@ -164,7 +204,10 @@ export function DashboardPage({ canOpen = () => false, onOpen }: {
                               <td>{detailText(s.kind, i)}</td>
                               <td>{pipelineLabel(i.status)}</td>
                               <td>{i.recruiter.name ?? "—"}</td>
-                              <td className="num">{days(i.ageDays)}</td>
+                              <td className="num">
+                                <span className="agebar" aria-hidden="true"><span className={`barfill ${i.ageDays >= 14 ? "c3" : "c2"}`} style={{ width: `${Math.min(100, Math.round((i.ageDays / 30) * 100))}%` }} /></span>
+                                {days(i.ageDays)}
+                              </td>
                               {openable && (
                                 <td className="rowactions">
                                   <button type="button" className="btn sm" onClick={() => onOpen?.(target, i.id)}
