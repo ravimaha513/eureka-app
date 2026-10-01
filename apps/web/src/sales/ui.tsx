@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { Candidate } from "../api";
 import { statusLabel } from "./salesApi";
 
@@ -39,6 +39,23 @@ export function Field({ label, error, hint, children }: {
       {error && <small id={errId} className="error fielderr">{error}</small>}
     </div>
   );
+}
+
+/**
+ * Focus after a failed submit (validation or API error): once React has
+ * committed this round's errors, focus the first invalid field, or else the
+ * announced form error (role="alert" from DialogActions). Returns the trigger
+ * to call on every failure. Running in an effect means stale marks from an
+ * earlier attempt and the busy-disabled submit button never win.
+ */
+export function useFocusAfterFailure(formRef: RefObject<HTMLFormElement>) {
+  const [failures, setFailures] = useState(0);
+  useEffect(() => {
+    if (failures === 0) return;
+    const form = formRef.current;
+    (form?.querySelector<HTMLElement>("[aria-invalid='true']") ?? form?.querySelector<HTMLElement>(".formerr"))?.focus();
+  }, [failures, formRef]);
+  return useCallback(() => setFailures((n) => n + 1), []);
 }
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';

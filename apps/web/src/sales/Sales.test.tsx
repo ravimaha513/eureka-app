@@ -481,6 +481,133 @@ describe("Log submission", () => {
   });
 });
 
+// ---- Focus after a failed submit ---------------------------------------------------------------
+// The user presses the submit button (focus on it), so each test focuses it before clicking.
+
+const submitWith = (dlg: HTMLElement, name: string) => {
+  const btn = within(dlg).getByRole("button", { name });
+  btn.focus();
+  fireEvent.click(btn);
+};
+
+describe("Focus after a failed submit: New candidate", () => {
+  const openCreate = async () => {
+    wrap(<CandidatesPage me={RECRUITER} />);
+    fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
+    const dlg = screen.getByRole("dialog", { name: "New candidate" });
+    await within(dlg).findByRole("option", { name: "Dallas" });
+    return dlg;
+  };
+  const fillAll = (dlg: HTMLElement) => {
+    fireEvent.change(within(dlg).getByLabelText("First name"), { target: { value: "Ravi" } });
+    fireEvent.change(within(dlg).getByLabelText("Last name"), { target: { value: "Kumar" } });
+    fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
+    fireEvent.change(within(dlg).getByLabelText("Location"), { target: { value: LOC } });
+  };
+
+  it("moves focus to the first invalid field of this round, not a stale one", async () => {
+    const dlg = await openCreate();
+    fireEvent.change(within(dlg).getByLabelText("First name"), { target: { value: "Ravi" } });
+    submitWith(dlg, "Create candidate");
+    const last = within(dlg).getByLabelText("Last name");
+    await waitFor(() => expect(last).toHaveFocus());
+    expect(last).toHaveAccessibleDescription("Enter a last name.");
+
+    // Fix everything but the location: focus skips the fields that were invalid last round.
+    fireEvent.change(last, { target: { value: "Kumar" } });
+    fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
+    submitWith(dlg, "Create candidate");
+    const loc = within(dlg).getByLabelText("Location");
+    await waitFor(() => expect(loc).toHaveFocus());
+    expect(loc).toHaveAccessibleDescription("Choose a location.");
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("focuses the field the server rejected (422) and announces the summary", async () => {
+    routes["POST /api/v1/candidates"] = () => problem(422, { title: "Validation failed", errors: [{ path: "phone", message: "E.164 format" }] });
+    const dlg = await openCreate();
+    fillAll(dlg);
+    fireEvent.change(within(dlg).getByLabelText("Phone (optional)"), { target: { value: "+14695550199" } });
+    submitWith(dlg, "Create candidate");
+    const phone = within(dlg).getByLabelText("Phone (optional)");
+    await waitFor(() => expect(phone).toHaveFocus());
+    expect(within(dlg).getByRole("alert")).toHaveTextContent("Some fields need attention");
+  });
+
+  it("focuses the announced error when the server refuses without field errors (403)", async () => {
+    routes["POST /api/v1/candidates"] = () => problem(403, { detail: "Not permitted" });
+    const dlg = await openCreate();
+    fillAll(dlg);
+    submitWith(dlg, "Create candidate");
+    const alert = await within(dlg).findByRole("alert");
+    expect(alert).toHaveTextContent("You can't create candidates in that team.");
+    await waitFor(() => expect(alert).toHaveFocus());
+    expect(dlg).toContainElement(document.activeElement as HTMLElement);
+  });
+});
+
+describe("Focus after a failed submit: Log submission", () => {
+  const openLog = async () => {
+    renderProfile(RECRUITER);
+    fireEvent.click(await screen.findByRole("button", { name: "Log submission" }));
+    const dlg = screen.getByRole("dialog", { name: "Log submission for Asha Iyer" });
+    await within(dlg).findByRole("option", { name: "Northwind Financial" });
+    return dlg;
+  };
+  const fillAll = (dlg: HTMLElement) => {
+    fireEvent.change(within(dlg).getByLabelText("Job title"), { target: { value: "Senior Java Developer" } });
+    fireEvent.change(within(dlg).getByLabelText("Client"), { target: { value: CLIENT } });
+  };
+
+  it("moves focus to the first invalid field after client-side validation", async () => {
+    const dlg = await openLog();
+    fireEvent.change(within(dlg).getByLabelText("Job title"), { target: { value: "Senior Java Developer" } });
+    fireEvent.change(within(dlg).getByLabelText("Rate per hour (optional)"), { target: { value: "5000" } });
+    submitWith(dlg, "Log submission");
+    const clientSel = within(dlg).getByLabelText("Client");
+    await waitFor(() => expect(clientSel).toHaveFocus());
+    expect(clientSel).toHaveAccessibleDescription("Choose a client.");
+
+    fireEvent.change(clientSel, { target: { value: CLIENT } });
+    submitWith(dlg, "Log submission");
+    const rate = within(dlg).getByLabelText("Rate per hour (optional)");
+    await waitFor(() => expect(rate).toHaveFocus());
+    expect(rate).toHaveAccessibleDescription("Enter an hourly rate between 0 and 1000.");
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("focuses the field the server rejected (422)", async () => {
+    routes["POST /api/v1/submissions"] = () => problem(422, { title: "Validation failed", errors: [{ path: "jobTitle", message: "Too long" }] });
+    const dlg = await openLog();
+    fillAll(dlg);
+    submitWith(dlg, "Log submission");
+    const title = within(dlg).getByLabelText("Job title");
+    await waitFor(() => expect(title).toHaveFocus());
+    expect(title).toHaveAccessibleDescription("Too long");
+    expect(within(dlg).getByRole("alert")).toHaveTextContent("Some fields need attention");
+  });
+
+  it("focuses the announced error on a 409 conflict", async () => {
+    routes["POST /api/v1/submissions"] = () => problem(409, { title: "Conflict" });
+    const dlg = await openLog();
+    fillAll(dlg);
+    submitWith(dlg, "Log submission");
+    const alert = await within(dlg).findByRole("alert");
+    expect(alert).toHaveTextContent("A conflicting submission already exists");
+    await waitFor(() => expect(alert).toHaveFocus());
+  });
+
+  it("focuses the announced error when the network fails", async () => {
+    routes["POST /api/v1/submissions"] = () => problem(500, { title: "Internal error", detail: "Something broke on our side." });
+    const dlg = await openLog();
+    fillAll(dlg);
+    submitWith(dlg, "Log submission");
+    const alert = await within(dlg).findByRole("alert");
+    expect(alert).toHaveTextContent("Something broke on our side.");
+    await waitFor(() => expect(alert).toHaveFocus());
+  });
+});
+
 // ---- Shell integration -------------------------------------------------------------------------
 
 describe("Sales navigation", () => {
