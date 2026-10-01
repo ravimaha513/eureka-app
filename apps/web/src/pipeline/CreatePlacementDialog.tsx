@@ -1,4 +1,5 @@
 import { useId, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "../api";
 import { Dialog, DialogActions } from "../admin/Dialog";
 import { fieldErrors } from "../sales/errors";
@@ -6,7 +7,7 @@ import { Field } from "../sales/ui";
 import { pipelineError } from "./errors";
 import {
   CONTACT_KIND_LABELS, PLACEMENT_TYPE_LABELS, WORK_MODE_LABELS, pipelineApi,
-  type ContactKind, type CreatePlacement, type PlacementType, type Submission, type WorkMode,
+  pipelineKeys, type ContactKind, type CreatePlacement, type PlacementType, type Submission, type WorkMode,
 } from "./pipelineApi";
 
 const FIELDS = ["placementType", "rate", "workMode", "projectCity", "projectState", "tentativeStart", "contacts"] as const;
@@ -30,6 +31,7 @@ export function CreatePlacementDialog({ submission, onClose, onCreated }: {
   onCreated: (r: { id: string; isFirstPlacement: boolean }) => void;
 }) {
   const id = useId();
+  const qc = useQueryClient();
   const keyRef = useRef<string>(newKey());
   const nextRow = useRef(1);
   const [v, setV] = useState({
@@ -40,8 +42,15 @@ export function CreatePlacementDialog({ submission, onClose, onCreated }: {
   const [contactErrors, setContactErrors] = useState<Record<number, ContactErrors>>({});
   const [formError, setFormError] = useState("");
   const [blocked, setBlocked] = useState(false);
+  /** 409 idempotency_key_reused: an earlier attempt with this key already created the placement. */
+  const [alreadyCreated, setAlreadyCreated] = useState(false);
   const [busy, setBusy] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  const refreshAndClose = () => {
+    void qc.invalidateQueries({ queryKey: pipelineKeys.placements });
+    void qc.invalidateQueries({ queryKey: pipelineKeys.submissions });
+    onClose();
+  };
   const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setV((s) => ({ ...s, [k]: e.target.value }));
 
   const addContact = () => {
@@ -119,6 +128,10 @@ export function CreatePlacementDialog({ submission, onClose, onCreated }: {
       // Network failures and 5xx keep the key, so a retry can't create a second placement.
       if (err instanceof ApiError && err.status >= 400 && err.status < 500) keyRef.current = newKey();
       if (err instanceof ApiError && (err.detail === "placement_exists" || err.detail === "submission_not_selected" || err.status === 409)) setBlocked(true);
+      if (err instanceof ApiError && err.status === 409 && err.detail === "idempotency_key_reused") {
+        setAlreadyCreated(true);
+        requestAnimationFrame(() => formRef.current?.querySelector<HTMLElement>(".refreshclose")?.focus());
+      }
       const { _form, ...perField } = fieldErrors(err, FIELDS);
       const { contacts: contactsErr, ...rest } = perField;
       setErrors(rest);
@@ -185,7 +198,17 @@ export function CreatePlacementDialog({ submission, onClose, onCreated }: {
           <button type="button" className="btn sm addcontact" onClick={addContact} disabled={contacts.length >= 10}>Add contact</button>
         </fieldset>
 
-        <DialogActions onCancel={onClose} submitLabel="Create placement" busy={busy} disabled={blocked} error={formError} />
+        {alreadyCreated ? (
+          <>
+            <p className="error formerr" role="alert">{formError}</p>
+            <div className="actions">
+              <button type="button" className="btn" onClick={onClose}>Cancel</button>
+              <button type="button" className="btn primary refreshclose" onClick={refreshAndClose}>Refresh and close</button>
+            </div>
+          </>
+        ) : (
+          <DialogActions onCancel={onClose} submitLabel="Create placement" busy={busy} disabled={blocked} error={formError} />
+        )}
       </form>
     </Dialog>
   );

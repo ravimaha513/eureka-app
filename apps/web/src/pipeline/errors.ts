@@ -10,7 +10,8 @@ export const PIPELINE_ERRORS: Record<string, string> = {
   rejection_reason_not_allowed: "A rejection reason can only be given when rejecting.",
   submission_closed: "This submission is closed (selected, rejected or withdrawn) and can't be changed.",
   idempotency_key_required: "The request was missing its safety key. Close the dialog and try again.",
-  idempotency_key_reused: "This form changed after an earlier attempt. Submit again to send it as a new request.",
+  // 409: the first request with this key already committed; only POST /placements sends a key.
+  idempotency_key_reused: "This placement was already created. Refresh the list to see it.",
   not_permitted: "You don't have permission to do that for this record.",
   interview_conflict: "This interview overlaps another interview for the candidate. Pick a different time.",
   consent_required: "Recording links need captured consent.",

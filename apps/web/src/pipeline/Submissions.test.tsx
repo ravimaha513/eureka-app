@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Shell } from "../App";
 import { SubmissionsPage } from "./SubmissionsPage";
@@ -276,7 +277,7 @@ describe("Create placement", () => {
     api.routes["POST /api/v1/placements"] = () => {
       n += 1;
       if (n === 1) return "network";
-      if (n === 2) return problem(422, { detail: "idempotency_key_reused" });
+      if (n === 2) return problem(422, { errors: [{ path: "tentativeStart", message: "Invalid date" }] });
       return { status: 201, body: { id: "p9", isFirstPlacement: false } };
     };
     const { dlg } = await openCreate();
@@ -284,13 +285,40 @@ describe("Create placement", () => {
     fireEvent.click(within(dlg).getByRole("button", { name: "Create placement" }));
     expect(await within(dlg).findByRole("alert")).toHaveTextContent("Failed to fetch");
     fireEvent.click(within(dlg).getByRole("button", { name: "Create placement" }));
-    await waitFor(() => expect(within(dlg).getByRole("alert")).toHaveTextContent("This form changed after an earlier attempt"));
+    await waitFor(() => expect(within(dlg).getByLabelText("Tentative start date")).toHaveAccessibleDescription("Invalid date"));
     fireEvent.click(within(dlg).getByRole("button", { name: "Create placement" }));
     await waitFor(() => expect(api.writes()).toHaveLength(3));
     const [k1, k2, k3] = api.writes().map((w) => w.headers["Idempotency-Key"]);
     expect(k1).toMatch(UUID);
     expect(k2).toBe(k1);
     expect(k3).not.toBe(k1);
+  });
+
+  it("treats a 409 idempotency_key_reused as already created and offers refresh and close", async () => {
+    let n = 0;
+    api.routes["POST /api/v1/placements"] = () => (++n === 1 ? "network" : problem(409, { detail: "idempotency_key_reused" }));
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    const { dlg } = await openCreate();
+    fillRequired(dlg);
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create placement" }));
+    expect(await within(dlg).findByRole("alert")).toHaveTextContent("Failed to fetch");
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create placement" }));
+    await waitFor(() => expect(within(dlg).getByRole("alert")).toHaveTextContent("This placement was already created. Refresh the list to see it."));
+    expect(within(dlg).getByRole("alert")).not.toHaveTextContent("Submit again");
+    expect(api.writes()[1]!.headers["Idempotency-Key"]).toBe(api.writes()[0]!.headers["Idempotency-Key"]);
+    expect(within(dlg).queryByRole("button", { name: "Create placement" })).not.toBeInTheDocument();
+    const refresh = within(dlg).getByRole("button", { name: "Refresh and close" });
+    await waitFor(() => expect(refresh).toHaveFocus());
+
+    const listGets = api.gets("/api/v1/submissions").length;
+    invalidate.mockClear();
+    fireEvent.click(refresh);
+    expect(screen.queryByRole("dialog", { name: /Create placement/ })).not.toBeInTheDocument();
+    const keys = invalidate.mock.calls.map(([f]) => f?.queryKey);
+    expect(keys).toContainEqual(["placements"]);
+    expect(keys).toContainEqual(["submissions"]);
+    await waitFor(() => expect(api.gets("/api/v1/submissions").length).toBeGreaterThan(listGets));
+    expect(api.writes()).toHaveLength(2);
   });
 
   it("uses a different key each time the dialog opens", async () => {
