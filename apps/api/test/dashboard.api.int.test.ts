@@ -199,6 +199,7 @@ interface Dashboard {
   metrics: string[];
   totals: Record<string, number>;
   groups: { id: string | null; name: string | null; counts: Record<string, number> }[];
+  series: { date: string; counts: Record<string, number> }[];
   needsAttention: {
     thresholds: Record<string, number>;
     sections: { kind: string; total: number; items: { id: string; ageDays: number; status: string; detail: Record<string, string | null>; candidate: { name: string | null } }[] }[];
@@ -245,6 +246,17 @@ describe("dashboard totals per role scope (hand-calculated)", () => {
     expect(d.period).toEqual({ from: P_FROM, to: P_TO });
     // Groups add up to the totals.
     for (const m of d.metrics) expect(d.groups.reduce((n, g) => n + (g.counts[m] ?? 0), 0), m).toBe(d.totals[m]);
+    // The daily series covers every day of the period and adds up to the totals.
+    expect(d.series.map((x) => x.date)).toEqual(["2030-03-01", "2030-03-02", "2030-03-03", "2030-03-04", "2030-03-05", "2030-03-06", "2030-03-07"]);
+    for (const m of d.metrics) expect(d.series.reduce((n, x) => n + (x.counts[m] ?? 0), 0), m).toBe(d.totals[m]);
+  });
+
+  it("buckets the daily series in the requested time zone", async () => {
+    const ny = await dashboard("m1", `${PERIOD}&tz=America/New_York`);
+    // The period runs Feb 28 19:00 to Mar 7 19:00 New York time, so it touches eight local days.
+    expect(ny.series.map((x) => x.date)).toEqual(["2030-02-28", "2030-03-01", "2030-03-02", "2030-03-03", "2030-03-04", "2030-03-05", "2030-03-06", "2030-03-07"]);
+    for (const m of ny.metrics) expect(ny.series.reduce((n, x) => n + (x.counts[m] ?? 0), 0), m).toBe(ny.totals[m]);
+    expect((await get("m1", `/api/v1/dashboard?${PERIOD}&tz=Not/AZone`)).statusCode).toBe(422);
   });
 
   it("a manager's dashboard is grouped by their teams", async () => {

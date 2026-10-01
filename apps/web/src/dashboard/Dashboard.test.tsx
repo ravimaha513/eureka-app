@@ -21,6 +21,10 @@ const LEAD: Dashboard = {
     { id: "u1", name: "Priya Shah", counts: { submissions: 3, interviewsScheduled: 2, interviewsCleared: 1, placementsCreated: 1, placementsJoined: 1, candidatesAdded: 1 } },
     { id: null, name: null, counts: { submissions: 1, interviewsScheduled: 0, interviewsCleared: 0, placementsCreated: 1, placementsJoined: 0, candidatesAdded: 1 } },
   ],
+  series: [
+    { date: "2026-09-29", counts: { submissions: 1, interviewsScheduled: 0, placementsJoined: 0 } },
+    { date: "2026-09-30", counts: { submissions: 3, interviewsScheduled: 2, placementsJoined: 1 } },
+  ],
   needsAttention: {
     thresholds: THRESHOLDS,
     sections: [
@@ -65,13 +69,31 @@ describe("Dashboard", () => {
     expect(screen.getByLabelText("Group by")).toHaveValue("recruiter");
   });
 
-  it("charts the funnel, the grouping and the needs-attention split", async () => {
+  it("charts activity over time, the funnel, the mix, the share by group and the needs-attention split", async () => {
     wrap(<DashboardPage />);
-    expect(await screen.findByRole("img", { name: /^Pipeline funnel: Submissions 4, Interviews 2/ })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /^Activity per day: Submissions 4 in total, Interviews 2 in total, Interviews cleared 0 in total$/ })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /^Pipeline funnel: Submissions 4, Interviews 2/ })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /^Activity mix: Submissions 4, Interviews 2/ })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Submissions by recruiter: Priya Shah 3, Unassigned 1" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /^Needs attention by kind: Stale submissions 3/ })).toBeInTheDocument();
     fireEvent.click(within(screen.getByRole("group", { name: "Metric to chart" })).getByRole("button", { name: "Joined" }));
     expect(screen.getByRole("img", { name: "Joined by recruiter: Priya Shah 1, Unassigned 0" })).toBeInTheDocument();
+  });
+
+  it("lets the user choose which metrics the time chart plots", async () => {
+    wrap(<DashboardPage />);
+    await screen.findByRole("img", { name: /^Activity per day/ });
+    const picker = screen.getByRole("group", { name: "Metrics to plot" });
+    fireEvent.click(within(picker).getByRole("button", { name: "Interviews" }));
+    expect(screen.getByRole("img", { name: /^Activity per day/ }).getAttribute("aria-label")).not.toMatch(/Interviews 2/);
+    fireEvent.click(within(picker).getByRole("button", { name: "Joined" }));
+    expect(screen.getByRole("img", { name: /^Activity per day/ }).getAttribute("aria-label")).toMatch(/Joined 1 in total/);
+  });
+
+  it("asks for the daily series in the browser's time zone", async () => {
+    wrap(<DashboardPage />);
+    await screen.findByRole("table", { name: "Activity by recruiter" });
+    expect(lastQuery().get("tz")).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
   });
 
   it("explains each needs-attention list with the thresholds in use", async () => {
