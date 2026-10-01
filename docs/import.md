@@ -1,7 +1,7 @@
 # Sheet migration: CSV import
 
 Design B9. Code in `apps/api/src/import/` (CLI) and `apps/api/src/modules/imports/` (API),
-schema in `db/migrations/0028_import_staging.sql` and `0033_import_hardening.sql`, fictional
+schema in `db/migrations/0028_import_staging.sql`, `0033_import_hardening.sql` and `0041_import_review.sql`, fictional
 fixtures in `apps/api/test/fixtures/import/`.
 
 ## Who does what
@@ -11,7 +11,8 @@ fixtures in `apps/api/test/fixtures/import/`.
 | Ticket | Operator: signed-in org admin (`access:manage`) | `POST /api/v1/imports/tickets` returns a one-time ticket (valid `import_config.ticket_hours`, default 24 h). Its creator is recorded as the batch's operator |
 | Stage, re-analyse, dry run, commit, report, purge | The CLI, as `eureka_import` | `cli.ts stage --ticket ...` etc. The CLI never names a person |
 | Review decisions | Signed-in org admin | `POST /api/v1/imports/{id}/decisions` `{sheet, rowNo, action: approve|reject|link, salesRowNo?}`; then `cli.ts reanalyse` |
-| Sign-off | A second signed-in org admin (not the operator) | `POST /api/v1/imports/{id}/approve`; valid `import_config.approval_days` (default 7) |
+| Preview | The approving org admin | `GET /api/v1/imports/{id}/preview`: per clean row the person, owner, visibility and target status; counts per owner; whether the batch loads placements; the database's verification problems; and the digest |
+| Sign-off | A second signed-in org admin (not the operator) | `POST /api/v1/imports/{id}/approve` `{digest}` quoting the preview it approves; refused while verification finds problems; valid `import_config.approval_days` (default 7) |
 | Read | Org admins | `GET /api/v1/imports/{id}` (counts, approval, expiry), `GET /api/v1/imports/{id}/review` (sheet row numbers and reasons, no personal data) |
 
 There is no web screen yet; the API is enough to run a migration (curl with a session cookie and
@@ -30,11 +31,18 @@ the CSRF header, as the e2e tests do).
    an approval of the batch, and sign-off is refused (`needs_analysis`) until `cli.ts reanalyse`
    (one transaction, batch row locked) has applied them.
 4. **commit** (no flag): dry run through the real database functions, always rolled back.
-5. **approve** (second admin). The approval stores a digest of every row (id, state, normalized
-   values, reasons). From then on the CLI cannot change the rows.
+5. **preview and approve** (second admin). The database first re-checks what it can from the
+   stored cells and the batch's own mapping (`authz.import_verify_batch`): state against reasons
+   (clean means no reasons, review means some); each clean row's owner against the owner column;
+   a sales row's target status and visibility against the status/row-colour mapping; the person
+   link; live duplicates only with an approve decision that accepted them; placements only when
+   the batch loads them. Any problem blocks approval. The approval quotes the preview's digest,
+   which covers `placements_commit` and every row's id, sheet, row number, row key, person key,
+   status key, state, normalized values and reasons. Row writes take the batch row `FOR SHARE`,
+   so they serialize with approval; from then on the CLI cannot change the rows.
 6. **commit --commit**: loads the clean rows. Each person is checked against the digest, the
-   approval's expiry and the decisions: rows rejected, linked elsewhere or decided after the
-   approval are not loaded.
+   approval's expiry, the approver and operator (both still active org admins) and the decisions:
+   rows rejected, linked elsewhere or decided after the approval are not loaded.
 7. **report** at any point; **purge** any batch, and `purge --expired` for batches older than
    `import_config.purge_days` (default 30), whatever their status.
 
@@ -88,7 +96,9 @@ literal status names of design B2.6 are mapped (`Active/Remote` maps to `active`
 example with Apps Script) holding each row's background colour and map it under `rowColors`.
 When text and colour are both mapped they must agree.
 
-`placements.commit` is `false` by default: loading a placement runs `authz.create_placement`,
+`placements.commit` is `false` by default and is copied onto the batch when it opens
+(`import_batch.placements_commit`, immutable, shown in the preview, part of the digest); changing
+the mapping later does not change an open batch. Loading a placement runs `authz.create_placement`,
 which queues `placement.created` outbox events for HR, Accounts and Immigration (open question).
 
 ## Normalization and matching
@@ -164,11 +174,15 @@ consent (location admin fields), placement contacts, `bench` (no app path yet).
   It reads reference lists, staff emails and the `import_*` tables, writes rows only while a batch
   is staged, and executes four functions: `import_open_batch`, `import_live_match`,
   `import_load_person`, `import_finish_batch`. It cannot create tickets, decide, approve, or read
-  or write live tables. In its sessions `authz.current_user_id()` returns NULL unless
-  `eureka.import_load` is on; the import functions set both values themselves on entry and clear
-  them on return, and the role can execute no other function that reads them.
+  or write live tables. In its sessions `authz.current_user_id()` returns NULL unless an import
+  call is running in the same transaction and backend: `eureka.import_session` has a row for it,
+  written only by `authz_definer` (`import_begin` / `import_end`). The loader's insert policies
+  check the same marker. The role cannot write the marker. It is never a member of another role:
+  0033 revokes any such grant (and fails if it cannot), and the API refuses to start and the
+  restore drill reports a problem if a membership exists.
 - The API role executes `import_create_ticket`, `import_decide`, `import_approve_batch`,
-  `import_batch_summary`, `import_review_rows`; each re-checks `access:manage` in the database.
+  `import_batch_summary`, `import_review_rows`, `import_load_preview`; each re-checks
+  `access:manage` in the database. The preview holds names and owner emails: org admins only.
 - Staging holds personal data (no DOB) until purged; the ledger keeps only ids and keyed hashes.
 
 ## Fixtures and tests

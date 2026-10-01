@@ -121,8 +121,9 @@ export async function stage(
       return { batchId: open.id, created: false };
     }
     if (!opts.ticket) throw new Error("A new batch needs --ticket (POST /api/v1/imports/tickets as an org admin)");
-    const batchId = (await c.query<{ id: string }>(`SELECT authz.import_open_batch($1, $2, $3) AS id`,
-      [opts.ticket, digest, { ...meta, mapping: JSON.parse(mappingText) }])).rows[0]!.id;
+    // placements.commit is fixed on the batch here; the approver sees it and it is part of the digest.
+    const batchId = (await c.query<{ id: string }>(`SELECT authz.import_open_batch($1, $2, $3, $4) AS id`,
+      [opts.ticket, digest, { ...meta, mapping: JSON.parse(mappingText) }, cfg.placements.commit])).rows[0]!.id;
     const refs = await loadRefs(c);
     const first = raws.map((r) => normalizeRow(r, cfg, refs, opts.hmac, today));
     await c.query(
@@ -149,8 +150,8 @@ export async function recompute(pool: pg.Pool, batchId: string, hmac: Hmac): Pro
 }
 
 async function recomputeIn(c: pg.PoolClient, batchId: string, hmac: Hmac): Promise<void> {
-  const b = (await c.query<{ status: string; files: { mapping: unknown }; purged_at: string | null }>(
-    `SELECT status, files, purged_at FROM eureka.import_batch WHERE id = $1 FOR UPDATE`, [batchId])).rows[0];
+  const b = (await c.query<{ status: string; files: { mapping: unknown }; purged_at: string | null; placements_commit: boolean }>(
+    `SELECT status, files, purged_at, placements_commit FROM eureka.import_batch WHERE id = $1 FOR UPDATE`, [batchId])).rows[0];
   if (!b) throw new Error(`No import batch ${batchId}`);
   if (b.status !== "staged") return;
   if (b.purged_at) throw new Error("Batch data was purged; stage the files again");
@@ -168,7 +169,7 @@ async function recomputeIn(c: pg.PoolClient, batchId: string, hmac: Hmac): Promi
   }
   const staged = resolveBatch({
     rows: normalized, ledger: await loadLedger(c), decisions: await loadDecisions(c), liveMatches: live,
-    placementsCommit: cfg.placements.commit, hmac,
+    placementsCommit: b.placements_commit, hmac,
   });
   const committed = new Set(rows.filter((r) => r.state === "committed").map((r) => `${r.sheet}:${r.row_no}`));
   const changes = staged.filter((s) => !committed.has(`${s.sheet}:${s.rowNo}`));

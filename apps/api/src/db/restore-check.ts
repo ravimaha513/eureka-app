@@ -15,6 +15,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { adminUrlFromEnv } from "./migrate.js";
+import { importRoleMemberships } from "../platform/role-isolation.js";
 
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../../db/migrations");
 export const PROTECTED_TABLES = ["person", "candidate", "submission", "interview", "audit_event", "placement"];
@@ -63,6 +64,10 @@ export async function restoreCheck(adminUrl: string, appUrl: string | null, migr
       if (!r) problems.push(`table eureka.${t} is missing`);
       else if (!r.on || !r.forced) problems.push(`RLS is not enabled and forced on eureka.${t}`);
     }
+
+    // The sheet-import role must not be able to act as another role (0033).
+    const memberships = await importRoleMemberships(admin);
+    if (memberships.length) problems.push(`eureka_import is a member of ${memberships.join(", ")}`);
 
     const counts: Record<string, number> = {};
     for (const t of COUNTED) {

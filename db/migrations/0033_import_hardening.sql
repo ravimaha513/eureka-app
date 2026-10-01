@@ -39,7 +39,7 @@ BEGIN
     IF (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) OR pg_has_role(current_user, g.grantor, 'USAGE') THEN
       EXECUTE format('REVOKE eureka_app FROM eureka_import GRANTED BY %I CASCADE', g.grantor);
     ELSE
-      RAISE WARNING 'eureka_import is still a member of eureka_app (granted by %); revoke it as that role', g.grantor;
+      RAISE EXCEPTION 'eureka_import is a member of eureka_app (granted by %); revoke it as that role, then migrate again', g.grantor;
     END IF;
   END LOOP;
 END $$;
@@ -91,14 +91,15 @@ CREATE TABLE eureka.import_natural_key (
 ALTER TABLE eureka.import_batch
   ADD COLUMN approved_digest text CHECK (approved_digest ~ '^[0-9a-f]{64}$'),
   ADD COLUMN analysed_at timestamptz NOT NULL DEFAULT now(),
-  ADD CONSTRAINT import_batch_digest CHECK ((status = 'staged') = (approved_digest IS NULL));
+  -- NOT VALID: rows from before this migration are backfilled and validated in 0041.
+  ADD CONSTRAINT import_batch_digest CHECK ((status = 'staged') = (approved_digest IS NULL)) NOT VALID;
 -- A committed batch is final; the same files can open a new batch (the ledger skips loaded rows).
 ALTER TABLE eureka.import_batch DROP CONSTRAINT import_batch_source_digest_key;
 CREATE UNIQUE INDEX import_batch_open_digest ON eureka.import_batch (source_digest) WHERE status <> 'committed';
 
 ALTER TABLE eureka.import_decision
   ADD COLUMN approved_reasons text[],
-  ADD CONSTRAINT import_decision_reasons CHECK ((action = 'approve') = (approved_reasons IS NOT NULL));
+  ADD CONSTRAINT import_decision_reasons CHECK ((action = 'approve') = (approved_reasons IS NOT NULL)) NOT VALID;
 
 CREATE INDEX import_row_batch_state ON eureka.import_row (batch_id, state);
 CREATE INDEX import_row_batch_person ON eureka.import_row (batch_id, person_key);

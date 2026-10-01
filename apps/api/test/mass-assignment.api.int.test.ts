@@ -103,6 +103,15 @@ let n = 0;
 /** A fresh candidate owned by r1a (as superuser), so writes on it never collide with other cases. */
 const freshOwn = () => newCandidate(db, { teamId: T.t1, recruiterId: U.r1a, locationId: LOC.dallas });
 
+/** A staged import batch with one sales row (as the import CLI would open it with an admin's ticket). */
+async function importBatch(): Promise<string> {
+  const ticket = (await ok("admin", "POST", "/api/v1/imports/tickets", {})).ticket as string;
+  const id = (await rows(`SELECT authz.import_open_batch($1, md5(random()::text) || md5(random()::text), '{}', false) AS id`, [ticket]))[0]!.id as string;
+  await rows(`INSERT INTO eureka.import_row (batch_id, sheet, row_no, row_key, raw, norm, state, reasons)
+              VALUES ($1, 'sales', 2, md5(random()::text) || md5(random()::text), '{}', '{}', 'review', '{missing:name}')`, [id]);
+  return id;
+}
+
 /** An interview on r1a's fresh candidate through the API; `hoursAgo` places it in the past. */
 async function interviewOf(hoursAgo = -24) {
   const cand = await freshOwn();
@@ -195,20 +204,6 @@ const CASES: RejectCase[] = [
     },
   },
   // sheet import sign-off (docs/import.md, migration 0033)
-  {
-    route: "POST /api/v1/imports/:id/decisions", actor: "admin2", reports: "detail",
-    prepare: async () => {
-      const batch = await stagedImport(U.admin);
-      return {
-        url: `/api/v1/imports/${batch}/decisions`, body: { sheet: "sales", rowNo: 2, action: "approve" },
-        state: () => rows(`SELECT (SELECT count(*) FROM eureka.import_decision)::int AS decisions, b.* FROM eureka.import_batch b WHERE b.id = $1`, [batch]),
-      };
-    },
-    forbidden: {
-      batchId: FOREIGN_ID, decidedBy: U.admin, decidedAt: PAST, approvedReasons: ["duplicate"], rowKey: "x", state: "clean",
-      operatorId: U.admin2, approvedBy: U.admin2, approvedAt: PAST, status: "approved", approvedDigest: "a".repeat(64),
-    },
-  },
   // identity
   {
     route: "POST /api/auth/dev-login", actor: null,
@@ -506,6 +501,29 @@ const CASES: RejectCase[] = [
     // A recruiter writes client feedback only; coach and location feedback need those grants.
     notPermitted: { fields: { kind: "coach" }, detail: /^kind_not_permitted$/ },
   },
+  // sheet import (docs/import.md): a staged batch with one row, opened as the migration task would
+  {
+    route: "POST /api/v1/imports/:id/decisions", actor: "admin",
+    prepare: async () => {
+      const id = await importBatch();
+      return {
+        url: `/api/v1/imports/${id}/decisions`, body: { sheet: "sales", rowNo: 2, action: "reject" },
+        state: () => rows(`SELECT count(*)::int AS n FROM eureka.import_decision`),
+      };
+    },
+    forbidden: { decidedBy: U.admin2, decidedAt: PAST, rowKey: "a".repeat(64), approvedReasons: ["missing:name"], batchId: FOREIGN_ID },
+  },
+  {
+    route: "POST /api/v1/imports/:id/approve", actor: "admin2",
+    prepare: async () => {
+      const id = await importBatch();
+      return {
+        url: `/api/v1/imports/${id}/approve`, body: { digest: "0".repeat(64) },
+        state: () => rows(`SELECT status, approved_by, approved_digest FROM eureka.import_batch WHERE id = $1`, [id]),
+      };
+    },
+    forbidden: { approvedBy: U.admin, status: "approved", operatorId: U.admin2, placementsCommit: true, approvedAt: PAST },
+  },
 ];
 
 /** Endpoints that read no body: what they change comes from the URL and the session only. */
@@ -551,22 +569,6 @@ const IGNORED: IgnoreCase[] = [
       expect(t).toEqual([{ created_by: U.admin, expires_at: new Date(expiresAt), used_at: null, batch_id: null }]);
       expect(Date.parse(expiresAt)).toBeLessThan(Date.parse("2099-01-01T00:00:00Z"));
       expect(await rows(`SELECT 1 FROM eureka.import_ticket WHERE token_hash = $1`, ["a".repeat(64)])).toEqual([]);
-    },
-  },
-  {
-    route: "POST /api/v1/imports/:id/approve",
-    run: async () => {
-      const batch = await stagedImport(U.admin);
-      const r = await call("admin2", "POST", `/api/v1/imports/${batch}/approve`, {
-        ...SERVER_MANAGED, status: "committed", approvedBy: U.admin, operatorId: U.admin2, approvedAt: PAST,
-        approvedDigest: "a".repeat(64), committedAt: PAST, purgedAt: PAST,
-      });
-      expect(r.statusCode, r.body).toBe(200);
-      expect(r.json()).toMatchObject({ id: batch, status: "approved" });
-      const b = (await rows(`SELECT status, operator_id, approved_by, approved_digest, committed_at, purged_at FROM eureka.import_batch WHERE id = $1`, [batch]))[0]!;
-      expect(b).toMatchObject({ status: "approved", operator_id: U.admin, approved_by: U.admin2, committed_at: null, purged_at: null });
-      expect(b.approved_digest).toMatch(/^[0-9a-f]{64}$/);
-      expect(b.approved_digest).not.toBe("a".repeat(64));
     },
   },
   {
