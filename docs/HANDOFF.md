@@ -52,6 +52,12 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   report, dry-run commit by default; `--commit` loads one person per transaction as the row's
   owner through the app's RLS, guards and definer functions, after sign-off by a second person
   holding `access:manage`. Idempotent via a ledger; imported interviews skip feedback emails.
+- Resumes (FR-CAN-07, migration 0036, design B2.2 "Built in migration 0036"): presigned POST into
+  `quarantine/resumes/<id>`, GuardDuty scan tag polled by the worker job `resume-scan`, size and
+  magic-byte check, promotion to `clean/`, one current version per candidate, audited 60-second
+  download links; `document:read`/`document:upload` over the candidate. Profile section in the web app.
+  Without AWS: `LOCAL_STORAGE_DIR` (API serves a directory) and a fake scanner (EICAR = infected);
+  `pnpm local` now runs the worker too.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
@@ -61,8 +67,8 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
    `placement.created` / `placement.state_changed` to HR, Accounts and Immigration via SES; prune
    published rows after N days. Also a job deleting `idempotency_key` rows older than 24 h (add an index on created_at).
 2. **Hot List extras:** saved views, bulk actions, export (capped, masked, audited).
-3. **Candidate extras:** batches, resumes, `candidate_event` timeline, full duplicate check
-   (email, phone, DOB blind index).
+3. **Candidate extras:** batches, `candidate_event` timeline, full duplicate check (email, phone;
+   DOB blind index open), resumes (done, migration 0036).
 4. **Dashboards:** manager, lead and location views with activity counts and "needs attention".
 5. **Sheet migration:** built (see Built). Left: the SRS Q6 status/row-colour mapping, a decision
    on loading historical placements (`placements.commit`), weekly dry runs on real exports.
@@ -90,6 +96,11 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - Sheet import (`docs/import.md`): status and row-colour mapping (SRS Q6); may historical
   placements emit outbox notifications; joined placements' assignment start date; who signs off a
   batch (org admin assumed); is `eureka_import` acting as the API role acceptable for the window?
+
+- Resumes: today they follow `document:read` (B4.4), so a recruiter sees resumes of their own
+  candidates only, not a teammate's, and Open-to-all-teams viewers, location roles, coaches and the
+  CEO see none. Is that right for marketing (other teams submitting an open candidate need the resume)?
+  How long are superseded versions kept (OD-03)? Should the uploader get an email when a file is blocked?
 
 ## Waiting on Ravi (not code)
 
