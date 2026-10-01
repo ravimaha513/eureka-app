@@ -2,6 +2,7 @@
 #   node dist/main.js         API (default)
 #   node dist/worker.js       background worker
 #   node dist/db/migrate.js   migrations + role passwords (run once per deploy)
+#   node dist/db/bootstrap.js first org_admin(s) on a fresh stack (one-off, infra/README.md "First admin")
 
 ARG NODE_VERSION=22.20.0
 
