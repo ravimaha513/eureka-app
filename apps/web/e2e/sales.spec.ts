@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { cell } from "./support";
 
 /**
  * Sales journeys against the full stack with the dev seed (apps/api/test/fixtures.ts):
@@ -20,12 +21,17 @@ async function signIn(page: Page, label: string) {
 }
 
 const hotlist = (page: Page) => page.getByRole("table", { name: "Hot List" });
+/** Filter controls (the bulk bar has its own "Set status" select, so scope to the filter form; HANDOFF rule 8). */
+const filters = (page: Page) => page.getByRole("search", { name: "Hot List filters" });
+const filter = (page: Page, name: string) => filters(page).getByRole("combobox", { name, exact: true });
+/** The list footer's result count (other live regions: saved views, export, bulk results). */
+const resultCount = (page: Page) => page.getByRole("status").filter({ hasText: / on page \d+/ });
 
 /** Filters to active, team-only candidates and waits for the result count to settle. */
 async function filterActiveTeamOnly(page: Page) {
-  await page.getByLabel("Status").selectOption({ label: "Active" });
-  await page.getByLabel("Visibility").selectOption({ label: "Team only" });
-  await expect(page.getByRole("status")).toContainText("on page 1");
+  await filter(page, "Status").selectOption({ label: "Active" });
+  await filter(page, "Visibility").selectOption({ label: "Team only" });
+  await expect(resultCount(page)).toContainText("on page 1");
   await expect(hotlist(page)).not.toHaveAttribute("aria-busy", "true");
 }
 
@@ -50,11 +56,11 @@ test("recruiter filters the Hot List, opens an own candidate and logs submission
   const rows = hotlist(page).locator("tbody tr");
   await expect(rows.first()).toBeVisible();
   for (const row of await rows.all()) {
-    await expect(row.locator("td").nth(2)).toContainText("Active");
+    await expect(await cell(hotlist(page), row, "Status")).toContainText("Active");
     await expect(row.getByText("Open to all teams")).toHaveCount(0);
     // Other teams' team-only candidates: phone masked and no profile link.
-    if ((await row.locator("td").nth(4).innerText()) !== "Team Rohit") {
-      await expect(row.locator("td").nth(7)).toHaveClass(/masked/);
+    if ((await (await cell(hotlist(page), row, "Team")).innerText()) !== "Team Rohit") {
+      await expect(await cell(hotlist(page), row, "Phone")).toHaveClass(/masked/);
       await expect(row.getByText("Profile belongs to another team")).toBeVisible();
     }
   }
@@ -63,7 +69,7 @@ test("recruiter filters the Hot List, opens an own candidate and logs submission
   await page.getByLabel("Search name").fill("Cand1");
   await expect(page.getByLabel("Search name")).toHaveValue("Cand1");
   await expect.poll(async () => {
-    const names = await hotlist(page).locator("tbody tr td:first-child b").allInnerTexts();
+    const names = await hotlist(page).locator("tbody tr td b").allInnerTexts();
     return names.length > 0 && names.every((n) => n.startsWith("Cand1"));
   }).toBe(true);
   await page.getByRole("button", { name: "Clear filters" }).click();
@@ -112,8 +118,8 @@ test("recruiter filters the Hot List, opens an own candidate and logs submission
 
   // Back to the list with the filters kept.
   await page.getByRole("button", { name: "← Back to Hot List" }).click();
-  await expect(page.getByLabel("Status")).toHaveValue("active");
-  await expect(page.getByLabel("Visibility")).toHaveValue("team");
+  await expect(filter(page, "Status")).toHaveValue("active");
+  await expect(filter(page, "Visibility")).toHaveValue("team");
 });
 
 test("lead toggles a candidate's Open to all teams visibility", async ({ page }) => {

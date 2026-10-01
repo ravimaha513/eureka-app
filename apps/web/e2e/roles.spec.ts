@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { cell } from "./support";
 
 async function signIn(page: Page, label: string) {
   await page.goto("/");
@@ -14,13 +15,14 @@ test("recruiter sees the whole Hot List with other teams' phones masked", async 
   const nav = page.getByRole("complementary", { name: "Main navigation" });
   await expect(nav.getByRole("button", { name: "Hot List" })).toBeVisible();
   await expect(nav.getByRole("button", { name: "Users & Access" })).toHaveCount(0);
-  const rows = page.locator("tbody tr");
+  const table = page.getByRole("table", { name: "Hot List" });
+  const rows = table.locator("tbody tr");
   await expect(rows.first()).toBeVisible();
   const teams = new Set<string>();
   for (const row of await rows.all()) {
-    const team = await row.locator("td").nth(4).innerText();
+    const team = await (await cell(table, row, "Team")).innerText();
     teams.add(team);
-    if (team !== "Team Rohit") await expect(row.locator("td").nth(7)).toHaveClass(/masked/);
+    if (team !== "Team Rohit") await expect(await cell(table, row, "Phone")).toHaveClass(/masked/);
   }
   expect(teams.size).toBeGreaterThan(1);
   await page.screenshot({ path: "e2e-artifacts/recruiter-hotlist.png", fullPage: true });
@@ -28,13 +30,14 @@ test("recruiter sees the whole Hot List with other teams' phones masked", async 
 
 test("location admin sees all locations, with phones only for Dallas", async ({ page }) => {
   await signIn(page, "Location Ops Admin (Dallas)");
-  const rows = page.locator("tbody tr");
+  const table = page.getByRole("table", { name: "Hot List" });
+  const rows = table.locator("tbody tr");
   await expect(rows.first()).toBeVisible();
   const locations = new Set<string>();
   for (const row of await rows.all()) {
-    const location = await row.locator("td").nth(6).innerText();
+    const location = await (await cell(table, row, "Location")).innerText();
     locations.add(location);
-    if (location !== "Dallas") await expect(row.locator("td").nth(7)).toHaveClass(/masked/);
+    if (location !== "Dallas") await expect(await cell(table, row, "Phone")).toHaveClass(/masked/);
   }
   expect(locations.size).toBeGreaterThan(1);
   await page.screenshot({ path: "e2e-artifacts/location-admin-hotlist.png", fullPage: true });
@@ -47,7 +50,8 @@ test("org admin gets the admin screen and the masked Hot List, nothing else", as
   await expect(nav.getByRole("button", { name: "Hot List" })).toBeVisible();
   await expect(nav.getByRole("button", { name: "Candidates" })).toHaveCount(0);
   expect((await page.request.get("/api/v1/candidates")).status()).toBe(403);
-  const phones = page.locator("tbody tr td:nth-child(8)");
-  await expect(phones.first()).toBeVisible();
-  for (const p of await phones.all()) await expect(p).toHaveClass(/masked/);
+  const table = page.getByRole("table", { name: "Hot List" });
+  const rows = table.locator("tbody tr");
+  await expect(rows.first()).toBeVisible();
+  for (const row of await rows.all()) await expect(await cell(table, row, "Phone")).toHaveClass(/masked/);
 });
