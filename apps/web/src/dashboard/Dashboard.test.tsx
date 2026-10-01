@@ -65,6 +65,15 @@ describe("Dashboard", () => {
     expect(screen.getByLabelText("Group by")).toHaveValue("recruiter");
   });
 
+  it("charts the funnel, the grouping and the needs-attention split", async () => {
+    wrap(<DashboardPage />);
+    expect(await screen.findByRole("img", { name: /^Pipeline funnel: Submissions 4, Interviews 2/ })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Submissions by recruiter: Priya Shah 3, Unassigned 1" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /^Needs attention by kind: Stale submissions 3/ })).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("group", { name: "Metric to chart" })).getByRole("button", { name: "Joined" }));
+    expect(screen.getByRole("img", { name: "Joined by recruiter: Priya Shah 1, Unassigned 0" })).toBeInTheDocument();
+  });
+
   it("explains each needs-attention list with the thresholds in use", async () => {
     wrap(<DashboardPage />);
     const stale = await screen.findByRole("region", { name: /^Stale submissions/ });

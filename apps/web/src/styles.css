@@ -186,3 +186,31 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .badge.resume-clean { background: #ecfdf3; color: #15803d; }
 .badge.resume-pending { background: var(--pri-50); color: var(--pri-700); }
 .badge.resume-infected, .badge.resume-rejected, .badge.resume-failed, .badge.resume-expired { background: #fef2f2; color: #b91c1c; }
+
+/* Dashboard charts */
+.dashboard { --c0: #4f46e5; --c1: #0891b2; --c2: #f59e0b; --c3: #e11d48; --c4: #16a34a; --c5: #9333ea; }
+.chartgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.chartcard { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.charttitle { font-size: 13px; color: var(--text2); }
+.tab.sm { padding: 3px 9px; font-size: 11.5px; }
+.bars { display: flex; flex-direction: column; gap: 7px; }
+.barrow { display: grid; grid-template-columns: minmax(70px, 28%) 1fr auto; gap: 8px; align-items: center; }
+.barlabel { color: var(--text2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bartrack { background: var(--line2); border-radius: 999px; height: 12px; overflow: hidden; display: block; }
+.barfill { display: block; height: 100%; border-radius: 999px; background: var(--c0); }
+.barvalue { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text); font-size: 12px; min-width: 24px; text-align: right; }
+.barhint { font-weight: 400; color: var(--muted); font-size: 11px; }
+.c0 { background: var(--c0); fill: none; stroke: var(--c0); } .c1 { background: var(--c1); stroke: var(--c1); }
+.c2 { background: var(--c2); stroke: var(--c2); } .c3 { background: var(--c3); stroke: var(--c3); }
+.c4 { background: var(--c4); stroke: var(--c4); } .c5 { background: var(--c5); stroke: var(--c5); }
+.donut { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.donut svg { width: 130px; height: 130px; }
+.donut circle { fill: none; stroke-width: 14; }
+.donut .donuttrack { stroke: var(--line2); }
+.donutnum { font-size: 20px; font-weight: 700; fill: var(--text); }
+.donutcap { font-size: 7px; fill: var(--muted); }
+.legend { display: flex; flex-direction: column; gap: 6px; }
+.legenditem { display: flex; align-items: center; gap: 6px; color: var(--text2); font-size: 12px; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; stroke: none; }
+.agebar { display: inline-block; width: 48px; height: 6px; margin-right: 8px; border-radius: 999px; background: var(--line2); overflow: hidden; vertical-align: middle; }
+.agebar .barfill { height: 6px; }
