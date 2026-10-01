@@ -91,3 +91,6 @@ and `packages/shared/src/authz/{state-machines,actions}.ts`. Deviations and prec
   2000-01-01 and 2100-12-31; up to 10 contacts, contact `name` ≤ 120, `email` valid ≤ 254, `phone` E.164.
   The same limits are table CHECKs.
 - **Outbox** rows hold ids, states and the recipient groups only; no worker reads them yet.
+
+### Lookups visibility (least privilege)
+`GET /api/v1/lookups` accepts any signed-in user and always returns all six keys, but their content depends on permissions: `technologies` and `locations` for everyone; `coaches` only with `interview:create` or `interview:update`; `clients`, `vendors` and `implementationPartners` only with `submission:read`, `submission:create` or `placement:read`. Withheld lists are `[]` (not missing, not 403); the web pickers then offer a paste-an-ID input, and the server validates every ID on write.
