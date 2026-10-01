@@ -72,7 +72,10 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
    `infra/scripts/restore-drill.sh` + `dist/db/restore-check.js` (infra/README.md). First local
    k6 run does NOT pass: Hot List p95 ~720 ms, and the unfiltered submissions list for broad
    scopes (manager, location admin) takes ~2 s idle and hit the 5 s statement timeout under load
-   (loadtest/README.md). Tune these, then run on staging (raise its WAF per-IP limit first).
+   (loadtest/README.md). Tuned since (0027 list-order indexes; 0034 hashed owned-candidate set in
+   the activity read policies, custom-planned `authz.hotlist_page`): all three lists < 60 ms p95
+   idle for manager, location admin and lead. Re-run k6 locally, then on staging (raise its WAF
+   per-IP limit first).
 7. ~~Fix older dialogs' focus after a failed submit~~ Done: Create candidate and Log submission
    use `useFocusAfterFailure` (sales/ui.tsx): after a validation or API error, focus goes to the
    first invalid field, else to the `role="alert"` form error. Use it in new forms too.

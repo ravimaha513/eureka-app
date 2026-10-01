@@ -139,6 +139,37 @@ describe("differential: database RLS alone matches the application engine", () =
     expect(performance.now() - t0).toBeLessThan(250);
   });
 
+  it("authz.hotlist_page filters, cursor and limit behave as before 0034 (bound parameters, custom plans)", async () => {
+    const access = toUserAccess("r2a");
+    const all = candidates.filter((c) => hotlistVisible(resolveScope(access, "hotlist:read", "everyone"), c)).map((c) => c.id).sort();
+    const page = (args: unknown[]) => asUser(db.app, U.r2a, async (c) =>
+      (await c.query<{ id: string; marketing_status: string; visibility: string; first_name: string }>(
+        `SELECT * FROM authz.hotlist_page($1, $2, $3, $4, $5, $6)`, args)).rows);
+    const byId = new Map(candidates.map((c) => [c.id, c]));
+    const onHold = await page(["on_hold", null, null, null, null, 500]);
+    expect(onHold.map((r) => r.id)).toEqual(all.filter((id) => byId.get(id)!.marketingStatus === "on_hold"));
+    const shared = await page([null, null, "all_teams", null, null, 500]);
+    expect(shared.map((r) => r.id)).toEqual(all.filter((id) => byId.get(id)!.visibility === "all_teams"));
+    expect((await page([null, "Java", null, null, null, 500])).map((r) => r.id)).toEqual(all);
+    expect(await page([null, "Cobol", null, null, null, 500])).toEqual([]);
+    const search = await page([null, null, null, "%cand1%", null, 500]);
+    expect(search.length).toBeGreaterThan(0);
+    expect(search.every((r) => r.first_name.startsWith("Cand1"))).toBe(true);
+    expect(await page([null, null, null, "%Cand\\_%", null, 500])).toEqual([]); // ESCAPE '\' still applies
+    // Cursor paging in id order returns every row exactly once; the limit is clamped to 1..201.
+    const walked: string[] = [];
+    let cursor: string | null = null;
+    for (;;) {
+      const rows = await page([null, null, null, null, cursor, 7]);
+      walked.push(...rows.map((r) => r.id));
+      if (rows.length < 7) break;
+      cursor = rows[rows.length - 1]!.id;
+    }
+    expect(walked).toEqual(all);
+    expect(await page([null, null, null, null, null, 0])).toHaveLength(1);
+    expect((await page([null, null, null, null, null, null])).length).toBe(Math.min(50, all.length));
+  });
+
   it("an unknown or inactive user id sees no Hot List", async () => {
     const unknown = await asUser(db.app, "00000000-0000-0000-0000-00000000dead", async (c) =>
       (await c.query(`SELECT count(*)::int n FROM authz.hotlist_page(NULL, NULL, NULL, NULL, NULL, 500)`)).rows[0].n);

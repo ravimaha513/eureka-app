@@ -123,7 +123,7 @@ development container, 120 VUs, 30 s ramp, 2 min hold:
 | p95, interview board | 456 ms | < 500 ms |
 | failed requests | 0.02% | < 1% |
 
-Things to look at before the staging run:
+Things to look at before the staging run (all three tuned since, below):
 
 - `GET /api/v1/submissions` without filters takes 1.7 s for a manager and
   2.4 s for a location admin even when idle (58k submissions), and under load
@@ -131,3 +131,23 @@ Things to look at before the staging run:
 - The Hot List page takes ~200 ms idle and is the slowest screen under load.
 - `GET /api/v1/interviews` without a date range takes 0.5–0.8 s for broad
   scopes (the board always sends one).
+
+### Tuning (2026-10-01, idle, same seed; service time, 20 runs, p95)
+
+| Endpoint | Manager | Location admin | Lead |
+|---|---|---|---|
+| submissions, before 0027 | 1,608 ms | 2,612 ms | 473 ms |
+| submissions, after 0027 + 0034 | 38 ms | 42 ms | 34 ms |
+| interviews (no range), before 0027 | 476 ms | 765 ms | 226 ms |
+| interviews (no range), after 0027 + 0034 | 57 ms | 45 ms | 52 ms |
+| Hot List, before 0034 | 235 ms | 236 ms | 276 ms |
+| Hot List, after 0034 | 10 ms | 16 ms | 10 ms |
+
+Causes: (1) no index matched the list order, so every visible row was
+joined and sorted before `LIMIT` (0027 added `submitted_at` / `starts_at`
+indexes); (2) the activity read policies searched the caller's
+owned-candidate array linearly per row (~12,500 ids for a location admin:
+2.2 s just to read the visible submissions; 0034 makes it a hashed set,
+45 ms); (3) `authz.hotlist_page` ran a generic plan that sorted all ~40k
+Hot List rows per page (0034 plans each call with its actual arguments).
+Not yet re-run under k6 load.
