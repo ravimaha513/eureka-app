@@ -6,6 +6,7 @@ import { loadConfig } from "../src/platform/config.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, T, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 import { newCandidate, selectedSubmission } from "./placement-seed.js";
+import { seedPipeline } from "./pipeline-seed.js";
 
 /**
  * API checks for the Phase 2 gaps closed in migration 0035 and alongside it
@@ -25,6 +26,7 @@ const W2 = [
 beforeAll(async () => {
   db = await createTestDb();
   candidates = await seedFixtures(db.admin);
+  await seedPipeline(db, candidates);
   await db.admin.query(`INSERT INTO authz.checklist_template (kind, placement_type, items) VALUES ('paperwork', 'w2', $1::jsonb)`,
     [JSON.stringify(W2)]);
   const url = new URL(process.env.TEST_PG_ADMIN_URL ?? "postgres://postgres:postgres@127.0.0.1:5432");
@@ -165,5 +167,35 @@ describe("profile-only candidate fields on GET /candidates/:id", () => {
     expect([j.inPersonOk, j.marketingEmail, j.vitelNumber]).toEqual([false, "back@eureka-mkt.example", "+19725550999"]);
     const audit = await db.admin.query(`SELECT changes::text AS t FROM eureka.audit_event WHERE entity_id = $1`, [c.id]);
     expect(audit.rows.map((r) => r.t).join(" ")).not.toMatch(/back@|9725550999/);
+  });
+});
+
+describe("interview board location filter (web Location filter)", () => {
+  async function ids(key: Key, query = "") {
+    const out: { id: string; location: { id: string } | null }[] = [];
+    let cursor = "";
+    for (;;) {
+      const res = await call(key, "GET", `/api/v1/interviews?limit=200${query}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      expect(res.statusCode, res.body).toBe(200);
+      out.push(...res.json().items);
+      cursor = res.json().nextCursor;
+      if (!cursor) return out;
+    }
+  }
+
+  it("narrows to one location and partitions the caller's board", async () => {
+    const all = await ids("m1");
+    const dallas = await ids("m1", `&locationId=${LOC.dallas}`);
+    const austin = await ids("m1", `&locationId=${LOC.austin}`);
+    expect(dallas.length).toBeGreaterThan(0);
+    expect(austin.length).toBeGreaterThan(0);
+    expect(dallas.every((i) => i.location?.id === LOC.dallas)).toBe(true);
+    expect(austin.every((i) => i.location?.id === LOC.austin)).toBe(true);
+    expect([...dallas, ...austin].map((i) => i.id).sort()).toEqual(all.map((i) => i.id).sort());
+  });
+
+  it("never widens the scope: a Dallas location admin filtering on Austin sees nothing", async () => {
+    expect((await ids("locD")).length).toBeGreaterThan(0);
+    expect(await ids("locD", `&locationId=${LOC.austin}`)).toEqual([]);
   });
 });
