@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ApiError } from "../api";
 import { Dialog, DialogActions } from "../admin/Dialog";
+import { LookupPicker } from "../lookups";
 import { UUID_RE, fieldErrors, salesError } from "./errors";
 import { salesApi, type CreateSubmission } from "./salesApi";
 import { Field } from "./ui";
@@ -25,13 +26,14 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged }: {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ id: string; duplicateWarning: boolean } | null>(null);
   const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement>) => setV((s) => ({ ...s, [k]: e.target.value }));
+  const pick = (k: "clientId" | "vendorId") => (id: string) => setV((s) => ({ ...s, [k]: id }));
 
   const validate = () => {
     const e: Record<string, string> = {};
     if (!v.jobTitle.trim()) e.jobTitle = "Enter the job title.";
     else if (v.jobTitle.trim().length > 160) e.jobTitle = "Keep the job title under 160 characters.";
-    if (!UUID_RE.test(v.clientId.trim())) e.clientId = "Enter the client's ID.";
-    if (v.vendorId.trim() && !UUID_RE.test(v.vendorId.trim())) e.vendorId = "Enter a valid vendor ID or leave it empty.";
+    if (!UUID_RE.test(v.clientId.trim())) e.clientId = "Choose a client.";
+    if (v.vendorId.trim() && !UUID_RE.test(v.vendorId.trim())) e.vendorId = "Choose a vendor or leave it empty.";
     if (v.rate.trim()) {
       const r = Number(v.rate);
       if (!Number.isFinite(r) || r <= 0 || r > 1000) e.rate = "Enter an hourly rate between 0 and 1000.";
@@ -81,12 +83,8 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged }: {
         <Field label="Job title" error={errors.jobTitle}>
           {(p) => <input {...p} value={v.jobTitle} onChange={set("jobTitle")} maxLength={200} data-autofocus />}
         </Field>
-        <Field label="Client ID" hint="The API has no client list yet; paste the client's ID." error={errors.clientId}>
-          {(p) => <input {...p} value={v.clientId} onChange={set("clientId")} spellCheck={false} />}
-        </Field>
-        <Field label="Vendor ID (optional)" error={errors.vendorId}>
-          {(p) => <input {...p} value={v.vendorId} onChange={set("vendorId")} spellCheck={false} />}
-        </Field>
+        <LookupPicker kind="clients" label="Client" value={v.clientId} onChange={pick("clientId")} error={errors.clientId} />
+        <LookupPicker kind="vendors" label="Vendor (optional)" optional placeholder="No vendor" value={v.vendorId} onChange={pick("vendorId")} error={errors.vendorId} />
         <Field label="Rate per hour (optional)" error={errors.rate}>
           {(p) => <input {...p} type="number" inputMode="decimal" min="0" max="1000" step="0.01" value={v.rate} onChange={set("rate")} />}
         </Field>

@@ -26,6 +26,11 @@ const OTHER = "22222222-2222-4222-8222-222222222222";
 const TECH = "33333333-3333-4333-8333-333333333333";
 const LOC = "44444444-4444-4444-8444-444444444444";
 const CLIENT = "55555555-5555-4555-8555-555555555555";
+const VENDOR = "66666666-6666-4666-8666-666666666666";
+const LOOKUPS = {
+  technologies: [{ id: TECH, name: "Java" }], clients: [{ id: CLIENT, name: "Northwind Financial" }],
+  vendors: [{ id: VENDOR, name: "Contoso Staffing" }], locations: [{ id: LOC, name: "Dallas" }], coaches: [],
+};
 
 const cand = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
   id, name, technology: "Java", status: "active", visibility: "team", priority: "P2",
@@ -57,6 +62,7 @@ beforeEach(() => {
     "GET /api/v1/hotlist": (u) => ({ body: { items: u.searchParams.get("cursor") ? [FOREIGN] : [OWN, FOREIGN], nextCursor: u.searchParams.get("cursor") ? null : OTHER } }),
     "GET /api/v1/candidates": () => ({ body: { items: [OWN], nextCursor: null } }),
     [`GET /api/v1/candidates/${CID}`]: () => ({ body: PROFILE }),
+    "GET /api/v1/lookups": () => ({ body: LOOKUPS }),
   };
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init = {}) => {
     const url = new URL(String(input), "http://localhost");
@@ -195,15 +201,16 @@ describe("Candidates list and create", () => {
     expect(writes()).toHaveLength(0);
     expect(within(dlg).getByLabelText("First name")).toHaveAttribute("aria-invalid", "true");
     expect(within(dlg).getByLabelText("First name")).toHaveAccessibleDescription("Enter a first name.");
-    expect(within(dlg).getByLabelText("Technology ID")).toHaveAttribute("aria-invalid", "true");
+    expect(await within(dlg).findByRole("option", { name: "Java" })).toBeInTheDocument();
+    expect(within(dlg).getByLabelText("Technology")).toHaveAttribute("aria-invalid", "true");
+    expect(within(dlg).getByLabelText("Technology")).toHaveAccessibleDescription("Choose a technology.");
     expect(within(dlg).getByLabelText("First name")).toHaveFocus();
 
     fireEvent.change(within(dlg).getByLabelText("First name"), { target: { value: "Ravi" } });
     fireEvent.change(within(dlg).getByLabelText("Last name"), { target: { value: "Kumar" } });
     fireEvent.change(within(dlg).getByLabelText("Phone (optional)"), { target: { value: "+14695550199" } });
-    fireEvent.change(within(dlg).getByLabelText("Technology ID"), { target: { value: TECH } });
-    // Location comes from the listed candidates' locations.
-    expect(within(dlg).getByLabelText("Location")).toHaveValue(LOC);
+    fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
+    fireEvent.change(within(dlg).getByLabelText("Location"), { target: { value: LOC } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
 
     const phone = within(dlg).getByLabelText("Phone (optional)");
@@ -225,9 +232,29 @@ describe("Candidates list and create", () => {
     const dlg = screen.getByRole("dialog", { name: "New candidate" });
     fireEvent.change(within(dlg).getByLabelText("First name"), { target: { value: "A" } });
     fireEvent.change(within(dlg).getByLabelText("Last name"), { target: { value: "B" } });
-    fireEvent.change(within(dlg).getByLabelText("Technology ID"), { target: { value: TECH } });
+    await within(dlg).findByRole("option", { name: "Dallas" });
+    fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
+    fireEvent.change(within(dlg).getByLabelText("Location"), { target: { value: LOC } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
     expect(await within(dlg).findByRole("alert")).toHaveTextContent("You can't create candidates in that team.");
+  });
+
+  it("falls back to known locations and typed IDs when the lookup list is unavailable", async () => {
+    routes["GET /api/v1/lookups"] = () => problem(503, { title: "Unavailable" });
+    routes["POST /api/v1/candidates"] = () => ({ status: 201, body: { id: "new-id" } });
+    wrap(<CandidatesPage me={RECRUITER} />);
+    fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
+    const dlg = screen.getByRole("dialog", { name: "New candidate" });
+    await waitFor(() => expect(within(dlg).getByLabelText("Technology").tagName).toBe("INPUT"));
+    expect(within(dlg).getByLabelText("Technology")).toHaveAccessibleDescription(expect.stringContaining("paste the ID"));
+    // Locations seen on the list are offered, with a typed ID as the last resort.
+    fireEvent.change(within(dlg).getByLabelText("Location"), { target: { value: "__other__" } });
+    fireEvent.change(within(dlg).getByLabelText("Location ID"), { target: { value: LOC } });
+    fireEvent.change(within(dlg).getByLabelText("First name"), { target: { value: "A" } });
+    fireEvent.change(within(dlg).getByLabelText("Last name"), { target: { value: "B" } });
+    fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
+    await waitFor(() => expect(writes()[0]!.body).toEqual({ firstName: "A", lastName: "B", technologyId: TECH, locationId: LOC }));
   });
 });
 
@@ -351,11 +378,13 @@ describe("Log submission", () => {
   const openDialog = async () => {
     renderProfile(RECRUITER);
     fireEvent.click(await screen.findByRole("button", { name: "Log submission" }));
-    return screen.getByRole("dialog", { name: "Log submission for Asha Iyer" });
+    const dlg = screen.getByRole("dialog", { name: "Log submission for Asha Iyer" });
+    await within(dlg).findByRole("option", { name: "Northwind Financial" });
+    return dlg;
   };
   const fill = (dlg: HTMLElement) => {
     fireEvent.change(within(dlg).getByLabelText("Job title"), { target: { value: "Senior Java Developer" } });
-    fireEvent.change(within(dlg).getByLabelText("Client ID"), { target: { value: CLIENT } });
+    fireEvent.change(within(dlg).getByLabelText("Client"), { target: { value: CLIENT } });
     fireEvent.change(within(dlg).getByLabelText("Rate per hour (optional)"), { target: { value: "65" } });
   };
 
@@ -365,13 +394,24 @@ describe("Log submission", () => {
     fireEvent.click(within(dlg).getByRole("button", { name: "Log submission" }));
     expect(writes()).toHaveLength(0);
     expect(within(dlg).getByLabelText("Job title")).toHaveAccessibleDescription("Enter the job title.");
-    expect(within(dlg).getByLabelText("Client ID")).toHaveAttribute("aria-invalid", "true");
+    expect(within(dlg).getByLabelText("Client")).toHaveAttribute("aria-invalid", "true");
     fill(dlg);
     fireEvent.click(within(dlg).getByRole("button", { name: "Log submission" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(writes()[0]).toMatchObject({ path: "/api/v1/submissions", body: { candidateId: CID, jobTitle: "Senior Java Developer", clientId: CLIENT, rate: 65 } });
+    expect(writes()[0]!.body).not.toHaveProperty("vendorId");
     expect(screen.getByRole("status")).toHaveTextContent("Submission logged.");
     expect(screen.queryByText(DUPLICATE_WARNING)).not.toBeInTheDocument();
+  });
+
+  it("sends the vendor picked from the lookup list", async () => {
+    routes["POST /api/v1/submissions"] = () => ({ status: 201, body: { id: "s3", duplicateWarning: false } });
+    const dlg = await openDialog();
+    fill(dlg);
+    expect(within(within(dlg).getByLabelText("Vendor (optional)")).getAllByRole("option").map((o) => o.textContent)).toEqual(["No vendor", "Contoso Staffing"]);
+    fireEvent.change(within(dlg).getByLabelText("Vendor (optional)"), { target: { value: VENDOR } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Log submission" }));
+    await waitFor(() => expect(writes()[0]!.body).toMatchObject({ clientId: CLIENT, vendorId: VENDOR }));
   });
 
   it("shows the duplicate warning in the dialog and keeps it on the page", async () => {
