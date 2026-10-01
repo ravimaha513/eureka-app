@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { activityVisible, resolveScope, type ActivityRef } from "@eureka/shared";
-import { asUser, createTestDb, type TestDb } from "./db-harness.js";
+import { asUser, createTestDb, ownedCandidateCalls, type TestDb } from "./db-harness.js";
 import { LOC, T, U, seedFixtures, toUserAccess } from "./fixtures.js";
 import { createPlacement, extraUser, newCandidate, selectedSubmission, transitionPlacement, transitionPlacementRow } from "./placement-seed.js";
 
@@ -504,5 +504,15 @@ describe("RLS differential: placement visibility in the database matches the eng
     expect(plan).not.toMatch(/candidate_id = ANY/);
     const { rows } = await db.admin.query(`SELECT pg_get_expr(polqual, polrelid) AS def FROM pg_policy WHERE polname = $1`, [policy]);
     expect(rows[0].def).toMatch(new RegExp(`unnest\\(\\( SELECT authz\\.owned_candidate_ids\\('${perm}'`));
+  });
+
+  // assignment_read resolves assignment:read and, through its placement probe, placement_read resolves placement:read.
+  it.each([["placement", 1], ["assignment", 2]] as const)("the %s read policy calls owned_candidate_ids once per statement and permission", async (table, perms) => {
+    // l3 (team t3) rejects the other teams' rows on the actor branches, so the ownership branch is probed per row.
+    const total = (await db.admin.query(`SELECT count(*)::int AS n FROM eureka.${table}`)).rows[0].n as number;
+    const { calls, rows } = await ownedCandidateCalls(db.admin, U.l3, `SELECT * FROM eureka.${table}`);
+    expect(rows).toBeGreaterThan(0);
+    expect(total - rows).toBeGreaterThan(1); // per-row resolution would then report more than `perms` calls
+    expect(calls).toBe(perms);
   });
 });

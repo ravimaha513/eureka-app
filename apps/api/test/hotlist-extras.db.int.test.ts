@@ -187,7 +187,7 @@ describe("authz.hotlist_export (differential against the engine)", () => {
     expect(rows[0]!.src).toMatch(/50001/);
   });
 
-  it("plans each call with its arguments (0038): every filter, the escape and the limit clamp still apply", async () => {
+  it("plans each call with its arguments (0038): every filter, an escaped underscore and the limit clamp still apply", async () => {
     const all = await exportAs(U.ceo);
     const byId = new Map(candidates.map((c) => [c.id, c]));
     const ids = (rows: Row[]) => rows.map((r) => r.id);
