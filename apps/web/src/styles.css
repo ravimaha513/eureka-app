@@ -171,3 +171,11 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .attention > p { margin: 4px 0 10px; }
 .attention .tablewrap { margin: 0 -16px; }
 .attention .ok { color: #15803d; }
+
+/* Hot List extras: saved views, export, bulk actions */
+.savedviews, .export, .bulkbar { margin: 8px 0; }
+.savedviews .toolbar + .toolbar { margin-top: 8px; }
+.savedviews p, .export p, .bulkbar p { margin: 6px 0 0; min-height: 1em; }
+.export { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bulkbar { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.bulkfail { margin: 4px 0 0; padding-left: 18px; font-size: 12px; color: #92400e; }

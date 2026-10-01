@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { salesApi, salesKeys, type Visibility } from "./salesApi";
+import { salesApi, salesKeys, type ViewFilters, type Visibility } from "./salesApi";
 
 export const PAGE_SIZE = 50;
 
@@ -42,6 +42,14 @@ export function useCandidateList(kind: "hotlist" | "candidates") {
     visibility, setVisibility: (v: Visibility | "") => { setVisibilityRaw(v); reset(); },
     hasFilters: Boolean(search || technology || status || visibility),
     clear: () => { setSearchInput(""); setTechnologyInput(""); setSearch(""); setTechnology(""); setStatusRaw(""); setVisibilityRaw(""); reset(); },
+    /** Replaces every filter at once (a saved view) and returns to page 1. */
+    apply: (f: ViewFilters) => {
+      setSearchInput(f.search ?? ""); setSearch(f.search ?? "");
+      setTechnologyInput(f.technology ?? ""); setTechnology(f.technology ?? "");
+      setStatusRaw(f.status ?? ""); setVisibilityRaw(f.visibility ?? ""); reset();
+    },
+    /** The filters in effect (debounced text), without paging. */
+    applied: { search, technology, status, visibility },
     prev: () => setCursors((c) => (c.length > 1 ? c.slice(0, -1) : c)),
     next: () => { const n = q.data?.nextCursor; if (n) setCursors((c) => [...c, n]); },
     canNext: Boolean(q.data?.nextCursor) && !q.isPlaceholderData,

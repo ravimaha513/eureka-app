@@ -27,6 +27,8 @@ import { PlacementsController } from "./modules/placements/placements.controller
 import { PlacementsService } from "./modules/placements/placements.service.js";
 import { LookupsController, LookupsService } from "./modules/lookups/lookups.controller.js";
 import { DashboardController, DashboardService } from "./modules/dashboard/dashboard.controller.js";
+import { HotlistController } from "./modules/hotlist/hotlist.controller.js";
+import { HotlistService } from "./modules/hotlist/hotlist.service.js";
 
 @Controller("api")
 class HealthController {
@@ -47,12 +49,12 @@ export class AppModule {
       module: AppModule,
       controllers: [
         FeedbackController, HealthController, AuthController, MeController, CandidatesController, SubmissionsController, InterviewsController,
-        AdminController, TeamsController, PlacementsController, LookupsController, DashboardController,
+        AdminController, TeamsController, PlacementsController, LookupsController, DashboardController, HotlistController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
         DbService, SessionService, AccessService, AuditService, OidcService,
-        CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService,
+        CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService,
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],

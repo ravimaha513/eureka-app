@@ -47,8 +47,9 @@ describe("role-aware navigation", () => {
 
 describe("Hot List", () => {
   it("shows masked phones as masked and labels Open-to-all-teams candidates", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
-      items: [{
+    // A fresh response per call: the page also loads the user's saved views.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => new Response(JSON.stringify({
+      items: String(input).startsWith("/api/v1/hotlist/views") ? [] : [{
         id: "c1", name: "Divya Menon", technology: "Data Engineer", status: "active", visibility: "all_teams", priority: "P1",
         team: { id: "t2", name: "Team Anjali" }, recruiter: null, location: { id: "l", name: "Dallas" },
         daysInMarket: 21, technicalRating: null, phone: "•••-•••-42", phoneMasked: true,
