@@ -180,8 +180,13 @@ resource "aws_iam_role_policy" "worker" {
   })
 }
 
+locals {
+  # SES senders the worker may use: interview feedback and placement notifications.
+  worker_mail_senders = distinct(compact([var.feedback_from_email, var.outbox_from_email]))
+}
+
 resource "aws_iam_role_policy" "worker_feedback" {
-  count = var.feedback_from_email != "" ? 1 : 0
+  count = length(local.worker_mail_senders) > 0 ? 1 : 0
   role  = aws_iam_role.worker.id
   policy = jsonencode({
     Version = "2012-10-17"
@@ -189,7 +194,7 @@ resource "aws_iam_role_policy" "worker_feedback" {
       Effect    = "Allow"
       Action    = ["ses:SendEmail"]
       Resource  = "arn:aws:ses:${var.aws_region}:${var.account_id}:identity/*"
-      Condition = { StringEquals = { "ses:FromAddress" = var.feedback_from_email } }
+      Condition = { StringEquals = { "ses:FromAddress" = local.worker_mail_senders } }
     }]
   })
 }
@@ -461,6 +466,13 @@ resource "aws_ecs_task_definition" "worker" {
       ], var.feedback_from_email != "" ? [
       { name = "FEEDBACK_FROM_EMAIL", value = var.feedback_from_email },
       { name = "FEEDBACK_PUBLIC_ORIGIN", value = local.public_base_url },
+      ] : [], [
+      { name = "OUTBOX_MAIL_MODE", value = var.outbox_from_email != "" ? "ses" : "disabled" },
+      ], var.outbox_from_email != "" ? [
+      { name = "OUTBOX_FROM_EMAIL", value = var.outbox_from_email },
+      { name = "APP_PUBLIC_ORIGIN", value = local.public_base_url },
+      ] : [], var.outbox_deliver_since != "" ? [
+      { name = "OUTBOX_DELIVER_SINCE", value = var.outbox_deliver_since },
     ] : [])
     secrets = concat([
       { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.generated["db/worker/url"].arn },
