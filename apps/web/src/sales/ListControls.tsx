@@ -4,8 +4,10 @@ import { statusLabel } from "./salesApi";
 
 type ListState = ReturnType<typeof useCandidateList>;
 
-/** Search / technology / status / visibility filters for a candidate list. */
-export function ListFilters({ s, label, statuses }: { s: ListState; label: string; statuses: readonly string[] }) {
+/** Search / technology / status / visibility (and, when `batches` is given, batch) filters for a candidate list. */
+export function ListFilters({ s, label, statuses, batches }: {
+  s: ListState; label: string; statuses: readonly string[]; batches?: { id: string; label: string }[];
+}) {
   const id = useId();
   return (
     <form className="toolbar" role="search" aria-label={`${label} filters`} onSubmit={(e) => e.preventDefault()}>
@@ -32,6 +34,16 @@ export function ListFilters({ s, label, statuses }: { s: ListState; label: strin
           <option value="all_teams">Open to all teams</option>
         </select>
       </div>
+      {batches && (
+        <div className="field inline">
+          <label htmlFor={`${id}-batch`}>Batch</label>
+          <select id={`${id}-batch`} value={s.batchId} onChange={(e) => s.setBatchId(e.target.value)}>
+            <option value="">Any batch</option>
+            {s.batchId && !batches.some((b) => b.id === s.batchId) && <option value={s.batchId}>Selected batch</option>}
+            {batches.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+          </select>
+        </div>
+      )}
       {s.hasFilters && <button type="button" className="btn" onClick={s.clear}>Clear filters</button>}
     </form>
   );

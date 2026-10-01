@@ -18,6 +18,7 @@ export function salesError(e: unknown, ctx: SalesErrorContext = "generic"): stri
       : "A conflicting record exists. Refresh and try again.";
     case 422:
       if (e.errors?.length) return "Some fields need attention. Check the highlighted fields.";
+      if (e.detail === "batch_not_allowed") return "That batch is at another location or no longer open. Choose another batch.";
       if (ctx === "transition") return "That status change isn't allowed from the candidate's current status.";
       return "The server rejected this change. Check the values and try again.";
     case 429: return e.detail ?? "Too many requests. Try again in a minute.";
