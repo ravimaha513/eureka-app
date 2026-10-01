@@ -21,11 +21,17 @@ const DAY_MS = 86_400_000;
 export const GROUP_BY = ["recruiter", "team", "location"] as const;
 export type GroupBy = (typeof GROUP_BY)[number];
 
+function validTimeZone(tz: string): boolean {
+  try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return true; } catch { return false; }
+}
+
 export const DashboardQuery = z
   .object({
     from: QueryInstant.optional(),
     to: QueryInstant.optional(),
     groupBy: z.enum(GROUP_BY).optional(),
+    /** IANA time zone the daily series is bucketed in (the client's); default UTC. */
+    tz: z.string().max(64).refine(validTimeZone, "unknown time zone").optional(),
   })
   .strict();
 export type DashboardQuery = z.infer<typeof DashboardQuery>;
@@ -96,7 +102,18 @@ function activityWhere(s: Scopes, perm: Permission, params: Params, alias: strin
   return parts.join(" AND ");
 }
 
-interface CountRow { m: Metric; k: string | null; n: number }
+/** `by`: 'k' rows are per group key, 'd' rows are per local day (`d` is a yyyy-mm-dd string). */
+interface CountRow { by: "k" | "d"; m: Metric; k: string | null; d: string | null; n: number }
+
+/** Every yyyy-mm-dd from the local day of `from` to the local day of the last instant before `to`. */
+export function localDays(from: Date, to: Date, tz: string): string[] {
+  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" });
+  const first = fmt.format(from);
+  const last = fmt.format(new Date(to.getTime() - 1));
+  const out: string[] = [];
+  for (let t = Date.parse(`${first}T00:00:00Z`); t <= Date.parse(`${last}T00:00:00Z`); t += DAY_MS) out.push(new Date(t).toISOString().slice(0, 10));
+  return out;
+}
 
 export interface AttentionItem {
   id: string;
@@ -134,7 +151,7 @@ export class DashboardService {
     const metrics = METRIC_KEYS.filter((m) => read[METRICS[m]]);
 
     try {
-      return await this.load(user, scopes, metrics, groupBy, from, to);
+      return await this.load(user, scopes, metrics, groupBy, from, to, q.tz ?? "UTC");
     } catch (err) {
       // query_canceled: the statement timeout fired. Mapped here, not globally, so other endpoints keep their behaviour.
       if ((err as { code?: string }).code === "57014") {
@@ -144,17 +161,23 @@ export class DashboardService {
     }
   }
 
-  private async load(user: AuthedUser, scopes: Scopes, metrics: Metric[], groupBy: GroupBy, from: Date, to: Date) {
+  private async load(user: AuthedUser, scopes: Scopes, metrics: Metric[], groupBy: GroupBy, from: Date, to: Date, tz: string) {
     const report = scopes.report;
     return this.db.withUser(user.id, async (c) => {
       // Org-wide reports get the longer report timeout (design B4.8 N9).
       if (report.all) await c.query("SET LOCAL statement_timeout = '60s'");
-      const counts = metrics.length ? await this.counts(c, scopes, groupBy, from, to) : [];
+      const counts = metrics.length ? await this.counts(c, scopes, groupBy, from, to, tz) : [];
       const names = await this.names(c, groupBy, [...new Set(counts.map((r) => r.k).filter((k): k is string => k !== null))]);
       const zero = () => Object.fromEntries(metrics.map((m) => [m, 0])) as Record<Metric, number>;
       const totals = zero();
       const groups = new Map<string | null, Record<Metric, number>>();
+      const days = new Map(localDays(from, to, tz).map((d) => [d, zero()]));
       for (const r of counts) {
+        if (r.by === "d") {
+          const day = days.get(r.d!);
+          if (day) day[r.m] += r.n;
+          continue;
+        }
         totals[r.m] += r.n;
         const g = groups.get(r.k) ?? zero();
         g[r.m] += r.n;
@@ -168,6 +191,8 @@ export class DashboardService {
         metrics,
         totals,
         groups: groupList,
+        /** One entry per local day of the period, zero-filled, for the activity-over-time chart. */
+        series: [...days].map(([date, counts]) => ({ date, counts })),
         needsAttention: {
           thresholds: DASHBOARD_THRESHOLDS,
           sections: await this.attention(c, scopes),
@@ -177,34 +202,35 @@ export class DashboardService {
   }
 
   /** One round trip: per metric and group key, under RLS with the list predicates. */
-  private async counts(c: pg.PoolClient, s: Scopes, groupBy: GroupBy, from: Date, to: Date): Promise<CountRow[]> {
+  private async counts(c: pg.PoolClient, s: Scopes, groupBy: GroupBy, from: Date, to: Date, tz: string): Promise<CountRow[]> {
     const params: Params = [];
     const p = bind(params);
     const $from = p(from.toISOString());
     const $to = p(to.toISOString());
+    const $tz = p(tz);
     const col = { recruiter: "recruiter_id", team: "team_id", location: "location_id" }[groupBy];
     const inPeriod = (expr: string) => `${expr} >= ${$from}::timestamptz AND ${expr} < ${$to}::timestamptz`;
     const branches: string[] = [];
 
     const sub = activityWhere(s, "submission:read", params, "s");
-    if (sub) branches.push(`SELECT 'submissions' AS m, s.${col} AS k FROM eureka.submission s
+    if (sub) branches.push(`SELECT 'submissions' AS m, s.${col} AS k, s.submitted_at AS ts FROM eureka.submission s
       LEFT JOIN eureka.candidate c ON c.id = s.candidate_id WHERE ${sub} AND ${inPeriod("s.submitted_at")}`);
 
     const int = activityWhere(s, "interview:read", params, "i");
     if (int) {
-      branches.push(`SELECT 'interviewsScheduled', i.${col} FROM eureka.interview i
+      branches.push(`SELECT 'interviewsScheduled', i.${col}, i.starts_at FROM eureka.interview i
         LEFT JOIN eureka.candidate c ON c.id = i.candidate_id
         WHERE ${int} AND ${inPeriod("i.starts_at")} AND i.call_status ${LIVE_INTERVIEW_SQL}`);
-      branches.push(`SELECT 'interviewsCleared', i.${col} FROM eureka.interview i
+      branches.push(`SELECT 'interviewsCleared', i.${col}, i.cleared_at FROM eureka.interview i
         LEFT JOIN eureka.candidate c ON c.id = i.candidate_id
         WHERE ${int} AND i.cleared AND ${inPeriod("i.cleared_at")}`);
     }
 
     const pl = activityWhere(s, "placement:read", params, "pl");
     if (pl) {
-      branches.push(`SELECT 'placementsCreated', pl.${col} FROM eureka.placement pl
+      branches.push(`SELECT 'placementsCreated', pl.${col}, pl.created_at FROM eureka.placement pl
         LEFT JOIN eureka.candidate c ON c.id = pl.candidate_id WHERE ${pl} AND ${inPeriod("pl.created_at")}`);
-      branches.push(`SELECT 'placementsJoined', pl.${col} FROM eureka.placement pl
+      branches.push(`SELECT 'placementsJoined', pl.${col}, pl.joined_at FROM eureka.placement pl
         LEFT JOIN eureka.candidate c ON c.id = pl.candidate_id
         WHERE ${pl} AND pl.joined_at IS NOT NULL AND ${inPeriod("pl.joined_at")}`);
     }
@@ -213,11 +239,14 @@ export class DashboardService {
     if (candRead) {
       const where = [scopePredicate(candRead, params, "c")];
       if (!s.report.all) where.push(ownsCandidateSql(s.report, params, "c"));
-      branches.push(`SELECT 'candidatesAdded', c.${col} FROM eureka.candidate c
+      branches.push(`SELECT 'candidatesAdded', c.${col}, c.created_at FROM eureka.candidate c
         WHERE ${where.join(" AND ")} AND ${inPeriod("c.created_at")}`);
     }
 
-    const sql = `SELECT m, k, count(*)::int AS n FROM (${branches.join("\nUNION ALL\n")}) x(m, k) GROUP BY m, k`;
+    // One scan, two groupings: per group key, and per local day in the caller's time zone.
+    const sql = `SELECT CASE WHEN GROUPING(k) = 0 THEN 'k' ELSE 'd' END AS by, m, k, d::text AS d, count(*)::int AS n
+      FROM (SELECT m, k, (ts AT TIME ZONE ${$tz}::text)::date AS d FROM (${branches.join("\nUNION ALL\n")}) x(m, k, ts)) y
+      GROUP BY GROUPING SETS ((m, k), (m, d))`;
     return (await c.query<CountRow>(sql, params)).rows;
   }
 

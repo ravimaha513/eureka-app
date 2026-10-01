@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { BarChart, Donut, Funnel } from "./Charts";
+import { FunnelBars, PALETTE, PieShare, TrendChart } from "./Charts";
 import { pipelineError } from "../pipeline/errors";
 import { pipelineLabel } from "../pipeline/pipelineApi";
 import { fmtDate } from "../sales/ui";
@@ -25,6 +25,13 @@ const fmtDay = (ms: number) => new Date(ms).toLocaleDateString(undefined, { date
 
 /** Pipeline order for the funnel chart. */
 const FUNNEL: Metric[] = ["submissions", "interviewsScheduled", "interviewsCleared", "placementsCreated", "placementsJoined"];
+
+/** The six largest shares, the rest folded into "Other" so the pie stays legible. */
+function topShares(parts: { key: string; label: string; value: number }[]) {
+  const sorted = [...parts].sort((a, b) => b.value - a.value);
+  const rest = sorted.slice(6).reduce((n, p) => n + p.value, 0);
+  return rest > 0 ? [...sorted.slice(0, 6), { key: "other", label: "Other", value: rest }] : sorted;
+}
 
 const days = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
 
@@ -76,9 +83,13 @@ export function DashboardPage({ canOpen = () => false, onOpen }: {
     placeholderData: keepPreviousData,
   });
   const d = q.data;
-  const [chartMetric, setChartMetric] = useState<Metric | undefined>(undefined);
-  const shownMetric = d && d.metrics.length > 0 ? (chartMetric && d.metrics.includes(chartMetric) ? chartMetric : d.metrics[0]!) : undefined;
+  const [shareMetric, setShareMetric] = useState<Metric | undefined>(undefined);
+  const [plotted, setPlotted] = useState<Metric[] | undefined>(undefined);
+  const shownMetric = d && d.metrics.length > 0 ? (shareMetric && d.metrics.includes(shareMetric) ? shareMetric : d.metrics[0]!) : undefined;
+  /** Until the user chooses, plot the first three metrics; six lines at once is noise. */
+  const plot = d ? (plotted ?? d.metrics.slice(0, 3)).filter((m) => d.metrics.includes(m)) : [];
   const funnel = d ? FUNNEL.filter((m) => d.metrics.includes(m)).map((m) => ({ key: m, label: METRIC_LABELS[m], value: d.totals[m] ?? 0 })) : [];
+  const trend = d ? d.series.map((x) => ({ date: x.date, ...Object.fromEntries(d.metrics.map((m) => [m, x.counts[m] ?? 0])) })) as ({ date: string } & Record<string, number | string>)[] : [];
   const shownGroup = d?.groupBy ?? groupBy ?? "recruiter";
 
   return (
@@ -129,36 +140,54 @@ export function DashboardPage({ canOpen = () => false, onOpen }: {
           </section>
 
           {d.metrics.length > 0 && (
-            <div className="chartgrid">
-              {funnel.length > 1 && (
-                <section className="card chartcard" aria-label="Pipeline funnel">
-                  <h3 className="charttitle">Pipeline funnel</h3>
-                  <Funnel stages={funnel} label="Pipeline funnel" />
-                </section>
-              )}
-              {shownMetric && d.groups.length > 0 && (
-                <section className="card chartcard" aria-label={`${METRIC_LABELS[shownMetric]} by ${GROUP_LABELS[d.groupBy].toLowerCase()}`}>
-                  <h3 className="charttitle">By {GROUP_LABELS[d.groupBy].toLowerCase()}</h3>
-                  <div className="tabs wrap" role="group" aria-label="Metric to chart">
-                    {d.metrics.map((m) => (
-                      <button key={m} type="button" className="tab sm" aria-pressed={shownMetric === m} onClick={() => setChartMetric(m)}>{METRIC_LABELS[m]}</button>
+            <>
+              <section className="card chartcard" aria-label="Activity over time">
+                <div className="chartheader">
+                  <h3 className="charttitle">Activity over time</h3>
+                  <div className="tabs wrap" role="group" aria-label="Metrics to plot">
+                    {d.metrics.map((m, i) => (
+                      <button key={m} type="button" className="tab sm" aria-pressed={plot.includes(m)}
+                        onClick={() => setPlotted(plot.includes(m) ? plot.filter((x) => x !== m) : [...plot, m])}>
+                        <i className="swatch" style={{ background: PALETTE[i % PALETTE.length] }} />{METRIC_LABELS[m]}
+                      </button>
                     ))}
                   </div>
-                  <BarChart tone={d.metrics.indexOf(shownMetric)} label={`${METRIC_LABELS[shownMetric]} by ${GROUP_LABELS[d.groupBy].toLowerCase()}`}
-                    bars={[...d.groups]
-                      .sort((a, b) => (b.counts[shownMetric] ?? 0) - (a.counts[shownMetric] ?? 0))
-                      .slice(0, 10)
-                      .map((g) => ({ key: g.id ?? "none", label: g.name ?? UNGROUPED[d.groupBy], value: g.counts[shownMetric] ?? 0 }))} />
+                </div>
+                <TrendChart data={trend} label="Activity per day" series={plot.map((m) => ({ key: m, label: METRIC_LABELS[m], color: PALETTE[d.metrics.indexOf(m) % PALETTE.length]! }))} />
+              </section>
+              <div className="chartgrid">
+                {funnel.length > 1 && (
+                  <section className="card chartcard" aria-label="Pipeline funnel">
+                    <h3 className="charttitle">Pipeline funnel</h3>
+                    <FunnelBars stages={funnel} label="Pipeline funnel" />
+                  </section>
+                )}
+                <section className="card chartcard" aria-label="Activity mix">
+                  <h3 className="charttitle">Activity mix</h3>
+                  <PieShare label="Activity mix" centre="events"
+                    parts={d.metrics.map((m) => ({ key: m, label: METRIC_LABELS[m], value: d.totals[m] ?? 0 }))} />
                 </section>
-              )}
-              {d.needsAttention.sections.length > 0 && (
-                <section className="card chartcard" aria-label="Needs attention overview">
-                  <h3 className="charttitle">Needs attention</h3>
-                  <Donut label="Needs attention by kind" centre="open items"
-                    parts={d.needsAttention.sections.map((s) => ({ key: s.kind, label: ATTENTION[s.kind].title, value: s.total }))} />
-                </section>
-              )}
-            </div>
+                {shownMetric && d.groups.length > 0 && (
+                  <section className="card chartcard" aria-label={`${METRIC_LABELS[shownMetric]} share by ${GROUP_LABELS[d.groupBy].toLowerCase()}`}>
+                    <h3 className="charttitle">Share by {GROUP_LABELS[d.groupBy].toLowerCase()}</h3>
+                    <div className="tabs wrap" role="group" aria-label="Metric to chart">
+                      {d.metrics.map((m) => (
+                        <button key={m} type="button" className="tab sm" aria-pressed={shownMetric === m} onClick={() => setShareMetric(m)}>{METRIC_LABELS[m]}</button>
+                      ))}
+                    </div>
+                    <PieShare label={`${METRIC_LABELS[shownMetric]} by ${GROUP_LABELS[d.groupBy].toLowerCase()}`} centre={METRIC_LABELS[shownMetric].toLowerCase()}
+                      parts={topShares(d.groups.map((g) => ({ key: g.id ?? "none", label: g.name ?? UNGROUPED[d.groupBy], value: g.counts[shownMetric] ?? 0 })))} />
+                  </section>
+                )}
+                {d.needsAttention.sections.length > 0 && (
+                  <section className="card chartcard" aria-label="Needs attention overview">
+                    <h3 className="charttitle">Needs attention</h3>
+                    <PieShare label="Needs attention by kind" centre="open items"
+                      parts={d.needsAttention.sections.map((s) => ({ key: s.kind, label: ATTENTION[s.kind].title, value: s.total }))} />
+                  </section>
+                )}
+              </div>
+            </>
           )}
 
           {d.metrics.length > 0 && (

@@ -25,6 +25,8 @@ export interface Dashboard {
   metrics: Metric[];
   totals: Partial<Record<Metric, number>>;
   groups: { id: string | null; name: string | null; counts: Partial<Record<Metric, number>> }[];
+  /** One entry per local day of the period (zero-filled), for the activity-over-time chart. */
+  series: { date: string; counts: Partial<Record<Metric, number>> }[];
   needsAttention: {
     thresholds: { staleSubmissionDays: number; feedbackGraceHours: number; feedbackLookbackDays: number; placementStallDays: number };
     sections: { kind: AttentionKind; total: number; items: AttentionItem[] }[];
@@ -68,7 +70,7 @@ export function periodRange(days: number, now = new Date()): { from: string; to:
 
 export const dashboardApi = {
   get: (q: { from: string; to: string; groupBy?: GroupBy }) => {
-    const p = new URLSearchParams({ from: q.from, to: q.to });
+    const p = new URLSearchParams({ from: q.from, to: q.to, tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
     if (q.groupBy) p.set("groupBy", q.groupBy);
     return api<Dashboard>(`/api/v1/dashboard?${p.toString()}`);
   },

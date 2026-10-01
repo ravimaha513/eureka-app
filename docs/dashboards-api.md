@@ -49,8 +49,12 @@ else keeps the 5-second default.
 |---|---|
 | `from`, `to` | Period `[from, to)`, date or ISO date-time with offset. Default: the 7 days ending now. `from < to`, at most 366 days; otherwise 422. |
 | `groupBy` | `recruiter`, `team` or `location`. Default from the broadest `report:read` grant: own/team → recruiter, hierarchy → team, location/org → location. |
+| `tz` | IANA time zone (e.g. `America/New_York`) the daily `series` is bucketed in. Default `UTC`. Unknown zones are rejected (422). |
 
 Unknown parameters are rejected (422).
+
+The response also carries `series`: one `{ date: "yyyy-mm-dd", counts }` entry per local day of the period
+(zero-filled), using the same metrics and scope as `totals`. The counts of a metric over `series` add up to its total.
 
 ## Metrics
 
