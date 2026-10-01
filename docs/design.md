@@ -743,6 +743,7 @@ CREATE POLICY candidate_update ON candidate FOR UPDATE TO eureka_app
 - Activity rows carry team and hierarchy snapshots, so reports attribute work to the team at the time (FR-ORG-04).
 - Exports stream CSV under the same scope, mask phone numbers, are capped at 50,000 rows and are audited.
 - Materialized views or a warehouse are added only when measured load requires it (A10).
+- Role dashboards (activity counts and "needs attention") follow the same rule: `docs/dashboards-api.md`.
 
 ## B8. Testing strategy
 

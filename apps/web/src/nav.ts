@@ -9,7 +9,7 @@ export interface NavItem {
 }
 
 export const NAV: NavItem[] = [
-  { key: "dashboard", label: "Dashboard", section: "Workspace", anyOf: ["report:read", "performance:read"] },
+  { key: "dashboard", label: "Dashboard", section: "Workspace", anyOf: ["report:read"] }, // GET /api/v1/dashboard needs report:read
   { key: "hotlist", label: "Hot List", section: "Workspace", anyOf: ["hotlist:read"] },
   { key: "candidates", label: "Candidates", section: "Workspace", anyOf: ["candidate:read"] },
   { key: "submissions", label: "Submissions", section: "Workspace", anyOf: ["submission:read"] },
