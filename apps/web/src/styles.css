@@ -155,3 +155,19 @@ h1:focus { outline: none; }
 .addcontact { align-self: flex-start; }
 table.mini th, table.mini td { padding: 6px 8px; }
 @media (max-width: 520px) { .grid2, .contactrow { grid-template-columns: 1fr; } }
+
+/* Dashboard */
+.dashboard { display: flex; flex-direction: column; gap: 16px; }
+.sectiontitle { font-size: 14px; color: var(--text2); margin-bottom: 8px; }
+.tiles { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.tile { padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+.tilelabel { font-weight: 600; color: var(--text2); font-size: 12px; }
+.tilevalue { font-size: 26px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.tilehint { color: var(--muted); font-size: 11.5px; }
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.attention { padding: 14px 16px 6px; margin-bottom: 12px; }
+.attention h3 { font-size: 14px; display: flex; gap: 8px; align-items: center; }
+.attention .count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--line2); color: var(--text2); font-size: 12px; text-align: center; }
+.attention > p { margin: 4px 0 10px; }
+.attention .tablewrap { margin: 0 -16px; }
+.attention .ok { color: #15803d; }
