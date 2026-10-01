@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Dialog, DialogActions } from "../admin/Dialog";
 import { LookupPicker } from "../lookups";
 import { UUID_RE, fieldErrors, salesError } from "./errors";
 import { salesApi, type CreateCandidate } from "./salesApi";
-import { Field } from "./ui";
+import { Field, useFocusAfterFailure } from "./ui";
 
 const FIELDS = ["firstName", "lastName", "phone", "technologyId", "locationId"] as const;
 const E164 = /^\+[1-9][0-9]{7,14}$/;
@@ -21,6 +21,8 @@ export function CreateCandidateDialog({ locations, onClose, onCreated }: {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const failed = useFocusAfterFailure(formRef);
   const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement>) => setV((s) => ({ ...s, [k]: e.target.value }));
 
   const validate = () => {
@@ -37,10 +39,7 @@ export function CreateCandidateDialog({ locations, onClose, onCreated }: {
     ev.preventDefault();
     const e = validate();
     setErrors(e); setFormError("");
-    if (Object.keys(e).length) {
-      (ev.currentTarget.querySelector<HTMLElement>("[aria-invalid='true']"))?.focus();
-      return;
-    }
+    if (Object.keys(e).length) { failed(); return; }
     const body: CreateCandidate = {
       firstName: v.firstName.trim(), lastName: v.lastName.trim(),
       technologyId: v.technologyId.trim(), locationId: v.locationId.trim(),
@@ -55,12 +54,13 @@ export function CreateCandidateDialog({ locations, onClose, onCreated }: {
       const { _form, ...perField } = fe;
       setErrors(perField);
       setFormError(_form ?? salesError(err, "create"));
+      failed();
     } finally { setBusy(false); }
   };
 
   return (
     <Dialog title="New candidate" onClose={onClose}>
-      <form onSubmit={submit} noValidate>
+      <form ref={formRef} onSubmit={submit} noValidate>
         <Field label="First name" error={errors.firstName}>
           {(p) => <input {...p} autoComplete="off" value={v.firstName} onChange={set("firstName")} data-autofocus />}
         </Field>

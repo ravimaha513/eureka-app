@@ -63,7 +63,8 @@ export function DialogActions({ onCancel, submitLabel, busy, disabled, error, da
 }) {
   return (
     <>
-      {error && <p className="error formerr" role="alert">{error}</p>}
+      {/* tabIndex -1: a form can move focus here after a failed submit with no field to point at. */}
+      {error && <p className="error formerr" role="alert" tabIndex={-1}>{error}</p>}
       <div className="actions">
         <button type="button" className="btn" onClick={onCancel}>Cancel</button>
         <button type="submit" className={`btn ${danger ? "danger" : "primary"}`} disabled={busy || disabled} aria-busy={busy || undefined}>

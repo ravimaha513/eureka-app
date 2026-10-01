@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ApiError } from "../api";
 import { Dialog, DialogActions } from "../admin/Dialog";
 import { LookupPicker } from "../lookups";
 import { UUID_RE, fieldErrors, salesError } from "./errors";
 import { salesApi, type CreateSubmission } from "./salesApi";
-import { Field } from "./ui";
+import { Field, useFocusAfterFailure } from "./ui";
 
 const FIELDS = ["jobTitle", "clientId", "vendorId", "rate"] as const;
 
@@ -24,6 +24,8 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged }: {
   const [formError, setFormError] = useState("");
   const [conflict, setConflict] = useState(false);
   const [busy, setBusy] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const failed = useFocusAfterFailure(formRef);
   const [done, setDone] = useState<{ id: string; duplicateWarning: boolean } | null>(null);
   const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement>) => setV((s) => ({ ...s, [k]: e.target.value }));
   const pick = (k: "clientId" | "vendorId") => (id: string) => setV((s) => ({ ...s, [k]: id }));
@@ -45,10 +47,7 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged }: {
     ev.preventDefault();
     const e = validate();
     setErrors(e); setFormError(""); setConflict(false);
-    if (Object.keys(e).length) {
-      ev.currentTarget.querySelector<HTMLElement>("[aria-invalid='true']")?.focus();
-      return;
-    }
+    if (Object.keys(e).length) { failed(); return; }
     const body: CreateSubmission = {
       candidateId: candidate.id, jobTitle: v.jobTitle.trim(), clientId: v.clientId.trim(),
       ...(v.vendorId.trim() ? { vendorId: v.vendorId.trim() } : {}),
@@ -64,6 +63,7 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged }: {
       const { _form, ...perField } = fieldErrors(err, FIELDS);
       setErrors(perField);
       setFormError(_form ?? salesError(err, "submission"));
+      failed();
     } finally { setBusy(false); }
   };
 
@@ -79,7 +79,7 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged }: {
 
   return (
     <Dialog key="form" title={`Log submission for ${candidate.name}`} onClose={onClose}>
-      <form onSubmit={submit} noValidate>
+      <form ref={formRef} onSubmit={submit} noValidate>
         <Field label="Job title" error={errors.jobTitle}>
           {(p) => <input {...p} value={v.jobTitle} onChange={set("jobTitle")} maxLength={200} data-autofocus />}
         </Field>
