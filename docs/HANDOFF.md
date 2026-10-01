@@ -9,7 +9,7 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - `pnpm -r typecheck` and `pnpm -r test` must pass before every commit (integration tests need
   PostgreSQL 16 at `TEST_PG_ADMIN_URL`, default `postgres://postgres:postgres@127.0.0.1:5432`).
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0024**) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0040**) and must apply as a
   non-superuser (Amazon RDS master): CI checks this.
 - Commit small and atomic; get an independent review of every security-relevant change.
 
@@ -19,7 +19,10 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 2. Every function in schemas `authz`/`eureka`: `REVOKE ALL ... FROM PUBLIC`, pinned
    `SET search_path = pg_catalog, pg_temp`, EXECUTE granted to exactly the role that needs it.
 3. RLS read policies never call definer functions per row; use
-   `col = ANY ((SELECT authz.x('perm'))::uuid[])` (InitPlan) and `EXISTS` by primary key.
+   `col = ANY ((SELECT authz.x('perm'))::uuid[])` (InitPlan) for small sets (user, team, location
+   ids), `col IN (SELECT pg_catalog.unnest((SELECT authz.x('perm'))))` (InitPlan feeding a hashed
+   SubPlan: one hash probe per row) for large sets such as `owned_candidate_ids` (0034/0038; `= ANY`
+   searches the array linearly per row), and `EXISTS` by primary key.
 4. Clients never set server-managed columns (status, snapshots, timestamps): BEFORE INSERT guards.
 5. No rates, phones, emails, free-text reasons or recording links in `audit_event` or `outbox_event`.
 6. Writes to sensitive tables only through SECURITY DEFINER functions that re-check permission
@@ -39,24 +42,68 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   (worker job) and public feedback form.
 - Placements: schema (0022/0023), state machine, first-placement, assignments, outbox rows,
   idempotency keys, Placements screen and Create placement dialog; lookups with least privilege.
+- Phase 2 audit and gap fixes (`docs/phase2-status.md`, migration 0035): paperwork checklist created with
+  the placement from `authz.checklist_template` (no template content yet: open question), profile read-back of
+  in-person preference and marketing contacts, interview board location filter, audited 90-day duplicate answer.
 - Worker: lease-based job runner, nightly audit export to Object Lock storage.
+- Outbox delivery (0024): placement events emailed to HR, Accounts, Immigration (one email per user per
+  event, `outbox_delivery` dedupe marker, in-doubt never resent), daily prune of published rows
+  (`OUTBOX_RETENTION_DAYS`, DB floor 7 days) and of Idempotency-Key rows older than 24 h. Enable with
+  `OUTBOX_MAIL_MODE`, `OUTBOX_FROM_EMAIL`, `APP_PUBLIC_ORIGIN` (Terraform does not set them yet); set
+  `OUTBOX_DELIVER_SINCE` on first enable. Hardening (0029): rejection cap (`failed`), lease-safe in-doubt,
+  no-recipient alert, delete/truncate guards, job_run retention for outbox-delivery.
+- Sheet migration (`docs/import.md`, migrations 0028, 0033 and 0041): CSV import CLI run as the
+  `eureka_import` role (NOLOGIN outside the migration window, no role memberships). Normalizes and
+  matches the Sales, interview and placement sheets into staging tables with a review queue and a
+  reconciliation report. Tickets, review decisions and sign-off are authenticated API calls by org
+  admins (`/api/v1/imports`, second person approves, digest-bound and expiring). Each person loads
+  through `authz.import_load_person` (definer, same RLS checks, guards, transitions and audit as the
+  API); a ledger with keyed hashes and natural keys keeps re-runs idempotent. The database verifies
+  the rows before sign-off and the approver approves a per-row preview by its digest (0041).
+  Append-only exception: the `GRANT eureka_app TO eureka_import` line was removed from 0028 after
+  it was pushed, because no environment had applied it; 0033 revokes any copy and fails if it cannot.
+- Resumes (FR-CAN-07, migration 0036, design B2.2 "Built in migration 0036"): presigned POST into
+  `quarantine/resumes/<id>`, GuardDuty scan tag polled by the worker job `resume-scan`, size and
+  magic-byte check, promotion to `clean/`, one current version per candidate, audited 60-second
+  download links; `document:read`/`document:upload` over the candidate. Profile section in the web app.
+  Without AWS: `LOCAL_STORAGE_DIR` (API serves a directory) and a fake scanner (EICAR = infected);
+  `pnpm local` now runs the worker too.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
+- First-admin bootstrap (migrations 0037, 0039): `dist/db/bootstrap.js` as a one-off migrate task creates two
+  `org_admin` users for hosted-domain emails; break-glass only: refuses while an active `org_admin` exists
+  (exit 3; idempotent for the same admins; after a first bootstrap a lock-out recovery needs `--recover`),
+  audited as system without email; first Google sign-in links by email (the email must be in the domain).
+  Optional `--demo-data` loads a fictional org (`@demo.invalid`, cannot sign in) only where `EUREKA_ENVIRONMENT`
+  is `staging`/`local` and the stack has no real users or candidates.
+  Runbook: infra/README.md "First admin (bootstrap)".
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
-1. **Outbox delivery job (worker):** grant the worker SELECT and UPDATE(published_at) on
+1. **(Done, see Built.) Outbox delivery job (worker):** grant the worker SELECT and UPDATE(published_at) on
    `outbox_event` with a narrow policy (the 0022 write guard currently blocks this); deliver
    `placement.created` / `placement.state_changed` to HR, Accounts and Immigration via SES; prune
    published rows after N days. Also a job deleting `idempotency_key` rows older than 24 h (add an index on created_at).
 2. **Hot List extras:** saved views, bulk actions, export (capped, masked, audited).
-3. **Candidate extras:** batches, resumes, `candidate_event` timeline, full duplicate check
-   (email, phone, DOB blind index).
+3. **Candidate extras:** batches, `candidate_event` timeline, full duplicate check (email, phone;
+   DOB blind index open), resumes (done, migration 0036).
 4. **Dashboards:** manager, lead and location views with activity counts and "needs attention".
-5. **Sheet migration:** CSV import with normalization, cross-sheet matching, review queues,
-   reconciliation report.
-6. **Launch checks:** k6 load test (120 users, 50k candidates, p95 < 500 ms), ZAP baseline,
-   restore-from-backup drill.
-7. Fix older dialogs' focus after a failed submit (Create candidate, Log submission).
+5. **Sheet migration:** built (see Built). Left: the SRS Q6 status/row-colour mapping, a decision
+   on loading historical placements (`placements.commit`), weekly dry runs on real exports.
+6. **Launch checks:** tooling is in place, nothing has been run against AWS yet.
+   k6: `loadtest/` + `db:seed-load` (50k fictional candidates; minted sessions for stacks
+   without dev sign-in). ZAP: manual `zap-baseline` workflow + `.zap/rules.tsv`. Restore drill:
+   `infra/scripts/restore-drill.sh` + `dist/db/restore-check.js` (infra/README.md). First local
+   k6 run does NOT pass: Hot List p95 ~720 ms, and the unfiltered submissions list for broad
+   scopes (manager, location admin) takes ~2 s idle and hit the 5 s statement timeout under load
+   (loadtest/README.md). Tuned since (0027 list-order indexes; 0034 hashed owned-candidate set in
+   the activity read policies, custom-planned `authz.hotlist_page`): all three lists < 60 ms p95
+   idle for manager, location admin and lead; 0038 does the same for placements/assignments and
+   `authz.hotlist_export`. Local k6 re-run (120 VUs) now passes: p95 156 ms overall, Hot List
+   113 ms, board 214 ms, 0% failed (loadtest/README.md). Next: run on staging (raise its WAF
+   per-IP limit first).
+7. ~~Fix older dialogs' focus after a failed submit~~ Done: Create candidate and Log submission
+   use `useFocusAfterFailure` (sales/ui.tsx): after a validation or API error, focus goes to the
+   first invalid field, else to the `role="alert"` form error. Use it in new forms too.
 
 ## Open product questions (ask Ravi, don't guess)
 
@@ -66,6 +113,18 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - May a candidate who failed BGC after joining be re-placed into the same job?
 - Should the manual candidate edge `active → confirmation` be removed now that placements drive it?
 - Does a pre-join `bgc_failed` count as an earlier placement for first-placement detection?
+- Paperwork checklist content per placement type (documents, owner role, required), candidate `eligibility`
+  fields, marketing locations and office: see `docs/phase2-status.md`.
+- Placement emails: should Associate HR (and the Lead/Manager, design C flow 3) also receive them, and may
+  they name the candidate or client? Today: `hr`, `accounts`, `immigration` only, ids and statuses only.
+- Sheet import (`docs/import.md`): status and row-colour mapping (SRS Q6); may historical
+  placements emit outbox notifications; joined placements' assignment start date; who signs off a
+  batch (org admin assumed); may the sheet set `all_teams` visibility without a lead?
+
+- Resumes: today they follow `document:read` (B4.4), so a recruiter sees resumes of their own
+  candidates only, not a teammate's, and Open-to-all-teams viewers, location roles, coaches and the
+  CEO see none. Is that right for marketing (other teams submitting an open candidate need the resume)?
+  How long are superseded versions kept (OD-03)? Should the uploader get an email when a file is blocked?
 
 ## Waiting on Ravi (not code)
 

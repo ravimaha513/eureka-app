@@ -2,6 +2,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, type Me } from "../api";
 import { ConfirmDialog } from "../admin/Dialog";
+import { CandidateResumes } from "./CandidateResumes";
+import { CandidateTimeline } from "./CandidateTimeline";
 import { EditProfileDialog } from "./EditProfileDialog";
 import { salesError } from "./errors";
 import { DUPLICATE_WARNING, LogSubmissionDialog } from "./LogSubmissionDialog";
@@ -107,12 +109,16 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
             <dt>Team</dt><dd>{c.team.name}</dd>
             <dt>Recruiter</dt><dd>{c.recruiter?.name ?? "Unassigned"}</dd>
             <dt>Location</dt><dd>{c.location.name}</dd>
+            {c.batch !== undefined && <><dt>Batch</dt><dd>{c.batch?.label ?? "No batch"}</dd></>}
             <dt>Phone</dt><dd><Phone c={c} /></dd>
             {c.dobMasked && <><dt>Date of birth</dt><dd className="masked">{c.dobMasked}</dd></>}
             <dt>Marketing since</dt><dd>{fmtDate(c.marketingStartDate)}</dd>
             <dt>Days in market</dt><dd>{c.daysInMarket ?? "—"}</dd>
             <dt>Technical rating</dt><dd>{c.technicalRating ? `${c.technicalRating} / 5` : "Not rated"}</dd>
             <dt>Visibility</dt><dd>{c.visibility === "all_teams" ? "Open to all teams" : "Team only"}</dd>
+            {c.inPersonOk !== undefined && <><dt>In-person interviews</dt><dd>{c.inPersonOk === null ? "Not recorded" : c.inPersonOk ? "Open to in-person" : "Remote only"}</dd></>}
+            {c.marketingEmail !== undefined && <><dt>Marketing email</dt><dd>{c.marketingEmail ?? "—"}</dd></>}
+            {c.vitelNumber !== undefined && <><dt>VITEL number</dt><dd>{c.vitelNumber ?? "—"}</dd></>}
           </dl>
         </section>
 
@@ -147,6 +153,10 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
             )}
           </section>
         )}
+
+        {caps.has("document:read") && <CandidateResumes candidateId={c.id} />}
+
+        <CandidateTimeline id={c.id} />
       </div>
 
       {modal?.kind === "edit" && (

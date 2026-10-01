@@ -28,6 +28,33 @@ const WorkerConfigSchema = z
     // At most this many missing UTC days are exported per tick while catching up
     // (every day since the last export is caught up eventually; see audit-export.ts).
     AUDIT_EXPORT_MAX_DAYS_PER_TICK: z.coerce.number().int().min(1).max(31).default(7),
+    // Outbox delivery (placement notifications to HR, Accounts, Immigration).
+    // Disabled: events stay unpublished (so they are not pruned) until a mail mode is set.
+    OUTBOX_MAIL_MODE: z.enum(["disabled", "local", "ses"]).default("disabled"),
+    OUTBOX_MAIL_DIR: z.string().min(1).optional(),
+    OUTBOX_FROM_EMAIL: z.string().email().optional(),
+    // Sign-in link in notification emails (the web app's origin).
+    APP_PUBLIC_ORIGIN: z.string().url().optional(),
+    // Events handled per tick (one job_run key each).
+    OUTBOX_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
+    // Published outbox rows are deleted after this many days (the database refuses fewer than 7).
+    OUTBOX_RETENTION_DAYS: z.coerce.number().int().min(7).max(3650).default(30),
+    // Definite (non-throttling) provider rejections per recipient before giving up (`failed`, alert).
+    OUTBOX_MAX_REJECTIONS: z.coerce.number().int().min(1).max(100).default(5),
+    // Backlog cut-off: unpublished events created before this instant are marked
+    // published without sending (set it when first enabling delivery).
+    OUTBOX_DELIVER_SINCE: z.string().datetime({ offset: true }).optional(),
+    // Resume scan-and-promote (resume-scan job): the documents bucket in AWS, or
+    // the API's local document directory with the fake scanner (development).
+    // Neither: the job is off and uploads stay pending.
+    DOCUMENTS_BUCKET: z.string().min(3).optional(),
+    LOCAL_STORAGE_DIR: z.string().min(1).optional(),
+    // Uploaded but no GuardDuty result after this long: failed (TIMEOUT).
+    RESUME_SCAN_TIMEOUT_MINUTES: z.coerce.number().int().min(5).max(1440).default(60),
+    // After the 5-minute presigned POST expires, wait this long for the object before marking the upload expired.
+    RESUME_UPLOAD_GRACE_MINUTES: z.coerce.number().int().min(1).max(120).default(10),
+    // More object versions than this under one quarantine key (a replayed presigned POST) logs an alert.
+    RESUME_MAX_KEY_VERSIONS: z.coerce.number().int().min(1).max(100).default(3),
   })
   .superRefine((c, ctx) => {
     if (c.FEEDBACK_MAIL_MODE !== "disabled") {
@@ -39,6 +66,22 @@ const WorkerConfigSchema = z
       }
       if (c.FEEDBACK_MAIL_MODE === "local" && (!c.FEEDBACK_MAIL_DIR || c.NODE_ENV === "production")) ctx.addIssue({ code: "custom", message: "Local feedback mail requires FEEDBACK_MAIL_DIR and a non-production environment" });
       if (c.FEEDBACK_MAIL_MODE === "ses" && (!c.FEEDBACK_FROM_EMAIL || !c.AWS_REGION)) ctx.addIssue({ code: "custom", message: "SES feedback requires FEEDBACK_FROM_EMAIL and AWS_REGION" });
+    }
+    if (c.OUTBOX_MAIL_MODE !== "disabled") {
+      if (!c.APP_PUBLIC_ORIGIN) ctx.addIssue({ code: "custom", message: "Outbox mail requires APP_PUBLIC_ORIGIN" });
+      else {
+        const url = new URL(c.APP_PUBLIC_ORIGIN);
+        if (url.username || url.password || url.pathname !== "/" || url.search || url.hash || !["http:", "https:"].includes(url.protocol)) ctx.addIssue({ code: "custom", message: "APP_PUBLIC_ORIGIN must be an HTTP(S) origin without a path or credentials" });
+        if (c.NODE_ENV === "production" && url.protocol !== "https:") ctx.addIssue({ code: "custom", message: "Production APP_PUBLIC_ORIGIN requires HTTPS" });
+      }
+      if (c.OUTBOX_MAIL_MODE === "local" && (!c.OUTBOX_MAIL_DIR || c.NODE_ENV === "production")) ctx.addIssue({ code: "custom", message: "Local outbox mail requires OUTBOX_MAIL_DIR and a non-production environment" });
+      if (c.OUTBOX_MAIL_MODE === "ses" && (!c.OUTBOX_FROM_EMAIL || !c.AWS_REGION)) ctx.addIssue({ code: "custom", message: "SES outbox mail requires OUTBOX_FROM_EMAIL and AWS_REGION" });
+    }
+    if (c.DOCUMENTS_BUCKET && c.LOCAL_STORAGE_DIR) {
+      ctx.addIssue({ code: "custom", message: "Set only one of DOCUMENTS_BUCKET and LOCAL_STORAGE_DIR" });
+    }
+    if (c.NODE_ENV === "production" && c.LOCAL_STORAGE_DIR) {
+      ctx.addIssue({ code: "custom", message: "LOCAL_STORAGE_DIR (fake malware scanner) is not allowed in production" });
     }
     if (!c.AUDIT_BUCKET && !c.EXPORT_DIR) {
       ctx.addIssue({ code: "custom", message: "Set AUDIT_BUCKET (S3) or EXPORT_DIR (local) for the audit export" });

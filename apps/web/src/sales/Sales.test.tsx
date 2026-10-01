@@ -59,10 +59,13 @@ beforeEach(() => {
   setCsrf("tok");
   calls = [];
   routes = {
+    "GET /api/v1/hotlist/views": () => ({ body: { items: [] } }),
     "GET /api/v1/hotlist": (u) => ({ body: { items: u.searchParams.get("cursor") ? [FOREIGN] : [OWN, FOREIGN], nextCursor: u.searchParams.get("cursor") ? null : OTHER } }),
     "GET /api/v1/candidates": () => ({ body: { items: [OWN], nextCursor: null } }),
     [`GET /api/v1/candidates/${CID}`]: () => ({ body: PROFILE }),
     "GET /api/v1/lookups": () => ({ body: LOOKUPS }),
+    [`GET /api/v1/candidates/${CID}/timeline`]: () => ({ body: { items: [], nextCursor: null } }),
+    "GET /api/v1/batches": () => ({ body: { items: [], canCreate: false } }),
   };
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init = {}) => {
     const url = new URL(String(input), "http://localhost");
@@ -91,14 +94,15 @@ describe("Hot List", () => {
   it("masks other teams' phones with a hidden explanation, labels Open to all teams, never shows DOB", async () => {
     wrap(<HotListPage me={RECRUITER} onOpenProfile={() => undefined} />);
     const foreign = await rowOf("Divya Menon");
-    const phoneCell = within(foreign).getAllByRole("cell")[7]!;
+    // The recruiter may change status, so the first column holds the row-selection checkbox.
+    const phoneCell = within(foreign).getAllByRole("cell")[8]!;
     expect(phoneCell).toHaveClass("masked");
     expect(within(phoneCell).getByText("•••-•••-42")).toHaveAttribute("aria-hidden", "true");
     expect(within(phoneCell).getByText(/Phone hidden, ends in 42\. Not your team's candidate\./)).toHaveClass("sr-only");
     expect(within(foreign).getByText("Open to all teams")).toHaveClass("badge");
     expect(within(await rowOf("Asha Iyer")).getByText("+14695550001")).toBeInTheDocument();
     expect(screen.queryByText(/date of birth|1994/i)).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("2 candidates on page 1, more on the next page.");
+    expect(screen.getByText("2 candidates on page 1, more on the next page.")).toHaveAttribute("role", "status");
   });
 
   it("links only openable profiles and explains the others", async () => {
@@ -361,6 +365,42 @@ describe("Candidate profile", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Profile saved.");
   });
 
+  it("shows the in-person preference and marketing contacts the server returns, and prefills Edit profile", async () => {
+    routes[`GET /api/v1/candidates/${CID}`] = () => ({
+      body: { ...PROFILE, inPersonOk: false, marketingEmail: "asha@mkt.example", vitelNumber: "+19725550100" },
+    });
+    routes[`PATCH /api/v1/candidates/${CID}`] = () => ({ body: { id: CID } });
+    renderProfile(RECRUITER);
+    await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
+    const facts = screen.getByRole("heading", { name: "Details" }).closest("section")!;
+    expect(within(facts).getByText("In-person interviews").nextElementSibling).toHaveTextContent("Remote only");
+    expect(within(facts).getByText("Marketing email").nextElementSibling).toHaveTextContent("asha@mkt.example");
+    expect(within(facts).getByText("VITEL number").nextElementSibling).toHaveTextContent("+19725550100");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+    const dlg = screen.getByRole("dialog", { name: "Edit Asha Iyer" });
+    expect(within(dlg).getByLabelText("Marketing email")).toHaveValue("asha@mkt.example");
+    expect(within(dlg).getByLabelText("VITEL number")).toHaveValue("+19725550100");
+    expect(within(dlg).getByLabelText("Marketing email")).toHaveAccessibleDescription(expect.stringContaining("not removed"));
+    expect(within(dlg).getByLabelText("In-person interviews")).toHaveValue("no");
+    // Unchanged prefilled values are not sent.
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save changes" }));
+    expect(within(dlg).getByRole("alert")).toHaveTextContent("Nothing changed.");
+    fireEvent.change(within(dlg).getByLabelText("In-person interviews"), { target: { value: "yes" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(writes()[0]!.body).toEqual({ inPersonOk: true });
+  });
+
+  it("hides marketing contacts the server withholds and says when the in-person preference is not recorded", async () => {
+    routes[`GET /api/v1/candidates/${CID}`] = () => ({ body: { ...PROFILE, inPersonOk: null } });
+    renderProfile(RECRUITER);
+    await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
+    expect(screen.getByText("In-person interviews").nextElementSibling).toHaveTextContent("Not recorded");
+    expect(screen.queryByText("Marketing email")).not.toBeInTheDocument();
+    expect(screen.queryByText("VITEL number")).not.toBeInTheDocument();
+  });
+
   it("follows the record's actions over capabilities when the server sends them", async () => {
     routes[`GET /api/v1/candidates/${CID}`] = () => ({
       body: { ...PROFILE, actions: { edit: false, transition: ["confirmation", "terminated"], visibility: true, rating: false, logSubmission: false } },
@@ -478,6 +518,133 @@ describe("Log submission", () => {
     renderProfile(LOC_ADMIN);
     await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
     expect(screen.queryByRole("button", { name: "Log submission" })).not.toBeInTheDocument();
+  });
+});
+
+// ---- Focus after a failed submit ---------------------------------------------------------------
+// The user presses the submit button (focus on it), so each test focuses it before clicking.
+
+const submitWith = (dlg: HTMLElement, name: string) => {
+  const btn = within(dlg).getByRole("button", { name });
+  btn.focus();
+  fireEvent.click(btn);
+};
+
+describe("Focus after a failed submit: New candidate", () => {
+  const openCreate = async () => {
+    wrap(<CandidatesPage me={RECRUITER} />);
+    fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
+    const dlg = screen.getByRole("dialog", { name: "New candidate" });
+    await within(dlg).findByRole("option", { name: "Dallas" });
+    return dlg;
+  };
+  const fillAll = (dlg: HTMLElement) => {
+    fireEvent.change(within(dlg).getByLabelText("First name"), { target: { value: "Ravi" } });
+    fireEvent.change(within(dlg).getByLabelText("Last name"), { target: { value: "Kumar" } });
+    fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
+    fireEvent.change(within(dlg).getByLabelText("Location"), { target: { value: LOC } });
+  };
+
+  it("moves focus to the first invalid field of this round, not a stale one", async () => {
+    const dlg = await openCreate();
+    fireEvent.change(within(dlg).getByLabelText("First name"), { target: { value: "Ravi" } });
+    submitWith(dlg, "Create candidate");
+    const last = within(dlg).getByLabelText("Last name");
+    await waitFor(() => expect(last).toHaveFocus());
+    expect(last).toHaveAccessibleDescription("Enter a last name.");
+
+    // Fix everything but the location: focus skips the fields that were invalid last round.
+    fireEvent.change(last, { target: { value: "Kumar" } });
+    fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
+    submitWith(dlg, "Create candidate");
+    const loc = within(dlg).getByLabelText("Location");
+    await waitFor(() => expect(loc).toHaveFocus());
+    expect(loc).toHaveAccessibleDescription("Choose a location.");
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("focuses the field the server rejected (422) and announces the summary", async () => {
+    routes["POST /api/v1/candidates"] = () => problem(422, { title: "Validation failed", errors: [{ path: "phone", message: "E.164 format" }] });
+    const dlg = await openCreate();
+    fillAll(dlg);
+    fireEvent.change(within(dlg).getByLabelText("Phone (optional)"), { target: { value: "+14695550199" } });
+    submitWith(dlg, "Create candidate");
+    const phone = within(dlg).getByLabelText("Phone (optional)");
+    await waitFor(() => expect(phone).toHaveFocus());
+    expect(within(dlg).getByRole("alert")).toHaveTextContent("Some fields need attention");
+  });
+
+  it("focuses the announced error when the server refuses without field errors (403)", async () => {
+    routes["POST /api/v1/candidates"] = () => problem(403, { detail: "Not permitted" });
+    const dlg = await openCreate();
+    fillAll(dlg);
+    submitWith(dlg, "Create candidate");
+    const alert = await within(dlg).findByRole("alert");
+    expect(alert).toHaveTextContent("You can't create candidates in that team.");
+    await waitFor(() => expect(alert).toHaveFocus());
+    expect(dlg).toContainElement(document.activeElement as HTMLElement);
+  });
+});
+
+describe("Focus after a failed submit: Log submission", () => {
+  const openLog = async () => {
+    renderProfile(RECRUITER);
+    fireEvent.click(await screen.findByRole("button", { name: "Log submission" }));
+    const dlg = screen.getByRole("dialog", { name: "Log submission for Asha Iyer" });
+    await within(dlg).findByRole("option", { name: "Northwind Financial" });
+    return dlg;
+  };
+  const fillAll = (dlg: HTMLElement) => {
+    fireEvent.change(within(dlg).getByLabelText("Job title"), { target: { value: "Senior Java Developer" } });
+    fireEvent.change(within(dlg).getByLabelText("Client"), { target: { value: CLIENT } });
+  };
+
+  it("moves focus to the first invalid field after client-side validation", async () => {
+    const dlg = await openLog();
+    fireEvent.change(within(dlg).getByLabelText("Job title"), { target: { value: "Senior Java Developer" } });
+    fireEvent.change(within(dlg).getByLabelText("Rate per hour (optional)"), { target: { value: "5000" } });
+    submitWith(dlg, "Log submission");
+    const clientSel = within(dlg).getByLabelText("Client");
+    await waitFor(() => expect(clientSel).toHaveFocus());
+    expect(clientSel).toHaveAccessibleDescription("Choose a client.");
+
+    fireEvent.change(clientSel, { target: { value: CLIENT } });
+    submitWith(dlg, "Log submission");
+    const rate = within(dlg).getByLabelText("Rate per hour (optional)");
+    await waitFor(() => expect(rate).toHaveFocus());
+    expect(rate).toHaveAccessibleDescription("Enter an hourly rate between 0 and 1000.");
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("focuses the field the server rejected (422)", async () => {
+    routes["POST /api/v1/submissions"] = () => problem(422, { title: "Validation failed", errors: [{ path: "jobTitle", message: "Too long" }] });
+    const dlg = await openLog();
+    fillAll(dlg);
+    submitWith(dlg, "Log submission");
+    const title = within(dlg).getByLabelText("Job title");
+    await waitFor(() => expect(title).toHaveFocus());
+    expect(title).toHaveAccessibleDescription("Too long");
+    expect(within(dlg).getByRole("alert")).toHaveTextContent("Some fields need attention");
+  });
+
+  it("focuses the announced error on a 409 conflict", async () => {
+    routes["POST /api/v1/submissions"] = () => problem(409, { title: "Conflict" });
+    const dlg = await openLog();
+    fillAll(dlg);
+    submitWith(dlg, "Log submission");
+    const alert = await within(dlg).findByRole("alert");
+    expect(alert).toHaveTextContent("A conflicting submission already exists");
+    await waitFor(() => expect(alert).toHaveFocus());
+  });
+
+  it("focuses the announced error when the network fails", async () => {
+    routes["POST /api/v1/submissions"] = () => problem(500, { title: "Internal error", detail: "Something broke on our side." });
+    const dlg = await openLog();
+    fillAll(dlg);
+    submitWith(dlg, "Log submission");
+    const alert = await within(dlg).findByRole("alert");
+    expect(alert).toHaveTextContent("Something broke on our side.");
+    await waitFor(() => expect(alert).toHaveFocus());
   });
 });
 

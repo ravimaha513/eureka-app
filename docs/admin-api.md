@@ -66,3 +66,4 @@ Added during implementation:
 - Changing a team's lead moves the old lead's candidates in that team to the new lead (keeps the recruiter/team invariant).
 - `DELETE /admin/users/:id/roles/:role` without `locationId` revokes the role at every location.
 - Moving members needs `team:move_member`, which `org_admin` does not hold (least privilege: moves reassign candidates, which is business data). The Teams tab shows the action disabled for admins; managers and associate directors will move members from a team view (Phase 2).
+- The first admins come from the bootstrap CLI (`authz.bootstrap_admins`, migration 0037; infra/README.md "First admin"), never from the API: break-glass only: it refuses while an active `org_admin` exists (and, after a first bootstrap, without `--recover`), creates two so restricted roles can be approved (AD-3), and is executable only by the migration user.

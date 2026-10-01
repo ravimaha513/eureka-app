@@ -1,5 +1,5 @@
 /** Typed client for the candidate, Hot List and submission API (apps/api/src/modules/candidates, submissions). */
-import { api, type Candidate } from "../api";
+import { api, apiFetch, type Candidate } from "../api";
 
 export interface CandidateProfile extends Candidate {
   marketingStartDate: string | null;
@@ -8,7 +8,56 @@ export interface CandidateProfile extends Candidate {
   rowVersion: number;
   /** What the caller may do on this record (docs/placements-api.md). Absent on older servers. */
   actions?: CandidateActions;
+  /** Training batch (FR-CAN-02); absent on older servers. */
+  batch?: { id: string; label: string } | null;
+  /** Open to in-person interviews (null: not recorded); absent on older servers. */
+  inPersonOk?: boolean | null;
+  /** Marketing contacts: present only with candidate.phone:read over an owned candidate (the phone rule). */
+  marketingEmail?: string | null;
+  vitelNumber?: string | null;
 }
+
+export type BatchStatus = "planned" | "in_training" | "completed" | "cancelled";
+
+/** GET /api/v1/batches item (any candidate:read holder). */
+export interface Batch {
+  id: string;
+  /** "Java · Dallas · Nov 2026" */
+  label: string;
+  location: { id: string; name: string };
+  technology: { id: string; name: string };
+  /** YYYY-MM */
+  startMonth: string;
+  sizePlanned: number | null;
+  status: BatchStatus;
+  /** Candidates in the batch that the caller can read. */
+  candidatesInScope: number;
+}
+
+/** `canCreate` is a hint (Sales leadership); the server decides. */
+export interface BatchList { items: Batch[]; canCreate: boolean }
+
+export interface CreateBatch { locationId: string; technologyId: string; startMonth: string; sizePlanned?: number }
+
+/** Batches a candidate can join: planned or in training. */
+export const OPEN_BATCH_STATUSES: readonly BatchStatus[] = ["planned", "in_training"];
+
+/** One timeline entry (GET /api/v1/candidates/:id/timeline): ids and state identifiers only. */
+export interface TimelineEvent {
+  id: string;
+  type: string;
+  at: string;
+  actor: { id: string; name: string | null } | null;
+  ref: { type: "submission" | "interview" | "placement" | "team" | "batch"; id: string | null; label: string | null } | null;
+  from: string | null;
+  to: string | null;
+}
+
+/**
+ * A likely duplicate (POST /api/v1/candidates/duplicate-check): the owning
+ * team and a contact; `candidateId` only when the caller can open that profile.
+ */
+export interface Duplicate { candidateId: string | null; team: string; contact: string | null; matchedOn: ("email" | "phone")[] }
 
 /** Per-record action hints computed by the authorization engine; the server still enforces every rule. */
 export interface CandidateActions {
@@ -30,6 +79,8 @@ export interface ListFilters {
   status?: string;
   technology?: string;
   visibility?: Visibility | "";
+  /** Candidates list only. */
+  batchId?: string;
   cursor?: string | null;
   limit?: number;
 }
@@ -42,14 +93,21 @@ export interface ProfileUpdate {
   marketingStartDate?: string;
   inPersonOk?: boolean;
   technologyId?: string;
+  /** null removes the candidate from its batch. */
+  batchId?: string | null;
 }
 
 export interface CreateCandidate {
   firstName: string;
   lastName: string;
+  /** E.164; the server normalizes formatting but needs the country code. */
   phone?: string;
+  email?: string;
   technologyId: string;
   locationId: string;
+  batchId?: string;
+  /** Create despite a 409 possible_duplicate. */
+  confirmDuplicate?: boolean;
 }
 
 export interface CreateSubmission {
@@ -96,6 +154,7 @@ function listQuery(f: ListFilters): string {
   if (f.status) q.set("status", f.status);
   if (f.technology) q.set("technology", f.technology);
   if (f.visibility) q.set("visibility", f.visibility);
+  if (f.batchId) q.set("batchId", f.batchId);
   if (f.cursor) q.set("cursor", f.cursor);
   q.set("limit", String(f.limit ?? 50));
   return q.toString();
@@ -115,10 +174,93 @@ export const salesApi = {
     api<{ id: string; status: string }>(`/api/v1/candidates/${enc(id)}/transition`, { method: "POST", ...json({ to }) }),
   submit: (b: CreateSubmission) =>
     api<{ id: string; duplicateWarning: boolean }>("/api/v1/submissions", { method: "POST", ...json(b) }),
+  duplicateCheck: (b: Pick<CreateCandidate, "firstName" | "lastName" | "phone" | "email">) =>
+    api<{ duplicates: Duplicate[] }>("/api/v1/candidates/duplicate-check", { method: "POST", ...json(b) }),
+  timeline: (id: string, cursor?: string | null) =>
+    api<Page<TimelineEvent>>(`/api/v1/candidates/${enc(id)}/timeline?limit=50${cursor ? `&cursor=${enc(cursor)}` : ""}`),
+  batches: (locationId?: string) =>
+    api<BatchList>(`/api/v1/batches${locationId ? `?locationId=${enc(locationId)}` : ""}`),
+  createBatch: (b: CreateBatch) => api<{ id: string }>("/api/v1/batches", { method: "POST", ...json(b) }),
+};
+
+/** Filters a saved view stores (the Hot List filters, no paging). */
+export interface ViewFilters {
+  search?: string;
+  status?: string;
+  technology?: string;
+  visibility?: Visibility;
+}
+
+export interface SavedView { id: string; name: string; filters: ViewFilters; createdAt: string; updatedAt: string }
+
+/** Statuses offered in bulk (BULK_STATUSES in apps/api/src/modules/hotlist); terminated and confirmation stay per record. */
+export const BULK_STATUS_OPTIONS = ["active", "on_hold", "full_of_interviews", "stopped"] as const;
+
+export type BulkError = "not_found" | "forbidden" | "invalid_transition" | "placement_open" | "failed";
+export interface BulkResponse { succeeded: number; failed: number; results: { id: string; ok: boolean; error?: BulkError }[] }
+
+export interface ExportResult { blob: Blob; filename: string; rows: number; truncated: boolean }
+
+/** Only the filters the API accepts, with empty values dropped. */
+export function viewFilters(f: ListFilters): ViewFilters {
+  const out: ViewFilters = {};
+  if (f.search) out.search = f.search;
+  if (f.status) out.status = f.status;
+  if (f.technology) out.technology = f.technology;
+  if (f.visibility) out.visibility = f.visibility;
+  return out;
+}
+
+export const hotlistApi = {
+  views: () => api<{ items: SavedView[] }>("/api/v1/hotlist/views"),
+  createView: (name: string, filters: ViewFilters) =>
+    api<SavedView>("/api/v1/hotlist/views", { method: "POST", ...json({ name, filters }) }),
+  updateView: (id: string, b: { name?: string; filters?: ViewFilters }) =>
+    api<SavedView>(`/api/v1/hotlist/views/${enc(id)}`, { method: "PATCH", ...json(b) }),
+  deleteView: (id: string) => api<void>(`/api/v1/hotlist/views/${enc(id)}`, { method: "DELETE" }),
+  bulkStatus: (ids: string[], to: string) =>
+    api<BulkResponse>("/api/v1/hotlist/bulk/status", { method: "POST", ...json({ ids, to }) }),
+  bulkVisibility: (ids: string[], visibility: Visibility) =>
+    api<BulkResponse>("/api/v1/hotlist/bulk/visibility", { method: "POST", ...json({ ids, visibility }) }),
+  /** CSV of the current view; the server caps, masks and audits it. */
+  exportCsv: async (filters: ViewFilters): Promise<ExportResult> => {
+    const res = await apiFetch("/api/v1/hotlist/export", { method: "POST", ...json(filters) });
+    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "hotlist.csv";
+    return {
+      blob: await res.blob(),
+      filename: name,
+      rows: Number(res.headers.get("x-export-rows") ?? 0),
+      truncated: res.headers.get("x-export-truncated") === "true",
+    };
+  },
 };
 
 export const salesKeys = {
   hotlist: ["hotlist"] as const,
   candidates: ["candidates"] as const,
   candidate: (id: string) => ["candidate", id] as const,
+  hotlistViews: ["hotlist-views"] as const,
+  timeline: (id: string) => ["candidate", id, "timeline"] as const,
+  batches: ["batches"] as const,
 };
+
+/** Plain-language timeline line, e.g. "Status changed from Active to On hold". */
+export function describeEvent(e: TimelineEvent): string {
+  const s = (v: string | null) => (v ? statusLabel(v) : "");
+  switch (e.type) {
+    case "candidate.created": return "Candidate created";
+    case "candidate.status_changed": return `Status changed from ${s(e.from)} to ${s(e.to)}`;
+    case "candidate.visibility_changed": return e.to === "all_teams" ? "Opened to all teams" : "Made visible to the team only";
+    case "candidate.rating_changed": return e.to ? `Technical rating set to ${e.to} of 5` : "Technical rating cleared";
+    case "candidate.assigned": return e.ref?.label ? `Assigned to ${e.ref.label}` : "Team or recruiter changed";
+    case "candidate.batch_changed": return e.ref?.id ? `Added to batch ${e.ref.label ?? ""}`.trim() : "Removed from batch";
+    case "submission.created": return "Submission logged";
+    case "submission.status_changed": return `Submission moved to ${s(e.to)}`;
+    case "interview.scheduled": return "Interview scheduled";
+    case "interview.status_changed": return `Interview ${s(e.to).toLowerCase()}`;
+    case "interview.cleared": return e.to === "cleared" ? "Interview cleared" : "Interview marked not cleared";
+    case "placement.created": return "Placement confirmed";
+    case "placement.status_changed": return `Placement moved to ${s(e.to)}`;
+    default: return statusLabel(e.type.replace(".", " "));
+  }
+}

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api, setCsrf, type Me } from "./api";
 import { visibleNav, type NavItem } from "./nav";
 import { AccessPage } from "./admin/AccessPage";
+import { DashboardPage } from "./dashboard/DashboardPage";
 import { CandidateProfile } from "./sales/CandidateProfile";
 import { CandidatesPage } from "./sales/CandidatesPage";
 import { InterviewsPage } from "./interviews/InterviewsPage";
@@ -104,6 +105,10 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "placements" ? <PlacementsPage key={placementId ?? "list"} me={me} initialOpenId={placementId} />
             : current.key === "interviews" ? <InterviewsPage me={me} />
             : current.key === "access" ? <AccessPage me={me} />
+            : current.key === "dashboard" ? (
+              <DashboardPage canOpen={(t) => items.some((i) => i.key === t)}
+                onOpen={(t, id) => { if (t === "placements") openPlacement(id); else setActive(t); }} />
+            )
             : <Placeholder item={current} />}
         </div>
       </main>

@@ -326,6 +326,8 @@ describe("Google OIDC validation", () => {
     ["missing hd (personal account)", { hd: undefined }, "n1", /company domain/],
     ["nonce mismatch", {}, "other", /nonce/],
     ["unverified email", { email_verified: false }, "n1", /not verified/],
+    ["email outside the hosted domain (hd claim matches)", { email: "demo-r1a@demo.invalid" }, "n1", /email is not in the company domain/],
+    ["email on a subdomain of the hosted domain", { email: "l1@sub.eureka.example" }, "n1", /email is not in the company domain/],
   ])("rejects %s", async (_n, claims, nonce, err) => {
     await expect(oidc.verify(await token(claims), nonce)).rejects.toThrow(err);
   });

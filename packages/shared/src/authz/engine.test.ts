@@ -10,6 +10,7 @@ import {
   type CandidateRef,
   type UserAccess,
 } from "./engine.js";
+import { canCreateBatch } from "./actions.js";
 
 // Fixture org: manager M leads nothing directly but has leads L1 (team T1) and L2 (team T2).
 // Recruiters R1a, R1b in T1; R2a in T2. Location Dallas = LOC_D.
@@ -73,6 +74,22 @@ describe("catalog integrity", () => {
       const holdsRestricted = RESTRICTED_PERMISSIONS.some((p) => GRANTS[role][p]);
       const orgSensitive = ORG_SENSITIVE_PERMISSIONS.some((p) => GRANTS[role][p] === "org");
       expect(isRestrictedRole(role), role).toBe(role === "org_admin" || holdsRestricted || orgSensitive);
+    }
+  });
+
+  it("report:export never reaches past a role's candidate:read and hotlist:read scope", () => {
+    // Scope a covers scope b when every candidate b reaches is also reached by a.
+    const covers = (a: string | undefined, b: string): boolean => {
+      if (a === undefined) return false;
+      if (a === "org" || a === b) return true;
+      const line = ["own", "team", "hierarchy"];
+      return line.includes(a) && line.includes(b) && line.indexOf(a) >= line.indexOf(b);
+    };
+    for (const role of ROLES) {
+      const exp = GRANTS[role]["report:export"];
+      if (exp === undefined) continue;
+      expect(covers(GRANTS[role]["candidate:read"], exp), `${role} candidate:read`).toBe(true);
+      expect(covers(GRANTS[role]["hotlist:read"], exp), `${role} hotlist:read`).toBe(true);
     }
   });
 
@@ -237,5 +254,12 @@ describe("Hot List visibility policy (OD-01)", () => {
     expect(hotlistVisible(resolveScope(R1a, "hotlist:read", "team"), { ...otherTeam, visibility: "all_teams" })).toBe(true);
     expect(resolveScope(ADMIN, "hotlist:read", "team")).toBeNull();
     expect(capabilities(ADMIN, "team")).not.toContain("hotlist:read");
+  });
+});
+
+describe("batch planning (canCreateBatch)", () => {
+  it("is Sales leadership only: leads and managers yes; recruiters, location, coaches, HR and admins no", () => {
+    expect([L1, M].map(canCreateBatch)).toEqual([true, true]);
+    expect([R1a, LOCADM, COACH, HR, ADMIN].map(canCreateBatch)).toEqual([false, false, false, false, false]);
   });
 });

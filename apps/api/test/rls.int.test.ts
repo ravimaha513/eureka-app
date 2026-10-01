@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { activityVisible, candidateVisible, hotlistVisible, ownsCandidate, resolveScope } from "@eureka/shared";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
-import { CLIENT_ID, LOC, T, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
+import { CLIENT_ID, LOC, T, TECH_ID, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 
 let db: TestDb;
 let candidates: FixtureCandidate[];
@@ -137,6 +137,61 @@ describe("differential: database RLS alone matches the application engine", () =
     const t0 = performance.now();
     await asUser(db.app, U.r1a, (c) => c.query(`SELECT count(*) FROM authz.hotlist_page(NULL, NULL, NULL, NULL, NULL, 200)`));
     expect(performance.now() - t0).toBeLessThan(250);
+  });
+
+  it("authz.hotlist_page filters, cursor and limit behave as before 0034 (bound parameters, custom plans)", async () => {
+    const access = toUserAccess("r2a");
+    const all = candidates.filter((c) => hotlistVisible(resolveScope(access, "hotlist:read", "everyone"), c)).map((c) => c.id).sort();
+    const page = (args: unknown[]) => asUser(db.app, U.r2a, async (c) =>
+      (await c.query<{ id: string; marketing_status: string; visibility: string; first_name: string }>(
+        `SELECT * FROM authz.hotlist_page($1, $2, $3, $4, $5, $6)`, args)).rows);
+    const byId = new Map(candidates.map((c) => [c.id, c]));
+    const onHold = await page(["on_hold", null, null, null, null, 500]);
+    expect(onHold.map((r) => r.id)).toEqual(all.filter((id) => byId.get(id)!.marketingStatus === "on_hold"));
+    const shared = await page([null, null, "all_teams", null, null, 500]);
+    expect(shared.map((r) => r.id)).toEqual(all.filter((id) => byId.get(id)!.visibility === "all_teams"));
+    expect((await page([null, "Java", null, null, null, 500])).map((r) => r.id)).toEqual(all);
+    expect(await page([null, "Cobol", null, null, null, 500])).toEqual([]);
+    const search = await page([null, null, null, "%cand1%", null, 500]);
+    expect(search.length).toBeGreaterThan(0);
+    expect(search.every((r) => r.first_name.startsWith("Cand1"))).toBe(true);
+    // An escaped underscore matches only a literal underscore (no name has one).
+    expect(await page([null, null, null, "%Cand\\_%", null, 500])).toEqual([]);
+    // Cursor paging in id order returns every row exactly once; the limit is clamped to 1..201.
+    const walked: string[] = [];
+    let cursor: string | null = null;
+    for (;;) {
+      const rows = await page([null, null, null, null, cursor, 7]);
+      walked.push(...rows.map((r) => r.id));
+      if (rows.length < 7) break;
+      cursor = rows[rows.length - 1]!.id;
+    }
+    expect(walked).toEqual(all);
+    expect(await page([null, null, null, null, null, 0])).toHaveLength(1);
+    expect((await page([null, null, null, null, null, null])).length).toBe(Math.min(50, all.length));
+  });
+
+  it("authz.hotlist_page caps a page at 201 rows whatever limit is asked", async () => {
+    // The fixture has fewer than 201 Hot List rows: add 210 (rolled back) and ask for 1,000.
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query(`
+        WITH p AS (INSERT INTO eureka.person (first_name, last_name)
+                   SELECT 'Bulk' || g, 'Test' FROM generate_series(1, 210) g RETURNING id)
+        INSERT INTO eureka.candidate (person_id, technology_id, team_id, recruiter_id, location_id, visibility, marketing_status)
+        SELECT p.id, $1, $2, $3, $4, 'team', 'active' FROM p`, [TECH_ID, T.t1, U.r1a, LOC.dallas]);
+      await c.query("SELECT set_config('eureka.user_id', $1, true)", [U.r1a]);
+      await c.query("SET LOCAL ROLE eureka_app");
+      const n = async (limit: number) =>
+        (await c.query(`SELECT count(*)::int AS n FROM authz.hotlist_page(NULL, NULL, NULL, NULL, NULL, $1)`, [limit])).rows[0].n;
+      expect(await n(1000)).toBe(201);
+      expect(await n(201)).toBe(201);
+      expect(await n(200)).toBe(200);
+    } finally {
+      await c.query("ROLLBACK");
+      c.release();
+    }
   });
 
   it("an unknown or inactive user id sees no Hot List", async () => {

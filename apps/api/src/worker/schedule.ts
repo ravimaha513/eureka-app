@@ -74,3 +74,21 @@ export function dueDailyKeys(
   }
   return keys;
 }
+
+/** A job run once per UTC day, due at hh:mm local time in timeZone the next day (see dailyDueAt). */
+export interface DailySchedule { hh: number; mm: number; timeZone: string }
+
+/**
+ * Schedules of the worker's maintenance and delivery jobs (design B6).
+ * - outbox-delivery: every tick; one run key per unpublished event (its id).
+ * - outbox-prune, idempotency-cleanup: daily, after the audit export (03:30).
+ *   Both delete by age relative to now(), so after downtime only the latest
+ *   day is run (catch-up is not needed).
+ */
+export const OUTBOX_PRUNE_SCHEDULE: DailySchedule = { hh: 4, mm: 0, timeZone: "America/New_York" };
+export const IDEMPOTENCY_CLEANUP_SCHEDULE: DailySchedule = { hh: 4, mm: 15, timeZone: "America/New_York" };
+
+/** The run key due at `now` for a daily maintenance job (only the latest day; [] before the first is due). */
+export function dueMaintenanceKeys(now: Date, s: DailySchedule): string[] {
+  return dueDailyKeys(now, s.hh, s.mm, s.timeZone, 1);
+}

@@ -42,6 +42,20 @@ variable "feedback_from_email" {
     error_message = "feedback_from_email must be empty or an email address."
   }
 }
+variable "outbox_from_email" {
+  description = "Verified SES sender for placement notifications (outbox delivery). Empty disables them."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.outbox_from_email == "" || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.outbox_from_email))
+    error_message = "outbox_from_email must be empty or an email address."
+  }
+}
+variable "outbox_deliver_since" {
+  description = "RFC 3339 cut-off: unpublished placement events created before it are marked published without email. Set when first enabling outbox mail."
+  type        = string
+  default     = ""
+}
 variable "use_fargate_spot" { type = bool }
 
 variable "image_tag" {

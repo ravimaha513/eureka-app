@@ -1,10 +1,16 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query } from "@nestjs/common";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import {
+  BatchListQuery,
+  BatchStatusChange,
   CandidateListQuery,
+  CreateBatch,
   CreateCandidate,
+  DuplicateCheck,
+  HotlistQuery,
   ProfileUpdate,
   RatingUpdate,
+  TimelineQuery,
   Transition,
   VisibilityUpdate,
 } from "./candidates.schemas.js";
@@ -17,7 +23,7 @@ export class CandidatesController {
   @Get("hotlist")
   @RequirePermission("hotlist:read")
   hotlist(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
-    return this.svc.list(user, "hotlist:read", CandidateListQuery.parse(q));
+    return this.svc.list(user, "hotlist:read", HotlistQuery.parse(q));
   }
 
   @Get("candidates")
@@ -32,10 +38,25 @@ export class CandidatesController {
     return this.svc.get(user, id);
   }
 
+  /** FR-CAN-10: events readable under candidate:read (activity events also need the activity readable). */
+  @Get("candidates/:id/timeline")
+  @RequirePermission("candidate:read")
+  timeline(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Query() q: unknown) {
+    return this.svc.timeline(user, id, TimelineQuery.parse(q));
+  }
+
   @Post("candidates")
   @RequirePermission("candidate:create")
   create(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.create(user, CreateCandidate.parse(body));
+  }
+
+  /** FR-CAN-09: minimal answer (team, contact, id only if readable); rate-limited and audited. */
+  @Post("candidates/duplicate-check")
+  @HttpCode(200)
+  @RequirePermission("candidate:create")
+  async duplicateCheck(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
+    return { duplicates: await this.svc.duplicates(user, DuplicateCheck.parse(body)) };
   }
 
   @Patch("candidates/:id")
@@ -60,5 +81,26 @@ export class CandidatesController {
   @RequirePermission("candidate:update")
   transition(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.transition(user, id, Transition.parse(body).to);
+  }
+
+  /** FR-CAN-02: batches are listed for every candidate:read holder. */
+  @Get("batches")
+  @RequirePermission("candidate:read")
+  batches(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
+    return this.svc.batches(user, BatchListQuery.parse(q));
+  }
+
+  /** Sales leadership only (candidate:create at team, hierarchy or org scope; canCreateBatch). */
+  @Post("batches")
+  @RequirePermission("candidate:create")
+  createBatch(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
+    return this.svc.createBatch(user, () => CreateBatch.parse(body));
+  }
+
+  /** planned -> in_training -> completed, or cancelled before completion; same permission as create. */
+  @Put("batches/:id/status")
+  @RequirePermission("candidate:create")
+  batchStatus(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.setBatchStatus(user, id, BatchStatusChange.parse(body).to);
   }
 }

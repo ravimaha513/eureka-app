@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Candidate, Me } from "../api";
 import { salesError } from "./errors";
+import { BulkBar, ExportButton, SavedViews } from "./HotListExtras";
 import { ListFilters, ListFooter } from "./ListControls";
 import { HOTLIST_STATUS_OPTIONS } from "./salesApi";
 import { Drawer, OpenToAllBadge, Phone, Priority, StatusBadge, fmtDate } from "./ui";
@@ -36,6 +37,23 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
   const s = useCandidateList("hotlist");
   const [preview, setPreview] = useState<Candidate | null>(null);
   const items = s.q.data?.items ?? [];
+  const canStatus = caps.includes("candidate:update");
+  const canVisibility = caps.includes("candidate.visibility:update");
+  const canBulk = canStatus || canVisibility;
+  const canExport = caps.includes("report:export");
+  // Selection covers the rows on this page; a new page or filter starts empty.
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const data = s.q.data;
+  useEffect(() => setSelected(new Set()), [data]);
+  /** Rows the viewer cannot act on (profile in another team) are not selectable; the server would refuse them. */
+  const selectable = items.filter((c) => c.canOpenProfile !== false);
+  const allSelected = selectable.length > 0 && selectable.every((c) => selected.has(c.id));
+  const toggle = (id: string) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const cols = canBulk ? 11 : 10;
 
   return (
     <>
@@ -43,17 +61,36 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
         <h1 tabIndex={-1}>Hot List</h1>
         <p className="sub">Candidates ready for marketing. Phones are shown only for candidates in your scope; others are masked.</p>
       </div>
+      <SavedViews s={s} />
       <ListFilters s={s} label="Hot List" statuses={HOTLIST_STATUS_OPTIONS} />
+      {canExport && <ExportButton s={s} />}
+      {canBulk && (
+        <BulkBar selected={selected} items={items} canStatus={canStatus} canVisibility={canVisibility}
+          onDone={() => setSelected(new Set())} />
+      )}
       <div className="card tablewrap">
         {s.q.isLoading ? <p className="empty">Loading…</p> : s.q.error ? <p className="empty error" role="alert">{salesError(s.q.error)}</p> : (
           <table aria-label="Hot List" aria-busy={s.q.isFetching || undefined}>
             <thead><tr>
+              {canBulk && (
+                <th>
+                  <input type="checkbox" aria-label="Select all candidates on this page" checked={allSelected}
+                    disabled={selectable.length === 0}
+                    onChange={() => setSelected(allSelected ? new Set() : new Set(selectable.map((c) => c.id)))} />
+                </th>
+              )}
               <th>Candidate</th><th>Technology</th><th>Status</th><th>Pri</th><th>Team</th><th>Recruiter</th><th>Location</th><th>Phone</th>
               <th>Days</th><th><span className="sr-only">Actions</span></th>
             </tr></thead>
             <tbody>
               {items.map((c) => (
                 <tr key={c.id}>
+                  {canBulk && (
+                    <td>
+                      <input type="checkbox" aria-label={`Select ${c.name}`} checked={selected.has(c.id)}
+                        disabled={c.canOpenProfile === false} onChange={() => toggle(c.id)} />
+                    </td>
+                  )}
                   <td><CandidateName c={c} caps={caps} onOpenProfile={onOpenProfile} /></td>
                   <td>{c.technology}</td>
                   <td><StatusBadge status={c.status} />{" "}{c.visibility === "all_teams" && <OpenToAllBadge />}</td>
@@ -68,7 +105,7 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
                   </td>
                 </tr>
               ))}
-              {items.length === 0 && <tr><td colSpan={10} className="empty">{s.hasFilters ? "No candidates match these filters." : "No candidates on the Hot List."}</td></tr>}
+              {items.length === 0 && <tr><td colSpan={cols} className="empty">{s.hasFilters ? "No candidates match these filters." : "No candidates on the Hot List."}</td></tr>}
             </tbody>
           </table>
         )}

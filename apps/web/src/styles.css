@@ -115,6 +115,8 @@ h1:focus { outline: none; }
 .facts dt { color: var(--muted); font-weight: 600; font-size: 12px; }
 .facts dd { margin: 0; color: var(--text2); }
 .profilegrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+.timeline { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid var(--line2); display: flex; flex-direction: column; gap: 8px; color: var(--text2); }
+.timeline li { font-size: 13px; }
 .card.pad { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
 .card.pad h2 { font-size: 15px; }
 .notfound { padding: 28px; display: flex; flex-direction: column; gap: 6px; }
@@ -155,3 +157,32 @@ h1:focus { outline: none; }
 .addcontact { align-self: flex-start; }
 table.mini th, table.mini td { padding: 6px 8px; }
 @media (max-width: 520px) { .grid2, .contactrow { grid-template-columns: 1fr; } }
+
+/* Dashboard */
+.dashboard { display: flex; flex-direction: column; gap: 16px; }
+.sectiontitle { font-size: 14px; color: var(--text2); margin-bottom: 8px; }
+.tiles { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.tile { padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+.tilelabel { font-weight: 600; color: var(--text2); font-size: 12px; }
+.tilevalue { font-size: 26px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.tilehint { color: var(--muted); font-size: 11.5px; }
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.attention { padding: 14px 16px 6px; margin-bottom: 12px; }
+.attention h3 { font-size: 14px; display: flex; gap: 8px; align-items: center; }
+.attention .count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--line2); color: var(--text2); font-size: 12px; text-align: center; }
+.attention > p { margin: 4px 0 10px; }
+.attention .tablewrap { margin: 0 -16px; }
+.attention .ok { color: #15803d; }
+
+/* Hot List extras: saved views, export, bulk actions */
+.savedviews, .export, .bulkbar { margin: 8px 0; }
+.savedviews .toolbar + .toolbar { margin-top: 8px; }
+.savedviews p, .export p, .bulkbar p { margin: 6px 0 0; min-height: 1em; }
+.export { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bulkbar { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.bulkfail { margin: 4px 0 0; padding-left: 18px; font-size: 12px; color: #92400e; }
+/* Resumes (CandidateResumes) */
+.resumecurrent { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.badge.resume-clean { background: #ecfdf3; color: #15803d; }
+.badge.resume-pending { background: var(--pri-50); color: var(--pri-700); }
+.badge.resume-infected, .badge.resume-rejected, .badge.resume-failed, .badge.resume-expired { background: #fef2f2; color: #b91c1c; }

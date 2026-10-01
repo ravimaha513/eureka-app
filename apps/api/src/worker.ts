@@ -1,19 +1,24 @@
 /**
  * Worker entrypoint (design A7, B6). Runs scheduled jobs from eureka.job_run
  * as eureka_worker (no BYPASSRLS, owns nothing; grants in migrations 0016, 0020).
- * Jobs: audit-export (nightly, 03:30 America/New_York). Phase 2 adds the
- * feedback email and outbox relay; Phase 3 reminders and retention.
+ * Jobs: audit-export (nightly, 03:30 America/New_York), feedback email and
+ * notification, outbox delivery (every tick), outbox prune and idempotency-key
+ * cleanup (daily, schedules in worker/schedule.ts), resume scan-and-promote (every
+ * tick, when DOCUMENTS_BUCKET or LOCAL_STORAGE_DIR is set). Phase 3 adds reminders and retention.
  */
 import { utimes, writeFile } from "node:fs/promises";
 import { S3Client } from "@aws-sdk/client-s3";
 import pg from "pg";
 import { LocalMail, SesMail } from "./worker/feedback-mail.js";
 import { feedbackEmailJob, feedbackNotificationJob } from "./worker/jobs/feedback-email.js";
+import { idempotencyCleanupJob, outboxDeliveryJob, outboxPruneJob } from "./worker/jobs/outbox.js";
 import { loadWorkerConfig } from "./worker/config.js";
 import { auditExportJob } from "./worker/jobs/audit-export.js";
 import { createLogger, errorFields } from "./worker/log.js";
 import { JobRunner } from "./worker/runner.js";
 import { DirSink, S3Sink, type ExportSink } from "./worker/sink.js";
+import { LocalDocumentStore, S3DocumentStore } from "./worker/document-store.js";
+import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob } from "./worker/jobs/resume-scan.js";
 
 const log = createLogger({ service: "worker" });
 const config = loadWorkerConfig();
@@ -39,11 +44,40 @@ const heartbeat = () => {
     .catch((err) => log.warn("heartbeat write failed", errorFields(err)));
 };
 
-const jobs = [auditExportJob(sink, config.AUDIT_EXPORT_MAX_DAYS_PER_TICK)];
+const jobs = [
+  auditExportJob(sink, config.AUDIT_EXPORT_MAX_DAYS_PER_TICK),
+  outboxPruneJob(config.OUTBOX_RETENTION_DAYS),
+  idempotencyCleanupJob(),
+];
+if (config.OUTBOX_MAIL_MODE !== "disabled") {
+  const mail = config.OUTBOX_MAIL_MODE === "local" ? new LocalMail(config.OUTBOX_MAIL_DIR!) : new SesMail(config.AWS_REGION!, config.OUTBOX_FROM_EMAIL!);
+  jobs.push(outboxDeliveryJob(mail, new URL(config.APP_PUBLIC_ORIGIN!).origin, {
+    batchSize: config.OUTBOX_BATCH_SIZE,
+    maxRejections: config.OUTBOX_MAX_REJECTIONS,
+    deliverSince: config.OUTBOX_DELIVER_SINCE ? new Date(config.OUTBOX_DELIVER_SINCE) : undefined,
+  }));
+}
 if (config.FEEDBACK_MAIL_MODE !== "disabled") {
   const mail = config.FEEDBACK_MAIL_MODE === "local" ? new LocalMail(config.FEEDBACK_MAIL_DIR!) : new SesMail(config.AWS_REGION!, config.FEEDBACK_FROM_EMAIL!);
   const origin = new URL(config.FEEDBACK_PUBLIC_ORIGIN!).origin;
   jobs.push(feedbackEmailJob(mail, origin, config.FEEDBACK_TOKEN_KEY!), feedbackNotificationJob(mail, origin));
+}
+if (config.DOCUMENTS_BUCKET || config.LOCAL_STORAGE_DIR) {
+  const store = config.DOCUMENTS_BUCKET
+    ? new S3DocumentStore(new S3Client({
+      region: config.AWS_REGION,
+      maxAttempts: 3,
+      requestHandler: { requestTimeout: 30_000, connectionTimeout: 5_000 },
+    }), config.DOCUMENTS_BUCKET)
+    : new LocalDocumentStore(config.LOCAL_STORAGE_DIR!);
+  jobs.push(resumeScanJob(store, {
+    ...DEFAULT_RESUME_SCAN_OPTIONS,
+    scanTimeoutMs: config.RESUME_SCAN_TIMEOUT_MINUTES * 60_000,
+    uploadGraceMs: config.RESUME_UPLOAD_GRACE_MINUTES * 60_000,
+    maxVersionsPerKey: config.RESUME_MAX_KEY_VERSIONS,
+  }));
+} else {
+  log.warn("resume-scan is off (set DOCUMENTS_BUCKET or LOCAL_STORAGE_DIR); uploaded resumes stay pending");
 }
 const runner = new JobRunner(pool, jobs, log, heartbeat);
 runner.start(config.JOB_TICK_SECONDS * 1000);

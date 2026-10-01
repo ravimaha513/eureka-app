@@ -9,11 +9,10 @@ locals {
   account_id  = "637423353261"
   aws_region  = "us-east-2"
 
-  # TODO(Ravi): pick the staging hostname. eureka.spokenly.click is already used
-  # by spokenly staging, so Eureka needs a different name.
+  # eureka.spokenly.click is used by spokenly staging, so Eureka staging uses its own name.
   domain_name       = "eureka-staging.spokenly.click"
   hosted_zone_name  = "spokenly.click"
-  google_hosted_domain = "" # TODO: company Google Workspace domain
+  google_hosted_domain = "aceintegrator.com"
 
   vpc_cidr             = "10.41.0.0/16"
   public_subnet_cidrs  = ["10.41.1.0/24", "10.41.2.0/24"]
@@ -29,7 +28,7 @@ locals {
   api_memory        = 512
   api_desired_count = 1
   api_max_count     = 2
-  worker_desired_count = 0 # worker ships in Phase 2
+  worker_desired_count = 1 # audit export and cleanup jobs; email stays off until a sender is set
   use_fargate_spot  = true
 
   audit_lock_mode = "GOVERNANCE"

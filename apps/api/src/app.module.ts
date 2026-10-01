@@ -26,6 +26,15 @@ import { AdminService } from "./modules/admin/admin.service.js";
 import { PlacementsController } from "./modules/placements/placements.controller.js";
 import { PlacementsService } from "./modules/placements/placements.service.js";
 import { LookupsController, LookupsService } from "./modules/lookups/lookups.controller.js";
+import { DashboardController, DashboardService } from "./modules/dashboard/dashboard.controller.js";
+import { HotlistController } from "./modules/hotlist/hotlist.controller.js";
+import { HotlistService } from "./modules/hotlist/hotlist.service.js";
+import { ImportsController, ImportsService } from "./modules/imports/imports.controller.js";
+import { assertImportRoleIsolated } from "./platform/role-isolation.js";
+import { ResumesController } from "./modules/resumes/resumes.controller.js";
+import { ResumesService } from "./modules/resumes/resumes.service.js";
+import { DOCUMENT_STORAGE, LocalDocumentStorage, createDocumentStorage, type DocumentStorage } from "./platform/storage/document-storage.js";
+import { registerLocalStorageRoutes } from "./platform/storage/local-routes.js";
 
 @Controller("api")
 class HealthController {
@@ -41,17 +50,19 @@ class HealthController {
 
 @Module({})
 export class AppModule {
-  static forConfig(config: AppConfig): DynamicModule {
+  static forConfig(config: AppConfig, storage: DocumentStorage = createDocumentStorage(config)): DynamicModule {
     return {
       module: AppModule,
       controllers: [
         FeedbackController, HealthController, AuthController, MeController, CandidatesController, SubmissionsController, InterviewsController,
-        AdminController, TeamsController, PlacementsController, LookupsController,
+        AdminController, TeamsController, PlacementsController, LookupsController, DashboardController, HotlistController, ImportsController,
+        ResumesController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
         DbService, SessionService, AccessService, AuditService, OidcService,
-        CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService,
+        CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
+        ResumesService, { provide: DOCUMENT_STORAGE, useValue: storage },
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],
@@ -60,8 +71,9 @@ export class AppModule {
 }
 
 export async function createApp(config: AppConfig): Promise<NestFastifyApplication> {
+  const storage = createDocumentStorage(config);
   const app = await NestFactory.create<NestFastifyApplication>(
-    AppModule.forConfig(config),
+    AppModule.forConfig(config, storage),
     // trustProxy stays off: X-Forwarded-For is client-controlled (CloudFront and
     // API Gateway append to it) and nothing reads req.ip yet. When a client IP is
     // needed, derive it from CloudFront's CloudFront-Viewer-Address header on
@@ -72,6 +84,8 @@ export async function createApp(config: AppConfig): Promise<NestFastifyApplicati
   await app.register(cookie as never);
   const fastify = app.getHttpAdapter().getInstance();
   if (config.ORIGIN_VERIFY_SECRET) fastify.addHook("onRequest", originGuard(config.ORIGIN_VERIFY_SECRET));
+  // Local document driver (development, tests): the API stands in for the bucket.
+  if (storage instanceof LocalDocumentStorage) await registerLocalStorageRoutes(fastify, storage);
   fastify.addHook("onSend", async (_req, reply) => {
     reply.header("x-content-type-options", "nosniff");
     reply.header("referrer-policy", "strict-origin-when-cross-origin");
@@ -79,5 +93,8 @@ export async function createApp(config: AppConfig): Promise<NestFastifyApplicati
     if (config.NODE_ENV === "production") reply.header("strict-transport-security", "max-age=63072000; includeSubDomains");
   });
   await app.init();
+  // Fail fast if the sheet-import role could act as another role (docs/import.md).
+  // Skipped in tests: roles are cluster-wide on a shared development server.
+  if (config.NODE_ENV !== "test") await assertImportRoleIsolated(app.get(DbService).pool);
   return app;
 }

@@ -213,6 +213,126 @@ The workflow, per environment:
 Migrations must be backward compatible with the running version
 (expand → deploy → contract), because step 3 runs before the new API is live.
 
+## First admin (bootstrap)
+
+A freshly deployed stack has the role catalog and no users, so nobody can
+sign in (Google sign-in only admits accounts that already exist in
+`app_user`; dev sign-in is refused under `NODE_ENV=production`).
+`dist/db/bootstrap.js` creates the first administrators once. Run it as a
+one-off task on the migrate task definition, like the restore check: that
+task has the RDS master credentials, `APP_DB_PASSWORD` and
+`GOOGLE_HOSTED_DOMAIN`, and runs in the "jobs" security group.
+
+What it does and refuses (database function `authz.bootstrap_admins`, migrations 0037 and 0039):
+
+- Creates **two** `org_admin` users for Google Workspace emails in
+  `google_hosted_domain` (staging and production: `aceintegrator.com`).
+  Two, because granting any restricted role (HR, Accounts, Immigration,
+  CEO, ..., and `org_admin` itself) needs a second admin who is neither the
+  requester nor the grantee (docs/admin-api.md AD-3): with one admin, no
+  restricted role could ever be granted and no second admin could be added.
+  `--single-admin` creates one anyway (only for a throwaway stack that needs
+  no restricted roles).
+- The admins hold `org_admin` only and see no business data (HANDOFF rule 7,
+  AD-3a). Use accounts that will never need a business role (e.g. a separate
+  `ravi.admin@` account), because a user with a business role cannot be
+  `org_admin` and vice versa.
+- **Break-glass only: refuses (exit 3) while an active `org_admin` exists.**
+  While the org is administered it adds nobody; further admins go through
+  Users & Access with a second approver. Running it again with exactly the
+  current admins changes nothing and exits 0. It only works when no active
+  admin is left, and after a first bootstrap that lock-out recovery also
+  needs `--recover` (audited with `recover: true`). Anyone holding the RDS
+  master secret could write the database directly anyway; the point is that
+  the supported tool cannot bypass the second-approver rule. Emails outside
+  the hosted domain, or an existing account that is inactive or holds a
+  role, are refused too. Exit 2 means bad arguments.
+- Runs in a READ COMMITTED transaction under the admin-count advisory lock,
+  so concurrent runs cannot both create admins (the function refuses any
+  other isolation level).
+- Audits each grant (`audit_event.action = 'admin.bootstrap'`, no actor,
+  `changes = {actor: "system:bootstrap", role: "org_admin", ...}`, no email)
+  in the same transaction. The task log line carries user ids, not emails.
+  The emails do appear in the task's command override (ECS
+  `describe-tasks`, CloudTrail), like any admin-created user's email in the
+  database.
+- The admins sign in with Google at the app URL: the first sign-in links the
+  Google account to the user by email (`google_sub` is set then), exactly
+  like a user an admin creates; later sign-ins match by `sub`.
+
+Prerequisites: a deploy of a commit that contains `dist/db/bootstrap.js` and
+migration 0037 (the deploy's migrate step applies it), real Google OAuth
+client values in SSM (step 4 of the one-time setup), and admin AWS
+credentials with `jq` and `terragrunt`.
+
+### Staging (`https://eureka-staging.spokenly.click`)
+
+```sh
+ENV=staging; export AWS_REGION=us-east-2
+OUT=$(cd infra/live/$ENV && terragrunt output -json)
+CLUSTER=$(jq -r .ecs_cluster.value <<<"$OUT")
+TASK_FAMILY=$(jq -r .migrate_task_definition.value <<<"$OUT")
+SUBNETS=$(jq -r '.public_subnet_ids.value | join(",")' <<<"$OUT")
+SECURITY_GROUP=$(jq -r .jobs_security_group_id.value <<<"$OUT")
+# Two admin accounts in aceintegrator.com; "Display Name <email>" or just the email.
+# Staging only: append "--demo-data" to the command array to load the fictional demo org (see below).
+OVERRIDES=$(jq -nc --arg a1 'First Admin <admin1@aceintegrator.com>' --arg a2 'Second Admin <admin2@aceintegrator.com>' \
+  '{containerOverrides: [{name: "migrate", command: ["node", "dist/db/bootstrap.js", "--admin", $a1, "--admin", $a2]}]}')
+TASK=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASK_FAMILY" --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[${SUBNETS}],securityGroups=[${SECURITY_GROUP}],assignPublicIp=ENABLED}" \
+  --overrides "$OVERRIDES" --started-by "bootstrap-admin" --query 'tasks[0].taskArn' --output text)
+aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK"
+aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --query 'tasks[0].containers[0].exitCode' --output text   # 0 = created or unchanged
+aws logs get-log-events --log-group-name "/eureka/$ENV/migrate" --log-stream-name "migrate/migrate/${TASK##*/}" \
+  --query 'events[].message' --output text
+```
+
+Without terragrunt, set `CLUSTER=eureka-staging`, `TASK_FAMILY=eureka-staging-migrate`
+and read `SUBNETS` / `SECURITY_GROUP` (`eureka-staging-jobs`) from the VPC console. If the
+deployed migrate task definition predates `GOOGLE_HOSTED_DOMAIN` and `EUREKA_ENVIRONMENT`,
+redeploy first (preferred), or add
+`environment: [{name: "GOOGLE_HOSTED_DOMAIN", value: "aceintegrator.com"}, {name: "EUREKA_ENVIRONMENT", value: "staging"}]`
+to the container override (staging only; never set `EUREKA_ENVIRONMENT` by hand for production).
+
+### Production (later)
+
+The same commands with `ENV=production; export AWS_REGION=us-east-1`, and
+**never** `--demo-data` (it refuses there anyway: the migrate task's
+`EUREKA_ENVIRONMENT` is `production`, not on the allow-list). Do it right after the first successful production deploy
+and record it in the operations log.
+
+### After the bootstrap: users, roles, second approval
+
+1. Both admins sign in (Google, hosted-domain accounts) and open Users & Access.
+2. Admin 1 creates users (`POST /admin/users`; email must be in the domain)
+   and assigns roles. Non-restricted roles (recruiter, lead, manager, associate
+   director, coach, location roles) apply immediately.
+3. Restricted roles (HR, Accounts, Immigration, CEO, BU Head, Offshore
+   Manager, Associate HR, Documents Team, `org_admin`) become pending
+   requests; **Admin 2** approves them under Role requests (the requester and
+   the grantee cannot). Pending requests expire after 7 days.
+4. To add a third admin later: create the user, request `org_admin`, have
+   the other admin approve. Neither admin can deactivate or demote the last
+   active admin (`last_admin`).
+
+### Demo data (staging only, optional)
+
+`--demo-data` also loads a small **fictional** org (apps/api/src/db/demo-data.ts,
+modeled on the seed-dev fixtures): 12 users in a sales hierarchy with three
+teams, a coach and a location ops admin for "Demo Dallas"/"Demo Austin", 32
+candidates and 12 submissions. Demo users have `@demo.invalid` emails, outside
+the hosted domain, so nobody can sign in as them, and only non-restricted
+roles (no approval is bypassed). Candidates and submissions are written as
+each demo recruiter through the app role, RLS and audit, like the API.
+It runs only where `EUREKA_ENVIRONMENT` is `staging` (Terraform sets it on the
+migrate task) or `local` (set it yourself for local development), and also
+refuses hosts or database names containing "prod" and any stack with real data:
+a candidate outside the demo teams, or any user besides the active org admins.
+So load it in the bootstrap run, before creating users; a re-run adds nothing. The admins see none of it (no data role):
+to show it, create a business account for the presenter in Users & Access and
+give it, for example, Location Ops Admin for "Demo Dallas" (24 candidates), or
+Associate Director and make the demo managers report to it (all 32).
+
 ## Turning on the worker
 
 The worker runs scheduled jobs from the `eureka.job_run` table (migrations 0016,
@@ -247,6 +367,14 @@ seq range to `eureka.audit_export`.
   run keys in the future and refuses to mark an audit-export day succeeded
   without its `audit_export` row (migration 0020); the ledger is the evidence.
 
+Placement notifications (outbox delivery, migrations 0024/0029) also run in the
+worker. They stay off (`OUTBOX_MAIL_MODE=disabled`, events kept unpublished) until
+`outbox_from_email` is set in `env.hcl`; that address (like `feedback_from_email`)
+must be a verified SES identity and is the only sender the worker's IAM policy
+allows. On first enable also set `outbox_deliver_since` (RFC 3339, e.g. the deploy
+time) so older events are marked published instead of all being emailed at once.
+Staging runs the worker with both senders empty, so it sends no email.
+
 To turn it on, set `worker_desired_count = 1` in `infra/live/<env>/env.hcl` and
 deploy (one task is enough; more are safe but idle). The worker needs
 migrations 0016 and 0020 applied first, which the deploy's migrate step does.
@@ -266,6 +394,95 @@ Check an export with:
 aws s3api head-object --bucket <audit bucket> --key audit/YYYY/MM/DD/audit-events.jsonl.gz --checksum-mode ENABLED
 # ChecksumSHA256 (base64) matches eureka.audit_export.sha256_hex (hex) for that day
 ```
+
+## Launch checks
+
+The MVP exit criteria (docs/implementation-plan.md) need three checks against a
+running stack. None of them runs on push or pull request.
+
+- **Load test (k6):** `loadtest/README.md`. 120 users over 50k fictional
+  candidates; pass is p95 < 500 ms and < 1% errors.
+- **ZAP baseline:** Actions → zap-baseline → Run workflow, with the URL of the
+  stack (e.g. `https://eureka-staging.spokenly.click`). It spiders the site
+  (plus the AJAX spider for the SPA) and runs ZAP's passive rules only, no
+  attack payloads. `.zap/rules.tsv` sets each alert to FAIL (fails the job),
+  WARN (reported) or IGNORE (noise such as cache and timestamp notices); the
+  HTML/JSON report is attached to the run as `zap-baseline-report`. To accept
+  a finding, change its line in the rules file with a reason in the commit.
+  The scan is unauthenticated: it covers the web app shell, security headers,
+  cookies and the API's unauthenticated answers.
+- **Restore drill:** below.
+
+## Restore drill
+
+Goal: prove a backup can be turned into a working database within the RTO,
+and measure how much data a restore would lose (RPO). Run it on staging first,
+then on production before launch and after any change to the database setup;
+the plan asks for a weekly check once live. A drill costs about one hour of a
+db.t4g.micro (cents) and touches the live database only through describe calls.
+
+Targets to confirm with Ravi (proposed): **RTO 2 hours, RPO 15 minutes.**
+Automated backups give point-in-time restore to within about 5 minutes
+(`backup_retention_period` days back); a snapshot restore loses everything since
+that night's backup window (07:00–08:00 UTC).
+
+### Automated: `infra/scripts/restore-drill.sh`
+
+```sh
+infra/scripts/restore-drill.sh staging                   # point-in-time (latest restorable time)
+infra/scripts/restore-drill.sh production --snapshot latest
+infra/scripts/restore-drill.sh staging --keep            # leave the copy up for inspection
+```
+
+It needs admin AWS credentials, `jq`, `node` and `terragrunt` (for the stack
+outputs; or set `CLUSTER`, `TASK_FAMILY`, `SUBNETS`, `SECURITY_GROUP`). Steps:
+
+1. Reads the source instance (`eureka-<env>`): subnet group, security group,
+   parameter group and class, and its latest restorable time.
+2. Restores into a **new** instance `eureka-<env>-drill-<UTC timestamp>`
+   (point-in-time with `--use-latest-restorable-time`, or from a snapshot),
+   private, single-AZ, tagged `purpose=restore-drill`. The copy is encrypted
+   with the same KMS key and keeps the app and worker role passwords.
+3. Waits until it is available (typically 10–30 minutes), then sets the copy's
+   master password to the current value of the RDS-managed secret (RDS rotates
+   it, so an older restore point can hold an older password).
+4. Runs the restore check inside the VPC: a one-off task on the migrate task
+   definition with the command `node dist/db/restore-check.js` and `DB_HOST`
+   pointed at the copy. The check is read-only and fails when
+   - any migration shipped in the image is not applied (`public.schema_migration`),
+   - RLS is not enabled and forced on person, candidate, submission, interview,
+     audit_event or placement,
+   - the `eureka_app` role cannot log in, sees any candidate without a user
+     context (RLS must fail closed), or sees none for a recruiter who has some.
+   It prints one JSON line with row counts and the newest write.
+5. Prints the report: RPO (drill start minus restore point), time to
+   available, RTO (drill start to verified), and the check's exit code.
+6. Deletes the copy (`--skip-final-snapshot --delete-automated-backups`) on
+   exit, also on failure, unless `--keep`. It only ever deletes an
+   identifier containing `-drill-`.
+
+Record each run (date, environment, source, RPO, RTO, pass/fail) in the
+operations log. A failed check or an RTO over target is a launch blocker.
+
+### By hand (what to do in a real incident)
+
+1. Pick the restore point: console → RDS → `eureka-<env>` → Actions → Restore
+   to point in time (or Snapshots → Restore). New identifier, same subnet
+   group `eureka-<env>`, security group `eureka-<env>-db`, parameter group
+   `eureka-<env>-pg16`, not publicly accessible.
+2. Verify it with the restore check (step 4 above).
+3. Cut over: Terraform owns `aws_db_instance.main`, so the safest switch is to
+   rename. Stop traffic (`aws ecs update-service --cluster eureka-<env> --service
+   api --desired-count 0`), rename the broken instance out of the way
+   (`aws rds modify-db-instance --db-instance-identifier eureka-<env>
+   --new-db-instance-identifier eureka-<env>-old --apply-immediately`), rename
+   the restored one to `eureka-<env>`, then re-run the deploy workflow: the SSM
+   URLs point at the instance address, which follows the identifier. Expect
+   `terragrunt plan` drift on settings the restore did not copy (backup
+   retention, log exports, deletion protection); apply it.
+4. Smoke test: `GET /api/health`, sign in, open the Hot List.
+5. Keep the old instance until the incident review is done, then delete it with
+   a final snapshot.
 
 ## Known risks
 

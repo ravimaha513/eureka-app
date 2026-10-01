@@ -187,7 +187,16 @@ export class PlacementsService {
       const row = await this.load(c, user, id);
       const contacts = await c.query<{ id: string; kind: string; name: string; email: string | null; phone: string | null }>(
         `SELECT id, kind, name, email, phone FROM eureka.placement_contact WHERE placement_id = $1 ORDER BY created_at, id`, [id]);
-      const base = { ...this.present(user.access, row), contacts: contacts.rows };
+      // Paperwork checklist copied from the template at creation (migration 0035);
+      // readable wherever the placement is. Document types and role keys only.
+      const checklist = await c.query<{ doc_type: string; owner_role: string; required: boolean; status: string }>(
+        `SELECT doc_type, owner_role, required, status FROM eureka.checklist_item
+         WHERE placement_id = $1 AND kind = 'paperwork' ORDER BY position`, [id]);
+      const base = {
+        ...this.present(user.access, row),
+        contacts: contacts.rows,
+        checklist: checklist.rows.map((i) => ({ docType: i.doc_type, ownerRole: i.owner_role, required: i.required, status: i.status })),
+      };
       // Field policy: the assignment key only where assignment:read covers the placement.
       if (!this.assignmentVisible(user.access, row)) return base;
       const asg = await c.query<{ assignment_no: number; start_date: string; end_date: string | null; end_reason: string | null }>(
