@@ -7,6 +7,7 @@ import { CandidateProfile } from "./sales/CandidateProfile";
 import { CandidatesPage } from "./sales/CandidatesPage";
 import { InterviewsPage } from "./interviews/InterviewsPage";
 import { HotListPage } from "./sales/HotListPage";
+import { PlacementsPage } from "./pipeline/PlacementsPage";
 import { SubmissionsPage } from "./pipeline/SubmissionsPage";
 
 /** The Hot List screen (kept under its original name for existing callers). */
@@ -54,6 +55,9 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // Open candidate profile. The list stays mounted (hidden) so its filters, page
   // and scroll survive, and focus returns to the row that opened the profile.
   const [profileId, setProfileId] = useState<string | null>(null);
+  // A placement to open when switching to Placements from another screen (e.g. right after creating it).
+  const [placementId, setPlacementId] = useState<string | null>(null);
+  const openPlacement = (id: string) => { setPlacementId(id); setActive("placements"); };
   const opener = useRef<HTMLElement | null>(null);
   const [restoreFocus, setRestoreFocus] = useState(false);
   const openProfile = (id: string) => { opener.current = document.activeElement as HTMLElement | null; setProfileId(id); };
@@ -75,7 +79,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <div key={s}>
             <div className="navsec">{s}</div>
             {items.filter((i) => i.section === s).map((i) => (
-              <button key={i.key} className="nav" aria-current={i.key === active ? "page" : undefined} onClick={() => { setActive(i.key); setProfileId(null); }}>{i.label}</button>
+              <button key={i.key} className="nav" aria-current={i.key === active ? "page" : undefined} onClick={() => { setActive(i.key); setProfileId(null); setPlacementId(null); }}>{i.label}</button>
             ))}
           </div>
         ))}
@@ -96,7 +100,8 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                 {profileId && <CandidateProfile key={profileId} id={profileId} me={me} onBack={closeProfile} backLabel={`Back to ${current.label}`} />}
               </>
             )
-            : current.key === "submissions" ? <SubmissionsPage me={me} />
+            : current.key === "submissions" ? <SubmissionsPage me={me} onOpenPlacement={items.some((i) => i.key === "placements") ? openPlacement : undefined} />
+            : current.key === "placements" ? <PlacementsPage key={placementId ?? "list"} me={me} initialOpenId={placementId} />
             : current.key === "interviews" ? <InterviewsPage me={me} />
             : current.key === "access" ? <AccessPage me={me} />
             : <Placeholder item={current} />}

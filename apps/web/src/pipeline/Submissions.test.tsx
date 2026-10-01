@@ -1,8 +1,9 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Shell } from "../App";
 import { SubmissionsPage } from "./SubmissionsPage";
 import { dayBoundary } from "./pipelineApi";
-import { COACH, LOOKUPS, UUID, meFor, mockApi, problem, sub, wrap, type Handler } from "./testkit";
+import { COACH, LOOKUPS, UUID, meFor, mockApi, plc, problem, sub, wrap, type Handler } from "./testkit";
 
 const RECRUITER = meFor("recruiter");
 const S1 = sub("s1");
@@ -331,5 +332,29 @@ describe("Create placement", () => {
     fireEvent.click(within(dlg).getByRole("button", { name: "Create placement" }));
     await waitFor(() => expect(within(dlg).getByLabelText("Tentative start date")).toHaveAttribute("aria-invalid", "true"));
     expect(within(dlg).getByLabelText("Tentative start date")).toHaveAccessibleDescription("Invalid date");
+  });
+});
+
+describe("Pipeline navigation", () => {
+  it("opens the new placement in Placements after creating it", async () => {
+    api.routes["POST /api/v1/placements"] = () => ({ status: 201, body: { id: "p9", isFirstPlacement: false } });
+    api.routes["GET /api/v1/placements"] = () => ({ body: { items: [plc("p9", { candidate: { id: "c2", name: "Divya Menon" } })], nextCursor: null } });
+    api.routes["GET /api/v1/placements/p9"] = () => ({ body: { ...plc("p9", { candidate: { id: "c2", name: "Divya Menon" } }), contacts: [], assignment: null } });
+    api.routes["GET /api/v1/hotlist"] = () => ({ body: { items: [], nextCursor: null } });
+    wrap(<Shell me={RECRUITER} onSignOut={() => undefined} />);
+    const nav = screen.getByRole("complementary", { name: "Main navigation" });
+    fireEvent.click(within(nav).getByRole("button", { name: "Submissions" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Submissions" })).toBeInTheDocument();
+    const drawer = await openDrawer("Divya Menon");
+    fireEvent.click(within(drawer).getByRole("button", { name: "Create placement" }));
+    const dlg = screen.getByRole("dialog", { name: "Create placement · Divya Menon" });
+    fireEvent.change(within(dlg).getByLabelText("Placement type"), { target: { value: "c2c" } });
+    fireEvent.change(within(dlg).getByLabelText("Work mode"), { target: { value: "onsite" } });
+    fireEvent.change(within(dlg).getByLabelText("Tentative start date"), { target: { value: "2026-10-20" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create placement" }));
+    fireEvent.click(await within(drawer).findByRole("button", { name: "Open the new placement" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Placements" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "Placements" })).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("dialog", { name: "Divya Menon · Northwind Financial" })).toBeInTheDocument();
   });
 });
