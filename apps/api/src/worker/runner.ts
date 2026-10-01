@@ -123,7 +123,8 @@ export class JobRunner {
   private async renew(job: string, runKey: string, attempt: number): Promise<boolean> {
     const r = await this.pool.query(
       `UPDATE eureka.job_run SET lease_until = now() + $4 * interval '1 millisecond'
-        WHERE job_name = $1 AND run_key = $2 AND status = 'running' AND attempts = $3`,
+        WHERE job_name = $1 AND run_key = $2 AND status = 'running' AND attempts = $3
+          AND lease_until > now()`, // an expired lease is lost, even if nobody has claimed it yet
       [job, runKey, attempt, this.opts.leaseMs]);
     return r.rowCount === 1;
   }
