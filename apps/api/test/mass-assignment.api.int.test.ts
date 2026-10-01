@@ -343,6 +343,21 @@ const CASES: RejectCase[] = [
     },
     forbidden: { status: "completed", startMonth: "2040-01", locationId: LOC.austin, technologyId: FOREIGN_ID, sizePlanned: 500 },
   },
+  // resumes (migration 0036): the key, status, version and hash are the server's; no file name is accepted
+  {
+    route: "POST /api/v1/candidates/:id/resumes", actor: "r1a",
+    prepare: async () => {
+      const cand = await freshOwn();
+      return {
+        url: `/api/v1/candidates/${cand.id}/resumes`, body: { contentType: "application/pdf", size: 1000 },
+        state: () => rows(`SELECT count(*)::int AS n FROM eureka.resume WHERE candidate_id = $1`, [cand.id]),
+      };
+    },
+    forbidden: {
+      candidateId: FOREIGN_ID, key: "clean/resumes/mine", status: "clean", scanResult: "NO_THREATS_FOUND", version: 9, isCurrent: true,
+      sha256: "a".repeat(64), uploadedBy: U.admin, fileName: "evil.html", scannedAt: PAST, uploadExpiresAt: "2099-01-01T00:00:00Z",
+    },
+  },
   // placements (docs/placements-api.md)
   {
     route: "POST /api/v1/placements", actor: "r1a",
@@ -425,6 +440,32 @@ const CASES: RejectCase[] = [
 /** Endpoints that read no body: what they change comes from the URL and the session only. */
 interface IgnoreCase { route: string; run: () => Promise<void> }
 const IGNORED: IgnoreCase[] = [
+  {
+    route: "POST /api/v1/candidates/:id/resumes/:resumeId/download",
+    run: async () => {
+      const cand = await freshOwn();
+      const c = await db.admin.connect();
+      let resumeId: string;
+      try {
+        await c.query("BEGIN");
+        await c.query("SET LOCAL session_replication_role = replica"); // a clean resume without running the scan
+        resumeId = (await c.query<{ id: string }>(
+          `INSERT INTO eureka.resume (candidate_id, status, scan_result, content_type, size_bytes, sha256_hex, version, is_current, uploaded_by, upload_expires_at, scanned_at)
+           VALUES ($1, 'clean', 'NO_THREATS_FOUND', 'application/pdf', 10, $2, 1, true, $3, now(), now()) RETURNING id`,
+          [cand.id, "a".repeat(64), U.r1a])).rows[0]!.id;
+        await c.query("COMMIT");
+      } finally {
+        c.release();
+      }
+      const r = await call("r1a", "POST", `/api/v1/candidates/${cand.id}/resumes/${resumeId}/download`,
+        { ...SERVER_MANAGED, resumeId: FOREIGN_ID, candidateId: FOREIGN_ID, version: 9, key: "quarantine/resumes/x", expiresSeconds: 86400 });
+      expect(r.statusCode, r.body).toBe(200);
+      expect(Date.parse(r.json().expiresAt) - Date.now()).toBeLessThanOrEqual(60_000);
+      expect(r.json().url).toContain("/api/local-storage/object?");
+      expect(await rows(`SELECT entity_id, changes FROM eureka.audit_event WHERE action = 'resume.downloaded' ORDER BY seq DESC LIMIT 1`))
+        .toEqual([{ entity_id: resumeId, changes: { candidateId: cand.id, version: 1 } }]);
+    },
+  },
   {
     route: "POST /api/auth/logout",
     run: async () => {
