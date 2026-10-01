@@ -17,7 +17,10 @@ import { DbService } from "../../platform/db.service.js";
  *   GET  /api/v1/imports/:id                  counts per sheet and state, approval and expiry
  *   GET  /api/v1/imports/:id/review           rows in review (sheet row numbers and reasons, no personal data)
  *   POST /api/v1/imports/:id/decisions        approve / reject / link one row
- *   POST /api/v1/imports/:id/approve          sign-off by an org admin who did not stage the batch
+ *   GET  /api/v1/imports/:id/preview          what approval would load (person, owner, visibility, target
+ *                                              status per row; counts per owner; verification problems; digest)
+ *   POST /api/v1/imports/:id/approve          sign-off by an org admin who did not stage the batch, quoting
+ *                                              the preview's digest ({ "digest": "..." })
  */
 export const Decision = z.object({
   sheet: z.enum(["sales", "interviews", "placements"]),
@@ -26,6 +29,7 @@ export const Decision = z.object({
   salesRowNo: z.number().int().min(2).max(1_000_000).optional(),
 }).strict().refine((d) => (d.action === "link") === (d.salesRowNo !== undefined), { message: "salesRowNo is required for link, and only for link" });
 export type Decision = z.infer<typeof Decision>;
+export const Approve = z.object({ digest: z.string().regex(/^[0-9a-f]{64}$/) }).strict();
 
 const CODES: Record<string, (code: string) => HttpException> = {
   not_permitted: () => new ForbiddenException("Not permitted"),
@@ -36,6 +40,8 @@ const CODES: Record<string, (code: string) => HttpException> = {
   row_committed: (c) => new ConflictException(c),
   invalid_transition: (c) => new ConflictException(c),
   needs_analysis: (c) => new ConflictException(c),
+  batch_changed: (c) => new ConflictException(c),
+  verification_failed: (c) => new UnprocessableEntityException(c),
   not_approvable: (c) => new UnprocessableEntityException(c),
   invalid_link: (c) => new UnprocessableEntityException(c),
   invalid_action: (c) => new UnprocessableEntityException(c),
@@ -100,9 +106,18 @@ export class ImportsService {
     });
   }
 
-  async approve(user: AuthedUser, id: string) {
+  /** Personal data (names, owner emails) for org admins only, the people who sign off. */
+  async preview(user: AuthedUser, id: string) {
     return this.tx(user, async (c) => {
-      await c.query(`SELECT authz.import_approve_batch($1)`, [id]);
+      const p = (await c.query<{ p: unknown }>(`SELECT authz.import_load_preview($1) AS p`, [id])).rows[0]!.p;
+      await this.audit.record(c, { actorId: user.id, action: "import.preview_read", entityType: "import_batch", entityId: id });
+      return p;
+    });
+  }
+
+  async approve(user: AuthedUser, id: string, digest: string) {
+    return this.tx(user, async (c) => {
+      await c.query(`SELECT authz.import_approve_batch($1, $2)`, [id, digest]);
       const s = (await c.query(`SELECT counts, approval_expires_at FROM authz.import_batch_summary($1)`, [id])).rows[0];
       await this.audit.record(c, { actorId: user.id, action: "import.batch_approved", entityType: "import_batch", entityId: id, changes: { counts: s.counts } });
       return { id, status: "approved", approvalExpiresAt: s.approval_expires_at };
@@ -138,9 +153,16 @@ export class ImportsController {
     return this.svc.decide(user, id, d.data);
   }
 
+  @Get(":id/preview")
+  preview(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
+    return this.svc.preview(user, id);
+  }
+
   @Post(":id/approve")
   @HttpCode(200)
-  approve(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
-    return this.svc.approve(user, id);
+  approve(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    const a = Approve.safeParse(body);
+    if (!a.success) throw new UnprocessableEntityException("digest is required (from GET /api/v1/imports/:id/preview)");
+    return this.svc.approve(user, id, a.data.digest);
   }
 }

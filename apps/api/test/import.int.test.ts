@@ -36,12 +36,9 @@ beforeAll(async () => {
   await seedFixtures(db.admin);
   // The role is NOLOGIN by default; operations enable LOGIN only for the migration window.
   await db.admin.query(`ALTER ROLE eureka_import LOGIN PASSWORD 'eureka_import_test'`);
-  // Roles are cluster-wide: a database migrated by an older branch (0028 without 0033) on a
-  // shared development cluster re-grants the membership 0033 removed. Remove it again here.
-  for (const g of (await db.admin.query(`SELECT gr.rolname AS grantor FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member
-      JOIN pg_roles gr ON gr.oid = m.grantor WHERE r.rolname = 'eureka_import'`)).rows) {
-    await db.admin.query(`REVOKE eureka_app FROM eureka_import GRANTED BY "${g.grantor}" CASCADE`);
-  }
+  // The membership checks below test what the migrations did. On a shared development
+  // cluster, a database migrated by an old branch (whose 0028 still granted eureka_app)
+  // would re-add it cluster-wide; 0033 removes it again whenever a database is migrated.
   const u = new URL(ADMIN_BASE);
   imp = new pg.Pool({ connectionString: `postgres://eureka_import:eureka_import_test@${u.host}/${db.name}`, max: 2 });
   app = await createApp(loadConfig({
@@ -76,7 +73,12 @@ async function ticket(key: keyof typeof U = "admin"): Promise<string> {
   expect(r.statusCode, r.body).toBe(201);
   return r.json().ticket as string;
 }
-const approve = (key: keyof typeof U, id = batchId) => call(key, "POST", `/api/v1/imports/${id}/approve`);
+/** Sign-off as the API client does it: read the preview, approve quoting its digest. */
+async function approve(key: keyof typeof U, id = batchId) {
+  const p = await call(key, "GET", `/api/v1/imports/${id}/preview`);
+  const digest = p.statusCode === 200 ? p.json().digest as string : "0".repeat(64);
+  return call(key, "POST", `/api/v1/imports/${id}/approve`, { digest });
+}
 const decide = (key: keyof typeof U, body: Record<string, unknown>, id = batchId) => call(key, "POST", `/api/v1/imports/${id}/decisions`, body);
 
 type RowView = { sheet: string; row_no: number; state: string; reasons: string[] };
@@ -232,7 +234,8 @@ describe("eureka_import cannot act as anyone (review PoC A)", () => {
       for (const sql of [
         `SELECT * FROM authz.request_role('${U.r1a}', 'ceo', NULL)`,
         `SELECT authz.current_user_id()`,
-        `SELECT authz.import_approve_batch('${batchId}')`,
+        `SELECT authz.import_approve_batch('${batchId}', repeat('a', 64))`,
+        `INSERT INTO eureka.import_session (xact, pid) VALUES (pg_current_xact_id(), pg_backend_pid())`,
         `SELECT authz.import_decide('${batchId}', 'sales', 7, 'reject', NULL)`,
         `SELECT count(*) FROM eureka.person`,
         `SELECT count(*) FROM eureka.candidate`,
@@ -277,7 +280,7 @@ describe("sign-off is an authenticated API call (review PoC B)", () => {
     expect((await approve("admin")).json().detail).toBe("second_person_required");
     expect((await approve("admin")).statusCode).toBe(403);
     expect((await approve("r1a")).statusCode).toBe(403);
-    expect((await call("admin2", "POST", `/api/v1/imports/00000000-0000-0000-0000-00000000beef/approve`)).statusCode).toBe(404);
+    expect((await call("admin2", "POST", `/api/v1/imports/00000000-0000-0000-0000-00000000beef/approve`, { digest: "0".repeat(64) })).statusCode).toBe(404);
     const ok = await approve("admin2");
     expect(ok.statusCode, ok.body).toBe(200);
     expect(ok.json().approvalExpiresAt).toBeTruthy();
@@ -545,6 +548,91 @@ describe("review queue through the API", () => {
       const db1 = (await db.admin.query(`SELECT authz.import_reason_approvable($1) AS a`, [r])).rows[0].a;
       expect(db1, r).toBe(APPROVABLE_REASONS.has(r) || DROPPABLE_FIELDS.has(r.split(":")[1] ?? ""));
     }
+  });
+});
+
+describe("the database verifies what an approver signs (second review)", () => {
+  it("the preview shows each row's person, owner, visibility and target status, counts per owner, and the digest", async () => {
+    const s = await stage(imp, { sales: edited(FILES.sales, "sales_pv.csv", (l) => [l[0]!, "Pia,Ray,pia.r@example.com,,(214) 555-0181,,Java,Dallas,r1a@eureka.example,Active / All Teams,,,"]) },
+      MAPPING, { hmac, ticket: await ticket("admin") });
+    const p = await call("admin2", "GET", `/api/v1/imports/${s.batchId}/preview`);
+    expect(p.statusCode).toBe(200);
+    expect(p.json()).toMatchObject({
+      placementsCommit: true, problems: [],
+      rows: [{ sheet: "sales", rowNo: 2, person: "Pia Ray", owner: "r1a@eureka.example", visibility: "all_teams", targetStatus: "active" }],
+      perOwner: [{ owner: "r1a@eureka.example", candidates: 1, interviews: 0, placements: 0, allTeams: 1 }],
+    });
+    expect(p.json().digest).toMatch(/^[0-9a-f]{64}$/);
+    expect((await call("r1a", "GET", `/api/v1/imports/${s.batchId}/preview`)).statusCode).toBe(403);
+    // placements_commit is the batch's, fixed at staging (the default mapping keeps it off).
+    const off = await stage(imp, { sales: edited(FILES.sales, "sales_off.csv", (l) => [l[0]!, "Oz,Ray,oz.r@example.com,,(214) 555-0182,,Java,Dallas,r1a@eureka.example,Active,,,"]) },
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/import/mapping.default.json"), "utf8"), { hmac, ticket: await ticket("admin") });
+    expect((await call("admin2", "GET", `/api/v1/imports/${off.batchId}/preview`)).json().placementsCommit).toBe(false);
+    await expect(imp.query(`UPDATE eureka.import_batch SET placements_commit = true WHERE id = $1`, [off.batchId])).rejects.toThrow(/permission denied/);
+  });
+
+  it("rows the CLI rewrote while staged are refused at approval (live duplicate flipped to clean, owner and visibility changed)", async () => {
+    const live = edited(FILES.sales, "sales_live.csv", (l) => [l[0]!, l[18]!]); // "Live Match": phone of a live candidate
+    const s = await stage(imp, { sales: live }, MAPPING, { hmac, ticket: await ticket("admin") });
+    expect((await rows(s.batchId)).get("sales 2")!.reasons).toEqual(["matches_existing_candidate"]);
+    await imp.query(`UPDATE eureka.import_row SET state = 'clean', reasons = '{}',
+        norm = norm || jsonb_build_object('visibility', 'all_teams', 'ownerId', $2::text, 'status', 'stopped')
+      WHERE batch_id = $1`, [s.batchId, U.r2a]);
+    const p = (await call("admin2", "GET", `/api/v1/imports/${s.batchId}/preview`)).json();
+    expect(p.problems.map((x: { problem: string }) => x.problem).sort())
+      .toEqual(["owner_mismatch", "status_mismatch", "unapproved_live_match", "visibility_mismatch"]);
+    const r = await call("admin2", "POST", `/api/v1/imports/${s.batchId}/approve`, { digest: p.digest });
+    expect([r.statusCode, r.json().detail]).toEqual([422, "verification_failed"]);
+    // A clean row that still carries reasons, and a review row without any, are refused too.
+    await imp.query(`UPDATE eureka.import_row SET state = 'review', reasons = '{}' WHERE batch_id = $1`, [s.batchId]);
+    expect((await call("admin2", "GET", `/api/v1/imports/${s.batchId}/preview`)).json().problems)
+      .toEqual([{ sheet: "sales", rowNo: 2, problem: "state_without_reasons" }]);
+  });
+
+  it("approval binds to the digest the approver saw, and the digest covers keys as well as values", async () => {
+    const s = await stage(imp, { sales: edited(FILES.sales, "sales_dg.csv", (l) => [l[0]!, "Dee,Gee,dee.g@example.com,,(214) 555-0183,,Java,Dallas,r1a@eureka.example,Active,,,"]) },
+      MAPPING, { hmac, ticket: await ticket("admin") });
+    const seen = (await call("admin2", "GET", `/api/v1/imports/${s.batchId}/preview`)).json().digest;
+    await imp.query(`UPDATE eureka.import_row SET status_key = 'something else' WHERE batch_id = $1`, [s.batchId]);
+    const r = await call("admin2", "POST", `/api/v1/imports/${s.batchId}/approve`, { digest: seen });
+    expect([r.statusCode, r.json().detail]).toEqual([409, "batch_changed"]);
+    expect((await call("admin2", "POST", `/api/v1/imports/${s.batchId}/approve`, {})).statusCode).toBe(422);
+  });
+
+  it("a row write racing an approval waits for it and is then refused (two connections)", async () => {
+    const s = await stage(imp, { sales: edited(FILES.sales, "sales_race.csv", (l) => [l[0]!, "Rae,Sea,rae.s@example.com,,(214) 555-0184,,Java,Dallas,r1a@eureka.example,Active,,,"]) },
+      MAPPING, { hmac, ticket: await ticket("admin") });
+    const digest = (await call("admin2", "GET", `/api/v1/imports/${s.batchId}/preview`)).json().digest;
+    const approver = await db.app.connect();
+    const writer = await imp.connect();
+    try {
+      await approver.query("BEGIN");
+      await approver.query(`SELECT set_config('eureka.user_id', $1, true)`, [U.admin2]);
+      await approver.query(`SELECT authz.import_approve_batch($1, $2)`, [s.batchId, digest]); // holds the batch row
+      let settled = false;
+      const write = writer.query(`UPDATE eureka.import_row SET reasons = '{x}', state = 'review' WHERE batch_id = $1`, [s.batchId])
+        .finally(() => { settled = true; });
+      write.catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 300));
+      expect(settled).toBe(false); // blocked behind the approval
+      await approver.query("COMMIT");
+      await expect(write).rejects.toThrow(/batch_not_staged/);
+    } finally {
+      await approver.query("ROLLBACK").catch(() => undefined);
+      approver.release();
+      writer.release();
+    }
+    expect((await reconcile(imp, s.batchId)).status).toBe("approved");
+    // And the loader still requires the approver and the operator to be active org admins.
+    await db.admin.query(`UPDATE eureka.app_user SET status = 'inactive' WHERE id = $1`, [U.admin2]);
+    try {
+      const c = await commitBatch(imp, s.batchId, { dryRun: false });
+      expect(c.failures[0]!.error).toMatch(/approval_not_valid/);
+    } finally {
+      await db.admin.query(`UPDATE eureka.app_user SET status = 'active' WHERE id = $1`, [U.admin2]);
+    }
+    const ok = await commitBatch(imp, s.batchId, { dryRun: false });
+    expect([ok.failures, ok.loaded.candidates]).toEqual([[], 1]);
   });
 });
 
