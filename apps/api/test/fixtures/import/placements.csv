@@ -1,0 +1,6 @@
+Candidate Name,Candidate Email,Phone,DOB,Recruiter Email,Client,Vendor,Implementation Partner,Job Title,Placement Type,Rate,Work Mode,Project City,Project State,Tentative Start,Status,Status Reason,Row Color
+Anil Joshi,anil.j@example.com,,,r1a@eureka.example,Northwind Financial,,,Java Developer,W2,$65/hr,Onsite,Dallas,Texas,10/15/2026,Confirmed,,
+Farah Khan,farah.k@example.com,,,r2a@eureka.example,Northwind Financial,,,Java Developer,C2C,70,Remote,,,2026-09-20,Joined,,
+Ravi Kumar,ravi.k@example.com,,,r1a@eureka.example,Northwind Financial,,,Java Developer,Corp to Corp,80/hr,Hybrid,Austin,TX,11/01/2026,Offer Accepted,,
+Unknown Person,ghost.person@example.com,,,r1a@eureka.example,Northwind Financial,,,Java Developer,W2,60,Onsite,Dallas,TX,2026-10-01,Confirmed,,
+Rahul Shah,rahul.s@example.com,,,r3a@eureka.example,Northwind Financial,,,Java Developer,W2,$120k,Onsite,Dallas,TX,2026-10-05,Backout,,
