@@ -28,6 +28,17 @@ const WorkerConfigSchema = z
     // At most this many missing UTC days are exported per tick while catching up
     // (every day since the last export is caught up eventually; see audit-export.ts).
     AUDIT_EXPORT_MAX_DAYS_PER_TICK: z.coerce.number().int().min(1).max(31).default(7),
+    // Outbox delivery (placement notifications to HR, Accounts, Immigration).
+    // Disabled: events stay unpublished (so they are not pruned) until a mail mode is set.
+    OUTBOX_MAIL_MODE: z.enum(["disabled", "local", "ses"]).default("disabled"),
+    OUTBOX_MAIL_DIR: z.string().min(1).optional(),
+    OUTBOX_FROM_EMAIL: z.string().email().optional(),
+    // Sign-in link in notification emails (the web app's origin).
+    APP_PUBLIC_ORIGIN: z.string().url().optional(),
+    // Events handled per tick (one job_run key each).
+    OUTBOX_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
+    // Published outbox rows are deleted after this many days (the database refuses fewer than 7).
+    OUTBOX_RETENTION_DAYS: z.coerce.number().int().min(7).max(3650).default(30),
   })
   .superRefine((c, ctx) => {
     if (c.FEEDBACK_MAIL_MODE !== "disabled") {
@@ -39,6 +50,16 @@ const WorkerConfigSchema = z
       }
       if (c.FEEDBACK_MAIL_MODE === "local" && (!c.FEEDBACK_MAIL_DIR || c.NODE_ENV === "production")) ctx.addIssue({ code: "custom", message: "Local feedback mail requires FEEDBACK_MAIL_DIR and a non-production environment" });
       if (c.FEEDBACK_MAIL_MODE === "ses" && (!c.FEEDBACK_FROM_EMAIL || !c.AWS_REGION)) ctx.addIssue({ code: "custom", message: "SES feedback requires FEEDBACK_FROM_EMAIL and AWS_REGION" });
+    }
+    if (c.OUTBOX_MAIL_MODE !== "disabled") {
+      if (!c.APP_PUBLIC_ORIGIN) ctx.addIssue({ code: "custom", message: "Outbox mail requires APP_PUBLIC_ORIGIN" });
+      else {
+        const url = new URL(c.APP_PUBLIC_ORIGIN);
+        if (url.username || url.password || url.pathname !== "/" || url.search || url.hash || !["http:", "https:"].includes(url.protocol)) ctx.addIssue({ code: "custom", message: "APP_PUBLIC_ORIGIN must be an HTTP(S) origin without a path or credentials" });
+        if (c.NODE_ENV === "production" && url.protocol !== "https:") ctx.addIssue({ code: "custom", message: "Production APP_PUBLIC_ORIGIN requires HTTPS" });
+      }
+      if (c.OUTBOX_MAIL_MODE === "local" && (!c.OUTBOX_MAIL_DIR || c.NODE_ENV === "production")) ctx.addIssue({ code: "custom", message: "Local outbox mail requires OUTBOX_MAIL_DIR and a non-production environment" });
+      if (c.OUTBOX_MAIL_MODE === "ses" && (!c.OUTBOX_FROM_EMAIL || !c.AWS_REGION)) ctx.addIssue({ code: "custom", message: "SES outbox mail requires OUTBOX_FROM_EMAIL and AWS_REGION" });
     }
     if (!c.AUDIT_BUCKET && !c.EXPORT_DIR) {
       ctx.addIssue({ code: "custom", message: "Set AUDIT_BUCKET (S3) or EXPORT_DIR (local) for the audit export" });
