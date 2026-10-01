@@ -91,3 +91,92 @@ describe("candidate feedback",()=>{
   expect(replies.at(-1)!.statusCode).toBe(429);
  });
 });
+
+/**
+ * Token rules (implementation plan, Phase 2 "feedback token tests"): opening the
+ * link (GET) never spends it, a link takes one answer, and it stops working at
+ * its expiry. Each test uses its own client address, so the per-IP limit of the
+ * public endpoint (30 a minute) is not shared with the tests above.
+ */
+describe("candidate feedback token", () => {
+  let ip = 10;
+  const client = () => {
+    const remoteAddress = `203.0.113.${++ip}`;
+    return {
+      get: (url: string) => app.inject({ method: "GET", url, remoteAddress }),
+      post: (url: string, payload: unknown) => app.inject({ method: "POST", url, payload: payload as never, remoteAddress }),
+    };
+  };
+  const row = async (id: string) =>
+    (await db.admin.query("SELECT used_at, expires_at, sent_at FROM eureka.feedback_delivery WHERE id=$1", [id])).rows[0];
+  const answers = async (id: string) => (await db.admin.query(
+    `SELECT f.rating, f.notes FROM eureka.interview_feedback f JOIN eureka.feedback_delivery d ON d.interview_id=f.interview_id
+     WHERE d.id=$1 AND f.kind='candidate'`, [id])).rows;
+  const interviewOf = async (id: string) =>
+    (await db.admin.query("SELECT interview_id FROM eureka.feedback_delivery WHERE id=$1", [id])).rows[0].interview_id as string;
+
+  it("is issued for 48 hours, and GET does not spend it or move its expiry", async () => {
+    const { id, url } = await delivery(5);
+    const issued = await row(id);
+    expect(issued.used_at).toBeNull();
+    expect(issued.sent_at).not.toBeNull();
+    const hours = (issued.expires_at.getTime() - Date.now()) / 3_600_000;
+    expect(hours).toBeGreaterThan(47.9);
+    expect(hours).toBeLessThanOrEqual(48);
+    const c = client();
+    for (let i = 0; i < 5; i++) expect((await c.get(url)).statusCode).toBe(200);
+    expect(await row(id)).toEqual(issued);
+    expect(await answers(id)).toEqual([]);
+    expect((await c.post(url, { rating: 5 })).statusCode).toBe(201);
+  });
+
+  it("takes one answer: a second POST is 404 and changes nothing; the worker issues no new link", async () => {
+    const { id, url } = await delivery(6);
+    const c = client();
+    expect((await c.post(url, { rating: 2, notes: "First answer" })).statusCode).toBe(201);
+    const used = await row(id);
+    expect(used.used_at).not.toBeNull();
+    expect((await c.post(url, { rating: 5, notes: "Second answer" })).statusCode).toBe(404);
+    expect((await c.get(url)).statusCode).toBe(404);
+    expect(await row(id)).toEqual(used);
+    expect(await answers(id)).toEqual([{ rating: 2, notes: "First answer" }]);
+    expect(await job.dueKeys(new Date(), ctx())).not.toContain(await interviewOf(id));
+  });
+
+  it("works until its expiry, then GET and POST are 404 and nothing is written", async () => {
+    const { id, url } = await delivery(7);
+    const c = client();
+    await db.admin.query("UPDATE eureka.feedback_delivery SET expires_at=now()+interval '1 minute' WHERE id=$1", [id]);
+    expect((await c.get(url)).statusCode).toBe(200);
+    await db.admin.query("UPDATE eureka.feedback_delivery SET expires_at=now()-interval '1 millisecond' WHERE id=$1", [id]);
+    expect((await c.get(url)).statusCode).toBe(404);
+    expect((await c.post(url, { rating: 4 })).statusCode).toBe(404);
+    expect((await row(id)).used_at).toBeNull();
+    expect(await answers(id)).toEqual([]);
+    // A link that was sent and expired is not re-issued by the worker.
+    expect(await job.dueKeys(new Date(), ctx())).not.toContain(await interviewOf(id));
+  });
+
+  it("a token differing in one character is unknown, and probing it does not spend the real one", async () => {
+    const { id, token } = await delivery(8);
+    const c = client();
+    const forged = `${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}`;
+    expect((await c.get(`/api/public/feedback/${forged}`)).statusCode).toBe(404);
+    expect((await c.post(`/api/public/feedback/${forged}`, { rating: 1 })).statusCode).toBe(404);
+    expect((await row(id)).used_at).toBeNull();
+    expect((await c.post(`/api/public/feedback/${token}`, { rating: 3 })).statusCode).toBe(201);
+    expect(await answers(id)).toEqual([{ rating: 3, notes: null }]);
+  });
+
+  it("refuses unknown fields with 422 without spending the link", async () => {
+    const { id, url } = await delivery(9);
+    const c = client();
+    const other = seed.interviews[0]!;
+    for (const extra of [{ kind: "coach" }, { interviewId: other.id }, { authorId: other.recruiterId }, { usedAt: null }]) {
+      expect((await c.post(url, { rating: 4, ...extra })).statusCode).toBe(422);
+    }
+    expect((await row(id)).used_at).toBeNull();
+    expect(await answers(id)).toEqual([]);
+    expect((await c.get(url)).statusCode).toBe(200);
+  });
+});
