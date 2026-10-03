@@ -68,6 +68,14 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   download links; `document:read`/`document:upload` over the candidate. Profile section in the web app.
   Without AWS: `LOCAL_STORAGE_DIR` (API serves a directory) and a fake scanner (EICAR = infected);
   `pnpm local` now runs the worker too.
+- Paperwork and restricted documents with step-up (FR-PPR-01 to 03, migration 0043, design B2.4 "Built in
+  migration 0043"): typed documents on a candidate or placement (`document`, `file_object`, type keys in
+  `authz.document_type` = `DOCUMENT_TYPES`), the resume scan pipeline generalised (`document-scan`), restricted
+  files under `restricted/documents/` with the restricted KMS key, opened only by HR, Accounts and Immigration
+  after a step-up of the session (Google `max_age=0`/`auth_time`, or the dev step-up behind `AUTH_MODE=dev` and
+  the `dev_step_up` database switch), every opening in `document_access` and the audit export. Web: documents
+  on the candidate profile and placement drawer, "Confirm it's you", access log. Add
+  `/api/auth/step-up/callback` to the Google OAuth client's redirect URIs (infra/README.md).
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 - First-admin bootstrap (migrations 0037, 0039): `dist/db/bootstrap.js` as a one-off migrate task creates two
   `org_admin` users for hosted-domain emails; break-glass only: refuses while an active `org_admin` exists
@@ -125,6 +133,17 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   candidates only, not a teammate's, and Open-to-all-teams viewers, location roles, coaches and the
   CEO see none. Is that right for marketing (other teams submitting an open candidate need the resume)?
   How long are superseded versions kept (OD-03)? Should the uploader get an email when a file is blocked?
+
+- Documents (migration 0043): which paperwork document types exist besides the restricted I-9, driving
+  license and work-authorization copies (today also `offer_letter`, `other`), and which are restricted (BGC
+  reports? SSN cards? offer letters with rates?). May the Documents Team and Associate HR upload restricted
+  documents they cannot open (today: no, upload needs `document.restricted:read`)? Should HR, Accounts and
+  Immigration see each other's openings in the access log (today: yes, for restricted documents they can read;
+  org admins see everything)? Should a recruiter see internal paperwork of their own candidates (today: yes,
+  `document:read` own)? Retention of documents and of the access log (OD-03; I-9 federal minimum).
+- Step-up: the Phase 0 spike must confirm Google honours `max_age=0`/`prompt=login` and returns `auth_time`;
+  if not, the WebAuthn fallback and the 15-minute idle timeout for restricted roles (design A6.1) are needed.
+  Should approving restricted role grants also require step-up (A6.1 lists it; not built)?
 
 ## Waiting on Ravi (not code)
 
