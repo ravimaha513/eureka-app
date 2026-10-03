@@ -4,6 +4,7 @@ import { ApiError, type Me } from "../api";
 import { ConfirmDialog } from "../admin/Dialog";
 import { CandidateResumes } from "./CandidateResumes";
 import { CandidateTimeline } from "./CandidateTimeline";
+import { CandidateWorkAuthorization } from "../workauth/CandidateWorkAuthorization";
 import { EditProfileDialog } from "./EditProfileDialog";
 import { salesError } from "./errors";
 import { DUPLICATE_WARNING, LogSubmissionDialog } from "./LogSubmissionDialog";
@@ -155,6 +156,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
         )}
 
         {caps.has("document:read") && <CandidateResumes candidateId={c.id} />}
+        {caps.has("visa:read") && <CandidateWorkAuthorization candidateId={c.id} />}
 
         <CandidateTimeline id={c.id} />
       </div>

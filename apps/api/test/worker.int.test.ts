@@ -538,6 +538,7 @@ describe("worker config", () => {
     expect(() => loadWorkerConfig(base)).toThrow(/AUDIT_BUCKET/);
     expect(() => loadWorkerConfig({ ...base, AUDIT_BUCKET: "b-123", EXPORT_DIR: "/tmp/x" })).toThrow(/only one/);
     expect(() => loadWorkerConfig({ ...base, NODE_ENV: "production", EXPORT_DIR: "/tmp/x" })).toThrow(/required in production/);
-    expect(loadWorkerConfig({ ...base, NODE_ENV: "production", AUDIT_BUCKET: "b-123" }).SHUTDOWN_GRACE_SECONDS).toBe(20);
+    const kms = { AWS_REGION: "us-east-2", FIELD_KMS_KEY_ARN: "arn:aws:kms:us-east-2:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab" };
+    expect(loadWorkerConfig({ ...base, ...kms, NODE_ENV: "production", AUDIT_BUCKET: "b-123" }).SHUTDOWN_GRACE_SECONDS).toBe(20);
   });
 });

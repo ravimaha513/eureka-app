@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { checkFieldCrypto, fieldCryptoEnv } from "../platform/crypto/config.js";
 
 /**
  * Worker configuration. Deliberately separate from the API config: the worker
@@ -55,8 +56,24 @@ const WorkerConfigSchema = z
     RESUME_UPLOAD_GRACE_MINUTES: z.coerce.number().int().min(1).max(120).default(10),
     // More object versions than this under one quarantine key (a replayed presigned POST) logs an alert.
     RESUME_MAX_KEY_VERSIONS: z.coerce.number().int().min(1).max(100).default(3),
+    // Field encryption (key-rotation job): FIELD_KMS_KEY_ARN in AWS, the local
+    // provider otherwise (refused in production). The worker never computes blind indexes.
+    FIELD_KMS_KEY_ARN: fieldCryptoEnv.FIELD_KMS_KEY_ARN,
+    FIELD_LOCAL_KEY: fieldCryptoEnv.FIELD_LOCAL_KEY,
+    // Rows re-encrypted per database round trip by the monthly key-rotation job.
+    KEY_ROTATION_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(100),
+    // Work authorization expiry notices (visa-expiry job): days before valid_to, comma-separated.
+    WORK_AUTH_EXPIRY_NOTICE_DAYS: z.string().default("90,60,30").transform((v, ctx) => {
+      const days = v.split(",").map((d) => d.trim()).filter((d) => d !== "").map(Number);
+      if (days.length < 1 || days.length > 10 || days.some((d) => !Number.isInteger(d) || d < 1 || d > 365) || new Set(days).size !== days.length) {
+        ctx.addIssue({ code: "custom", message: "WORK_AUTH_EXPIRY_NOTICE_DAYS must be 1-10 distinct whole days between 1 and 365" });
+        return z.NEVER;
+      }
+      return days.sort((a, b) => b - a);
+    }),
   })
   .superRefine((c, ctx) => {
+    checkFieldCrypto(c, ctx, { bidx: false });
     if (c.FEEDBACK_MAIL_MODE !== "disabled") {
       if (!c.FEEDBACK_PUBLIC_ORIGIN || !c.FEEDBACK_TOKEN_KEY) ctx.addIssue({ code: "custom", message: "Feedback requires FEEDBACK_PUBLIC_ORIGIN and FEEDBACK_TOKEN_KEY" });
       if (c.FEEDBACK_PUBLIC_ORIGIN) {
