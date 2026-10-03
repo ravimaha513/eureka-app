@@ -419,9 +419,11 @@ END $$;
 
 -- Worker: expiry notices (FR-VIS-03, FR-NTF-11). For each valid record whose
 -- valid_to is today or later and within the largest threshold, the smallest
--- threshold already reached is noticed once per expiry date: a record entered
--- 20 days before expiry gets the 30-day notice only; a missed day is caught up
--- on the next run. "Today" is the America/New_York calendar day of the
+-- threshold already reached is noticed once: a record entered 20 days before
+-- expiry gets the 30-day notice only; a missed day is caught up on the next
+-- run. A notice counts for its expiry date and any earlier one (a correction
+-- to an earlier date does not repeat it); extending valid_to past every
+-- noticed date (a renewal) starts a new cycle. "Today" is the America/New_York calendar day of the
 -- database clock (the worker cannot move it). Returns the number of events.
 CREATE FUNCTION authz.work_auth_expiry_notices(p_thresholds integer[]) RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -450,7 +452,7 @@ BEGIN
     SELECT pg_catalog.min(x) INTO t FROM pg_catalog.unnest(p_thresholds) x WHERE x >= r.days_left;
     IF t IS NULL OR EXISTS (
          SELECT 1 FROM eureka.work_authorization_notice wn
-          WHERE wn.work_authorization_id = r.id AND wn.valid_to = r.valid_to AND wn.threshold_days <= t) THEN
+          WHERE wn.work_authorization_id = r.id AND wn.valid_to >= r.valid_to AND wn.threshold_days <= t) THEN
       CONTINUE;
     END IF;
     ev := pg_catalog.gen_random_uuid();
