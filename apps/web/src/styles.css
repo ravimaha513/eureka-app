@@ -186,6 +186,9 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .badge.resume-clean { background: #ecfdf3; color: #15803d; }
 .badge.resume-pending { background: var(--pri-50); color: var(--pri-700); }
 .badge.resume-infected, .badge.resume-rejected, .badge.resume-failed, .badge.resume-expired { background: #fef2f2; color: #b91c1c; }
+.badge.workauth-valid { background: #ecfdf3; color: #15803d; }
+.badge.workauth-pending { background: var(--pri-50); color: var(--pri-700); }
+.badge.workauth-expired, .badge.workauth-revoked { background: #fef2f2; color: #b91c1c; }
 
 /* Dashboard charts */
 .dashboard { --c0: #4f46e5; --c1: #0891b2; --c2: #f59e0b; --c3: #e11d48; --c4: #16a34a; --c5: #9333ea; }
