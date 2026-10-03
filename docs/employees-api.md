@@ -17,6 +17,11 @@ person, role-specific child records), B2.4 (`assignment`), B2.6 (candidate `plac
 | EM-5 No free text: end and exit reasons are categories; audit and outbox rows hold ids, dates, statuses and categories only. | CHECKs, `employment_event.reason ~ '^[a-z_]{1,40}$'` |
 | EM-6 Placements are unchanged: reassignment goes through the normal placement flow (selected submission → placement → `joined`), so the placement state machine, `is_first_placement` and assignment numbering are not duplicated. | — |
 
+Invariant (0048): at most one open assignment per person (partial unique index `assignment_open_person`).
+`bgc_failed` on a joined placement ends its assignment and benches the candidate only when that assignment was still
+open; on a placement whose assignment already ended (project exit) it is recorded (status, reason, outbox) without
+moving the candidate or the employee.
+
 Lock order of every employment write matches `authz.transition_placement`: placement row, candidate row, per-person
 advisory lock, assignment row, employee row.
 
@@ -42,7 +47,8 @@ advisory lock, assignment row, employee row.
   `{ id, status: "exited" }`. Only from `bench`; the date is not before the last assignment's end and not in the future.
 - `POST /api/v1/employees/:personId/return-to-market` `{}` (`assignment:update`) → `{ id, candidateStatus: "active" }`.
   Reassignment, first step: a benched employee's candidate moves `bench → active` so Sales can place them again. Refused
-  after a failed background check (`bgc_failed_last`, open question) and when the candidate already left the bench.
+  (`bgc_failed_last`, open question) when the last assignment ended with `bgc_failed` or any placement of the person
+  failed its check after joining, and when the candidate already left the bench.
 - `GET /api/v1/reports/joinings-exits?from=YYYY-MM-DD&to=YYYY-MM-DD` (`report:read`; at most two years) →
   `{ from, to, totals: { joinings, firstPlacements, exits, exitsByReason: {completed, terminated, resigned, bgc_failed} },
   byTeam: [{ team, joinings, exits }], items: [{ kind: "joining"|"exit", date, assignmentId, assignmentNo, placementId,
@@ -50,7 +56,8 @@ advisory lock, assignment row, employee row.
   assignment that started in the period; an exit one that ended in it. Rows are the assignments the caller can read
   (RLS plus the engine's `assignment:read` and `report:read` predicates on the placement's actor snapshot or owned
   candidate), so the counts equal what the role can list; callers with `report:read` but no `assignment:read` (location
-  roles) get zeros. Up to 1,000 items in the view (totals cover all).
+  roles) get zeros. Totals and `byTeam` are SQL counts over every matching assignment (no cap); up to 1,000 items in
+  the view (`truncated`), newest first. 30 requests per user per minute (429), 60 s timeout (503).
 - `POST /api/v1/reports/joinings-exits/export` `{ from, to }` (`report:export`) → CSV (`Event, Date, Candidate, Assignment
   no., Client, Team, Recruiter, Location, First placement, End reason`), additionally limited to the `report:export` scope,
   capped at 50,000 lines (`x-export-truncated`), 60 s timeout, 5 per user per 10 minutes, formula-injection safe, audited
@@ -68,10 +75,10 @@ Audit actions: `assignment.ended` `{ endDate, reason, employeeFrom, employeeTo }
 `employee.exited` `{ from, to, exitDate, reason }`, `employee.returned_to_market` `{ candidateId }`, and
 `candidate.transition` `{ from, to, via: "employment" }` when the candidate moved.
 
-## Outbox events (for the notification jobs; rows only, not delivered yet)
+## Outbox events (delivered by `outbox-delivery`, migration 0046)
 
-All three are outside `DELIVERED_TYPES` of the 0024 delivery job, so they stay unpublished until a notification job
-handles them. `notify` lists recipient groups (role keys); delivery decides who actually gets what.
+Delivered by the notification jobs (`docs/notifications.md`). Recipients and channels come from the notification
+registry, not from the payload: `notify` is only checked against the type's audience (a mismatch fails the event).
 
 | type | aggregate | When | payload |
 |---|---|---|---|
@@ -79,11 +86,18 @@ handles them. `notify` lists recipient groups (role keys); delivery decides who 
 | `employee.exited` | `employee` / person id | `bench → exited` | `{ personId, candidateId, lastAssignmentId, exitDate, exitReason: "resigned"\|"terminated"\|"other", notify: ["hr","accounts","immigration","bu_head","ceo"] }` |
 | `assignment.ending_soon` | `assignment` / assignment id | Daily job `assignment-ending-soon` (05:00 America/New_York): open assignment with a planned end within 30 days (`authz.assignment_ending_soon_scan(days)`, worker only, 1..90); once per planned end date, re-armed when the date changes | `{ assignmentId, placementId, personId, candidateId, plannedEndDate, daysLeft, notify: ["hr","accounts"] }` |
 
+History order: the detail sorts by recording time, then effective date, then id. Rows backfilled by 0045 for
+assignments that existed before it share one recording time, so they sort by effective date (no row is rewritten).
+
 ## Open questions (conservative defaults in place)
 
 - Should recording an exit change the candidate's marketing status (e.g. `terminated`)? Today it is left as it is (bench).
 - May HR/Accounts return a benched employee to marketing, or only Sales (who already can, `bench → active`)? Built for
-  `assignment:update` holders; refused after a failed background check (re-placing after BGC failure is open).
+  `assignment:update` holders; refused after a failed background check (re-placing after BGC failure is open). Sales'
+  manual `bench → active` (`authz.transition_candidate`) is unchanged and does not apply that BGC check: decide whether it
+  should.
+- `bgc_failed` reported on a joined placement whose assignment already ended is recorded only (no candidate or employee
+  change). Should it be refused instead, or should it also stop a later re-placement?
 - End dates: project exits are recorded for today or earlier only (a future end is a planned end date). Is a future-dated
   exit needed?
 - Assignment start date stays the day the placement is marked `joined` (open question in HANDOFF, unchanged here).

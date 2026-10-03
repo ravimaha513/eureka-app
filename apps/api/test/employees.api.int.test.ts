@@ -344,6 +344,13 @@ describe("joinings/exits report", () => {
     expect(codes.slice(0, 5)).toEqual([200, 200, 200, 200, 200]);
     expect(codes[5]).toBe(429);
   });
+
+  it("rate-limits the report view per user (30 per minute)", async () => {
+    const codes: number[] = [];
+    for (let i = 0; i < 31; i++) codes.push((await call("ad", "GET", `/api/v1/reports/joinings-exits?${Q}`)).statusCode);
+    expect(codes.filter((c) => c === 200).length).toBeLessThanOrEqual(30);
+    expect(codes.at(-1)).toBe(429);
+  });
 });
 
 /** The catalog roles that may write employment data hold employee:read at org scope (the database requires both). */

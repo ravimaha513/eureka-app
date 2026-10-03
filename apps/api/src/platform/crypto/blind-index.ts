@@ -19,6 +19,17 @@ export class BlindIndexer {
     if (!(BLIND_INDEX_CLASSES as readonly string[]).includes(cls)) throw new Error("unknown blind index class");
     return this.provider.mac(Buffer.from(`eureka-bidx:v1\0${cls}\0${normalized}`, "utf8"));
   }
+
+  /**
+   * Integrity tag of an encrypted value (review of 0042, R1b): a MAC over the
+   * field class, the row id and the plaintext under the blind index key, which
+   * the worker cannot use. Stored next to the ciphertext by the API and
+   * checked on every reveal, so a value re-encrypted by anyone without this
+   * key (a forged rotation) is detected. Domain-separated from blind indexes.
+   */
+  async integrityMac(cls: string, rowId: string, plaintext: string): Promise<Buffer> {
+    return this.provider.mac(Buffer.from(`eureka-mac:v1\0${cls}\0${rowId.toLowerCase()}\0${plaintext}`, "utf8"));
+  }
 }
 
 /**

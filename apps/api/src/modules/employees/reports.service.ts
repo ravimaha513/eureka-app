@@ -52,14 +52,31 @@ export interface ReportItem {
   endReason: string | null;
 }
 
-/** Rows returned in the JSON view (totals always cover every row). */
+/** Rows returned in the JSON view (totals always cover every matching assignment). */
 export const REPORT_VIEW_CAP = 1000;
+/** JSON report requests per user per minute (org-wide reports are expensive; design A6.5). */
+export const REPORT_VIEWS_PER_MINUTE = 30;
+
+interface TeamCount {
+  team_id: string | null; team_name: string | null; joinings: number; first_placements: number; exits: number;
+  completed: number; terminated: number; resigned: number; bgc_failed: number;
+}
+
+async function timed<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if ((err as { code?: string }).code === "57014") throw new ServiceUnavailableException("The report took too long. Choose a shorter period.");
+    throw err;
+  }
+}
 
 const label = (s: string) => { const t = s.replace(/_/g, " "); return t.charAt(0).toUpperCase() + t.slice(1); };
 
 @Injectable()
 export class ReportsService {
   private readonly exportLimiter = new RateLimiter(EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
+  private readonly viewLimiter = new RateLimiter(REPORT_VIEWS_PER_MINUTE, 60_000);
 
   constructor(private readonly db: DbService, private readonly audit: AuditService) {}
 
@@ -83,19 +100,43 @@ export class ReportsService {
       LEFT JOIN eureka.location l ON l.id = pl.location_id
       WHERE (a.start_date BETWEEN $1::date AND $2::date OR a.end_date BETWEEN $1::date AND $2::date)
         AND ${preds.join(" AND ")}
-      ORDER BY a.id
+      ORDER BY greatest(CASE WHEN a.end_date BETWEEN $1::date AND $2::date THEN a.end_date END,
+                        CASE WHEN a.start_date BETWEEN $1::date AND $2::date THEN a.start_date END) DESC, a.id
       LIMIT ${limit}`;
     return this.db.withUser(user.id, async (c) => {
       await c.query(`SET LOCAL statement_timeout = '60s'`); // design N9: org-wide reports
-      let rows: Row[];
-      try {
-        rows = (await c.query<Row>(sql, params)).rows;
-      } catch (err) {
-        if ((err as { code?: string }).code === "57014") throw new ServiceUnavailableException("The report took too long. Choose a shorter period.");
-        throw err;
-      }
+      const rows = await timed(() => c.query<Row>(sql, params)).then((r) => r.rows);
       if (after) await after(c, rows);
       return rows;
+    });
+  }
+
+  /**
+   * Totals and per-team counts over every matching assignment (independent of
+   * any row cap), with the same predicates as rows().
+   */
+  private async totals(user: AuthedUser, period: ReportPeriod, scopes: EffectiveScope[]): Promise<TeamCount[]> {
+    const params: unknown[] = [period.from, period.to];
+    const preds = scopes.map((s) => activityPredicate(s, params, "pl", "c"));
+    const inP = (col: string) => `${col} BETWEEN $1::date AND $2::date`;
+    const sql = `
+      SELECT pl.team_id, tm.name AS team_name,
+             count(*) FILTER (WHERE ${inP("a.start_date")})::int AS joinings,
+             count(*) FILTER (WHERE ${inP("a.start_date")} AND pl.is_first_placement)::int AS first_placements,
+             count(*) FILTER (WHERE ${inP("a.end_date")})::int AS exits,
+             count(*) FILTER (WHERE ${inP("a.end_date")} AND a.end_reason = 'completed')::int AS completed,
+             count(*) FILTER (WHERE ${inP("a.end_date")} AND a.end_reason = 'terminated')::int AS terminated,
+             count(*) FILTER (WHERE ${inP("a.end_date")} AND a.end_reason = 'resigned')::int AS resigned,
+             count(*) FILTER (WHERE ${inP("a.end_date")} AND a.end_reason = 'bgc_failed')::int AS bgc_failed
+      FROM eureka.assignment a
+      JOIN eureka.placement pl ON pl.id = a.placement_id
+      LEFT JOIN eureka.candidate c ON c.id = pl.candidate_id
+      LEFT JOIN eureka.team tm ON tm.id = pl.team_id
+      WHERE (${inP("a.start_date")} OR ${inP("a.end_date")}) AND ${preds.join(" AND ")}
+      GROUP BY pl.team_id, tm.name`;
+    return this.db.withUser(user.id, async (c) => {
+      await c.query(`SET LOCAL statement_timeout = '60s'`);
+      return (await timed(() => c.query<TeamCount>(sql, params))).rows;
     });
   }
 
@@ -126,31 +167,27 @@ export class ReportsService {
 
   async joiningsExits(user: AuthedUser, period: ReportPeriod) {
     const scopes = this.readScopes(user);
-    const rows = scopes.length ? await this.rows(user, period, scopes, EXPORT_ROW_CAP + 1) : [];
-    const items = this.items(rows, period);
-    const joinings = items.filter((i) => i.kind === "joining");
-    const exits = items.filter((i) => i.kind === "exit");
-    const exitsByReason: Record<string, number> = { completed: 0, terminated: 0, resigned: 0, bgc_failed: 0 };
-    for (const e of exits) if (e.endReason) exitsByReason[e.endReason] = (exitsByReason[e.endReason] ?? 0) + 1;
-    const byTeam = new Map<string, { team: ReportItem["team"]; joinings: number; exits: number }>();
-    for (const i of items) {
-      const key = i.team?.id ?? "";
-      const g = byTeam.get(key) ?? { team: i.team, joinings: 0, exits: 0 };
-      if (i.kind === "joining") g.joinings++; else g.exits++;
-      byTeam.set(key, g);
+    if (!this.viewLimiter.take(user.id)) {
+      throw new HttpException("Too many report requests; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
     }
+    const groups = scopes.length ? await this.totals(user, period, scopes) : [];
+    const rows = scopes.length ? await this.rows(user, period, scopes, REPORT_VIEW_CAP + 1) : [];
+    const items = this.items(rows.slice(0, REPORT_VIEW_CAP), period);
+    const sum = (k: keyof TeamCount) => groups.reduce((n, g) => n + (g[k] as number), 0);
     return {
       from: period.from,
       to: period.to,
       totals: {
-        joinings: joinings.length,
-        firstPlacements: joinings.filter((j) => j.isFirstPlacement).length,
-        exits: exits.length,
-        exitsByReason,
+        joinings: sum("joinings"),
+        firstPlacements: sum("first_placements"),
+        exits: sum("exits"),
+        exitsByReason: { completed: sum("completed"), terminated: sum("terminated"), resigned: sum("resigned"), bgc_failed: sum("bgc_failed") },
       },
-      byTeam: [...byTeam.values()].sort((a, b) => (b.joinings + b.exits) - (a.joinings + a.exits) || (a.team?.name ?? "~").localeCompare(b.team?.name ?? "~")),
+      byTeam: groups
+        .map((g) => ({ team: g.team_id ? { id: g.team_id, name: g.team_name } : null, joinings: g.joinings, exits: g.exits }))
+        .sort((a, b) => (b.joinings + b.exits) - (a.joinings + a.exits) || (a.team?.name ?? "~").localeCompare(b.team?.name ?? "~")),
       items: items.slice(0, REPORT_VIEW_CAP),
-      truncated: items.length > REPORT_VIEW_CAP || rows.length > EXPORT_ROW_CAP,
+      truncated: rows.length > REPORT_VIEW_CAP || items.length > REPORT_VIEW_CAP,
     };
   }
 

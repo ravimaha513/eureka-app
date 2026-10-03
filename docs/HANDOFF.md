@@ -87,6 +87,14 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   Item notes and reasons have no app column privilege: they are read through `authz.checklist_item_texts`
   (document:read over the placement), because items themselves stay readable to every `placement:read` holder.
   Not yet: the `checklist.item_overdue` notification job (waits for 0046, `authz.notification_emit_once`).
+- Notifications (migration 0046, `docs/notifications.md`): in-app inbox (`notification`, own rows only, written by the
+  worker; bell and panel in the web top bar, unread count polled every 60 s), outbox delivery generalised to typed
+  events with recipients resolved in the database and email and/or inbox channels (placement emails unchanged; the
+  inbox channel runs even with `OUTBOX_MAIL_MODE=disabled`), bench-time job (FR-NTF-05, off until
+  `NOTIFY_BENCH_DAYS` is set; type `employee.bench_time`), inbox prune. Delivered producers: 0042
+  `work_authorization.expiring`, 0045 `employee.benched` (project exit), `employee.exited`, `assignment.ending_soon`;
+  `candidate.assigned` and `checklist.item_overdue` await their producers. The registry, not a payload's `notify`,
+  decides recipients (shapes and rules in `docs/notifications.md`; `authz.notification_emit_once` for once-only reminders).
 - Paperwork and restricted documents with step-up (FR-PPR-01 to 03, migration 0043, design B2.4 "Built in
   migration 0043"): typed documents on a candidate or placement (`document`, `file_object`, type keys in
   `authz.document_type` = `DOCUMENT_TYPES`), the resume scan pipeline generalised (`document-scan`), restricted
@@ -104,6 +112,10 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   Daily `visa-expiry` job inserts `work_authorization.expiring` outbox rows (90/60/30, ids and dates only);
   delivery and inbox belong to the notification jobs. Profile section in the web app. IAM: the task roles may use
   the restricted key directly only with the encryption context `eureka:purpose = field`.
+  Review follow-ups (migration 0047): rotation keys only for the current UTC month, an integrity MAC per number
+  (blind index key, which the worker lacks) checked on every reveal, a rotation log with alerts, provider/key and
+  header-version checks, reveal limits counted in the database (20/minute, 200/day). 0047 validates
+  `number_mac` against existing rows: a local database holding numbers from before it needs a reseed.
   Left: DOB is not read or written anywhere (OD-04); when it is, encrypt with class `dob`, set `dob_bidx` with
   `dobBlindIndex`, add `dob` to the rotation job (definer functions like `work_auth_number`) and use the index in
   the duplicate check.
@@ -179,6 +191,10 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   CEO see none. Is that right for marketing (other teams submitting an open candidate need the resume)?
   How long are superseded versions kept (OD-03)? Should the uploader get an email when a file is blocked?
 
+- Notifications (`docs/notifications.md`): FR-NTF-02 (what is a candidate "response", N, message to the candidate),
+  the bench threshold (OD-05) and the "POC" recipient of FR-NTF-05, whether Associate HR is an "admin team" for
+  project exit, recipients/channels of `assignment.ending_soon` (not in the design), per-user preferences (none in
+  the design), and whether placement events should also reach the inbox.
 - Documents (migration 0043): which paperwork document types exist besides the restricted I-9, driving
   license and work-authorization copies (today also `offer_letter`, `other`), and which are restricted (BGC
   reports? SSN cards? offer letters with rates?). May the Documents Team and Associate HR upload restricted

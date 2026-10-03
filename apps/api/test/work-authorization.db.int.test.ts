@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { candidateVisible, resolveScope, workAuthAccess } from "@eureka/shared";
-import { FieldCipher, FieldCryptoError, parseHeader } from "../src/platform/crypto/field-crypto.js";
-import { LocalKeyProvider } from "../src/platform/crypto/key-provider.js";
+import { BlindIndexer } from "../src/platform/crypto/blind-index.js";
+import { FieldCipher, FieldCryptoError, parseHeader, sealWith } from "../src/platform/crypto/field-crypto.js";
+import { LocalKeyProvider, LocalMacProvider } from "../src/platform/crypto/key-provider.js";
 import { KEY_ROTATION_JOB, keyRotationJob } from "../src/worker/jobs/key-rotation.js";
 import { VISA_EXPIRY_JOB, visaExpiryJob } from "../src/worker/jobs/visa-expiry.js";
 import { DELIVERED_TYPES } from "../src/worker/jobs/outbox.js";
@@ -28,8 +29,22 @@ const CLS = "work_auth_number" as const;
 const apiCipher = new FieldCipher(new LocalKeyProvider());
 const workerCipher = new FieldCipher(new LocalKeyProvider());
 const ctx = () => ({ pool: db.worker, log: silentLogger, signal: new AbortController().signal, heartbeat() {} });
+const macs = new BlindIndexer(new LocalMacProvider());
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 const lastMonth = () => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7); };
+/**
+ * Time travel to the next month: this month's rotation keys, their job_run
+ * rows and rotation log entries become last month's, so the current month can
+ * rotate again (the database only accepts the current month's label).
+ */
+let travelled = 0;
+async function nextMonth() {
+  // Each earlier "month" gets its own past label (the labels are unique per class).
+  const label = `19${String(50 + Math.floor(travelled / 12)).padStart(2, "0")}-${String((travelled++ % 12) + 1).padStart(2, "0")}`;
+  await force(`UPDATE eureka.field_key SET rotation_key = $1, created_at = created_at - interval '32 days' WHERE rotation_key = $2`, [label, thisMonth()]);
+  await force(`UPDATE eureka.field_rotation_log SET at = at - interval '32 days'`);
+  await force(`DELETE FROM eureka.job_run WHERE job_name = $1 AND run_key = $2`, [KEY_ROTATION_JOB, thisMonth()]);
+}
 
 beforeAll(async () => {
   db = await createTestDb();
@@ -67,8 +82,9 @@ interface WaOpts { number?: string | null; type?: string; status?: string; valid
 const createWa = (actor: string, candidateId: string, o: WaOpts = {}) => asUser(db.app, actor, async (c) => {
   const id = randomUUID();
   const sealed = o.number ? await apiCipher.encrypt(c, { cls: CLS, rowId: id }, o.number) : null;
-  await c.query(`SELECT authz.work_auth_create($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [id, candidateId, o.type ?? "h1b", sealed?.enc ?? null, sealed?.keyId ?? null, o.validFrom ?? null, o.validTo ?? null, o.status ?? "valid"]);
+  const mac = o.number ? await macs.integrityMac(CLS, id, o.number) : null;
+  await c.query(`SELECT authz.work_auth_create($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [id, candidateId, o.type ?? "h1b", sealed?.enc ?? null, sealed?.keyId ?? null, mac, o.validFrom ?? null, o.validTo ?? null, o.status ?? "valid"]);
   return id;
 }, true);
 
@@ -136,7 +152,7 @@ describe("writes only through definer functions, with permission and scope re-ch
     expect(row).toMatchObject({ auth_type: "h1b", status: "valid", row_version: 1, created_by: U.imm, updated_by: U.imm });
     expect(await denied(() => createWa(U.hr, cand.id))).toBe("not_permitted");
     for (const u of [U.r1a, U.l1, U.m1, U.ceo, U.acct, U.locD, U.admin]) expect(await denied(() => createWa(u, cand.id)), u).toBe("not_found");
-    expect(await denied(() => db.app.query(`SELECT authz.work_auth_create($1, $2, 'h1b', NULL, NULL, NULL, NULL, 'valid')`, [randomUUID(), cand.id])))
+    expect(await denied(() => db.app.query(`SELECT authz.work_auth_create($1, $2, 'h1b', NULL, NULL, NULL, NULL, NULL, 'valid')`, [randomUUID(), cand.id])))
       .toBe("not_permitted");
   });
 
@@ -164,24 +180,24 @@ describe("writes only through definer functions, with permission and scope re-ch
     const cand = own();
     const id = await createWa(U.imm, cand.id, { validFrom: "2026-01-01", validTo: "2026-12-31" });
     const v = await asUser(db.app, U.imm, async (c) => (await c.query<{ v: number }>(
-      `SELECT authz.work_auth_update($1, $2, 1, 'h1b', false, NULL, NULL, '2026-01-01', '2029-12-31', 'valid') AS v`, [id, cand.id])).rows[0]!.v, true);
+      `SELECT authz.work_auth_update($1, $2, 1, 'h1b', false, NULL, NULL, NULL, '2026-01-01', '2029-12-31', 'valid') AS v`, [id, cand.id])).rows[0]!.v, true);
     expect(v).toBe(2);
     // Stale row_version, wrong candidate, HR, Sales.
     const upd = (actor: string, candidateId: string, version: number) => asUser(db.app, actor, (c) => c.query(
-      `SELECT authz.work_auth_update($1, $2, $3, 'h1b', false, NULL, NULL, NULL, NULL, 'revoked')`, [id, candidateId, version]));
+      `SELECT authz.work_auth_update($1, $2, $3, 'h1b', false, NULL, NULL, NULL, NULL, NULL, 'revoked')`, [id, candidateId, version]));
     expect(await denied(() => upd(U.imm, cand.id, 1))).toBe("stale");
     expect(await denied(() => upd(U.imm, candidates[5]!.id, 2))).toBe("not_found");
     expect(await denied(() => upd(U.hr, cand.id, 2))).toBe("not_permitted");
     expect(await denied(() => upd(U.r1a, cand.id, 2))).toBe("not_found");
     // Dates out of order and unknown values hit the table CHECKs.
     expect(await denied(() => asUser(db.app, U.imm, (c) => c.query(
-      `SELECT authz.work_auth_update($1, $2, 2, 'h1b', false, NULL, NULL, '2027-01-01', '2026-01-01', 'valid')`, [id, cand.id])))).toMatch(/work_authorization_dates/);
+      `SELECT authz.work_auth_update($1, $2, 2, 'h1b', false, NULL, NULL, NULL, '2027-01-01', '2026-01-01', 'valid')`, [id, cand.id])))).toMatch(/work_authorization_dates/);
     expect(await denied(() => createWa(U.imm, cand.id, { type: "citizen" }))).toMatch(/auth_type_check/);
     // A forged ciphertext (not naming its key) or a key of another class is refused.
     expect(await denied(() => asUser(db.app, U.imm, (c) => c.query(
-      `SELECT authz.work_auth_create($1, $2, 'h1b', $3, NULL, NULL, NULL, 'valid')`, [randomUUID(), cand.id, Buffer.alloc(60, 1)])))).toBe("invalid_number");
+      `SELECT authz.work_auth_create($1, $2, 'h1b', $3, NULL, NULL, NULL, NULL, 'valid')`, [randomUUID(), cand.id, Buffer.alloc(60, 1)])))).toBe("invalid_number");
     expect(await denied(() => asUser(db.app, U.imm, (c) => c.query(
-      `SELECT authz.work_auth_create($1, $2, 'h1b', $3, $4, NULL, NULL, 'valid')`, [randomUUID(), cand.id, Buffer.alloc(60, 1), randomUUID()])))).toBe("invalid_number");
+      `SELECT authz.work_auth_create($1, $2, 'h1b', $3, $4, $5, NULL, NULL, 'valid')`, [randomUUID(), cand.id, Buffer.alloc(60, 1), randomUUID(), Buffer.alloc(32)])))).toBe("invalid_number");
     const r = (await db.admin.query(`SELECT * FROM eureka.work_authorization WHERE id = $1`, [id])).rows[0];
     expect(r).toMatchObject({ row_version: 2, created_by: U.imm, updated_by: U.imm, valid_to: expect.any(Date) });
     expect(await denied(() => force(`UPDATE eureka.work_authorization SET number_enc = $2, number_key_id = (SELECT id FROM eureka.field_key LIMIT 1) WHERE id = $1`,
@@ -221,47 +237,90 @@ describe("field encryption against the database (design A6.3)", () => {
       .rejects.toThrow(/another key provider/);
   });
 
-  it("the API may only create a class's first key; rotation keys are the worker's, never in the future", async () => {
-    const wrapped = Buffer.alloc(60, 3);
-    expect(await denied(() => db.worker.query(`SELECT authz.field_key_first($1, 'dob', 'local', 'x', $2)`, [randomUUID(), wrapped]))).toMatch(/permission denied/);
-    expect(await denied(() => asUser(db.app, U.imm, (c) => c.query(`SELECT authz.field_key_rotate($1, 'dob', 'local', 'x', $2, '2026-01')`, [randomUUID(), wrapped]))))
+  it("the API may only create a class's first key; rotation keys are the worker's, current month only (review R1, R2)", async () => {
+    const local = new LocalKeyProvider();
+    const wrapped = (await local.generateDataKey({ x: "y" })).wrapped;
+    expect(await denied(() => db.worker.query(`SELECT authz.field_key_first($1, 'dob', 'local', $2, $3)`, [randomUUID(), local.keyRef, wrapped]))).toMatch(/permission denied/);
+    expect(await denied(() => asUser(db.app, U.imm, (c) => c.query(`SELECT authz.field_key_rotate($1, $2, 'local', $3, $4, $5)`, [randomUUID(), CLS, local.keyRef, wrapped, thisMonth()]))))
       .toMatch(/permission denied/);
-    expect(await denied(() => db.worker.query(`SELECT authz.field_key_rotate($1, 'dob', 'local', 'x', $2, '2999-01')`, [randomUUID(), wrapped]))).toMatch(/future/);
-    expect(await denied(() => db.worker.query(`SELECT authz.field_key_rotate($1, 'dob', 'local', 'x', $2, '2026-13')`, [randomUUID(), wrapped]))).toBe("invalid_key");
+    // Any other label, past or future, is refused: no minting keys under unused month labels.
+    for (const label of [lastMonth(), "2001-01", "2999-01"]) {
+      expect(await denied(() => db.worker.query(`SELECT authz.field_key_rotate($1, $2, 'local', $3, $4, $5)`, [randomUUID(), CLS, local.keyRef, wrapped, label])), label)
+        .toBe("rotation key is not the current month");
+    }
+    expect(await denied(() => db.worker.query(`SELECT authz.field_key_rotate($1, $2, 'local', $3, $4, '2026-13')`, [randomUUID(), CLS, local.keyRef, wrapped]))).toBe("invalid_key");
+    // Bogus provider, key reference or wrapped bytes (R2): refused for a new key.
+    for (const [provider, ref, w] of [
+      ["local", "x", wrapped], ["local", local.keyRef, Buffer.alloc(16)], ["kms", "arn:aws:kms:us-east-2:123456789012:key/abc", Buffer.alloc(180)],
+      ["plain", local.keyRef, wrapped],
+    ] as const) {
+      expect(await denied(() => db.worker.query(`SELECT authz.field_key_rotate($1, $2, $3, $4, $5, $6)`, [randomUUID(), CLS, provider, ref, w, thisMonth()])), `${provider} ${ref}`)
+        .toMatch(/invalid_key|provider_check/);
+      expect(await denied(() => asUser(db.app, U.imm, (c) => c.query(`SELECT authz.field_key_first($1, 'dob', $2, $3, $4)`, [randomUUID(), provider, ref, w]))), `first ${provider}`)
+        .toMatch(/invalid_key|provider_check/);
+    }
+    // A class without any key has nothing to rotate.
+    expect((await db.worker.query(`SELECT * FROM authz.field_key_rotate($1, 'dob', 'local', $2, $3, $4)`, [randomUUID(), local.keyRef, wrapped, thisMonth()])).rows).toEqual([]);
+    // Owner and superuser cannot label a key with another month either.
+    expect(await denied(() => asUser(db.admin, U.imm, async (c) => {
+      await c.query("SET LOCAL ROLE authz_definer");
+      await c.query(`INSERT INTO eureka.field_key (id, field_class, version, provider, key_ref, wrapped_key, rotation_key) VALUES ($1, 'dob', 1, 'local', $2, $3, '2001-01')`,
+        [randomUUID(), local.keyRef, wrapped]);
+    }))).toMatch(/labelled with the month/);
     // A second "first" key is not added: the existing one is returned.
     const k1 = (await asUser(db.app, U.imm, (c) => c.query(`SELECT * FROM authz.field_key_first($1, $2, 'local', 'x', $3)`, [randomUUID(), CLS, wrapped]))).rows[0];
     expect(k1.id).toBe((await db.admin.query(`SELECT id FROM eureka.field_key WHERE field_class = $1 ORDER BY version DESC LIMIT 1`, [CLS])).rows[0].id);
   });
+
+  it("new numbers need a header naming the key's version and a 32-byte integrity MAC", async () => {
+    const cand = await fresh();
+    const id = randomUUID();
+    const make = (sealed: { enc: Buffer; keyId: string }, mac: Buffer | null) => asUser(db.app, U.imm, (c) => c.query(
+      `SELECT authz.work_auth_create($1, $2, 'h1b', $3, $4, $5, NULL, NULL, 'valid')`, [id, cand.id, sealed.enc, sealed.keyId, mac]));
+    const sealed = await asUser(db.app, U.imm, (c) => apiCipher.encrypt(c, { cls: CLS, rowId: id }, "HDR-1"));
+    const badVersion = Buffer.from(sealed.enc);
+    badVersion.writeUInt32BE(badVersion.readUInt32BE(17) + 1, 17);
+    expect(await denied(() => make({ ...sealed, enc: badVersion }, Buffer.alloc(32)))).toBe("invalid_number");
+    expect(await denied(() => make(sealed, null))).toBe("invalid_number");
+    expect(await denied(() => make(sealed, Buffer.alloc(16)))).toBe("invalid_number");
+    const mac = await macs.integrityMac(CLS, id, "HDR-1");
+    expect(await denied(() => make(sealed, mac))).toBe("allowed");
+  });
 });
 
 describe("key-rotation job (worker)", () => {
-  it("re-encrypts every row under the month's new key version; plaintext unchanged; idempotent; leased", async () => {
+  const versionOf = async (id: string) => (await db.admin.query<{ version: number }>(
+    `SELECT k.version FROM eureka.work_authorization w JOIN eureka.field_key k ON k.id = w.number_key_id WHERE w.id = $1`, [id])).rows[0]!.version;
+
+  it("re-encrypts every row under the month's new key version; plaintext and MAC unchanged; logged; idempotent; leased", async () => {
     const cand = await fresh();
     const numbers = ["ROT-1", "ROT-2", "ROT-3", "ROT-4", "ROT-5"];
     const ids = [];
     for (const n of numbers) ids.push(await createWa(U.imm, cand.id, { number: n }));
     const noNumber = await createWa(U.imm, cand.id, {});
-    const versionOf = async (id: string) => (await db.admin.query<{ version: number }>(
-      `SELECT k.version FROM eureka.work_authorization w JOIN eureka.field_key k ON k.id = w.number_key_id WHERE w.id = $1`, [id])).rows[0]!.version;
     const before = await versionOf(ids[0]!);
     const total = (await db.admin.query(`SELECT count(*)::int AS n FROM eureka.work_authorization WHERE number_enc IS NOT NULL`)).rows[0].n;
+    const macsBefore = (await db.admin.query(`SELECT id, number_mac FROM eureka.work_authorization ORDER BY id`)).rows;
 
-    // Time travel: last month's run (it was missed), then this month's.
     const job = keyRotationJob(workerCipher, { batchSize: 2 });
     const runner = new JobRunner(db.worker, [job], silentLogger);
-    expect(await runner.runOnce(job, lastMonth())).toBe("ran");
+    expect(await runner.runOnce(job, thisMonth())).toBe("ran");
     for (const id of ids) expect(await versionOf(id)).toBe(before + 1);
-    const detail = (await db.admin.query(`SELECT detail FROM eureka.job_run WHERE job_name = $1 AND run_key = $2`, [KEY_ROTATION_JOB, lastMonth()])).rows[0].detail;
+    const detail = (await db.admin.query(`SELECT detail FROM eureka.job_run WHERE job_name = $1 AND run_key = $2`, [KEY_ROTATION_JOB, thisMonth()])).rows[0].detail;
     expect(detail).toEqual({ work_auth_number: { keyVersion: before + 1, reencrypted: total, skipped: 0, failed: 0 } });
     expect(JSON.stringify(detail)).not.toMatch(/ROT-/);
+    expect((await db.admin.query(`SELECT count(*)::int AS n FROM eureka.field_rotation_log WHERE row_id = ANY ($1::uuid[])`, [ids])).rows[0].n).toBe(ids.length);
 
+    // Time travel: a month later the next rotation.
+    await nextMonth();
     expect(await runner.runOnce(job, thisMonth())).toBe("ran");
     for (const id of ids) expect(await versionOf(id)).toBe(before + 2);
-    // Values decrypt to the same plaintext, bound to their rows, with a cold API cache.
+    // Values decrypt to the same plaintext, bound to their rows, with a cold API cache; MACs untouched.
     const cold = new FieldCipher(new LocalKeyProvider());
     for (const [i, id] of ids.entries()) {
       expect(await asUser(db.app, U.imm, async (c) => cold.decrypt(c, { cls: CLS, rowId: id }, (await encOf(id)).number_enc))).toBe(numbers[i]);
     }
+    expect((await db.admin.query(`SELECT id, number_mac FROM eureka.work_authorization ORDER BY id`)).rows).toEqual(macsBefore);
     expect((await encOf(noNumber)).number_enc).toBeNull();
     // Rotation is not a user edit: row_version and updated_* unchanged.
     expect((await db.admin.query(`SELECT DISTINCT row_version FROM eureka.work_authorization WHERE id = ANY ($1::uuid[])`, [ids])).rows).toEqual([{ row_version: 1 }]);
@@ -270,29 +329,58 @@ describe("key-rotation job (worker)", () => {
     expect(await runner.runOnce(job, thisMonth())).toBe("done-before");
     expect(await job.run(thisMonth(), ctx())).toEqual({ work_auth_number: { keyVersion: before + 2, reencrypted: 0, skipped: 0, failed: 0 } });
     expect((await db.admin.query(`SELECT count(*)::int AS n FROM eureka.field_key WHERE field_class = $1 AND rotation_key = $2`, [CLS, thisMonth()])).rows[0].n).toBe(1);
-    // An older month's run cannot rotate backwards once a newer key exists.
-    await expect(job.run(lastMonth(), ctx())).rejects.toThrow(/not_current_key/);
+    // Another month's label is refused outright.
+    await expect(job.run(lastMonth(), ctx())).rejects.toThrow(/not the current month/);
 
-    // Lease: another runner holding a live lease on next month's key is not disturbed.
+    // Lease: another runner holding a live lease on a key is not disturbed.
     await force(`INSERT INTO eureka.job_run (job_name, run_key, status, lease_until) VALUES ($1, '2099-01', 'running', now() + interval '10 minutes')`, [KEY_ROTATION_JOB]);
     expect(await runner.runOnce(job, "2099-01")).toBe("leased");
   });
 
-  it("new API writes after a rotation use the newest key; a concurrent write wins over the rotation's swap", async () => {
+  it("compare-and-swap: a newer key exists, the row changed meanwhile, the swap is refused (review R3)", async () => {
     const cand = await fresh();
     const id = await createWa(U.imm, cand.id, { number: "RACE-1" });
-    const newest = (await db.admin.query(`SELECT id, version FROM eureka.field_key WHERE field_class = $1 ORDER BY version DESC LIMIT 1`, [CLS])).rows[0];
-    expect((await encOf(id)).number_key_id).toBe(newest.id);
-    // The worker read an old ciphertext; the row changed meanwhile: apply refuses (compare-and-swap).
-    const old = (await encOf(id)).number_enc;
-    expect((await db.worker.query(`SELECT authz.field_rotation_apply($1, $2, $3, $4, $5) AS ok`,
-      [CLS, id, Buffer.concat([old.subarray(0, 40), Buffer.alloc(old.length - 40, 0)]), old, newest.id])).rows[0].ok).toBe(false);
+    const old = await encOf(id);
+    // Time travel and add a newer key without rotating any row.
+    await nextMonth();
+    const key = (await workerCipher.rotationKey(db.worker, CLS, thisMonth()))!;
+    expect(key.version).toBeGreaterThan(await versionOf(id));
+    const next = sealWith(key, { cls: CLS, rowId: id }, "RACE-1");
+    const logged = async () => (await db.admin.query(`SELECT count(*)::int AS n FROM eureka.field_rotation_log WHERE row_id = $1`, [id])).rows[0].n;
+    // Every other check passes; only the old ciphertext differs from the row: false, nothing changed or logged.
+    const stale = Buffer.from(old.number_enc);
+    stale[stale.length - 1] = stale[stale.length - 1]! ^ 1;
+    expect((await db.worker.query(`SELECT authz.field_rotation_apply($1, $2, $3, $4, $5) AS ok`, [CLS, id, stale, next, key.id])).rows[0].ok).toBe(false);
+    expect((await encOf(id)).number_enc.equals(old.number_enc)).toBe(true);
+    expect(await logged()).toBe(0);
+    // A header naming another version of the key is refused (R2).
+    const wrongVersion = Buffer.from(next);
+    wrongVersion.writeUInt32BE(key.version + 1, 17);
+    expect(await denied(() => db.worker.query(`SELECT authz.field_rotation_apply($1, $2, $3, $4, $5)`, [CLS, id, old.number_enc, wrongVersion, key.id]))).toBe("invalid_ciphertext");
     // Only to the newest key, never sideways or backwards.
-    const older = (await db.admin.query(`SELECT id FROM eureka.field_key WHERE field_class = $1 AND version < $2 ORDER BY version LIMIT 1`, [CLS, newest.version])).rows[0];
-    expect(await denied(() => db.worker.query(`SELECT authz.field_rotation_apply($1, $2, $3, $4, $5)`, [CLS, id, old, old, older.id]))).toBe("not_current_key");
-    expect(await denied(() => db.worker.query(`SELECT * FROM authz.field_rotation_batch($1, $2, NULL, 10)`, [CLS, older.id]))).toBe("not_current_key");
-    expect(await denied(() => db.worker.query(`SELECT * FROM authz.field_rotation_batch('dob', $1, NULL, 10)`, [newest.id]))).toBe("unsupported field class");
-    expect((await db.worker.query(`SELECT authz.field_rotation_apply($1, $2, $3, $3, $4) AS ok`, [CLS, id, old, newest.id])).rows[0].ok).toBe(false);
+    expect(await denied(() => db.worker.query(`SELECT authz.field_rotation_apply($1, $2, $3, $4, $5)`, [CLS, id, old.number_enc, old.number_enc, old.number_key_id]))).toBe("not_current_key");
+    expect(await denied(() => db.worker.query(`SELECT * FROM authz.field_rotation_batch($1, $2, NULL, 10)`, [CLS, old.number_key_id]))).toBe("not_current_key");
+    expect(await denied(() => db.worker.query(`SELECT * FROM authz.field_rotation_batch('dob', $1, NULL, 10)`, [key.id]))).toBe("unsupported field class");
+    // The matching old ciphertext swaps once, and the swap is logged.
+    expect((await db.worker.query(`SELECT authz.field_rotation_apply($1, $2, $3, $4, $5) AS ok`, [CLS, id, old.number_enc, next, key.id])).rows[0].ok).toBe(true);
+    expect((await db.worker.query(`SELECT authz.field_rotation_apply($1, $2, $3, $4, $5) AS ok`, [CLS, id, next, next, key.id])).rows[0].ok).toBe(false);
+    expect(await logged()).toBe(1);
+    workerCipher.release(key);
+    // New API writes use the newest key.
+    const id2 = await createWa(U.imm, cand.id, { number: "RACE-2" });
+    expect((await encOf(id2)).number_key_id).toBe(key.id);
+  });
+
+  it("the rotation log is append-only and reports repeated rotations this month", async () => {
+    const keyId = (await db.admin.query(`SELECT id FROM eureka.field_key WHERE field_class = $1 LIMIT 1`, [CLS])).rows[0].id;
+    expect(await denied(() => db.worker.query(`SELECT * FROM eureka.field_rotation_log`))).toMatch(/permission denied/);
+    expect(await denied(() => db.admin.query(`DELETE FROM eureka.field_rotation_log`))).toMatch(/append-only/);
+    const alerts = async () => (await db.worker.query(`SELECT * FROM authz.field_rotation_alerts($1)`, [CLS])).rows[0];
+    expect(await alerts()).toMatchObject({ rotation_keys_this_month: 1, rows_rotated_more_than_once: 0 });
+    const row = randomUUID();
+    await force(`INSERT INTO eureka.field_rotation_log (field_class, row_id, from_key, to_key) VALUES ($1, $2, $3, $3), ($1, $2, $3, $3)`, [CLS, row, keyId]);
+    expect(await alerts()).toMatchObject({ rows_rotated_more_than_once: 1 });
+    await force(`DELETE FROM eureka.field_rotation_log WHERE row_id = $1`, [row]);
   });
 
   it("a row that does not decrypt is counted and left unchanged; the rest are rotated", async () => {
@@ -301,13 +389,28 @@ describe("key-rotation job (worker)", () => {
     const bad = await createWa(U.imm, cand.id, { number: "BAD-1" });
     const { number_enc, number_key_id } = await encOf(good);
     await force(`UPDATE eureka.work_authorization SET number_enc = $2, number_key_id = $3 WHERE id = $1`, [bad, number_enc, number_key_id]);
-    // Time travel: this month's rotation already ran; pretend its key came from an earlier run so this month rotates again.
-    await force(`UPDATE eureka.field_key SET rotation_key = NULL WHERE field_class = $1 AND rotation_key = $2`, [CLS, thisMonth()]);
+    await nextMonth();
     const out = await keyRotationJob(workerCipher, { batchSize: 10 }).run(thisMonth(), ctx()) as Record<string, { failed: number; reencrypted: number }>;
     expect(out.work_auth_number!.failed).toBe(1);
     expect(out.work_auth_number!.reencrypted).toBeGreaterThan(0);
     expect((await encOf(bad)).number_enc.equals(number_enc)).toBe(true);
     expect(await asUser(db.app, U.imm, async (c) => apiCipher.decrypt(c, { cls: CLS, rowId: good }, (await encOf(good)).number_enc))).toBe("GOOD-1");
+  });
+
+  it("a wrapped key the provider rejects is a per-row failure, not a halted run (review R7)", async () => {
+    const cand = await fresh();
+    const id = await createWa(U.imm, cand.id, { number: "WRAP-1" });
+    const { number_key_id } = await encOf(id);
+    // Corrupt the wrapped key of this row's data key (time travel, triggers off) and drop cached copies.
+    const orig = (await db.admin.query(`SELECT wrapped_key FROM eureka.field_key WHERE id = $1`, [number_key_id])).rows[0].wrapped_key as Buffer;
+    const bad = Buffer.from(orig);
+    bad[bad.length - 1] = bad[bad.length - 1]! ^ 1;
+    await force(`UPDATE eureka.field_key SET wrapped_key = $2 WHERE id = $1`, [number_key_id, bad]);
+    const cold = new FieldCipher(new LocalKeyProvider());
+    await nextMonth();
+    const out = await keyRotationJob(cold, { batchSize: 10 }).run(thisMonth(), ctx()) as Record<string, { failed: number; reencrypted: number }>;
+    expect(out.work_auth_number!.failed).toBeGreaterThanOrEqual(1);
+    await force(`UPDATE eureka.field_key SET wrapped_key = $2 WHERE id = $1`, [number_key_id, orig]);
   });
 
   it("is scheduled monthly on the 1st after 05:00 New York time", () => {
@@ -346,7 +449,7 @@ describe("visa-expiry notices (time travel on valid_to)", () => {
     expect((await events(id)).map((e) => [e.payload.threshold_days, e.payload.days_left])).toEqual([[90, 90], [60, 59], [30, 30]]);
   });
 
-  it("the event carries ids, dates and days only (no number, no type), for HR and Immigration; delivery ignores it for now", async () => {
+  it("the event carries ids, dates and days only (no number, no type), for HR and Immigration; the notification delivery handles it", async () => {
     const cand = await fresh();
     const id = await createWa(U.imm, cand.id, { number: "SECRET-NUM-9", type: "h4_ead", validTo: await nyDay(45) });
     expect(await visaExpiryJob([90, 60, 30]).run("label", ctx())).toMatchObject({ events: expect.any(Number) });
@@ -356,7 +459,7 @@ describe("visa-expiry notices (time travel on valid_to)", () => {
       candidate_id: cand.id, person_id: person, expires_on: await nyDay(45), threshold_days: 60, days_left: 45, notify: ["hr", "immigration"],
     } });
     expect(JSON.stringify(ev)).not.toMatch(/SECRET|h4_ead/);
-    expect((DELIVERED_TYPES as readonly string[]).includes("work_authorization.expiring")).toBe(false);
+    expect((DELIVERED_TYPES as readonly string[]).includes("work_authorization.expiring")).toBe(true);
   });
 
   it("entered late: only the smallest threshold reached; pending, revoked and undated records get none; renewal restarts", async () => {
@@ -370,7 +473,7 @@ describe("visa-expiry notices (time travel on valid_to)", () => {
     for (const id of [pending, revoked, undated]) expect(await events(id)).toEqual([]);
     // Renewed by Immigration: a new expiry date starts a new cycle.
     await asUser(db.app, U.imm, async (c) => c.query(
-      `SELECT authz.work_auth_update($1, $2, 1, 'h1b', false, NULL, NULL, NULL, $3, 'valid')`, [late, cand.id, await nyDay(85)]), true);
+      `SELECT authz.work_auth_update($1, $2, 1, 'h1b', false, NULL, NULL, NULL, NULL, $3, 'valid')`, [late, cand.id, await nyDay(85)]), true);
     await runJob();
     expect((await events(late)).map((e) => e.payload.threshold_days)).toEqual([30, 90]);
   });

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { resolveScope, type UserAccess } from "@eureka/shared";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, T, U, seedFixtures, toUserAccess } from "./fixtures.js";
-import { createPlacement, extraUser, selectedSubmission, transitionPlacement } from "./placement-seed.js";
+import { createPlacement, extraUser, newCandidate, selectedSubmission, transitionPlacement } from "./placement-seed.js";
 import { asActor, backdate, joinPlacement, joinedEmployee, type Joined } from "./employee-seed.js";
 import { assignmentEndingSoonJob } from "../src/worker/jobs/assignment-ending-soon.js";
 import { silentLogger } from "../src/worker/log.js";
@@ -299,6 +299,69 @@ describe("authz.exit_employee and authz.return_employee_to_market", () => {
   });
 });
 
+describe("review 0048: bgc_failed on a placement whose assignment already ended", () => {
+  it("re-placed employee: marking the old placement bgc_failed records it but moves neither candidate nor employee", async () => {
+    const j = await onAssignment();
+    await endAssignment(U.hr, j.assignmentId, addDays(today, -5), "completed");
+    await toMarket(U.hr, j.personId);
+    const sub = await selectedSubmission(db, U.r1a, j.candidateId);
+    const p2 = await createPlacement(db, U.r1a, sub);
+    await joinPlacement(db, U.r1a, p2.id);
+    expect(await candStatus(j.candidateId)).toBe("placed");
+    const outboxBefore = (await outbox("employee.benched", j.personId)).length;
+    const eventsBefore = (await events(j.personId)).length;
+
+    const r = await asUser(db.app, U.m1, async (c) => (await c.query(
+      `SELECT * FROM authz.transition_placement($1, 'bgc_failed', 'Late result')`, [j.placementId])).rows[0], true);
+    expect(r).toEqual({ from_status: "joined", to_status: "bgc_failed", candidate_from: null, candidate_to: null });
+    expect((await q(`SELECT status FROM eureka.placement WHERE id = $1`, [j.placementId]))[0]).toEqual({ status: "bgc_failed" });
+    expect(await candStatus(j.candidateId)).toBe("placed");
+    expect((await employee(j.personId)).status).toBe("on_assignment");
+    expect(await q(`SELECT end_reason FROM eureka.assignment WHERE id = $1`, [j.assignmentId])).toEqual([{ end_reason: "completed" }]);
+    expect(await outbox("employee.benched", j.personId)).toHaveLength(outboxBefore);
+    expect(await events(j.personId)).toHaveLength(eventsBefore);
+    // Sales cannot re-market the placed candidate, so no second open assignment can follow.
+    await expect(asUser(db.app, U.r1a, (c) => c.query(`SELECT authz.transition_candidate($1, 'bench')`, [j.candidateId])))
+      .rejects.toThrow(/invalid transition/);
+  });
+
+  it("bgc_failed on the open assignment still ends it and benches candidate and employee", async () => {
+    const j = await onAssignment();
+    const r = await asUser(db.app, U.m1, async (c) => (await c.query(
+      `SELECT * FROM authz.transition_placement($1, 'bgc_failed', 'Failed')`, [j.placementId])).rows[0], true);
+    expect(r).toMatchObject({ candidate_from: "placed", candidate_to: "bench" });
+    expect((await employee(j.personId)).status).toBe("bench");
+  });
+
+  it("return to market is refused after a joined placement failed its check, even after a project exit", async () => {
+    const j = await onAssignment();
+    await endAssignment(U.hr, j.assignmentId, addDays(today, -5), "completed");
+    await transitionPlacement(db, U.m1, j.placementId, "bgc_failed", "Late result");
+    expect(await candStatus(j.candidateId)).toBe("bench");
+    expect((await employee(j.personId)).status).toBe("bench");
+    await expect(toMarket(U.hr, j.personId)).rejects.toThrow("bgc_failed_last");
+  });
+
+  it("invariant: at most one open assignment per person (enforced by a unique index)", async () => {
+    const open = await q<{ n: number }>(
+      `SELECT count(*)::int AS n FROM (SELECT person_id FROM eureka.assignment WHERE end_date IS NULL GROUP BY person_id HAVING count(*) > 1) x`);
+    expect(open[0]!.n).toBe(0);
+    const j = await joinedEmployee(db);
+    const cand = await newCandidate(db, { teamId: T.t1, recruiterId: U.r1a, locationId: LOC.dallas });
+    const other = (await createPlacement(db, U.r1a, await selectedSubmission(db, U.r1a, cand.id))).id;
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL session_replication_role = replica");
+      await expect(c.query(`INSERT INTO eureka.assignment (person_id, placement_id, assignment_no, start_date) VALUES ($1, $2, 99, CURRENT_DATE)`,
+        [j.personId, other])).rejects.toThrow(/assignment_open_person/);
+    } finally {
+      await c.query("ROLLBACK").catch(() => undefined);
+      c.release();
+    }
+  });
+});
+
 describe("RLS (differential against the engine)", () => {
   const people: Joined[] = [];
   beforeAll(async () => {
@@ -349,6 +412,27 @@ describe("guards and grants", () => {
     await expect(db.admin.query(`DELETE FROM eureka.employment_event WHERE person_id = $1`, [j.personId])).rejects.toThrow(/employment functions/);
     await expect(db.admin.query(`TRUNCATE eureka.employee CASCADE`)).rejects.toThrow(/never truncated/);
     await expect(db.admin.query(`TRUNCATE eureka.employment_event`)).rejects.toThrow(/never truncated/);
+    // The table owner (eureka_owner), not only the superuser.
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL ROLE eureka_owner");
+      for (const sql of [
+        `UPDATE eureka.employee SET status = 'bench' WHERE person_id = '${j.personId}'`,
+        `DELETE FROM eureka.employment_event WHERE person_id = '${j.personId}'`,
+        `INSERT INTO eureka.assignment_plan (assignment_id, planned_end_date) VALUES ('${j.assignmentId}', '2099-01-01')`,
+        `TRUNCATE eureka.assignment_plan`,
+      ]) {
+        // Refused by the guard or row-level security (FORCE RLS: no owner policy, so no row is visible or writable).
+        await c.query("SAVEPOINT s");
+        const r = await c.query(sql).then((x) => x.rowCount, (e: Error) => e.message);
+        expect(String(r), sql).toMatch(/^0$|employment functions|never truncated|row-level security/);
+        await c.query("ROLLBACK TO SAVEPOINT s");
+      }
+    } finally {
+      await c.query("ROLLBACK").catch(() => undefined);
+      c.release();
+    }
   });
 
   it("internal functions are not executable by the app or the worker; the scan only by the worker", async () => {
