@@ -36,18 +36,32 @@ reasons, even where the payload carries a date or code for validation.
 
 ## Event-type contract
 
-`aggregate_type` / `aggregate_id` are free (the delivery reads the payload). All ids are uuids; dates are
-`YYYY-MM-DD` strings; a payload that does not validate fails the event before anyone is notified.
+`aggregate_type` / `aggregate_id` are free (the delivery reads the payload; ids in the payload must be uuids, dates
+`YYYY-MM-DD`). A payload that does not validate fails the event before anyone is notified (retried with backoff,
+alert), so a producer and this registry cannot drift apart silently. The shapes below are what the merged
+producers emit; `notifications.producers.int.test.ts` runs each producer through the delivery job end to end.
 
-| Type | SRS | Emitted by | Payload | Recipients (active users) | Channels | Inbox opens |
-|---|---|---|---|---|---|---|
-| `placement.created`, `placement.state_changed` | PL-7 | placements (0022/0023), on main | unchanged (`notify` groups) | holders of `hr`, `accounts`, `immigration` named in `notify` | email | — |
-| `work_authorization.expiring` | FR-NTF-11, FR-VIS-03 | work authorization module (0042), daily job | `workAuthorizationId`, `candidateId`, `validTo`, `daysBefore` ∈ {90, 60, 30} | `hr`, `immigration` | email + inbox | candidate |
-| `employee.exited` | FR-NTF-09, FR-EMP-04 (project exit, on assignment end) | employees/assignments (0045) | `assignmentId`, `placementId`, `candidateId`, `endDate`, `endReason` ∈ {`bgc_failed`, `completed`, `terminated`, `resigned`} | `hr`, `accounts`, `immigration` (admin teams), `bu_head`, `ceo` | email + inbox | placement |
-| `employee.benched` | FR-NTF-05 (bench-time) | **this change**: job `bench-time`; others may emit the same shape | `candidateId`, `benchSince`, `benchDays`, `thresholdDays` | the candidate's recruiter, its team's lead, that lead's manager (reporting line), `ceo` | email + inbox | candidate |
-| `candidate.assigned` | FR-NTF-10, FR-EMP-05 (team assigned) | employees (0045), bench → reassignment | `candidateId`, `teamId` (the new team), optional `fromTeamId` | the new team's lead and that lead's manager | email + inbox | candidate |
-| `checklist.item_overdue` | FR-NTF-04 (paperwork pending), FR-NTF-03 / FR-VIS-04 (documents pending) | paperwork/BGC (0044), daily job | `checklistItemId`, `placementId`, `daysOverdue` (0..3650), optional `assigneeId` | the placement's recruiter, the lead of its team snapshot, that lead's manager; plus `assigneeId` when that user holds `documents_team` | email + inbox | placement |
-| `assignment.ending_soon` | not in design B6 | employees/assignments (0045), daily job | `assignmentId`, `placementId`, `candidateId`, `endDate`, `daysBefore` (1..365) | `hr`, `accounts` (conservative default) | inbox only | placement |
+**Who decides the recipients: the registry, never the payload.** `authz.notification_recipients` resolves them
+from the event type (role holders and/or the recruiter, team lead and manager around the record). A producer may
+include a `notify` list (0042 and 0045 do); it is only checked to be a subset of the type's audience (listed in
+the table), and a list naming anyone else, or not a list of strings, fails the event. A narrower list does not
+narrow the audience. The one exception, kept from 0022-0024, is the placement events, whose `notify` groups select
+among `hr`, `accounts`, `immigration`.
+
+| Type | SRS | Producer | Payload | Recipients (active users; role holders valid now) | `notify` may name | Channels | Inbox opens |
+|---|---|---|---|---|---|---|---|
+| `placement.created`, `placement.state_changed` | PL-7 | placements (0022/0023) | unchanged | `hr`, `accounts`, `immigration` named in `notify` | those three | email | — |
+| `work_authorization.expiring` | FR-NTF-11, FR-VIS-03 | 0042 job `visa-expiry` (`authz.work_auth_expiry_notices`) | `candidate_id`, `person_id`, `expires_on`, `threshold_days` (1..365, `WORK_AUTH_EXPIRY_NOTICE_DAYS`), `days_left` (0..threshold), `notify` | `hr`, `immigration` | `hr`, `immigration` | email + inbox | candidate |
+| `employee.benched` | FR-NTF-09, FR-EMP-04 (project exit: an assignment ended, employee on the bench; bgc_failed after joining too) | 0045 trigger on assignment end (`authz.end_assignment`, `transition_placement`) | `personId`, `candidateId`, `assignmentId`, `placementId`, `endDate`, `endReason` ∈ {bgc_failed, completed, terminated, resigned}, `notify` | `hr`, `accounts`, `immigration` (admin teams), `bu_head`, `ceo` | those five | email + inbox | placement |
+| `employee.exited` | exit from the company (same audience as FR-NTF-09) | 0045 `authz.exit_employee` | `personId`, `candidateId`, `lastAssignmentId`, `exitDate`, `exitReason` ∈ {resigned, terminated, other}, `notify` | `hr`, `accounts`, `immigration`, `bu_head`, `ceo` | those five | email + inbox | candidate |
+| `assignment.ending_soon` | not in design B6 | 0045 job `assignment-ending-soon` (`authz.assignment_ending_soon_scan`) | `assignmentId`, `placementId`, `personId`, `candidateId`, `plannedEndDate`, `daysLeft` (0..365), `notify` | `hr`, `accounts` (conservative default) | `hr`, `accounts` | inbox only | placement |
+| `employee.bench_time` | FR-NTF-05 (bench-time) | 0046 job `bench-time` (`authz.emit_bench_time`) | `candidateId`, `benchSince`, `benchDays`, `thresholdDays` | the candidate's recruiter, its team's lead, that lead's manager (reporting line), `ceo` | `recruiter`, `lead`, `manager`, `ceo` | email + inbox | candidate |
+| `candidate.assigned` | FR-NTF-10, FR-EMP-05 (team assigned) | not emitted yet (team reassignment) | `candidateId`, `teamId` (the new team), optional `fromTeamId` | the new team's lead and that lead's manager | `lead`, `manager` | email + inbox | candidate |
+| `checklist.item_overdue` | FR-NTF-04 (paperwork pending), FR-NTF-03 / FR-VIS-04 (documents pending) | paperwork/BGC (0044), not merged yet | `checklistItemId`, `placementId`, `daysOverdue` (0..3650), optional `assigneeId` | the placement's recruiter, the lead of its team snapshot, that lead's manager; plus `assigneeId` when that user holds `documents_team` | `recruiter`, `lead`, `manager`, `documents_team` | email + inbox | placement |
+
+`employee.benched` (0045) is the move to the bench at project exit; `employee.bench_time` (0046) is the reminder
+once a candidate has been on the bench for N days. Emails and inbox rows never show the dates, reasons or codes
+in these payloads; they are validated only.
 
 ### Emitting a scheduled reminder once
 
@@ -56,11 +70,11 @@ Daily detection jobs should not depend on outbox rows to deduplicate (they are p
 
 ```sql
 PERFORM authz.notification_emit_once(
-  'visa-expiry',                                   -- job name
-  wa.id::text || ':' || wa.valid_to::text || ':60',  -- once-only key (<= 200 chars)
-  'work_authorization.expiring', 'work_authorization', wa.id,
-  pg_catalog.jsonb_build_object('workAuthorizationId', wa.id, 'candidateId', c.id,
-    'validTo', wa.valid_to, 'daysBefore', 60));
+  'paperwork-overdue',                                  -- job name
+  ci.id::text || ':' || p_day::text,                    -- once-only key (<= 200 chars)
+  'checklist.item_overdue', 'checklist_item', ci.id,
+  pg_catalog.jsonb_build_object('checklistItemId', ci.id, 'placementId', ci.placement_id,
+    'daysOverdue', p_day - ci.due_on));
 ```
 
 It records `(job, key)` in `eureka.notification_ledger` and writes the event only the first time (returns the
@@ -72,7 +86,7 @@ definer function (like `authz.emit_bench_time(day, threshold)`) to `eureka_worke
 | Job | Schedule | Run key | Notes |
 |---|---|---|---|
 | `outbox-delivery` | every tick | event id, or `inbox:<id>` (mail disabled) | above |
-| `bench-time` | daily 07:45 America/New_York | the New York date | Only when `NOTIFY_BENCH_DAYS` is set (threshold is OD-05, open). One `employee.benched` per candidate and bench period (`bench_since`) once on bench ≥ N days; the database refuses a future day |
+| `bench-time` | daily 07:45 America/New_York | the New York date | Only when `NOTIFY_BENCH_DAYS` is set (threshold is OD-05, open). One `employee.bench_time` per candidate and bench period (`bench_since`) once on bench ≥ N days; the database refuses a future day |
 | `notification-prune` | daily 04:30 America/New_York | UTC date (maintenance) | Deletes inbox rows older than `NOTIFICATION_RETENTION_DAYS` (default 180); the database refuses fewer than 30 days |
 
 All are covered by time-travel tests on a fixed clock (`apps/api/test/notifications.int.test.ts`).

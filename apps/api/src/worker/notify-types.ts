@@ -86,8 +86,23 @@ function statusLabel(v: unknown): string {
   return PLACEMENT_STATUS_LABELS[v]!;
 }
 
-/** Visa notice tiers (FR-VIS-03, FR-NTF-11: 90/60/30 days). */
-export const WORK_AUTH_NOTICE_DAYS = [90, 60, 30] as const;
+/**
+ * The roles a type's payload `notify` list may name. Recipients are decided by
+ * the registry and authz.notification_recipients, never by the payload: a
+ * producer's `notify` is only checked against this list (a mismatch means the
+ * producer and the registry disagree, so the event fails loudly instead of
+ * notifying the wrong people). Placement events are the one exception kept from
+ * 0022-0024: their `notify` groups select among hr, accounts and immigration.
+ */
+function checkNotify(p: Record<string, unknown>, allowed: readonly string[]): void {
+  const n = p.notify;
+  if (n === undefined) return;
+  if (!Array.isArray(n) || n.some((g) => typeof g !== "string" || !allowed.includes(g))) {
+    throw new Error("outbox event payload has an invalid notify list");
+  }
+}
+
+const ADMIN_TEAMS_BU_CEO = ["hr", "accounts", "immigration", "bu_head", "ceo"] as const;
 
 export const EVENT_SPECS: Record<string, EventSpec> = {
   // Placements (PL-7, migrations 0022-0024): unchanged, email only.
@@ -112,21 +127,25 @@ export const EVENT_SPECS: Record<string, EventSpec> = {
     },
   },
 
-  // FR-NTF-11 visa-expiry (FR-VIS-03): HR and Immigration, 90/60/30-day notices.
+
+  // FR-NTF-11 visa-expiry (FR-VIS-03; producer: visa-expiry job, migration 0042): HR and Immigration.
   "work_authorization.expiring": {
     email: true, inApp: true,
     render: (ev) => {
-      uuid(ev.payload, "workAuthorizationId");
-      const candidateId = uuid(ev.payload, "candidateId");
-      date(ev.payload, "validTo"); // validated, never shown
-      const days = int(ev.payload, "daysBefore", 1, 365);
-      if (!(WORK_AUTH_NOTICE_DAYS as readonly number[]).includes(days)) throw new Error("outbox event payload has an invalid daysBefore");
+      aggregate(ev);
+      const candidateId = uuid(ev.payload, "candidate_id");
+      uuid(ev.payload, "person_id");
+      date(ev.payload, "expires_on"); // validated, never shown
+      const days = int(ev.payload, "threshold_days", 1, 365);
+      const left = int(ev.payload, "days_left", 0, 365);
+      if (left > days) throw new Error("outbox event payload has an invalid days_left");
+      checkNotify(ev.payload, ["hr", "immigration"]);
       return {
-        subject: `Eureka: work authorization expires within ${days} days`,
+        subject: `Eureka: work authorization expires within ${plural(days, "day")}`,
         message: `A work authorization recorded in Eureka reaches its ${days}-day expiry notice.`,
         refLabel: "Candidate reference", refId: candidateId,
         inbox: {
-          title: `Work authorization expires within ${days} days`,
+          title: `Work authorization expires within ${plural(days, "day")}`,
           body: `A candidate's work authorization reaches its ${days}-day expiry notice. Open the candidate to review it.`,
           entity: { type: "candidate", id: candidateId },
         },
@@ -134,43 +153,78 @@ export const EVENT_SPECS: Record<string, EventSpec> = {
     },
   },
 
-  // FR-NTF-09 project-exit (FR-EMP-04, on assignment end): admin teams, BU, CEO.
-  "employee.exited": {
+  // FR-NTF-09 project-exit (FR-EMP-04, design B5 flow 6): an assignment ended and the employee is on the
+  // bench (producer: migration 0045 trigger on assignment end, bgc_failed after joining included).
+  // Admin teams, BU, CEO.
+  "employee.benched": {
     email: true, inApp: true,
     render: (ev) => {
+      aggregate(ev);
+      uuid(ev.payload, "personId");
+      uuid(ev.payload, "candidateId");
       uuid(ev.payload, "assignmentId");
       const placementId = uuid(ev.payload, "placementId");
-      uuid(ev.payload, "candidateId");
       date(ev.payload, "endDate");
       oneOf(ev.payload, "endReason", ["bgc_failed", "completed", "terminated", "resigned"] as const); // validated, never shown
+      checkNotify(ev.payload, ADMIN_TEAMS_BU_CEO);
       return {
         subject: "Eureka: project assignment ended",
-        message: "An employee's project assignment has ended in Eureka.",
+        message: "An employee's project assignment has ended in Eureka and the employee is on the bench.",
         refLabel: "Placement reference", refId: placementId,
         inbox: {
           title: "Project assignment ended",
-          body: "An employee's project assignment has ended. Open the placement for the details.",
+          body: "An employee's project assignment has ended and the employee is on the bench. Open the placement for the details.",
           entity: { type: "placement", id: placementId },
         },
       };
     },
   },
 
-  // Not in design B6: conservative default (HR and Accounts, in-app only); see docs/notifications.md.
+  // The employee left the company (bench -> exited; producer: authz.exit_employee, migration 0045).
+  // Same audience as project exit (FR-NTF-09).
+  "employee.exited": {
+    email: true, inApp: true,
+    render: (ev) => {
+      aggregate(ev);
+      uuid(ev.payload, "personId");
+      const candidateId = uuid(ev.payload, "candidateId");
+      uuid(ev.payload, "lastAssignmentId");
+      date(ev.payload, "exitDate");
+      oneOf(ev.payload, "exitReason", ["resigned", "terminated", "other"] as const); // validated, never shown
+      checkNotify(ev.payload, ADMIN_TEAMS_BU_CEO);
+      return {
+        subject: "Eureka: employee exit recorded",
+        message: "An employee's exit from the company was recorded in Eureka.",
+        refLabel: "Candidate reference", refId: candidateId,
+        inbox: {
+          title: "Employee exit recorded",
+          body: "An employee's exit from the company was recorded. Open the candidate for the details.",
+          entity: { type: "candidate", id: candidateId },
+        },
+      };
+    },
+  },
+
+  // Not in design B6 (producer: assignment-ending-soon job, migration 0045): HR and Accounts, in-app only
+  // (conservative default; see docs/notifications.md).
   "assignment.ending_soon": {
     email: false, inApp: true,
     render: (ev) => {
+      aggregate(ev);
       uuid(ev.payload, "assignmentId");
       const placementId = uuid(ev.payload, "placementId");
+      uuid(ev.payload, "personId");
       uuid(ev.payload, "candidateId");
-      date(ev.payload, "endDate");
-      const days = int(ev.payload, "daysBefore", 1, 365);
+      date(ev.payload, "plannedEndDate"); // validated, never shown
+      const days = int(ev.payload, "daysLeft", 0, 365);
+      checkNotify(ev.payload, ["hr", "accounts"]);
+      const when = days === 0 ? "today" : `within ${plural(days, "day")}`;
       return {
-        subject: `Eureka: project assignment ends within ${plural(days, "day")}`,
-        message: `A project assignment ends within ${plural(days, "day")}.`,
+        subject: `Eureka: project assignment ends ${when}`,
+        message: `A project assignment ends ${when}.`,
         refLabel: "Placement reference", refId: placementId,
         inbox: {
-          title: `Project assignment ends within ${plural(days, "day")}`,
+          title: `Project assignment ends ${when}`,
           body: "A project assignment is ending soon. Open the placement for the details.",
           entity: { type: "placement", id: placementId },
         },
@@ -178,14 +232,16 @@ export const EVENT_SPECS: Record<string, EventSpec> = {
     },
   },
 
-  // FR-NTF-05 bench-time: TL, recruiter, manager, CEO once bench > N days.
-  "employee.benched": {
+  // FR-NTF-05 bench-time (producer: the bench-time job, migration 0046): TL, recruiter, manager, CEO once
+  // a candidate has been on bench for N days. Distinct from employee.benched (the move to the bench).
+  "employee.bench_time": {
     email: true, inApp: true,
     render: (ev) => {
       const candidateId = uuid(ev.payload, "candidateId");
       date(ev.payload, "benchSince");
       int(ev.payload, "benchDays", 0, 36500);
       const threshold = int(ev.payload, "thresholdDays", 1, 365);
+      checkNotify(ev.payload, ["recruiter", "lead", "manager", "ceo"]);
       return {
         subject: `Eureka: candidate on bench for more than ${plural(threshold, "day")}`,
         message: `A candidate has been on bench for more than ${plural(threshold, "day")}.`,
@@ -206,6 +262,7 @@ export const EVENT_SPECS: Record<string, EventSpec> = {
       const candidateId = uuid(ev.payload, "candidateId");
       uuid(ev.payload, "teamId");
       optionalUuid(ev.payload, "fromTeamId");
+      checkNotify(ev.payload, ["lead", "manager"]);
       return {
         subject: "Eureka: candidate assigned to your team",
         message: "A candidate was assigned to a team you lead or manage.",
@@ -227,6 +284,7 @@ export const EVENT_SPECS: Record<string, EventSpec> = {
       const placementId = uuid(ev.payload, "placementId");
       optionalUuid(ev.payload, "assigneeId");
       const days = int(ev.payload, "daysOverdue", 0, 3650);
+      checkNotify(ev.payload, ["recruiter", "lead", "manager", "documents_team"]);
       return {
         subject: "Eureka: paperwork item overdue",
         message: `A paperwork checklist item on a placement is overdue (${plural(days, "day")}).`,

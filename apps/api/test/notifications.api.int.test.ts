@@ -48,7 +48,7 @@ async function call(key: Key, method: "GET" | "POST", url: string, payload?: unk
 async function notifyHrAndAccounts(days = 30) {
   const [a, p, c] = [await newId(db), await newId(db), await newId(db)];
   const ev = await emitEvent(db, "assignment.ending_soon", "assignment", a,
-    { assignmentId: a, placementId: p, candidateId: c, endDate: "2026-11-01", daysBefore: days });
+    { assignmentId: a, placementId: p, personId: a, candidateId: c, plannedEndDate: "2026-11-01", daysLeft: days, notify: ["hr", "accounts"] });
   await deliverInbox(db, ev);
   return { ev, placementId: p };
 }

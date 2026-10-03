@@ -88,10 +88,16 @@ async function placement() {
 }
 
 const PAYLOADS = {
-  workAuth: (cand: string, wa: string) => ({ workAuthorizationId: wa, candidateId: cand, validTo: "2027-01-15", daysBefore: 60 }),
-  exited: (a: string, p: string, cand: string) => ({ assignmentId: a, placementId: p, candidateId: cand, endDate: "2026-09-30", endReason: "terminated" }),
-  endingSoon: (a: string, p: string, cand: string) => ({ assignmentId: a, placementId: p, candidateId: cand, endDate: "2026-11-01", daysBefore: 30 }),
-  benched: (cand: string) => ({ candidateId: cand, benchSince: "2026-05-01", benchDays: 45, thresholdDays: 30 }),
+  // Shapes of the merged producers (0042 visa-expiry, 0045 employees); see docs/notifications.md.
+  workAuth: (cand: string, person: string) => ({ candidate_id: cand, person_id: person, expires_on: "2027-01-15",
+    threshold_days: 60, days_left: 45, notify: ["hr", "immigration"] }),
+  projectExit: (a: string, p: string, cand: string) => ({ personId: a, candidateId: cand, assignmentId: a, placementId: p,
+    endDate: "2026-09-30", endReason: "terminated", notify: ["hr", "accounts", "immigration", "bu_head", "ceo"] }),
+  exited: (person: string, a: string, cand: string) => ({ personId: person, candidateId: cand, lastAssignmentId: a,
+    exitDate: "2026-09-29", exitReason: "resigned", notify: ["hr", "accounts", "immigration", "bu_head", "ceo"] }),
+  endingSoon: (a: string, p: string, cand: string) => ({ assignmentId: a, placementId: p, personId: a, candidateId: cand,
+    plannedEndDate: "2026-11-01", daysLeft: 30, notify: ["hr", "accounts"] }),
+  benchTime: (cand: string) => ({ candidateId: cand, benchSince: "2026-05-01", benchDays: 45, thresholdDays: 30 }),
   assigned: (cand: string, team: string, from?: string) => ({ candidateId: cand, teamId: team, ...(from ? { fromTeamId: from } : {}) }),
   overdue: (item: string, p: string, assignee?: string) => ({ checklistItemId: item, placementId: p, daysOverdue: 3, ...(assignee ? { assigneeId: assignee } : {}) }),
 };
@@ -119,19 +125,21 @@ describe("recipients per event type (authz.notification_recipients)", () => {
     const a = await newId(db);
     const wa = await emitEvent(db, "work_authorization.expiring", "work_authorization", await newId(db), PAYLOADS.workAuth(cand, await newId(db)));
     expect(await recipients(wa)).toEqual(ids([[U.hr, "hr"], [U.imm, "immigration"]]));
-    const ex = await emitEvent(db, "employee.exited", "assignment", a, PAYLOADS.exited(a, placementId, cand));
+    const ex = await emitEvent(db, "employee.benched", "employee", a, PAYLOADS.projectExit(a, placementId, cand));
     expect(await recipients(ex)).toEqual(ids([[U.hr, "hr"], [U.acct, "accounts"], [U.imm, "immigration"], [X.bu!, "bu_head"], [U.ceo, "ceo"]]));
+    const left = await emitEvent(db, "employee.exited", "employee", a, PAYLOADS.exited(a, a, cand));
+    expect(await recipients(left)).toEqual(ids([[U.hr, "hr"], [U.acct, "accounts"], [U.imm, "immigration"], [X.bu!, "bu_head"], [U.ceo, "ceo"]]));
     const es = await emitEvent(db, "assignment.ending_soon", "assignment", a, PAYLOADS.endingSoon(a, placementId, cand));
     expect(await recipients(es)).toEqual(ids([[U.hr, "hr"], [U.acct, "accounts"]]));
   });
 
   it("bench-time reaches the candidate's recruiter, team lead, the lead's manager and the CEO", async () => {
     const t1 = await benchCandidate("2026-05-01");
-    const ev = await emitEvent(db, "employee.benched", "candidate", t1, PAYLOADS.benched(t1));
+    const ev = await emitEvent(db, "employee.bench_time", "candidate", t1, PAYLOADS.benchTime(t1));
     expect(await recipients(ev)).toEqual(ids([[U.r1a, "recruiter"], [U.l1, "lead"], [U.m1, "manager"], [U.ceo, "ceo"]]));
     // Another team: its own lead and manager; an unassigned recruiter adds nobody.
     const t3 = await benchCandidate("2026-05-01", T.t3, null);
-    const ev3 = await emitEvent(db, "employee.benched", "candidate", t3, PAYLOADS.benched(t3));
+    const ev3 = await emitEvent(db, "employee.bench_time", "candidate", t3, PAYLOADS.benchTime(t3));
     expect(await recipients(ev3)).toEqual(ids([[U.l3, "lead"], [U.m2, "manager"], [U.ceo, "ceo"]]));
   });
 
@@ -169,7 +177,7 @@ describe("recipients per event type (authz.notification_recipients)", () => {
 
   it("the p_user filter answers for one user (the re-check before a send)", async () => {
     const cand = await benchCandidate("2026-05-01");
-    const ev = await emitEvent(db, "employee.benched", "candidate", cand, PAYLOADS.benched(cand));
+    const ev = await emitEvent(db, "employee.bench_time", "candidate", cand, PAYLOADS.benchTime(cand));
     const one = await db.worker.query("SELECT recipient_id, reason FROM authz.notification_recipients($1, $2)", [ev, U.l1]);
     expect(one.rows).toEqual([{ recipient_id: U.l1, reason: "lead" }]);
     expect((await db.worker.query("SELECT 1 FROM authz.notification_recipients($1, $2)", [ev, U.r2a])).rowCount).toBe(0);
@@ -199,7 +207,7 @@ describe("delivery: inbox and email channels", () => {
   it("with mail disabled an emailing event gets its inbox rows once and waits; with mail it emails each recipient once", async () => {
     const { placementId, candidateId } = await placement();
     const a = await newId(db);
-    const ev = await emitEvent(db, "employee.exited", "assignment", a, PAYLOADS.exited(a, placementId, candidateId));
+    const ev = await emitEvent(db, "employee.benched", "employee", a, PAYLOADS.projectExit(a, placementId, candidateId));
     const noMail = outboxDeliveryJob(null, null, { batchSize: 500 });
     const keys = await noMail.dueKeys(new Date(), { pool: db.worker, log: silentLogger });
     expect(keys).toContain(`inbox:${ev}`);
@@ -229,7 +237,7 @@ describe("delivery: inbox and email channels", () => {
 
   it("email stays at most once per recipient for the new types: unknown outcome is in doubt and never resent", async () => {
     const cand = await benchCandidate("2026-04-01");
-    const ev = await emitEvent(db, "employee.benched", "candidate", cand, PAYLOADS.benched(cand));
+    const ev = await emitEvent(db, "employee.bench_time", "candidate", cand, PAYLOADS.benchTime(cand));
     const mail = new FakeMail((m) => (m.to === "l1@eureka.example" ? new Error("socket hang up") : null));
     const r = await deliverEvent(db.worker, mail, ORIGIN, ev, ctx());
     expect(r).toMatchObject({ recipients: 4, sent: 3, inDoubt: 1, inApp: 4 });
@@ -295,15 +303,31 @@ describe("delivery: inbox and email channels", () => {
   it("a malformed payload fails before anyone is notified", async () => {
     const cand = await benchCandidate("2026-05-01");
     for (const payload of [{ candidateId: "not-a-uuid", benchSince: "2026-05-01", benchDays: 1, thresholdDays: 30 },
-      { ...PAYLOADS.benched(cand), thresholdDays: 0 }, { ...PAYLOADS.benched(cand), benchSince: "May 1" }]) {
-      const ev = await emitEvent(db, "employee.benched", "candidate", cand, payload);
+      { ...PAYLOADS.benchTime(cand), thresholdDays: 0 }, { ...PAYLOADS.benchTime(cand), benchSince: "May 1" }]) {
+      const ev = await emitEvent(db, "employee.bench_time", "candidate", cand, payload);
       await expect(deliverEvent(db.worker, new FakeMail(), ORIGIN, ev, ctx())).rejects.toThrow(/invalid/);
       expect(await inbox(ev)).toEqual([]);
       expect(await rows("SELECT 1 FROM eureka.outbox_delivery WHERE event_id = $1", [ev])).toEqual([]);
     }
     const wa = await emitEvent(db, "work_authorization.expiring", "work_authorization", cand,
-      { ...PAYLOADS.workAuth(cand, cand), daysBefore: 45 });
-    await expect(deliverInbox(db, wa)).rejects.toThrow(/daysBefore/);
+      { ...PAYLOADS.workAuth(cand, cand), days_left: 61 });
+    await expect(deliverInbox(db, wa)).rejects.toThrow(/days_left/);
+  });
+
+  it("the registry decides recipients: a producer's notify list is only checked against the type's audience", async () => {
+    const { placementId, candidateId } = await placement();
+    const a = await newId(db);
+    // A narrower list does not narrow the audience (HR and Accounts both get it).
+    const narrow = await emitEvent(db, "assignment.ending_soon", "assignment", a,
+      { ...PAYLOADS.endingSoon(a, placementId, candidateId), notify: ["hr"] });
+    expect((await deliverInbox(db, narrow)).inApp).toBe(2);
+    expect(await inbox(narrow)).toEqual([U.hr, U.acct].sort());
+    // A list naming someone outside the audience fails the event before anyone is notified.
+    for (const notify of [["hr", "org_admin"], "hr", [1]]) {
+      const ev = await emitEvent(db, "assignment.ending_soon", "assignment", a, { ...PAYLOADS.endingSoon(a, placementId, candidateId), notify });
+      await expect(deliverInbox(db, ev)).rejects.toThrow(/notify/);
+      expect(await inbox(ev)).toEqual([]);
+    }
   });
 
   it("job scheduling without mail: email-only events wait, in-app-only events are delivered under their id", async () => {
@@ -330,15 +354,16 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
     const item = await newId(db);
     const events = [
       ["work_authorization.expiring", PAYLOADS.workAuth(candidateId, a)],
-      ["employee.exited", PAYLOADS.exited(a, placementId, candidateId)],
+      ["employee.benched", PAYLOADS.projectExit(a, placementId, candidateId)],
+      ["employee.exited", PAYLOADS.exited(a, a, candidateId)],
       ["assignment.ending_soon", PAYLOADS.endingSoon(a, placementId, candidateId)],
-      ["employee.benched", PAYLOADS.benched(candidateId)],
+      ["employee.bench_time", PAYLOADS.benchTime(candidateId)],
       ["candidate.assigned", PAYLOADS.assigned(candidateId, T.t1, T.t2)],
       ["checklist.item_overdue", PAYLOADS.overdue(item, placementId, X.docs)],
     ] as const;
     expect(events.map(([t]) => t).sort()).toEqual(Object.keys(EVENT_SPECS).filter((t) => !t.startsWith("placement.")).sort());
     const secrets = [person, "Placed", "81.25", "Irving", "Petra", "petra@vendor.example", "4695550188", "Northwind",
-      "2027-01-15", "2026-09-30", "2026-11-01", "2026-05-01", "terminated", "r1a", "Team Rohit"];
+      "2027-01-15", "2026-09-30", "2026-09-29", "2026-11-01", "2026-05-01", "terminated", "resigned", "r1a", "Team Rohit"];
     for (const [type, payload] of events) {
       const ev = await emitEvent(db, type, "candidate", candidateId, payload);
       const mail = new FakeMail();
@@ -358,13 +383,13 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
     const cand = await benchCandidate("2026-03-01");
     await db.worker.query("SELECT authz.emit_bench_time('2026-04-15', 30)");
     const p = (await rows<{ payload: Record<string, unknown> }>(
-      "SELECT payload FROM eureka.outbox_event WHERE type = 'employee.benched' AND aggregate_id = $1", [cand]))[0]!.payload;
+      "SELECT payload FROM eureka.outbox_event WHERE type = 'employee.bench_time' AND aggregate_id = $1", [cand]))[0]!.payload;
     expect(Object.keys(p).sort()).toEqual(["benchDays", "benchSince", "candidateId", "thresholdDays"]);
     expect(p).toEqual({ candidateId: cand, benchSince: "2026-03-01", benchDays: 45, thresholdDays: 30 });
   });
 
   it("the why-line and templates refuse unknown reasons and types", () => {
-    const ev = { id: "x", type: "employee.benched", aggregate_id: "00000000-0000-4000-8000-000000000001",
+    const ev = { id: "x", type: "employee.bench_time", aggregate_id: "00000000-0000-4000-8000-000000000001",
       payload: { candidateId: "00000000-0000-4000-8000-000000000001", benchSince: "2026-01-01", benchDays: 40, thresholdDays: 30 } };
     expect(() => renderEmail(ev, ORIGIN, ["org_admin"])).toThrow(/no known reason/);
     expect(() => renderEmail({ ...ev, type: "x.y" }, ORIGIN, ["ceo"])).toThrow(/not delivered/);
@@ -381,10 +406,10 @@ describe("inbox table privileges and RLS (migration 0046)", () => {
   beforeAll(async () => {
     const { placementId, candidateId } = await placement();
     const a = await newId(db);
-    evA = await emitEvent(db, "employee.exited", "assignment", a, PAYLOADS.exited(a, placementId, candidateId));
+    evA = await emitEvent(db, "employee.benched", "employee", a, PAYLOADS.projectExit(a, placementId, candidateId));
     await deliverInbox(db, evA);
     const cand = await benchCandidate("2026-05-01", T.t2, U.r2a);
-    evB = await emitEvent(db, "employee.benched", "candidate", cand, PAYLOADS.benched(cand));
+    evB = await emitEvent(db, "employee.bench_time", "candidate", cand, PAYLOADS.benchTime(cand));
     await deliverInbox(db, evB);
   });
 
@@ -437,7 +462,7 @@ describe("inbox table privileges and RLS (migration 0046)", () => {
     expect(await denied(db.worker, "SELECT title FROM eureka.notification")).toMatch(/permission denied/);
     expect(await denied(db.worker, "SELECT body FROM eureka.notification")).toMatch(/permission denied/);
     expect(await denied(db.worker, "UPDATE eureka.notification SET read_at = now()")).toMatch(/permission denied/);
-    const ins = (ev: string, type = "employee.exited") => denied(db.worker,
+    const ins = (ev: string, type = "employee.benched") => denied(db.worker,
       `INSERT INTO eureka.notification (recipient_id, event_id, type, entity_type, entity_id, title, body)
        VALUES ($1, $2, $3, 'candidate', gen_random_uuid(), 'T', 'B')`, [U.r3a, ev, type]);
     // The fan-out of evA is recorded (and it may be published): no more rows.
@@ -446,7 +471,7 @@ describe("inbox table privileges and RLS (migration 0046)", () => {
     const { placementId, candidateId } = await placement();
     const a = await newId(db);
     const fresh = await emitEvent(db, "assignment.ending_soon", "assignment", a, PAYLOADS.endingSoon(a, placementId, candidateId));
-    expect(await ins(fresh, "employee.exited")).toMatch(/row-level security/);        // type must match the event
+    expect(await ins(fresh, "employee.benched")).toMatch(/row-level security/);        // type must match the event
     expect(await ins(fresh, "assignment.ending_soon")).toMatch(/row-level security/); // r3a is not a recipient of it
     const c = await db.worker.connect();
     try {                                                                              // a recipient would be accepted
@@ -506,11 +531,11 @@ describe("inbox table privileges and RLS (migration 0046)", () => {
     expect(by["authz.notification_recipients"].worker).toBe(true);
     expect(by["authz.emit_bench_time"].worker).toBe(true);
     expect(by["authz.notification_emit_once"].worker).toBe(false);
-    expect(await denied(db.worker, "SELECT authz.notification_emit_once('bench-time', 'k', 'employee.benched', 'candidate', gen_random_uuid(), '{}')"))
+    expect(await denied(db.worker, "SELECT authz.notification_emit_once('bench-time', 'k', 'employee.bench_time', 'candidate', gen_random_uuid(), '{}')"))
       .toMatch(/permission denied/);
     // The worker still cannot write outbox events itself.
     expect(await denied(db.worker, `INSERT INTO eureka.outbox_event (type, aggregate_type, aggregate_id, payload)
-      VALUES ('employee.benched', 'candidate', gen_random_uuid(), '{}')`)).toMatch(/permission denied/);
+      VALUES ('employee.bench_time', 'candidate', gen_random_uuid(), '{}')`)).toMatch(/permission denied/);
     // The worker gained no read on candidate or placement rows.
     expect(await denied(db.worker, "SELECT 1 FROM eureka.candidate")).toMatch(/permission denied/);
     expect(await denied(db.worker, "SELECT 1 FROM eureka.placement")).toMatch(/permission denied/);
@@ -540,7 +565,7 @@ describe("time travel: scheduled notification jobs on a fixed clock", () => {
     const notBench = (await newCandidate(db, { teamId: T.t3, recruiterId: U.r3a, locationId: LOC.dallas })).id;
     await force("UPDATE eureka.candidate SET bench_since = '2026-01-01' WHERE id = $1", [notBench]); // not on bench: ignored
     const events = async () => (await rows<{ id: string; payload: { benchDays: number } }>(
-      "SELECT id, payload FROM eureka.outbox_event WHERE type = 'employee.benched' AND aggregate_id = ANY ($1) ORDER BY created_at",
+      "SELECT id, payload FROM eureka.outbox_event WHERE type = 'employee.bench_time' AND aggregate_id = ANY ($1) ORDER BY created_at",
       [[cand, notBench]]));
 
     expect(await runner.runOnce(job, "2026-06-08")).toBe("ran");                   // day 29

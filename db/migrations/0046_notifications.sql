@@ -22,7 +22,10 @@
 --    unpublished outbox event by type (role holders and/or the people around
 --    the candidate or placement), active users only. Used for the fan-out and
 --    for the re-check before each email. SECURITY DEFINER so the worker needs
---    no read access to candidate or placement rows.
+--    no read access to candidate or placement rows. The type decides the
+--    recipients; a producer's payload `notify` list is ignored here (the worker
+--    only checks it against the type's audience), except the placement events'
+--    groups (0022/0023), which select among hr, accounts and immigration.
 -- 4. eureka.notification_ledger + authz.notification_emit_once: durable
 --    "emitted once" keys for scheduled reminders (outbox rows are pruned after
 --    30 days; the ledger is not), callable from authz_definer functions only.
@@ -237,13 +240,15 @@ BEGIN
       SELECT DISTINCT g FROM pg_catalog.jsonb_array_elements_text(
         CASE WHEN pg_catalog.jsonb_typeof(v_payload -> 'notify') = 'array' THEN v_payload -> 'notify' ELSE '[]'::jsonb END) g
        WHERE g IN ('hr', 'accounts', 'immigration'));
-  ELSIF v_type = 'work_authorization.expiring' THEN      -- FR-NTF-11
+  ELSIF v_type = 'work_authorization.expiring' THEN      -- FR-NTF-11 (producer 0042)
     v_roles := ARRAY['hr', 'immigration'];
-  ELSIF v_type = 'employee.exited' THEN                  -- FR-NTF-09: admin teams, BU, CEO
+  ELSIF v_type IN ('employee.benched', 'employee.exited') THEN
+    -- FR-NTF-09 project exit (assignment ended, on the bench) and the exit
+    -- from the company (producer 0045): admin teams, BU, CEO.
     v_roles := ARRAY['hr', 'accounts', 'immigration', 'bu_head', 'ceo'];
-  ELSIF v_type = 'assignment.ending_soon' THEN           -- not in design: conservative default
+  ELSIF v_type = 'assignment.ending_soon' THEN           -- not in design: conservative default (producer 0045)
     v_roles := ARRAY['hr', 'accounts'];
-  ELSIF v_type = 'employee.benched' THEN                 -- FR-NTF-05: TL, recruiter, manager, CEO
+  ELSIF v_type = 'employee.bench_time' THEN              -- FR-NTF-05: TL, recruiter, manager, CEO
     v_roles := ARRAY['ceo'];
     SELECT c.recruiter_id, c.team_id INTO v_rec, v_team
       FROM eureka.candidate c WHERE c.id = (v_payload ->> 'candidateId')::uuid;
@@ -300,7 +305,7 @@ BEGIN
   RETURN ev;
 END $$;
 
--- FR-NTF-05 bench-time: one `employee.benched` event per candidate and bench
+-- FR-NTF-05 bench-time: one `employee.bench_time` event per candidate and bench
 -- period once the candidate has been on bench for p_threshold_days as of
 -- p_day (the job's America/New_York date; never a future day). Returns the
 -- number of events written. Ids, dates and counts only in the payload.
@@ -327,7 +332,7 @@ BEGIN
      ORDER BY c.bench_since, c.id
      LIMIT 5000
   LOOP
-    IF authz.notification_emit_once('bench-time', r.k, 'employee.benched', 'candidate', r.id,
+    IF authz.notification_emit_once('bench-time', r.k, 'employee.bench_time', 'candidate', r.id,
          pg_catalog.jsonb_build_object('candidateId', r.id, 'benchSince', r.bench_since,
            'benchDays', p_day - r.bench_since, 'thresholdDays', p_threshold_days)) IS NOT NULL THEN
       n := n + 1;

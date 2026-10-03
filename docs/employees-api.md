@@ -68,10 +68,10 @@ Audit actions: `assignment.ended` `{ endDate, reason, employeeFrom, employeeTo }
 `employee.exited` `{ from, to, exitDate, reason }`, `employee.returned_to_market` `{ candidateId }`, and
 `candidate.transition` `{ from, to, via: "employment" }` when the candidate moved.
 
-## Outbox events (for the notification jobs; rows only, not delivered yet)
+## Outbox events (delivered by `outbox-delivery`, migration 0046)
 
-All three are outside `DELIVERED_TYPES` of the 0024 delivery job, so they stay unpublished until a notification job
-handles them. `notify` lists recipient groups (role keys); delivery decides who actually gets what.
+Delivered by the notification jobs (`docs/notifications.md`). Recipients and channels come from the notification
+registry, not from the payload: `notify` is only checked against the type's audience (a mismatch fails the event).
 
 | type | aggregate | When | payload |
 |---|---|---|---|
