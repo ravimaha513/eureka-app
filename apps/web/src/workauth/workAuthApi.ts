@@ -43,7 +43,7 @@ export const workAuthApi = {
     api<{ id: string; rowVersion: number }>(`${base(candidateId)}/${enc(id)}`, {
       method: "PATCH", body: JSON.stringify(body), headers: { "if-match": `"${rowVersion}"` },
     }),
-  /** Audited on the server; needs a recent sign-in. */
+  /** Audited on the server; needs a step-up of this session (403 `step_up_required` otherwise). */
   reveal: (candidateId: string, id: string) =>
     api<{ id: string; number: string }>(`${base(candidateId)}/${enc(id)}/reveal`, { method: "POST" }),
 };

@@ -16,6 +16,9 @@ import { backdate, joinedEmployee } from "./employee-seed.js";
 import { LOCAL_UPLOAD_PATH } from "../src/platform/storage/document-storage.js";
 import { LocalDocumentStore } from "../src/worker/document-store.js";
 import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob } from "../src/worker/jobs/resume-scan.js";
+import { documentScanJob } from "../src/worker/jobs/document-scan.js";
+import { DEFAULT_SCAN_OPTIONS } from "../src/worker/jobs/scan-pipeline.js";
+import { StartStepUp } from "../src/modules/identity/step-up.controller.js";
 import { silentLogger } from "../src/worker/log.js";
 import { JobRunner } from "../src/worker/runner.js";
 
@@ -224,6 +227,14 @@ interface RejectCase {
   reports?: "errors" | "detail";
 }
 
+/** Fields a document upload never takes from the client (FR-PPR-01, migration 0043). */
+const DOCUMENT_FORBIDDEN: Record<string, unknown> = {
+  classification: "internal", status: "clean", scanResult: "NO_THREATS_FOUND", sha256: "a".repeat(64), sha256Hex: "a".repeat(64),
+  candidateId: FOREIGN_ID, placementId: FOREIGN_ID, fileId: FOREIGN_ID, documentId: FOREIGN_ID, uploadedBy: U.r1b,
+  key: `restricted/documents/${FOREIGN_ID}`, storageKey: `clean/documents/${FOREIGN_ID}`, kmsKeyAlias: "alias/other",
+  fileName: "../../etc/passwd", scannedAt: PAST, uploadExpiresAt: "2099-01-01T00:00:00Z", verifiedBy: U.hr, expiresOn: "2099-01-01",
+};
+
 const CASES: RejectCase[] = [
   // resumes (FR-CAN-07, migration 0036): status, scan result, version, digest, uploader and key are the server's
   {
@@ -255,6 +266,30 @@ const CASES: RejectCase[] = [
       recipientId: U.acct, userId: U.acct, readAt: PAST, read: false, ids: [FOREIGN_ID], eventId: FOREIGN_ID,
       type: "employee.exited", title: "Hijacked", entity: { type: "candidate", id: FOREIGN_ID },
     },
+  },
+  // paperwork documents (FR-PPR-01, migration 0043): classification, owner, status, file and key are the server's
+  {
+    route: "POST /api/v1/candidates/:id/documents", actor: "hr",
+    prepare: async () => {
+      const cand = await freshOwn();
+      return {
+        url: `/api/v1/candidates/${cand.id}/documents`, body: { docType: "offer_letter", contentType: PDF, size: 1234 },
+        state: () => rows(`SELECT (SELECT count(*)::int FROM eureka.document) AS d, (SELECT count(*)::int FROM eureka.file_object) AS f`),
+      };
+    },
+    forbidden: DOCUMENT_FORBIDDEN,
+  },
+  {
+    route: "POST /api/v1/placements/:id/documents", actor: "hr",
+    prepare: async () => {
+      const cand = await freshOwn();
+      const placement = (await createPlacement(db, U.r1a, await selectedSubmission(db, U.r1a, cand.id))).id;
+      return {
+        url: `/api/v1/placements/${placement}/documents`, body: { docType: "i9", contentType: PDF, size: 1234 },
+        state: () => rows(`SELECT (SELECT count(*)::int FROM eureka.document) AS d, (SELECT count(*)::int FROM eureka.file_object) AS f`),
+      };
+    },
+    forbidden: DOCUMENT_FORBIDDEN,
   },
   // work authorization (FR-VIS-01, migration 0042): person, ciphertext, key, audit columns and row version are the server's
   {
@@ -692,6 +727,65 @@ const IGNORED: IgnoreCase[] = [
     },
   },
   {
+    route: "POST /api/v1/documents/:documentId/download",
+    run: async () => {
+      const cand = await freshOwn();
+      const file = pdf("document download");
+      const r = await ok("r1a", "POST", `/api/v1/candidates/${cand.id}/documents`, { docType: "offer_letter", contentType: PDF, size: file.length });
+      const up = await app.inject({ method: "POST", url: r.upload.url, ...form(r.upload.fields, file) });
+      expect(up.statusCode, up.body).toBe(204);
+      await new JobRunner(db.worker, [documentScanJob(new LocalDocumentStore(docs), DEFAULT_SCAN_OPTIONS)], silentLogger).tick();
+      const before = await rows(`SELECT * FROM eureka.document ORDER BY id`);
+      const res = await call("r1a", "POST", `/api/v1/documents/${r.id}/download`, {
+        ...SERVER_MANAGED, key: `restricted/documents/${FOREIGN_ID}`, fileId: FOREIGN_ID, classification: "restricted",
+        fileName: "payload.html", contentType: "text/html", expiresSeconds: 86_400, stepUpGrantId: FOREIGN_ID,
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      const { url, expiresAt } = res.json() as { url: string; expiresAt: string };
+      expect(Date.parse(expiresAt) - Date.now()).toBeLessThanOrEqual(60_000);
+      const got = await app.inject({ method: "GET", url });
+      expect(got.rawPayload.equals(file)).toBe(true);
+      expect(got.headers["content-type"]).toBe(PDF);
+      expect(String(got.headers["content-disposition"])).not.toContain("payload.html");
+      expect(await rows(`SELECT * FROM eureka.document ORDER BY id`)).toEqual(before);
+      const log = await rows(`SELECT user_id, classification, step_up_grant_id FROM eureka.document_access WHERE document_id = $1`, [r.id]);
+      expect(log).toEqual([{ user_id: U.r1a, classification: "internal", step_up_grant_id: null }]);
+    },
+  },
+  {
+    route: "POST /api/auth/step-up/dev",
+    run: async () => {
+      await rows(`INSERT INTO authz.policy_setting (key, value) VALUES ('dev_step_up', 'on') ON CONFLICT (key) DO UPDATE SET value = 'on'`);
+      try {
+        const mine = await login("acct", true);
+        const victim = await login("hr", true);
+        const res = await call(null, "POST", "/api/auth/step-up/dev",
+          { ...SERVER_MANAGED, userId: U.hr, sessionId: victim.cookie, method: "google", ttlMinutes: 600, expiresAt: "2099-01-01T00:00:00Z", authTime: PAST },
+          {}, mine);
+        expect(res.statusCode, res.body).toBe(200);
+        expect(Date.parse(res.json().expiresAt) - Date.now()).toBeLessThanOrEqual(15 * 60_000);
+        const grants = await rows(`SELECT user_id, method FROM eureka.step_up_grant WHERE user_id = ANY($1)`, [[U.acct, U.hr]]);
+        expect(grants).toEqual([{ user_id: U.acct, method: "dev" }]);
+        expect((await call(null, "GET", "/api/auth/step-up", undefined, {}, victim)).json()).toMatchObject({ active: false });
+      } finally {
+        await rows(`DELETE FROM authz.policy_setting WHERE key = 'dev_step_up'`);
+      }
+    },
+  },
+  {
+    // Google mode only (this app runs AUTH_MODE=dev, where it is 404); its strict schema is checked directly.
+    route: "POST /api/auth/step-up/start",
+    run: async () => {
+      expect((await call("hr", "POST", "/api/auth/step-up/start", { returnTo: "/" })).statusCode).toBe(404);
+      for (const [field, value] of Object.entries({ ...SERVER_MANAGED, userId: U.r1a, sessionHash: "x", state: "s", nonce: "n",
+        redirectUri: "https://evil.example/cb", expiresAt: "2099-01-01T00:00:00Z", maxAge: 99999 })) {
+        const r = StartStepUp.safeParse({ returnTo: "/", [field]: value });
+        expect(r.success, field).toBe(false);
+      }
+      expect(StartStepUp.safeParse({ returnTo: "/candidates" }).success).toBe(true);
+    },
+  },
+  {
     // The reveal takes no body: the record comes from the URL, the reader from the session.
     route: "POST /api/v1/candidates/:id/work-authorizations/:waId/reveal",
     run: async () => {
@@ -699,14 +793,23 @@ const IGNORED: IgnoreCase[] = [
       const a = await ok("imm", "POST", `/api/v1/candidates/${cand.id}/work-authorizations`, { type: "h1b", number: "AAA111", status: "valid" });
       const b = await ok("imm", "POST", `/api/v1/candidates/${cand.id}/work-authorizations`, { type: "h1b", number: "BBB222", status: "valid" });
       const before = await rows(`SELECT * FROM eureka.work_authorization ORDER BY id`);
-      const r = await call("imm", "POST", `/api/v1/candidates/${cand.id}/work-authorizations/${a.id}/reveal`, {
-        ...SERVER_MANAGED, waId: b.id, candidateId: FOREIGN_ID, actorId: U.hr, number: "ZZZ999",
-      });
+      // The reveal needs a step-up of this session (development step-up here).
+      await rows(`INSERT INTO authz.policy_setting (key, value) VALUES ('dev_step_up', 'on') ON CONFLICT (key) DO UPDATE SET value = 'on'`);
+      const s = await login("imm", true);
+      try {
+        expect((await call(null, "POST", "/api/auth/step-up/dev", undefined, {}, s)).statusCode).toBe(200);
+      } finally {
+        await rows(`DELETE FROM authz.policy_setting WHERE key = 'dev_step_up'`);
+      }
+      const r = await call(null, "POST", `/api/v1/candidates/${cand.id}/work-authorizations/${a.id}/reveal`, {
+        ...SERVER_MANAGED, waId: b.id, candidateId: FOREIGN_ID, actorId: U.hr, number: "ZZZ999", stepUpGrantId: FOREIGN_ID,
+      }, {}, s);
       expect(r.statusCode, r.body).toBe(200);
       expect(r.json()).toEqual({ id: a.id, number: "AAA111" });
       expect(await rows(`SELECT * FROM eureka.work_authorization ORDER BY id`)).toEqual(before);
       const audit = await rows(`SELECT actor_id, entity_id, changes FROM eureka.audit_event WHERE action = 'work_authorization.number_revealed' ORDER BY seq DESC LIMIT 1`);
-      expect(audit).toEqual([{ actor_id: U.imm, entity_id: a.id, changes: { candidateId: cand.id } }]);
+      expect(audit).toEqual([{ actor_id: U.imm, entity_id: a.id, changes: { candidateId: cand.id, stepUpGrantId: expect.any(String) } }]);
+      expect(audit[0]!.changes.stepUpGrantId).not.toBe(FOREIGN_ID);
     },
   },
   {

@@ -3,11 +3,13 @@
  * as eureka_worker (no BYPASSRLS, owns nothing; grants in migrations 0016, 0020).
  * Jobs: audit-export (nightly, 03:30 America/New_York), feedback email and
  * notification, outbox delivery (every tick), outbox prune and idempotency-key
- * cleanup (daily, schedules in worker/schedule.ts), resume scan-and-promote (every
- * tick, when DOCUMENTS_BUCKET or LOCAL_STORAGE_DIR is set), notification inbox prune (daily) and
- * the bench-time reminder (daily, when NOTIFY_BENCH_DAYS is set), assignment-ending-soon outbox rows
- * (daily), field key rotation (monthly) and work authorization expiry notices (daily). The outbox
- * delivery job always runs: without a mail mode it delivers the in-app inbox channel only
+ * cleanup (daily, schedules in worker/schedule.ts), resume and document
+ * scan-and-promote (every tick, when DOCUMENTS_BUCKET or LOCAL_STORAGE_DIR is
+ * set; documents also need RESTRICTED_KMS_KEY_ARN with S3), notification inbox
+ * prune (daily), the bench-time reminder (daily, when NOTIFY_BENCH_DAYS is set),
+ * assignment-ending-soon outbox rows (daily), field key rotation (monthly) and
+ * work authorization expiry notices (daily). The outbox delivery job always
+ * runs: without a mail mode it delivers the in-app inbox channel only
  * (docs/notifications.md).
  */
 import { utimes, writeFile } from "node:fs/promises";
@@ -24,6 +26,7 @@ import { JobRunner } from "./worker/runner.js";
 import { DirSink, S3Sink, type ExportSink } from "./worker/sink.js";
 import { LocalDocumentStore, S3DocumentStore } from "./worker/document-store.js";
 import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob } from "./worker/jobs/resume-scan.js";
+import { documentScanJob } from "./worker/jobs/document-scan.js";
 import { assignmentEndingSoonJob } from "./worker/jobs/assignment-ending-soon.js";
 import { FieldCipher } from "./platform/crypto/field-crypto.js";
 import { createKeyProvider } from "./platform/crypto/config.js";
@@ -90,14 +93,20 @@ if (config.DOCUMENTS_BUCKET || config.LOCAL_STORAGE_DIR) {
       requestHandler: { requestTimeout: 30_000, connectionTimeout: 5_000 },
     }), config.DOCUMENTS_BUCKET)
     : new LocalDocumentStore(config.LOCAL_STORAGE_DIR!);
-  jobs.push(resumeScanJob(store, {
+  const scanOptions = {
     ...DEFAULT_RESUME_SCAN_OPTIONS,
     scanTimeoutMs: config.RESUME_SCAN_TIMEOUT_MINUTES * 60_000,
     uploadGraceMs: config.RESUME_UPLOAD_GRACE_MINUTES * 60_000,
     maxVersionsPerKey: config.RESUME_MAX_KEY_VERSIONS,
-  }));
+  };
+  jobs.push(resumeScanJob(store, scanOptions));
+  if (store.kind === "local" || config.RESTRICTED_KMS_KEY_ARN) {
+    jobs.push(documentScanJob(store, scanOptions, config.RESTRICTED_KMS_KEY_ARN));
+  } else {
+    log.warn("document-scan is off (set RESTRICTED_KMS_KEY_ARN); uploaded documents stay pending");
+  }
 } else {
-  log.warn("resume-scan is off (set DOCUMENTS_BUCKET or LOCAL_STORAGE_DIR); uploaded resumes stay pending");
+  log.warn("resume-scan and document-scan are off (set DOCUMENTS_BUCKET or LOCAL_STORAGE_DIR); uploads stay pending");
 }
 const runner = new JobRunner(pool, jobs, log, heartbeat);
 runner.start(config.JOB_TICK_SECONDS * 1000);

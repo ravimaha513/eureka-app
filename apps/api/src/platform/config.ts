@@ -28,6 +28,11 @@ const ConfigSchema = z
     PUBLIC_BASE_URL: z.string().url().default("http://localhost:5173"),
     SESSION_IDLE_MINUTES: z.coerce.number().int().positive().default(60),
     SESSION_ABSOLUTE_HOURS: z.coerce.number().int().positive().default(12),
+    // Step-up (design A6.1): how long a fresh re-authentication opens restricted
+    // documents for this session (the database caps it at 15 minutes), and how
+    // old the Google sign-in (auth_time) may be when the step-up completes.
+    STEP_UP_TTL_MINUTES: z.coerce.number().int().min(1).max(15).default(10),
+    STEP_UP_MAX_AGE_SECONDS: z.coerce.number().int().min(30).max(900).default(300),
     // Shared secret CloudFront adds as X-Origin-Verify. The API Gateway endpoint
     // is publicly addressable, so requests without it (bypassing CloudFront and
     // its WAF) are rejected. Required in production. For rotation it may be a

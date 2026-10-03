@@ -1,7 +1,7 @@
 import { S3Client } from "@aws-sdk/client-s3";
 import { describe, expect, it } from "vitest";
 import { decideScan, DEFAULT_RESUME_SCAN_OPTIONS } from "../../worker/jobs/resume-scan.js";
-import { resumeCleanKey, resumeDownloadName, resumeQuarantineKey } from "./content.js";
+import { documentDownloadName, documentQuarantineKey, documentStoredKey, resumeCleanKey, resumeDownloadName, resumeQuarantineKey } from "./content.js";
 import { LocalDocumentStorage, S3DocumentStorage, attachmentDisposition } from "./document-storage.js";
 import { localPath } from "./local-files.js";
 import { parseMultipart } from "./local-routes.js";
@@ -66,6 +66,25 @@ describe("object keys", () => {
     expect(() => resumeCleanKey("x")).toThrow();
     expect(localPath("/tmp/docs", resumeCleanKey(ID))).toBe(`/tmp/docs/clean/resumes/${ID}`);
     expect(() => localPath("/tmp/docs", "clean/resumes/../../../etc/passwd")).toThrow();
+  });
+
+  it("documents: quarantine for every upload; clean/ or restricted/ by classification; names from the type", () => {
+    expect(documentQuarantineKey(ID)).toBe(`quarantine/documents/${ID}`);
+    expect(documentStoredKey(ID, "internal")).toBe(`clean/documents/${ID}`);
+    expect(documentStoredKey(ID, "restricted")).toBe(`restricted/documents/${ID}`);
+    expect(() => documentStoredKey("../x", "restricted")).toThrow();
+    expect(localPath("/tmp/docs", documentStoredKey(ID, "restricted"))).toBe(`/tmp/docs/restricted/documents/${ID}`);
+    expect(() => localPath("/tmp/docs", `public/documents/${ID}`)).toThrow();
+    expect(documentDownloadName("work_authorization", ID, "image/jpeg")).toBe("work-authorization-0b9f0f3e.jpg");
+    expect(() => documentDownloadName("../evil", ID, PDF)).toThrow();
+  });
+
+  it("downloads are signed for clean/ and restricted/ objects, never quarantine/", async () => {
+    const url = new URL(await storage.presignDownload({ key: documentStoredKey(ID, "restricted"), contentType: PDF, fileName: "i9-0b9f0f3e.pdf", expiresSeconds: 300 }));
+    expect(url.pathname).toBe(`/restricted/documents/${ID}`);
+    expect(url.searchParams.get("X-Amz-Expires")).toBe("300");
+    await expect(storage.presignDownload({ key: documentQuarantineKey(ID), contentType: PDF, fileName: "a.pdf", expiresSeconds: 60 })).rejects.toThrow(/clean/);
+    await expect(storage.presignUpload({ key: documentStoredKey(ID, "restricted"), contentType: PDF, size: 1, expiresSeconds: 60 })).rejects.toThrow(/quarantine/);
   });
 });
 describe("local driver policies", () => {

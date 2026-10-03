@@ -8,13 +8,15 @@ import { ApiError } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
 import { Field, fmtDate, useFocusAfterFailure } from "../sales/ui";
 import { workAuthApi, workAuthKeys, type WorkAuthInput, type WorkAuthorization } from "./workAuthApi";
+import { StepUpDialog } from "../documents/StepUpDialog";
+import { documentKeys, isStepUpRequired } from "../documents/documentsApi";
 
 /** A revealed number is hidden again after this long. */
 export const REVEAL_VISIBLE_MS = 60_000;
 
 export function workAuthError(e: unknown, action: "load" | "save" | "reveal"): string {
   if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";
-  if (e.detail === "step_up_required") return "For your security, sign out and sign in again, then show the number within 15 minutes.";
+  if (e.detail === "step_up_required") return "Confirm it's you to show the number.";
   switch (e.status) {
     case 401: return "Your session ended. Sign in again.";
     case 403: return action === "save" ? "You can't change work authorization for this candidate." : "You can't see work authorization for this candidate.";
@@ -38,7 +40,8 @@ function expiryText(w: WorkAuthorization): string {
  * Work authorization on the candidate profile (FR-VIS-01, 02). Shown to
  * visa:read holders (HR, Immigration); the server decides per candidate
  * (403/404 hide the section). Numbers are masked; "Show number" asks the
- * server, which audits each reveal and needs a recent sign-in.
+ * server, which audits each reveal and needs a step-up of this session
+ * ("Confirm it's you", the same as restricted documents).
  */
 export function CandidateWorkAuthorization({ candidateId }: { candidateId: string }) {
   const qc = useQueryClient();
@@ -47,6 +50,7 @@ export function CandidateWorkAuthorization({ candidateId }: { candidateId: strin
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [editing, setEditing] = useState<WorkAuthorization | "new" | null>(null);
+  const [stepUpFor, setStepUpFor] = useState<WorkAuthorization | null>(null);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const q = useQuery({ queryKey: workAuthKeys.list(candidateId), queryFn: () => workAuthApi.list(candidateId) });
@@ -70,7 +74,8 @@ export function CandidateWorkAuthorization({ candidateId }: { candidateId: strin
       timers.current.set(w.id, setTimeout(() => hide(w.id), REVEAL_VISIBLE_MS));
       setMessage(`${WORK_AUTH_TYPES[w.type]} number shown. It hides again in a minute.`);
     } catch (err) {
-      setError(workAuthError(err, "reveal"));
+      if (isStepUpRequired(err)) setStepUpFor(w);
+      else setError(workAuthError(err, "reveal"));
     } finally {
       setBusy(null);
     }
@@ -133,6 +138,10 @@ export function CandidateWorkAuthorization({ candidateId }: { candidateId: strin
             if (editing !== "new") hide(editing.id);
             void qc.invalidateQueries({ queryKey: workAuthKeys.list(candidateId) });
           }} />
+      )}
+      {stepUpFor && (
+        <StepUpDialog onClose={() => setStepUpFor(null)}
+          onConfirmed={() => { const w = stepUpFor; setStepUpFor(null); void qc.invalidateQueries({ queryKey: documentKeys.stepUp }); void reveal(w); }} />
       )}
     </section>
   );

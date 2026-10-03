@@ -61,6 +61,10 @@ const WorkerConfigSchema = z
     RESUME_UPLOAD_GRACE_MINUTES: z.coerce.number().int().min(1).max(120).default(10),
     // More object versions than this under one quarantine key (a replayed presigned POST) logs an alert.
     RESUME_MAX_KEY_VERSIONS: z.coerce.number().int().min(1).max(100).default(3),
+    // document-scan: restricted files (I-9, driving license, work authorization) are
+    // promoted to restricted/ under this KMS key (the documents bucket's data key is never used for them).
+    // Unset with DOCUMENTS_BUCKET: document-scan is off and uploaded documents stay pending.
+    RESTRICTED_KMS_KEY_ARN: z.string().regex(/^arn:aws[a-z-]*:kms:[a-z0-9-]+:\d{12}:key\/[A-Za-z0-9-]+$/).optional(),
     // Field encryption (key-rotation job): FIELD_KMS_KEY_ARN in AWS, the local
     // provider otherwise (refused in production). The worker never computes blind indexes.
     FIELD_KMS_KEY_ARN: fieldCryptoEnv.FIELD_KMS_KEY_ARN,

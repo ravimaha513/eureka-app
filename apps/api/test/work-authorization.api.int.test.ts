@@ -22,6 +22,8 @@ const NUMBER = "EAC2190054321";
 beforeAll(async () => {
   db = await createTestDb();
   candidates = await seedFixtures(db.admin);
+  // The reveal needs a step-up grant (migration 0043); tests use the development step-up.
+  await db.admin.query(`INSERT INTO authz.policy_setting (key, value) VALUES ('dev_step_up', 'on')`);
   const url = new URL(process.env.TEST_PG_ADMIN_URL ?? "postgres://postgres:postgres@127.0.0.1:5432");
   app = await createApp(loadConfig({
     NODE_ENV: "test", AUTH_MODE: "dev", SESSION_SECRET: "test-secret-test-secret-test-secret-123",
@@ -36,7 +38,8 @@ afterAll(async () => {
 
 type Session = { cookie: string; csrf: string };
 const sessions = new Map<string, Session>();
-async function login(key: keyof typeof U, fresh = false): Promise<Session> {
+/** Signs in; `stepUp` (default) also takes the development step-up for this session. */
+async function login(key: keyof typeof U, fresh = false, stepUp = true): Promise<Session> {
   const cached = sessions.get(key);
   if (cached && !fresh) return cached;
   const res = await app.inject({ method: "POST", url: "/api/auth/dev-login", payload: { email: `${key}@eureka.example` } });
@@ -44,6 +47,10 @@ async function login(key: keyof typeof U, fresh = false): Promise<Session> {
   const cookie = String(res.headers["set-cookie"]).split(";")[0]!;
   const me = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie } });
   const s = { cookie, csrf: me.json().csrfToken as string };
+  if (stepUp) {
+    const g = await app.inject({ method: "POST", url: "/api/auth/step-up/dev", headers: { cookie, "x-csrf-token": s.csrf } });
+    expect(g.statusCode).toBe(200);
+  }
   sessions.set(key, s);
   return s;
 }
@@ -110,7 +117,7 @@ describe("number: encrypted, masked, revealed only through the audited call", ()
       expect(r.json()).toEqual({ id, number: NUMBER });
       expect(r.headers["cache-control"]).toBe("no-store");
       const audit = (await db.admin.query(`SELECT actor_id, action, entity_type, entity_id, changes FROM eureka.audit_event WHERE seq > $1`, [before])).rows;
-      expect(audit).toEqual([{ actor_id: U[key], action: "work_authorization.number_revealed", entity_type: "work_authorization", entity_id: id, changes: { candidateId: cand.id } }]);
+      expect(audit).toEqual([{ actor_id: U[key], action: "work_authorization.number_revealed", entity_type: "work_authorization", entity_id: id, changes: { candidateId: cand.id, stepUpGrantId: expect.any(String) } }]);
     }
     expect(await auditText()).not.toContain(NUMBER);
     expect(await outboxText()).not.toContain(NUMBER);
@@ -123,21 +130,38 @@ describe("number: encrypted, masked, revealed only through the audited call", ()
     expect((await call("imm", "POST", `${base(other.id)}/${id}/reveal`)).statusCode).toBe(404);
   });
 
-  it("reveal needs a sign-in within 15 minutes (step-up); a stale session gets 403 step_up_required and no audit row", async () => {
+  it("reveal needs a live step-up of this session (shared step-up, A6.1): none, expired or another session's -> 403 step_up_required, no audit row", async () => {
     const cand = await fresh();
     const { id } = await created(cand.id);
-    const s = await login("hr", true);
-    await db.admin.query(`UPDATE eureka.session SET auth_time = now() - interval '16 minutes' WHERE user_id = $1`, [U.hr]);
-    const before = (await db.admin.query(`SELECT count(*)::int AS n FROM eureka.audit_event WHERE action = 'work_authorization.number_revealed'`)).rows[0].n;
-    const r = await app.inject({ method: "POST", url: `${base(cand.id)}/${id}/reveal`, headers: { cookie: s.cookie, "x-csrf-token": s.csrf } });
+    const revealed = async () => (await db.admin.query(`SELECT count(*)::int AS n FROM eureka.audit_event WHERE action = 'work_authorization.number_revealed'`)).rows[0].n as number;
+    const reveal = (s: Session) => app.inject({ method: "POST", url: `${base(cand.id)}/${id}/reveal`, headers: { cookie: s.cookie, "x-csrf-token": s.csrf } });
+    const before = await revealed();
+    // A fresh sign-in alone is not a step-up; another session's grant does not count.
+    await login("hr", true, true);
+    sessions.delete("hr");
+    const s = await login("hr", true, false);
+    sessions.delete("hr");
+    const r = await reveal(s);
     expect(r.statusCode).toBe(403);
     expect(r.json().detail).toBe("step_up_required");
     expect(r.body).not.toContain(NUMBER);
-    expect((await db.admin.query(`SELECT count(*)::int AS n FROM eureka.audit_event WHERE action = 'work_authorization.number_revealed'`)).rows[0].n).toBe(before);
-    sessions.delete("hr");
-    const again = await login("hr", true);
-    const ok = await app.inject({ method: "POST", url: `${base(cand.id)}/${id}/reveal`, headers: { cookie: again.cookie, "x-csrf-token": again.csrf } });
-    expect(ok.statusCode).toBe(200);
+    // With a grant: allowed; once it has expired: refused again.
+    expect((await app.inject({ method: "POST", url: "/api/auth/step-up/dev", headers: { cookie: s.cookie, "x-csrf-token": s.csrf } })).statusCode).toBe(200);
+    expect((await reveal(s)).statusCode).toBe(200);
+    expect(await revealed()).toBe(before + 1);
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL session_replication_role = replica");
+      await c.query(`UPDATE eureka.step_up_grant SET created_at = now() - interval '11 minutes', expires_at = now() - interval '1 second' WHERE user_id = $1`, [U.hr]);
+      await c.query("COMMIT");
+    } finally {
+      c.release();
+    }
+    const stale = await reveal(s);
+    expect(stale.statusCode).toBe(403);
+    expect(stale.json().detail).toBe("step_up_required");
+    expect(await revealed()).toBe(before + 1);
   });
 
   it("a record without a number cannot be revealed (409)", async () => {
