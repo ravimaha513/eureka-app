@@ -8,7 +8,7 @@
  * set; documents also need RESTRICTED_KMS_KEY_ARN with S3), notification inbox
  * prune (daily), the bench-time reminder (daily, when NOTIFY_BENCH_DAYS is set),
  * assignment-ending-soon outbox rows (daily), field key rotation (monthly) and
- * work authorization expiry notices (daily). The outbox delivery job always
+ * work authorization expiry notices and paperwork-overdue reminders (daily). The outbox delivery job always
  * runs: without a mail mode it delivers the in-app inbox channel only
  * (docs/notifications.md).
  */
@@ -28,6 +28,7 @@ import { LocalDocumentStore, S3DocumentStore } from "./worker/document-store.js"
 import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob } from "./worker/jobs/resume-scan.js";
 import { documentScanJob } from "./worker/jobs/document-scan.js";
 import { assignmentEndingSoonJob } from "./worker/jobs/assignment-ending-soon.js";
+import { paperworkOverdueJob } from "./worker/jobs/paperwork-overdue.js";
 import { FieldCipher } from "./platform/crypto/field-crypto.js";
 import { createKeyProvider } from "./platform/crypto/config.js";
 import { keyRotationJob } from "./worker/jobs/key-rotation.js";
@@ -67,6 +68,8 @@ const jobs = [
   keyRotationJob(new FieldCipher(createKeyProvider(config)), { batchSize: config.KEY_ROTATION_BATCH_SIZE }),
   // Work authorization expiry notices into the outbox (delivered by the notification jobs).
   visaExpiryJob(config.WORK_AUTH_EXPIRY_NOTICE_DAYS),
+  // Paperwork items past their due date (FR-NTF-04, migration 0049), once per item and due date.
+  paperworkOverdueJob(),
 ];
 {
   // Without a mail mode only the in-app channel is delivered; emailing events stay unpublished.

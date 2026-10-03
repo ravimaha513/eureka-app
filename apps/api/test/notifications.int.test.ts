@@ -46,6 +46,20 @@ async function force(sql: string, params: unknown[] = []) {
   }
 }
 
+/**
+ * A checklist item of the placement assigned to `assignee` (test setup, guards off). Since 0049 the
+ * resolver adds a Documents Team assignee only when the payload names the item's current assignee.
+ */
+async function itemAssigned(placementId: string, assignee: string): Promise<string> {
+  const id = await newId(db);
+  await force(`INSERT INTO eureka.checklist_item (id, placement_id, kind, position, doc_type, owner_role, required,
+                 candidate_id, recruiter_id, team_id, location_id, assignee_id)
+               SELECT $1, p.id, 'paperwork', 1, 'sample_ntf_doc', 'documents_team', true,
+                      p.candidate_id, p.recruiter_id, p.team_id, p.location_id, $3
+                 FROM eureka.placement p WHERE p.id = $2`, [id, placementId, assignee]);
+  return id;
+}
+
 const err = (p: Promise<unknown>) => p.then(() => "allowed", (e: Error) => e.message);
 const denied = (pool: pg.Pool, sql: string, params: unknown[] = []) => err(pool.query(sql, params));
 const rows = async <R extends Record<string, unknown> = Record<string, unknown>>(sql: string, params: unknown[] = []) =>
@@ -153,7 +167,7 @@ describe("recipients per event type (authz.notification_recipients)", () => {
 
   it("paperwork overdue reaches the placement's recruiter, lead and manager, plus a Documents Team assignee", async () => {
     const { placementId } = await placement();
-    const item = await newId(db);
+    const item = await itemAssigned(placementId, X.docs!);
     const ev = await emitEvent(db, "checklist.item_overdue", "checklist_item", item, PAYLOADS.overdue(item, placementId, X.docs));
     expect(await recipients(ev)).toEqual(ids([[U.r1a, "recruiter"], [U.l1, "lead"], [U.m1, "manager"], [X.docs!, "documents_team"]]));
     // An assignee who is not on the Documents Team is ignored.
@@ -268,7 +282,7 @@ describe("delivery: inbox and email channels", () => {
 
   it("a provider rejection retries that recipient only; recipients who left are skipped", async () => {
     const { placementId } = await placement();
-    const item = await newId(db);
+    const item = await itemAssigned(placementId, X.docs!);
     const ev = await emitEvent(db, "checklist.item_overdue", "checklist_item", item, PAYLOADS.overdue(item, placementId, X.docs));
     let reject = true;
     const mail = new FakeMail((m) => (reject && m.to === "docs@eureka.example" ? new MailRejected("bad") : null));

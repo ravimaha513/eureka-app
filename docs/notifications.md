@@ -57,7 +57,7 @@ among `hr`, `accounts`, `immigration`.
 | `assignment.ending_soon` | not in design B6 | 0045 job `assignment-ending-soon` (`authz.assignment_ending_soon_scan`) | `assignmentId`, `placementId`, `personId`, `candidateId`, `plannedEndDate`, `daysLeft` (0..365), `notify` | `hr`, `accounts` (conservative default) | `hr`, `accounts` | inbox only | placement |
 | `employee.bench_time` | FR-NTF-05 (bench-time) | 0046 job `bench-time` (`authz.emit_bench_time`) | `candidateId`, `benchSince`, `benchDays`, `thresholdDays` | the candidate's recruiter, its team's lead, that lead's manager (reporting line), `ceo` | `recruiter`, `lead`, `manager`, `ceo` | email + inbox | candidate |
 | `candidate.assigned` | FR-NTF-10, FR-EMP-05 (team assigned) | not emitted yet (team reassignment) | `candidateId`, `teamId` (the new team), optional `fromTeamId` | the new team's lead and that lead's manager | `lead`, `manager` | email + inbox | candidate |
-| `checklist.item_overdue` | FR-NTF-04 (paperwork pending), FR-NTF-03 / FR-VIS-04 (documents pending) | paperwork/BGC (0044), not merged yet | `checklistItemId`, `placementId`, `daysOverdue` (0..3650), optional `assigneeId` | the placement's recruiter, the lead of its team snapshot, that lead's manager; plus `assigneeId` when that user holds `documents_team` | `recruiter`, `lead`, `manager`, `documents_team` | email + inbox | placement |
+| `checklist.item_overdue` | FR-NTF-04 (paperwork pending), FR-NTF-03 / FR-VIS-04 (documents pending) | 0049 job `paperwork-overdue` (`authz.emit_paperwork_overdue`): outstanding (pending/received) items past `due_on` on placements not backed out, once per item and due date | `checklistItemId`, `placementId`, `daysOverdue` (0..3650), optional `assigneeId` | the placement's recruiter, the lead of its team snapshot, that lead's manager; plus `assigneeId` when that user holds `documents_team` and is the item's current assignee (checked by the resolver, 0049) | `recruiter`, `lead`, `manager`, `documents_team` | email + inbox | placement |
 
 `employee.benched` (0045) is the move to the bench at project exit; `employee.bench_time` (0046) is the reminder
 once a candidate has been on the bench for N days. Emails and inbox rows never show the dates, reasons or codes
@@ -86,6 +86,7 @@ definer function (like `authz.emit_bench_time(day, threshold)`) to `eureka_worke
 | Job | Schedule | Run key | Notes |
 |---|---|---|---|
 | `outbox-delivery` | every tick | event id, or `inbox:<id>` (mail disabled) | above |
+| `paperwork-overdue` | daily 07:30 America/New_York | the New York date | Always on. One `checklist.item_overdue` per checklist item and due date (ledger key `<item>:<due date>`; a new due date re-arms it); the database refuses a future day |
 | `bench-time` | daily 07:45 America/New_York | the New York date | Only when `NOTIFY_BENCH_DAYS` is set (threshold is OD-05, open). One `employee.bench_time` per candidate and bench period (`bench_since`) once on bench ≥ N days; the database refuses a future day |
 | `notification-prune` | daily 04:30 America/New_York | UTC date (maintenance) | Deletes inbox rows older than `NOTIFICATION_RETENTION_DAYS` (default 180); the database refuses fewer than 30 days |
 
@@ -110,7 +111,7 @@ placement or candidate when the user has that screen.
 ## Privileges (migration 0046)
 
 - `eureka_app`: SELECT own `notification` rows, UPDATE (`read_at`) own rows. Nothing on `inbox_fanout` or the ledger.
-- `eureka_worker`: EXECUTE `authz.notification_recipients`, `authz.emit_bench_time`; `notification` SELECT of
+- `eureka_worker`: EXECUTE `authz.notification_recipients`, `authz.emit_bench_time`, `authz.emit_paperwork_overdue` (0049); `notification` SELECT of
   the key columns only (never titles or bodies), INSERT during fan-out for named recipients, DELETE past 30 days;
   `inbox_fanout` SELECT/INSERT. Still no access to candidate or placement rows, no outbox INSERT.
 - `authz_definer`: SELECT (`id`, `type`, `payload`, `published_at`) on `outbox_event`; the ledger.

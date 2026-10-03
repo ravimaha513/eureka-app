@@ -7,13 +7,14 @@ import { LocalMail } from "../src/worker/feedback-mail.js";
 import { assignmentEndingSoonJob } from "../src/worker/jobs/assignment-ending-soon.js";
 import { benchTimeJob } from "../src/worker/jobs/notifications.js";
 import { outboxDeliveryJob } from "../src/worker/jobs/outbox.js";
+import { paperworkOverdueJob } from "../src/worker/jobs/paperwork-overdue.js";
 import { visaExpiryJob } from "../src/worker/jobs/visa-expiry.js";
 import { silentLogger } from "../src/worker/log.js";
 import { JobRunner } from "../src/worker/runner.js";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { asActor, backdate, force, joinedEmployee, type Joined } from "./employee-seed.js";
 import { LOC, T, U, seedFixtures } from "./fixtures.js";
-import { newCandidate } from "./placement-seed.js";
+import { createPlacement, newCandidate, selectedSubmission } from "./placement-seed.js";
 import { workerCtx } from "./notification-seed.js";
 
 /**
@@ -137,6 +138,36 @@ describe("producers delivered end to end (inbox + local email)", () => {
     expect(r.to).toEqual([]);
     expect(r.published).not.toBeNull();
     expectClean(r.inbox.map((x) => `${x.title} ${x.body}`), [...await personalData(k.candidateId), planned]);
+  });
+
+  it("0049 paperwork-overdue job: checklist.item_overdue to recruiter, lead, manager and a documents_team assignee", async () => {
+    await db.admin.query(`INSERT INTO authz.checklist_template (kind, placement_type, items) VALUES ('paperwork', 'w2', $1::jsonb)`,
+      [JSON.stringify([{ doc_type: "sample_overdue_doc", owner_role: "documents_team" }])]);
+    const docs = (await db.admin.query<{ id: string }>(
+      "INSERT INTO eureka.app_user (email, display_name) VALUES ('docs@eureka.example', 'docs') RETURNING id")).rows[0]!.id;
+    await db.admin.query("INSERT INTO eureka.user_role (user_id, role_key) VALUES ($1, 'documents_team')", [docs]);
+    const cand = await newCandidate(db, { teamId: T.t1, recruiterId: U.r1a, locationId: LOC.dallas });
+    const sub = await selectedSubmission(db, U.r1a, cand.id);
+    const p = await createPlacement(db, U.r1a, sub, { type: "w2" });
+    const item = (await db.admin.query<{ id: string }>("SELECT id FROM eureka.checklist_item WHERE placement_id = $1", [p.id])).rows[0]!.id;
+    const dueOn = addDays(today, -5);
+    await asUser(db.app, U.hr, (c) => c.query("SELECT authz.update_checklist_item($1, $2::jsonb, NULL)",
+      [item, JSON.stringify({ dueOn, assigneeId: docs, notes: "SECRET fictional note" })]), true);
+    const nyToday = (await db.admin.query<{ d: string }>("SELECT (now() AT TIME ZONE 'America/New_York')::date::text AS d")).rows[0]!.d;
+    await paperworkOverdueJob().run(nyToday, { ...workerCtx(), pool: db.worker });
+    const [ev] = await eventsOf("checklist.item_overdue", item);
+    expect(Object.keys(ev!.payload).sort()).toEqual(["assigneeId", "checklistItemId", "daysOverdue", "placementId"]);
+    expect(ev!.payload).toMatchObject({ checklistItemId: item, placementId: p.id, assigneeId: docs });
+    const r = await deliver(ev!.id);
+    expect(r.inbox.map((x) => x.recipient_id)).toEqual([U.r1a, U.l1, U.m1, docs].sort());
+    expect(r.inbox[0]).toMatchObject({ title: "Paperwork item overdue", entity_type: "placement", entity_id: p.id });
+    expect(r.to).toEqual(["docs@eureka.example", "l1@eureka.example", "m1@eureka.example", "r1a@eureka.example"]);
+    expect(r.published).not.toBeNull();
+    expectClean([...r.mails.map((m) => `${m.subject}\n${m.text}`), ...r.inbox.map((x) => `${x.title} ${x.body}`)],
+      [...await personalData(cand.id), dueOn, "sample_overdue_doc", "Sample overdue doc", "documents_team"]);
+    // Re-running the day is a no-op (once per item and due date).
+    await paperworkOverdueJob().run(nyToday, { ...workerCtx(), pool: db.worker });
+    expect(await eventsOf("checklist.item_overdue", item)).toHaveLength(1);
   });
 
   it("0046 bench-time job: employee.bench_time to recruiter, lead, manager and CEO (not employee.benched)", async () => {

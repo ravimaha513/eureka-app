@@ -86,7 +86,9 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   candidate's documents) and the drawer embeds the documents section for uploads.
   Item notes and reasons have no app column privilege: they are read through `authz.checklist_item_texts`
   (document:read over the placement), because items themselves stay readable to every `placement:read` holder.
-  Not yet: the `checklist.item_overdue` notification job (waits for 0046, `authz.notification_emit_once`).
+  Overdue reminder (migration 0049): the daily worker job `paperwork-overdue` (07:30 New York) emits one
+  `checklist.item_overdue` per outstanding item past its due date, once per item and due date (re-armed when the due
+  date changes), through `authz.emit_paperwork_overdue` (the worker's only new grant); recipients per `docs/notifications.md`.
 - Notifications (migration 0046, `docs/notifications.md`): in-app inbox (`notification`, own rows only, written by the
   worker; bell and panel in the web top bar, unread count polled every 60 s), outbox delivery generalised to typed
   events with recipients resolved in the database and email and/or inbox channels (placement emails unchanged; the

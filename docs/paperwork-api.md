@@ -54,3 +54,12 @@ FR-PLC-06, implementation plan Phase 3 "Paperwork and onboarding checklists per 
 
 `apps/api/src/db/dev-pipeline.ts` (local development only) publishes fictional sample templates (`sample_form_a` …) as the
 dev HR user and records some progress. Nothing else ships template content.
+
+## Overdue reminder (migration 0049)
+
+The worker job `paperwork-overdue` (daily, 07:30 America/New_York) calls `authz.emit_paperwork_overdue(day)`, which emits
+`checklist.item_overdue` for each `pending`/`received` item whose `due_on` is before the day, on a placement that was not
+backed out, exactly once per item and due date (`eureka.notification_ledger`); changing the due date re-arms it.
+Payload `{ checklistItemId, placementId, daysOverdue, assigneeId? }`; recipients and rendering are in `docs/notifications.md`
+(recruiter, team lead, the lead's manager, and the assignee when they hold `documents_team`). No names, document types,
+dates or notes reach the email or inbox.
