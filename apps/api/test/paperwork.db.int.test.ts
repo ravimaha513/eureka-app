@@ -442,7 +442,9 @@ describe("BGC and the placement state machine (FR-PLC-06): one set of rules in a
     });
     expect(r.row).toMatchObject({ to_status: "failed", placement_from: "confirmed", placement_to: "bgc_failed",
       candidate_from: "confirmation", candidate_to: "active" });
-    expect(r.state).toEqual({ placement: "bgc_failed", reason: "Fictional finding", bgc: "failed" });
+    // The free-text BGC reason stays on the BGC record (document:read); the placement,
+    // readable by every placement:read holder, gets a fixed reason (0053).
+    expect(r.state).toEqual({ placement: "bgc_failed", reason: "Background check failed (see the BGC record)", bgc: "failed" });
     void cand;
   });
 
@@ -474,7 +476,7 @@ describe("BGC and the placement state machine (FR-PLC-06): one set of rules in a
       const again = await c.query(`SELECT * FROM authz.update_bgc($1, '{"failPlacement":true}', NULL)`, [id]).then(() => "ok", (e: Error) => e.message);
       return { s, again };
     });
-    expect(status).toEqual({ s: { status: "bgc_failed", status_reason: "Fictional finding" }, again: "invalid_transition" });
+    expect(status).toEqual({ s: { status: "bgc_failed", status_reason: "Background check failed (see the BGC record)" }, again: "invalid_transition" });
   });
 
   it("the placement transitions themselves are unchanged: no BGC record is required (no gating, open question)", async () => {

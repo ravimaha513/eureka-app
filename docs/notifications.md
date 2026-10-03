@@ -76,7 +76,7 @@ Daily detection jobs should not depend on outbox rows to deduplicate (they are p
 ```sql
 PERFORM authz.notification_emit_once(
   'paperwork-overdue',                                  -- job name
-  ci.id::text || ':' || p_day::text,                    -- once-only key (<= 200 chars)
+  ci.id::text || ':' || ci.due_on::text,                -- once-only key per item and due date (<= 200 chars)
   'checklist.item_overdue', 'checklist_item', ci.id,
   pg_catalog.jsonb_build_object('checklistItemId', ci.id, 'placementId', ci.placement_id,
     'daysOverdue', p_day - ci.due_on));
