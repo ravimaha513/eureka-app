@@ -41,6 +41,9 @@ export interface DocumentStore {
   deleteVersion(key: string, versionId: string, signal?: AbortSignal): Promise<void>;
 }
 
+/** User metadata (x-amz-meta-sha256) holding the hex SHA-256 of a restricted object. */
+export const SHA256_META = "sha256";
+
 /** Promotion writes clean/ or restricted/ only; restricted/ needs the restricted key. Returns whether it is restricted. */
 function promotionTarget(key: string, kmsKeyId: string | undefined): boolean {
   if (key.startsWith("clean/")) return false;
@@ -102,14 +105,30 @@ export class S3DocumentStore implements DocumentStore {
       await this.s3.send(new PutObjectCommand({
         Bucket: this.bucket, Key: key, Body: body, ContentType: contentType, ContentLength: body.length,
         ChecksumSHA256: checksum, IfNoneMatch: "*",
-        ...(restricted ? { ServerSideEncryption: "aws:kms" as const, SSEKMSKeyId: opts.kmsKeyId, BucketKeyEnabled: false } : {}),
+        ...(restricted ? {
+          ServerSideEncryption: "aws:kms" as const, SSEKMSKeyId: opts.kmsKeyId, BucketKeyEnabled: false,
+          // Compared after a 412 with a plain HEAD (see below); the hex digest of the bytes.
+          Metadata: { [SHA256_META]: sha256.toString("hex") },
+        } : {}),
       }), { abortSignal: signal });
       return;
     } catch (err) {
       const e = err as { name?: string; $metadata?: { httpStatusCode?: number } } | null;
       if (e?.name !== "PreconditionFailed" && e?.$metadata?.httpStatusCode !== 412) throw err;
     }
-    // HeadObject (s3:GetObject on clean/resumes/*, metadata only).
+    if (restricted) {
+      // A HEAD with ChecksumMode on an SSE-KMS object needs kms:Decrypt, which the
+      // worker does not hold for the restricted key (by design). A plain HEAD
+      // returns user metadata and the key id without decrypting: compare our
+      // SHA-256 metadata, the size and the restricted key.
+      const head = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }), { abortSignal: signal });
+      if (head.Metadata?.[SHA256_META] !== sha256.toString("hex") || head.ContentLength !== body.length
+        || head.ServerSideEncryption !== "aws:kms" || head.SSEKMSKeyId !== opts.kmsKeyId) {
+        throw new CleanObjectConflictError(`${key} already exists with different content or key`);
+      }
+      return;
+    }
+    // HeadObject (s3:GetObject on clean/*, metadata only; data key decrypt via S3 is granted).
     const head = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key, ChecksumMode: "ENABLED" }), { abortSignal: signal });
     if (head.ChecksumSHA256 !== checksum || head.ContentLength !== body.length) {
       throw new CleanObjectConflictError(`${key} already exists with different content`);
