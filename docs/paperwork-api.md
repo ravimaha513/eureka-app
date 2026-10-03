@@ -14,7 +14,7 @@ FR-PLC-06, implementation plan Phase 3 "Paperwork and onboarding checklists per 
 | PW-2 | Item states: `pending → received → verified`; `pending`/`received → waived`; `received → pending` (returned), `verified`/`waived → pending` (reopened). Waiving, returning and reopening need a reason (≤ 500). |
 | PW-3 | Receiving, notes and the document link need `document:upload` or `document:verify` over the placement; every other status change, the owner role, the assignee and the due date need `document:verify`. |
 | PW-4 | The assignee is an active user who currently holds the item's owner role (re-checked when the owner role changes). The due date is between 2000-01-01 and 2100-12-31; an item is overdue when it is `pending`/`received` and past its due date. |
-| PW-5 | `document_id` is a nullable uuid **without a foreign key** until the documents module merges (see HANDOFF). Nothing dereferences it yet. |
+| PW-5 | `document_id` references `eureka.document` (0043). A link is accepted only for a document of the item's candidate, filed on no placement or on this placement, whose file is `pending` or `clean`, and that the caller can read (candidate readable, `document:read` over it, `document.restricted:read` for restricted documents); otherwise 422 `invalid_document`, the same answer for every case. `null` unlinks. |
 | PW-6 | One BGC record per placement (design B2.4 columns), created on the first write as `not_started`. Writes need `bgc:update` over the placement (HR). |
 | PW-7 | BGC states: `not_started → initiated → in_progress → cleared | failed`, `initiated → cleared | failed`, and `cleared → failed` after the fact (FR-PLC-06). `failed` is final and needs a reason. Moving to `initiated` defaults `initiatedOn` to today, `cleared`/`failed` default `completedOn`. |
 | PW-8 | BGC status never changes the placement by itself. `failPlacement: true` (with the record ending `failed`) also moves the placement to `bgc_failed` in the same transaction **by calling `authz.transition_placement`**, which applies the placement rules unchanged (`placement:update` + `placement.bgc_status:update`, allowed states, reason, candidate/assignment side effects, outbox). Today no single role holds both rights, so HR records the result and a Manager/AD marks the placement (open question). Placement transitions do not require a BGC record (no gating; open question). |
@@ -47,7 +47,7 @@ FR-PLC-06, implementation plan Phase 3 "Paperwork and onboarding checklists per 
 ## Error codes
 
 `invalid_transition`, `reason_required`, `invalid_change`, `invalid_assignee`, `invalid_owner_role`, `invalid_due_date`,
-`invalid_helper`, `placement_closed` (backed-out placement), `invalid_checklist_template` (422); `version_mismatch` (409);
+`invalid_helper`, `invalid_document`, `placement_closed` (backed-out placement), `invalid_checklist_template` (422); `version_mismatch` (409);
 `not_permitted` (403); not found (404). With `failPlacement`, the placement codes of `authz.transition_placement` apply too.
 
 ## Dev seed

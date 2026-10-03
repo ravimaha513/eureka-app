@@ -79,13 +79,14 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   `document:verify` at org scope); placements keep the version they copied. "Paperwork & BGC" screen (work queue,
   drawer, templates tab) and checklist progress + BGC status in the placement drawer. No template content ships; the dev
   seed publishes fictional `sample_form_*` templates.
-  **Integration note (documents work, 0043):** `checklist_item.document_id` is a nullable uuid with **no foreign key**
-  yet. When the documents module merges, the integrator adds `FOREIGN KEY (document_id) REFERENCES eureka.document(id)`,
-  makes `authz.update_checklist_item` check that the document belongs to the item's placement or candidate and is
-  readable/clean, and adds the "attach document" picker to the item dialog (today the UI shows the id read-only and
-  never sends it). The API accepts any uuid until then, so check for (or null out) dangling ids before adding the FK.
+  Document link (with 0043): `checklist_item.document_id REFERENCES eureka.document(id)`; `authz.update_checklist_item`
+  accepts only a document of the item's candidate filed on no placement or on this placement, whose file is not blocked
+  (`pending`/`clean`) and which the caller can read under the download rules (restricted documents only with
+  `document.restricted:read`); anything else is 422 `invalid_document`. The item dialog has a document picker (the
+  candidate's documents) and the drawer embeds the documents section for uploads.
   Item notes and reasons have no app column privilege: they are read through `authz.checklist_item_texts`
-  (document:read over the placement), because items themselves stay readable to every `placement:read` holder. Notifications work (0046) may want `bgc.*`/checklist overdue events; none are emitted yet.
+  (document:read over the placement), because items themselves stay readable to every `placement:read` holder.
+  Not yet: the `checklist.item_overdue` notification job (waits for 0046, `authz.notification_emit_once`).
 - Paperwork and restricted documents with step-up (FR-PPR-01 to 03, migration 0043, design B2.4 "Built in
   migration 0043"): typed documents on a candidate or placement (`document`, `file_object`, type keys in
   `authz.document_type` = `DOCUMENT_TYPES`), the resume scan pipeline generalised (`document-scan`), restricted

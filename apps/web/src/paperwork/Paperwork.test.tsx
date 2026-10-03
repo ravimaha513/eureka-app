@@ -142,6 +142,38 @@ describe("Paperwork drawer", () => {
     expect(api.writes()[0]!.body).toEqual({ status: "waived", reason: "Fictional: not applicable", assigneeId: HR.id, dueOn: "2026-02-01", expectedVersion: 1 });
   });
 
+  it("links a document of this candidate or placement and maps invalid_document", async () => {
+    const doc = (id: string, extra: Record<string, unknown>) => ({
+      id, candidateId: "c1", placementId: null, docType: "offer_letter", docTypeLabel: "Offer letter", classification: "internal",
+      status: "clean", reason: null, contentType: "application/pdf", sizeBytes: 1000, sha256: null,
+      uploadedBy: { id: "u-me", name: "Test User" }, createdAt: "2026-01-02T10:00:00Z", scannedAt: null, ...extra,
+    });
+    const listing = { canUpload: true, canUploadRestricted: true, canViewRestricted: true };
+    api.routes["GET /api/v1/candidates/c1/documents"] = () => ({ body: { ...listing, items: [
+      doc("d-cand", {}), doc("d-here", { placementId: "p1", docTypeLabel: "Form I-9" }),
+      doc("d-other", { placementId: "p-old", docTypeLabel: "Other placement" }), doc("d-bad", { status: "infected", docTypeLabel: "Blocked" }),
+    ] } });
+    api.routes["GET /api/v1/placements/p1/documents"] = () => ({ body: { ...listing, items: [] } });
+    api.routes["GET /api/auth/step-up"] = () => ({ body: { active: false, expiresAt: null, method: null, mode: "dev", ttlMinutes: 10 } });
+    let reply: "ok" | "bad" = "bad";
+    api.routes["PATCH /api/v1/paperwork/items/i1"] = () => (reply === "bad" ? problem(422, { detail: "invalid_document" }) : { body: DETAIL.items[0] });
+    wrap(<PaperworkPage me={HR} />);
+    const drawer = await openDrawer();
+    expect(await within(drawer).findByRole("heading", { name: "Placement documents" })).toBeInTheDocument();
+    fireEvent.click(await within(drawer).findByRole("button", { name: "Update Sample doc a" }));
+    const dlg = screen.getByRole("dialog", { name: "Update Sample doc a" });
+    const picker = within(dlg).getByLabelText("Linked document");
+    await waitFor(() => expect(within(picker).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "No document", "Offer letter · Jan 2, 2026", "Form I-9 · Jan 2, 2026 · this placement"]));
+    fireEvent.change(picker, { target: { value: "d-here" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
+    expect(await within(dlg).findByText(/That document can't be linked/)).toBeInTheDocument();
+    expect(api.writes()[0]!.body).toEqual({ documentId: "d-here", expectedVersion: 1 });
+    reply = "ok";
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Update Sample doc a" })).not.toBeInTheDocument());
+  });
+
   it("maps a lost update and refuses an empty change", async () => {
     api.routes["PATCH /api/v1/paperwork/items/i1"] = () => problem(409, { detail: "version_mismatch" });
     wrap(<PaperworkPage me={HR} />);

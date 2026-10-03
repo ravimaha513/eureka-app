@@ -89,6 +89,7 @@ export interface ItemChange {
   assigneeId?: string | null;
   dueOn?: string | null;
   notes?: string | null;
+  documentId?: string | null;
   expectedVersion?: number;
 }
 
@@ -160,6 +161,7 @@ export const PAPERWORK_ERRORS: Record<string, string> = {
   invalid_due_date: "Pick a due date between 2000 and 2100.",
   invalid_change: "One of the values isn't valid. Check the fields and try again.",
   invalid_helper: "The person who helped must be an active user.",
+  invalid_document: "That document can't be linked: it must belong to this candidate or placement, be readable by you and not be blocked by the scan.",
   placement_closed: "This placement was backed out; its paperwork can no longer change.",
   version_mismatch: "Someone else changed this in the meantime. Close and reopen to see the latest version.",
   invalid_checklist_template: "The template isn't valid: document types must be snake_case and unique, owners existing roles.",

@@ -7,6 +7,8 @@ import { Drawer, Field, fmtDate } from "../sales/ui";
 import { PLACEMENT_TYPE_LABELS, fmtDateTime, pipelineLabel, type PlacementType } from "../pipeline/pipelineApi";
 import { PipelineStatus } from "../pipeline/ui";
 import { docTypeLabel } from "../pipeline/PlacementsPage";
+import { DocumentsSection } from "../documents/DocumentsSection";
+import { documentKeys, documentsApi } from "../documents/documentsApi";
 import {
   BGC_REASON_REQUIRED, BGC_STATUSES, ITEM_REASON_REQUIRED, PAPERWORK_ERRORS,
   paperworkApi, paperworkKeys, paperworkLabel,
@@ -218,7 +220,7 @@ function PaperworkDrawer({ placementId, me, onClose }: { placementId: string; me
                       {d.items.map((i) => (
                         <tr key={i.id}>
                           <td>{docTypeLabel(i.docType)}<span className="block">{i.required ? "Required" : "Optional"}
-                            {i.assignee && ` · ${i.assignee.name ?? "assigned"}`}</span>
+                            {i.assignee && ` · ${i.assignee.name ?? "assigned"}`}{i.documentId && " · document linked"}</span>
                             {i.notes && <span className="block note">{i.notes}</span>}</td>
                           <td>{roleLabel(i.ownerRole)}</td>
                           <td><span className={`badge cl-${i.status}`}>{paperworkLabel(i.status)}</span>
@@ -240,12 +242,16 @@ function PaperworkDrawer({ placementId, me, onClose }: { placementId: string; me
               )}
             </section>
 
+            {/* Upload and open documents here (0043); a placement the caller cannot read files them on the candidate. */}
+            <DocumentsSection owner={d.placement ? { kind: "placement", id: placementId } : { kind: "candidate", id: d.candidate.id }}
+              title={d.placement ? "Placement documents" : "Candidate documents"} />
+
             <BgcSection hid={hid} bgc={d.bgc} onEdit={() => setEditBgc(true)} />
           </>
         )}
       </Drawer>
       {d && editItem && (
-        <ItemDialog item={editItem} me={me} onClose={() => setEditItem(null)}
+        <ItemDialog item={editItem} me={me} candidateId={d.candidate.id} placementId={placementId} onClose={() => setEditItem(null)}
           onDone={(m) => { setEditItem(null); done(m); }} />
       )}
       {d && editBgc && (
@@ -305,8 +311,37 @@ function BgcSection({ hid, bgc, onEdit }: { hid: string; bgc: Bgc; onEdit: () =>
   );
 }
 
-function ItemDialog({ item, me, onClose, onDone }: {
-  item: PaperworkItem; me: Pick<Me, "id" | "roles">; onClose: () => void; onDone: (m: string) => void;
+/**
+ * Documents (0043) of the item's candidate that may be linked: candidate-level ones and
+ * those filed on this placement. The list follows the caller's document scope (restricted
+ * documents only for roles that read them); the server checks the link again (PW-5).
+ */
+function DocumentPicker({ candidateId, placementId, current, value, onChange }: {
+  candidateId: string; placementId: string; current: string | null; value: string; onChange: (v: string) => void;
+}) {
+  const q = useQuery({ queryKey: documentKeys.list({ kind: "candidate", id: candidateId }), queryFn: () => documentsApi.list({ kind: "candidate", id: candidateId }) });
+  const docs = (q.data?.items ?? []).filter((d) => (d.placementId === null || d.placementId === placementId)
+    && (d.status === "pending" || d.status === "clean"));
+  return (
+    <Field label="Linked document" hint={q.isError ? "Documents could not be loaded." : "Upload new files in the Documents section of this drawer."}>
+      {(p) => (
+        <select {...p} value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">No document</option>
+          {current && !docs.some((d) => d.id === current) && <option value={current}>Current document</option>}
+          {docs.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.docTypeLabel} · {fmtDate(d.createdAt)}{d.placementId ? " · this placement" : ""}{d.status === "pending" ? " (scanning)" : ""}
+            </option>
+          ))}
+        </select>
+      )}
+    </Field>
+  );
+}
+
+function ItemDialog({ item, me, candidateId, placementId, onClose, onDone }: {
+  item: PaperworkItem; me: Pick<Me, "id" | "roles">; candidateId: string; placementId: string;
+  onClose: () => void; onDone: (m: string) => void;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [status, setStatus] = useState("");
@@ -315,6 +350,7 @@ function ItemDialog({ item, me, onClose, onDone }: {
   const [assignee, setAssignee] = useState(item.assignee?.id ?? "");
   const [dueOn, setDueOn] = useState(item.dueOn ?? "");
   const [notes, setNotes] = useState(item.notes ?? "");
+  const [docId, setDocId] = useState(item.documentId ?? "");
   const [fieldErr, setFieldErr] = useState<{ reason?: string; form?: string }>({});
   const submit = useSubmit(paperworkError);
   const a = item.actions;
@@ -331,6 +367,7 @@ function ItemDialog({ item, me, onClose, onDone }: {
       if (dueOn !== (item.dueOn ?? "")) b.dueOn = dueOn || null;
     }
     if (a.editNotes && notes.trim() !== (item.notes ?? "")) b.notes = notes.trim() || null;
+    if (a.editNotes && docId !== (item.documentId ?? "")) b.documentId = docId || null;
     return b;
   };
 
@@ -390,7 +427,7 @@ function ItemDialog({ item, me, onClose, onDone }: {
             {(p) => <textarea {...p} rows={3} maxLength={1000} value={notes} onChange={(e) => setNotes(e.target.value)} />}
           </Field>
         )}
-        {item.documentId && <p className="muted">Linked document: {item.documentId}</p>}
+        {a.editNotes && <DocumentPicker candidateId={candidateId} placementId={placementId} current={item.documentId} value={docId} onChange={setDocId} />}
         {fieldErr.form && <p className="error" role="alert">{fieldErr.form}</p>}
         <DialogActions onCancel={onClose} submitLabel="Save" busy={submit.busy} error={submit.error} />
       </form>

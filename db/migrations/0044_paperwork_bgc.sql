@@ -13,8 +13,8 @@
 --   2. Checklist items gain progress: status pending -> received -> verified,
 --      waived (with a reason), returned/reopened to pending (with a reason);
 --      owner role, assignee, due date, notes and a document link
---      (`document_id`, no foreign key yet: the documents module lands in
---      parallel and the integrator adds the FK). Writes only through
+--      (`document_id` -> eureka.document, 0043: same candidate, no placement
+--      or the item's placement, readable by the caller). Writes only through
 --      authz.update_checklist_item (definer, re-checks permission and scope);
 --      every change is recorded in eureka.checklist_item_event by trigger.
 --   3. eureka.bgc: one background-check record per placement (design B2.4
@@ -118,9 +118,9 @@ ALTER TABLE eureka.checklist_item
   ADD COLUMN assignee_id       uuid REFERENCES eureka.app_user(id),
   ADD COLUMN due_on            date CHECK (due_on BETWEEN date '2000-01-01' AND date '2100-12-31'),
   ADD COLUMN notes             text CHECK (char_length(btrim(notes)) BETWEEN 1 AND 1000),
-  -- Document link: the documents module (built in parallel) adds the foreign
-  -- key to eureka.document when it merges (docs/HANDOFF.md).
-  ADD COLUMN document_id       uuid,
+  -- Document link (0043); authz.update_checklist_item checks it belongs to the
+  -- item's candidate (and placement) and that the caller can read it.
+  ADD COLUMN document_id       uuid REFERENCES eureka.document(id),
   ADD COLUMN status_reason     text CHECK (char_length(btrim(status_reason)) BETWEEN 1 AND 500),
   ADD COLUMN status_changed_at timestamptz,
   ADD COLUMN status_changed_by uuid REFERENCES eureka.app_user(id),
@@ -658,6 +658,22 @@ BEGIN
       RAISE EXCEPTION 'invalid_change' USING ERRCODE = 'check_violation';
     ELSE
       doc := (p_changes ->> 'documentId')::uuid;
+    END IF;
+    -- PW-5: a linked document (0043) is about the item's candidate, filed on no
+    -- placement or on this one, not blocked by the scan, and readable by the
+    -- caller under the download rules (candidate readable, document:read over
+    -- it, and document.restricted:read for restricted documents). Every other
+    -- case is the same 422, so nothing is revealed about other documents.
+    IF doc IS NOT NULL AND doc IS DISTINCT FROM i.document_id AND NOT EXISTS (
+         SELECT 1 FROM eureka.document d JOIN eureka.file_object f ON f.id = d.file_id
+          WHERE d.id = doc AND d.candidate_id = i.candidate_id
+            AND (d.placement_id IS NULL OR d.placement_id = i.placement_id)
+            AND f.status IN ('pending', 'clean')
+            AND coalesce(authz.candidate_visible(d.candidate_id, 'candidate:read'), false)
+            AND coalesce(authz.candidate_owned(d.candidate_id, 'document:read'), false)
+            AND (d.classification = 'internal'
+                 OR coalesce(authz.candidate_owned(d.candidate_id, 'document.restricted:read'), false))) THEN
+      RAISE EXCEPTION 'invalid_document' USING ERRCODE = 'check_violation';
     END IF;
   END IF;
 

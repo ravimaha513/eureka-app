@@ -20,6 +20,7 @@ const CODES: Record<string, (code: string) => HttpException> = {
   invalid_owner_role: unprocessable,
   invalid_due_date: unprocessable,
   invalid_helper: unprocessable,
+  invalid_document: unprocessable,
   placement_closed: unprocessable,
   invalid_checklist_template: unprocessable,
 };

@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { activityVisible, can, checklistTemplateAccess, resolveScope, type ActivityRef } from "@eureka/shared";
 import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
-import { createTestDb, type TestDb } from "./db-harness.js";
+import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, T, U, seedFixtures, toUserAccess } from "./fixtures.js";
 import { createPlacement, newCandidate, selectedSubmission, transitionPlacement } from "./placement-seed.js";
 
@@ -208,6 +208,24 @@ describe("item updates", () => {
     expect((await call("r2a", "GET", `/api/v1/paperwork/items/${item}/history`)).statusCode).toBe(404);
     // A location role reads the placement (and its checklist) but not the paperwork history (document:read).
     expect((await call("locD", "GET", `/api/v1/paperwork/items/${item}/history`)).statusCode).toBe(403);
+  });
+
+  it("links a document of the candidate; another candidate's or an unreadable restricted one is 422 invalid_document", async () => {
+    const m = await placed();
+    const other = await placed();
+    const item = await itemId(m.id);
+    const doc = (owner: { candidate?: string; placement?: string }, type = "offer_letter") => asUser(db.app, U.hr, async (c) =>
+      (await c.query(`SELECT * FROM authz.create_document_upload($1, $2, $3, 'application/pdf', 1000)`,
+        [owner.candidate ?? null, owner.placement ?? null, type])).rows[0].document_id as string, true);
+    let res = await call("r1a", "PATCH", `/api/v1/paperwork/items/${item}`, { documentId: await doc({ placement: other.id }) });
+    expect([res.statusCode, res.json().detail]).toEqual([422, "invalid_document"]);
+    res = await call("r1a", "PATCH", `/api/v1/paperwork/items/${item}`, { documentId: await doc({ candidate: m.cand.id }, "i9") });
+    expect([res.statusCode, res.json().detail]).toEqual([422, "invalid_document"]);
+    const mine = await doc({ placement: m.id });
+    res = await call("r1a", "PATCH", `/api/v1/paperwork/items/${item}`, { documentId: mine });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().documentId).toBe(mine);
+    expect((await auditOf(item)).at(-1)!.changes).toMatchObject({ fields: ["document"], documentId: mine });
   });
 
   it("refuses an empty change, unknown keys and a backed-out placement", async () => {

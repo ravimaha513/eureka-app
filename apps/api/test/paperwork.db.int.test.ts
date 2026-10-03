@@ -12,7 +12,7 @@ import {
 } from "@eureka/shared";
 import { asUser, createTestDb, ownedCandidateCalls, type TestDb } from "./db-harness.js";
 import { LOC, T, U, seedFixtures, toUserAccess } from "./fixtures.js";
-import { createPlacement, newCandidate, selectedSubmission, transitionPlacement } from "./placement-seed.js";
+import { createPlacement, extraUser, newCandidate, selectedSubmission, transitionPlacement } from "./placement-seed.js";
 
 /**
  * Database-only checks for migration 0044 (paperwork progress, BGC records,
@@ -50,6 +50,12 @@ async function placed(actor = U.r1a, cand: Cand = R1A, type = "w2") {
 }
 const itemsOf = async (placementId: string) => (await db.admin.query(
   `SELECT * FROM eureka.checklist_item WHERE placement_id = $1 ORDER BY position`, [placementId])).rows;
+/** A document row (0043, file pending) on a candidate or a placement, created through authz.create_document_upload. */
+async function documentFor(actor: string, owner: { candidate?: string; placement?: string }, docType = "offer_letter") {
+  return asUser(db.app, actor, async (c) => (await c.query<{ document_id: string }>(
+    `SELECT * FROM authz.create_document_upload($1, $2, $3, 'application/pdf', 1000)`,
+    [owner.candidate ?? null, owner.placement ?? null, docType])).rows[0]!.document_id, true);
+}
 const itemId = async (placementId: string, docType = "sample_doc_a") =>
   (await itemsOf(placementId)).find((i) => i.doc_type === docType)!.id as string;
 
@@ -218,11 +224,62 @@ describe("checklist item progress", () => {
     await expect(updateItem(U.hr, item, { documentId: "x" })).rejects.toThrow(/invalid_change/);
     await expect(updateItem(U.hr, item, { notes: "x".repeat(1001) })).rejects.toThrow(/invalid_change/);
     await expect(updateItem(U.hr, item, { notes: 5 })).rejects.toThrow(/invalid_change/);
-    // No foreign key yet: any id is stored as given (the documents module adds the FK).
-    const doc = "00000000-0000-4000-8000-00000000d0c1";
+    const doc = await documentFor(U.hr, { placement: id });
     await updateItem(U.hr, item, { documentId: doc, dueOn: null, notes: "" });
     const row = (await db.admin.query(`SELECT document_id, due_on, notes, assignee_id FROM eureka.checklist_item WHERE id = $1`, [item])).rows[0];
     expect(row).toEqual({ document_id: doc, due_on: null, notes: null, assignee_id: U.acct });
+  });
+
+  it("links only a document of the item's candidate, on no placement or this one, that is not blocked (PW-5)", async () => {
+    const a = await placed();
+    const b = await placed();
+    const item = await itemId(a.id);
+    // The column has a real foreign key now (0043).
+    await expect(updateItem(U.hr, item, { documentId: "00000000-0000-4000-8000-00000000d0c1" })).rejects.toThrow(/invalid_document/);
+    // Another candidate's document (candidate-level or on their placement) is refused.
+    await expect(updateItem(U.hr, item, { documentId: await documentFor(U.hr, { candidate: b.cand.id }) })).rejects.toThrow(/invalid_document/);
+    await expect(updateItem(U.hr, item, { documentId: await documentFor(U.hr, { placement: b.id }) })).rejects.toThrow(/invalid_document/);
+    // The same candidate's document filed on another of their placements is refused too.
+    await transitionPlacement(db, U.r1a, a.id, "backout", "Fictional: declined");
+    const sub2 = await selectedSubmission(db, U.r1a, a.cand.id);
+    const a2 = await createPlacement(db, U.r1a, sub2, { type: "w2" });
+    const item2 = await itemId(a2.id);
+    await expect(updateItem(U.hr, item2, { documentId: await documentFor(U.hr, { placement: a.id }) })).rejects.toThrow(/invalid_document/);
+    // Candidate-level and this placement's documents are accepted.
+    await expect(updateItem(U.hr, item2, { documentId: await documentFor(U.hr, { candidate: a.cand.id }) })).resolves.toBeTruthy();
+    const onThis = await documentFor(U.hr, { placement: a2.id });
+    await expect(updateItem(U.hr, item2, { documentId: onThis })).resolves.toBeTruthy();
+    // A file the scan blocked cannot be linked.
+    const blocked = await documentFor(U.hr, { placement: a2.id });
+    const c = await db.admin.connect();
+    try {
+      await c.query("SET session_replication_role = replica");
+      await c.query(`UPDATE eureka.file_object SET status = 'infected', scanned_at = now()
+                      WHERE id = (SELECT file_id FROM eureka.document WHERE id = $1)`, [blocked]);
+    } finally {
+      await c.query("RESET session_replication_role");
+      c.release();
+    }
+    await expect(updateItem(U.hr, item2, { documentId: blocked })).rejects.toThrow(/invalid_document/);
+    // Unlinking is always possible.
+    await expect(updateItem(U.hr, item2, { documentId: null })).resolves.toMatchObject({ changed: ["document"] });
+  });
+
+  it("restricted documents can be linked only by roles that can read them", async () => {
+    const { id, cand } = await placed();
+    const item = await itemId(id);
+    const restricted = await documentFor(U.hr, { candidate: cand.id }, "i9");
+    const internal = await documentFor(U.hr, { candidate: cand.id }, "offer_letter");
+    // r1a may edit the item's document link (document:upload own) but holds no document.restricted:read.
+    await expect(updateItem(U.r1a, item, { documentId: restricted })).rejects.toThrow(/invalid_document/);
+    await expect(updateItem(U.r1a, item, { documentId: internal })).resolves.toBeTruthy();
+    // HR and Immigration read restricted documents.
+    await expect(updateItem(U.hr, item, { documentId: restricted }, null, false)).resolves.toBeTruthy();
+    await expect(updateItem(U.imm, item, { documentId: restricted }, null, false)).resolves.toBeTruthy();
+    // Associate HR uploads but cannot read restricted documents.
+    const ahr = await extraUser(db, "pw_ahr", "associate_hr");
+    await expect(updateItem(ahr.id, item, { documentId: restricted })).rejects.toThrow(/invalid_document/);
+    await expect(updateItem(ahr.id, item, { documentId: internal })).resolves.toBeTruthy();
   });
 
   it("refuses changes on a backed-out placement; a placement in bgc_failed can still be closed out", async () => {
@@ -248,11 +305,11 @@ describe("permission matrix: item writes per fixture user (404 / 403 / ok, as th
     receive: { status: "received" },
     waive: { status: "waived", reason: "Fictional reason" },
     notes: { notes: "Fictional note" },
-    document: { documentId: "00000000-0000-4000-8000-00000000d0c2" },
+    document: { documentId: "" }, // filled per placement with an internal document of its candidate
     due: { dueOn: "2031-03-01" },
     owner: { ownerRole: "documents_team" },
   } as const;
-  const made: { id: string; ref: ActivityRef }[] = [];
+  const made: { id: string; ref: ActivityRef; doc: string }[] = [];
 
   beforeAll(async () => {
     for (const [actor, cand] of [[U.r1a, R1A], [U.r3a, { teamId: T.t3, recruiterId: U.r3a, locationId: LOC.austin }]] as const) {
@@ -260,7 +317,7 @@ describe("permission matrix: item writes per fixture user (404 / 403 / ok, as th
       const pl = (await db.admin.query(`SELECT * FROM eureka.placement WHERE id = $1`, [p.id])).rows[0];
       const cs = (await db.admin.query(`SELECT marketing_status FROM eureka.candidate WHERE id = $1`, [p.cand.id])).rows[0];
       made.push({ id: p.id, ref: { recruiterId: pl.recruiter_id, teamId: pl.team_id, locationId: pl.location_id,
-        candidate: { ...p.cand, marketingStatus: cs.marketing_status } } });
+        candidate: { ...p.cand, marketingStatus: cs.marketing_status } }, doc: await documentFor(U.hr, { candidate: p.cand.id }) });
     }
   }, 60_000);
 
@@ -274,7 +331,7 @@ describe("permission matrix: item writes per fixture user (404 / 403 / ok, as th
         const allowed = op === "receive" ? acts.transition.includes("received")
           : op === "waive" ? acts.transition.includes("waived")
             : op === "notes" || op === "document" ? acts.editNotes : acts.assign;
-        const run = updateItem(U[key], item, changes, null, false);
+        const run = updateItem(U[key], item, op === "document" ? { documentId: m.doc } : changes, null, false);
         if (!visible) await expect(run, `${key} ${op}`).rejects.toThrow(/item_not_found/);
         else if (!allowed) await expect(run, `${key} ${op}`).rejects.toThrow(/not_permitted/);
         else await expect(run, `${key} ${op}`).resolves.toBeTruthy();
