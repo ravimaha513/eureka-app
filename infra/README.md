@@ -23,7 +23,7 @@ infra/
   live/production/      env.hcl  (us-east-1, single-AZ db.t4g.micro, audit lock COMPLIANCE 3y)
   modules/stack/        the whole environment
     main.tf       VPC, public/private subnets, S3 gateway endpoint, flow logs (no NAT)
-    kms.tf        keys: data, restricted
+    kms.tf        keys: data, restricted (documents + field encryption), bidx (blind index HMAC)
     database.tf   RDS PostgreSQL 16 (TLS only, managed master secret), SSM parameters
     storage.tf    S3: documents (quarantine -> clean/restricted, GuardDuty scan), audit (Object Lock), web, logs
     app.tf        ECR, ECS Fargate ARM64 (api, worker, migrate), API Gateway HTTP API + VPC link + Cloud Map
