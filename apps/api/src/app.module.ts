@@ -33,6 +33,8 @@ import { ImportsController, ImportsService } from "./modules/imports/imports.con
 import { assertImportRoleIsolated } from "./platform/role-isolation.js";
 import { ResumesController } from "./modules/resumes/resumes.controller.js";
 import { ResumesService } from "./modules/resumes/resumes.service.js";
+import { NotificationsController } from "./modules/notifications/notifications.controller.js";
+import { NotificationsService } from "./modules/notifications/notifications.service.js";
 import { DOCUMENT_STORAGE, LocalDocumentStorage, createDocumentStorage, type DocumentStorage } from "./platform/storage/document-storage.js";
 import { registerLocalStorageRoutes } from "./platform/storage/local-routes.js";
 
@@ -56,13 +58,13 @@ export class AppModule {
       controllers: [
         FeedbackController, HealthController, AuthController, MeController, CandidatesController, SubmissionsController, InterviewsController,
         AdminController, TeamsController, PlacementsController, LookupsController, DashboardController, HotlistController, ImportsController,
-        ResumesController,
+        ResumesController, NotificationsController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
         DbService, SessionService, AccessService, AuditService, OidcService,
         CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
-        ResumesService, { provide: DOCUMENT_STORAGE, useValue: storage },
+        ResumesService, NotificationsService, { provide: DOCUMENT_STORAGE, useValue: storage },
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],

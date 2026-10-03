@@ -11,6 +11,7 @@ import { loadConfig, type AppConfig } from "../src/platform/config.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
 import { CLIENT_ID, LOC, T, TECH_ID, U, seedFixtures, type FixtureCandidate } from "./fixtures.js";
 import { createPlacement, newCandidate, selectedSubmission } from "./placement-seed.js";
+import { deliverInbox, emitEvent, newId } from "./notification-seed.js";
 import { LOCAL_UPLOAD_PATH } from "../src/platform/storage/document-storage.js";
 import { LocalDocumentStore } from "../src/worker/document-store.js";
 import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob } from "../src/worker/jobs/resume-scan.js";
@@ -163,6 +164,19 @@ async function stagedImport(operator: string) {
   }
 }
 
+/** An in-app notification for HR and Accounts (as the worker delivers it); returns hr's and acct's row ids. */
+async function inboxRows() {
+  const [a, p, c] = [await newId(db), await newId(db), await newId(db)];
+  const ev = await emitEvent(db, "assignment.ending_soon", "assignment", a,
+    { assignmentId: a, placementId: p, candidateId: c, endDate: "2026-11-01", daysBefore: 30 });
+  await deliverInbox(db, ev);
+  const r = await rows(`SELECT recipient_id, id FROM eureka.notification WHERE event_id = $1`, [ev]);
+  const of = (u: string) => r.find((x) => x.recipient_id === u)!.id as string;
+  return { hr: of(U.hr), acct: of(U.acct) };
+}
+const notificationState = (ids: string[]) =>
+  rows(`SELECT id, recipient_id, title, body, read_at FROM eureka.notification WHERE id = ANY ($1) ORDER BY id`, [ids]);
+
 // ---- cases --------------------------------------------------------------------------------------
 
 interface Prepared {
@@ -201,6 +215,21 @@ const CASES: RejectCase[] = [
       status: "clean", scanResult: "NO_THREATS_FOUND", version: 1, isCurrent: true, sha256: "a".repeat(64), sha256Hex: "a".repeat(64),
       uploadedBy: U.r1b, candidateId: FOREIGN_ID, key: `clean/resume/${FOREIGN_ID}`, storageKey: `clean/resume/${FOREIGN_ID}`,
       fileName: "../../etc/passwd", scannedAt: PAST, uploadExpiresAt: "2099-01-01T00:00:00Z",
+    },
+  },
+  // in-app inbox (migration 0046): the recipient comes from the session, the read time from the server
+  {
+    route: "POST /api/v1/notifications/read-all", actor: "hr",
+    prepare: async () => {
+      const r = await inboxRows();
+      return {
+        url: "/api/v1/notifications/read-all", body: {},
+        state: () => notificationState([r.hr, r.acct]),
+      };
+    },
+    forbidden: {
+      recipientId: U.acct, userId: U.acct, readAt: PAST, read: false, ids: [FOREIGN_ID], eventId: FOREIGN_ID,
+      type: "employee.exited", title: "Hijacked", entity: { type: "candidate", id: FOREIGN_ID },
     },
   },
   // sheet import sign-off (docs/import.md, migration 0033)
@@ -529,6 +558,37 @@ const CASES: RejectCase[] = [
 /** Endpoints that read no body: what they change comes from the URL and the session only. */
 interface IgnoreCase { route: string; run: () => Promise<void> }
 const IGNORED: IgnoreCase[] = [
+  {
+    route: "POST /api/v1/notifications/:id/read",
+    run: async () => {
+      const r = await inboxRows();
+      const before = Date.now();
+      const res = await call("hr", "POST", `/api/v1/notifications/${r.hr}/read`,
+        { ...SERVER_MANAGED, readAt: PAST, recipientId: U.acct, userId: U.acct, title: "Hijacked", read: false, id: r.acct });
+      expect(res.statusCode, res.body).toBe(204);
+      const st = await notificationState([r.hr, r.acct]);
+      const hr = st.find((x) => x.id === r.hr)!;
+      const acct = st.find((x) => x.id === r.acct)!;
+      expect((hr.read_at as Date).getTime()).toBeGreaterThanOrEqual(before - 5_000);   // the server's time, not PAST
+      expect(hr.title).toBe("Project assignment ends within 30 days");
+      expect(hr.recipient_id).toBe(U.hr);
+      expect(acct.read_at).toBeNull();                                                 // the other recipient's row is untouched
+    },
+  },
+  {
+    route: "POST /api/v1/notifications/:id/unread",
+    run: async () => {
+      const r = await inboxRows();
+      await ok("hr", "POST", `/api/v1/notifications/${r.hr}/read`, undefined, 204);
+      await ok("acct", "POST", `/api/v1/notifications/${r.acct}/read`, undefined, 204);
+      const acctBefore = (await notificationState([r.acct]))[0];
+      const res = await call("hr", "POST", `/api/v1/notifications/${r.hr}/unread`,
+        { ...SERVER_MANAGED, readAt: PAST, recipientId: U.acct, id: r.acct, read: true });
+      expect(res.statusCode, res.body).toBe(204);
+      expect((await notificationState([r.hr]))[0]!.read_at).toBeNull();
+      expect((await notificationState([r.acct]))[0]).toEqual(acctBefore);
+    },
+  },
   {
     route: "POST /api/v1/candidates/:id/resumes/:resumeId/download",
     run: async () => {
