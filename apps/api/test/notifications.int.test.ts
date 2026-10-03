@@ -147,8 +147,12 @@ describe("recipients per event type (authz.notification_recipients)", () => {
     const cand = (await newCandidate(db, { teamId: T.t2, recruiterId: U.r2a, locationId: LOC.dallas })).id;
     const ev = await emitEvent(db, "candidate.assigned", "candidate", cand, PAYLOADS.assigned(cand, T.t2, T.t1));
     expect(await recipients(ev)).toEqual(ids([[U.l2, "lead"], [U.m1, "manager"]]));
+    // The payload's team must be the candidate's current team (0051): a team it is not in reaches nobody.
     const ev3 = await emitEvent(db, "candidate.assigned", "candidate", cand, PAYLOADS.assigned(cand, T.t3));
+    expect(await recipients(ev3)).toEqual([]);
+    await force("UPDATE eureka.candidate SET team_id = $2, recruiter_id = NULL WHERE id = $1", [cand, T.t3]);
     expect(await recipients(ev3)).toEqual(ids([[U.l3, "lead"], [U.m2, "manager"]]));
+    expect(await recipients(ev)).toEqual([]);                                     // stale: the candidate moved on
   });
 
   it("paperwork overdue reaches the placement's recruiter, lead and manager, plus a Documents Team assignee", async () => {
@@ -330,6 +334,28 @@ describe("delivery: inbox and email channels", () => {
     }
   });
 
+  it("OUTBOX_DELIVER_SINCE also cuts off emailing in-app types: inbox only, published, no email (review F1)", async () => {
+    const cand = (await newCandidate(db, { teamId: T.t1, recruiterId: U.r1a, locationId: LOC.dallas })).id;
+    const ev = await emitEvent(db, "work_authorization.expiring", "work_authorization", await newId(db), PAYLOADS.workAuth(cand, await newId(db)));
+    await force("UPDATE eureka.outbox_event SET created_at = now() - interval '10 days' WHERE id = $1", [ev]);
+    const mail = new FakeMail();
+    const job = outboxDeliveryJob(mail, ORIGIN, { batchSize: 500, deliverSince: new Date(Date.now() - 86_400_000) });
+    const keys = await job.dueKeys(new Date(), { pool: db.worker, log: silentLogger });
+    expect(keys).toContain(ev);                                  // no inbox marker yet: skipBacklog leaves it to the run
+    expect(await new JobRunner(db.worker, [job], silentLogger).runOnce(job, ev)).toBe("ran");
+    expect(mail.sent).toHaveLength(0);
+    expect(await inbox(ev)).toEqual([U.hr, U.imm].sort());
+    expect(await rows("SELECT 1 FROM eureka.outbox_delivery WHERE event_id = $1", [ev])).toEqual([]);
+    expect(await publishedAt(ev)).not.toBeNull();
+    const detail = (await rows<{ detail: Record<string, unknown> }>(
+      "SELECT detail FROM eureka.job_run WHERE job_name = 'outbox-delivery' AND run_key = $1", [ev]))[0]!.detail;
+    expect(detail).toMatchObject({ emailCutOff: true, inApp: 2, sent: 0 });
+    // A fresh event of the same type is emailed as usual.
+    const fresh = await emitEvent(db, "work_authorization.expiring", "work_authorization", await newId(db), PAYLOADS.workAuth(cand, await newId(db)));
+    expect(await new JobRunner(db.worker, [job], silentLogger).runOnce(job, fresh)).toBe("ran");
+    expect(mail.to()).toEqual(["hr@eureka.example", "imm@eureka.example"]);
+  });
+
   it("job scheduling without mail: email-only events wait, in-app-only events are delivered under their id", async () => {
     const { placementId, candidateId } = await placement();
     const pc = (await rows<{ id: string }>(
@@ -381,7 +407,7 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
 
   it("bench-time payloads hold ids, dates and counts only", async () => {
     const cand = await benchCandidate("2026-03-01");
-    await db.worker.query("SELECT authz.emit_bench_time('2026-04-15', 30)");
+    await db.worker.query("SELECT authz.emit_bench_time('2026-04-15', 30, 30)");
     const p = (await rows<{ payload: Record<string, unknown> }>(
       "SELECT payload FROM eureka.outbox_event WHERE type = 'employee.bench_time' AND aggregate_id = $1", [cand]))[0]!.payload;
     expect(Object.keys(p).sort()).toEqual(["benchDays", "benchSince", "candidateId", "thresholdDays"]);
@@ -473,6 +499,11 @@ describe("inbox table privileges and RLS (migration 0046)", () => {
     const fresh = await emitEvent(db, "assignment.ending_soon", "assignment", a, PAYLOADS.endingSoon(a, placementId, candidateId));
     expect(await ins(fresh, "employee.benched")).toMatch(/row-level security/);        // type must match the event
     expect(await ins(fresh, "assignment.ending_soon")).toMatch(/row-level security/); // r3a is not a recipient of it
+    // A recipient with an entity other than the event's is refused (0051).
+    expect(await denied(db.worker, `INSERT INTO eureka.notification (recipient_id, event_id, type, entity_type, entity_id, title, body)
+      VALUES ($1, $2, 'assignment.ending_soon', 'placement', $3, 'T', 'B')`, [U.hr, fresh, candidateId])).toMatch(/row-level security/);
+    expect(await denied(db.worker, `INSERT INTO eureka.notification (recipient_id, event_id, type, entity_type, entity_id, title, body)
+      VALUES ($1, $2, 'assignment.ending_soon', 'candidate', $3, 'T', 'B')`, [U.hr, fresh, placementId])).toMatch(/row-level security/);
     const c = await db.worker.connect();
     try {                                                                              // a recipient would be accepted
       await c.query("BEGIN");
@@ -519,9 +550,9 @@ describe("inbox table privileges and RLS (migration 0046)", () => {
              has_function_privilege('eureka_app', p.oid, 'EXECUTE') AS app,
              has_function_privilege('eureka_worker', p.oid, 'EXECUTE') AS worker
         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE p.proname IN ('notification_recipients', 'notification_emit_once', 'emit_bench_time',
+       WHERE p.proname IN ('notification_recipients', 'notification_emit_once', 'emit_bench_time', 'notification_entity',
                            'notification_guard', 'inbox_fanout_guard', 'notification_ledger_guard')`);
-    expect(fns).toHaveLength(6);
+    expect(fns).toHaveLength(7);
     const by = Object.fromEntries(fns.map((r) => [r.sig.split("(")[0], r]));
     for (const r of fns) {
       expect(r.proconfig, r.sig).toContain("search_path=pg_catalog, pg_temp");
@@ -530,6 +561,8 @@ describe("inbox table privileges and RLS (migration 0046)", () => {
     }
     expect(by["authz.notification_recipients"].worker).toBe(true);
     expect(by["authz.emit_bench_time"].worker).toBe(true);
+    expect(by["authz.emit_bench_time"].sig).toBe("authz.emit_bench_time(date,integer,integer)");
+    expect(by["authz.notification_entity"].worker).toBe(true);
     expect(by["authz.notification_emit_once"].worker).toBe(false);
     expect(await denied(db.worker, "SELECT authz.notification_emit_once('bench-time', 'k', 'employee.bench_time', 'candidate', gen_random_uuid(), '{}')"))
       .toMatch(/permission denied/);
@@ -578,7 +611,7 @@ describe("time travel: scheduled notification jobs on a fixed clock", () => {
     expect(await events()).toHaveLength(1);
     const detail = (await rows<{ detail: Record<string, unknown> }>(
       "SELECT detail FROM eureka.job_run WHERE job_name = $1 AND run_key = '2026-06-20'", [BENCH_TIME_JOB]))[0]!.detail;
-    expect(detail).toEqual({ emitted: 0, thresholdDays: 30 });
+    expect(detail).toEqual({ emitted: 0, thresholdDays: 30, windowDays: 7 });
 
     // A new bench period is a new notice.
     await force("UPDATE eureka.candidate SET bench_since = '2026-06-01' WHERE id = $1", [cand]);
@@ -593,10 +626,38 @@ describe("time travel: scheduled notification jobs on a fixed clock", () => {
 
   it("the database refuses a future day or a bad threshold", async () => {
     const tomorrow = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10);
-    expect(await denied(db.worker, "SELECT authz.emit_bench_time($1::date, 30)", [tomorrow])).toMatch(/invalid bench-time run/);
-    expect(await denied(db.worker, "SELECT authz.emit_bench_time('2026-06-01', 0)")).toMatch(/invalid bench-time run/);
-    expect(await denied(db.worker, "SELECT authz.emit_bench_time(NULL, 30)")).toMatch(/invalid bench-time run/);
-    expect(await denied(db.app, "SELECT authz.emit_bench_time('2026-06-01', 30)")).toMatch(/permission denied/);
+    expect(await denied(db.worker, "SELECT authz.emit_bench_time($1::date, 30, 7)", [tomorrow])).toMatch(/invalid bench-time run/);
+    expect(await denied(db.worker, "SELECT authz.emit_bench_time('2026-06-01', 0, 7)")).toMatch(/invalid bench-time run/);
+    expect(await denied(db.worker, "SELECT authz.emit_bench_time('2026-06-01', 30, 0)")).toMatch(/invalid bench-time run/);
+    expect(await denied(db.worker, "SELECT authz.emit_bench_time(NULL, 30, 7)")).toMatch(/invalid bench-time run/);
+    expect(await denied(db.app, "SELECT authz.emit_bench_time('2026-06-01', 30, 7)")).toMatch(/permission denied/);
+    expect(await denied(db.worker, "SELECT authz.emit_bench_time('2026-06-01', 30)")).toMatch(/does not exist/); // 0046 signature dropped
+  });
+
+  it("bench-time: one reminder per bench period whatever the threshold, and only recent crossings (0051)", async () => {
+    const benched = async (cand: string) => (await rows<{ id: string }>(
+      "SELECT id FROM eureka.outbox_event WHERE type = 'employee.bench_time' AND aggregate_id = $1", [cand])).length;
+    const day = "2026-08-31";
+    const recent = await benchCandidate("2026-07-28", T.t3, U.r3a);  // crossed 30 days on 2026-08-27 (4 days ago)
+    const old = await benchCandidate("2026-06-01", T.t3, U.r3a);     // crossed on 2026-07-01 (61 days ago)
+    expect((await db.worker.query("SELECT authz.emit_bench_time($1, 30, 7) AS n", [day])).rows[0].n).toBeGreaterThanOrEqual(1);
+    expect([await benched(recent), await benched(old)]).toEqual([1, 0]);   // first enable: no flood of the whole bench
+    // A worker-chosen threshold change does not re-notify the same bench period (it once took 50 events).
+    for (let t = 1; t <= 50; t++) await db.worker.query("SELECT authz.emit_bench_time($1, $2, 365)", [day, t]);
+    expect(await benched(recent)).toBe(1);
+    expect(await benched(old)).toBe(1);                                    // the wide window reached it once
+    // A 0046-style key (with a threshold suffix) counts as already notified.
+    const legacy = await benchCandidate("2026-07-29", T.t3, U.r3a);
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL ROLE authz_definer");
+      await c.query("INSERT INTO eureka.notification_ledger (job, key, event_id) VALUES ('bench-time', $1, gen_random_uuid())",
+        [`${legacy}:2026-07-29:30`]);
+      await c.query("COMMIT");
+    } finally { c.release(); }
+    await db.worker.query("SELECT authz.emit_bench_time($1, 30, 7)", [day]);
+    expect(await benched(legacy)).toBe(0);
   });
 
   it("notification-prune runs daily after 04:30 New York and deletes rows older than the retention only", async () => {
@@ -626,5 +687,8 @@ describe("time travel: scheduled notification jobs on a fixed clock", () => {
     expect(loadWorkerConfig({ ...base, NOTIFY_BENCH_DAYS: "45" }).NOTIFY_BENCH_DAYS).toBe(45);
     expect(() => loadWorkerConfig({ ...base, NOTIFICATION_RETENTION_DAYS: "7" })).toThrow();
     expect(() => loadWorkerConfig({ ...base, NOTIFY_BENCH_DAYS: "0" })).toThrow();
+    expect(loadWorkerConfig(base).NOTIFY_BENCH_WINDOW_DAYS).toBe(7);
+    expect(() => loadWorkerConfig({ ...base, NOTIFY_BENCH_WINDOW_DAYS: "0" })).toThrow();
+    expect(() => benchTimeJob(30, 0)).toThrow(/window/);
   });
 });

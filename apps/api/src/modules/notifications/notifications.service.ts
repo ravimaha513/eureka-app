@@ -76,7 +76,8 @@ export class NotificationsService {
   async readAll(user: AuthedUser, body: ReadAll) {
     const r = await this.db.withUser(user.id, (c) => c.query(
       `UPDATE eureka.notification SET read_at = now()
-        WHERE recipient_id = $1 AND read_at IS NULL AND ($2::timestamptz IS NULL OR created_at <= $2::timestamptz)`,
+        WHERE recipient_id = $1 AND read_at IS NULL
+          AND ($2::timestamptz IS NULL OR date_trunc('milliseconds', created_at) <= $2::timestamptz)`,
       [user.id, body.before ?? null]));
     return { updated: r.rowCount ?? 0 };
   }

@@ -22,20 +22,30 @@ const DELETE_BATCH = 1000;
 /**
  * FR-NTF-05: once a candidate has been on bench for `thresholdDays` (OD-05,
  * still open: the job is off until NOTIFY_BENCH_DAYS is set), one
- * `employee.benched` event per bench period. Run key = the New York date the
+ * `employee.bench_time` event per bench period, whatever the threshold
+ * (migration 0051). Only candidates that crossed the threshold within the last
+ * `windowDays` days are notified, so a first enable (or a lowered threshold)
+ * does not notify the whole bench at once. Run key = the New York date the
  * reminder runs for (never a future day; the database refuses one).
  */
-export function benchTimeJob(thresholdDays: number, schedule: DailySchedule = BENCH_TIME_SCHEDULE): JobDefinition {
+export const DEFAULT_BENCH_WINDOW_DAYS = 7;
+
+export function benchTimeJob(
+  thresholdDays: number, windowDays = DEFAULT_BENCH_WINDOW_DAYS, schedule: DailySchedule = BENCH_TIME_SCHEDULE,
+): JobDefinition {
   if (!Number.isInteger(thresholdDays) || thresholdDays < 1 || thresholdDays > 365) {
     throw new Error("bench threshold must be 1 to 365 days");
+  }
+  if (!Number.isInteger(windowDays) || windowDays < 1 || windowDays > 365) {
+    throw new Error("bench window must be 1 to 365 days");
   }
   return {
     name: BENCH_TIME_JOB,
     dueKeys: (now) => [dueReminderKey(now, schedule)],
     async run(day, { pool }) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("bench-time run key must be a date");
-      const r = await pool.query<{ n: number }>("SELECT authz.emit_bench_time($1::date, $2) AS n", [day, thresholdDays]);
-      return { emitted: r.rows[0]!.n, thresholdDays };
+      const r = await pool.query<{ n: number }>("SELECT authz.emit_bench_time($1::date, $2, $3) AS n", [day, thresholdDays, windowDays]);
+      return { emitted: r.rows[0]!.n, thresholdDays, windowDays };
     },
   };
 }

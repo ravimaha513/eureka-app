@@ -19,6 +19,11 @@ Code: `apps/api/src/worker/notify-types.ts` (types, templates), `apps/api/src/wo
    - **email**: one `outbox_delivery` row per recipient, then the unchanged at-most-once send (re-check
      before each send, `sending` committed before the provider call, `in_doubt` never resent, rejection
      cap `OUTBOX_MAX_REJECTIONS`, `OUTBOX_DELIVER_SINCE` cut-off). One email per user even with several reasons.
+     **Backlog cut-off (0051 review, F1):** an emailing event created before `OUTBOX_DELIVER_SINCE` is never
+     emailed, whatever its channels: email-only types are published by `skipBacklog`; a type that also has an
+     inbox gets its inbox rows (in-app, exactly once; low risk, and normally already delivered while mail was
+     disabled) and is then published without `outbox_delivery` rows. An event whose emails had already started
+     (delivery rows exist) is finished as before.
 3. The event is published when every channel is done. Without a mail mode (`OUTBOX_MAIL_MODE=disabled`) the
    job still runs: in-app-only events are delivered and published; events that also email get their inbox
    rows under the run key `inbox:<event id>` and stay unpublished until mail is enabled (as placement
@@ -56,8 +61,8 @@ among `hr`, `accounts`, `immigration`.
 | `employee.exited` | exit from the company (same audience as FR-NTF-09) | 0045 `authz.exit_employee` | `personId`, `candidateId`, `lastAssignmentId`, `exitDate`, `exitReason` ∈ {resigned, terminated, other}, `notify` | `hr`, `accounts`, `immigration`, `bu_head`, `ceo` | those five | email + inbox | candidate |
 | `assignment.ending_soon` | not in design B6 | 0045 job `assignment-ending-soon` (`authz.assignment_ending_soon_scan`) | `assignmentId`, `placementId`, `personId`, `candidateId`, `plannedEndDate`, `daysLeft` (0..365), `notify` | `hr`, `accounts` (conservative default) | `hr`, `accounts` | inbox only | placement |
 | `employee.bench_time` | FR-NTF-05 (bench-time) | 0046 job `bench-time` (`authz.emit_bench_time`) | `candidateId`, `benchSince`, `benchDays`, `thresholdDays` | the candidate's recruiter, its team's lead, that lead's manager (reporting line), `ceo` | `recruiter`, `lead`, `manager`, `ceo` | email + inbox | candidate |
-| `candidate.assigned` | FR-NTF-10, FR-EMP-05 (team assigned) | not emitted yet (team reassignment) | `candidateId`, `teamId` (the new team), optional `fromTeamId` | the new team's lead and that lead's manager | `lead`, `manager` | email + inbox | candidate |
-| `checklist.item_overdue` | FR-NTF-04 (paperwork pending), FR-NTF-03 / FR-VIS-04 (documents pending) | paperwork/BGC (0044), not merged yet | `checklistItemId`, `placementId`, `daysOverdue` (0..3650), optional `assigneeId` | the placement's recruiter, the lead of its team snapshot, that lead's manager; plus `assigneeId` when that user holds `documents_team` | `recruiter`, `lead`, `manager`, `documents_team` | email + inbox | placement |
+| `candidate.assigned` | FR-NTF-10, FR-EMP-05 (team assigned) | not emitted yet (team reassignment) | `candidateId`, `teamId` (the new team), optional `fromTeamId` | the lead of the candidate's current team (only while it equals `teamId`; otherwise nobody, the event alerts) and that lead's manager | `lead`, `manager` | email + inbox | candidate |
+| `checklist.item_overdue` | FR-NTF-04 (paperwork pending), FR-NTF-03 / FR-VIS-04 (documents pending) | paperwork/BGC (0044), not merged yet | `checklistItemId`, `placementId`, `daysOverdue` (0..3650), optional `assigneeId` | the placement's recruiter, the lead of its team snapshot, that lead's manager; plus `assigneeId` when that user holds `documents_team` (trusted from the producer's definer function; `checklist_item` has no assignee column yet, to be verified with 0049) | `recruiter`, `lead`, `manager`, `documents_team` | email + inbox | placement |
 
 `employee.benched` (0045) is the move to the bench at project exit; `employee.bench_time` (0046) is the reminder
 once a candidate has been on the bench for N days. Emails and inbox rows never show the dates, reasons or codes
@@ -86,7 +91,7 @@ definer function (like `authz.emit_bench_time(day, threshold)`) to `eureka_worke
 | Job | Schedule | Run key | Notes |
 |---|---|---|---|
 | `outbox-delivery` | every tick | event id, or `inbox:<id>` (mail disabled) | above |
-| `bench-time` | daily 07:45 America/New_York | the New York date | Only when `NOTIFY_BENCH_DAYS` is set (threshold is OD-05, open). One `employee.bench_time` per candidate and bench period (`bench_since`) once on bench ≥ N days; the database refuses a future day |
+| `bench-time` | daily 07:45 America/New_York | the New York date | Only when `NOTIFY_BENCH_DAYS` is set (threshold is OD-05, open). One `employee.bench_time` per candidate and bench period (ledger key `candidate:bench_since`, whatever the threshold; a changed threshold does not re-notify), only for candidates whose N-th bench day falls within the last `NOTIFY_BENCH_WINDOW_DAYS` (default 7) days, so a first enable does not notify the whole bench; a worker down longer than the window misses those crossings. The database refuses a future day (0051) |
 | `notification-prune` | daily 04:30 America/New_York | UTC date (maintenance) | Deletes inbox rows older than `NOTIFICATION_RETENTION_DAYS` (default 180); the database refuses fewer than 30 days |
 
 All are covered by time-travel tests on a fixed clock (`apps/api/test/notifications.int.test.ts`).
@@ -101,18 +106,20 @@ All routes need a session; writes need the CSRF token. Every query names the ses
 | `GET /api/v1/notifications?limit=1..50&cursor=&unread=true` | `{ items: [{ id, type, title, body, entity: { type, id }, createdAt, readAt }], nextCursor }`, newest first |
 | `GET /api/v1/notifications/unread-count` | `{ unread, capped }` (counted up to 1000) |
 | `POST /api/v1/notifications/:id/read` / `/unread` | 204; body ignored; 404 when the row is not the caller's |
-| `POST /api/v1/notifications/read-all` | `{ updated }`; strict body `{ before?: ISO time }` (only rows created at or before it) |
+| `POST /api/v1/notifications/read-all` | `{ updated }`; strict body `{ before?: ISO time }` (only rows created at or before it, compared at the millisecond precision `createdAt` is listed with, so sending the newest item's `createdAt` includes it) |
 
 The database sets `read_at` (the first read time is kept); nothing else in a row can change. The web app polls
 the unread count every 60 s (no websockets), announces growth in a polite live region and opens the
 placement or candidate when the user has that screen.
 
-## Privileges (migration 0046)
+## Privileges (migrations 0046, 0051)
 
 - `eureka_app`: SELECT own `notification` rows, UPDATE (`read_at`) own rows. Nothing on `inbox_fanout` or the ledger.
 - `eureka_worker`: EXECUTE `authz.notification_recipients`, `authz.emit_bench_time`; `notification` SELECT of
   the key columns only (never titles or bodies), INSERT during fan-out for named recipients, DELETE past 30 days;
-  `inbox_fanout` SELECT/INSERT. Still no access to candidate or placement rows, no outbox INSERT.
+  `inbox_fanout` SELECT/INSERT. An inbox row's `entity_type`/`entity_id` must equal `authz.notification_entity(event)`
+  (derived from the type and payload, 0051). Residual: titles and bodies are rendered by the worker from the fixed
+  templates in `notify-types.ts`; the database bounds them (length, no control characters) but does not check the text. Still no access to candidate or placement rows, no outbox INSERT.
 - `authz_definer`: SELECT (`id`, `type`, `payload`, `published_at`) on `outbox_event`; the ledger.
 - Triggers refuse every other write (owner and superuser included): notification inserts only by the worker,
   updates only of `read_at` by the app, deletes only by the worker past 30 days, no TRUNCATE; markers go only
