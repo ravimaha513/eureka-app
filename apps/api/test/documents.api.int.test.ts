@@ -444,6 +444,40 @@ describe("Google step-up (OIDC max_age / auth_time)", () => {
     expect((await download(s)).json().detail).toBe("step_up_required");
   });
 
+  const lastFailure = async () => (await db.admin.query(
+    `SELECT changes ->> 'reason' AS r FROM eureka.audit_event WHERE action = 'auth.step_up_failed' AND actor_id = $1 ORDER BY seq DESC LIMIT 1`, [U.imm])).rows[0]?.r;
+
+  it("a refused token is recorded as token_refused (not wrong_account) and consumes the challenge", async () => {
+    const s = await googleSession(U.imm);
+    const { cb, google, stepCookie } = await stepUp(s, (nonce) => ({ nonce }));
+    expect(cb.headers.location).toMatch(/stepUp=failed$/);
+    expect(await lastFailure()).toBe("token_refused");
+    const state = createHash("sha256").update(google.searchParams.get("state")!).digest();
+    expect((await db.admin.query(`SELECT outcome, used_at IS NOT NULL AS used FROM eureka.step_up_challenge WHERE state_hash = $1`, [state])).rows)
+      .toEqual([{ outcome: "token_refused", used: true }]);
+    // Replaying it now (even with a good token) grants nothing.
+    tokenResponse = () => idToken({ nonce: google.searchParams.get("nonce"), auth_time: Math.floor(Date.now() / 1000) });
+    const replay = await gapp.inject({ method: "GET", url: `/api/auth/step-up/callback?code=c2&state=${google.searchParams.get("state")}`,
+      headers: { cookie: `${s.cookie}; ${stepCookie}` } });
+    expect(replay.headers.location).toMatch(/stepUp=failed$/);
+    expect(await lastFailure()).toBe("replayed");
+  });
+
+  it("cancelling at Google (error=access_denied, no code) consumes the challenge as cancelled", async () => {
+    const s = await googleSession(U.imm);
+    const start = await gapp.inject({ method: "POST", url: "/api/auth/step-up/start", payload: { returnTo: "/candidates" }, headers: { cookie: s.cookie, "x-csrf-token": s.csrf } });
+    const google = new URL(start.json().redirectUrl as string);
+    const stepCookie = String(start.headers["set-cookie"]).split(";")[0]!;
+    const st = google.searchParams.get("state")!;
+    const cb = await gapp.inject({ method: "GET", url: `/api/auth/step-up/callback?error=access_denied&state=${st}`, headers: { cookie: `${s.cookie}; ${stepCookie}` } });
+    expect(cb.statusCode).toBe(302);
+    expect(cb.headers.location).toBe("http://localhost:5173/candidates?stepUp=failed");
+    expect(await lastFailure()).toBe("cancelled");
+    expect((await db.admin.query(`SELECT outcome FROM eureka.step_up_challenge WHERE state_hash = $1`, [createHash("sha256").update(st).digest()])).rows)
+      .toEqual([{ outcome: "cancelled" }]);
+    expect((await gapp.inject({ method: "GET", url: "/api/auth/step-up", headers: { cookie: s.cookie } })).json()).toMatchObject({ active: false });
+  });
+
   it("a replayed callback grants nothing; another session cannot use the callback", async () => {
     const s = await googleSession(U.imm);
     const fresh = (nonce: string) => ({ nonce, auth_time: Math.floor(Date.now() / 1000) });
