@@ -160,14 +160,27 @@ resource "aws_iam_role_policy" "api" {
         }
       },
       {
-        # Application field encryption (FIELD_KMS_KEY_ARN) calls KMS directly.
-        # Never with an S3 encryption context: restricted document objects are
-        # reachable only through RestrictedDocumentsKmsViaS3.
-        Sid       = "FieldEncryption"
-        Effect    = "Allow"
-        Action    = ["kms:GenerateDataKey", "kms:Decrypt"]
-        Resource  = aws_kms_key.restricted.arn
-        Condition = { Null = { "kms:EncryptionContext:aws:s3:arn" = "true" } }
+        # Application field encryption (FIELD_KMS_KEY_ARN) calls KMS directly,
+        # only for field data keys (encryption context eureka:purpose = field)
+        # and never through a service (no kms:ViaService) or with an S3 context:
+        # S3 lets a request add its own SSE-KMS context pairs, so the purpose
+        # pair alone would not keep restricted/documents/ objects out of reach.
+        # Restricted documents are reachable only via RestrictedDocumentsKmsViaS3.
+        Sid      = "FieldEncryption"
+        Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
+        Resource = aws_kms_key.restricted.arn
+        Condition = {
+          StringEquals = { "kms:EncryptionContext:eureka:purpose" = "field" }
+          Null         = { "kms:ViaService" = "true", "kms:EncryptionContext:aws:s3:arn" = "true" }
+        }
+      },
+      {
+        # Blind index (BIDX_KMS_KEY_ARN): HMAC only, never the key itself.
+        Sid      = "BlindIndexMac"
+        Effect   = "Allow"
+        Action   = ["kms:GenerateMac"]
+        Resource = aws_kms_key.bidx.arn
       },
       {
         Effect    = "Allow"
@@ -201,6 +214,10 @@ resource "aws_iam_role_policy" "api" {
 #   the worker never reads a restricted object back) for restricted/documents/.
 #   No tagging rights: the scan result cannot be forged by the worker either
 #   (the bucket policy also denies it).
+#   key-rotation (worker/jobs/key-rotation.ts): GenerateDataKey and Decrypt on
+#   the restricted key, only directly (no kms:ViaService, no S3 context) and
+#   only with the field encryption context (eureka:purpose = field), never for
+#   restricted documents.
 resource "aws_iam_role" "worker" {
   name               = "${local.name}-worker-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
@@ -292,6 +309,18 @@ resource "aws_iam_role_policy" "worker" {
         Condition = {
           StringEquals = { "kms:ViaService" = "s3.${var.aws_region}.amazonaws.com" }
           StringLike   = { "kms:EncryptionContext:aws:s3:arn" = "${aws_s3_bucket.b["documents"].arn}*" }
+        }
+      },
+      {
+        # key-rotation job: unwraps old field data keys and generates the
+        # month's new one; field encryption context only (no documents).
+        Sid      = "FieldKeyRotation"
+        Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
+        Resource = aws_kms_key.restricted.arn
+        Condition = {
+          StringEquals = { "kms:EncryptionContext:eureka:purpose" = "field" }
+          Null         = { "kms:ViaService" = "true", "kms:EncryptionContext:aws:s3:arn" = "true" }
         }
       },
     ]
@@ -486,6 +515,7 @@ locals {
     { name = "AWS_REGION", value = var.aws_region },
     { name = "DOCUMENTS_BUCKET", value = aws_s3_bucket.b["documents"].id },
     { name = "FIELD_KMS_KEY_ARN", value = aws_kms_key.restricted.arn },
+    { name = "BIDX_KMS_KEY_ARN", value = aws_kms_key.bidx.arn },
     # db.t4g.micro allows ~80-110 connections; a rollout can briefly run up to
     # 2 x api_max_count API tasks plus the worker, so keep each pool small.
     { name = "DB_POOL_MAX", value = "5" },
@@ -568,8 +598,10 @@ resource "aws_ecs_task_definition" "worker" {
   }
   volume { name = "tmp" }
   # The worker gets its own environment: no session secret, OAuth client or
-  # field-encryption key (it does not use them; it gets the restricted key ARN only
-  # to name it on restricted/ writes, usable only through S3). See apps/api/src/worker/config.ts.
+  # blind index key (it does not use them); the field-encryption key for the
+  # key-rotation job, and the same key's ARN as RESTRICTED_KMS_KEY_ARN to name it
+  # on restricted/ writes (document-scan; usable there only through S3).
+  # See apps/api/src/worker/config.ts.
   container_definitions = jsonencode([merge(local.container_base, {
     name    = "worker"
     command = ["node", "dist/worker.js"]
@@ -579,6 +611,7 @@ resource "aws_ecs_task_definition" "worker" {
       { name = "AWS_REGION", value = var.aws_region },
       { name = "AUDIT_BUCKET", value = aws_s3_bucket.b["audit"].id },
       { name = "DOCUMENTS_BUCKET", value = aws_s3_bucket.b["documents"].id },
+      { name = "FIELD_KMS_KEY_ARN", value = aws_kms_key.restricted.arn },
       # document-scan writes restricted/documents/ under this key (an id, not a secret).
       { name = "RESTRICTED_KMS_KEY_ARN", value = aws_kms_key.restricted.arn },
       { name = "FEEDBACK_MAIL_MODE", value = var.feedback_from_email != "" ? "ses" : "disabled" },

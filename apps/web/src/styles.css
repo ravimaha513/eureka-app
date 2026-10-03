@@ -143,6 +143,8 @@ h1:focus { outline: none; }
 .badge.st-selected, .badge.st-joined, .badge.st-confirmed { background: #ecfdf3; color: #15803d; }
 .badge.st-rejected, .badge.st-withdrawn, .badge.st-backout, .badge.st-bgc_failed { background: #fef2f2; color: #b91c1c; }
 .badge.first { background: #f5f3ff; color: #6d28d9; }
+.badge.emp-on_assignment { background: #ecfdf3; color: #15803d; } .badge.emp-bench { background: #fff7e6; color: #b45309; }
+.badge.emp-exited { background: #f1f5f9; color: #475569; }
 .drawer.wide { width: min(560px, 100%); }
 .field textarea { border-radius: 8px; border: 1px solid var(--line); padding: 8px 10px; font: inherit; color: var(--text); resize: vertical; width: 100%; }
 .check { display: inline-flex; gap: 6px; align-items: center; font-weight: 600; color: var(--text2); }
@@ -188,6 +190,9 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .badge.resume-infected, .badge.resume-rejected, .badge.resume-failed, .badge.resume-expired { background: #fef2f2; color: #b91c1c; }
 /* Paperwork documents (DocumentsSection) */
 .badge.restricted { background: #fff7e6; color: #92400e; }
+.badge.workauth-valid { background: #ecfdf3; color: #15803d; }
+.badge.workauth-pending { background: var(--pri-50); color: var(--pri-700); }
+.badge.workauth-expired, .badge.workauth-revoked { background: #fef2f2; color: #b91c1c; }
 
 /* Dashboard charts */
 .dashboard { --c0: #4f46e5; --c1: #0891b2; --c2: #f59e0b; --c3: #e11d48; --c4: #16a34a; --c5: #9333ea; }

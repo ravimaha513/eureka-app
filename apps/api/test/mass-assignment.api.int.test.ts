@@ -8,9 +8,10 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule, createApp } from "../src/app.module.js";
 import { loadConfig, type AppConfig } from "../src/platform/config.js";
-import { createTestDb, type TestDb } from "./db-harness.js";
+import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { CLIENT_ID, LOC, T, TECH_ID, U, seedFixtures, type FixtureCandidate } from "./fixtures.js";
 import { createPlacement, newCandidate, selectedSubmission } from "./placement-seed.js";
+import { backdate, joinedEmployee } from "./employee-seed.js";
 import { LOCAL_UPLOAD_PATH } from "../src/platform/storage/document-storage.js";
 import { LocalDocumentStore } from "../src/worker/document-store.js";
 import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob } from "../src/worker/jobs/resume-scan.js";
@@ -166,6 +167,30 @@ async function stagedImport(operator: string) {
   }
 }
 
+const dbToday = async () => (await rows(`SELECT CURRENT_DATE::text AS d`))[0]!.d as string;
+const daysAgo = async (n: number) => (await rows(`SELECT (CURRENT_DATE - $1::int)::text AS d`, [n]))[0]!.d as string;
+/** A fresh r1a candidate placed and joined, the assignment started 60 days ago. */
+async function employeeOnAssignment() {
+  const j = await joinedEmployee(db);
+  await backdate(db, j, await daysAgo(60));
+  return j;
+}
+/** As above, then the assignment ended by HR (employee on the bench). */
+async function benchedEmployee() {
+  const j = await employeeOnAssignment();
+  await asUser(db.app, U.hr, (c) => c.query(`SELECT authz.end_assignment($1, CURRENT_DATE - 1, 'completed')`, [j.assignmentId]), true);
+  return j;
+}
+/** Every row the employment endpoints write for this person (and the outbox). */
+const employmentState = async (personId: string) => ({
+  employee: await rows(`SELECT * FROM eureka.employee WHERE person_id = $1`, [personId]),
+  assignments: await rows(`SELECT a.*, pp.planned_end_date, pp.ending_notice_for FROM eureka.assignment a
+                           LEFT JOIN eureka.assignment_plan pp ON pp.assignment_id = a.id WHERE a.person_id = $1`, [personId]),
+  candidates: await rows(`SELECT c.marketing_status, c.team_id, c.recruiter_id FROM eureka.candidate c WHERE c.person_id = $1`, [personId]),
+  events: await rows(`SELECT count(*)::int AS n FROM eureka.employment_event WHERE person_id = $1`, [personId]),
+  outbox: await rows(`SELECT count(*)::int AS n FROM eureka.outbox_event`),
+});
+
 // ---- cases --------------------------------------------------------------------------------------
 
 interface Prepared {
@@ -237,6 +262,37 @@ const CASES: RejectCase[] = [
       };
     },
     forbidden: DOCUMENT_FORBIDDEN,
+  },
+  // work authorization (FR-VIS-01, migration 0042): person, ciphertext, key, audit columns and row version are the server's
+  {
+    route: "POST /api/v1/candidates/:id/work-authorizations", actor: "imm",
+    prepare: async () => {
+      const cand = await freshOwn();
+      return {
+        url: `/api/v1/candidates/${cand.id}/work-authorizations`, body: { type: "h1b", number: "EAC2190012345", status: "valid", validTo: "2028-01-31" },
+        state: () => rows(`SELECT count(*)::int AS n, (SELECT count(*)::int FROM eureka.field_key) AS keys FROM eureka.work_authorization`),
+      };
+    },
+    forbidden: {
+      personId: FOREIGN_ID, candidateId: FOREIGN_ID, numberEnc: "AQ==", number_enc: "AQ==", numberKeyId: FOREIGN_ID, keyId: FOREIGN_ID,
+      numberMasked: "x", hasNumber: false, expired: true, daysToExpiry: 1, updatedBy: U.hr, authType: "o1", row_version: 9,
+    },
+  },
+  {
+    route: "PATCH /api/v1/candidates/:id/work-authorizations/:waId", actor: "imm",
+    prepare: async () => {
+      const cand = await freshOwn();
+      const wa = await ok("imm", "POST", `/api/v1/candidates/${cand.id}/work-authorizations`, { type: "h1b", number: "EAC2190012345", status: "valid" });
+      return {
+        url: `/api/v1/candidates/${cand.id}/work-authorizations/${wa.id}`, body: { status: "revoked", number: "WAC1" },
+        headers: { "if-match": "1" },
+        state: () => rows(`SELECT * FROM eureka.work_authorization WHERE id = $1`, [wa.id]),
+      };
+    },
+    forbidden: {
+      personId: FOREIGN_ID, candidateId: FOREIGN_ID, numberEnc: "AQ==", numberKeyId: FOREIGN_ID, keyId: FOREIGN_ID,
+      numberMasked: "x", hasNumber: false, expired: true, updatedBy: U.hr, row_version: 9,
+    },
   },
   // sheet import sign-off (docs/import.md, migration 0033)
   // identity
@@ -490,6 +546,53 @@ const CASES: RejectCase[] = [
     },
     forbidden: { status: "joined", statusChangedAt: PAST, statusChangedBy: U.l1, joinedAt: PAST, isFirstPlacement: false, candidateId: FOREIGN_ID, rate: 999 },
   },
+  // employees and assignments (docs/employees-api.md): status, dates the server sets, snapshots and history are the server's
+  {
+    route: "POST /api/v1/assignments/:id/end", actor: "hr",
+    prepare: async () => {
+      const j = await employeeOnAssignment();
+      return {
+        url: `/api/v1/assignments/${j.assignmentId}/end`, body: { endDate: await dbToday(), reason: "completed" },
+        state: () => employmentState(j.personId),
+      };
+    },
+    forbidden: {
+      endReason: "bgc_failed", status: "bench", employeeStatus: "exited", personId: FOREIGN_ID, placementId: FOREIGN_ID,
+      candidateId: FOREIGN_ID, assignmentNo: 9, startDate: "2020-01-01", candidateStatus: "terminated", note: "free text",
+    },
+  },
+  {
+    route: "PUT /api/v1/assignments/:id/planned-end-date", actor: "hr",
+    prepare: async () => {
+      const j = await employeeOnAssignment();
+      return {
+        url: `/api/v1/assignments/${j.assignmentId}/planned-end-date`, body: { plannedEndDate: "2099-01-01" },
+        state: () => employmentState(j.personId),
+      };
+    },
+    forbidden: { endingNoticeFor: "2099-01-01", endDate: "2099-01-01", startDate: "2020-01-01", assignmentId: FOREIGN_ID, previousPlannedEndDate: "2020-01-01" },
+  },
+  {
+    route: "POST /api/v1/employees/:id/exit", actor: "hr",
+    prepare: async () => {
+      const j = await benchedEmployee();
+      return { url: `/api/v1/employees/${j.personId}/exit`, body: { exitDate: await dbToday(), reason: "resigned" }, state: () => employmentState(j.personId) };
+    },
+    forbidden: { status: "on_assignment", exitedOn: "2020-01-01", statusSince: PAST, employeeSince: "2020-01-01", candidateId: FOREIGN_ID, personId: FOREIGN_ID },
+  },
+  {
+    route: "POST /api/v1/employees/:id/return-to-market", actor: "hr",
+    prepare: async () => {
+      const j = await benchedEmployee();
+      return { url: `/api/v1/employees/${j.personId}/return-to-market`, body: {}, state: () => employmentState(j.personId) };
+    },
+    forbidden: { candidateStatus: "active", status: "on_assignment", candidateId: FOREIGN_ID, teamId: T.t2, recruiterId: U.r2a },
+  },
+  {
+    route: "POST /api/v1/reports/joinings-exits/export", actor: "l1",
+    prepare: async () => ({ url: "/api/v1/reports/joinings-exits/export", body: { from: "2025-01-01", to: "2025-06-30" }, state: async () => null }),
+    forbidden: { teamId: T.t2, recruiterId: U.r2a, scope: "org", limit: 1_000_000, includePhones: true, cap: 1 },
+  },
   // interviews
   {
     route: "POST /api/v1/interviews", actor: "r1a",
@@ -621,6 +724,33 @@ const IGNORED: IgnoreCase[] = [
         expect(r.success, field).toBe(false);
       }
       expect(StartStepUp.safeParse({ returnTo: "/candidates" }).success).toBe(true);
+    },
+  },
+  {
+    // The reveal takes no body: the record comes from the URL, the reader from the session.
+    route: "POST /api/v1/candidates/:id/work-authorizations/:waId/reveal",
+    run: async () => {
+      const cand = await freshOwn();
+      const a = await ok("imm", "POST", `/api/v1/candidates/${cand.id}/work-authorizations`, { type: "h1b", number: "AAA111", status: "valid" });
+      const b = await ok("imm", "POST", `/api/v1/candidates/${cand.id}/work-authorizations`, { type: "h1b", number: "BBB222", status: "valid" });
+      const before = await rows(`SELECT * FROM eureka.work_authorization ORDER BY id`);
+      // The reveal needs a step-up of this session (development step-up here).
+      await rows(`INSERT INTO authz.policy_setting (key, value) VALUES ('dev_step_up', 'on') ON CONFLICT (key) DO UPDATE SET value = 'on'`);
+      const s = await login("imm", true);
+      try {
+        expect((await call(null, "POST", "/api/auth/step-up/dev", undefined, {}, s)).statusCode).toBe(200);
+      } finally {
+        await rows(`DELETE FROM authz.policy_setting WHERE key = 'dev_step_up'`);
+      }
+      const r = await call(null, "POST", `/api/v1/candidates/${cand.id}/work-authorizations/${a.id}/reveal`, {
+        ...SERVER_MANAGED, waId: b.id, candidateId: FOREIGN_ID, actorId: U.hr, number: "ZZZ999", stepUpGrantId: FOREIGN_ID,
+      }, {}, s);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(r.json()).toEqual({ id: a.id, number: "AAA111" });
+      expect(await rows(`SELECT * FROM eureka.work_authorization ORDER BY id`)).toEqual(before);
+      const audit = await rows(`SELECT actor_id, entity_id, changes FROM eureka.audit_event WHERE action = 'work_authorization.number_revealed' ORDER BY seq DESC LIMIT 1`);
+      expect(audit).toEqual([{ actor_id: U.imm, entity_id: a.id, changes: { candidateId: cand.id, stepUpGrantId: expect.any(String) } }]);
+      expect(audit[0]!.changes.stepUpGrantId).not.toBe(FOREIGN_ID);
     },
   },
   {

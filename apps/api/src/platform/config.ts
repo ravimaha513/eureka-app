@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { checkFieldCrypto, fieldCryptoEnv } from "./crypto/config.js";
 
 /** Placeholder Terraform writes to SSM until the real Google OAuth values are set. */
 const PLACEHOLDER = "set-me";
@@ -42,8 +43,12 @@ const ConfigSchema = z
     DOCUMENTS_BUCKET: z.string().min(3).optional(),
     AWS_REGION: z.string().optional(),
     LOCAL_STORAGE_DIR: z.string().min(1).optional(),
+    // Field encryption (design A6.3): KMS keys in AWS, a local provider otherwise
+    // (refused in production). See platform/crypto/config.ts.
+    ...fieldCryptoEnv,
   })
   .superRefine((c, ctx) => {
+    checkFieldCrypto(c, ctx, { bidx: true });
     // Design A6.1: the development identity provider can never run in production.
     if (c.NODE_ENV === "production" && c.AUTH_MODE === "dev") {
       ctx.addIssue({ code: "custom", message: "AUTH_MODE=dev is not allowed in production" });

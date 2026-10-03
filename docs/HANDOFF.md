@@ -76,6 +76,18 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   the `dev_step_up` database switch), every opening in `document_access` and the audit export. Web: documents
   on the candidate profile and placement drawer, "Confirm it's you", access log. Add
   `/api/auth/step-up/callback` to the Google OAuth client's redirect URIs (infra/README.md).
+- Field encryption and work authorization (FR-VIS-01 to 03, migration 0042, `docs/work-authorization-api.md`):
+  AES-256-GCM envelope encryption with KMS data keys per field class (`eureka.field_key`, AAD = table, column,
+  row id), local key provider for development (refused in production), blind index helper (separate KMS HMAC
+  key `bidx`, `BIDX_KMS_KEY_ARN`), monthly `key-rotation` worker job. Work authorization records per person
+  (number encrypted, masked; audited reveal needs the shared step-up of migration 0043), RLS read = `visa:read` over the
+  candidate (HR, Immigration), writes through definer functions (`visa:update`, Immigration), `If-Match` on PATCH.
+  Daily `visa-expiry` job inserts `work_authorization.expiring` outbox rows (90/60/30, ids and dates only);
+  delivery and inbox belong to the notification jobs. Profile section in the web app. IAM: the task roles may use
+  the restricted key directly only with the encryption context `eureka:purpose = field`.
+  Left: DOB is not read or written anywhere (OD-04); when it is, encrypt with class `dob`, set `dob_bidx` with
+  `dobBlindIndex`, add `dob` to the rotation job (definer functions like `work_auth_number`) and use the index in
+  the duplicate check.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 - First-admin bootstrap (migrations 0037, 0039): `dist/db/bootstrap.js` as a one-off migrate task creates two
   `org_admin` users for hosted-domain emails; break-glass only: refuses while an active `org_admin` exists
@@ -144,6 +156,12 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - Step-up: the Phase 0 spike must confirm Google honours `max_age=0`/`prompt=login` and returns `auth_time`;
   if not, the WebAuthn fallback and the 15-minute idle timeout for restricted roles (design A6.1) are needed.
   Should approving restricted role grants also require step-up (A6.1 lists it; not built)?
+- Work authorization (migration 0042): who may see the records? Design B4.4 says `document:read` scope over the
+  candidate (would include Documents Team, Associate HR, Accounts and Sales over their own candidates); built
+  conservatively as `visa:read` only (HR, Immigration), number reveal also `visa:read`. Confirm the type list
+  (placeholder: H-1B, H-4 EAD, L-1, L-2 EAD, F-1 OPT/STEM OPT/CPT, EAD, green card, TN, O-1, other), whether
+  `valid_to` is required for some types, whether an "expired" notice (day 0) is wanted, and whether the
+  expiry notices may name the candidate (today: ids and dates only).
 
 ## Waiting on Ravi (not code)
 
