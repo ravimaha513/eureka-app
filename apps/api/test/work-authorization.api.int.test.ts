@@ -6,6 +6,8 @@ import { loadConfig } from "../src/platform/config.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, T, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 import { newCandidate } from "./placement-seed.js";
+import { FieldCipher, sealWith } from "../src/platform/crypto/field-crypto.js";
+import { LocalKeyProvider } from "../src/platform/crypto/key-provider.js";
 
 /**
  * Work authorization API (FR-VIS-01, 02; docs/work-authorization-api.md):
@@ -138,6 +140,101 @@ describe("number: encrypted, masked, revealed only through the audited call", ()
     const again = await login("hr", true);
     const ok = await app.inject({ method: "POST", url: `${base(cand.id)}/${id}/reveal`, headers: { cookie: again.cookie, "x-csrf-token": again.csrf } });
     expect(ok.statusCode).toBe(200);
+  });
+
+  it("a number replaced through a forged rotation fails its integrity check: no number, audited, alert (review R1)", async () => {
+    const cand = await fresh();
+    const { id } = await created(cand.id);
+    // A worker (no blind index key) mints this month's key and "rotates" the row to its own value.
+    const worker = new FieldCipher(new LocalKeyProvider());
+    const month = new Date().toISOString().slice(0, 7);
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL session_replication_role = replica");
+      await c.query(`UPDATE eureka.field_key SET rotation_key = NULL WHERE rotation_key = $1`, [month]);
+      await c.query("COMMIT");
+    } finally {
+      c.release();
+    }
+    const key = (await worker.rotationKey(db.worker, "work_auth_number", month))!;
+    const old = (await db.admin.query(`SELECT number_enc FROM eureka.work_authorization WHERE id = $1`, [id])).rows[0].number_enc;
+    const forged = sealWith(key, { cls: "work_auth_number", rowId: id }, "ATTACKER-1");
+    expect((await db.worker.query(`SELECT authz.field_rotation_apply('work_auth_number', $1, $2, $3, $4) AS ok`, [id, old, forged, key.id])).rows[0].ok).toBe(true);
+    const r = await call("imm", "POST", `${base(cand.id)}/${id}/reveal`);
+    expect(r.statusCode).toBe(500);
+    expect(r.json().detail).toBe("integrity_check_failed");
+    expect(r.body).not.toContain("ATTACKER");
+    expect(r.body).not.toContain(NUMBER);
+    const audit = (await db.admin.query(`SELECT action, changes FROM eureka.audit_event WHERE entity_id = $1 AND action LIKE 'work_authorization.%' ORDER BY seq`, [id])).rows;
+    expect(audit.slice(-2)).toEqual([
+      { action: "work_authorization.number_revealed", changes: { candidateId: cand.id } },
+      { action: "work_authorization.integrity_failed", changes: { candidateId: cand.id } },
+    ]);
+    // Re-entering the number through the API restores a verifiable value.
+    const cur = (await call("imm", "GET", base(cand.id))).json().items[0];
+    expect((await patch("imm", `${base(cand.id)}/${id}`, cur.rowVersion, { number: NUMBER })).statusCode).toBe(200);
+    expect((await call("imm", "POST", `${base(cand.id)}/${id}/reveal`)).json().number).toBe(NUMBER);
+  });
+
+  it("reveals are limited per user across API tasks: 20 a minute, 200 a day (from the audit log), 429", async () => {
+    const cand = await fresh();
+    const { id } = await created(cand.id);
+    const revealed = async () => (await db.admin.query(
+      `SELECT count(*)::int AS n FROM eureka.audit_event WHERE actor_id = $1 AND action = 'work_authorization.number_revealed'`, [U.imm])).rows[0].n;
+    // Earlier reveals by this user in the last minute count, whichever task served them.
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL session_replication_role = replica");
+      await c.query(`DELETE FROM eureka.audit_event WHERE actor_id = $1 AND action = 'work_authorization.number_revealed'`, [U.imm]);
+      await c.query(`INSERT INTO eureka.audit_event (actor_id, action, entity_type, entity_id, changes, at)
+                     SELECT $1, 'work_authorization.number_revealed', 'work_authorization', $2, '{}', now() FROM generate_series(1, 19)`, [U.imm, id]);
+      await c.query("COMMIT");
+    } finally {
+      c.release();
+    }
+    expect((await call("imm", "POST", `${base(cand.id)}/${id}/reveal`)).statusCode).toBe(200);
+    const before = await revealed();
+    const limited = await call("imm", "POST", `${base(cand.id)}/${id}/reveal`);
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json().detail).toBe("too_many_reveals");
+    expect(limited.body).not.toContain(NUMBER);
+    expect(await revealed()).toBe(before);
+    // Older than a minute: the per-minute window frees up, the daily cap still applies.
+    const c2 = await db.admin.connect();
+    try {
+      await c2.query("BEGIN");
+      await c2.query("SET LOCAL session_replication_role = replica");
+      await c2.query(`UPDATE eureka.audit_event SET at = now() - interval '2 hours' WHERE actor_id = $1 AND action = 'work_authorization.number_revealed'`, [U.imm]);
+      await c2.query("COMMIT");
+    } finally {
+      c2.release();
+    }
+    expect((await call("imm", "POST", `${base(cand.id)}/${id}/reveal`)).statusCode).toBe(200);
+    const c3 = await db.admin.connect();
+    try {
+      await c3.query("BEGIN");
+      await c3.query("SET LOCAL session_replication_role = replica");
+      await c3.query(`INSERT INTO eureka.audit_event (actor_id, action, entity_type, entity_id, changes, at)
+                      SELECT $1, 'work_authorization.number_revealed', 'work_authorization', $2, '{}', now() - interval '3 hours' FROM generate_series(1, 200)`, [U.imm, id]);
+      await c3.query("COMMIT");
+    } finally {
+      c3.release();
+    }
+    expect((await call("imm", "POST", `${base(cand.id)}/${id}/reveal`)).statusCode).toBe(429);
+    // Another user is not affected.
+    expect((await call("hr", "POST", `${base(cand.id)}/${id}/reveal`)).statusCode).toBe(200);
+    // Clean up so later tests can reveal as Immigration.
+    const c4 = await db.admin.connect();
+    try {
+      await c4.query("BEGIN");
+      await c4.query("SET LOCAL session_replication_role = replica");
+      await c4.query(`DELETE FROM eureka.audit_event WHERE actor_id = $1 AND action = 'work_authorization.number_revealed'`, [U.imm]);
+      await c4.query("COMMIT");
+    } finally {
+      c4.release();
+    }
   });
 
   it("a record without a number cannot be revealed (409)", async () => {

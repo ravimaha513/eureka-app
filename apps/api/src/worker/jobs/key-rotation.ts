@@ -18,6 +18,12 @@ import { KEY_ROTATION_SCHEDULE, dueMonthlyKeys } from "../schedule.js";
  * lease keeps two workers from running the same month at once; the job checks
  * its abort signal between rows and touches the heartbeat between batches.
  *
+ * Review of 0042 (migration 0047): the key's label must be the current UTC
+ * month, a class without any key is skipped, every swap is logged in
+ * eureka.field_rotation_log, and the job alerts when the month has more than
+ * one rotation key or a row was rotated twice. Rotation never touches
+ * number_mac, so a forged swap is caught when the number is revealed.
+ *
  * Plaintext stays in this function's locals: nothing is logged or written to
  * job_run except counts and key versions. A row that does not decrypt
  * (corrupted, or bound to another row) is counted, logged by id with an alert,
@@ -40,31 +46,48 @@ export function keyRotationJob(cipher: FieldCipher, o: KeyRotationOptions): JobD
       const detail: Record<string, unknown> = {};
       for (const cls of o.classes ?? ROTATED_CLASSES) {
         const key = await cipher.rotationKey(pool, cls, runKey);
+        if (!key) {
+          detail[cls] = { keyVersion: null, reencrypted: 0, skipped: 0, failed: 0 };
+          continue;
+        }
         let after: string | null = null;
         let reencrypted = 0, skipped = 0, failed = 0;
-        for (;;) {
-          signal.throwIfAborted();
-          const batch: Pending[] = (await pool.query<Pending>(
-            `SELECT row_id, enc, key_id FROM authz.field_rotation_batch($1, $2, $3, $4)`, [cls, key.id, after, o.batchSize])).rows;
-          if (batch.length === 0) break;
-          for (const r of batch) {
+        try {
+          for (;;) {
             signal.throwIfAborted();
-            after = r.row_id;
-            const ref = { cls, rowId: r.row_id };
-            let next: Buffer;
-            try {
-              next = sealWith(key, ref, await cipher.decrypt(pool, ref, r.enc));
-            } catch (err) {
-              if (!(err instanceof FieldCryptoError)) throw err;
-              failed++;
-              log.error("key rotation: a value does not decrypt; left unchanged", { job: KEY_ROTATION_JOB, cls, rowId: r.row_id, alert: true });
-              continue;
+            const batch: Pending[] = (await pool.query<Pending>(
+              `SELECT row_id, enc, key_id FROM authz.field_rotation_batch($1, $2, $3, $4)`, [cls, key.id, after, o.batchSize])).rows;
+            if (batch.length === 0) break;
+            for (const r of batch) {
+              signal.throwIfAborted();
+              after = r.row_id;
+              const ref = { cls, rowId: r.row_id };
+              let next: Buffer;
+              try {
+                next = sealWith(key, ref, await cipher.decrypt(pool, ref, r.enc));
+              } catch (err) {
+                // Permanent (bad value, bad wrapped key): skip the row. Throttling,
+                // network and other transient errors fail the run, which is retried.
+                if (!(err instanceof FieldCryptoError)) throw err;
+                failed++;
+                log.error("key rotation: a value does not decrypt; left unchanged", { job: KEY_ROTATION_JOB, cls, rowId: r.row_id, alert: true });
+                continue;
+              }
+              const ok = (await pool.query<{ ok: boolean }>(
+                `SELECT authz.field_rotation_apply($1, $2, $3, $4, $5) AS ok`, [cls, r.row_id, r.enc, next, key.id])).rows[0]!.ok;
+              if (ok) reencrypted++; else skipped++;
             }
-            const ok = (await pool.query<{ ok: boolean }>(
-              `SELECT authz.field_rotation_apply($1, $2, $3, $4, $5) AS ok`, [cls, r.row_id, r.enc, next, key.id])).rows[0]!.ok;
-            if (ok) reencrypted++; else skipped++;
+            heartbeat();
           }
-          heartbeat();
+        } finally {
+          cipher.release(key);
+        }
+        // Review of 0042 (R1c): more than one rotation key this month, or a row
+        // rotated more than once this month, is not something this job does.
+        const a = (await pool.query<{ rotation_keys_this_month: number; keys_this_month: number; rows_rotated_more_than_once: number }>(
+          `SELECT * FROM authz.field_rotation_alerts($1)`, [cls])).rows[0]!;
+        if (a.rotation_keys_this_month > 1 || a.rows_rotated_more_than_once > 0) {
+          log.error("key rotation: unexpected keys or repeated rotations this month", { job: KEY_ROTATION_JOB, cls, ...a, alert: true });
         }
         detail[cls] = { keyVersion: key.version, reencrypted, skipped, failed };
       }
