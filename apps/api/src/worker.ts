@@ -4,7 +4,8 @@
  * Jobs: audit-export (nightly, 03:30 America/New_York), feedback email and
  * notification, outbox delivery (every tick), outbox prune and idempotency-key
  * cleanup (daily, schedules in worker/schedule.ts), resume scan-and-promote (every
- * tick, when DOCUMENTS_BUCKET or LOCAL_STORAGE_DIR is set). Phase 3 adds reminders and retention.
+ * tick, when DOCUMENTS_BUCKET or LOCAL_STORAGE_DIR is set), assignment-ending-soon outbox rows
+ * (daily). Phase 3 adds reminders and retention.
  */
 import { utimes, writeFile } from "node:fs/promises";
 import { S3Client } from "@aws-sdk/client-s3";
@@ -19,6 +20,7 @@ import { JobRunner } from "./worker/runner.js";
 import { DirSink, S3Sink, type ExportSink } from "./worker/sink.js";
 import { LocalDocumentStore, S3DocumentStore } from "./worker/document-store.js";
 import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob } from "./worker/jobs/resume-scan.js";
+import { assignmentEndingSoonJob } from "./worker/jobs/assignment-ending-soon.js";
 
 const log = createLogger({ service: "worker" });
 const config = loadWorkerConfig();
@@ -48,6 +50,7 @@ const jobs = [
   auditExportJob(sink, config.AUDIT_EXPORT_MAX_DAYS_PER_TICK),
   outboxPruneJob(config.OUTBOX_RETENTION_DAYS),
   idempotencyCleanupJob(),
+  assignmentEndingSoonJob(),
 ];
 if (config.OUTBOX_MAIL_MODE !== "disabled") {
   const mail = config.OUTBOX_MAIL_MODE === "local" ? new LocalMail(config.OUTBOX_MAIL_DIR!) : new SesMail(config.AWS_REGION!, config.OUTBOX_FROM_EMAIL!);

@@ -4,6 +4,8 @@ import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, T, U, seedFixtures, toUserAccess } from "./fixtures.js";
 import { createPlacement, extraUser, selectedSubmission, transitionPlacement } from "./placement-seed.js";
 import { asActor, backdate, joinPlacement, joinedEmployee, type Joined } from "./employee-seed.js";
+import { assignmentEndingSoonJob } from "../src/worker/jobs/assignment-ending-soon.js";
+import { silentLogger } from "../src/worker/log.js";
 
 /**
  * Database-only checks for migration 0045 (employees, assignment lifecycle,
@@ -399,5 +401,20 @@ describe("assignment.ending_soon (worker scan)", () => {
 
   it.each([0, 91, null])("refuses a window of %s days", async (d) => {
     await expect(db.worker.query(`SELECT authz.assignment_ending_soon_scan($1)`, [d])).rejects.toThrow(/between 1 and 90/);
+  });
+});
+
+describe("worker job assignment-ending-soon", () => {
+  it("is due daily at 05:00 New York time and writes the scan's outbox rows", async () => {
+    const job = assignmentEndingSoonJob(30);
+    expect(await job.dueKeys(new Date("2030-03-12T08:59:00Z"), { pool: db.worker, log: silentLogger })).toEqual([]);
+    expect(await job.dueKeys(new Date("2030-03-12T09:00:00Z"), { pool: db.worker, log: silentLogger })).toEqual(["2030-03-11"]);
+    const a = await onAssignment();
+    await setEnd(U.hr, a.assignmentId, addDays(today, 7));
+    const ctx = { pool: db.worker, log: silentLogger, signal: new AbortController().signal, heartbeat: () => undefined };
+    const first = await job.run("2030-03-11", ctx);
+    expect(first.events).toBeGreaterThanOrEqual(1);
+    expect(await outbox("assignment.ending_soon", a.assignmentId)).toHaveLength(1);
+    expect(await job.run("2030-03-11", ctx)).toEqual({ events: 0, days: 30 });
   });
 });
