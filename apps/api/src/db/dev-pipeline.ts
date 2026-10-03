@@ -11,7 +11,7 @@
 import type pg from "pg";
 
 const uid = (n: number) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
-const U = { r1a: uid(9), r1b: uid(10), r2a: uid(11), r3a: uid(12), coach: uid(13), locD: uid(14), locA: uid(15) };
+const U = { r1a: uid(9), r1b: uid(10), r2a: uid(11), r3a: uid(12), coach: uid(13), locD: uid(14), locA: uid(15), hr: uid(16) };
 const NORTHWIND = uid(601);
 const CLIENTS: [string, string][] = [
   [uid(602), "Contoso Health"], [uid(603), "Fabrikam Retail"], [uid(604), "Tailspin Airlines"], [uid(605), "Woodgrove Bank"],
@@ -153,12 +153,31 @@ export async function seedDevPipeline(admin: pg.Pool): Promise<DevPipelineResult
     }
     await c.query(`UPDATE eureka.placement p SET created_at = s.status_changed_at + interval '1 hour'
                      FROM eureka.submission s WHERE s.id = p.submission_id`);
+    // Joined placements opened their assignment (and the employee record, migration 0045) today:
+    // start them a week after the placement was created, so the Employees screen shows real dates.
+    await c.query(`UPDATE eureka.assignment a SET start_date = least(current_date - 1, (p.created_at + interval '7 days')::date)
+                     FROM eureka.placement p WHERE p.id = a.placement_id`);
+    await c.query(`UPDATE eureka.employee e SET employee_since = a.start_date, status_since = a.start_date
+                     FROM eureka.assignment a WHERE a.person_id = e.person_id`);
+    await c.query(`UPDATE eureka.employment_event ev SET effective_on = a.start_date
+                     FROM eureka.assignment a WHERE a.id = ev.assignment_id AND ev.kind = 'started'`);
     await c.query("COMMIT");
   } catch (err) {
     await c.query("ROLLBACK").catch(() => undefined);
     throw err;
   } finally {
     c.release();
+  }
+
+  // Employees (dev only): HR plans the end of the first joined assignment (ending soon) and records a
+  // project exit on the second (the employee and candidate move to the bench), through the definer functions.
+  const joined = (await admin.query<{ id: string }>(
+    `SELECT a.id FROM eureka.assignment a ORDER BY a.start_date, a.id`)).rows;
+  if (joined[0]) {
+    await asUser(admin, U.hr, (c2) => c2.query("SELECT * FROM authz.set_assignment_end_date($1, current_date + 20)", [joined[0]!.id]));
+  }
+  if (joined[1]) {
+    await asUser(admin, U.hr, (c2) => c2.query("SELECT * FROM authz.end_assignment($1, current_date - 1, 'completed')", [joined[1]!.id]));
   }
   return out;
 }

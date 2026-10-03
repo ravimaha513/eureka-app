@@ -116,3 +116,22 @@ export function dueReminderKey(now: Date, s: DailySchedule): string {
  */
 export const BENCH_TIME_SCHEDULE: DailySchedule = { hh: 7, mm: 45, timeZone: "America/New_York" };
 export const NOTIFICATION_PRUNE_SCHEDULE: DailySchedule = { hh: 4, mm: 30, timeZone: "America/New_York" };
+/** visa-expiry (design B6): daily notices, after the maintenance jobs; only the latest day (notices catch up by themselves). */
+export const VISA_EXPIRY_SCHEDULE: DailySchedule = { hh: 6, mm: 0, timeZone: "America/New_York" };
+
+/** A job run once a month on `day` at hh:mm local time in timeZone. */
+export interface MonthlySchedule { day: number; hh: number; mm: number; timeZone: string }
+
+/** key-rotation (design B6): monthly, on the 1st at 05:00 America/New_York. */
+export const KEY_ROTATION_SCHEDULE: MonthlySchedule = { day: 1, hh: 5, mm: 0, timeZone: "America/New_York" };
+
+/**
+ * The run key ("YYYY-MM", the UTC month) of a monthly job due at `now`: the
+ * current month once its due time has passed, else none (a missed month is
+ * not caught up: the next month's run covers it).
+ */
+export function dueMonthlyKeys(now: Date, s: MonthlySchedule): string[] {
+  const month = utcDateKey(now).slice(0, 7);
+  const due = zonedTime(`${month}-${String(s.day).padStart(2, "0")}`, s.hh, s.mm, s.timeZone);
+  return due.getTime() <= now.getTime() ? [month] : [];
+}

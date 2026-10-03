@@ -352,14 +352,17 @@ describe("audit", () => {
 
 describe("configuration", () => {
   const base = { NODE_ENV: "production", AUTH_MODE: "google", SESSION_SECRET: "x".repeat(40), DATABASE_URL: "postgres://x@y/z",
-    GOOGLE_CLIENT_ID: "c", GOOGLE_CLIENT_SECRET: "s", GOOGLE_HOSTED_DOMAIN: "eureka.example", ORIGIN_VERIFY_SECRET: "o".repeat(40) };
+    GOOGLE_CLIENT_ID: "c", GOOGLE_CLIENT_SECRET: "s", GOOGLE_HOSTED_DOMAIN: "eureka.example", ORIGIN_VERIFY_SECRET: "o".repeat(40),
+    AWS_REGION: "us-east-2", FIELD_KMS_KEY_ARN: "arn:aws:kms:us-east-2:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab",
+    BIDX_KMS_KEY_ARN: "arn:aws:kms:us-east-2:123456789012:key/9876abcd-12ab-34cd-56ef-1234567890ab" };
   it("production needs the documents bucket (no local driver)", () => {
     expect(() => loadConfig(base)).toThrow(/DOCUMENTS_BUCKET is required/);
     expect(loadConfig({ ...base, DOCUMENTS_BUCKET: "eureka-prod-documents" }).DOCUMENTS_BUCKET).toBe("eureka-prod-documents");
     expect(() => loadConfig({ ...base, DOCUMENTS_BUCKET: "b-1", LOCAL_STORAGE_DIR: "/tmp/x" })).toThrow(/only one/);
   });
   it("the worker refuses the fake scanner in production", () => {
-    const w = { DATABASE_URL: "postgres://x@y/z", AUDIT_BUCKET: "a-1", NODE_ENV: "production" };
+    const w = { DATABASE_URL: "postgres://x@y/z", AUDIT_BUCKET: "a-1", NODE_ENV: "production",
+      AWS_REGION: "us-east-2", FIELD_KMS_KEY_ARN: "arn:aws:kms:us-east-2:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab" };
     expect(() => loadWorkerConfig({ ...w, LOCAL_STORAGE_DIR: "/tmp/x" })).toThrow(/not allowed in production/);
     expect(loadWorkerConfig({ ...w, DOCUMENTS_BUCKET: "d-1" }).RESUME_SCAN_TIMEOUT_MINUTES).toBe(60);
   });

@@ -72,9 +72,22 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   worker; bell and panel in the web top bar, unread count polled every 60 s), outbox delivery generalised to typed
   events with recipients resolved in the database and email and/or inbox channels (placement emails unchanged; the
   inbox channel runs even with `OUTBOX_MAIL_MODE=disabled`), bench-time job (FR-NTF-05, off until
-  `NOTIFY_BENCH_DAYS` is set), inbox prune. Other Phase 3 modules emit `work_authorization.expiring`,
-  `employee.exited`, `candidate.assigned`, `checklist.item_overdue`, `assignment.ending_soon` in the shapes listed
-  there (`authz.notification_emit_once` for once-only reminders).
+  `NOTIFY_BENCH_DAYS` is set; type `employee.bench_time`), inbox prune. Delivered producers: 0042
+  `work_authorization.expiring`, 0045 `employee.benched` (project exit), `employee.exited`, `assignment.ending_soon`;
+  `candidate.assigned` and `checklist.item_overdue` await their producers. The registry, not a payload's `notify`,
+  decides recipients (shapes and rules in `docs/notifications.md`; `authz.notification_emit_once` for once-only reminders).
+- Field encryption and work authorization (FR-VIS-01 to 03, migration 0042, `docs/work-authorization-api.md`):
+  AES-256-GCM envelope encryption with KMS data keys per field class (`eureka.field_key`, AAD = table, column,
+  row id), local key provider for development (refused in production), blind index helper (separate KMS HMAC
+  key `bidx`, `BIDX_KMS_KEY_ARN`), monthly `key-rotation` worker job. Work authorization records per person
+  (number encrypted, masked; audited reveal needs a sign-in within 15 minutes), RLS read = `visa:read` over the
+  candidate (HR, Immigration), writes through definer functions (`visa:update`, Immigration), `If-Match` on PATCH.
+  Daily `visa-expiry` job inserts `work_authorization.expiring` outbox rows (90/60/30, ids and dates only);
+  delivery and inbox belong to the notification jobs. Profile section in the web app. IAM: the task roles may use
+  the restricted key directly only with the encryption context `eureka:purpose = field`.
+  Left: DOB is not read or written anywhere (OD-04); when it is, encrypt with class `dob`, set `dob_bidx` with
+  `dobBlindIndex`, add `dob` to the rotation job (definer functions like `work_auth_number`) and use the index in
+  the duplicate check. The reveal's step-up is a 15-minute sign-in-age check until the shared step-up lands.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 - First-admin bootstrap (migrations 0037, 0039): `dist/db/bootstrap.js` as a one-off migrate task creates two
   `org_admin` users for hosted-domain emails; break-glass only: refuses while an active `org_admin` exists
@@ -137,6 +150,13 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   the bench threshold (OD-05) and the "POC" recipient of FR-NTF-05, whether Associate HR is an "admin team" for
   project exit, recipients/channels of `assignment.ending_soon` (not in the design), per-user preferences (none in
   the design), and whether placement events should also reach the inbox.
+- Work authorization (migration 0042): who may see the records? Design B4.4 says `document:read` scope over the
+  candidate (would include Documents Team, Associate HR, Accounts and Sales over their own candidates); built
+  conservatively as `visa:read` only (HR, Immigration), number reveal also `visa:read`. Confirm the type list
+  (placeholder: H-1B, H-4 EAD, L-1, L-2 EAD, F-1 OPT/STEM OPT/CPT, EAD, green card, TN, O-1, other), whether
+  `valid_to` is required for some types, whether an "expired" notice (day 0) is wanted, and whether the
+  expiry notices may name the candidate (today: ids and dates only). Should a revealed number need the
+  WebAuthn/Google step-up rather than a recent sign-in?
 
 ## Waiting on Ravi (not code)
 

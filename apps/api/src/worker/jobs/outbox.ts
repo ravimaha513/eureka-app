@@ -52,6 +52,7 @@ import { DELIVERED_TYPES, EMAIL_TYPES, INBOX_TYPES, renderEmail, specOf, type Ev
  * Emails and inbox rows carry no personal data (see notify-types.ts).
  * Addresses are read at send time and never stored, logged or written to job_run.
  */
+export { DELIVERED_TYPES };
 export const OUTBOX_DELIVERY_JOB = "outbox-delivery";
 export const OUTBOX_PRUNE_JOB = "outbox-prune";
 export const IDEMPOTENCY_CLEANUP_JOB = "idempotency-cleanup";

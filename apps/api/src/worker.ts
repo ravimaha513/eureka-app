@@ -5,8 +5,10 @@
  * notification, outbox delivery (every tick), outbox prune and idempotency-key
  * cleanup (daily, schedules in worker/schedule.ts), resume scan-and-promote (every
  * tick, when DOCUMENTS_BUCKET or LOCAL_STORAGE_DIR is set), notification inbox prune (daily) and
- * the bench-time reminder (daily, when NOTIFY_BENCH_DAYS is set). The outbox delivery job always
- * runs: without a mail mode it delivers the in-app inbox channel only (docs/notifications.md).
+ * the bench-time reminder (daily, when NOTIFY_BENCH_DAYS is set), assignment-ending-soon outbox rows
+ * (daily), field key rotation (monthly) and work authorization expiry notices (daily). The outbox
+ * delivery job always runs: without a mail mode it delivers the in-app inbox channel only
+ * (docs/notifications.md).
  */
 import { utimes, writeFile } from "node:fs/promises";
 import { S3Client } from "@aws-sdk/client-s3";
@@ -22,6 +24,11 @@ import { JobRunner } from "./worker/runner.js";
 import { DirSink, S3Sink, type ExportSink } from "./worker/sink.js";
 import { LocalDocumentStore, S3DocumentStore } from "./worker/document-store.js";
 import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob } from "./worker/jobs/resume-scan.js";
+import { assignmentEndingSoonJob } from "./worker/jobs/assignment-ending-soon.js";
+import { FieldCipher } from "./platform/crypto/field-crypto.js";
+import { createKeyProvider } from "./platform/crypto/config.js";
+import { keyRotationJob } from "./worker/jobs/key-rotation.js";
+import { visaExpiryJob } from "./worker/jobs/visa-expiry.js";
 
 const log = createLogger({ service: "worker" });
 const config = loadWorkerConfig();
@@ -52,6 +59,11 @@ const jobs = [
   outboxPruneJob(config.OUTBOX_RETENTION_DAYS),
   idempotencyCleanupJob(),
   notificationPruneJob(config.NOTIFICATION_RETENTION_DAYS),
+  assignmentEndingSoonJob(),
+  // Field encryption (design A6.3): monthly re-encryption under a new data key.
+  keyRotationJob(new FieldCipher(createKeyProvider(config)), { batchSize: config.KEY_ROTATION_BATCH_SIZE }),
+  // Work authorization expiry notices into the outbox (delivered by the notification jobs).
+  visaExpiryJob(config.WORK_AUTH_EXPIRY_NOTICE_DAYS),
 ];
 {
   // Without a mail mode only the in-app channel is delivered; emailing events stay unpublished.

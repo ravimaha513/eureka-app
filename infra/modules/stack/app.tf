@@ -137,11 +137,23 @@ resource "aws_iam_role_policy" "api" {
         }
       },
       {
-        # Application field encryption (FIELD_KMS_KEY_ARN) calls KMS directly.
+        # Application field encryption (FIELD_KMS_KEY_ARN) calls KMS directly,
+        # only for field data keys (encryption context eureka:purpose = field),
+        # so this cannot be used to decrypt restricted documents.
         Sid      = "FieldEncryption"
         Effect   = "Allow"
         Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
         Resource = aws_kms_key.restricted.arn
+        Condition = {
+          StringEquals = { "kms:EncryptionContext:eureka:purpose" = "field" }
+        }
+      },
+      {
+        # Blind index (BIDX_KMS_KEY_ARN): HMAC only, never the key itself.
+        Sid      = "BlindIndexMac"
+        Effect   = "Allow"
+        Action   = ["kms:GenerateMac"]
+        Resource = aws_kms_key.bidx.arn
       },
       {
         Effect    = "Allow"
@@ -171,6 +183,9 @@ resource "aws_iam_role_policy" "api" {
 #   the checksum after a 412). KMS through S3 on
 #   the documents bucket only. No tagging rights: the scan result cannot be
 #   forged by the worker either (the bucket policy also denies it).
+#   key-rotation (worker/jobs/key-rotation.ts): GenerateDataKey and Decrypt on
+#   the restricted key, only with the field encryption context
+#   (eureka:purpose = field), never for restricted documents.
 resource "aws_iam_role" "worker" {
   name               = "${local.name}-worker-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
@@ -240,6 +255,17 @@ resource "aws_iam_role_policy" "worker" {
         Condition = {
           StringEquals = { "kms:ViaService" = "s3.${var.aws_region}.amazonaws.com" }
           StringLike   = { "kms:EncryptionContext:aws:s3:arn" = "${aws_s3_bucket.b["documents"].arn}*" }
+        }
+      },
+      {
+        # key-rotation job: unwraps old field data keys and generates the
+        # month's new one; field encryption context only (no documents).
+        Sid      = "FieldKeyRotation"
+        Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
+        Resource = aws_kms_key.restricted.arn
+        Condition = {
+          StringEquals = { "kms:EncryptionContext:eureka:purpose" = "field" }
         }
       },
     ]
@@ -434,6 +460,7 @@ locals {
     { name = "AWS_REGION", value = var.aws_region },
     { name = "DOCUMENTS_BUCKET", value = aws_s3_bucket.b["documents"].id },
     { name = "FIELD_KMS_KEY_ARN", value = aws_kms_key.restricted.arn },
+    { name = "BIDX_KMS_KEY_ARN", value = aws_kms_key.bidx.arn },
     # db.t4g.micro allows ~80-110 connections; a rollout can briefly run up to
     # 2 x api_max_count API tasks plus the worker, so keep each pool small.
     { name = "DB_POOL_MAX", value = "5" },
@@ -516,7 +543,8 @@ resource "aws_ecs_task_definition" "worker" {
   }
   volume { name = "tmp" }
   # The worker gets its own environment: no session secret, OAuth client or
-  # field-encryption key (it does not use them). See apps/api/src/worker/config.ts.
+  # blind index key (it does not use them); the field-encryption key for the
+  # key-rotation job. See apps/api/src/worker/config.ts.
   container_definitions = jsonencode([merge(local.container_base, {
     name    = "worker"
     command = ["node", "dist/worker.js"]
@@ -526,6 +554,7 @@ resource "aws_ecs_task_definition" "worker" {
       { name = "AWS_REGION", value = var.aws_region },
       { name = "AUDIT_BUCKET", value = aws_s3_bucket.b["audit"].id },
       { name = "DOCUMENTS_BUCKET", value = aws_s3_bucket.b["documents"].id },
+      { name = "FIELD_KMS_KEY_ARN", value = aws_kms_key.restricted.arn },
       { name = "FEEDBACK_MAIL_MODE", value = var.feedback_from_email != "" ? "ses" : "disabled" },
       { name = "DB_POOL_MAX", value = "3" },
       { name = "SHUTDOWN_GRACE_SECONDS", value = "20" },
