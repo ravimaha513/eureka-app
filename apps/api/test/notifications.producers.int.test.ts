@@ -141,7 +141,7 @@ describe("producers delivered end to end (inbox + local email)", () => {
 
   it("0046 bench-time job: employee.bench_time to recruiter, lead, manager and CEO (not employee.benched)", async () => {
     const cand = await newCandidate(db, { teamId: T.t2, recruiterId: U.r2a, locationId: LOC.austin });
-    await force(db, "UPDATE eureka.candidate SET marketing_status = 'bench', bench_since = $2 WHERE id = $1", [cand.id, addDays(today, -40)]);
+    await force(db, "UPDATE eureka.candidate SET marketing_status = 'bench', bench_since = $2 WHERE id = $1", [cand.id, addDays(today, -32)]);
     const nyToday = (await db.admin.query<{ d: string }>("SELECT (now() AT TIME ZONE 'America/New_York')::date::text AS d")).rows[0]!.d;
     await benchTimeJob(30).run(nyToday, { ...workerCtx(), pool: db.worker });
     expect(await eventsOf("employee.benched", cand.id)).toEqual([]);
@@ -150,6 +150,6 @@ describe("producers delivered end to end (inbox + local email)", () => {
     expect(r.inbox.map((x) => x.recipient_id)).toEqual([U.r2a, U.l2, U.m1, U.ceo].sort());
     expect(r.to).toEqual(["ceo@eureka.example", "l2@eureka.example", "m1@eureka.example", "r2a@eureka.example"]);
     expectClean([...r.mails.map((m) => `${m.subject}\n${m.text}`), ...r.inbox.map((x) => `${x.title} ${x.body}`)],
-      [...await personalData(cand.id), addDays(today, -40)]);
+      [...await personalData(cand.id), addDays(today, -32)]);
   });
 });

@@ -78,7 +78,7 @@ const jobs = [
     deliverSince: config.OUTBOX_DELIVER_SINCE ? new Date(config.OUTBOX_DELIVER_SINCE) : undefined,
   }));
 }
-if (config.NOTIFY_BENCH_DAYS) jobs.push(benchTimeJob(config.NOTIFY_BENCH_DAYS));
+if (config.NOTIFY_BENCH_DAYS) jobs.push(benchTimeJob(config.NOTIFY_BENCH_DAYS, config.NOTIFY_BENCH_WINDOW_DAYS));
 else log.warn("bench-time reminder is off (NOTIFY_BENCH_DAYS unset; threshold is open decision OD-05)");
 if (config.FEEDBACK_MAIL_MODE !== "disabled") {
   const mail = config.FEEDBACK_MAIL_MODE === "local" ? new LocalMail(config.FEEDBACK_MAIL_DIR!) : new SesMail(config.AWS_REGION!, config.FEEDBACK_FROM_EMAIL!);
