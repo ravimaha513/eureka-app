@@ -207,8 +207,8 @@ export class WorkAuthorizationService {
       await this.access(c, user, candidateId);
       const r = await this.row(c, candidateId, id);
       if (!r.number_enc) throw new ConflictException("no_number");
-      await requireStepUp(c, user);
-      await c.query(`SELECT authz.work_auth_reveal($1, $2)`, [id, candidateId]).catch(mapDbError);
+      const stepUpGrantId = await requireStepUp(c, user);
+      await c.query(`SELECT authz.work_auth_reveal($1, $2, $3)`, [id, candidateId, stepUpGrantId]).catch(mapDbError);
       const number = await this.crypto.cipher.decrypt(c, { cls: "work_auth_number", rowId: id }, r.number_enc);
       const expected = await this.crypto.blindIndex.integrityMac("work_auth_number", id, number);
       if (!r.number_mac || r.number_mac.length !== expected.length || !timingSafeEqual(r.number_mac, expected)) {

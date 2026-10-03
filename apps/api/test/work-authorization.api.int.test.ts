@@ -192,7 +192,7 @@ describe("number: encrypted, masked, revealed only through the audited call", ()
     expect(r.body).not.toContain(NUMBER);
     const audit = (await db.admin.query(`SELECT action, changes FROM eureka.audit_event WHERE entity_id = $1 AND action LIKE 'work_authorization.%' ORDER BY seq`, [id])).rows;
     expect(audit.slice(-2)).toEqual([
-      { action: "work_authorization.number_revealed", changes: { candidateId: cand.id } },
+      { action: "work_authorization.number_revealed", changes: { candidateId: cand.id, stepUpGrantId: expect.any(String) } },
       { action: "work_authorization.integrity_failed", changes: { candidateId: cand.id } },
     ]);
     // Re-entering the number through the API restores a verifiable value.

@@ -361,13 +361,18 @@ END $$;
 -- API: records one reveal (R5). Scope re-checked (visa:read over the
 -- candidate, the record belongs to it and holds a number); at most 20 reveals
 -- per user per minute and 200 per day across all API tasks; writes the audit
--- row (ids only). The API decrypts only after this succeeds.
-CREATE FUNCTION authz.work_auth_reveal(p_id uuid, p_candidate uuid) RETURNS void
+-- row (ids only, including the step-up grant the API checked with
+-- requireStepUp in this transaction, migration 0043). The API decrypts only
+-- after this succeeds.
+CREATE FUNCTION authz.work_auth_reveal(p_id uuid, p_candidate uuid, p_step_up_grant uuid) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE me uuid := authz.current_user_id();
 BEGIN
   IF me IS NULL THEN
     RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF p_step_up_grant IS NULL THEN
+    RAISE EXCEPTION 'step_up_required' USING ERRCODE = 'insufficient_privilege';
   END IF;
   IF p_id IS NULL OR p_candidate IS NULL
      OR NOT coalesce(authz.candidate_visible(p_candidate, 'candidate:read'), false)
@@ -387,7 +392,7 @@ BEGIN
   END IF;
   INSERT INTO eureka.audit_event (actor_id, action, entity_type, entity_id, changes)
   VALUES (me, 'work_authorization.number_revealed', 'work_authorization', p_id,
-          pg_catalog.jsonb_build_object('candidateId', p_candidate));
+          pg_catalog.jsonb_build_object('candidateId', p_candidate, 'stepUpGrantId', p_step_up_grant));
 END $$;
 
 RESET ROLE;
@@ -398,10 +403,10 @@ REVOKE ALL ON FUNCTION authz.field_rotation_alerts(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.work_auth_check_number(bytea, uuid, bytea) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.work_auth_create(uuid, uuid, text, bytea, uuid, bytea, date, date, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.work_auth_update(uuid, uuid, integer, text, boolean, bytea, uuid, bytea, date, date, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION authz.work_auth_reveal(uuid, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION authz.work_auth_reveal(uuid, uuid, uuid) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION authz.work_auth_create(uuid, uuid, text, bytea, uuid, bytea, date, date, text) TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.work_auth_update(uuid, uuid, integer, text, boolean, bytea, uuid, bytea, date, date, text) TO eureka_app;
-GRANT EXECUTE ON FUNCTION authz.work_auth_reveal(uuid, uuid) TO eureka_app;
+GRANT EXECUTE ON FUNCTION authz.work_auth_reveal(uuid, uuid, uuid) TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.field_rotation_alerts(text) TO eureka_worker;
 -- field_key_valid, field_header_matches and work_auth_check_number are called from definer functions only.
