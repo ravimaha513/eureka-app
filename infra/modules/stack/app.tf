@@ -98,10 +98,14 @@ resource "aws_iam_role_policy" "execution_secrets" {
 
 # API task role: documents bucket prefixes, field-encryption key, SES send.
 # The API never handles file bytes; these rights exist so the URLs it signs
-# work: presigned POST into quarantine/resumes/ (S3 checks the signer's
-# s3:PutObject; no s3:PutObjectTagging, so an upload cannot carry the scan
-# tag) and presigned GET of clean/resumes/ only. Other document types add
-# their own prefixes when they are built (restricted/ needs step-up first).
+# work: presigned POST into quarantine/resumes/ and quarantine/documents/ (S3
+# checks the signer's s3:PutObject; no s3:PutObjectTagging, so an upload
+# cannot carry the scan tag) and presigned GET of clean/resumes/,
+# clean/documents/ and restricted/documents/. A restricted link is signed only
+# after the database confirmed document.restricted:read and a live step-up of
+# the caller's session and logged the access (migration 0043); its decryption
+# uses the restricted key through S3, for restricted/documents/* objects only
+# (object-level encryption context: the worker writes them without a bucket key).
 resource "aws_iam_role" "api" {
   name               = "${local.name}-api-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
@@ -113,16 +117,35 @@ resource "aws_iam_role_policy" "api" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid      = "UploadToQuarantineOnly"
-        Effect   = "Allow"
-        Action   = ["s3:PutObject"]
-        Resource = "${aws_s3_bucket.b["documents"].arn}/quarantine/resumes/*"
+        Sid    = "UploadToQuarantineOnly"
+        Effect = "Allow"
+        Action = ["s3:PutObject"]
+        Resource = [
+          "${aws_s3_bucket.b["documents"].arn}/quarantine/resumes/*",
+          "${aws_s3_bucket.b["documents"].arn}/quarantine/documents/*",
+        ]
       },
       {
-        Sid      = "ReadScannedDocuments"
+        Sid    = "ReadScannedDocuments"
+        Effect = "Allow"
+        Action = ["s3:GetObject"]
+        Resource = [
+          "${aws_s3_bucket.b["documents"].arn}/clean/resumes/*",
+          "${aws_s3_bucket.b["documents"].arn}/clean/documents/*",
+          "${aws_s3_bucket.b["documents"].arn}/restricted/documents/*",
+        ]
+      },
+      {
+        # Presigned GET of restricted documents: decrypt with the restricted
+        # key only through S3 and only for objects under restricted/documents/.
+        Sid      = "RestrictedDocumentsKmsViaS3"
         Effect   = "Allow"
-        Action   = ["s3:GetObject"]
-        Resource = "${aws_s3_bucket.b["documents"].arn}/clean/resumes/*"
+        Action   = ["kms:Decrypt"]
+        Resource = aws_kms_key.restricted.arn
+        Condition = {
+          StringEquals = { "kms:ViaService" = "s3.${var.aws_region}.amazonaws.com" }
+          StringLike   = { "kms:EncryptionContext:aws:s3:arn" = "${aws_s3_bucket.b["documents"].arn}/restricted/documents/*" }
+        }
       },
       {
         # Data key only through S3 on the documents bucket (what the presigned
@@ -138,14 +161,18 @@ resource "aws_iam_role_policy" "api" {
       },
       {
         # Application field encryption (FIELD_KMS_KEY_ARN) calls KMS directly,
-        # only for field data keys (encryption context eureka:purpose = field),
-        # so this cannot be used to decrypt restricted documents.
+        # only for field data keys (encryption context eureka:purpose = field)
+        # and never through a service (no kms:ViaService) or with an S3 context:
+        # S3 lets a request add its own SSE-KMS context pairs, so the purpose
+        # pair alone would not keep restricted/documents/ objects out of reach.
+        # Restricted documents are reachable only via RestrictedDocumentsKmsViaS3.
         Sid      = "FieldEncryption"
         Effect   = "Allow"
         Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
         Resource = aws_kms_key.restricted.arn
         Condition = {
           StringEquals = { "kms:EncryptionContext:eureka:purpose" = "field" }
+          Null         = { "kms:ViaService" = "true", "kms:EncryptionContext:aws:s3:arn" = "true" }
         }
       },
       {
@@ -174,18 +201,23 @@ resource "aws_iam_role_policy" "api" {
 #   metadata). No kms:Decrypt is granted, so a GET of an object body fails;
 #   HEAD reads metadata only.
 # No list, delete or retention-change rights on the audit bucket.
-#   resume-scan (worker/jobs/resume-scan.ts): polls the GuardDuty scan tag of
-#   pending uploads (no EventBridge rule: the pending set is small and the
-#   tag is the source of truth). ListBucketVersions only for keys under
-#   quarantine/resumes/ (a missing upload is then "no versions", not an
-#   ambiguous 403); read the exact scanned version and its tags; delete that
-#   version (infected or promoted); write clean/resumes/ create-only (HeadObject to compare
-#   the checksum after a 412). KMS through S3 on
-#   the documents bucket only. No tagging rights: the scan result cannot be
-#   forged by the worker either (the bucket policy also denies it).
+#   resume-scan and document-scan (worker/jobs/scan-pipeline.ts): poll the
+#   GuardDuty scan tag of pending uploads (no EventBridge rule: the pending
+#   set is small and the tag is the source of truth). ListBucketVersions only
+#   for keys under quarantine/resumes/ and quarantine/documents/ (a missing
+#   upload is then "no versions", not an ambiguous 403); read the exact
+#   scanned version and its tags; delete that version (infected or promoted);
+#   write clean/resumes/, clean/documents/ and restricted/documents/
+#   create-only (HeadObject to compare the checksum after a 412). KMS through
+#   S3 on the documents bucket only: the data key for quarantine/ and clean/,
+#   the restricted key (GenerateDataKey only: single-part writes; no Decrypt,
+#   the worker never reads a restricted object back) for restricted/documents/.
+#   No tagging rights: the scan result cannot be forged by the worker either
+#   (the bucket policy also denies it).
 #   key-rotation (worker/jobs/key-rotation.ts): GenerateDataKey and Decrypt on
-#   the restricted key, only with the field encryption context
-#   (eureka:purpose = field), never for restricted documents.
+#   the restricted key, only directly (no kms:ViaService, no S3 context) and
+#   only with the field encryption context (eureka:purpose = field), never for
+#   restricted documents.
 resource "aws_iam_role" "worker" {
   name               = "${local.name}-worker-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
@@ -224,28 +256,50 @@ resource "aws_iam_role_policy" "worker" {
         Action   = ["s3:ListBucketVersions"]
         Resource = aws_s3_bucket.b["documents"].arn
         Condition = {
-          StringLike = { "s3:prefix" = "quarantine/resumes/*" }
+          StringLike = { "s3:prefix" = ["quarantine/resumes/*", "quarantine/documents/*"] }
         }
       },
       {
-        Sid      = "ResumeScanReadQuarantine"
-        Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:GetObjectVersion", "s3:GetObjectTagging", "s3:GetObjectVersionTagging", "s3:DeleteObjectVersion"]
-        Resource = "${aws_s3_bucket.b["documents"].arn}/quarantine/resumes/*"
+        Sid    = "ResumeScanReadQuarantine"
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:GetObjectVersion", "s3:GetObjectTagging", "s3:GetObjectVersionTagging", "s3:DeleteObjectVersion"]
+        Resource = [
+          "${aws_s3_bucket.b["documents"].arn}/quarantine/resumes/*",
+          "${aws_s3_bucket.b["documents"].arn}/quarantine/documents/*",
+        ]
       },
       {
-        Sid      = "ResumeScanPromote"
-        Effect   = "Allow"
-        Action   = ["s3:PutObject"]
-        Resource = "${aws_s3_bucket.b["documents"].arn}/clean/resumes/*"
+        Sid    = "ResumeScanPromote"
+        Effect = "Allow"
+        Action = ["s3:PutObject"]
+        Resource = [
+          "${aws_s3_bucket.b["documents"].arn}/clean/resumes/*",
+          "${aws_s3_bucket.b["documents"].arn}/clean/documents/*",
+          "${aws_s3_bucket.b["documents"].arn}/restricted/documents/*",
+        ]
       },
       {
         # HeadObject only: after a 412 on the create-only write, compare the
-        # stored checksum with ours (metadata; the body is never read here).
-        Sid      = "ResumeScanVerifyClean"
+        # stored checksum with ours (metadata; the body is never read here,
+        # and restricted bodies could not be: no kms:Decrypt on that key).
+        Sid    = "ResumeScanVerifyClean"
+        Effect = "Allow"
+        Action = ["s3:GetObject"]
+        Resource = [
+          "${aws_s3_bucket.b["documents"].arn}/clean/resumes/*",
+          "${aws_s3_bucket.b["documents"].arn}/clean/documents/*",
+          "${aws_s3_bucket.b["documents"].arn}/restricted/documents/*",
+        ]
+      },
+      {
+        Sid      = "DocumentScanRestrictedKms"
         Effect   = "Allow"
-        Action   = ["s3:GetObject"]
-        Resource = "${aws_s3_bucket.b["documents"].arn}/clean/resumes/*"
+        Action   = ["kms:GenerateDataKey"]
+        Resource = aws_kms_key.restricted.arn
+        Condition = {
+          StringEquals = { "kms:ViaService" = "s3.${var.aws_region}.amazonaws.com" }
+          StringLike   = { "kms:EncryptionContext:aws:s3:arn" = "${aws_s3_bucket.b["documents"].arn}/restricted/documents/*" }
+        }
       },
       {
         Sid      = "ResumeScanKms"
@@ -266,6 +320,7 @@ resource "aws_iam_role_policy" "worker" {
         Resource = aws_kms_key.restricted.arn
         Condition = {
           StringEquals = { "kms:EncryptionContext:eureka:purpose" = "field" }
+          Null         = { "kms:ViaService" = "true", "kms:EncryptionContext:aws:s3:arn" = "true" }
         }
       },
     ]
@@ -544,7 +599,9 @@ resource "aws_ecs_task_definition" "worker" {
   volume { name = "tmp" }
   # The worker gets its own environment: no session secret, OAuth client or
   # blind index key (it does not use them); the field-encryption key for the
-  # key-rotation job. See apps/api/src/worker/config.ts.
+  # key-rotation job, and the same key's ARN as RESTRICTED_KMS_KEY_ARN to name it
+  # on restricted/ writes (document-scan; usable there only through S3).
+  # See apps/api/src/worker/config.ts.
   container_definitions = jsonencode([merge(local.container_base, {
     name    = "worker"
     command = ["node", "dist/worker.js"]
@@ -555,6 +612,8 @@ resource "aws_ecs_task_definition" "worker" {
       { name = "AUDIT_BUCKET", value = aws_s3_bucket.b["audit"].id },
       { name = "DOCUMENTS_BUCKET", value = aws_s3_bucket.b["documents"].id },
       { name = "FIELD_KMS_KEY_ARN", value = aws_kms_key.restricted.arn },
+      # document-scan writes restricted/documents/ under this key (an id, not a secret).
+      { name = "RESTRICTED_KMS_KEY_ARN", value = aws_kms_key.restricted.arn },
       { name = "FEEDBACK_MAIL_MODE", value = var.feedback_from_email != "" ? "ses" : "disabled" },
       { name = "DB_POOL_MAX", value = "3" },
       { name = "SHUTDOWN_GRACE_SECONDS", value = "20" },

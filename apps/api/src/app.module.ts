@@ -33,6 +33,9 @@ import { ImportsController, ImportsService } from "./modules/imports/imports.con
 import { assertImportRoleIsolated } from "./platform/role-isolation.js";
 import { ResumesController } from "./modules/resumes/resumes.controller.js";
 import { ResumesService } from "./modules/resumes/resumes.service.js";
+import { DocumentsController } from "./modules/documents/documents.controller.js";
+import { DocumentsService } from "./modules/documents/documents.service.js";
+import { StepUpController } from "./modules/identity/step-up.controller.js";
 import { AssignmentsController, EmployeesController, EmployeesService, ReportsController, ReportsService } from "./modules/employees/employees.controller.js";
 import { DOCUMENT_STORAGE, LocalDocumentStorage, createDocumentStorage, type DocumentStorage } from "./platform/storage/document-storage.js";
 import { registerLocalStorageRoutes } from "./platform/storage/local-routes.js";
@@ -60,13 +63,14 @@ export class AppModule {
       controllers: [
         FeedbackController, HealthController, AuthController, MeController, CandidatesController, SubmissionsController, InterviewsController,
         AdminController, TeamsController, PlacementsController, LookupsController, DashboardController, HotlistController, ImportsController,
-        ResumesController, EmployeesController, AssignmentsController, ReportsController, WorkAuthorizationController,
+        ResumesController, DocumentsController, StepUpController,
+        EmployeesController, AssignmentsController, ReportsController, WorkAuthorizationController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
         DbService, SessionService, AccessService, AuditService, OidcService,
         CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
-        ResumesService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
+        ResumesService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
         WorkAuthorizationService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },

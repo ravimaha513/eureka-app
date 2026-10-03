@@ -75,12 +75,18 @@ describe("Work authorization section", () => {
     expect(screen.queryByText("EAC2190012345")).toBeNull();
   });
 
-  it("explains a step-up refusal", async () => {
+  it("a step-up refusal asks to confirm it's you, then shows the number", async () => {
+    let stepped = false;
     routes[`GET ${BASE}`] = () => ({ body: { canEdit: false, canReveal: true, items: [record(W1)] } });
-    routes[`POST ${BASE}/${W1}/reveal`] = () => problem(403, "step_up_required");
+    routes[`POST ${BASE}/${W1}/reveal`] = () => stepped ? { body: { id: W1, number: "EAC2190012345" } } : problem(403, "step_up_required");
+    routes["GET /api/auth/step-up"] = () => ({ body: { active: false, expiresAt: null, method: null, mode: "dev", ttlMinutes: 10 } });
+    routes["POST /api/auth/step-up/dev"] = () => { stepped = true; return { body: { active: true, expiresAt: "2026-09-20T10:10:00Z" } }; };
     wrap();
     fireEvent.click(await screen.findByRole("button", { name: "Show number for H-1B" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/sign in again/);
+    const dialog = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Confirm (development)" }));
+    expect(await screen.findByText("EAC2190012345")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("hides itself when the server says the candidate is not in scope", async () => {

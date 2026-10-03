@@ -188,6 +188,8 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .badge.resume-clean { background: #ecfdf3; color: #15803d; }
 .badge.resume-pending { background: var(--pri-50); color: var(--pri-700); }
 .badge.resume-infected, .badge.resume-rejected, .badge.resume-failed, .badge.resume-expired { background: #fef2f2; color: #b91c1c; }
+/* Paperwork documents (DocumentsSection) */
+.badge.restricted { background: #fff7e6; color: #92400e; }
 .badge.workauth-valid { background: #ecfdf3; color: #15803d; }
 .badge.workauth-pending { background: var(--pri-50); color: var(--pri-700); }
 .badge.workauth-expired, .badge.workauth-revoked { background: #fef2f2; color: #b91c1c; }

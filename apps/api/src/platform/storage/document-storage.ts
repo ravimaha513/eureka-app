@@ -38,17 +38,21 @@ export function attachmentDisposition(fileName: string): string {
 const quarantineOnly = (key: string) => {
   if (!key.startsWith("quarantine/")) throw new Error("uploads go to quarantine/ only");
 };
+/** Scanned objects only: clean/ (internal) and restricted/ (after step-up, checked by the caller). */
+export const isServableKey = (key: string) => key.startsWith("clean/") || key.startsWith("restricted/");
 const cleanOnly = (key: string) => {
-  if (!key.startsWith("clean/")) throw new Error("downloads are signed for clean/ only");
+  if (!isServableKey(key)) throw new Error("downloads are signed for clean/ and restricted/ only");
 };
 
 /**
  * S3: presigned POST whose policy pins the bucket, the exact key, the exact
  * Content-Type and an exact content-length-range (the declared size), signed
- * by the API task role (which may PutObject only under quarantine/resumes/,
- * and has no PutObjectTagging, so a client cannot add the scan tag). Encryption
- * is the bucket default (SSE-KMS). Downloads: presigned GET forcing
- * Content-Disposition: attachment and the stored type.
+ * by the API task role (which may PutObject only under quarantine/resumes/
+ * and quarantine/documents/, and has no PutObjectTagging, so a client cannot
+ * add the scan tag). Encryption is the bucket default (SSE-KMS, data key).
+ * Downloads: presigned GET forcing Content-Disposition: attachment and the
+ * stored type; restricted/ objects are decrypted with the restricted key,
+ * which the API role may use only through S3 for restricted/documents/*.
  */
 export class S3DocumentStorage implements DocumentStorage {
   readonly kind = "s3" as const;

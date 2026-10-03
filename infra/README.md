@@ -164,7 +164,8 @@ it is on a flat-rate plan.
 
 4. **Google OAuth client** (Google Cloud console → APIs & Services → Credentials):
    - Type: Web application.
-   - Authorized redirect URI: `https://<app host>/api/auth/callback`.
+   - Authorized redirect URIs: `https://<app host>/api/auth/callback` (sign-in) and
+     `https://<app host>/api/auth/step-up/callback` (step-up before restricted documents, migration 0043).
    - Terraform creates `/eureka/<env>/app/google_client_{id,secret}` with the
      placeholder value `set-me` and never overwrites them afterwards. The API
      refuses to start while either value is still `set-me` (config check), so

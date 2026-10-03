@@ -30,9 +30,23 @@ export interface DocumentStore {
   verdict(key: string, signal?: AbortSignal): Promise<ScanVerdict>;
   /** The bytes of one version; throws when it is larger than maxBytes. */
   read(key: string, versionId: string, maxBytes: number, signal?: AbortSignal): Promise<Buffer>;
-  putClean(key: string, body: Buffer, sha256: Buffer, contentType: string, signal?: AbortSignal): Promise<void>;
+  /**
+   * Create-only write of a scanned file to clean/ or restricted/. A
+   * restricted/ object is encrypted with the restricted KMS key (`kmsKeyId`,
+   * required there) and no S3 bucket key, so the KMS encryption context is
+   * the object's own ARN (what the IAM conditions match on).
+   */
+  putClean(key: string, body: Buffer, sha256: Buffer, contentType: string, signal?: AbortSignal, opts?: { kmsKeyId?: string }): Promise<void>;
   /** Permanently removes one quarantine version (infected files, files promoted to clean/). */
   deleteVersion(key: string, versionId: string, signal?: AbortSignal): Promise<void>;
+}
+
+/** Promotion writes clean/ or restricted/ only; restricted/ needs the restricted key. Returns whether it is restricted. */
+function promotionTarget(key: string, kmsKeyId: string | undefined): boolean {
+  if (key.startsWith("clean/")) return false;
+  if (!key.startsWith("restricted/")) throw new Error("promotion writes clean/ or restricted/ only");
+  if (!kmsKeyId) throw new Error("restricted/ objects need the restricted KMS key");
+  return true;
 }
 
 /** The tag GuardDuty Malware Protection for S3 writes on each scanned object. */
@@ -42,11 +56,12 @@ export class ObjectTooLargeError extends Error {}
 
 /**
  * S3 (infra/modules/stack/app.tf, worker role): ListBucketVersions limited to
- * quarantine/resumes/ (a missing object is then "no versions" instead of an
- * ambiguous 403), Get(Object|ObjectVersion)(Tagging) and DeleteObjectVersion
- * on quarantine/resumes/*, PutObject (create-only) and GetObject (HeadObject
- * checksum after a 412) on clean/resumes/*. Encryption is the
- * bucket default (SSE-KMS, data key).
+ * quarantine/resumes/ and quarantine/documents/ (a missing object is then "no
+ * versions" instead of an ambiguous 403), Get(Object|ObjectVersion)(Tagging)
+ * and DeleteObjectVersion there, PutObject (create-only) and GetObject
+ * (HeadObject checksum after a 412) on clean/resumes/*, clean/documents/* and
+ * restricted/documents/*. Encryption is the bucket default (SSE-KMS, data
+ * key), except restricted/ (the restricted key, set per object).
  */
 export class S3DocumentStore implements DocumentStore {
   readonly kind = "s3" as const;
@@ -79,14 +94,15 @@ export class S3DocumentStore implements DocumentStore {
     return Buffer.concat(chunks);
   }
 
-  async putClean(key: string, body: Buffer, sha256: Buffer, contentType: string, signal?: AbortSignal): Promise<void> {
-    if (!key.startsWith("clean/")) throw new Error("promotion writes clean/ only");
+  async putClean(key: string, body: Buffer, sha256: Buffer, contentType: string, signal?: AbortSignal, opts: { kmsKeyId?: string } = {}): Promise<void> {
+    const restricted = promotionTarget(key, opts.kmsKeyId);
     const checksum = sha256.toString("base64");
     try {
       // Create-only: a clean object is never overwritten (a retry finds its own bytes, compared below).
       await this.s3.send(new PutObjectCommand({
         Bucket: this.bucket, Key: key, Body: body, ContentType: contentType, ContentLength: body.length,
         ChecksumSHA256: checksum, IfNoneMatch: "*",
+        ...(restricted ? { ServerSideEncryption: "aws:kms" as const, SSEKMSKeyId: opts.kmsKeyId, BucketKeyEnabled: false } : {}),
       }), { abortSignal: signal });
       return;
     } catch (err) {
@@ -141,8 +157,8 @@ export class LocalDocumentStore implements DocumentStore {
     return body;
   }
 
-  async putClean(key: string, body: Buffer, sha256: Buffer): Promise<void> {
-    if (!key.startsWith("clean/")) throw new Error("promotion writes clean/ only");
+  async putClean(key: string, body: Buffer, sha256: Buffer, _contentType?: string, _signal?: AbortSignal, opts: { kmsKeyId?: string } = {}): Promise<void> {
+    promotionTarget(key, opts.kmsKeyId);
     const path = localPath(this.root, key);
     const tmp = await writeTempBeside(path, body);
     try {

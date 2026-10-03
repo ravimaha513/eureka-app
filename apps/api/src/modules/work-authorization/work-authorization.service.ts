@@ -11,16 +11,10 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { FIELD_CRYPTO, type FieldCrypto } from "../../platform/crypto/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
+import { requireStepUp } from "../../platform/step-up.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import type { WorkAuthCreate, WorkAuthUpdate } from "./work-authorization.schemas.js";
 
-/**
- * Step-up for revealing a work authorization number (design A6.1, A6.3
- * "Restricted": visa numbers): the session's sign-in must be at most this
- * old. Stand-in until the shared step-up check (restricted documents) lands;
- * then the reveal should use it.
- */
-export const REVEAL_STEP_UP_MS = 15 * 60_000;
 export const REVEALS_PER_MINUTE = 20;
 
 interface Row {
@@ -191,23 +185,24 @@ export class WorkAuthorizationService {
   }
 
   /**
-   * The number in clear for one record (B4.6: visa:read). Needs a sign-in
-   * within REVEAL_STEP_UP_MS (step-up), is rate-limited and audited (who,
-   * which record; never the number) in the same transaction.
+   * The number in clear for one record (B4.6: visa:read; A6.3 restricted).
+   * Needs a live step-up grant of this session (design A6.1, the same gate as
+   * restricted documents: requireStepUp), is rate-limited and audited (who,
+   * which record, the step-up grant id; never the number) in the same transaction.
    */
   async reveal(user: AuthedUser, candidateId: string, id: string) {
     return this.db.withUser(user.id, async (c) => {
       await this.access(c, user, candidateId);
       const r = await this.row(c, candidateId, id);
       if (!r.number_enc) throw new ConflictException("no_number");
-      if (!(Date.now() - user.authTime.getTime() <= REVEAL_STEP_UP_MS)) throw new ForbiddenException("step_up_required");
+      const stepUpGrantId = await requireStepUp(c, user);
       if (!this.revealLimiter.take(user.id)) {
         throw new HttpException("Too many requests; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
       }
       const number = await this.crypto.cipher.decrypt(c, { cls: "work_auth_number", rowId: id }, r.number_enc);
       await this.audit.record(c, {
         actorId: user.id, action: "work_authorization.number_revealed", entityType: "work_authorization", entityId: id,
-        changes: { candidateId },
+        changes: { candidateId, stepUpGrantId },
       });
       return { id, number };
     });

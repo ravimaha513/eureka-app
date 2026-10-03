@@ -121,8 +121,10 @@ resource "aws_s3_bucket_policy" "tls_only" {
   depends_on = [aws_s3_bucket_public_access_block.b]
 }
 
-# Restricted documents must be written with the restricted KMS key.
-# Scan integrity (resume-scan job): the GuardDuty scan tag is the only signal
+# Restricted documents must be written with the restricted KMS key, only by
+# the worker (promotion after a clean scan), and are read only by the API role
+# (presigned GET after step-up; migration 0043) and the worker (HeadObject).
+# Scan integrity (scan jobs): the GuardDuty scan tag is the only signal
 # that a quarantined object is safe, so only the malware-protection role may
 # tag quarantine/ objects, and only the worker may write clean/ (promotion).
 resource "aws_s3_bucket_policy" "documents" {
@@ -159,8 +161,16 @@ resource "aws_s3_bucket_policy" "documents" {
         Effect    = "Deny"
         Principal = "*"
         Action    = "s3:PutObject"
-        Resource  = "${aws_s3_bucket.b["documents"].arn}/clean/*"
+        Resource  = ["${aws_s3_bucket.b["documents"].arn}/clean/*", "${aws_s3_bucket.b["documents"].arn}/restricted/*"]
         Condition = { ArnNotEquals = { "aws:PrincipalArn" = aws_iam_role.worker.arn } }
+      },
+      {
+        Sid       = "OnlyAppReadsRestricted"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = ["s3:GetObject", "s3:GetObjectVersion"]
+        Resource  = "${aws_s3_bucket.b["documents"].arn}/restricted/*"
+        Condition = { ArnNotEquals = { "aws:PrincipalArn" = [aws_iam_role.api.arn, aws_iam_role.worker.arn] } }
       },
     ]
   })
