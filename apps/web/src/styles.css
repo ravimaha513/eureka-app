@@ -207,3 +207,19 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .legend { display: flex; flex-direction: column; gap: 6px; }
 .legenditem { display: flex; align-items: center; gap: 6px; color: var(--text2); font-size: 12px; }
 .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+
+/* Notification bell and inbox panel (top bar) */
+.inbox-wrap { position: relative; }
+.bell { position: relative; width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); font-size: 16px; line-height: 1; }
+.bell:focus-visible, .linkish:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; }
+.bell-count { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #b91c1c; color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.inbox { position: absolute; right: 0; top: 44px; z-index: 30; width: min(380px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 20px 50px rgba(15, 23, 42, .2); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.inbox-head { display: flex; align-items: center; gap: 8px; }
+.inbox-head h2 { font-size: 15px; margin: 0 auto 0 0; }
+.inbox-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.inbox-list li { border: 1px solid var(--line2); border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px; }
+.inbox-list li.unread { border-color: var(--pri-50); background: #fafaff; }
+.inbox-list li.unread .inbox-title { font-weight: 700; }
+.inbox-list li p { margin: 0; color: var(--text2); font-size: 13px; }
+.inbox-list li .btn { justify-self: start; }
+.linkish { border: 0; background: none; padding: 0; color: var(--pri-700); font: inherit; text-align: left; cursor: pointer; text-decoration: underline; }

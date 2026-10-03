@@ -10,6 +10,7 @@ import { InterviewsPage } from "./interviews/InterviewsPage";
 import { HotListPage } from "./sales/HotListPage";
 import { PlacementsPage } from "./pipeline/PlacementsPage";
 import { SubmissionsPage } from "./pipeline/SubmissionsPage";
+import { NotificationBell, type InboxItem } from "./notifications/Inbox";
 
 /** The Hot List screen (kept under its original name for existing callers). */
 export const HotList = HotListPage;
@@ -70,6 +71,17 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     if (el && el.isConnected && !el.closest("[hidden]")) el.focus();
     else document.querySelector<HTMLElement>(".content h1")?.focus();
   }, [restoreFocus]);
+  // Inbox entries open the placement or the candidate profile when the user has that screen.
+  const has = (key: string) => items.some((i) => i.key === key);
+  const candidateScreen = has("candidates") ? "candidates" : has("hotlist") ? "hotlist" : null;
+  const canOpenEntity = (e: InboxItem["entity"]) => (e.type === "placement" ? has("placements") : candidateScreen !== null);
+  const openEntity = (e: InboxItem["entity"]) => {
+    if (e.type === "placement") { setProfileId(null); openPlacement(e.id); return; }
+    if (!candidateScreen) return;
+    setPlacementId(null);
+    setActive(candidateScreen);
+    openProfile(e.id);
+  };
   const sections = [...new Set(items.map((i) => i.section))];
   const current = items.find((i) => i.key === active);
   return (
@@ -88,7 +100,10 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <button className="nav" onClick={onSignOut}>Sign out</button></div>
       </aside>
       <main className="main">
-        <div className="top"><span className="rolepill">{me.roles.map((r) => r.label).join(" · ")}</span></div>
+        <div className="top">
+          <span className="rolepill">{me.roles.map((r) => r.label).join(" · ")}</span>
+          <NotificationBell onOpen={openEntity} canOpen={canOpenEntity} />
+        </div>
         <div className="content">
           {!current ? <p className="empty">Your role has no screens yet.</p>
             : current.key === "hotlist" || current.key === "candidates" ? (
