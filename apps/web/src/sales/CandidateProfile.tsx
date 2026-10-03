@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, type Me } from "../api";
 import { ConfirmDialog } from "../admin/Dialog";
 import { CandidateResumes } from "./CandidateResumes";
+import { DocumentsSection } from "../documents/DocumentsSection";
 import { CandidateTimeline } from "./CandidateTimeline";
 import { EditProfileDialog } from "./EditProfileDialog";
 import { salesError } from "./errors";
@@ -155,6 +156,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
         )}
 
         {caps.has("document:read") && <CandidateResumes candidateId={c.id} />}
+        {caps.has("document:read") && <DocumentsSection owner={{ kind: "candidate", id: c.id }} title="Paperwork documents" />}
 
         <CandidateTimeline id={c.id} />
       </div>
