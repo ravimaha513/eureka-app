@@ -45,6 +45,17 @@ describe("role-aware navigation", () => {
   });
 });
 
+describe("notification bell in the shell", () => {
+  it("every role gets the bell in the top bar, outside the sidebar", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => new Response(JSON.stringify(
+      String(input).startsWith("/api/v1/notifications/unread-count") ? { unread: 4, capped: false } : { items: [] }), { status: 200 }));
+    wrap(<Shell me={meFor("recruiter")} onSignOut={() => undefined} />);
+    expect(await screen.findByRole("button", { name: "Notifications, 4 unread" })).toBeInTheDocument();
+    const nav = screen.getByRole("complementary", { name: "Main navigation" });
+    expect(within(nav).queryByRole("button", { name: /Notifications/ })).not.toBeInTheDocument();
+  });
+});
+
 describe("Hot List", () => {
   it("shows masked phones as masked and labels Open-to-all-teams candidates", async () => {
     // A fresh response per call: the page also loads the user's saved views.

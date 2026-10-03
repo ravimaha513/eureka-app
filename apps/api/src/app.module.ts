@@ -33,6 +33,8 @@ import { ImportsController, ImportsService } from "./modules/imports/imports.con
 import { assertImportRoleIsolated } from "./platform/role-isolation.js";
 import { ResumesController } from "./modules/resumes/resumes.controller.js";
 import { ResumesService } from "./modules/resumes/resumes.service.js";
+import { NotificationsController } from "./modules/notifications/notifications.controller.js";
+import { NotificationsService } from "./modules/notifications/notifications.service.js";
 import { DocumentsController } from "./modules/documents/documents.controller.js";
 import { DocumentsService } from "./modules/documents/documents.service.js";
 import { StepUpController } from "./modules/identity/step-up.controller.js";
@@ -63,14 +65,14 @@ export class AppModule {
       controllers: [
         FeedbackController, HealthController, AuthController, MeController, CandidatesController, SubmissionsController, InterviewsController,
         AdminController, TeamsController, PlacementsController, LookupsController, DashboardController, HotlistController, ImportsController,
-        ResumesController, DocumentsController, StepUpController,
+        ResumesController, NotificationsController, DocumentsController, StepUpController,
         EmployeesController, AssignmentsController, ReportsController, WorkAuthorizationController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
         DbService, SessionService, AccessService, AuditService, OidcService,
         CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
-        ResumesService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
+        ResumesService, NotificationsService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
         WorkAuthorizationService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },

@@ -346,7 +346,7 @@ describe("visa-expiry notices (time travel on valid_to)", () => {
     expect((await events(id)).map((e) => [e.payload.threshold_days, e.payload.days_left])).toEqual([[90, 90], [60, 59], [30, 30]]);
   });
 
-  it("the event carries ids, dates and days only (no number, no type), for HR and Immigration; delivery ignores it for now", async () => {
+  it("the event carries ids, dates and days only (no number, no type), for HR and Immigration; the notification delivery handles it", async () => {
     const cand = await fresh();
     const id = await createWa(U.imm, cand.id, { number: "SECRET-NUM-9", type: "h4_ead", validTo: await nyDay(45) });
     expect(await visaExpiryJob([90, 60, 30]).run("label", ctx())).toMatchObject({ events: expect.any(Number) });
@@ -356,7 +356,7 @@ describe("visa-expiry notices (time travel on valid_to)", () => {
       candidate_id: cand.id, person_id: person, expires_on: await nyDay(45), threshold_days: 60, days_left: 45, notify: ["hr", "immigration"],
     } });
     expect(JSON.stringify(ev)).not.toMatch(/SECRET|h4_ead/);
-    expect((DELIVERED_TYPES as readonly string[]).includes("work_authorization.expiring")).toBe(false);
+    expect((DELIVERED_TYPES as readonly string[]).includes("work_authorization.expiring")).toBe(true);
   });
 
   it("entered late: only the smallest threshold reached; pending, revoked and undated records get none; renewal restarts", async () => {

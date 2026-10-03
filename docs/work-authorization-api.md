@@ -97,7 +97,6 @@ through `authz.work_auth_expiry_notices(thresholds)`; thresholds come from
   (a renewal) starts a new cycle.
 - The payload holds ids, the expiry date and day counts only: no number, no
   authorization type, no names. Recipients sign in to see details.
-- `notify` names recipient groups as in placement events (`hr`, `immigration`).
-- `outbox-delivery` does not deliver this type yet (it only selects
-  `placement.*`), so these rows stay unpublished and are not pruned until the
-  notification jobs handle them.
+- `notify` (`hr`, `immigration`) is only checked against the type's audience;
+  `outbox-delivery` (migration 0046, `docs/notifications.md`) decides the
+  recipients (HR and Immigration) and delivers email and an inbox entry.
