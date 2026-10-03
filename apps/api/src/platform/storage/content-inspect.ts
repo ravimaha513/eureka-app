@@ -59,25 +59,42 @@ function inspectPng(buf: Buffer): ContentProblem | null {
   return "BAD_CONTENT";
 }
 
-/** Marker walk up to the scan; a frame header is required; the file ends with EOI. */
+/**
+ * Full marker walk: segments before the first scan (a frame header is
+ * required), then the entropy-coded data of each scan, where only byte
+ * stuffing (FF 00), fill bytes, restart markers (RST0-7) and further marker
+ * segments (DHT, DQT, DRI, another SOS of a progressive image, APPn, COM) may
+ * follow an FF byte. The first EOI ends the image and must be the last two
+ * bytes: nothing may be appended (no polyglot tail), and a second SOI is refused.
+ */
 function inspectJpeg(buf: Buffer): ContentProblem | null {
-  if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8 || buf[2] !== 0xff) return "BAD_CONTENT";
-  if (buf[buf.length - 2] !== 0xff || buf[buf.length - 1] !== 0xd9) return "BAD_CONTENT";
+  const n = buf.length;
+  if (n < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return "BAD_CONTENT";
   let p = 2;
   let frame = false;
-  while (p + 4 <= buf.length) {
-    if (buf[p] !== 0xff) return "BAD_CONTENT";
+  let scans = 0;
+  let inScan = false;
+  while (p < n) {
+    if (inScan && buf[p] !== 0xff) { p++; continue; } // entropy-coded byte
+    if (buf[p] !== 0xff || p + 1 >= n) return "BAD_CONTENT";
     let m = buf[p + 1]!;
-    while (m === 0xff && p + 2 < buf.length) { p++; m = buf[p + 1]!; } // fill bytes
-    if (m === 0x01 || (m >= 0xd0 && m <= 0xd7)) { p += 2; continue; } // standalone markers
-    if (m === 0xd8 || m === 0xd9) return "BAD_CONTENT";
+    while (m === 0xff) { p++; if (p + 1 >= n) return "BAD_CONTENT"; m = buf[p + 1]!; } // fill bytes
+    if (inScan && m === 0x00) { p += 2; continue; } // stuffed FF data byte
+    if ((m >= 0xd0 && m <= 0xd7) || m === 0x01) { p += 2; continue; } // RSTn, TEM: no length
+    if (m === 0xd9) return frame && scans > 0 && p + 2 === n ? null : "BAD_CONTENT"; // EOI, last
+    if (m === 0xd8 || m === 0x00 || (m >= 0x02 && m <= 0xbf)) return "BAD_CONTENT"; // SOI again, reserved
+    if (p + 4 > n) return "BAD_CONTENT";
     const len = buf.readUInt16BE(p + 2);
-    if (len < 2 || p + 2 + len > buf.length) return "BAD_CONTENT";
+    if (len < 2 || p + 2 + len > n) return "BAD_CONTENT";
     if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) frame = true;
-    if (m === 0xda) return frame ? null : "BAD_CONTENT";
     p += 2 + len;
+    if (m === 0xda) {
+      if (!frame) return "BAD_CONTENT";
+      scans++;
+      inScan = true;
+    }
   }
-  return "BAD_CONTENT";
+  return "BAD_CONTENT"; // no EOI
 }
 
 // ---------------------------------------------------------------- DOCX (ZIP)
