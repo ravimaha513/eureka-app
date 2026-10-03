@@ -143,6 +143,8 @@ h1:focus { outline: none; }
 .badge.st-selected, .badge.st-joined, .badge.st-confirmed { background: #ecfdf3; color: #15803d; }
 .badge.st-rejected, .badge.st-withdrawn, .badge.st-backout, .badge.st-bgc_failed { background: #fef2f2; color: #b91c1c; }
 .badge.first { background: #f5f3ff; color: #6d28d9; }
+.badge.emp-on_assignment { background: #ecfdf3; color: #15803d; } .badge.emp-bench { background: #fff7e6; color: #b45309; }
+.badge.emp-exited { background: #f1f5f9; color: #475569; }
 .drawer.wide { width: min(560px, 100%); }
 .field textarea { border-radius: 8px; border: 1px solid var(--line); padding: 8px 10px; font: inherit; color: var(--text); resize: vertical; width: 100%; }
 .check { display: inline-flex; gap: 6px; align-items: center; font-weight: 600; color: var(--text2); }
