@@ -496,6 +496,8 @@ Built in migration 0043 (2026-10-03), paperwork documents, restricted documents 
 
 Not built: WebAuthn step-up (the design's fallback) and the 15-minute idle timeout for restricted roles wait for the Phase 0 Google spike; document verification (`document:verify`, `verified_by`, `expires_on`) and the checklist link belong to the paperwork work; retention of documents (OD-03, I-9 federal minimum) has no purge job yet; restricted uploads sit in `quarantine/` under the data key until promoted (minutes; 2-day lifecycle).
 
+Review follow-ups (migration 0050, 2026-10-03): a step-up that ends without a usable token is consumed with its own reason (`authz.step_up_fail`: `cancelled` for `error=access_denied` or no code, `token_refused` for a token that fails verification); a production migration run (`NODE_ENV=production`) deletes the `dev_step_up` switch; restricted objects carry their SHA-256 as `x-amz-meta-sha256`, so after a 412 the worker verifies an existing object with a plain HEAD (metadata, size, SSE-KMS key id) and needs no `kms:Decrypt`; JPEG inspection walks the entropy-coded data (stuffing, RSTn, further DHT/SOS) to an EOI that must end the file. Residual: scan-data bytes without `FF` are not interpreted (GuardDuty and attachment-only downloads remain the controls).
+
 Not yet done: nothing in this list. The outbox delivery job is built (migrations 0024 and 0029, B6 `outbox-delivery`); `candidate_event` rows are written by migration 0026.
 
 ## B3. API design
