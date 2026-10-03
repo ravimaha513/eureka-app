@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { BlindIndexer, dobBlindIndex, normalizeDob } from "./blind-index.js";
 import { createBlindIndexer, createKeyProvider, checkFieldCrypto, fieldCryptoEnv, type FieldCryptoConfig } from "./config.js";
-import { FieldCryptoError, MIN_CIPHERTEXT_LEN, openWith, parseHeader, sealWith, type DataKey } from "./field-crypto.js";
+import { FieldCipher, FieldCryptoError, MIN_CIPHERTEXT_LEN, openWith, parseHeader, sealWith, type DataKey, type Queryable } from "./field-crypto.js";
 import { KmsKeyProvider, KmsMacProvider, LocalKeyProvider, LocalMacProvider, dataKeyContext } from "./key-provider.js";
 import { z } from "zod";
 
@@ -165,5 +165,59 @@ describe("configuration (local provider refused in production)", () => {
     expect(() => createBlindIndexer(prod)).toThrow(/not allowed in production/);
     expect(createKeyProvider({ NODE_ENV: "test" }).kind).toBe("local");
     expect(createKeyProvider({ NODE_ENV: "production", FIELD_KMS_KEY_ARN: arn, AWS_REGION: "us-east-2" }).kind).toBe("kms");
+  });
+});
+
+describe("key material handling (review findings 6 and 7)", () => {
+  it("KMS: the SDK's plaintext buffers are zeroed after copying", async () => {
+    const generated = new Uint8Array(32).fill(7);
+    const decrypted = new Uint8Array(32).fill(8);
+    const send = vi.fn(async (cmd: { constructor: { name: string } }) =>
+      cmd.constructor.name === "GenerateDataKeyCommand" ? { Plaintext: generated, CiphertextBlob: new Uint8Array(180) } : { Plaintext: decrypted });
+    const p = new KmsKeyProvider({ send } as never, "arn:aws:kms:us-east-2:123456789012:key/abc");
+    const out = await p.generateDataKey({});
+    expect(out.plaintext.equals(Buffer.alloc(32, 7))).toBe(true);
+    expect([...generated].every((b) => b === 0)).toBe(true);
+    expect((await p.unwrapDataKey(out.wrapped, {})).equals(Buffer.alloc(32, 8))).toBe(true);
+    expect([...decrypted].every((b) => b === 0)).toBe(true);
+  });
+
+  it("unwrap: a rejected ciphertext is a FieldCryptoError; throttling and network errors are rethrown as they are", async () => {
+    const fail = (name: string) => new KmsKeyProvider({ send: async () => { const e = new Error(name); e.name = name; throw e; } } as never, "arn:x");
+    await expect(fail("InvalidCiphertextException").unwrapDataKey(Buffer.alloc(10), {})).rejects.toBeInstanceOf(FieldCryptoError);
+    await expect(fail("IncorrectKeyException").unwrapDataKey(Buffer.alloc(10), {})).rejects.toBeInstanceOf(FieldCryptoError);
+    for (const name of ["ThrottlingException", "TimeoutError", "KMSInternalException"]) {
+      const err = await fail(name).unwrapDataKey(Buffer.alloc(10), {}).catch((e: unknown) => e);
+      expect(err).not.toBeInstanceOf(FieldCryptoError);
+      expect((err as Error).name).toBe(name);
+    }
+    const local = new LocalKeyProvider();
+    const { wrapped } = await local.generateDataKey({ a: "b" });
+    await expect(local.unwrapDataKey(wrapped, { a: "c" })).rejects.toBeInstanceOf(FieldCryptoError);
+    await expect(local.unwrapDataKey(Buffer.alloc(5), { a: "b" })).rejects.toBeInstanceOf(FieldCryptoError);
+  });
+
+  it("the cache is bounded, evicts and zeroes the oldest, never hands out its own buffers", async () => {
+    const provider = new LocalKeyProvider();
+    const rows = new Map<string, Record<string, unknown>>();
+    for (let i = 0; i < 5; i++) {
+      const id = randomUUID();
+      const { wrapped } = await provider.generateDataKey(dataKeyContext("work_auth_number", id));
+      rows.set(id, { id, field_class: "work_auth_number", version: i + 1, provider: "local", key_ref: provider.keyRef, wrapped_key: wrapped });
+    }
+    const db: Queryable = { query: async (_sql: string, params?: unknown[]) => ({ rows: [rows.get(String(params![0]))] as never[] }) };
+    const cipher = new FieldCipher(provider, { maxKeys: 3 });
+    const ids = [...rows.keys()];
+    const encs = await Promise.all(ids.map(async (id, i) => {
+      // Seal with a lent copy, then zero the copy: the cache still decrypts.
+      const k = await (cipher as unknown as { keyById(db: Queryable, id: string): Promise<DataKey> }).keyById(db, id);
+      const enc = sealWith(k, { cls: "work_auth_number", rowId: id }, `N-${i}`);
+      cipher.release(k);
+      expect(k.key.every((b) => b === 0)).toBe(true);
+      return enc;
+    }));
+    expect(cipher.cacheSize).toBe(3);
+    for (const [i, id] of ids.entries()) expect(await cipher.decrypt(db, { cls: "work_auth_number", rowId: id }, encs[i]!)).toBe(`N-${i}`);
+    expect(cipher.cacheSize).toBe(3);
   });
 });

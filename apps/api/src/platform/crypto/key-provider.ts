@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "node:crypto";
 import { DecryptCommand, GenerateDataKeyCommand, GenerateMacCommand, type KMSClient } from "@aws-sdk/client-kms";
+import { FieldCryptoError, unwrapFailure } from "./errors.js";
 
 /**
  * Key providers for field encryption (design A6.3). A provider wraps and
@@ -68,12 +69,24 @@ export class LocalKeyProvider implements KeyProvider {
   }
 
   async unwrapDataKey(wrapped: Buffer, context: EncryptionContext): Promise<Buffer> {
-    if (wrapped.length !== 12 + 32 + 16) throw new Error("wrapped data key has the wrong length");
-    const d = createDecipheriv("aes-256-gcm", this.master, wrapped.subarray(0, 12));
-    d.setAAD(canonical(context));
-    d.setAuthTag(wrapped.subarray(44));
-    return Buffer.concat([d.update(wrapped.subarray(12, 44)), d.final()]);
+    if (wrapped.length !== 12 + 32 + 16) throw new FieldCryptoError("wrapped data key has the wrong length");
+    try {
+      const d = createDecipheriv("aes-256-gcm", this.master, wrapped.subarray(0, 12));
+      d.setAAD(canonical(context));
+      d.setAuthTag(wrapped.subarray(44));
+      return Buffer.concat([d.update(wrapped.subarray(12, 44)), d.final()]);
+    } catch {
+      throw new FieldCryptoError("data key cannot be unwrapped (local)");
+    }
   }
+}
+
+/** Our own copy of a key from the SDK; the SDK's buffer is zeroed (review finding 6). */
+function copyAndZero(src: Uint8Array): Buffer {
+  const out = Buffer.alloc(src.length);
+  out.set(src);
+  src.fill(0);
+  return out;
 }
 
 export class KmsKeyProvider implements KeyProvider {
@@ -83,14 +96,21 @@ export class KmsKeyProvider implements KeyProvider {
 
   async generateDataKey(context: EncryptionContext) {
     const out = await this.kms.send(new GenerateDataKeyCommand({ KeyId: this.keyRef, KeySpec: "AES_256", EncryptionContext: context }));
-    if (!out.Plaintext || !out.CiphertextBlob || out.Plaintext.length !== 32) throw new Error("KMS returned no data key");
-    return { plaintext: Buffer.from(out.Plaintext), wrapped: Buffer.from(out.CiphertextBlob) };
+    if (!out.Plaintext || !out.CiphertextBlob || out.Plaintext.length !== 32) {
+      out.Plaintext?.fill(0);
+      throw new Error("KMS returned no data key");
+    }
+    return { plaintext: copyAndZero(out.Plaintext), wrapped: Buffer.from(out.CiphertextBlob) };
   }
 
   async unwrapDataKey(wrapped: Buffer, context: EncryptionContext): Promise<Buffer> {
-    const out = await this.kms.send(new DecryptCommand({ KeyId: this.keyRef, CiphertextBlob: wrapped, EncryptionContext: context }));
-    if (!out.Plaintext || out.Plaintext.length !== 32) throw new Error("KMS returned no data key");
-    return Buffer.from(out.Plaintext);
+    const out = await this.kms.send(new DecryptCommand({ KeyId: this.keyRef, CiphertextBlob: wrapped, EncryptionContext: context }))
+      .catch(unwrapFailure);
+    if (!out.Plaintext || out.Plaintext.length !== 32) {
+      out.Plaintext?.fill(0);
+      throw new FieldCryptoError("KMS returned no data key");
+    }
+    return copyAndZero(out.Plaintext);
   }
 }
 

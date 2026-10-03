@@ -1,5 +1,8 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
+import { FieldCryptoError } from "./errors.js";
 import { dataKeyContext, type KeyProvider } from "./key-provider.js";
+
+export { FieldCryptoError };
 
 /**
  * Application-side field encryption (design A6.3; migration 0042).
@@ -44,9 +47,9 @@ const IV_LEN = 12;
 const TAG_LEN = 16;
 export const MIN_CIPHERTEXT_LEN = HEADER_LEN + IV_LEN + 1 + TAG_LEN;
 export const KEY_CACHE_MS = 24 * 3600_000;
+/** Unwrapped data keys kept in memory at most (oldest evicted and zeroed first). */
+export const KEY_CACHE_MAX = 64;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export class FieldCryptoError extends Error {}
 
 const uuidBytes = (id: string) => Buffer.from(id.replace(/-/g, ""), "hex");
 const uuidOf = (b: Buffer) => {
@@ -108,50 +111,86 @@ interface KeyRow extends Record<string, unknown> {
  * Data key management and encryption for the API and the worker. Keys are
  * read from eureka.field_key with the caller's connection (the API's request
  * transaction, the worker's pool).
+ *
+ * Key material (review finding 6): the cache owns its buffers and never hands
+ * them out; callers get a copy (`DataKey`) that they zero with `release` when
+ * done. Cache entries expire after 24 hours, at most KEY_CACHE_MAX are kept,
+ * and an evicted entry is zeroed.
  */
 export class FieldCipher {
   private readonly cache = new Map<string, { key: DataKey; until: number }>();
 
   constructor(
     readonly provider: KeyProvider,
-    private readonly opts: { cacheMs?: number; now?: () => number } = {},
+    private readonly opts: { cacheMs?: number; now?: () => number; maxKeys?: number } = {},
   ) {}
 
   private now() { return this.opts.now?.() ?? Date.now(); }
 
+  /** A copy of a cached key for one use. */
+  private lend(key: DataKey): DataKey {
+    return { ...key, key: Buffer.from(key.key) };
+  }
+
+  /** Zeroes a key obtained from this cipher (rotationKey, newestKey). */
+  release(key: DataKey | null | undefined): void {
+    key?.key.fill(0);
+  }
+
+  private cached(id: string): DataKey | null {
+    const hit = this.cache.get(id);
+    if (!hit) return null;
+    if (hit.until > this.now()) return hit.key;
+    hit.key.key.fill(0);
+    this.cache.delete(id);
+    return null;
+  }
+
+  private remember(key: DataKey) {
+    const old = this.cache.get(key.id);
+    if (old && old.key.key !== key.key) old.key.key.fill(0);
+    this.cache.delete(key.id);
+    this.cache.set(key.id, { key, until: this.now() + (this.opts.cacheMs ?? KEY_CACHE_MS) });
+    const max = this.opts.maxKeys ?? KEY_CACHE_MAX;
+    while (this.cache.size > max) {
+      const [oldest, entry] = this.cache.entries().next().value as [string, { key: DataKey }];
+      entry.key.key.fill(0);
+      this.cache.delete(oldest);
+    }
+  }
+
+  /** Number of cached keys (tests). */
+  get cacheSize() { return this.cache.size; }
+
+  /** Drops and zeroes every cached data key. */
+  clearCache() {
+    for (const { key } of this.cache.values()) key.key.fill(0);
+    this.cache.clear();
+  }
+
+  /** The cached key of `row`, unwrapping it first if needed; returns a copy. */
   private async unwrap(row: KeyRow): Promise<DataKey> {
-    const hit = this.cache.get(row.id);
-    if (hit && hit.until > this.now()) return hit.key;
-    // An expired entry is dropped, not zeroed: a concurrent call may still hold it.
-    if (hit) this.cache.delete(row.id);
+    const hit = this.cached(row.id);
+    if (hit) return this.lend(hit);
     if (row.provider !== this.provider.kind || row.key_ref !== this.provider.keyRef) {
       throw new FieldCryptoError(`data key ${row.id} belongs to another key provider`);
     }
     const plaintext = await this.provider.unwrapDataKey(row.wrapped_key, dataKeyContext(row.field_class, row.id));
     const key: DataKey = { id: row.id, version: row.version, cls: row.field_class, key: plaintext };
     this.remember(key);
-    return key;
-  }
-
-  private remember(key: DataKey) {
-    this.cache.set(key.id, { key, until: this.now() + (this.opts.cacheMs ?? KEY_CACHE_MS) });
-  }
-
-  /** Drops every cached data key (tests). */
-  clearCache() {
-    this.cache.clear();
+    return this.lend(key);
   }
 
   private async keyById(db: Queryable, id: string): Promise<DataKey> {
-    const hit = this.cache.get(id);
-    if (hit && hit.until > this.now()) return hit.key;
+    const hit = this.cached(id);
+    if (hit) return this.lend(hit);
     const row = (await db.query<KeyRow>(
       `SELECT id, field_class, version, provider, key_ref, wrapped_key FROM eureka.field_key WHERE id = $1`, [id])).rows[0];
     if (!row) throw new FieldCryptoError("unknown data key");
     return this.unwrap(row);
   }
 
-  /** The newest data key of a class, or null when the class has none yet. */
+  /** The newest data key of a class (a copy: release it), or null when the class has none yet. */
   async newestKey(db: Queryable, cls: FieldClass): Promise<DataKey | null> {
     const row = (await db.query<KeyRow>(
       `SELECT id, field_class, version, provider, key_ref, wrapped_key FROM eureka.field_key
@@ -159,8 +198,8 @@ export class FieldCipher {
     return row ? this.unwrap(row) : null;
   }
 
-  /** API: the newest key, creating the class's first key when it has none (authz.field_key_first). */
-  async currentKey(db: Queryable, cls: FieldClass): Promise<DataKey> {
+  /** API: the newest key (a copy), creating the class's first key when it has none (authz.field_key_first). */
+  private async currentKey(db: Queryable, cls: FieldClass): Promise<DataKey> {
     const existing = await this.newestKey(db, cls);
     if (existing) return existing;
     const id = randomUUID();
@@ -173,38 +212,52 @@ export class FieldCipher {
     }
     const key: DataKey = { id, version: got.version, cls, key: plaintext };
     this.remember(key);
-    return key;
+    return this.lend(key);
   }
 
   /**
-   * Worker: the data key of one rotation run (authz.field_key_rotate). A
-   * retried run gets the key its first attempt added.
+   * Worker: the data key of the current month's rotation (authz.field_key_rotate),
+   * a copy the caller releases. A retried run gets the key its first attempt
+   * added. Null when the class has no key yet (nothing to rotate).
    */
-  async rotationKey(db: Queryable, cls: FieldClass, runKey: string): Promise<DataKey> {
+  async rotationKey(db: Queryable, cls: FieldClass, runKey: string): Promise<DataKey | null> {
     const id = randomUUID();
     const { plaintext, wrapped } = await this.provider.generateDataKey(dataKeyContext(cls, id));
-    const got = (await db.query<{ id: string; version: number }>(
-      `SELECT * FROM authz.field_key_rotate($1, $2, $3, $4, $5, $6)`,
-      [id, cls, this.provider.kind, this.provider.keyRef, wrapped, runKey])).rows[0];
-    if (!got) throw new FieldCryptoError("no rotation key");
-    if (got.id !== id) {
+    let got: { id: string; version: number } | undefined;
+    try {
+      got = (await db.query<{ id: string; version: number }>(
+        `SELECT * FROM authz.field_key_rotate($1, $2, $3, $4, $5, $6)`,
+        [id, cls, this.provider.kind, this.provider.keyRef, wrapped, runKey])).rows[0];
+    } catch (err) {
       plaintext.fill(0);
-      return this.keyById(db, got.id);
+      throw err;
+    }
+    if (!got || got.id !== id) {
+      plaintext.fill(0);
+      return got ? this.keyById(db, got.id) : null;
     }
     const key: DataKey = { id, version: got.version, cls, key: plaintext };
     this.remember(key);
-    return key;
+    return this.lend(key);
   }
 
   /** Encrypts under the class's newest key (API). Returns the ciphertext and its key id. */
   async encrypt(db: Queryable, ref: FieldRef, plaintext: string): Promise<{ enc: Buffer; keyId: string }> {
     const key = await this.currentKey(db, ref.cls);
-    return { enc: sealWith(key, ref, plaintext), keyId: key.id };
+    try {
+      return { enc: sealWith(key, ref, plaintext), keyId: key.id };
+    } finally {
+      this.release(key);
+    }
   }
 
   async decrypt(db: Queryable, ref: FieldRef, enc: Buffer): Promise<string> {
     const { keyId } = parseHeader(enc);
     const key = await this.keyById(db, keyId);
-    return openWith(key, ref, enc);
+    try {
+      return openWith(key, ref, enc);
+    } finally {
+      this.release(key);
+    }
   }
 }
