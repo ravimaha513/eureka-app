@@ -55,17 +55,14 @@ describe("checklist created with the placement", () => {
     expect(await items((await placed("1099")).id)).toEqual([]);
   });
 
-  it("a later template change does not rewrite existing placements", async () => {
+  it("a later template version does not rewrite existing placements (versions are immutable, 0044)", async () => {
     const { id } = await placed("c2c");
-    await db.admin.query(`UPDATE authz.checklist_template SET items = '[{"doc_type":"w9","owner_role":"accounts"}]'
-                          WHERE kind = 'paperwork' AND placement_type = 'c2c'`);
-    try {
-      expect((await items(id)).map((i) => i.doc_type)).toEqual(["msa"]);
-      expect((await items((await placed("c2c")).id)).map((i) => i.doc_type)).toEqual(["w9"]);
-    } finally {
-      await db.admin.query(`UPDATE authz.checklist_template SET items = $1::jsonb
-                            WHERE kind = 'paperwork' AND placement_type = 'c2c'`, [JSON.stringify(C2C)]);
-    }
+    await db.admin.query(`INSERT INTO authz.checklist_template (kind, placement_type, items)
+                          VALUES ('paperwork', 'c2c', '[{"doc_type":"w9","owner_role":"accounts"}]')`);
+    expect((await items(id)).map((i) => i.doc_type)).toEqual(["msa"]);
+    expect((await items((await placed("c2c")).id)).map((i) => i.doc_type)).toEqual(["w9"]);
+    await db.admin.query(`INSERT INTO authz.checklist_template (kind, placement_type, items) VALUES ('paperwork', 'c2c', $1::jsonb)`,
+      [JSON.stringify(C2C)]);
   });
 
   it("a refused placement leaves no checklist behind", async () => {
@@ -88,8 +85,8 @@ describe("template validation", () => {
     ["extra key (free text)", [{ doc_type: "offer_letter", owner_role: "hr", note: "call Bob" }]],
     ["duplicate doc_type", [{ doc_type: "i9", owner_role: "hr" }, { doc_type: "i9", owner_role: "accounts" }]],
   ])("refuses %s", async (_name, value) => {
-    await expect(db.admin.query(`UPDATE authz.checklist_template SET items = $1::jsonb
-      WHERE kind = 'paperwork' AND placement_type = 'w2'`, [JSON.stringify(value)])).rejects.toThrow(/invalid_checklist_template/);
+    await expect(db.admin.query(`INSERT INTO authz.checklist_template (kind, placement_type, items)
+      VALUES ('paperwork', 'w2', $1::jsonb)`, [JSON.stringify(value)])).rejects.toThrow(/invalid_checklist_template/);
   });
 
   it("refuses a non-array or an unknown kind or type", async () => {
@@ -143,7 +140,7 @@ describe("write paths are closed", () => {
   });
 });
 
-describe("RLS differential: checklist items are visible exactly where the placement is", () => {
+describe("RLS differential: checklist items are visible where the placement is, or under document:read (0044)", () => {
   const made: (ActivityRef & { id: string })[] = [];
 
   beforeAll(async () => {
@@ -166,6 +163,7 @@ describe("RLS differential: checklist items are visible exactly where the placem
 
   it.each(users)("%s", async (key) => {
     const scope = resolveScope(toUserAccess(key), "placement:read");
+    const docs = resolveScope(toUserAccess(key), "document:read");
     const ids = new Set(made.map((m) => m.id));
     const seen = await asUser(db.app, U[key], async (c) => ({
       // With RLS alone (no application predicate).
@@ -174,9 +172,9 @@ describe("RLS differential: checklist items are visible exactly where the placem
       placements: (await c.query<{ id: string }>(`SELECT id FROM eureka.placement`)).rows
         .map((r) => r.id).filter((i) => ids.has(i)).sort(),
     }));
-    const expected = made.filter((m) => activityVisible(scope, m)).map((m) => m.id).sort();
+    const expected = made.filter((m) => activityVisible(scope, m) || activityVisible(docs, m)).map((m) => m.id).sort();
     expect(seen.items).toEqual(expected);
-    expect(seen.items).toEqual(seen.placements);
+    expect(seen.placements).toEqual(made.filter((m) => activityVisible(scope, m)).map((m) => m.id).sort());
   });
 
   it("the read policy probes the placement by key, with no per-row definer calls", async () => {
@@ -184,6 +182,7 @@ describe("RLS differential: checklist items are visible exactly where the placem
       SELECT pg_get_expr(polqual, polrelid) AS def FROM pg_policy WHERE polname = 'checklist_item_read'`);
     expect(rows).toHaveLength(1);
     expect(rows[0].def).toMatch(/EXISTS/);
-    expect(rows[0].def).not.toMatch(/authz\./);
+    // Scope functions appear only as InitPlans (rule 3), never called per row.
+    expect(rows[0].def).not.toMatch(/(?<!SELECT )authz\./);
   });
 });

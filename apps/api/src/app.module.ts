@@ -33,6 +33,8 @@ import { ImportsController, ImportsService } from "./modules/imports/imports.con
 import { assertImportRoleIsolated } from "./platform/role-isolation.js";
 import { ResumesController } from "./modules/resumes/resumes.controller.js";
 import { ResumesService } from "./modules/resumes/resumes.service.js";
+import { PaperworkController } from "./modules/paperwork/paperwork.controller.js";
+import { PaperworkService } from "./modules/paperwork/paperwork.service.js";
 import { NotificationsController } from "./modules/notifications/notifications.controller.js";
 import { NotificationsService } from "./modules/notifications/notifications.service.js";
 import { DocumentsController } from "./modules/documents/documents.controller.js";
@@ -65,6 +67,7 @@ export class AppModule {
       controllers: [
         FeedbackController, HealthController, AuthController, MeController, CandidatesController, SubmissionsController, InterviewsController,
         AdminController, TeamsController, PlacementsController, LookupsController, DashboardController, HotlistController, ImportsController,
+        PaperworkController,
         ResumesController, NotificationsController, DocumentsController, StepUpController,
         EmployeesController, AssignmentsController, ReportsController, WorkAuthorizationController,
       ],
@@ -72,6 +75,7 @@ export class AppModule {
         { provide: CONFIG, useValue: config },
         DbService, SessionService, AccessService, AuditService, OidcService,
         CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
+        PaperworkService,
         ResumesService, NotificationsService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
         WorkAuthorizationService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
         { provide: APP_GUARD, useClass: AuthGuard },

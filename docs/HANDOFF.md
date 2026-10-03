@@ -9,7 +9,7 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - `pnpm -r typecheck` and `pnpm -r test` must pass before every commit (integration tests need
   PostgreSQL 16 at `TEST_PG_ADMIN_URL`, default `postgres://postgres:postgres@127.0.0.1:5432`).
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0040**) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0053**; 0040 and 0049 are unused) and must apply as a
   non-superuser (Amazon RDS master): CI checks this.
 - Commit small and atomic; get an independent review of every security-relevant change.
 
@@ -68,6 +68,27 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   download links; `document:read`/`document:upload` over the candidate. Profile section in the web app.
   Without AWS: `LOCAL_STORAGE_DIR` (API serves a directory) and a fake scanner (EICAR = infected);
   `pnpm local` now runs the worker too.
+- Paperwork progress and BGC (Phase 3, migration 0044, contract `docs/paperwork-api.md`): checklist items move
+  `pending → received → verified` / `waived` (reason) / back to `pending` (returned or reopened, reason) with owner role,
+  assignee (must hold the owner role), due date, notes and a document link, only through `authz.update_checklist_item`
+  (receive/notes need `document:upload` or `document:verify`; everything else `document:verify`), with history rows.
+  One BGC record per placement (`not_started → initiated → in_progress → cleared | failed`, `cleared → failed` after the
+  fact) through `authz.update_bgc` (`bgc:update`, HR); `failPlacement` moves the placement to `bgc_failed` by calling
+  `authz.transition_placement`, so its rules are not duplicated. Paperwork/BGC visibility is `document:read` over the
+  placement (B4.4); items stay readable wherever the placement is. Templates are append-only versions (publish:
+  `document:verify` at org scope); placements keep the version they copied. "Paperwork & BGC" screen (work queue,
+  drawer, templates tab) and checklist progress + BGC status in the placement drawer. No template content ships; the dev
+  seed publishes fictional `sample_form_*` templates.
+  Document link (with 0043): `checklist_item.document_id REFERENCES eureka.document(id)`; `authz.update_checklist_item`
+  accepts only a document of the item's candidate filed on no placement or on this placement, whose file is not blocked
+  (`pending`/`clean`) and which the caller can read under the download rules (restricted documents only with
+  `document.restricted:read`); anything else is 422 `invalid_document`. The item dialog has a document picker (the
+  candidate's documents) and the drawer embeds the documents section for uploads.
+  Item notes and reasons have no app column privilege: they are read through `authz.checklist_item_texts`
+  (document:read over the placement), because items themselves stay readable to every `placement:read` holder.
+  Overdue reminder (migration 0052): the daily worker job `paperwork-overdue` (07:30 New York) emits one
+  `checklist.item_overdue` per outstanding item past its due date, once per item and due date (re-armed when the due
+  date changes), through `authz.emit_paperwork_overdue` (the worker's only new grant); recipients per `docs/notifications.md`.
 - Notifications (migration 0046, `docs/notifications.md`): in-app inbox (`notification`, own rows only, written by the
   worker; bell and panel in the web top bar, unread count polled every 60 s), outbox delivery generalised to typed
   events with recipients resolved in the database and email and/or inbox channels (placement emails unchanged; the
@@ -152,6 +173,20 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - Does a pre-join `bgc_failed` count as an earlier placement for first-placement detection?
 - Paperwork checklist content per placement type (documents, owner role, required), candidate `eligibility`
   fields, marketing locations and office: see `docs/phase2-status.md`.
+- Paperwork and BGC (migration 0044; conservative defaults built, see `docs/paperwork-api.md`):
+  - Who manages templates? Built: `document:verify` at org scope (HR, Immigration, Documents Team), no new permission.
+    A dedicated permission (e.g. HR only) would be a catalog change.
+  - Should items carry a default due date (e.g. N days after placement creation) in the template? Built: none, set by hand.
+  - Item state machine: may a verifier jump `pending → verified` without "received"? May Accounts (no
+    `document:upload`) update the items it owns? May recruiters mark items received (built: yes, `document:upload` own)?
+  - BGC: the brief named statuses `requested/in_progress/clear/consider/failed`; design B2.4 says
+    `not_started/initiated/in_progress/cleared/failed` (built). Is a vendor "consider" (needs adjudication) state needed?
+    Allowed list for `education_level` (built: free text ≤ 60), is `bgc_company` a fixed vendor list or `legal_entity`?
+    Can a failed check be re-run (built: `failed` is final)?
+  - Should `bgc → ready` require a cleared BGC, and should HR recording `failed` move the placement to `bgc_failed`
+    automatically? Built: neither (no gating; HR lacks `placement.bgc_status:update`, so a Manager/AD marks the placement;
+    one request does both only for a user holding both rights).
+  - Paperwork after `bgc_failed`/`joined`: built as still editable (closing out); only `backout` placements are frozen.
 - Placement emails: should Associate HR (and the Lead/Manager, design C flow 3) also receive them, and may
   they name the candidate or client? Today: `hr`, `accounts`, `immigration` only, ids and statuses only.
 - Sheet import (`docs/import.md`): status and row-colour mapping (SRS Q6); may historical

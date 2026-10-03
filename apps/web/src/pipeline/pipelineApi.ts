@@ -53,7 +53,16 @@ export type ContactKind = "vendor_poc" | "invoicing_poc" | "client_manager";
 
 export interface PlacementContact { kind: ContactKind; name: string; email?: string | null; phone?: string | null }
 /** One paperwork checklist item, copied from the template of the placement type when the placement was created. */
-export interface ChecklistItem { docType: string; ownerRole: string; required: boolean; status: string }
+export interface ChecklistItem {
+  /** Progress fields (migration 0044); optional for older servers. */
+  id?: string;
+  docType: string;
+  ownerRole: string;
+  required: boolean;
+  status: string;
+  dueOn?: string | null;
+  overdue?: boolean;
+}
 export interface Assignment { assignmentNo: number; startDate: string | null; endDate: string | null; endReason: string | null }
 
 export interface Placement {
@@ -80,6 +89,8 @@ export interface Placement {
   contacts?: PlacementContact[];
   /** Detail only (GET /placements/:id); absent on older servers. */
   checklist?: ChecklistItem[];
+  /** Detail only, where document:read covers the placement (migration 0044). */
+  bgc?: { status: string };
   assignment?: Assignment | null;
 }
 

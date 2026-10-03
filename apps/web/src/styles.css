@@ -215,6 +215,13 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .legenditem { display: flex; align-items: center; gap: 6px; color: var(--text2); font-size: 12px; }
 .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
 
+/* Paperwork & BGC (migration 0044) */
+.badge.overdue { background: #fef2f2; color: #b91c1c; }
+.badge.cl-received, .badge.bgc-initiated, .badge.bgc-in_progress { background: #fff7e6; color: #b45309; }
+.badge.cl-verified, .badge.cl-waived, .badge.bgc-cleared { background: #ecfdf3; color: #15803d; }
+.badge.bgc-failed { background: #fef2f2; color: #b91c1c; }
+.history { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text2); }
+.block.note { color: var(--muted); font-style: italic; white-space: pre-wrap; }
 /* Notification bell and inbox panel (top bar) */
 .inbox-wrap { position: relative; }
 .bell { position: relative; width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); font-size: 16px; line-height: 1; }

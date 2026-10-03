@@ -10,6 +10,7 @@ import { InterviewsPage } from "./interviews/InterviewsPage";
 import { HotListPage } from "./sales/HotListPage";
 import { PlacementsPage } from "./pipeline/PlacementsPage";
 import { SubmissionsPage } from "./pipeline/SubmissionsPage";
+import { PaperworkPage } from "./paperwork/PaperworkPage";
 import { NotificationBell, type InboxItem } from "./notifications/Inbox";
 import { EmployeesPage } from "./employees/EmployeesPage";
 import { ReportsPage } from "./employees/JoiningsExitsReport";
@@ -121,6 +122,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "submissions" ? <SubmissionsPage me={me} onOpenPlacement={items.some((i) => i.key === "placements") ? openPlacement : undefined} />
             : current.key === "placements" ? <PlacementsPage key={placementId ?? "list"} me={me} initialOpenId={placementId} />
             : current.key === "interviews" ? <InterviewsPage me={me} />
+            : current.key === "paperwork" ? <PaperworkPage me={me} />
             : current.key === "access" ? <AccessPage me={me} />
             : current.key === "employees" ? <EmployeesPage me={me} />
             : current.key === "reports" ? <ReportsPage me={me} />

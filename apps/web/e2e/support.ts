@@ -53,7 +53,7 @@ export async function expectMaskedPhone(phoneCell: Locator) {
 export interface Api {
   me: { id: string; csrfToken: string; capabilities: string[] };
   get(path: string): Promise<any>;
-  send(method: "POST" | "PATCH" | "PUT", path: string, data: unknown, status?: number): Promise<any>;
+  send(method: "POST" | "PATCH" | "PUT", path: string, data: unknown, status?: number, headers?: Record<string, string>): Promise<any>;
   dispose(): Promise<void>;
 }
 
@@ -70,8 +70,8 @@ export async function apiAs(playwright: PlaywrightWorkerArgs["playwright"], base
       expect(res.status(), `GET ${path}: ${await res.text()}`).toBe(200);
       return res.json();
     },
-    async send(method, path, data, status) {
-      const res = await ctx.fetch(path, { method, data, headers: { "x-csrf-token": me.csrfToken } });
+    async send(method, path, data, status, headers = {}) {
+      const res = await ctx.fetch(path, { method, data, headers: { "x-csrf-token": me.csrfToken, ...headers } });
       if (status !== undefined) expect(res.status(), `${method} ${path}: ${await res.text()}`).toBe(status);
       else expect(res.ok(), `${method} ${path}: ${res.status()} ${await res.text()}`).toBeTruthy();
       const text = await res.text();
