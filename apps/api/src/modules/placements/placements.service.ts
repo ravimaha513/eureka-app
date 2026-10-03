@@ -182,20 +182,42 @@ export class PlacementsService {
     });
   }
 
+  /** document:read over the actor snapshot or the owned candidate (mirrors the bgc_read policy, migration 0044). */
+  private documentsVisible(access: UserAccess, r: PlacementRow): boolean {
+    const scope = resolveScope(access, "document:read");
+    if (!scope) return false;
+    if (ownsActivity(scope, actor(r))) return true;
+    return ownsCandidate(scope, {
+      recruiterId: r.cand_recruiter_id, teamId: r.cand_team_id, locationId: r.cand_location_id,
+      visibility: "team", marketingStatus: "",
+    });
+  }
+
   async get(user: AuthedUser, id: string) {
     return this.db.withUser(user.id, async (c) => {
       const row = await this.load(c, user, id);
       const contacts = await c.query<{ id: string; kind: string; name: string; email: string | null; phone: string | null }>(
         `SELECT id, kind, name, email, phone FROM eureka.placement_contact WHERE placement_id = $1 ORDER BY created_at, id`, [id]);
-      // Paperwork checklist copied from the template at creation (migration 0035);
-      // readable wherever the placement is. Document types and role keys only.
-      const checklist = await c.query<{ doc_type: string; owner_role: string; required: boolean; status: string }>(
-        `SELECT doc_type, owner_role, required, status FROM eureka.checklist_item
-         WHERE placement_id = $1 AND kind = 'paperwork' ORDER BY position`, [id]);
+      // Paperwork checklist copied from the template at creation (migration 0035) with its
+      // progress (0044); readable wherever the placement is. Document types, role keys,
+      // statuses and dates only: notes, reasons and history are on /paperwork (document:read).
+      const checklist = await c.query<{ id: string; doc_type: string; owner_role: string; required: boolean; status: string;
+        due_on: string | null; overdue: boolean }>(
+        `SELECT id, doc_type, owner_role, required, status, due_on::text AS due_on,
+                coalesce(status IN ('pending', 'received') AND due_on < current_date, false) AS overdue
+           FROM eureka.checklist_item WHERE placement_id = $1 AND kind = 'paperwork' ORDER BY position`, [id]);
+      const docsVisible = this.documentsVisible(user.access, row);
+      // BGC status (B4.4): only where document:read covers the placement; key omitted otherwise.
+      const bgc = docsVisible
+        ? (await c.query<{ status: string }>(`SELECT status FROM eureka.bgc WHERE placement_id = $1`, [id])).rows[0]?.status ?? "not_started"
+        : undefined;
       const base = {
         ...this.present(user.access, row),
         contacts: contacts.rows,
-        checklist: checklist.rows.map((i) => ({ docType: i.doc_type, ownerRole: i.owner_role, required: i.required, status: i.status })),
+        checklist: checklist.rows.map((i) => ({
+          id: i.id, docType: i.doc_type, ownerRole: i.owner_role, required: i.required, status: i.status, dueOn: i.due_on, overdue: i.overdue,
+        })),
+        ...(bgc !== undefined ? { bgc: { status: bgc } } : {}),
       };
       // Field policy: the assignment key only where assignment:read covers the placement.
       if (!this.assignmentVisible(user.access, row)) return base;

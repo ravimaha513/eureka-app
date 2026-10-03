@@ -310,7 +310,7 @@ describe("placements", () => {
       expect(res.statusCode).toBe(200);
       const p = res.json();
       expect(Object.keys(p).sort()).toEqual([
-        "allowedTransitions", "assignment", "candidate", "checklist", "client", "contacts", "createdAt", "id", "implementationPartner",
+        "allowedTransitions", "assignment", "bgc", "candidate", "checklist", "client", "contacts", "createdAt", "id", "implementationPartner",
         "isFirstPlacement", "location", "placementType", "projectCity", "projectState", "rate", "recruiter", "status",
         "statusChangedAt", "submissionId", "team", "tentativeStart", "vendor", "workMode",
       ]);
@@ -325,6 +325,8 @@ describe("placements", () => {
       expect(p.contacts).toEqual([{ id: expect.any(String), kind: "invoicing_poc", name: "Ina Voice", email: "ina@vendor.example", phone: "+14695550199" }]);
       // No paperwork template configured in this database (migration 0035).
       expect(p.checklist).toEqual([]);
+      // Migration 0044: BGC status for document:read holders; no record yet.
+      expect(p.bgc).toEqual({ status: "not_started" });
     });
   });
 

@@ -110,10 +110,14 @@ describe("paperwork checklist on GET /placements/:id", () => {
       // No placement:read at all: the route guard answers 403.
       expect(res.statusCode, `${key} ${m.id}`).toBe(visible ? 200 : scope === null ? 403 : 404);
       if (!visible) continue;
+      // Progress fields added by migration 0044 (no notes or reasons on the placement).
+      const progress = { id: expect.any(String), dueOn: null, overdue: false };
       expect(res.json().checklist).toEqual(m.type === "w2" ? [
-        { docType: "offer_letter", ownerRole: "hr", required: true, status: "pending" },
-        { docType: "direct_deposit", ownerRole: "accounts", required: false, status: "pending" },
+        { docType: "offer_letter", ownerRole: "hr", required: true, status: "pending", ...progress },
+        { docType: "direct_deposit", ownerRole: "accounts", required: false, status: "pending", ...progress },
       ] : []);
+      // BGC status only where document:read covers the placement (B4.4).
+      expect("bgc" in res.json(), `${key} bgc`).toBe(activityVisible(resolveScope(toUserAccess(key), "document:read"), m));
     }
   });
 

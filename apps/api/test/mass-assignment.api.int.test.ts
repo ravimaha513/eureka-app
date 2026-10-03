@@ -148,6 +148,18 @@ async function resumeOf(file?: Buffer) {
   return { candidateId: cand.id, resumeId: r.id as string, ticket };
 }
 
+/** A fresh r1a placement with one paperwork item (fictional sample template, added once as superuser). */
+async function paperworkPlacement() {
+  await rows(`INSERT INTO authz.checklist_template (kind, placement_type, items)
+              SELECT 'paperwork', 'w2', '[{"doc_type":"sample_ma_doc","owner_role":"hr"}]'
+              WHERE NOT EXISTS (SELECT 1 FROM authz.checklist_template WHERE kind = 'paperwork' AND placement_type = 'w2')`);
+  const cand = await freshOwn();
+  const sub = await selectedSubmission(db, U.r1a, cand.id);
+  const p = await createPlacement(db, U.r1a, sub, { type: "w2" });
+  const itemId = (await rows(`SELECT id FROM eureka.checklist_item WHERE placement_id = $1`, [p.id]))[0]!.id as string;
+  return { placementId: p.id, itemId };
+}
+
 /** A staged import batch operated by `operator` (as superuser; staging itself runs as eureka_import). */
 async function stagedImport(operator: string) {
   const digest = randomBytes(32).toString("hex");
@@ -454,6 +466,46 @@ const CASES: RejectCase[] = [
       };
     },
     forbidden: { status: "joined", statusChangedAt: PAST, statusChangedBy: U.l1, joinedAt: PAST, isFirstPlacement: false, candidateId: FOREIGN_ID, rate: 999 },
+  },
+  // paperwork and BGC (docs/paperwork-api.md, migration 0044): placement, snapshots, version and who/when are the server's
+  {
+    route: "PATCH /api/v1/paperwork/items/:id", actor: "hr",
+    prepare: async () => {
+      const { itemId } = await paperworkPlacement();
+      return {
+        url: `/api/v1/paperwork/items/${itemId}`, body: { status: "received" },
+        state: () => rows(`SELECT (SELECT row_to_json(i) FROM eureka.checklist_item i WHERE i.id = $1) AS item,
+                                  (SELECT count(*) FROM eureka.checklist_item_event WHERE item_id = $1)::int AS events`, [itemId]),
+      };
+    },
+    forbidden: {
+      placementId: FOREIGN_ID, candidateId: FOREIGN_ID, recruiterId: U.r1b, teamId: T.t2, locationId: LOC.austin, kind: "onboarding",
+      docType: "other_doc", required: false, position: 9, version: 99, templateVersion: 7, statusChangedAt: PAST, statusChangedBy: U.admin,
+    },
+  },
+  {
+    route: "PATCH /api/v1/paperwork/placements/:id/bgc", actor: "hr",
+    prepare: async () => {
+      const { placementId } = await paperworkPlacement();
+      return {
+        url: `/api/v1/paperwork/placements/${placementId}/bgc`, body: { status: "initiated" },
+        state: () => rows(`SELECT (SELECT row_to_json(b) FROM eureka.bgc b WHERE b.placement_id = $1) AS bgc,
+                                  (SELECT status FROM eureka.placement WHERE id = $1) AS placement`, [placementId]),
+      };
+    },
+    forbidden: {
+      placementId: FOREIGN_ID, candidateId: FOREIGN_ID, recruiterId: U.r1b, teamId: T.t2, locationId: LOC.austin, version: 99,
+      statusChangedAt: PAST, statusChangedBy: U.admin, placementStatus: "bgc_failed",
+    },
+  },
+  {
+    route: "POST /api/v1/paperwork/templates", actor: "hr",
+    prepare: async () => ({
+      url: "/api/v1/paperwork/templates",
+      body: { kind: "onboarding", placementType: "1099", items: [{ docType: "sample_ma_doc", ownerRole: "hr" }], expectedVersion: 0 },
+      state: () => rows(`SELECT count(*)::int AS n FROM authz.checklist_template`),
+    }),
+    forbidden: { version: 5, publishedAt: PAST, publishedBy: U.admin, active: true },
   },
   // interviews
   {
