@@ -33,6 +33,10 @@ if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-
   const p = await seedDevPipeline(admin);
   if (p.submissions) console.log(`seeded pipeline: ${p.submissions} submissions, ${p.interviews} interviews, ${p.feedback} feedback, ${p.placements} placements`);
 }
+// Development step-up ("Confirm it's you" without Google) needs this database switch as well as
+// AUTH_MODE=dev in the API (migration 0043); no migration sets it, so other environments refuse it.
+await admin.query(`INSERT INTO authz.policy_setting (key, value) VALUES ('dev_step_up', 'on')
+  ON CONFLICT (key) DO UPDATE SET value = 'on'`);
 if (process.env.APP_DB_PASSWORD) {
   await admin.query(`ALTER ROLE eureka_app PASSWORD '${process.env.APP_DB_PASSWORD.replace(/'/g, "''")}'`);
 }

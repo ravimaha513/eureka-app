@@ -24,7 +24,7 @@ export async function writeTempBeside(path: string, data: Buffer): Promise<strin
 
 /** Path of an object key under the local root; refuses keys that would escape it. */
 export function localPath(root: string, key: string): string {
-  if (!/^(quarantine|clean)\/[a-z]+\/[0-9a-f-]{36}$/.test(key)) throw new Error("invalid object key");
+  if (!/^(quarantine|clean|restricted)\/[a-z]+\/[0-9a-f-]{36}$/.test(key)) throw new Error("invalid object key");
   const base = resolve(root);
   const p = resolve(join(base, key));
   if (!p.startsWith(base + sep)) throw new Error("object key escapes the storage root");

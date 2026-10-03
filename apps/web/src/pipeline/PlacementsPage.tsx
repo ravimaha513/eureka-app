@@ -3,6 +3,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { ROLE_LABELS, type Role } from "@eureka/shared";
 import type { Me } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { DocumentsSection } from "../documents/DocumentsSection";
 import { Drawer, Field, fmtDate } from "../sales/ui";
 import { pipelineError } from "./errors";
 import {
@@ -38,7 +39,7 @@ function ChecklistProgress({ items }: { items: NonNullable<Placement["checklist"
 const where = (p: Pick<Placement, "projectCity" | "projectState">) => [p.projectCity, p.projectState].filter(Boolean).join(", ");
 
 /** Placements list (GET /api/v1/placements) with a detail drawer for contacts, assignment and status changes. */
-export function PlacementsPage({ initialOpenId = null }: { me?: Pick<Me, "capabilities">; initialOpenId?: string | null }) {
+export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "capabilities">; initialOpenId?: string | null }) {
   const id = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [status, setStatusRaw] = useState("");
@@ -143,13 +144,14 @@ export function PlacementsPage({ initialOpenId = null }: { me?: Pick<Me, "capabi
         </nav>
       </div>
 
-      {openId && <PlacementDrawer id={openId} initial={items.find((p) => p.id === openId) ?? null} onClose={close} onNotice={setNotice} />}
+      {openId && <PlacementDrawer id={openId} initial={items.find((p) => p.id === openId) ?? null} onClose={close} onNotice={setNotice}
+        canReadDocuments={Boolean(me?.capabilities.includes("document:read"))} />}
     </>
   );
 }
 
-function PlacementDrawer({ id, initial, onClose, onNotice }: {
-  id: string; initial: Placement | null; onClose: () => void; onNotice: (m: string) => void;
+function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = false }: {
+  id: string; initial: Placement | null; onClose: () => void; onNotice: (m: string) => void; canReadDocuments?: boolean;
 }) {
   const qc = useQueryClient();
   const hid = useId();
@@ -285,6 +287,8 @@ function PlacementDrawer({ id, initial, onClose, onNotice }: {
                 </dl>
               )}
             </section>
+
+            {canReadDocuments && <DocumentsSection owner={{ kind: "placement", id }} title="Placement documents" />}
           </>
         )}
       </Drawer>

@@ -31,6 +31,22 @@ export class OidcService {
   }
 
   start(redirectUri: string): OidcStart {
+    return this.authorize(redirectUri, { prompt: "select_account" });
+  }
+
+  /**
+   * Step-up (design A6.1): asks Google for a fresh authentication. `max_age=0`
+   * (OIDC Core 3.1.2.1) requires a new sign-in and makes auth_time a required
+   * claim; `prompt=login` is the design's request too. Whether Google honours
+   * both is the Phase 0 spike: the callback trusts neither, it checks the
+   * returned auth_time (verifyStepUp, authz.step_up_complete). `login_hint`
+   * pre-selects the signed-in user's account.
+   */
+  startStepUp(redirectUri: string, loginHint?: string): OidcStart {
+    return this.authorize(redirectUri, { prompt: "login", max_age: "0", ...(loginHint ? { login_hint: loginHint } : {}) });
+  }
+
+  private authorize(redirectUri: string, extra: Record<string, string>): OidcStart {
     const state = randomBytes(16).toString("base64url");
     const nonce = randomBytes(16).toString("base64url");
     const verifier = randomBytes(32).toString("base64url");
@@ -45,7 +61,7 @@ export class OidcService {
       code_challenge: challenge,
       code_challenge_method: "S256",
       hd: this.config.GOOGLE_HOSTED_DOMAIN ?? "",
-      prompt: "select_account",
+      ...extra,
     });
     return { url: `${GOOGLE_AUTH}?${params}`, state, nonce, verifier };
   }
@@ -70,6 +86,10 @@ export class OidcService {
   }
 
   async verify(idToken: string, expectedNonce: string): Promise<VerifiedIdentity> {
+    return (await this.check(idToken, expectedNonce)).identity;
+  }
+
+  private async check(idToken: string, expectedNonce: string): Promise<{ identity: VerifiedIdentity; authTimeClaim: unknown }> {
     const { payload } = await jwtVerify(idToken, this.jwks, {
       issuer: GOOGLE_ISSUERS,
       audience: this.config.GOOGLE_CLIENT_ID,
@@ -87,6 +107,21 @@ export class OidcService {
       throw new Error("email is not in the company domain");
     }
     const authTime = typeof payload.auth_time === "number" ? payload.auth_time : payload.iat ?? Date.now() / 1000;
-    return { sub: payload.sub, email: payload.email.toLowerCase(), authTime: new Date(authTime * 1000) };
+    return {
+      identity: { sub: payload.sub, email: payload.email.toLowerCase(), authTime: new Date(authTime * 1000) },
+      authTimeClaim: payload.auth_time,
+    };
+  }
+
+  /**
+   * Step-up ID token: everything verify() checks, and an auth_time claim is
+   * required (no fallback to iat: issuing a token is not re-authenticating).
+   * Its freshness against the challenge and STEP_UP_MAX_AGE_SECONDS is
+   * checked by authz.step_up_complete, together with the linked Google sub.
+   */
+  async verifyStepUp(idToken: string, expectedNonce: string): Promise<VerifiedIdentity> {
+    const { identity, authTimeClaim } = await this.check(idToken, expectedNonce);
+    if (typeof authTimeClaim !== "number" || !Number.isFinite(authTimeClaim)) throw new Error("no auth_time in the step-up token");
+    return { ...identity, authTime: new Date(authTimeClaim * 1000) };
   }
 }

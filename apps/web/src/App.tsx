@@ -11,6 +11,8 @@ import { HotListPage } from "./sales/HotListPage";
 import { PlacementsPage } from "./pipeline/PlacementsPage";
 import { SubmissionsPage } from "./pipeline/SubmissionsPage";
 import { PaperworkPage } from "./paperwork/PaperworkPage";
+import { EmployeesPage } from "./employees/EmployeesPage";
+import { ReportsPage } from "./employees/JoiningsExitsReport";
 
 /** The Hot List screen (kept under its original name for existing callers). */
 export const HotList = HotListPage;
@@ -107,6 +109,8 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "interviews" ? <InterviewsPage me={me} />
             : current.key === "paperwork" ? <PaperworkPage me={me} />
             : current.key === "access" ? <AccessPage me={me} />
+            : current.key === "employees" ? <EmployeesPage me={me} />
+            : current.key === "reports" ? <ReportsPage me={me} />
             : current.key === "dashboard" ? (
               <DashboardPage canOpen={(t) => items.some((i) => i.key === t)}
                 onOpen={(t, id) => { if (t === "placements") openPlacement(id); else setActive(t); }} />

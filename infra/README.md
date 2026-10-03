@@ -23,7 +23,7 @@ infra/
   live/production/      env.hcl  (us-east-1, single-AZ db.t4g.micro, audit lock COMPLIANCE 3y)
   modules/stack/        the whole environment
     main.tf       VPC, public/private subnets, S3 gateway endpoint, flow logs (no NAT)
-    kms.tf        keys: data, restricted
+    kms.tf        keys: data, restricted (documents + field encryption), bidx (blind index HMAC)
     database.tf   RDS PostgreSQL 16 (TLS only, managed master secret), SSM parameters
     storage.tf    S3: documents (quarantine -> clean/restricted, GuardDuty scan), audit (Object Lock), web, logs
     app.tf        ECR, ECS Fargate ARM64 (api, worker, migrate), API Gateway HTTP API + VPC link + Cloud Map
@@ -164,7 +164,8 @@ it is on a flat-rate plan.
 
 4. **Google OAuth client** (Google Cloud console → APIs & Services → Credentials):
    - Type: Web application.
-   - Authorized redirect URI: `https://<app host>/api/auth/callback`.
+   - Authorized redirect URIs: `https://<app host>/api/auth/callback` (sign-in) and
+     `https://<app host>/api/auth/step-up/callback` (step-up before restricted documents, migration 0043).
    - Terraform creates `/eureka/<env>/app/google_client_{id,secret}` with the
      placeholder value `set-me` and never overwrites them afterwards. The API
      refuses to start while either value is still `set-me` (config check), so

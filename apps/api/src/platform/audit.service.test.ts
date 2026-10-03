@@ -10,6 +10,8 @@ describe("audit redaction (rule 5)", () => {
       priority: "P1", marketingEmail: "[redacted]", marketing_email: "[redacted]", vitelNumber: "[redacted]",
       email: "[redacted]", personalEmail: "[redacted]", phone: "[redacted]", rate: "[redacted]", technologyId: "t1",
     });
+    expect(redactChanges({ number: "EAC2190012345", numberEnc: "x", number_enc: "x", workAuthNumber: "A1", type: "h1b" }))
+      .toEqual({ number: "[redacted]", numberEnc: "[redacted]", number_enc: "[redacted]", workAuthNumber: "[redacted]", type: "h1b" });
     expect(redactChanges(undefined)).toBeNull();
   });
 });
