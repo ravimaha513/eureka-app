@@ -92,7 +92,12 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   candidate (HR, Immigration), writes through definer functions (`visa:update`, Immigration), `If-Match` on PATCH.
   Daily `visa-expiry` job inserts `work_authorization.expiring` outbox rows (90/60/30, ids and dates only);
   delivery and inbox belong to the notification jobs. Profile section in the web app. IAM: the task roles may use
-  the restricted key directly only with the encryption context `eureka:purpose = field`.
+  the restricted key directly only with the field encryption context (purpose `field`, the field classes each role
+  needs, no other context keys); the restricted key's policy denies decrypt/data keys to every principal but the
+  API and worker task roles and an optional break-glass role (`restricted_break_glass_role_arn`, default empty).
+  The key-rotation worker can decrypt every value of the classes it rotates, by design (infra/README.md
+  "Known risks"); it cannot forge one unnoticed (integrity MAC, 0047). Add `dob` to `api_field_classes` /
+  `rotated_field_classes` in `infra/modules/stack/kms.tf` when DOB is written.
   Review follow-ups (migration 0047): rotation keys only for the current UTC month, an integrity MAC per number
   (blind index key, which the worker lacks) checked on every reveal, a rotation log with alerts, provider/key and
   header-version checks, reveal limits counted in the database (20/minute, 200/day). 0047 validates

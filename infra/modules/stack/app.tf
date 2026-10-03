@@ -166,21 +166,31 @@ resource "aws_iam_role_policy" "api" {
         # S3 lets a request add its own SSE-KMS context pairs, so the purpose
         # pair alone would not keep restricted/documents/ objects out of reach.
         # Restricted documents are reachable only via RestrictedDocumentsKmsViaS3.
+        # Only the field classes the API encrypts and decrypts
+        # (local.api_field_classes), and only the three context keys the app
+        # sends (no extra pairs a caller could add).
         Sid      = "FieldEncryption"
         Effect   = "Allow"
         Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
         Resource = aws_kms_key.restricted.arn
         Condition = {
-          StringEquals = { "kms:EncryptionContext:eureka:purpose" = "field" }
-          Null         = { "kms:ViaService" = "true", "kms:EncryptionContext:aws:s3:arn" = "true" }
+          StringEquals = {
+            "kms:EncryptionContext:eureka:purpose"     = "field"
+            "kms:EncryptionContext:eureka:field-class" = local.api_field_classes
+          }
+          "ForAllValues:StringEquals" = { "kms:EncryptionContextKeys" = local.field_context_keys }
+          Null                        = { "kms:ViaService" = "true", "kms:EncryptionContext:aws:s3:arn" = "true" }
         }
       },
       {
-        # Blind index (BIDX_KMS_KEY_ARN): HMAC only, never the key itself.
-        Sid      = "BlindIndexMac"
-        Effect   = "Allow"
-        Action   = ["kms:GenerateMac"]
-        Resource = aws_kms_key.bidx.arn
+        # Blind index and integrity MACs (BIDX_KMS_KEY_ARN): HMAC only, never the
+        # key itself. MAC operations take no encryption context, so the field
+        # class is in the MAC'd message (domain-separated in the app), not in IAM.
+        Sid       = "BlindIndexMac"
+        Effect    = "Allow"
+        Action    = ["kms:GenerateMac"]
+        Resource  = aws_kms_key.bidx.arn
+        Condition = { StringEquals = { "kms:MacAlgorithm" = "HMAC_SHA_256" } }
       },
       {
         Effect    = "Allow"
@@ -216,8 +226,11 @@ resource "aws_iam_role_policy" "api" {
 #   (the bucket policy also denies it).
 #   key-rotation (worker/jobs/key-rotation.ts): GenerateDataKey and Decrypt on
 #   the restricted key, only directly (no kms:ViaService, no S3 context) and
-#   only with the field encryption context (eureka:purpose = field), never for
-#   restricted documents.
+#   only with the field encryption context (eureka:purpose = field, the field
+#   classes it rotates, no other context keys), never for restricted documents.
+#   By design this lets the worker decrypt every value of the rotated classes
+#   (it re-encrypts them); it cannot forge one unnoticed, because it has no
+#   GenerateMac on the bidx key (integrity MAC checked on reveal, migration 0047).
 resource "aws_iam_role" "worker" {
   name               = "${local.name}-worker-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
@@ -313,14 +326,19 @@ resource "aws_iam_role_policy" "worker" {
       },
       {
         # key-rotation job: unwraps old field data keys and generates the
-        # month's new one; field encryption context only (no documents).
+        # month's new one; field encryption context only (no documents), only
+        # the classes it rotates (local.rotated_field_classes).
         Sid      = "FieldKeyRotation"
         Effect   = "Allow"
         Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
         Resource = aws_kms_key.restricted.arn
         Condition = {
-          StringEquals = { "kms:EncryptionContext:eureka:purpose" = "field" }
-          Null         = { "kms:ViaService" = "true", "kms:EncryptionContext:aws:s3:arn" = "true" }
+          StringEquals = {
+            "kms:EncryptionContext:eureka:purpose"     = "field"
+            "kms:EncryptionContext:eureka:field-class" = local.rotated_field_classes
+          }
+          "ForAllValues:StringEquals" = { "kms:EncryptionContextKeys" = local.field_context_keys }
+          Null                        = { "kms:ViaService" = "true", "kms:EncryptionContext:aws:s3:arn" = "true" }
         }
       },
     ]
