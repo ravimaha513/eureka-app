@@ -1,6 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
-  ConflictException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, NotFoundException, UnprocessableEntityException,
+  ConflictException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, InternalServerErrorException, Logger,
+  NotFoundException, UnprocessableEntityException,
 } from "@nestjs/common";
 import type pg from "pg";
 import {
@@ -10,12 +11,13 @@ import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { FIELD_CRYPTO, type FieldCrypto } from "../../platform/crypto/config.js";
 import { DbService } from "../../platform/db.service.js";
-import { RateLimiter } from "../../platform/rate-limit.js";
 import { requireStepUp } from "../../platform/step-up.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import type { WorkAuthCreate, WorkAuthUpdate } from "./work-authorization.schemas.js";
 
+/** Enforced in the database across API tasks (authz.work_auth_reveal, migration 0047). */
 export const REVEALS_PER_MINUTE = 20;
+export const REVEALS_PER_DAY = 200;
 
 interface Row {
   id: string;
@@ -60,6 +62,7 @@ const DB_ERRORS: Record<string, () => HttpException> = {
   stale: () => new HttpException("stale", HttpStatus.PRECONDITION_FAILED),
   invalid_number: () => new UnprocessableEntityException("invalid_number"),
   invalid_record: () => new UnprocessableEntityException("invalid_record"),
+  too_many_reveals: () => new HttpException("too_many_reveals", HttpStatus.TOO_MANY_REQUESTS),
 };
 
 function mapDbError(err: unknown): never {
@@ -80,7 +83,7 @@ function mapDbError(err: unknown): never {
  */
 @Injectable()
 export class WorkAuthorizationService {
-  private readonly revealLimiter = new RateLimiter(REVEALS_PER_MINUTE, 60_000);
+  private readonly log = new Logger("WorkAuthorization");
 
   constructor(
     private readonly db: DbService,
@@ -103,9 +106,15 @@ export class WorkAuthorizationService {
     return access;
   }
 
-  private async row(c: pg.PoolClient, candidateId: string, id: string): Promise<Row & { number_enc: Buffer | null }> {
-    const r = (await c.query<Row & { number_enc: Buffer | null }>(
-      `SELECT ${COLUMNS}, w.number_enc FROM eureka.work_authorization w
+  /** Seals a number bound to the row, with its integrity MAC (blind index key, which the worker lacks). */
+  private async seal(c: pg.PoolClient, id: string, number: string) {
+    const sealed = await this.crypto.cipher.encrypt(c, { cls: "work_auth_number", rowId: id }, number);
+    return { ...sealed, mac: await this.crypto.blindIndex.integrityMac("work_auth_number", id, number) };
+  }
+
+  private async row(c: pg.PoolClient, candidateId: string, id: string): Promise<Row & { number_enc: Buffer | null; number_mac: Buffer | null }> {
+    const r = (await c.query<Row & { number_enc: Buffer | null; number_mac: Buffer | null }>(
+      `SELECT ${COLUMNS}, w.number_enc, w.number_mac FROM eureka.work_authorization w
          JOIN eureka.candidate c ON c.person_id = w.person_id
          LEFT JOIN eureka.app_user u ON u.id = w.updated_by
         WHERE w.id = $1 AND c.id = $2`, [id, candidateId])).rows[0];
@@ -133,11 +142,9 @@ export class WorkAuthorizationService {
       if (!access.update) throw new ForbiddenException("Not permitted");
       const body = parse();
       const id = randomUUID();
-      const sealed = body.number
-        ? await this.crypto.cipher.encrypt(c, { cls: "work_auth_number", rowId: id }, body.number)
-        : null;
-      await c.query(`SELECT authz.work_auth_create($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [id, candidateId, body.type, sealed?.enc ?? null, sealed?.keyId ?? null, body.validFrom ?? null, body.validTo ?? null, body.status])
+      const sealed = body.number ? await this.seal(c, id, body.number) : null;
+      await c.query(`SELECT authz.work_auth_create($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [id, candidateId, body.type, sealed?.enc ?? null, sealed?.keyId ?? null, sealed?.mac ?? null, body.validFrom ?? null, body.validTo ?? null, body.status])
         .catch(mapDbError);
       // Rule 5: never the number; whether one was given is enough.
       await this.audit.record(c, {
@@ -166,10 +173,11 @@ export class WorkAuthorizationService {
         throw new UnprocessableEntityException("validTo must not be before validFrom");
       }
       const setNumber = body.number !== undefined;
-      const sealed = body.number ? await this.crypto.cipher.encrypt(c, { cls: "work_auth_number", rowId: id }, body.number) : null;
+      const sealed = body.number ? await this.seal(c, id, body.number) : null;
       const rowVersion = (await c.query<{ v: number }>(
-        `SELECT authz.work_auth_update($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) AS v`,
-        [id, candidateId, expectedVersion, next.type, setNumber, sealed?.enc ?? null, sealed?.keyId ?? null, next.validFrom, next.validTo, next.status])
+        `SELECT authz.work_auth_update($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) AS v`,
+        [id, candidateId, expectedVersion, next.type, setNumber, sealed?.enc ?? null, sealed?.keyId ?? null, sealed?.mac ?? null,
+          next.validFrom, next.validTo, next.status])
         .catch(mapDbError)).rows[0]!.v;
       const changed = (["type", "validFrom", "validTo", "status"] as const).filter((k) => body[k] !== undefined && body[k] !== (
         k === "type" ? cur.auth_type : k === "validFrom" ? cur.valid_from : k === "validTo" ? cur.valid_to : cur.status));
@@ -187,24 +195,36 @@ export class WorkAuthorizationService {
   /**
    * The number in clear for one record (B4.6: visa:read; A6.3 restricted).
    * Needs a live step-up grant of this session (design A6.1, the same gate as
-   * restricted documents: requireStepUp), is rate-limited and audited (who,
-   * which record, the step-up grant id; never the number) in the same transaction.
+   * restricted documents: requireStepUp). authz.work_auth_reveal re-checks scope,
+   * enforces REVEALS_PER_MINUTE / REVEALS_PER_DAY across API tasks and writes
+   * the audit row (who, which record; never the number) in this transaction.
+   * The decrypted value must match the integrity MAC stored by the API; a
+   * mismatch (a value re-encrypted without the API, e.g. a forged rotation) is
+   * audited and alerted, and nothing is returned.
    */
   async reveal(user: AuthedUser, candidateId: string, id: string) {
-    return this.db.withUser(user.id, async (c) => {
+    const out = await this.db.withUser(user.id, async (c) => {
       await this.access(c, user, candidateId);
       const r = await this.row(c, candidateId, id);
       if (!r.number_enc) throw new ConflictException("no_number");
-      const stepUpGrantId = await requireStepUp(c, user);
-      if (!this.revealLimiter.take(user.id)) {
-        throw new HttpException("Too many requests; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
-      }
+      await requireStepUp(c, user);
+      await c.query(`SELECT authz.work_auth_reveal($1, $2)`, [id, candidateId]).catch(mapDbError);
       const number = await this.crypto.cipher.decrypt(c, { cls: "work_auth_number", rowId: id }, r.number_enc);
-      await this.audit.record(c, {
-        actorId: user.id, action: "work_authorization.number_revealed", entityType: "work_authorization", entityId: id,
-        changes: { candidateId, stepUpGrantId },
-      });
+      const expected = await this.crypto.blindIndex.integrityMac("work_auth_number", id, number);
+      if (!r.number_mac || r.number_mac.length !== expected.length || !timingSafeEqual(r.number_mac, expected)) {
+        // Committed (not thrown inside the transaction) so the evidence stays.
+        await this.audit.record(c, {
+          actorId: user.id, action: "work_authorization.integrity_failed", entityType: "work_authorization", entityId: id,
+          changes: { candidateId },
+        });
+        return null;
+      }
       return { id, number };
     });
+    if (!out) {
+      this.log.error(JSON.stringify({ msg: "work authorization number failed its integrity check", workAuthorizationId: id, alert: true }));
+      throw new InternalServerErrorException("integrity_check_failed");
+    }
+    return out;
   }
 }

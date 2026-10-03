@@ -93,6 +93,10 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   Daily `visa-expiry` job inserts `work_authorization.expiring` outbox rows (90/60/30, ids and dates only);
   delivery and inbox belong to the notification jobs. Profile section in the web app. IAM: the task roles may use
   the restricted key directly only with the encryption context `eureka:purpose = field`.
+  Review follow-ups (migration 0047): rotation keys only for the current UTC month, an integrity MAC per number
+  (blind index key, which the worker lacks) checked on every reveal, a rotation log with alerts, provider/key and
+  header-version checks, reveal limits counted in the database (20/minute, 200/day). 0047 validates
+  `number_mac` against existing rows: a local database holding numbers from before it needs a reseed.
   Left: DOB is not read or written anywhere (OD-04); when it is, encrypt with class `dob`, set `dob_bidx` with
   `dobBlindIndex`, add `dob` to the rotation job (definer functions like `work_auth_number`) and use the index in
   the duplicate check.
