@@ -68,6 +68,13 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   download links; `document:read`/`document:upload` over the candidate. Profile section in the web app.
   Without AWS: `LOCAL_STORAGE_DIR` (API serves a directory) and a fake scanner (EICAR = infected);
   `pnpm local` now runs the worker too.
+- Notifications (migration 0046, `docs/notifications.md`): in-app inbox (`notification`, own rows only, written by the
+  worker; bell and panel in the web top bar, unread count polled every 60 s), outbox delivery generalised to typed
+  events with recipients resolved in the database and email and/or inbox channels (placement emails unchanged; the
+  inbox channel runs even with `OUTBOX_MAIL_MODE=disabled`), bench-time job (FR-NTF-05, off until
+  `NOTIFY_BENCH_DAYS` is set), inbox prune. Other Phase 3 modules emit `work_authorization.expiring`,
+  `employee.exited`, `candidate.assigned`, `checklist.item_overdue`, `assignment.ending_soon` in the shapes listed
+  there (`authz.notification_emit_once` for once-only reminders).
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 - First-admin bootstrap (migrations 0037, 0039): `dist/db/bootstrap.js` as a one-off migrate task creates two
   `org_admin` users for hosted-domain emails; break-glass only: refuses while an active `org_admin` exists
@@ -125,6 +132,11 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   candidates only, not a teammate's, and Open-to-all-teams viewers, location roles, coaches and the
   CEO see none. Is that right for marketing (other teams submitting an open candidate need the resume)?
   How long are superseded versions kept (OD-03)? Should the uploader get an email when a file is blocked?
+
+- Notifications (`docs/notifications.md`): FR-NTF-02 (what is a candidate "response", N, message to the candidate),
+  the bench threshold (OD-05) and the "POC" recipient of FR-NTF-05, whether Associate HR is an "admin team" for
+  project exit, recipients/channels of `assignment.ending_soon` (not in the design), per-user preferences (none in
+  the design), and whether placement events should also reach the inbox.
 
 ## Waiting on Ravi (not code)
 
