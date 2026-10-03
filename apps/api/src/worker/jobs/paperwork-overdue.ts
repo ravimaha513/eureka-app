@@ -2,7 +2,7 @@ import type { JobDefinition } from "../runner.js";
 import { PAPERWORK_OVERDUE_SCHEDULE, dueReminderKey, type DailySchedule } from "../schedule.js";
 
 /**
- * paperwork-overdue (FR-NTF-04 / FR-NTF-03; migrations 0044 and 0049). Daily
+ * paperwork-overdue (FR-NTF-04 / FR-NTF-03; migrations 0044 and 0052). Daily
  * after 07:30 America/New_York. authz.emit_paperwork_overdue writes one
  * `checklist.item_overdue` outbox event per outstanding checklist item past its
  * due date (exactly once per item and due date, through the notification

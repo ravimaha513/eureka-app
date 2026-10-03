@@ -108,7 +108,10 @@ describe("notifications API", () => {
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json().updated).toBeGreaterThan(0);
     expect(await unread("hr")).toEqual({ unread: 1, capped: false });
-    expect((await call("hr", "POST", "/api/v1/notifications/read-all")).json()).toEqual({ updated: 1 });
+    // `before` = the newest item's createdAt as listed (milliseconds): that item is included (review F2).
+    const newest = (await call("hr", "GET", "/api/v1/notifications?unread=true&limit=1")).json().items[0];
+    expect((await call("hr", "POST", "/api/v1/notifications/read-all", { before: newest.createdAt })).json()).toEqual({ updated: 1 });
+    expect((await call("hr", "POST", "/api/v1/notifications/read-all")).json()).toEqual({ updated: 0 });
     expect((await unread("hr")).unread).toBe(0);
     // Accounts' rows were never touched.
     expect((await unread("acct")).unread).toBe(before + 1);

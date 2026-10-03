@@ -8,7 +8,7 @@ import { createPlacement, newCandidate, selectedSubmission, transitionPlacement 
 import { emitEvent } from "./notification-seed.js";
 
 /**
- * paperwork-overdue (migration 0049, docs/notifications.md `checklist.item_overdue`):
+ * paperwork-overdue (migration 0052, docs/notifications.md `checklist.item_overdue`):
  * schedule on a fixed clock, exactly once per item and due date, re-arm on a
  * new due date, outstanding items on non-backed-out placements only, payload
  * shape, and the worker's narrow privilege.

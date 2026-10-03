@@ -68,7 +68,7 @@ const jobs = [
   keyRotationJob(new FieldCipher(createKeyProvider(config)), { batchSize: config.KEY_ROTATION_BATCH_SIZE }),
   // Work authorization expiry notices into the outbox (delivered by the notification jobs).
   visaExpiryJob(config.WORK_AUTH_EXPIRY_NOTICE_DAYS),
-  // Paperwork items past their due date (FR-NTF-04, migration 0049), once per item and due date.
+  // Paperwork items past their due date (FR-NTF-04, migration 0052), once per item and due date.
   paperworkOverdueJob(),
 ];
 {
@@ -81,7 +81,7 @@ const jobs = [
     deliverSince: config.OUTBOX_DELIVER_SINCE ? new Date(config.OUTBOX_DELIVER_SINCE) : undefined,
   }));
 }
-if (config.NOTIFY_BENCH_DAYS) jobs.push(benchTimeJob(config.NOTIFY_BENCH_DAYS));
+if (config.NOTIFY_BENCH_DAYS) jobs.push(benchTimeJob(config.NOTIFY_BENCH_DAYS, config.NOTIFY_BENCH_WINDOW_DAYS));
 else log.warn("bench-time reminder is off (NOTIFY_BENCH_DAYS unset; threshold is open decision OD-05)");
 if (config.FEEDBACK_MAIL_MODE !== "disabled") {
   const mail = config.FEEDBACK_MAIL_MODE === "local" ? new LocalMail(config.FEEDBACK_MAIL_DIR!) : new SesMail(config.AWS_REGION!, config.FEEDBACK_FROM_EMAIL!);

@@ -1,6 +1,7 @@
 -- Paperwork overdue reminder (FR-NTF-04 paperwork pending, FR-NTF-03 documents
 -- pending; docs/notifications.md `checklist.item_overdue`; docs/paperwork-api.md).
--- Runs after 0046 because it emits through authz.notification_emit_once.
+-- Runs after 0046 (authz.notification_emit_once) and after 0051, whose
+-- authz.notification_recipients it extends (numbered 0052 so 0051 cannot undo it).
 --
 -- authz.emit_paperwork_overdue(day): for every checklist item that is still
 -- outstanding (pending or received) and whose due date is before `day` (the
@@ -55,7 +56,7 @@ BEGIN
   RETURN n;
 END $$;
 
--- The 0046 recipient resolver, unchanged except the `checklist.item_overdue`
+-- The 0051 recipient resolver, unchanged except the `checklist.item_overdue`
 -- branch: the assignee is added only when the payload's assigneeId is the
 -- item's current assignee (and the item belongs to the payload's placement).
 -- CREATE OR REPLACE as authz_definer keeps the owner, signature, search_path
@@ -82,29 +83,29 @@ BEGIN
   END IF;
 
   IF v_type IN ('placement.created', 'placement.state_changed') THEN
-    -- The groups the placement function named (0022/0023), limited to the known three.
     v_roles := ARRAY(
       SELECT DISTINCT g FROM pg_catalog.jsonb_array_elements_text(
         CASE WHEN pg_catalog.jsonb_typeof(v_payload -> 'notify') = 'array' THEN v_payload -> 'notify' ELSE '[]'::jsonb END) g
        WHERE g IN ('hr', 'accounts', 'immigration'));
-  ELSIF v_type = 'work_authorization.expiring' THEN      -- FR-NTF-11 (producer 0042)
+  ELSIF v_type = 'work_authorization.expiring' THEN
     v_roles := ARRAY['hr', 'immigration'];
   ELSIF v_type IN ('employee.benched', 'employee.exited') THEN
-    -- FR-NTF-09 project exit (assignment ended, on the bench) and the exit
-    -- from the company (producer 0045): admin teams, BU, CEO.
     v_roles := ARRAY['hr', 'accounts', 'immigration', 'bu_head', 'ceo'];
-  ELSIF v_type = 'assignment.ending_soon' THEN           -- not in design: conservative default (producer 0045)
+  ELSIF v_type = 'assignment.ending_soon' THEN
     v_roles := ARRAY['hr', 'accounts'];
-  ELSIF v_type = 'employee.bench_time' THEN              -- FR-NTF-05: TL, recruiter, manager, CEO
+  ELSIF v_type = 'employee.bench_time' THEN
     v_roles := ARRAY['ceo'];
     SELECT c.recruiter_id, c.team_id INTO v_rec, v_team
       FROM eureka.candidate c WHERE c.id = (v_payload ->> 'candidateId')::uuid;
-  ELSIF v_type = 'candidate.assigned' THEN               -- FR-NTF-10: the new Lead and Manager
-    v_team := (v_payload ->> 'teamId')::uuid;
-  ELSIF v_type = 'checklist.item_overdue' THEN           -- FR-NTF-04 (TL, recruiter, manager); FR-NTF-03 (assignee)
+  ELSIF v_type = 'candidate.assigned' THEN
+    -- The candidate's current team, and only while it is the team the event names.
+    SELECT c.team_id INTO v_team FROM eureka.candidate c
+     WHERE c.id = (v_payload ->> 'candidateId')::uuid
+       AND c.team_id = (v_payload ->> 'teamId')::uuid;
+  ELSIF v_type = 'checklist.item_overdue' THEN
     SELECT p.recruiter_id, p.team_id INTO v_rec, v_team
       FROM eureka.placement p WHERE p.id = (v_payload ->> 'placementId')::uuid;
-    -- 0049: the assignee only when the payload names the item's current
+    -- 0052: the assignee only when the payload names the item's current
     -- assignee (the producer derives it from checklist_item.assignee_id; the
     -- payload alone never adds a recipient).
     SELECT ci.assignee_id INTO v_assign FROM eureka.checklist_item ci

@@ -77,7 +77,7 @@ prices, tens of users, under 1M requests/month:
 | RDS PostgreSQL db.t4g.micro, single-AZ, 20 GB gp3, 14-day PITR | ~$14 |
 | Fargate ARM64 API task, 0.25 vCPU / 0.5 GB, on-demand | ~$7 |
 | Public IPv4 address for that task | ~$3.65 |
-| KMS keys (data, restricted) | $2 |
+| KMS keys (data, restricted, bidx) | $3 |
 | Cloud Map namespace (private hosted zone) + RDS master secret | ~$1 |
 | API Gateway HTTP API ($1 per million requests) | <$1 |
 | CloudFront + WAF on the flat-rate **Free** plan (1M requests, 100 GB) | $0 |
@@ -504,6 +504,27 @@ operations log. A failed check or an RTO over target is a launch blocker.
     caching keyed on that header so rejected floods are cheap and never reach
     the tasks.
 - **Access logs show CloudFront, not clients.** See the notes under "What runs where".
+- **Restricted key use is pinned to the task roles.** The restricted key's policy
+  denies `kms:Decrypt`, `kms:GenerateDataKey*` and `kms:ReEncrypt*` to every
+  principal except the API and worker task roles and, when set, the
+  `restricted_break_glass_role_arn` variable (default empty: nobody else; the
+  deploy roles and account administrators included). Key administration
+  (policy, rotation, deletion) still works through the account-root statement,
+  so Terraform keeps managing the key. To read restricted data in an
+  emergency, set the variable to a dedicated role, apply, use it (CloudTrail
+  records every call), then clear it again.
+- **Field encryption IAM.** The task roles may use the restricted key directly
+  (no `kms:ViaService`, no S3 context) only with the field context: purpose
+  `field`, a field class they need (`api_field_classes`, `rotated_field_classes`
+  in `kms.tf`; today `work_auth_number`) and no context keys other than
+  `eureka:purpose`, `eureka:field-class`, `eureka:key-id`. The bidx key allows
+  only `kms:GenerateMac` with HMAC_SHA_256, to the API only.
+- **The rotation worker can read every encrypted field, by design.** The
+  monthly key-rotation job decrypts each value of the rotated classes to
+  re-encrypt it under the new data key. It cannot replace a value unnoticed:
+  it has no GenerateMac on the bidx key, and every reveal checks the value's
+  integrity MAC (migration 0047). Treat the worker role as having read access
+  to visa numbers (and DOB once it is stored).
 
 ## Local checks
 

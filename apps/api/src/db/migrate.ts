@@ -11,7 +11,9 @@ const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../.
  * authorization catalog (design B4.1: grants live in code, never edited at runtime).
  * Must run with a privileged connection (superuser / rds_superuser).
  */
-export async function migrate(adminUrl: string): Promise<void> {
+export async function migrate(
+  adminUrl: string, opts: { production?: boolean } = { production: process.env.NODE_ENV === "production" },
+): Promise<void> {
   const client = new pg.Client({ connectionString: adminUrl });
   await client.connect();
   try {
@@ -35,14 +37,14 @@ export async function migrate(adminUrl: string): Promise<void> {
         throw new Error(`Migration ${file} failed: ${(err as Error).message}`);
       }
     }
-    await seedCatalog(client);
+    await seedCatalog(client, opts);
   } finally {
     await client.end();
   }
 }
 
 /** Replaces role and role_permission rows and policy settings with the catalog contents. */
-export async function seedCatalog(client: pg.Client | pg.PoolClient): Promise<void> {
+export async function seedCatalog(client: pg.Client | pg.PoolClient, opts: { production?: boolean } = {}): Promise<void> {
   await client.query("BEGIN");
   try {
     for (const role of ROLES) {
@@ -66,6 +68,9 @@ export async function seedCatalog(client: pg.Client | pg.PoolClient): Promise<vo
       `INSERT INTO authz.policy_setting (key, value) VALUES ('hotlist_visibility', $1)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [HOTLIST_VISIBILITY]);
     if (policy.rowCount !== 1) throw new Error("hotlist_visibility policy was not written");
+    // The development step-up switch (migration 0043) never survives a production deploy,
+    // whoever set it: the API refuses AUTH_MODE=dev there too, this is the database side.
+    if (opts.production) await client.query(`DELETE FROM authz.policy_setting WHERE key = 'dev_step_up'`);
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");

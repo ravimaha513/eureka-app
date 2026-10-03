@@ -9,7 +9,7 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - `pnpm -r typecheck` and `pnpm -r test` must pass before every commit (integration tests need
   PostgreSQL 16 at `TEST_PG_ADMIN_URL`, default `postgres://postgres:postgres@127.0.0.1:5432`).
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0040**) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0053**; 0040 and 0049 are unused) and must apply as a
   non-superuser (Amazon RDS master): CI checks this.
 - Commit small and atomic; get an independent review of every security-relevant change.
 
@@ -86,7 +86,7 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   candidate's documents) and the drawer embeds the documents section for uploads.
   Item notes and reasons have no app column privilege: they are read through `authz.checklist_item_texts`
   (document:read over the placement), because items themselves stay readable to every `placement:read` holder.
-  Overdue reminder (migration 0049): the daily worker job `paperwork-overdue` (07:30 New York) emits one
+  Overdue reminder (migration 0052): the daily worker job `paperwork-overdue` (07:30 New York) emits one
   `checklist.item_overdue` per outstanding item past its due date, once per item and due date (re-armed when the due
   date changes), through `authz.emit_paperwork_overdue` (the worker's only new grant); recipients per `docs/notifications.md`.
 - Notifications (migration 0046, `docs/notifications.md`): in-app inbox (`notification`, own rows only, written by the
@@ -113,7 +113,12 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   candidate (HR, Immigration), writes through definer functions (`visa:update`, Immigration), `If-Match` on PATCH.
   Daily `visa-expiry` job inserts `work_authorization.expiring` outbox rows (90/60/30, ids and dates only);
   delivery and inbox belong to the notification jobs. Profile section in the web app. IAM: the task roles may use
-  the restricted key directly only with the encryption context `eureka:purpose = field`.
+  the restricted key directly only with the field encryption context (purpose `field`, the field classes each role
+  needs, no other context keys); the restricted key's policy denies decrypt/data keys to every principal but the
+  API and worker task roles and an optional break-glass role (`restricted_break_glass_role_arn`, default empty).
+  The key-rotation worker can decrypt every value of the classes it rotates, by design (infra/README.md
+  "Known risks"); it cannot forge one unnoticed (integrity MAC, 0047). Add `dob` to `api_field_classes` /
+  `rotated_field_classes` in `infra/modules/stack/kms.tf` when DOB is written.
   Review follow-ups (migration 0047): rotation keys only for the current UTC month, an integrity MAC per number
   (blind index key, which the worker lacks) checked on every reveal, a rotation log with alerts, provider/key and
   header-version checks, reveal limits counted in the database (20/minute, 200/day). 0047 validates

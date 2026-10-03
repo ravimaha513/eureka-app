@@ -50,6 +50,9 @@ const WorkerConfigSchema = z
     // FR-NTF-05 bench-time: notify once a candidate has been on bench this many days.
     // The threshold is an open product decision (design OD-05): unset, the job is off.
     NOTIFY_BENCH_DAYS: z.coerce.number().int().min(1).max(365).optional(),
+    // Only candidates that crossed the bench threshold within this many days are notified
+    // (no flood on first enable; a worker down longer than this misses those crossings).
+    NOTIFY_BENCH_WINDOW_DAYS: z.coerce.number().int().min(1).max(365).default(7),
     // Resume scan-and-promote (resume-scan job): the documents bucket in AWS, or
     // the API's local document directory with the fake scanner (development).
     // Neither: the job is off and uploads stay pending.

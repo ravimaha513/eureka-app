@@ -64,7 +64,7 @@ const DELETE_BATCH = 1000;
 /** "inbox" runs only the in-app channel; "full" runs every channel of the type. */
 export type DeliveryMode = "full" | "inbox";
 
-interface Prepared { ev: OutboxEvent; spec: EventSpec; inApp: number | undefined; published: boolean }
+interface Prepared { ev: OutboxEvent; spec: EventSpec; inApp: number | undefined; published: boolean; cutOff: boolean }
 
 /**
  * Locks the unpublished event, marks interrupted sends in_doubt and, the first
@@ -72,19 +72,29 @@ interface Prepared { ev: OutboxEvent; spec: EventSpec; inApp: number | undefined
  * already published.
  */
 async function prepare(
-  pool: pg.Pool, id: string, log: Logger, staleSendingMs: number, withEmail: boolean,
+  pool: pg.Pool, id: string, log: Logger, staleSendingMs: number, withEmail: boolean, deliverSince?: Date,
 ): Promise<Prepared | null> {
   const c = await pool.connect();
   try {
     await c.query("BEGIN");
-    const r = await c.query<OutboxEvent>(
-      `SELECT id, type, aggregate_id, payload FROM eureka.outbox_event
+    const r = await c.query<OutboxEvent & { created_at: Date }>(
+      `SELECT id, type, aggregate_id, payload, created_at FROM eureka.outbox_event
         WHERE id = $1 AND published_at IS NULL FOR UPDATE`, [id]);
-    const ev = r.rows[0];
-    if (!ev) { await c.query("COMMIT"); return null; }
+    const row = r.rows[0];
+    if (!row) { await c.query("COMMIT"); return null; }
+    const { created_at: createdAt, ...ev } = row;
     const spec = specOf(ev.type);
     const rendered = spec.render(ev); // a malformed event fails before anyone is notified
-    const email = spec.email && withEmail;
+    // Backlog cut-off (OUTBOX_DELIVER_SINCE) for an emailing type: an event
+    // created before it is never emailed. Its inbox part is still delivered
+    // (in-app, exactly once) and it is published without delivery rows. An
+    // event whose emails had already started keeps going (rows exist).
+    let cutOff = false;
+    if (spec.email && withEmail && deliverSince && createdAt < deliverSince) {
+      const started = await c.query("SELECT 1 FROM eureka.outbox_delivery WHERE event_id = $1 LIMIT 1", [id]);
+      cutOff = !started.rowCount;
+    }
+    const email = spec.email && withEmail && !cutOff;
 
     if (email) {
       // Only sends older than the lease window: a younger `sending` row may
@@ -141,12 +151,16 @@ async function prepare(
     }
 
     let published = false;
-    if (!spec.email) {
+    if (!spec.email || cutOff) {
       await c.query("UPDATE eureka.outbox_event SET published_at = now() WHERE id = $1 AND published_at IS NULL", [id]);
       published = true;
     }
     await c.query("COMMIT");
-    return { ev, spec, inApp, published };
+    if (cutOff) {
+      log.warn("outbox event before OUTBOX_DELIVER_SINCE published without email", {
+        job: OUTBOX_DELIVERY_JOB, eventId: id, type: ev.type, inApp: inApp ?? 0 });
+    }
+    return { ev, spec, inApp, published, cutOff };
   } catch (err) {
     await c.query("ROLLBACK").catch(() => undefined);
     throw err;
@@ -167,6 +181,8 @@ export interface DeliveryResult {
   inApp?: number;
   /** An inbox-only run of a type that also emails: the email part is still to come. */
   emailPending?: boolean;
+  /** Created before OUTBOX_DELIVER_SINCE: published without email. */
+  emailCutOff?: boolean;
 }
 
 export interface DeliveryOptions {
@@ -175,6 +191,8 @@ export interface DeliveryOptions {
   /** A `sending` row older than this (the runner lease) is in doubt. */
   staleSendingMs: number;
   mode: DeliveryMode;
+  /** Backlog cut-off (OUTBOX_DELIVER_SINCE): emailing events created before it are not emailed. */
+  deliverSince?: Date;
 }
 export const DEFAULT_DELIVERY_OPTIONS: DeliveryOptions = {
   maxRejections: 5, staleSendingMs: DEFAULT_RUNNER_OPTIONS.leaseMs, mode: "full",
@@ -188,10 +206,13 @@ export async function deliverEvent(
 ): Promise<DeliveryResult> {
   const opts = { ...DEFAULT_DELIVERY_OPTIONS, ...options };
   const withEmail = opts.mode === "full";
-  const prepared = await prepare(pool, id, ctx.log, opts.staleSendingMs, withEmail && mail !== null);
+  const prepared = await prepare(pool, id, ctx.log, opts.staleSendingMs, withEmail && mail !== null, opts.deliverSince);
   if (!prepared) return { alreadyPublished: true, recipients: 0, sent: 0, skipped: 0, inDoubt: 0, failed: 0 };
   const { ev, spec, inApp } = prepared;
   const extra = inApp === undefined ? {} : { inApp };
+  if (prepared.cutOff) {
+    return { alreadyPublished: false, recipients: inApp ?? 0, sent: 0, skipped: 0, inDoubt: 0, failed: 0, ...extra, emailCutOff: true };
+  }
   if (!spec.email) {
     return { alreadyPublished: false, recipients: inApp ?? 0, sent: 0, skipped: 0, inDoubt: 0, failed: 0, ...extra };
   }
