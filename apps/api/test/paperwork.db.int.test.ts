@@ -490,16 +490,33 @@ describe("closed write paths and hardening", () => {
        WHERE p.proname IN ('update_checklist_item', 'update_bgc', 'checklist_templates', 'publish_checklist_template',
                            'placement_covered', 'checklist_item_history', 'bgc_history', 'checklist_on_placement',
                            'checklist_template_check', 'checklist_item_write_guard', 'bgc_write_guard', 'paperwork_event_guard',
-                           'paperwork_no_truncate', 'checklist_template_no_truncate')
+                           'paperwork_no_truncate', 'checklist_template_no_truncate', 'checklist_item_texts')
        ORDER BY p.proname`);
-    expect(rows).toHaveLength(14);
-    const app = new Set(["update_checklist_item", "update_bgc", "checklist_templates", "publish_checklist_template"]);
+    expect(rows).toHaveLength(15);
+    const app = new Set(["update_checklist_item", "update_bgc", "checklist_templates", "publish_checklist_template", "checklist_item_texts"]);
     for (const r of rows) {
       expect(r.proconfig, r.proname).toContain("search_path=pg_catalog, pg_temp");
       expect(r.public, r.proname).toBe(false);
       expect(r.app, r.proname).toBe(app.has(r.proname));
       expect(r.worker, r.proname).toBe(false);
     }
+  });
+
+  it("item notes and reasons are readable only under document:read, through authz.checklist_item_texts", async () => {
+    const { id } = await placed();
+    const item = await itemId(id);
+    await updateItem(U.hr, item, { status: "waived", reason: "Fictional reason text", notes: "Fictional note text" });
+    // locD reads the placement (location scope) and its items, but holds no document:read.
+    for (const k of ["locD", "ceo", "r1a", "hr", "imm"] as const) {
+      await expect(asUser(db.app, U[k], (c) => c.query(`SELECT notes FROM eureka.checklist_item`)), k).rejects.toThrow(/permission denied/);
+      await expect(asUser(db.app, U[k], (c) => c.query(`SELECT status_reason FROM eureka.checklist_item`)), k).rejects.toThrow(/permission denied/);
+      const texts = (await asUser(db.app, U[k], (c) => c.query(`SELECT * FROM authz.checklist_item_texts($1) WHERE item_id = $2`, [id, item]))).rows;
+      const docs = ["r1a", "hr", "imm"].includes(k);
+      expect(texts, k).toEqual(docs ? [{ item_id: item, notes: "Fictional note text", status_reason: "Fictional reason text" }] : []);
+    }
+    expect((await asUser(db.app, U.locD, (c) => c.query(`SELECT status FROM eureka.checklist_item WHERE id = $1`, [item]))).rows)
+      .toEqual([{ status: "waived" }]);
+    expect((await db.app.query(`SELECT * FROM authz.checklist_item_texts($1)`, [id])).rows).toEqual([]);
   });
 
   it("RLS is enabled and forced on the new tables", async () => {
@@ -555,7 +572,7 @@ describe("RLS differential: BGC, item history and items across fixture users", (
 
   it("read policies resolve candidate ownership once per statement (rule 3)", async () => {
     for (const t of ["bgc", "checklist_item", "checklist_item_event"]) {
-      const r = await ownedCandidateCalls(db.admin, U.m1, `SELECT * FROM eureka.${t}`);
+      const r = await ownedCandidateCalls(db.admin, U.m1, `SELECT id FROM eureka.${t}`);
       expect(r.rows, t).toBeGreaterThan(0);
       expect(r.calls, t).toBeLessThanOrEqual(2);
     }

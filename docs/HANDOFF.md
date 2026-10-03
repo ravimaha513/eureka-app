@@ -83,7 +83,9 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   yet. When the documents module merges, the integrator adds `FOREIGN KEY (document_id) REFERENCES eureka.document(id)`,
   makes `authz.update_checklist_item` check that the document belongs to the item's placement or candidate and is
   readable/clean, and adds the "attach document" picker to the item dialog (today the UI shows the id read-only and
-  never sends it). Notifications work (0046) may want `bgc.*`/checklist overdue events; none are emitted yet.
+  never sends it). The API accepts any uuid until then, so check for (or null out) dangling ids before adding the FK.
+  Item notes and reasons have no app column privilege: they are read through `authz.checklist_item_texts`
+  (document:read over the placement), because items themselves stay readable to every `placement:read` holder. Notifications work (0046) may want `bgc.*`/checklist overdue events; none are emitted yet.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 - First-admin bootstrap (migrations 0037, 0039): `dist/db/bootstrap.js` as a one-off migrate task creates two
   `org_admin` users for hosted-domain emails; break-glass only: refuses while an active `org_admin` exists

@@ -120,13 +120,20 @@ const BASE = (where: (alias: string, col: string) => string) => `
   UNION SELECT i.placement_id, i.candidate_id, i.recruiter_id, i.team_id, i.location_id FROM eureka.checklist_item i ${where("i", "placement_id")}
   UNION SELECT b.placement_id, b.candidate_id, b.recruiter_id, b.team_id, b.location_id FROM eureka.bgc b ${where("b", "placement_id")}`;
 
-const ITEM_SELECT = `
-  SELECT i.id, i.placement_id, i.doc_type, i.owner_role, i.required, i.status, i.status_reason, i.status_changed_at,
+/**
+ * Items of the placement bound to `placementParam`. Notes and reasons come from
+ * authz.checklist_item_texts (document:read over the placement; the app has no
+ * column privilege on them, migration 0044).
+ */
+const ITEM_SELECT = (placementParam: string) => `
+  SELECT i.id, i.placement_id, i.doc_type, i.owner_role, i.required, i.status, tx.status_reason, i.status_changed_at,
          i.assignee_id, au.display_name AS assignee_name, i.due_on::text AS due_on,
          coalesce(i.status IN ('pending', 'received') AND i.due_on < current_date, false) AS overdue,
-         i.notes, i.document_id, i.version, i.template_version
+         tx.notes, i.document_id, i.version, i.template_version
     FROM eureka.checklist_item i
-    LEFT JOIN eureka.app_user au ON au.id = i.assignee_id`;
+    LEFT JOIN authz.checklist_item_texts(${placementParam}::uuid) tx ON tx.item_id = i.id
+    LEFT JOIN eureka.app_user au ON au.id = i.assignee_id
+   WHERE i.placement_id = ${placementParam}::uuid`;
 
 const candidateRef = (r: HeaderRow): CandidateRef | null =>
   r.cand_visibility === null ? null : {
@@ -273,7 +280,7 @@ export class PaperworkService {
   async detail(user: AuthedUser, placementId: string) {
     return this.db.withUser(user.id, async (c) => {
       const h = await this.header(c, user, placementId);
-      const items = (await c.query<ItemRow>(`${ITEM_SELECT} WHERE i.placement_id = $1 AND i.kind = 'paperwork' ORDER BY i.position`,
+      const items = (await c.query<ItemRow>(`${ITEM_SELECT("$1")} AND i.kind = 'paperwork' ORDER BY i.position`,
         [placementId])).rows;
       return {
         ...this.presentHeader(h),
@@ -310,7 +317,9 @@ export class PaperworkService {
    */
   async updateItem(user: AuthedUser, itemId: string, body: UpdateChecklistItem) {
     return this.db.withUser(user.id, async (c) => {
-      const item = (await c.query<ItemRow>(`${ITEM_SELECT} WHERE i.id = $1`, [itemId])).rows[0];
+      const pid = (await c.query<{ placement_id: string }>(`SELECT placement_id FROM eureka.checklist_item WHERE id = $1`, [itemId])).rows[0];
+      if (!pid) throw new NotFoundException();
+      const item = (await c.query<ItemRow>(`${ITEM_SELECT("$2")} AND i.id = $1`, [itemId, pid.placement_id])).rows[0];
       if (!item) throw new NotFoundException();
       const h = await this.headerForItem(c, user, item.placement_id);
       const acts = checklistItemActions(user.access, paperworkRef(h), item.status, h.placement_status);
@@ -346,7 +355,7 @@ export class PaperworkService {
           ...(r.changed.includes("document") ? { documentId: changes.documentId } : {}),
         },
       });
-      const fresh = (await c.query<ItemRow>(`${ITEM_SELECT} WHERE i.id = $1`, [itemId])).rows[0]!;
+      const fresh = (await c.query<ItemRow>(`${ITEM_SELECT("$2")} AND i.id = $1`, [itemId, item.placement_id])).rows[0]!;
       return this.presentItem(user.access, h, fresh);
     });
   }

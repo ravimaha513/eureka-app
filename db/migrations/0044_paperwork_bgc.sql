@@ -402,6 +402,15 @@ REVOKE ALL ON FUNCTION authz.checklist_template_no_truncate() FROM PUBLIC;
 
 -- App: read only (every write goes through the definer functions below).
 GRANT SELECT ON eureka.checklist_item_event, eureka.bgc, eureka.bgc_event TO eureka_app;
+-- Items are readable wherever the placement is (location roles, CEO, ...), but
+-- their free text (notes, reasons) only under document:read (B4.4): the app
+-- reads every other column directly and the text through
+-- authz.checklist_item_texts, which checks document:read over the placement.
+REVOKE SELECT ON eureka.checklist_item FROM eureka_app;
+GRANT SELECT (id, placement_id, kind, position, doc_type, owner_role, required, status, created_at,
+              candidate_id, recruiter_id, team_id, location_id, template_version, assignee_id, due_on,
+              document_id, status_changed_at, status_changed_by, updated_at, updated_by, version)
+  ON eureka.checklist_item TO eureka_app;
 -- Definer: exactly what the functions and triggers write.
 GRANT SELECT ON eureka.checklist_item TO authz_definer;
 GRANT UPDATE (status, status_reason, status_changed_at, status_changed_by, owner_role, assignee_id, due_on,
@@ -806,6 +815,17 @@ BEGIN
     (SELECT x.version FROM eureka.bgc x WHERE x.id = b.id), ch, pl_from, pl_to, c_from, c_to;
 END $$;
 
+-- Notes and status reasons of one placement's items, only for a caller with
+-- document:read over the placement (actor snapshot or owned candidate);
+-- otherwise no rows. Called once per request, never from a policy.
+CREATE FUNCTION authz.checklist_item_texts(p_placement uuid)
+RETURNS TABLE (item_id uuid, notes text, status_reason text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+  SELECT i.id, i.notes, i.status_reason FROM eureka.checklist_item i
+   WHERE i.placement_id = p_placement AND authz.current_user_id() IS NOT NULL
+     AND coalesce(authz.placement_covered(p_placement, 'document:read'), false)
+$$;
+
 -- Template versions (all, newest first per kind/type) for callers holding
 -- document:read at org scope (the paperwork roles); configuration only.
 CREATE FUNCTION authz.checklist_templates()
@@ -860,6 +880,8 @@ REVOKE ALL ON FUNCTION authz.placement_covered(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.update_checklist_item(uuid, jsonb, integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.update_bgc(uuid, jsonb, integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.checklist_templates() FROM PUBLIC;
+REVOKE ALL ON FUNCTION authz.checklist_item_texts(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION authz.checklist_item_texts(uuid) TO eureka_app;
 REVOKE ALL ON FUNCTION authz.publish_checklist_template(text, text, jsonb, integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION authz.update_checklist_item(uuid, jsonb, integer) TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.update_bgc(uuid, jsonb, integer) TO eureka_app;
