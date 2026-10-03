@@ -464,7 +464,7 @@ BEGIN
     INSERT INTO eureka.audit_event (actor_id, action, entity_type, entity_id, changes)
     VALUES (authz.current_user_id(), 'auth.step_up_failed', 'app_user', authz.current_user_id(),
             pg_catalog.jsonb_build_object('method', 'google', 'reason', why));
-    RETURN QUERY SELECT why, NULL::uuid, NULL::timestamptz, NULL::text;
+    RETURN QUERY SELECT why, NULL::uuid, NULL::timestamptz, c.return_to;
     RETURN;
   END IF;
 
