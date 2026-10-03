@@ -447,6 +447,16 @@ describe("inbox table privileges and RLS (migration 0046)", () => {
     const a = await newId(db);
     const fresh = await emitEvent(db, "assignment.ending_soon", "assignment", a, PAYLOADS.endingSoon(a, placementId, candidateId));
     expect(await ins(fresh, "employee.exited")).toMatch(/row-level security/);        // type must match the event
+    expect(await ins(fresh, "assignment.ending_soon")).toMatch(/row-level security/); // r3a is not a recipient of it
+    const c = await db.worker.connect();
+    try {                                                                              // a recipient would be accepted
+      await c.query("BEGIN");
+      await c.query(`INSERT INTO eureka.notification (recipient_id, event_id, type, entity_type, entity_id, title, body)
+        VALUES ($1, $2, 'assignment.ending_soon', 'placement', $3, 'T', 'B')`, [U.hr, fresh, placementId]);
+    } finally {
+      await c.query("ROLLBACK");
+      c.release();
+    }
     expect(await denied(db.worker, "INSERT INTO eureka.inbox_fanout (event_id, recipients, created_at) VALUES ($1, 1, now())", [fresh]))
       .toMatch(/permission denied/);
     // Recent rows cannot be pruned; nobody else may delete or truncate.

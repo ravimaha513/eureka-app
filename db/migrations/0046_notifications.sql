@@ -183,10 +183,7 @@ GRANT SELECT (id, event_id, recipient_id, created_at) ON eureka.notification TO 
 GRANT INSERT (recipient_id, event_id, type, entity_type, entity_id, title, body) ON eureka.notification TO eureka_worker;
 GRANT DELETE ON eureka.notification TO eureka_worker;
 CREATE POLICY notification_worker_read ON eureka.notification FOR SELECT TO eureka_worker USING (true);
-CREATE POLICY notification_worker_insert ON eureka.notification FOR INSERT TO eureka_worker
-  WITH CHECK (EXISTS (SELECT 1 FROM eureka.outbox_event e
-                       WHERE e.id = notification.event_id AND e.type = notification.type AND e.published_at IS NULL)
-              AND NOT EXISTS (SELECT 1 FROM eureka.inbox_fanout f WHERE f.event_id = notification.event_id));
+-- notification_worker_insert is created at the end (it calls authz.notification_recipients).
 CREATE POLICY notification_worker_prune ON eureka.notification FOR DELETE TO eureka_worker
   USING (created_at < now() - interval '30 days');
 
@@ -346,3 +343,13 @@ REVOKE ALL ON FUNCTION authz.notification_emit_once(text, text, text, text, uuid
 REVOKE ALL ON FUNCTION authz.emit_bench_time(date, integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION authz.notification_recipients(uuid, uuid) TO eureka_worker;
 GRANT EXECUTE ON FUNCTION authz.emit_bench_time(date, integer) TO eureka_worker;
+
+-- ---------- worker inbox insert policy (needs the resolver above) ----------
+-- Only for a real, unpublished event of the same type, before its fan-out is
+-- recorded, and only for a user the database itself names as a recipient
+-- (a few rows per event; the resolver runs per inserted row, never on reads).
+CREATE POLICY notification_worker_insert ON eureka.notification FOR INSERT TO eureka_worker
+  WITH CHECK (EXISTS (SELECT 1 FROM eureka.outbox_event e
+                       WHERE e.id = notification.event_id AND e.type = notification.type AND e.published_at IS NULL)
+              AND NOT EXISTS (SELECT 1 FROM eureka.inbox_fanout f WHERE f.event_id = notification.event_id)
+              AND EXISTS (SELECT 1 FROM authz.notification_recipients(notification.event_id, notification.recipient_id)));

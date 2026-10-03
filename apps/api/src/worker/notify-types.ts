@@ -164,7 +164,7 @@ export const EVENT_SPECS: Record<string, EventSpec> = {
       const placementId = uuid(ev.payload, "placementId");
       uuid(ev.payload, "candidateId");
       date(ev.payload, "endDate");
-      const days = int(ev.payload, "daysBefore", 0, 365);
+      const days = int(ev.payload, "daysBefore", 1, 365);
       return {
         subject: `Eureka: project assignment ends within ${plural(days, "day")}`,
         message: `A project assignment ends within ${plural(days, "day")}.`,
