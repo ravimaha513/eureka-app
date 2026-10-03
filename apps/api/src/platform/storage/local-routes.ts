@@ -5,6 +5,7 @@ import {
   LOCAL_DOWNLOAD_PATH,
   LOCAL_UPLOAD_PATH,
   attachmentDisposition,
+  isServableKey,
   type LocalDocumentStorage,
   type LocalDownloadPolicy,
   type LocalUploadPolicy,
@@ -49,7 +50,7 @@ const problem = (reply: FastifyReply, status: number, title: string) =>
  * refuses the local driver in production). Enforces what the S3 POST policy
  * enforces: valid signature and expiry, exact key, exact Content-Type, exact
  * size, no unsigned fields, a single file field last. Downloads serve clean/
- * objects only, as attachments. Registered outside Nest (no session needed:
+ * and restricted/ objects only, as attachments. Registered outside Nest (no session needed:
  * the signed policy is the authorization, as with S3).
  */
 export async function registerLocalStorageRoutes(app: FastifyInstance, storage: LocalDocumentStorage): Promise<void> {
@@ -80,7 +81,7 @@ export async function registerLocalStorageRoutes(app: FastifyInstance, storage: 
     scope.get(LOCAL_DOWNLOAD_PATH, async (req, reply) => {
       const q = req.query as { policy?: string; signature?: string };
       const policy = q.policy && q.signature ? storage.verify<LocalDownloadPolicy>(q.policy, q.signature) : null;
-      if (!policy || policy.purpose !== "download" || !policy.key.startsWith("clean/")) return problem(reply, 403, "Invalid or expired link");
+      if (!policy || policy.purpose !== "download" || !isServableKey(policy.key)) return problem(reply, 403, "Invalid or expired link");
       let body: Buffer;
       try { body = await readFile(localPath(storage.root, policy.key)); } catch { return problem(reply, 404, "Not Found"); }
       return reply

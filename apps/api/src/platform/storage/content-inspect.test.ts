@@ -1,6 +1,7 @@
 import { crc32, deflateRawSync, deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { inspectResume, readZipDirectory } from "./content-inspect.js";
+import { tinyJpeg, tinyPng } from "../../../test/images.js";
+import { inspectDocument, inspectResume, readZipDirectory } from "./content-inspect.js";
 
 const PDF = "application/pdf";
 const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -121,5 +122,29 @@ describe("PDF: header and active content", () => {
 
   it("finds active content hidden in a compressed object stream", () => {
     expect(inspectResume(objStm("1 0 obj << /S /JavaScript /JS (app.alert(1)) >>"), PDF)).toBe("ACTIVE_CONTENT");
+  });
+});
+
+describe("inspectDocument: images (design A6.5 allowlist)", () => {
+  it("accepts a well-formed PNG and JPEG, and checks PDF and DOCX as for resumes", () => {
+    expect(inspectDocument(tinyPng(), "image/png")).toBeNull();
+    expect(inspectDocument(tinyJpeg(), "image/jpeg")).toBeNull();
+    expect(inspectDocument(Buffer.from("%PDF-1.7\n1 0 obj << /OpenAction << /S /JavaScript >> >>\n%%EOF"), PDF)).toBe("ACTIVE_CONTENT");
+    expect(inspectDocument(Buffer.from("PK\x03\x04 not really"), DOCX)).toBe("BAD_CONTENT");
+    expect(inspectDocument(tinyPng(), "image/gif" as never)).toBe("BAD_CONTENT");
+  });
+
+  it.each([
+    ["PNG with data appended after IEND (polyglot tail)", () => tinyPng(Buffer.from("<html>")), "image/png"],
+    ["PNG without IEND", () => tinyPng().subarray(0, tinyPng().length - 12), "image/png"],
+    ["PNG signature only", () => tinyPng().subarray(0, 8), "image/png"],
+    ["a PDF declared as PNG", () => Buffer.from("%PDF-1.7\n%%EOF\n"), "image/png"],
+    ["a PNG declared as JPEG", () => tinyPng(), "image/jpeg"],
+    ["JPEG with data after EOI", () => tinyJpeg(Buffer.from([0xff, 0xd9, 0x3c, 0x73])), "image/jpeg"],
+    ["JPEG without EOI", () => tinyJpeg(Buffer.from([0x00, 0x00])), "image/jpeg"],
+    ["JPEG markers only", () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]), "image/jpeg"],
+    ["an HTML file declared as JPEG", () => Buffer.from("<script>alert(1)</script>"), "image/jpeg"],
+  ] as const)("refuses %s", (_n, body, type) => {
+    expect(inspectDocument(body(), type)).toBe("BAD_CONTENT");
   });
 });

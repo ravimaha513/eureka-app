@@ -359,13 +359,14 @@ describe("step-up (authz.step_up_*)", () => {
     expect(reasons.slice(-3)).toEqual(["replayed", "nonce_mismatch", "replayed"]);
   });
 
-  it.each([
-    ["another Google account", (u: string) => `sub-${U.acct}`, () => new Date(), "wrong_account"],
+  type Bad = [string, (u: string) => string | null, () => Date | null, string];
+  it.each<Bad>([
+    ["another Google account", () => `sub-${U.acct}`, () => new Date(), "wrong_account"],
     ["no sub", () => null, () => new Date(), "wrong_account"],
-    ["no auth_time", (u: string) => `sub-${u}`, () => null, "stale_auth"],
-    ["auth_time before the challenge (no re-authentication)", (u: string) => `sub-${u}`, () => new Date(Date.now() - 5 * 60_000), "stale_auth"],
-    ["auth_time in the future", (u: string) => `sub-${u}`, () => new Date(Date.now() + 5 * 60_000), "stale_auth"],
-  ] as const)("refuses %s", async (_n, sub, authTime, outcome) => {
+    ["no auth_time", (u) => `sub-${u}`, () => null, "stale_auth"],
+    ["auth_time before the challenge (no re-authentication)", (u) => `sub-${u}`, () => new Date(Date.now() - 5 * 60_000), "stale_auth"],
+    ["auth_time in the future", (u) => `sub-${u}`, () => new Date(Date.now() + 5 * 60_000), "stale_auth"],
+  ])("refuses %s", async (_n, sub, authTime, outcome) => {
     const s = await session(U.hr);
     const st = state(); const nonce = randomBytes(16);
     await begin(U.hr, s, st, nonce);
