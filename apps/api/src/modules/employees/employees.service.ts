@@ -173,7 +173,7 @@ export class EmployeesService {
         `SELECT ev.id::text, ev.kind, ev.at, u.display_name AS actor_name, ev.assignment_id, ev.from_status, ev.to_status,
                 ev.effective_on::text, ev.previous_on::text, ev.reason
          FROM eureka.employment_event ev LEFT JOIN eureka.app_user u ON u.id = ev.actor_id
-         WHERE ev.person_id = $1 ORDER BY ev.id DESC LIMIT 200`, [id]);
+         WHERE ev.person_id = $1 ORDER BY ev.at DESC, ev.effective_on DESC NULLS LAST, ev.id DESC LIMIT 200`, [id]);
       return {
         ...this.present(user.access, row),
         assignments: assignments.rows.map((a) => ({
