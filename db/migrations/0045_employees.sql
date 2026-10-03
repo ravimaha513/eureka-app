@@ -278,9 +278,10 @@ END $$;
 -- Locks and returns the assignment with its placement's actor snapshot after
 -- the shared checks: visible (assignment:read and placement:read on the
 -- placement, as the read policies) else 404, then assignment:update on the
--- actor snapshot else 403. Lock order matches authz.transition_placement
--- (placement, candidate, per-person advisory lock, assignment) so concurrent
--- placement and employment writes serialize instead of deadlocking. Internal.
+-- actor snapshot and employee:read at org scope else 403. Lock order matches
+-- authz.transition_placement (placement, candidate, per-person advisory lock,
+-- assignment) so concurrent placement and employment writes serialize instead
+-- of deadlocking. Internal.
 CREATE FUNCTION authz.assignment_for_update(p_assignment uuid)
 RETURNS TABLE (id uuid, person_id uuid, placement_id uuid, start_date date, end_date date,
                candidate_id uuid, recruiter_id uuid, team_id uuid, location_id uuid)
@@ -297,7 +298,9 @@ BEGIN
             OR authz.candidate_owned(p.candidate_id, 'placement:read')), false) THEN
     RAISE EXCEPTION 'assignment_not_found' USING ERRCODE = 'no_data_found';
   END IF;
-  IF NOT coalesce(authz.owns('assignment:update', p.recruiter_id, p.team_id, p.location_id), false) THEN
+  -- Employment writes also need the employee in view: employee:read at org scope (B4.4).
+  IF NOT coalesce(authz.owns('assignment:update', p.recruiter_id, p.team_id, p.location_id)
+                  AND authz.has_org('employee:read'), false) THEN
     RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
   END IF;
   PERFORM 1 FROM eureka.candidate c WHERE c.id = p.candidate_id FOR UPDATE;

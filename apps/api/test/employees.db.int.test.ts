@@ -32,7 +32,7 @@ afterAll(async () => {
 });
 
 const q = async <R = Record<string, unknown>>(sql: string, params: unknown[] = []) => (await db.admin.query(sql, params)).rows as R[];
-const employee = async (person: string) => (await q(`SELECT * FROM eureka.employee WHERE person_id = $1`, [person]))[0];
+const employee = async (person: string) => (await q<Record<string, any>>(`SELECT * FROM eureka.employee WHERE person_id = $1`, [person]))[0]!;
 const candStatus = async (id: string) => (await q<{ marketing_status: string }>(`SELECT marketing_status FROM eureka.candidate WHERE id = $1`, [id]))[0]!.marketing_status;
 const events = async (person: string) => q<{ kind: string; from_status: string | null; to_status: string | null; effective_on: string | null; previous_on: string | null; reason: string | null; actor_id: string | null }>(
   `SELECT kind, from_status, to_status, effective_on::text, previous_on::text, reason, actor_id FROM eureka.employment_event WHERE person_id = $1 ORDER BY id`, [person]);
@@ -98,7 +98,7 @@ describe("authz.end_assignment (project exit)", () => {
     expect(e.status).toBe("bench");
     const ev = await outbox("employee.benched", j.personId);
     expect(ev.map((x) => [x.payload.endDate, x.payload.endReason])).toEqual([[end, "completed"]]);
-    expect((await events(j.personId)).at(-1)).toMatchObject({ kind: "ended", from_status: "on_assignment", to_status: "bench", effective_on: end, reason: "completed", actor_id: U.hr });
+    expect((await events(j.personId)).at(-1)!).toMatchObject({ kind: "ended", from_status: "on_assignment", to_status: "bench", effective_on: end, reason: "completed", actor_id: U.hr });
   });
 
   it.each([
@@ -293,7 +293,7 @@ describe("authz.exit_employee and authz.return_employee_to_market", () => {
     await joinPlacement(db, U.r1a, p.id);
     const e = await employee(j.personId);
     expect([e.status, e.exited_on, e.exit_reason]).toEqual(["on_assignment", null, null]);
-    expect((await events(j.personId)).at(-1)).toMatchObject({ kind: "started", from_status: "exited", to_status: "on_assignment" });
+    expect((await events(j.personId)).at(-1)!).toMatchObject({ kind: "started", from_status: "exited", to_status: "on_assignment" });
   });
 });
 
