@@ -3,111 +3,76 @@ import { MailRejected, type MailTransport } from "../feedback-mail.js";
 import type { Logger } from "../log.js";
 import { DEFAULT_RUNNER_OPTIONS, type JobDefinition } from "../runner.js";
 import { IDEMPOTENCY_CLEANUP_SCHEDULE, OUTBOX_PRUNE_SCHEDULE, dueMaintenanceKeys } from "../schedule.js";
+import { DELIVERED_TYPES, EMAIL_TYPES, INBOX_TYPES, renderEmail, specOf, type EventSpec, type OutboxEvent } from "../notify-types.js";
 
 /**
- * Outbox delivery (design A7, PL-7; migrations 0024, 0029). Each unpublished
- * `placement.created` / `placement.state_changed` event is one job_run key
- * (its id), so the runner's lease, backoff and alerting apply per event.
+ * Outbox delivery (design A7, B6, PL-7; migrations 0024, 0029, 0046). Each
+ * unpublished event of a delivered type (worker/notify-types.ts,
+ * docs/notifications.md) is one job_run key (its id), so the runner's lease,
+ * backoff and alerting apply per event. A type has an email channel, an in-app
+ * (inbox) channel or both; recipients come from the database
+ * (authz.notification_recipients, by type), never from the client.
  *
  * Delivery of one event:
- *  1. Fan-out (once, in one transaction with the event row locked): one
- *     outbox_delivery row per distinct active user holding a role of the
- *     event's recipient groups. A user in several groups gets one email.
+ *  1. Fan-out (in one transaction with the event row locked):
+ *     - inbox: the first time, one notification row per recipient and the
+ *       inbox_fanout marker, together (exactly once; the database refuses
+ *       rows for an event whose marker exists);
+ *     - email: the first time, one outbox_delivery row per recipient. A user
+ *       with several reasons (roles, recruiter and lead...) gets one email.
  *     No recipient at all: the event stays unpublished, alert, retry.
  *     Rows left in `sending` for longer than the lease window by an earlier
  *     run that died are marked in_doubt (younger ones may belong to a live
  *     runner: left alone, this run fails and retries).
- *  2. Per recipient: re-check the user is still active and still holds the
- *     role (else `skipped`), mark `sending` (committed), send, mark `sent`.
- *     A MailRejected error (provider definitely refused) puts the row back to
- *     `pending` and the run fails, so the runner retries after backoff;
- *     throttling is not counted, other rejections are, and after
- *     maxRejections the row is `failed` (final, alert). Any other error
- *     leaves the outcome unknown: the row becomes `in_doubt`. A final update
- *     that matches no row (taken over meanwhile) is logged as an alert.
- *  3. When every row is final, the event is marked published.
+ *     An in-app-only event is published in the same transaction.
+ *  2. Per email recipient: re-check that the user is still a recipient
+ *     (active, still holds the role or the relation) else `skipped`; mark
+ *     `sending` (committed), send, mark `sent`. A MailRejected error
+ *     (provider definitely refused) puts the row back to `pending` and the run
+ *     fails, so the runner retries after backoff; throttling is not counted,
+ *     other rejections are, and after maxRejections the row is `failed`
+ *     (final, alert). Any other error leaves the outcome unknown: the row
+ *     becomes `in_doubt`. A final update that matches no row (taken over
+ *     meanwhile) is logged as an alert.
+ *  3. When every email row is final, the event is marked published.
+ *
+ * Without a mail transport (OUTBOX_MAIL_MODE=disabled) the job still runs the
+ * inbox channel: in-app-only events are delivered and published; events that
+ * also email get their inbox rows under the run key `inbox:<id>` and stay
+ * unpublished (so they are not pruned) until a mail mode is set, exactly as
+ * email-only events do.
  *
  * Guarantee: an email is never sent twice to the same recipient for the same
  * event. A crash (or lost database connection) between the provider accepting
  * the message and the `sent` update leaves the row in `sending`; the next run
  * marks it in_doubt and does not resend (at most once per recipient, with an
  * alert log). Everything before the `sending` mark is retried (at least once
- * up to that point).
+ * up to that point). Inbox rows are written exactly once per recipient.
  *
- * Emails carry no personal data: the event, the placement status, the
- * placement reference (an id) and a sign-in link. Addresses are read at send
- * time and never stored, logged or written to job_run.
+ * Emails and inbox rows carry no personal data (see notify-types.ts).
+ * Addresses are read at send time and never stored, logged or written to job_run.
  */
 export const OUTBOX_DELIVERY_JOB = "outbox-delivery";
 export const OUTBOX_PRUNE_JOB = "outbox-prune";
 export const IDEMPOTENCY_CLEANUP_JOB = "idempotency-cleanup";
+/** Run-key prefix of an inbox-only run (mail disabled, type also emails). */
+export const INBOX_KEY_PREFIX = "inbox:";
 
-/** Recipient groups named in an event's `notify` list -> role keys. */
-export const RECIPIENT_GROUPS = {
-  hr: ["hr"],
-  accounts: ["accounts"],
-  immigration: ["immigration"],
-} as const satisfies Record<string, readonly string[]>;
-type Group = keyof typeof RECIPIENT_GROUPS;
-const GROUP_LABELS: Record<Group, string> = { hr: "HR", accounts: "Accounts", immigration: "Immigration" };
-
-export const DELIVERED_TYPES = ["placement.created", "placement.state_changed"] as const;
-type EventType = (typeof DELIVERED_TYPES)[number];
-
-const STATUS_LABELS: Record<string, string> = {
-  confirmed: "Confirmed", paperwork: "Paperwork", bgc: "Background check", ready: "Ready to join",
-  joined: "Joined", backout: "Backed out", bgc_failed: "Background check failed",
-};
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DELETE_BATCH = 1000;
 
-interface OutboxEvent { id: string; type: EventType; aggregate_id: string; payload: Record<string, unknown> }
+/** "inbox" runs only the in-app channel; "full" runs every channel of the type. */
+export type DeliveryMode = "full" | "inbox";
 
-function statusLabel(v: unknown): string {
-  if (typeof v !== "string" || !(v in STATUS_LABELS)) throw new Error("outbox event has an unknown status");
-  return STATUS_LABELS[v]!;
-}
-
-/** The event's recipient groups; an event naming none (or only unknown ones) is invalid. */
-export function recipientGroups(payload: Record<string, unknown>): Group[] {
-  const notify = payload.notify;
-  if (!Array.isArray(notify)) throw new Error("outbox event has no notify list");
-  const groups = [...new Set(notify.filter((g): g is Group => typeof g === "string" && g in RECIPIENT_GROUPS))];
-  if (groups.length === 0) throw new Error("outbox event names no known recipient group");
-  return groups.sort();
-}
-
-export function rolesOf(groups: Group[]): string[] {
-  return [...new Set(groups.flatMap((g) => RECIPIENT_GROUPS[g]))].sort();
-}
-
-/** Subject and body for one recipient. Only states, the placement id and the link. */
-export function renderEmail(ev: OutboxEvent, origin: string, recipientGroups: Group[]): { subject: string; text: string } {
-  const ref = ev.aggregate_id;
-  if (!UUID.test(ref)) throw new Error("outbox event has an invalid aggregate id");
-  const why = `You receive this email as a member of ${recipientGroups.map((g) => GROUP_LABELS[g]).join(" and ")}.`;
-  const footer = `Placement reference: ${ref}\n\nSign in to Eureka for the details: ${origin}/\n${why}\n`;
-  if (ev.type === "placement.created") {
-    return {
-      subject: "Eureka: new placement",
-      text: `A new placement was recorded in Eureka (status: ${statusLabel(ev.payload.status)}).\n${footer}`,
-    };
-  }
-  const from = statusLabel(ev.payload.from);
-  const to = statusLabel(ev.payload.to);
-  return {
-    subject: `Eureka: placement status changed to ${to}`,
-    text: `A placement in Eureka moved from ${from} to ${to}.\n${footer}`,
-  };
-}
+interface Prepared { ev: OutboxEvent; spec: EventSpec; inApp: number | undefined; published: boolean }
 
 /**
  * Locks the unpublished event, marks interrupted sends in_doubt and, the first
- * time, records the recipients. Returns null when the event is already published.
+ * time per channel, records the recipients. Returns null when the event is
+ * already published.
  */
 async function prepare(
-  pool: pg.Pool, id: string, log: Logger, staleSendingMs: number,
-): Promise<{ ev: OutboxEvent; groups: Group[] } | null> {
+  pool: pg.Pool, id: string, log: Logger, staleSendingMs: number, withEmail: boolean,
+): Promise<Prepared | null> {
   const c = await pool.connect();
   try {
     await c.query("BEGIN");
@@ -116,39 +81,71 @@ async function prepare(
         WHERE id = $1 AND published_at IS NULL FOR UPDATE`, [id]);
     const ev = r.rows[0];
     if (!ev) { await c.query("COMMIT"); return null; }
-    if (!(DELIVERED_TYPES as readonly string[]).includes(ev.type)) throw new Error("outbox event type is not delivered");
-    const groups = recipientGroups(ev.payload);
+    const spec = specOf(ev.type);
+    const rendered = spec.render(ev); // a malformed event fails before anyone is notified
+    const email = spec.email && withEmail;
 
-    // Only sends older than the lease window: a younger `sending` row may
-    // belong to a runner that is still alive (lease takeover); it is left
-    // alone and this run fails and retries later.
-    const doubt = await c.query(
-      `UPDATE eureka.outbox_delivery SET status = 'in_doubt'
-        WHERE event_id = $1 AND status = 'sending' AND attempt_at < now() - $2 * interval '1 millisecond'`,
-      [id, staleSendingMs]);
-    if (doubt.rowCount) {
-      log.error("outbox delivery interrupted after the send started; not resent", {
-        job: OUTBOX_DELIVERY_JOB, eventId: id, inDoubt: doubt.rowCount, alert: true });
-    }
-
-    const any = await c.query("SELECT 1 FROM eureka.outbox_delivery WHERE event_id = $1 LIMIT 1", [id]);
-    if (!any.rowCount) {
-      const added = await c.query(
-        `INSERT INTO eureka.outbox_delivery (event_id, user_id)
-         SELECT DISTINCT $1::uuid, u.id
-           FROM eureka.app_user u JOIN eureka.user_role ur ON ur.user_id = u.id
-          WHERE u.status = 'active' AND ur.role_key = ANY ($2::text[]) AND ur.valid @> now()`,
-        [id, rolesOf(groups)]);
-      if (!added.rowCount) {
-        // Nobody holds a recipient role: keep the event unpublished and retry
-        // (backoff) until someone does, rather than dropping the notification.
-        log.error("outbox event has no recipients; kept unpublished", {
-          job: OUTBOX_DELIVERY_JOB, eventId: id, groups, alert: true });
-        throw new Error("outbox event has no recipients; retry pending");
+    if (email) {
+      // Only sends older than the lease window: a younger `sending` row may
+      // belong to a runner that is still alive (lease takeover); it is left
+      // alone and this run fails and retries later.
+      const doubt = await c.query(
+        `UPDATE eureka.outbox_delivery SET status = 'in_doubt'
+          WHERE event_id = $1 AND status = 'sending' AND attempt_at < now() - $2 * interval '1 millisecond'`,
+        [id, staleSendingMs]);
+      if (doubt.rowCount) {
+        log.error("outbox delivery interrupted after the send started; not resent", {
+          job: OUTBOX_DELIVERY_JOB, eventId: id, inDoubt: doubt.rowCount, alert: true });
       }
     }
+
+    let recipients: string[] | null = null;
+    const resolve = async (): Promise<string[]> => {
+      recipients ??= (await c.query<{ recipient_id: string }>(
+        `SELECT DISTINCT recipient_id FROM authz.notification_recipients($1) ORDER BY recipient_id`, [id]))
+        .rows.map((x) => x.recipient_id);
+      if (recipients.length === 0) {
+        // Nobody qualifies: keep the event unpublished and retry (backoff)
+        // until someone does, rather than dropping the notification.
+        log.error("outbox event has no recipients; kept unpublished", {
+          job: OUTBOX_DELIVERY_JOB, eventId: id, type: ev.type, alert: true });
+        throw new Error("outbox event has no recipients; retry pending");
+      }
+      return recipients;
+    };
+
+    let inApp: number | undefined;
+    if (spec.inApp) {
+      const done = await c.query<{ recipients: number }>("SELECT recipients FROM eureka.inbox_fanout WHERE event_id = $1", [id]);
+      if (done.rows[0]) inApp = done.rows[0].recipients;
+      else {
+        const users = await resolve();
+        const box = rendered.inbox!;
+        await c.query(
+          `INSERT INTO eureka.notification (recipient_id, event_id, type, entity_type, entity_id, title, body)
+           SELECT u, $2, $3, $4, $5, $6, $7 FROM unnest($1::uuid[]) AS u`,
+          [users, id, ev.type, box.entity.type, box.entity.id, box.title, box.body]);
+        await c.query("INSERT INTO eureka.inbox_fanout (event_id, recipients) VALUES ($1, $2)", [id, users.length]);
+        inApp = users.length;
+      }
+    }
+
+    if (email) {
+      const any = await c.query("SELECT 1 FROM eureka.outbox_delivery WHERE event_id = $1 LIMIT 1", [id]);
+      if (!any.rowCount) {
+        await c.query(
+          `INSERT INTO eureka.outbox_delivery (event_id, user_id) SELECT $1, u FROM unnest($2::uuid[]) AS u`,
+          [id, await resolve()]);
+      }
+    }
+
+    let published = false;
+    if (!spec.email) {
+      await c.query("UPDATE eureka.outbox_event SET published_at = now() WHERE id = $1 AND published_at IS NULL", [id]);
+      published = true;
+    }
     await c.query("COMMIT");
-    return { ev, groups };
+    return { ev, spec, inApp, published };
   } catch (err) {
     await c.query("ROLLBACK").catch(() => undefined);
     throw err;
@@ -165,6 +162,10 @@ export interface DeliveryResult {
   skipped: number;
   inDoubt: number;
   failed: number;
+  /** Inbox rows of the event (in-app types only). */
+  inApp?: number;
+  /** An inbox-only run of a type that also emails: the email part is still to come. */
+  emailPending?: boolean;
 }
 
 export interface DeliveryOptions {
@@ -172,21 +173,32 @@ export interface DeliveryOptions {
   maxRejections: number;
   /** A `sending` row older than this (the runner lease) is in doubt. */
   staleSendingMs: number;
+  mode: DeliveryMode;
 }
-export const DEFAULT_DELIVERY_OPTIONS: DeliveryOptions = { maxRejections: 5, staleSendingMs: DEFAULT_RUNNER_OPTIONS.leaseMs };
+export const DEFAULT_DELIVERY_OPTIONS: DeliveryOptions = {
+  maxRejections: 5, staleSendingMs: DEFAULT_RUNNER_OPTIONS.leaseMs, mode: "full",
+};
 
 /** Delivers one event (see the module comment). Throws when a retry is needed. */
 export async function deliverEvent(
-  pool: pg.Pool, mail: MailTransport, origin: string, id: string,
+  pool: pg.Pool, mail: MailTransport | null, origin: string | null, id: string,
   ctx: { log: Logger; signal: AbortSignal; heartbeat?: () => void },
   options: Partial<DeliveryOptions> = {},
 ): Promise<DeliveryResult> {
   const opts = { ...DEFAULT_DELIVERY_OPTIONS, ...options };
-  const prepared = await prepare(pool, id, ctx.log, opts.staleSendingMs);
+  const withEmail = opts.mode === "full";
+  const prepared = await prepare(pool, id, ctx.log, opts.staleSendingMs, withEmail && mail !== null);
   if (!prepared) return { alreadyPublished: true, recipients: 0, sent: 0, skipped: 0, inDoubt: 0, failed: 0 };
-  const { ev, groups } = prepared;
-  const roles = rolesOf(groups);
-  renderEmail(ev, origin, groups); // a malformed event fails before anyone is emailed
+  const { ev, spec, inApp } = prepared;
+  const extra = inApp === undefined ? {} : { inApp };
+  if (!spec.email) {
+    return { alreadyPublished: false, recipients: inApp ?? 0, sent: 0, skipped: 0, inDoubt: 0, failed: 0, ...extra };
+  }
+  if (!withEmail) {
+    return { alreadyPublished: false, recipients: inApp ?? 0, sent: 0, skipped: 0, inDoubt: 0, failed: 0, ...extra, emailPending: true };
+  }
+  // A full run of an emailing type needs a transport: never record success without the email part.
+  if (!mail || !origin) throw new Error("email delivery is not configured; retry pending");
 
   const pending = await pool.query<{ user_id: string }>(
     `SELECT user_id FROM eureka.outbox_delivery WHERE event_id = $1 AND status = 'pending' ORDER BY user_id`, [id]);
@@ -194,12 +206,12 @@ export async function deliverEvent(
   for (const { user_id: userId } of pending.rows) {
     ctx.signal.throwIfAborted();
     ctx.heartbeat?.();
-    // Still active and still in a recipient group? Which groups (for the email)?
-    const who = await pool.query<{ email: string; roles: string[] }>(
-      `SELECT u.email::text AS email, array_agg(DISTINCT ur.role_key) AS roles
-         FROM eureka.app_user u JOIN eureka.user_role ur ON ur.user_id = u.id
-        WHERE u.id = $1 AND u.status = 'active' AND ur.role_key = ANY ($2::text[]) AND ur.valid @> now()
-        GROUP BY u.email`, [userId, roles]);
+    // Still a recipient (active, role or relation still holds)? For which reasons (for the email)?
+    const who = await pool.query<{ email: string; reasons: string[] }>(
+      `SELECT u.email::text AS email, array_agg(DISTINCT r.reason ORDER BY r.reason) AS reasons
+         FROM authz.notification_recipients($1, $2) r JOIN eureka.app_user u ON u.id = r.recipient_id
+        WHERE u.status = 'active'
+        GROUP BY u.email`, [id, userId]);
     const recipient = who.rows[0];
     if (!recipient) {
       await pool.query(
@@ -207,8 +219,7 @@ export async function deliverEvent(
         [id, userId]);
       continue;
     }
-    const mine = groups.filter((g) => RECIPIENT_GROUPS[g].some((r) => recipient.roles.includes(r)));
-    const { subject, text } = renderEmail(ev, origin, mine);
+    const { subject, text } = renderEmail(ev, origin, recipient.reasons);
 
     // The dedupe marker: committed before the provider call.
     const claimed = await pool.query<{ rejections: number }>(
@@ -259,30 +270,46 @@ export async function deliverEvent(
   if (recipients === 0) throw new Error("outbox event has no recipients; retry pending");
 
   await pool.query("UPDATE eureka.outbox_event SET published_at = now() WHERE id = $1 AND published_at IS NULL", [id]);
-  return { alreadyPublished: false, recipients, sent: n("sent"), skipped: n("skipped"), inDoubt: n("in_doubt"), failed: n("failed") };
-}
-
-/** Unpublished deliverable events, oldest first, skipping events waiting in backoff. */
-export async function dueOutboxEvents(pool: pg.Pool, batchSize: number): Promise<string[]> {
-  const r = await pool.query<{ id: string }>(
-    `SELECT e.id FROM eureka.outbox_event e
-      WHERE e.published_at IS NULL AND e.type = ANY ($1::text[])
-        AND NOT EXISTS (SELECT 1 FROM eureka.job_run j
-                         WHERE j.job_name = $2 AND j.run_key = e.id::text
-                           AND (j.next_attempt_at > now() OR (j.status = 'running' AND j.lease_until > now())))
-      ORDER BY e.created_at, e.id LIMIT $3`, [DELIVERED_TYPES, OUTBOX_DELIVERY_JOB, batchSize]);
-  return r.rows.map((x) => x.id);
+  return { alreadyPublished: false, recipients, sent: n("sent"), skipped: n("skipped"), inDoubt: n("in_doubt"), failed: n("failed"), ...extra };
 }
 
 /**
- * Backlog cut-off (OUTBOX_DELIVER_SINCE): unpublished events created before
- * `since` are marked published without sending, so enabling delivery on a
- * database with old events does not email them all. Returns the count.
+ * Run keys of unpublished deliverable events, oldest first, skipping keys
+ * waiting in backoff or under a live lease. With mail: every delivered type
+ * (key = event id). Without mail: in-app-only types (key = event id) and,
+ * for types that also email, the inbox part once (key = `inbox:<id>`, until
+ * the inbox_fanout marker exists); email-only events wait.
+ */
+export async function dueOutboxEvents(pool: pg.Pool, batchSize: number, mailEnabled = true): Promise<string[]> {
+  const r = await pool.query<{ key: string }>(
+    `SELECT k.key FROM (
+       SELECT e.created_at, e.id,
+              CASE WHEN $4 OR NOT (e.type = ANY ($5::text[])) THEN e.id::text ELSE $6 || e.id::text END AS key
+         FROM eureka.outbox_event e
+        WHERE e.published_at IS NULL AND e.type = ANY ($1::text[])
+          AND ($4 OR NOT (e.type = ANY ($5::text[]))
+               OR (e.type = ANY ($7::text[]) AND NOT EXISTS (SELECT 1 FROM eureka.inbox_fanout f WHERE f.event_id = e.id)))
+     ) k
+      WHERE NOT EXISTS (SELECT 1 FROM eureka.job_run j
+                         WHERE j.job_name = $2 AND j.run_key = k.key
+                           AND (j.next_attempt_at > now() OR (j.status = 'running' AND j.lease_until > now())))
+      ORDER BY k.created_at, k.id LIMIT $3`,
+    [DELIVERED_TYPES, OUTBOX_DELIVERY_JOB, batchSize, mailEnabled, EMAIL_TYPES, INBOX_KEY_PREFIX, INBOX_TYPES]);
+  return r.rows.map((x) => x.key);
+}
+
+/**
+ * Backlog cut-off (OUTBOX_DELIVER_SINCE): unpublished emailing events created
+ * before `since` are marked published without sending, so enabling delivery on
+ * a database with old events does not email them all. An event that also has
+ * an inbox part is cut off only once its inbox rows exist. Returns the count.
  */
 export async function skipBacklog(pool: pg.Pool, since: Date, log: Logger): Promise<number> {
   const r = await pool.query(
-    `UPDATE eureka.outbox_event SET published_at = now()
-      WHERE published_at IS NULL AND created_at < $1 AND type = ANY ($2::text[])`, [since, DELIVERED_TYPES]);
+    `UPDATE eureka.outbox_event e SET published_at = now()
+      WHERE e.published_at IS NULL AND e.created_at < $1 AND e.type = ANY ($2::text[])
+        AND (NOT (e.type = ANY ($3::text[])) OR EXISTS (SELECT 1 FROM eureka.inbox_fanout f WHERE f.event_id = e.id))`,
+    [since, EMAIL_TYPES, INBOX_TYPES]);
   const skipped = r.rowCount ?? 0;
   if (skipped > 0) {
     log.warn("outbox events before OUTBOX_DELIVER_SINCE marked published without sending", {
@@ -291,21 +318,29 @@ export async function skipBacklog(pool: pg.Pool, since: Date, log: Logger): Prom
   return skipped;
 }
 
-export interface OutboxDeliveryJobOptions extends Partial<DeliveryOptions> {
+export interface OutboxDeliveryJobOptions extends Partial<Omit<DeliveryOptions, "mode">> {
   batchSize: number;
-  /** Events created before this are never emailed (see skipBacklog). */
+  /** Events created before this are never emailed (see skipBacklog; only with mail). */
   deliverSince?: Date;
 }
 
-export function outboxDeliveryJob(mail: MailTransport, origin: string, o: OutboxDeliveryJobOptions): JobDefinition {
+/**
+ * The delivery job. `mail` and `origin` null (OUTBOX_MAIL_MODE=disabled): the
+ * inbox channel only (see dueOutboxEvents).
+ */
+export function outboxDeliveryJob(mail: MailTransport | null, origin: string | null, o: OutboxDeliveryJobOptions): JobDefinition {
+  const mailEnabled = mail !== null && origin !== null;
   return {
     name: OUTBOX_DELIVERY_JOB,
     async dueKeys(_now, { pool, log }) {
-      if (o.deliverSince) await skipBacklog(pool, o.deliverSince, log);
-      return dueOutboxEvents(pool, o.batchSize);
+      if (mailEnabled && o.deliverSince) await skipBacklog(pool, o.deliverSince, log);
+      return dueOutboxEvents(pool, o.batchSize, mailEnabled);
     },
-    async run(id, ctx) {
-      const r = await deliverEvent(ctx.pool, mail, origin, id, ctx, o);
+    async run(key, ctx) {
+      const inbox = key.startsWith(INBOX_KEY_PREFIX);
+      const id = inbox ? key.slice(INBOX_KEY_PREFIX.length) : key;
+      const r = await deliverEvent(ctx.pool, mailEnabled ? mail : null, mailEnabled ? origin : null, id, ctx,
+        { ...o, mode: inbox ? "inbox" : "full" });
       return { ...r };
     },
   };

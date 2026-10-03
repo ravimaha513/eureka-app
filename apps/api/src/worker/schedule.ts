@@ -92,3 +92,27 @@ export const IDEMPOTENCY_CLEANUP_SCHEDULE: DailySchedule = { hh: 4, mm: 15, time
 export function dueMaintenanceKeys(now: Date, s: DailySchedule): string[] {
   return dueDailyKeys(now, s.hh, s.mm, s.timeZone, 1);
 }
+
+/** "YYYY-MM-DD" of the calendar day containing `d` in `timeZone`. */
+export function localDateKey(d: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+}
+
+/**
+ * The run key of a daily reminder job at `now`: today's local date in the
+ * schedule's zone once hh:mm local has passed, else yesterday's. Reminder jobs
+ * are level-based (they emit whatever is due as of the key's day, once per
+ * subject), so a worker that was down only needs the latest day.
+ */
+export function dueReminderKey(now: Date, s: DailySchedule): string {
+  const today = localDateKey(now, s.timeZone);
+  return zonedTime(today, s.hh, s.mm, s.timeZone).getTime() <= now.getTime() ? today : addDays(today, -1);
+}
+
+/**
+ * Daily reminder and notification maintenance schedules (design B6).
+ * - bench-time (FR-NTF-05): 07:45 New York, before the US working day.
+ * - notification-prune: 04:30 New York, after the outbox prune.
+ */
+export const BENCH_TIME_SCHEDULE: DailySchedule = { hh: 7, mm: 45, timeZone: "America/New_York" };
+export const NOTIFICATION_PRUNE_SCHEDULE: DailySchedule = { hh: 4, mm: 30, timeZone: "America/New_York" };

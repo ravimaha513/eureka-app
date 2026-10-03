@@ -4,7 +4,9 @@
  * Jobs: audit-export (nightly, 03:30 America/New_York), feedback email and
  * notification, outbox delivery (every tick), outbox prune and idempotency-key
  * cleanup (daily, schedules in worker/schedule.ts), resume scan-and-promote (every
- * tick, when DOCUMENTS_BUCKET or LOCAL_STORAGE_DIR is set). Phase 3 adds reminders and retention.
+ * tick, when DOCUMENTS_BUCKET or LOCAL_STORAGE_DIR is set), notification inbox prune (daily) and
+ * the bench-time reminder (daily, when NOTIFY_BENCH_DAYS is set). The outbox delivery job always
+ * runs: without a mail mode it delivers the in-app inbox channel only (docs/notifications.md).
  */
 import { utimes, writeFile } from "node:fs/promises";
 import { S3Client } from "@aws-sdk/client-s3";
@@ -12,6 +14,7 @@ import pg from "pg";
 import { LocalMail, SesMail } from "./worker/feedback-mail.js";
 import { feedbackEmailJob, feedbackNotificationJob } from "./worker/jobs/feedback-email.js";
 import { idempotencyCleanupJob, outboxDeliveryJob, outboxPruneJob } from "./worker/jobs/outbox.js";
+import { benchTimeJob, notificationPruneJob } from "./worker/jobs/notifications.js";
 import { loadWorkerConfig } from "./worker/config.js";
 import { auditExportJob } from "./worker/jobs/audit-export.js";
 import { createLogger, errorFields } from "./worker/log.js";
@@ -48,15 +51,20 @@ const jobs = [
   auditExportJob(sink, config.AUDIT_EXPORT_MAX_DAYS_PER_TICK),
   outboxPruneJob(config.OUTBOX_RETENTION_DAYS),
   idempotencyCleanupJob(),
+  notificationPruneJob(config.NOTIFICATION_RETENTION_DAYS),
 ];
-if (config.OUTBOX_MAIL_MODE !== "disabled") {
-  const mail = config.OUTBOX_MAIL_MODE === "local" ? new LocalMail(config.OUTBOX_MAIL_DIR!) : new SesMail(config.AWS_REGION!, config.OUTBOX_FROM_EMAIL!);
-  jobs.push(outboxDeliveryJob(mail, new URL(config.APP_PUBLIC_ORIGIN!).origin, {
+{
+  // Without a mail mode only the in-app channel is delivered; emailing events stay unpublished.
+  const mail = config.OUTBOX_MAIL_MODE === "disabled" ? null
+    : config.OUTBOX_MAIL_MODE === "local" ? new LocalMail(config.OUTBOX_MAIL_DIR!) : new SesMail(config.AWS_REGION!, config.OUTBOX_FROM_EMAIL!);
+  jobs.push(outboxDeliveryJob(mail, mail ? new URL(config.APP_PUBLIC_ORIGIN!).origin : null, {
     batchSize: config.OUTBOX_BATCH_SIZE,
     maxRejections: config.OUTBOX_MAX_REJECTIONS,
     deliverSince: config.OUTBOX_DELIVER_SINCE ? new Date(config.OUTBOX_DELIVER_SINCE) : undefined,
   }));
 }
+if (config.NOTIFY_BENCH_DAYS) jobs.push(benchTimeJob(config.NOTIFY_BENCH_DAYS));
+else log.warn("bench-time reminder is off (NOTIFY_BENCH_DAYS unset; threshold is open decision OD-05)");
 if (config.FEEDBACK_MAIL_MODE !== "disabled") {
   const mail = config.FEEDBACK_MAIL_MODE === "local" ? new LocalMail(config.FEEDBACK_MAIL_DIR!) : new SesMail(config.AWS_REGION!, config.FEEDBACK_FROM_EMAIL!);
   const origin = new URL(config.FEEDBACK_PUBLIC_ORIGIN!).origin;

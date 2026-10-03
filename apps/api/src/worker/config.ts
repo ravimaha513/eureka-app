@@ -44,6 +44,11 @@ const WorkerConfigSchema = z
     // Backlog cut-off: unpublished events created before this instant are marked
     // published without sending (set it when first enabling delivery).
     OUTBOX_DELIVER_SINCE: z.string().datetime({ offset: true }).optional(),
+    // In-app inbox rows are deleted after this many days (the database refuses fewer than 30).
+    NOTIFICATION_RETENTION_DAYS: z.coerce.number().int().min(30).max(3650).default(180),
+    // FR-NTF-05 bench-time: notify once a candidate has been on bench this many days.
+    // The threshold is an open product decision (design OD-05): unset, the job is off.
+    NOTIFY_BENCH_DAYS: z.coerce.number().int().min(1).max(365).optional(),
     // Resume scan-and-promote (resume-scan job): the documents bucket in AWS, or
     // the API's local document directory with the fake scanner (development).
     // Neither: the job is off and uploads stay pending.
