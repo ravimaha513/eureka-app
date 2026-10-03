@@ -203,6 +203,37 @@ const CASES: RejectCase[] = [
       fileName: "../../etc/passwd", scannedAt: PAST, uploadExpiresAt: "2099-01-01T00:00:00Z",
     },
   },
+  // work authorization (FR-VIS-01, migration 0042): person, ciphertext, key, audit columns and row version are the server's
+  {
+    route: "POST /api/v1/candidates/:id/work-authorizations", actor: "imm",
+    prepare: async () => {
+      const cand = await freshOwn();
+      return {
+        url: `/api/v1/candidates/${cand.id}/work-authorizations`, body: { type: "h1b", number: "EAC2190012345", status: "valid", validTo: "2028-01-31" },
+        state: () => rows(`SELECT count(*)::int AS n, (SELECT count(*)::int FROM eureka.field_key) AS keys FROM eureka.work_authorization`),
+      };
+    },
+    forbidden: {
+      personId: FOREIGN_ID, candidateId: FOREIGN_ID, numberEnc: "AQ==", number_enc: "AQ==", numberKeyId: FOREIGN_ID, keyId: FOREIGN_ID,
+      numberMasked: "x", hasNumber: false, expired: true, daysToExpiry: 1, updatedBy: U.hr, authType: "o1", row_version: 9,
+    },
+  },
+  {
+    route: "PATCH /api/v1/candidates/:id/work-authorizations/:waId", actor: "imm",
+    prepare: async () => {
+      const cand = await freshOwn();
+      const wa = await ok("imm", "POST", `/api/v1/candidates/${cand.id}/work-authorizations`, { type: "h1b", number: "EAC2190012345", status: "valid" });
+      return {
+        url: `/api/v1/candidates/${cand.id}/work-authorizations/${wa.id}`, body: { status: "revoked", number: "WAC1" },
+        headers: { "if-match": "1" },
+        state: () => rows(`SELECT * FROM eureka.work_authorization WHERE id = $1`, [wa.id]),
+      };
+    },
+    forbidden: {
+      personId: FOREIGN_ID, candidateId: FOREIGN_ID, numberEnc: "AQ==", numberKeyId: FOREIGN_ID, keyId: FOREIGN_ID,
+      numberMasked: "x", hasNumber: false, expired: true, updatedBy: U.hr, row_version: 9,
+    },
+  },
   // sheet import sign-off (docs/import.md, migration 0033)
   // identity
   {
@@ -529,6 +560,24 @@ const CASES: RejectCase[] = [
 /** Endpoints that read no body: what they change comes from the URL and the session only. */
 interface IgnoreCase { route: string; run: () => Promise<void> }
 const IGNORED: IgnoreCase[] = [
+  {
+    // The reveal takes no body: the record comes from the URL, the reader from the session.
+    route: "POST /api/v1/candidates/:id/work-authorizations/:waId/reveal",
+    run: async () => {
+      const cand = await freshOwn();
+      const a = await ok("imm", "POST", `/api/v1/candidates/${cand.id}/work-authorizations`, { type: "h1b", number: "AAA111", status: "valid" });
+      const b = await ok("imm", "POST", `/api/v1/candidates/${cand.id}/work-authorizations`, { type: "h1b", number: "BBB222", status: "valid" });
+      const before = await rows(`SELECT * FROM eureka.work_authorization ORDER BY id`);
+      const r = await call("imm", "POST", `/api/v1/candidates/${cand.id}/work-authorizations/${a.id}/reveal`, {
+        ...SERVER_MANAGED, waId: b.id, candidateId: FOREIGN_ID, actorId: U.hr, number: "ZZZ999",
+      });
+      expect(r.statusCode, r.body).toBe(200);
+      expect(r.json()).toEqual({ id: a.id, number: "AAA111" });
+      expect(await rows(`SELECT * FROM eureka.work_authorization ORDER BY id`)).toEqual(before);
+      const audit = await rows(`SELECT actor_id, entity_id, changes FROM eureka.audit_event WHERE action = 'work_authorization.number_revealed' ORDER BY seq DESC LIMIT 1`);
+      expect(audit).toEqual([{ actor_id: U.imm, entity_id: a.id, changes: { candidateId: cand.id } }]);
+    },
+  },
   {
     route: "POST /api/v1/candidates/:id/resumes/:resumeId/download",
     run: async () => {
