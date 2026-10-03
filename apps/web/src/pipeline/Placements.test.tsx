@@ -83,9 +83,28 @@ describe("Placement detail", () => {
     const table = await within(drawer).findByRole("table", { name: "Paperwork checklist" });
     const rows = within(table).getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell").map((c) => c.textContent));
     expect(rows).toEqual([
-      ["Offer letter", "HR", "Required", "Pending"],
-      ["Direct deposit", "Accounts", "Optional", "Pending"],
+      ["Offer letter", "HR", "Required", "Pending", "—"],
+      ["Direct deposit", "Accounts", "Optional", "Pending", "—"],
     ]);
+    expect(within(drawer).getByText(/0 of 2 done \(1 required open\)/)).toBeInTheDocument();
+    // No bgc key (no document:read over this placement): no BGC section.
+    expect(within(drawer).queryByRole("heading", { name: "Background check" })).not.toBeInTheDocument();
+  });
+
+  it("shows checklist progress, overdue items and the BGC status (migration 0044)", async () => {
+    api.routes["GET /api/v1/placements/p1"] = () => ({ body: { ...FULL_P1, bgc: { status: "in_progress" }, checklist: [
+      { id: "i1", docType: "sample_doc_a", ownerRole: "hr", required: true, status: "verified", dueOn: null, overdue: false },
+      { id: "i2", docType: "sample_doc_b", ownerRole: "immigration", required: true, status: "received", dueOn: "2026-01-05", overdue: true },
+      { id: "i3", docType: "sample_doc_c", ownerRole: "accounts", required: false, status: "waived", dueOn: null, overdue: false },
+    ] } });
+    wrap(<PlacementsPage me={RECRUITER} />);
+    const drawer = await openDrawer("Asha Iyer");
+    expect(await within(drawer).findByText(/2 of 3 done \(1 required open, 1 overdue\)/)).toBeInTheDocument();
+    expect(within(drawer).getByRole("progressbar", { name: "Paperwork done" })).toHaveAttribute("value", "2");
+    const table = within(drawer).getByRole("table", { name: "Paperwork checklist" });
+    expect(within(table).getByText("Overdue")).toHaveClass("badge", "overdue");
+    expect(within(drawer).getByRole("heading", { name: "Background check" })).toBeInTheDocument();
+    expect(within(drawer).getByText("In progress")).toHaveClass("badge", "bgc-in_progress");
   });
 
   it("says when the placement type has no checklist, and hides the section for servers without one", async () => {
