@@ -56,6 +56,15 @@ variable "outbox_deliver_since" {
   type        = string
   default     = ""
 }
+variable "restricted_break_glass_role_arn" {
+  description = "IAM role ARN allowed to decrypt with the restricted KMS key besides the API and worker task roles (emergency access, audited by CloudTrail). Empty: nobody else."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.restricted_break_glass_role_arn == "" || can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/.+$", var.restricted_break_glass_role_arn))
+    error_message = "restricted_break_glass_role_arn must be empty or an IAM role ARN."
+  }
+}
 variable "use_fargate_spot" { type = bool }
 
 variable "image_tag" {
