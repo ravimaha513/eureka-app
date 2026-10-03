@@ -83,7 +83,7 @@ describe("producers delivered end to end (inbox + local email)", () => {
     const nyDay = (await db.admin.query<{ d: string }>(
       "SELECT ((now() AT TIME ZONE 'America/New_York')::date + 45)::text AS d")).rows[0]!.d;
     const waId = randomUUID();
-    await asUser(db.app, U.imm, (c) => c.query("SELECT authz.work_auth_create($1, $2, 'h4_ead', NULL, NULL, NULL, $3::date, 'valid')",
+    await asUser(db.app, U.imm, (c) => c.query("SELECT authz.work_auth_create($1, $2, 'h4_ead', NULL, NULL, NULL, NULL, $3::date, 'valid')",
       [waId, cand.id, nyDay]), true);
     await visaExpiryJob([90, 60, 30]).run("label", { ...workerCtx(), pool: db.worker });
     const [ev] = await eventsOf("work_authorization.expiring", waId);
