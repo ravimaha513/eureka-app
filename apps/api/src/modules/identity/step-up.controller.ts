@@ -106,23 +106,35 @@ export class StepUpController {
       throw new ForbiddenException("Step-up expired, please try again");
     }
     const saved = JSON.parse(Buffer.from(payload, "base64url").toString()) as { state: string; nonce: string; verifier: string };
-    if (typeof state !== "string" || state !== saved.state || typeof code !== "string" || !code) {
-      throw new ForbiddenException("Step-up state mismatch");
-    }
+    if (typeof state !== "string" || state !== saved.state) throw new ForbiddenException("Step-up state mismatch");
     void reply.clearCookie(STEP_UP_COOKIE, { path: COOKIE_PATH });
 
+    // The challenge is consumed on every path from here (single use, also when
+    // the user cancelled at Google or the token is refused), each with its reason.
+    let r: { outcome: string; return_to: string | null };
     let identity: { sub: string; authTime: Date } | null = null;
-    try {
-      const idToken = await this.oidc.exchange(code, saved.verifier, this.redirectUri());
-      identity = await this.oidc.verifyStepUp(idToken, saved.nonce);
-    } catch (err) {
-      this.log.warn(`step-up token refused: ${(err as Error).message}`);
+    let failure: "cancelled" | "token_refused" | null = null;
+    if (typeof code !== "string" || !code) {
+      failure = "cancelled"; // error=access_denied or no code
+    } else {
+      try {
+        const idToken = await this.oidc.exchange(code, saved.verifier, this.redirectUri());
+        identity = await this.oidc.verifyStepUp(idToken, saved.nonce);
+      } catch (err) {
+        this.log.warn(`step-up token refused: ${(err as Error).message}`);
+        failure = "token_refused";
+      }
     }
-    // Consumes the challenge whatever the token said (a refused token records why: no sub or auth_time).
-    const r = await this.db.withUser(user.id, async (c) => (await c.query<{ outcome: string; return_to: string | null }>(
-      `SELECT outcome, return_to FROM authz.step_up_complete($1, $2, $3, $4, $5, $6, $7)`,
-      [user.sessionHash, sha256(saved.state), sha256(saved.nonce), identity?.sub ?? null, identity?.authTime ?? null,
-        this.config.STEP_UP_MAX_AGE_SECONDS, this.config.STEP_UP_TTL_MINUTES])).rows[0]!);
+    if (failure || !identity) {
+      r = await this.db.withUser(user.id, async (c) => (await c.query<{ outcome: string; return_to: string | null }>(
+        `SELECT outcome, return_to FROM authz.step_up_fail($1, $2, $3)`,
+        [user.sessionHash, sha256(saved.state), failure ?? "token_refused"])).rows[0]!);
+    } else {
+      r = await this.db.withUser(user.id, async (c) => (await c.query<{ outcome: string; return_to: string | null }>(
+        `SELECT outcome, return_to FROM authz.step_up_complete($1, $2, $3, $4, $5, $6, $7)`,
+        [user.sessionHash, sha256(saved.state), sha256(saved.nonce), identity.sub, identity.authTime,
+          this.config.STEP_UP_MAX_AGE_SECONDS, this.config.STEP_UP_TTL_MINUTES])).rows[0]!);
+    }
     const back = r.return_to && ReturnPath.safeParse(r.return_to).success ? r.return_to : "/";
     const target = new URL(back, this.config.PUBLIC_BASE_URL);
     if (target.origin !== new URL(this.config.PUBLIC_BASE_URL).origin) throw new ForbiddenException("Step-up return path refused");

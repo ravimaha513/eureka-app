@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DOCUMENT_TYPES, DOCUMENT_TYPE_LIST, candidateVisible, documentAccess, resolveScope } from "@eureka/shared";
+import { migrate } from "../src/db/migrate.js";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 import { createPlacement, newCandidate, selectedSubmission } from "./placement-seed.js";
@@ -402,6 +403,26 @@ describe("step-up (authz.step_up_*)", () => {
     await expect(begin(U.hr, s2, state(), nonce)).rejects.toThrow(/not_permitted/);
   });
 
+  it("step_up_fail consumes the challenge with its reason (cancelled / token_refused); only this session's; no grant", async () => {
+    const fail = (userId: string, s: Buffer, st: Buffer, reason: string) => asUser(db.app, userId, async (c) =>
+      (await c.query<{ outcome: string; return_to: string | null }>(`SELECT * FROM authz.step_up_fail($1, $2, $3)`, [s, sha256(st), reason])).rows[0]!, true);
+    const s = await session(U.hr);
+    const st = state(); const nonce = randomBytes(16);
+    await begin(U.hr, s, st, nonce, "/x");
+    expect(await fail(U.hr, await session(U.hr), st, "cancelled")).toEqual({ outcome: "unknown_state", return_to: null });
+    expect(await fail(U.hr, s, st, "cancelled")).toEqual({ outcome: "cancelled", return_to: "/x" });
+    expect(await fail(U.hr, s, st, "token_refused")).toMatchObject({ outcome: "replayed" });
+    expect((await complete(U.hr, s, st, nonce, `sub-${U.hr}`, new Date())).outcome).toBe("replayed");
+    expect(await current(U.hr, s)).toEqual([]);
+    const st2 = state();
+    await begin(U.hr, s, st2, nonce);
+    expect((await fail(U.hr, s, st2, "token_refused")).outcome).toBe("token_refused");
+    await expect(fail(U.hr, s, state(), "wrong_account")).rejects.toThrow(/invalid_step_up/);
+    await expect(fail(U.acct, s, st2, "cancelled")).rejects.toThrow(/not_permitted/);
+    const reasons = (await db.admin.query(`SELECT changes ->> 'reason' r FROM eureka.audit_event WHERE action = 'auth.step_up_failed' AND actor_id = $1 ORDER BY seq DESC LIMIT 5`, [U.hr])).rows.map((x) => x.r);
+    expect(reasons.slice(0, 2)).toEqual(["token_refused", "replayed"]);
+  });
+
   it("begin: own live session only, same-origin return path, at most ten per session in ten minutes", async () => {
     const s = await session(U.imm);
     await expect(begin(U.acct, s, state(), randomBytes(16))).rejects.toThrow(/not_permitted/);
@@ -439,6 +460,18 @@ describe("step-up (authz.step_up_*)", () => {
       await c.query("ROLLBACK");
       c.release();
     }
+  });
+
+  it("a production migration run deletes the dev_step_up switch; a non-production run keeps it", async () => {
+    const url = `${process.env.TEST_PG_ADMIN_URL ?? "postgres://postgres:postgres@127.0.0.1:5432"}/${db.name}`;
+    const setting = async () => (await db.admin.query(`SELECT value FROM authz.policy_setting WHERE key = 'dev_step_up'`)).rows;
+    await db.admin.query(`INSERT INTO authz.policy_setting (key, value) VALUES ('dev_step_up', 'on') ON CONFLICT (key) DO UPDATE SET value = 'on'`);
+    await migrate(url, { production: false });
+    expect(await setting()).toEqual([{ value: "on" }]);
+    await migrate(url, { production: true });
+    expect(await setting()).toEqual([]);
+    const s = await session(U.hr);
+    await expect(devGrant(U.hr, s)).rejects.toThrow(/not_permitted/);
   });
 
   it("dev step-up is refused unless dev_step_up = 'on' (no migration sets it)", async () => {
