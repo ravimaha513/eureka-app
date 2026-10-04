@@ -91,7 +91,7 @@ export function CandidateWorkAuthorization({ candidateId }: { candidateId: strin
         : q.error ? <p className="error">{workAuthError(q.error, "load")}</p>
         : items.length === 0 ? <p className="muted">No work authorization recorded.</p>
         : (
-          <table aria-label="Work authorization records">
+          <div className="tablewrap"><table aria-label="Work authorization records">
             <thead><tr>
               <th scope="col">Type</th><th scope="col">Number</th><th scope="col">Valid from</th><th scope="col">Expires</th>
               <th scope="col">Status</th><th scope="col"><span className="sr-only">Actions</span></th>
@@ -125,7 +125,7 @@ export function CandidateWorkAuthorization({ candidateId }: { candidateId: strin
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       {q.data?.canEdit && (
         <button type="button" className="btn" onClick={() => setEditing("new")}>Add work authorization</button>

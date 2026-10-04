@@ -105,7 +105,7 @@ export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "ca
           {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
             <p className="empty error" role="alert">{pipelineError(q.error, "placement")} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
           ) : (
-            <table aria-label="Placements" aria-busy={q.isFetching || undefined}>
+            <div className="tablewrap"><table aria-label="Placements" aria-busy={q.isFetching || undefined}>
               <thead><tr>
                 <th>Candidate</th><th>Client / vendor</th><th>Type</th><th>Tentative start</th><th>Status</th><th>Recruiter</th>
                 {showRate && <th>Rate</th>}
@@ -130,7 +130,7 @@ export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "ca
                   <tr><td colSpan={showRate ? 8 : 7} className="empty">{hasFilters ? "No placements match these filters." : "No placements yet. Create one from a selected submission."}</td></tr>
                 )}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       )}
@@ -223,7 +223,7 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
             <section className="manageblock" aria-labelledby={`${hid}-c`}>
               <h3 id={`${hid}-c`}>Contacts</h3>
               {!full ? <p className="muted">Loading contacts…</p> : !p.contacts?.length ? <p className="muted">No contacts recorded.</p> : (
-                <table className="mini" aria-labelledby={`${hid}-c`}>
+                <div className="tablewrap"><table className="mini" aria-labelledby={`${hid}-c`}>
                   <thead><tr><th>Kind</th><th>Name</th><th>Email</th><th>Phone</th></tr></thead>
                   <tbody>
                     {p.contacts.map((c, i) => (
@@ -235,7 +235,7 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               )}
             </section>
 
@@ -247,7 +247,7 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
                 ) : (
                   <>
                     <ChecklistProgress items={p.checklist} />
-                    <table className="mini" aria-labelledby={`${hid}-k`}>
+                    <div className="tablewrap"><table className="mini" aria-labelledby={`${hid}-k`}>
                       <thead><tr><th>Document</th><th>Owner</th><th>Required</th><th>Status</th><th>Due</th></tr></thead>
                       <tbody>
                         {p.checklist.map((c) => (
@@ -260,7 +260,7 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                    </table></div>
                   </>
                 )}
               </section>

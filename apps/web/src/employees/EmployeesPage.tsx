@@ -101,7 +101,7 @@ export function EmployeesPage(_: { me?: Pick<Me, "capabilities"> }) {
         {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
           <p className="empty error" role="alert">{employmentError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
         ) : (
-          <table aria-label="Employees" aria-busy={q.isFetching || undefined}>
+          <div className="tablewrap"><table aria-label="Employees" aria-busy={q.isFetching || undefined}>
             <thead><tr>
               <th>Employee</th><th>Status</th><th>Current client</th><th>Assignment</th><th>Planned end</th><th>Location / team</th>
               <th><span className="sr-only">Actions</span></th>
@@ -128,7 +128,7 @@ export function EmployeesPage(_: { me?: Pick<Me, "capabilities"> }) {
                 <tr><td colSpan={7} className="empty">{hasFilters ? "No employees match these filters." : "No employees yet. A person becomes an employee when their placement is marked Joined."}</td></tr>
               )}
             </tbody>
-          </table>
+          </table></div>
         )}
       </div>
       <div className="listfoot">
@@ -218,7 +218,7 @@ function EmployeeDrawer({ id, initial, onClose, onNotice }: {
               {!full ? <p className="muted">Loading assignments…</p> : e.assignments.length === 0 ? (
                 <p className="muted">No assignment you can see.</p>
               ) : (
-                <table className="mini" aria-labelledby={`${hid}-as`}>
+                <div className="tablewrap"><table className="mini" aria-labelledby={`${hid}-as`}>
                   <thead><tr><th>No.</th><th>Client</th><th>Started</th><th>Ended</th><th>Planned end</th><th>Reason</th></tr></thead>
                   <tbody>
                     {e.assignments.map((x) => (
@@ -232,7 +232,7 @@ function EmployeeDrawer({ id, initial, onClose, onNotice }: {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               )}
             </section>
 

@@ -87,23 +87,38 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   };
   const sections = [...new Set(items.map((i) => i.section))];
   const current = items.find((i) => i.key === active);
+  // Phones: the sidebar is an off-canvas drawer opened from the top bar's menu button.
+  const [navOpen, setNavOpen] = useState(false);
+  const menuBtn = useRef<HTMLButtonElement>(null);
+  const sideRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!navOpen) return;
+    sideRef.current?.querySelector<HTMLElement>(".nav")?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setNavOpen(false); menuBtn.current?.focus(); } };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [navOpen]);
   return (
     <div className="app">
-      <aside className="side" aria-label="Main navigation">
+      <aside id="mainnav" ref={sideRef} className={navOpen ? "side open" : "side"} aria-label="Main navigation">
         <div className="brand"><span className="logo">✦</span>Eureka</div>
         {sections.map((s) => (
           <div key={s}>
             <div className="navsec">{s}</div>
             {items.filter((i) => i.section === s).map((i) => (
-              <button key={i.key} className="nav" aria-current={i.key === active ? "page" : undefined} onClick={() => { setActive(i.key); setProfileId(null); setPlacementId(null); }}>{i.label}</button>
+              <button key={i.key} className="nav" aria-current={i.key === active ? "page" : undefined} onClick={() => { setActive(i.key); setProfileId(null); setPlacementId(null); setNavOpen(false); }}>{i.label}</button>
             ))}
           </div>
         ))}
         <div className="sidefoot">{me.displayName}<small>{me.roles.map((r) => r.label).join(", ")}</small>
           <button className="nav" onClick={onSignOut}>Sign out</button></div>
       </aside>
+      {navOpen && <div className="navscrim" aria-hidden="true" onClick={() => setNavOpen(false)} />}
       <main className="main">
         <div className="top">
+          <button ref={menuBtn} type="button" className="menubtn" aria-label="Menu" aria-controls="mainnav" aria-expanded={navOpen}
+            onClick={() => setNavOpen((o) => !o)}>☰</button>
+          <span className="topbrand"><span className="logo">✦</span>Eureka</span>
           <span className="rolepill">{me.roles.map((r) => r.label).join(" · ")}</span>
           <NotificationBell onOpen={openEntity} canOpen={canOpenEntity} />
         </div>

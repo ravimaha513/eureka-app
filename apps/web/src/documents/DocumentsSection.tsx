@@ -39,7 +39,7 @@ function AccessLogDialog({ doc, onClose }: { doc: DocumentItem; onClose: () => v
         : q.error ? <p className="error" role="alert">{documentError(q.error, "load")}</p>
         : !q.data?.items.length ? <p className="muted">Nobody has opened this document yet.</p>
         : (
-          <table className="mini" aria-label="Access log, newest first">
+          <div className="tablewrap"><table className="mini" aria-label="Access log, newest first">
             <thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">Confirmed</th></tr></thead>
             <tbody>
               {q.data.items.map((a) => (
@@ -50,7 +50,7 @@ function AccessLogDialog({ doc, onClose }: { doc: DocumentItem; onClose: () => v
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       <div className="actions"><button type="button" className="btn" onClick={onClose} data-autofocus>Close</button></div>
     </Dialog>
@@ -159,7 +159,7 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
         : q.error ? <p className="error">{documentError(q.error, "load")}</p>
         : items.length === 0 ? <p className="muted">No documents yet.</p>
         : (
-          <table aria-label={`${title}, newest first`}>
+          <div className="tablewrap"><table aria-label={`${title}, newest first`}>
             <thead><tr><th scope="col">Document</th><th scope="col">Status</th><th scope="col">Uploaded</th><th scope="col">Size</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {items.map((d) => (
@@ -187,7 +187,7 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
 
       {q.data?.canUpload && (

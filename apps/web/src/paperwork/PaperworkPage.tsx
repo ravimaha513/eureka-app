@@ -129,7 +129,7 @@ function WorkQueue({ me }: { me: Pick<Me, "id" | "roles" | "capabilities"> }) {
         {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
           <p className="empty error" role="alert">{paperworkError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
         ) : (
-          <table aria-label="Paperwork queue" aria-busy={q.isFetching || undefined}>
+          <div className="tablewrap"><table aria-label="Paperwork queue" aria-busy={q.isFetching || undefined}>
             <thead><tr><th>Candidate</th><th>Placement</th><th>Checklist</th><th>Next due</th><th>BGC</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {rows.map((r) => <QueueTableRow key={r.placementId} r={r} onOpen={() => setOpenId(r.placementId)} />)}
@@ -137,7 +137,7 @@ function WorkQueue({ me }: { me: Pick<Me, "id" | "roles" | "capabilities"> }) {
                 <tr><td colSpan={6} className="empty">{hasFilters ? "No placements match these filters." : "Nothing outstanding. New placements appear here with their paperwork."}</td></tr>
               )}
             </tbody>
-          </table>
+          </table></div>
         )}
       </div>
       <div className="listfoot">
@@ -214,7 +214,7 @@ function PaperworkDrawer({ placementId, me, onClose }: { placementId: string; me
                 <>
                   <p className="muted">{d.checklist.total - d.checklist.open} of {d.checklist.total} done
                     {d.checklist.overdue > 0 && `, ${d.checklist.overdue} overdue`}.</p>
-                  <table className="mini" aria-labelledby={`${hid}-k`}>
+                  <div className="tablewrap"><table className="mini" aria-labelledby={`${hid}-k`}>
                     <thead><tr><th>Document</th><th>Owner</th><th>Status</th><th>Due</th><th><span className="sr-only">Actions</span></th></tr></thead>
                     <tbody>
                       {d.items.map((i) => (
@@ -236,7 +236,7 @@ function PaperworkDrawer({ placementId, me, onClose }: { placementId: string; me
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </table></div>
                   {historyOf && <ItemHistory itemId={historyOf} label={docTypeLabel(d.items.find((i) => i.id === historyOf)?.docType ?? "")} />}
                 </>
               )}
@@ -535,7 +535,7 @@ function TemplatesPanel({ templates, canPublish }: { templates: TemplateVersion[
         <section key={kind} className="card pad" aria-label={`${paperworkLabel(kind)} templates`}>
           <h2>{paperworkLabel(kind)} templates</h2>
           {kind === "onboarding" && <p className="muted">Onboarding items attach to assignments when the employees work lands.</p>}
-          <table className="mini" aria-label={`${paperworkLabel(kind)} templates`}>
+          <div className="tablewrap"><table className="mini" aria-label={`${paperworkLabel(kind)} templates`}>
             <thead><tr><th>Placement type</th><th>Version</th><th>Documents</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {TYPES.map((type) => {
@@ -553,7 +553,7 @@ function TemplatesPanel({ templates, canPublish }: { templates: TemplateVersion[
                 );
               })}
             </tbody>
-          </table>
+          </table></div>
         </section>
       ))}
       {editing && (

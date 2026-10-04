@@ -141,7 +141,7 @@ export function CandidateResumes({ candidateId, pollMs = RESUME_POLL_MS }: { can
       )}
 
       {items.length > 0 && (
-        <table aria-label="Resume uploads, newest first">
+        <div className="tablewrap"><table aria-label="Resume uploads, newest first">
           <thead><tr><th scope="col">Version</th><th scope="col">Status</th><th scope="col">Uploaded</th><th scope="col">Size</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
           <tbody>
             {items.map((r) => (
@@ -161,7 +161,7 @@ export function CandidateResumes({ candidateId, pollMs = RESUME_POLL_MS }: { can
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </section>
   );
