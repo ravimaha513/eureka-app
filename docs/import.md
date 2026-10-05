@@ -123,8 +123,33 @@ database; the migrate task and the CLI ship in the same image.
 `authz.policy_setting` `crewnex_commit = 'on'` (absent means off; CrewNex consolidation C1f sets it
 by migration) the verification reports `crewnex_commit_disabled` on each clean row, so approval is
 refused, and `import_load_person` refuses outside a dry run. Today such a batch would run through
-the sheet loader, which would load personal contacts, match on marketing email and ignore source
-ids (consolidation decisions D1, D3, D4).
+the sheet loader, which would load personal contacts and update nothing in place (consolidation
+decisions D1, D3, D4).
+
+### CrewNex source ids (C1a.2)
+
+In a `crewnex` batch every row is keyed by its CrewNex record id (consolidation D3). The mapping
+names the column per sheet (`sheets.<sheet>.columns.sourceId`); interview and placement sheets may
+also name the consultant's id (`consultantSourceId`). Staging a crewnex batch refuses a mapping
+without `sourceId` or an export without that column. A sheet batch never reads either column: its
+row keys and analysis are unchanged (`src/import/sheets-golden.test.ts` pins them).
+
+- **Row key** = HMAC(`src:crewnex:<sheet>:<id>`) instead of the cell hash, so a record edited
+  between exports keeps its key, its review decisions and its ledger link; a ledger hit on the
+  key is `skipped` (`already_imported`), never updated in place (D1).
+- **Identity**: a person's ledger hashes add HMAC(`src:crewnex:person:<consultant id>`) and leave
+  out the marketing email (reissued between consultants; CrewNex's Vitel number is not mapped at
+  all). A later sales row with the same consultant id is that person (skipped); an interview or
+  placement row naming a consultant id is matched by the id alone, never by contact details.
+- **Review** (not approvable; fix the export and re-stage): `missing_source_id`,
+  `invalid_source_id` (over 200 characters, or spaces/control characters), `duplicate_source_id`
+  (two rows of one sheet with the same id: both), `invalid_consultant_source_id`,
+  `unknown_consultant_source_id` (in neither the batch's sales rows nor the ledger; **link** still
+  works).
+- Not yet: a contact (personal email or phone) hit on a person loaded from the sheets or under
+  another CrewNex id is still `person_already_imported`; C1b.3 turns it into review
+  (`matches_imported_person`). The live-duplicate check (`authz.import_live_match`) still compares
+  the marketing email; identity-only columns are C1a.4.
 
 ## Normalization and matching
 
@@ -138,7 +163,8 @@ ids (consolidation decisions D1, D3, D4).
 | Interview times | Local date + time + zone (default `America/Chicago`), end time or duration (default 60 min) |
 | Rates | Hourly only (`$65/hr`, `65`); annual or out-of-range values go to review |
 
-People are matched across sheets (design B9) by email (marketing or personal), then phone. Name
+People are matched across sheets (design B9) by email (marketing or personal; personal only in a
+crewnex batch, which matches by CrewNex id first: see above), then phone. Name
 + DOB and a name alone are only suggestions for review (`name_dob_match`, `name_only_match`).
 A sales row sharing an email, phone or name + DOB with an earlier one is a probable duplicate. A
 sales row whose email or phone belongs to a live candidate not created by the import goes to
@@ -161,7 +187,8 @@ an interview or placement row to a sales row (or marks a sales row as a duplicat
 
 Rows end in exactly one state: `clean`, `held` (fine, but its person cannot load, or placements
 are off), `review`, `rejected` (`duplicate_row`, `rejected_by_reviewer`, `merged_into_row`),
-`skipped` (`already_imported`, `person_already_imported`) or `committed`.
+`skipped` (`already_imported`, `person_already_imported`) or `committed`. In a crewnex batch, rows
+sharing a source id are not `duplicate_row` but `review` (`duplicate_source_id`).
 
 ## What the commit does
 
