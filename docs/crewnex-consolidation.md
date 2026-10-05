@@ -525,8 +525,12 @@ between (A) and (C) on measured usage; (B) only if consultant sign-in is wanted 
 ## 7. AWS cost
 
 Baseline: **~$30/month** (infra/README "Cost": RDS db.t4g.micro single-AZ 20 GB, one 0.25 vCPU / 0.5 GB API task,
-KMS, CloudFront + WAF on the Free plan). Note that the table assumes one API task; an always-on worker adds
-~$7 Fargate + $3.65 IPv4 regardless of CrewNex. Prices are us-east-1 list prices; verify before committing.
+KMS, CloudFront + WAF on the Free flat-rate plan). The worker already runs on `FARGATE_SPOT`
+(`infra/modules/stack/app.tf:760`): about **$2.5 + $3.65 IPv4** a month on top of the table, regardless of
+CrewNex. Prices are us-east-1 list prices; verify before committing. Sources: aws.amazon.com/cloudfront/pricing,
+docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/flat-rate-pricing-plan.html (Free: 1M requests,
+100 GB; Pro: 10M requests, 50 TB; no overage charges, sustained overuse degrades instead),
+aws.amazon.com/about-aws/whats-new/2025/02/amazon-guardduty-malware-protection-s3-price-reduction.
 
 Volume assumptions (CrewNex publishes no counts; replace with real ones at C1a.7, whose manifest carries them):
 2,000 consultants, 60,000 submittals, 15,000 interviews, 500 placements, 300,000 audit rows per year after
@@ -534,29 +538,49 @@ cutover, 20 GB of documents/resumes/contracts.
 
 | Phase | Incremental Eureka cost / month | Basis |
 |---|---|---|
-| C1 data | **+$0–1** | ~80k rows ≈ 0.1–0.3 GB with indexes; fits the 20 GB volume (gp3 $0.115/GB). Export + import tasks (1 vCPU / 2 GB, ~30 min weekly) ≈ $0.10/month plus IPv4 while running. Staging tables purged after 30 days. |
-| C1 audit growth | +$0 | 300k rows/year ≈ 0.3 GB/year; Object Lock export objects are small. |
-| C2.1 files | **+$1–2**, plus **~$10–25 one-time** | S3 Standard 20 GB ≈ $0.46; GuardDuty Malware Protection for S3 billed per GB scanned and per object (one-off scan of the backlog, then upload volume). |
-| C2.4 email | **+$1–3** | SES $0.10 per 1,000; CrewNex's 13 crons (reminders, digests, every-30-minute tech-check reminders) estimated 10k–30k emails/month. |
-| C2 general | **+$0–12** | Raise the API task to 1 GB if exports or the file copy need it (~+$3.5); `db.t4g.small` (+~$12) only if CPU credits show sustained surplus. |
+| C1 build (C1a–C1f.3) | **+$0–35** | All increments test in CI PostgreSQL ($0). A temporary staging stack for rehearsals costs ~$25–35/month **while it exists** (infra/README); default: rehearse in CI (C1f.3) and create staging only if a real-AWS rehearsal is wanted, then destroy it. Real-data dry runs: export + import tasks (1 vCPU / 2 GB, ~30 min weekly) ≈ $0.10/month plus IPv4 while running. |
+| C1f cutover onward | **+$15–22** | **CloudFront Pro flat-rate ($15)**: the Free plan's 1M requests a month will not carry the offshore Sales organisation moving in; enrol **before** cutover traffic (an upgrade is immediate and prorated). API Gateway ~$1 per million requests; CloudWatch logs and access-log ingestion a few dollars. Data: ~80k rows ≈ 0.1–0.3 GB, fits the 20 GB volume. |
+| Audit growth | +$0 | 300k rows/year ≈ 0.3 GB/year; Object Lock export objects are small. |
+| C2.1 files | **+$0.5–1**, plus **~$3–5 one-time** | S3 Standard 20 GB ≈ $0.46. GuardDuty Malware Protection for S3 at ~$0.09/GB scanned (after the 2025 price cut) plus a per-object charge: ~$3–5 for the 20 GB backlog, then upload volume. |
+| C2.4 email | **+$1–3** | SES $0.10 per 1,000; CrewNex's 13 cron schedules (reminders, digests, every-30-minute tech-check reminders) estimated 10k–30k emails/month. |
+| C2 general | **+$0–12** | API task to 1 GB if exports or the file copy need it (~+$3.5); `db.t4g.small` (+~$12) only if `CPUCreditBalance` keeps falling (guardrail alarm). |
 | C3 (A) keep CrewNex LMS | +$0 on AWS | CrewNex keeps Supabase, Vercel, R2. |
-| C3 (B) port LMS, video stays on R2 + Worker | **+$15–30** | Consultants sign in: second API task (+~$11), `db.t4g.small` (+~$12); R2 ~$3 (213 GB × $0.015) + Workers paid plan $5 stay on Cloudflare. |
-| C3 (B) port LMS, video to S3 + CloudFront | **+$500–1,000** on-demand | 213 GB S3 ≈ $5; egress: 800k min × 7.5–11 MB/min (≈1–1.5 Mbit/s) ≈ 6–9 TB; CloudFront ≈ $0.085/GB in the US, more in India; first 1 TB free. A CloudFront flat-rate plan (Pro, $15, with a much larger transfer allowance) could collapse this to tens of dollars **if** its terms allow video delivery at this volume and request count: unverified, check before relying on it. Default: keep R2. |
+| C3 (B) port LMS, video stays on R2 + Worker | **+$15–30** | **Cheapest.** Consultants sign in: second API task (+~$11), `db.t4g.small` (+~$12); R2 ~$3 (213 GB × $0.015) + Workers paid plan $5 stay on Cloudflare. |
+| C3 (B) port LMS, video on S3 behind the **same** distribution under flat-rate Pro | **~$4–20** | S3 213 GB ≈ $5; transfer inside Pro's 50 TB allowance; risk: 10M requests a month shared with the app (Range requests per viewing minute) and a sustained overage degrades every user of the distribution, not just video. |
+| C3 (B) video on pay-as-you-go CloudFront | **$250–2,000** | CrewNex videos are untranscoded (~1.3 GB per object, 2–5 Mbit/s): 800k min ≈ 12–30 TB a month at ~$0.06–0.085/GB in the US, more in India. **Never** (guardrail). Measure real egress from R2 analytics before C3. |
 
 CrewNex costs retired (list prices; actual plans are TODO in CrewNex `docs/Vendors.md`, Q28):
 
 | Service | List price | Retired at |
 |---|---|---|
-| Supabase Pro (production; staging and e2e projects) | $25/month org + compute; extra projects ~$10 each | Only when the last slice leaves: C3 (B) or (C). Under (A) it stays, with a smaller dataset. |
-| Vercel Pro (the `*/30` cron needs Pro) | $20 per seat/month + usage | Same as Supabase |
-| Vercel Blob | ~$0.023/GB-month + operations | C2.1 for documents/resumes/contracts; LMS files (assignment submissions, resources) at C3 |
-| Upstash Redis | pay-as-you-go, likely $0–10 | With Vercel |
-| Cloudflare R2 + Worker | ~$3–8 | Never under (A)/(B with R2); at C3 (C) |
+| Supabase staging and e2e projects | ~$10 each on a Pro org (compute) | **C1f**, if CrewNex is reduced to LMS maintenance: the e2e project only serves CrewNex's E2E suite and staging its demo data. Cost of retiring: LMS changes after C1f run without CrewNex's E2E job. |
+| Vercel seats | $20 per seat/month | **C1f**: down to one seat (the `*/30` cron still needs Pro) |
+| Supabase Pro production | $25/month org + compute | Only when the last slice leaves: C3 (B) or (C). Under (A) it stays, with a smaller dataset. |
+| Vercel Pro (last seat) + usage | $20 + usage | Same as Supabase production |
+| Vercel Blob | ~$0.023/GB-month + operations | C2.1 for documents/resumes/contracts; LMS files at C3 |
+| Upstash Redis | likely **$0** (free tier at this request volume) | With Vercel |
+| Cloudflare R2 + Worker | ~$3–8 | Never under (A) or (B with R2); at C3 (C) |
 | Sentry | free or Team plan | With Vercel |
 | Turnstile | free | C2.7 (if Eureka takes intake) |
 
-Honest summary: **C1 and C2 retire almost nothing**, because CrewNex keeps running for the LMS. The saving
-comes from one system of record and one authorization model; the bill drops only at C3.
+C1 and C2 retire little (two Supabase projects and Vercel seats); the bill drops substantially only at C3.
+
+### Cost guardrails (C1a.0, first increment)
+
+The production account is shared with spokenly (`infra/live/production/env.hcl`, account `637423353261`), so an
+account-wide budget would trip on spokenly's spend. Budgets are **tag-scoped**: provider default tags already set
+`Project = "Eureka"` (`infra/terragrunt.hcl:32-38`); C1a.0 adds `Workstream = "crewnex"` to every resource the
+consolidation creates and activates both as cost-allocation tags (tags apply only from activation onward, and
+some spend is untaggable, which the anomaly monitor covers).
+
+| Guardrail | Setting |
+|---|---|
+| AWS Budget, `Project=Eureka` | $40/month; alerts at 50 %, 80 %, 100 % actual and 100 % forecast |
+| AWS Budget, `Workstream=crewnex` | $15/month, same alerts |
+| Cost Anomaly Detection | Per-service monitor, alert at $10 impact |
+| Log retention | 7–14 days on every new task log group (exporter, import) |
+| CloudWatch alarms | RDS `CPUCreditBalance` (low) and `FreeableMemory` (low) during dry runs and after cutover |
+| Rules | No task in a private subnet (it would need a NAT, $33/month each); delete pre-cutover manual RDS snapshots and the export SSM secret at C1f.4; video is **never** served on pay-as-you-go CloudFront; CloudFront Pro enrolled before cutover |
 
 ## 8. Risks and invariants
 
