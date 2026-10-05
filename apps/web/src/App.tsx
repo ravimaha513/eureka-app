@@ -272,5 +272,10 @@ export default function App() {
   });
   if (me.isLoading) return <p className="empty">Loading…</p>;
   if (!me.data) return <Login onSignedIn={() => qc.invalidateQueries()} />;
-  return <Shell me={me.data} onSignOut={async () => { await api("/api/auth/logout", { method: "POST" }); qc.clear(); await qc.invalidateQueries(); }} />;
+  return <Shell me={me.data} onSignOut={async () => {
+    // A 401 here means the session is already gone; either way the client must return to the sign-in screen.
+    try { await api("/api/auth/logout", { method: "POST" }); } catch { /* already signed out */ }
+    qc.clear();
+    await qc.invalidateQueries();
+  }} />;
 }

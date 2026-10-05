@@ -1,5 +1,6 @@
 import { ForbiddenException, Inject, Injectable, UnprocessableEntityException } from "@nestjs/common";
 import type pg from "pg";
+import { z } from "zod";
 import {
   LOCATION_ROLES,
   ROLES,
@@ -13,7 +14,14 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { mapAdminError } from "./admin.errors.js";
-import type { CreateRoleRequest, CreateTeam, CreateUser, MoveMember, UserListQuery } from "./admin.schemas.js";
+import type { BulkCreateUsers, CreateRoleRequest, CreateTeam, CreateUser, MoveMember, UserListQuery } from "./admin.schemas.js";
+
+const EMAIL = z.string().email();
+
+/** Thrown inside the transaction to roll it back while still returning the per-row report. */
+class BulkOutcome extends Error {
+  constructor(readonly report: unknown) { super("bulk_rollback"); }
+}
 
 const label = (key: string) => ROLE_LABELS[key as Role] ?? key;
 
@@ -167,6 +175,73 @@ export class AdminService {
       });
       return { id };
     });
+  }
+
+  /**
+   * Bulk create (docs/admin-api.md). All or nothing: every row is checked and
+   * inserted in one transaction, and the transaction is rolled back when any
+   * row fails or when `dryRun` is set, so a preview shows exactly what a real
+   * run would do. Each user goes through the same definer function and audit
+   * event as the single create.
+   */
+  async bulkCreateUsers(user: AuthedUser, body: BulkCreateUsers) {
+    const domain = this.config.GOOGLE_HOSTED_DOMAIN?.trim().toLowerCase();
+    type Row = { row: number; email: string; displayName: string; status: "ok" | "error"; error?: string; id?: string };
+    try {
+      return await this.tx(user, async (c) => {
+        const locs = (await c.query<{ id: string; name: string }>(`SELECT id, name FROM eureka.location`)).rows;
+        const byName = new Map(locs.map((l) => [l.name.trim().toLowerCase(), l.id]));
+        const seen = new Set<string>();
+        const results: Row[] = [];
+        for (const [i, r] of body.rows.entries()) {
+          const email = r.email.trim();
+          const displayName = r.displayName.trim();
+          const designation = r.designation?.trim() || null;
+          const locName = r.location?.trim();
+          const res: Row = { row: i + 1, email, displayName, status: "ok" };
+          results.push(res);
+          const fail = (code: string) => { res.status = "error"; res.error = code; };
+          if (!EMAIL.safeParse(email).success) { fail("invalid_email"); continue; }
+          if (domain && !email.toLowerCase().endsWith(`@${domain}`)) { fail("email_domain"); continue; }
+          if (!displayName) { fail("name_required"); continue; }
+          if (seen.has(email.toLowerCase())) { fail("duplicate_in_file"); continue; }
+          seen.add(email.toLowerCase());
+          const locationId = locName ? byName.get(locName.toLowerCase()) : null;
+          if (locName && !locationId) { fail("unknown_location"); continue; }
+          await c.query("SAVEPOINT bulk_row");
+          try {
+            const { rows } = await c.query<{ id: string }>(
+              `SELECT authz.admin_create_user($1, $2, $3, $4) AS id`, [email, displayName, designation, locationId ?? null]);
+            res.id = rows[0]!.id;
+            await c.query("RELEASE SAVEPOINT bulk_row");
+          } catch (err) {
+            const e = err as { code?: string; constraint?: string };
+            if (e.code === "23505" && e.constraint === "app_user_email_key") {
+              await c.query("ROLLBACK TO SAVEPOINT bulk_row");
+              fail("email_exists");
+              continue;
+            }
+            throw err; // not_permitted and anything unexpected abort the whole import
+          }
+          await this.audit.record(c, {
+            actorId: user.id, action: "admin.user.created", entityType: "app_user", entityId: res.id!,
+            changes: { email, displayName, designation: designation ?? undefined, primaryLocationId: locationId ?? undefined, bulk: true },
+          });
+        }
+        const failed = results.filter((x) => x.status === "error").length;
+        const committed = !body.dryRun && failed === 0;
+        const report = { dryRun: body.dryRun, committed, created: committed ? results.length : 0, failed,
+          rows: committed ? results : results.map(({ id: _id, ...rest }) => rest) };
+        if (!committed) throw new BulkOutcome(report);
+        await this.audit.record(c, {
+          actorId: user.id, action: "admin.user.bulk_created", entityType: "app_user", changes: { count: results.length },
+        });
+        return report;
+      });
+    } catch (err) {
+      if (err instanceof BulkOutcome) return err.report;
+      throw err;
+    }
   }
 
   async setStatus(user: AuthedUser, id: string, active: boolean) {

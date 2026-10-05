@@ -478,6 +478,10 @@ resource "aws_service_discovery_service" "api" {
   # failure_threshold is deprecated (AWS always uses 1); an empty block keeps
   # ECS-reported task health driving registration.
   health_check_custom_config {}
+
+  # The provider reads this empty block back as absent and plans a replacement
+  # every run; replacing fails while ECS tasks are still registered.
+  lifecycle { ignore_changes = [health_check_custom_config] }
 }
 
 resource "aws_apigatewayv2_vpc_link" "api" {
