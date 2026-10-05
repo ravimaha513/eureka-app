@@ -1,0 +1,73 @@
+/* jobs-portal: jobs, applications and the applicant portal (theme tokens only; dark mode via the tokens). */
+
+/* Rich text view and editor */
+.richview { display: flex; flex-direction: column; gap: 8px; color: var(--text2); line-height: 1.55; overflow-wrap: anywhere; }
+.richview ul, .richview ol { padding-left: 22px; display: flex; flex-direction: column; gap: 2px; }
+.rtlabel { font-weight: 600; color: var(--text2); font-size: 13px; }
+.rteditor { border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.rteditor.invalid { border-color: var(--bad-fg); }
+.rteditor:focus-within { border-color: var(--pri); box-shadow: 0 0 0 3px var(--pri-100); }
+.rttoolbar { display: flex; flex-wrap: wrap; gap: 2px; padding: 4px; border-bottom: 1px solid var(--line); background: var(--surface2); }
+.rtbtn { width: 32px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--text2); }
+.rtbtn:hover { background: var(--hover); color: var(--text); }
+.rtbtn:focus-visible { outline: 2px solid var(--pri); outline-offset: 1px; }
+.rtsep { width: 1px; margin: 4px 4px; background: var(--line-strong); }
+.rtarea { min-height: 110px; max-height: 320px; overflow-y: auto; padding: 10px 12px; color: var(--text); line-height: 1.55; outline: none; overflow-wrap: anywhere; }
+.rtarea:empty::before { content: attr(data-placeholder); color: var(--faint); }
+.rtarea ul, .rtarea ol { padding-left: 22px; }
+.rtarea p + p { margin-top: 6px; }
+
+/* Skills tag input */
+.taginput { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border: 1px solid var(--line-strong); border-radius: 10px; padding: 6px 8px; background: var(--surface); }
+.taginput:focus-within { border-color: var(--pri); box-shadow: 0 0 0 3px var(--pri-100); }
+.taginput input { border: 0 !important; height: 28px !important; min-width: 120px !important; flex: 1; padding: 0 4px !important; box-shadow: none !important; background: none; }
+
+/* Radio groups in forms */
+.radios { display: flex; flex-wrap: wrap; gap: 6px 14px; border: 0; padding: 0; margin: 0 0 12px; }
+.radios legend { font-weight: 600; color: var(--text2); font-size: 13px; margin-bottom: 6px; padding: 0; }
+.radios label { display: inline-flex; align-items: center; gap: 6px; color: var(--text2); font-weight: 500; }
+
+.dialog.wide { width: min(860px, calc(100vw - 32px)); }
+.formsection { font-size: 13px; font-weight: 700; color: var(--text); margin: 8px 0 8px; }
+
+/* Status pills */
+.badge.job-open, .badge.app-hired, .badge.app-offered, .badge.ai-completed { background: var(--ok-bg); color: var(--ok-fg); }
+.badge.job-on_hold, .badge.app-shortlisted, .badge.ai-no_show { background: var(--warn-bg); color: var(--warn-fg); }
+.badge.job-closed, .badge.app-rejected, .badge.app-withdrawn, .badge.ai-cancelled { background: var(--bad-bg); color: var(--bad-fg); }
+.badge.app-interview_scheduled, .badge.ai-scheduled { background: var(--pri-50); color: var(--pri-700); }
+.badge.kind { background: var(--violet-bg); color: var(--violet-fg); }
+.badge.pill { background: var(--neutral-bg); color: var(--neutral-fg); font-weight: 500; }
+
+/* Applicant portal */
+.portal { min-height: 100vh; display: flex; flex-direction: column; background: var(--bg); }
+.portaltop { height: 64px; display: flex; align-items: center; gap: 12px; padding: 0 24px; background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20; }
+.portaltop nav { display: flex; gap: 4px; margin-left: 12px; }
+.portaltop nav button { height: 38px; padding: 0 12px; border: 0; border-radius: 10px; background: none; color: var(--text2); font-weight: 600; }
+.portaltop nav button[aria-current="page"] { background: var(--pri-50); color: var(--pri); }
+.portaltop .grow { flex: 1; }
+.portalmain { width: min(1180px, 100%); margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+.portalfoot { margin-top: auto; padding: 16px 24px; color: var(--muted); font-size: 12px; text-align: center; }
+.jobcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.jobcard { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow-sm); min-width: 0; }
+.jobcard h2 { font-size: 16px; }
+.jobcard .meta { color: var(--muted); font-size: 12.5px; }
+.jobcard .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.jobcard p.excerpt { color: var(--text2); line-height: 1.5; overflow-wrap: anywhere; }
+.jobcard .posted { color: var(--muted); font-size: 12px; text-align: right; }
+.jobcard .cardactions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: auto; }
+.authcard { width: min(440px, 100%); margin: 40px auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 4px; }
+.authcard h1 { font-size: 24px; margin-bottom: 4px; }
+.authcard .field input { width: 100%; }
+.authcard .alt { margin-top: 12px; color: var(--muted); text-align: center; }
+.okbox { padding: 12px 14px; border-radius: 10px; background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-line); }
+.stars { color: var(--warn-fg); letter-spacing: 1px; }
+.scoregrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 768px) {
+  .portaltop { padding: 0 12px; gap: 8px; }
+  .portaltop nav { margin-left: 0; }
+  .portaltop .brandname { display: none; }
+  .portalmain { padding: 16px; }
+  .jobcards { grid-template-columns: minmax(0, 1fr); }
+  .scoregrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .authcard { margin: 16px auto; padding: 20px 16px; }
+}

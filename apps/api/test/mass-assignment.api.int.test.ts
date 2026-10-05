@@ -742,6 +742,29 @@ const CASES: RejectCase[] = [
     },
     forbidden: { approvedBy: U.admin, status: "approved", operatorId: U.admin2, placementsCommit: true, approvedAt: PAST },
   },
+  // jobs-portal (migration 0060): owner, team, version, posting time and kind are the server's
+  {
+    route: "POST /api/v1/jobs", actor: "l1",
+    prepare: async () => ({
+      url: "/api/v1/jobs",
+      body: { kind: "client_requirement", title: "MA job", category: "engineering", experienceLevel: "mid", employmentType: "contract",
+        workMode: "remote", clientId: CLIENT_ID },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.job`),
+    }),
+    forbidden: { ownerId: U.l2, teamId: T.t3, postedAt: PAST, applicants: 9, owner: { id: U.l2 }, actions: { edit: true } },
+  },
+  {
+    route: "PATCH /api/v1/jobs/:id", actor: "l1",
+    prepare: async () => {
+      const j = await ok("l1", "POST", "/api/v1/jobs", { kind: "client_requirement", title: "MA job 2", category: "engineering",
+        experienceLevel: "mid", employmentType: "contract", workMode: "remote", clientId: CLIENT_ID }, 201);
+      return {
+        url: `/api/v1/jobs/${j.id}`, body: { title: "Renamed" }, headers: { "if-match": "1" },
+        state: () => rows(`SELECT * FROM eureka.job WHERE id = $1`, [j.id]),
+      };
+    },
+    forbidden: { kind: "internal_opening", ownerId: U.l2, teamId: T.t3, postedAt: PAST, row_version: 9 },
+  },
 ];
 
 /** Endpoints that read no body: what they change comes from the URL and the session only. */

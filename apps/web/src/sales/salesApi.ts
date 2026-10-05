@@ -116,6 +116,8 @@ export interface CreateSubmission {
   clientId: string;
   vendorId?: string;
   rate?: number;
+  /** jobs-portal: the client requirement this submission answers. */
+  jobId?: string;
 }
 
 /** Every marketing status in the domain model, in lifecycle order. */

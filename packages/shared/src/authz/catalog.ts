@@ -134,6 +134,13 @@ export const PERMISSIONS = [
   // administration
   "access:manage",
   "audit:read",
+  // jobs-portal: jobs (client requirements, internal openings), applicants and their applications
+  "job:read",
+  "job:manage",
+  "applicant:read",
+  "applicant.phone:read",
+  "application:read",
+  "application:manage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -190,6 +197,8 @@ export const GRANTS: Record<Role, Grants> = {
     "document:read": "own",
     "document:upload": "own",
     "vendor.preferred:create": "own",
+    // jobs-portal
+    "job:read": "team",
   },
   lead: {
     ...salesLine("team", "team"),
@@ -198,6 +207,9 @@ export const GRANTS: Record<Role, Grants> = {
     "report:export": "team",
     "vendor.preferred:create": "own",
     "vendor.preferred:read": "team",
+    // jobs-portal
+    "job:read": "team",
+    "job:manage": "team",
   },
   manager: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -209,6 +221,9 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     "designation:change": "hierarchy",
+    // jobs-portal
+    "job:read": "hierarchy",
+    "job:manage": "hierarchy",
   },
   assoc_director: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -220,6 +235,9 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     "designation:change": "hierarchy",
+    // jobs-portal
+    "job:read": "hierarchy",
+    "job:manage": "hierarchy",
   },
   offshore_manager: {
     "candidate:read": "org",
@@ -237,6 +255,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "org",
     "team:move_member": "org",
     "designation:change": "org",
+    // jobs-portal
+    "job:read": "org",
   },
   ceo: {
     "candidate:read": "org",
@@ -252,6 +272,8 @@ export const GRANTS: Record<Role, Grants> = {
     "report:read": "org",
     "report:export": "org",
     "vendor.preferred:read": "org",
+    // jobs-portal
+    "job:read": "org",
   },
   location_incharge: {
     "candidate:read": "location",
@@ -304,6 +326,13 @@ export const GRANTS: Record<Role, Grants> = {
     "bgc:update": "org",
     "visa:read": "org",
     "report:read": "org",
+    // jobs-portal
+    "job:read": "org",
+    "job:manage": "org",
+    "applicant:read": "org",
+    "applicant.phone:read": "org",
+    "application:read": "org",
+    "application:manage": "org",
   },
   associate_hr: {
     "assignment:read": "org",
@@ -387,6 +416,8 @@ export const ORG_SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "candidate:assign",
   "team:move_member",
   "document:read",
+  // jobs-portal
+  "applicant.phone:read",
 ];
 
 export function isRestrictedRole(role: Role): boolean {

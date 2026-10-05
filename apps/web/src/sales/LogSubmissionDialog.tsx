@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { jobsApi } from "../jobs/jobsApi";
 import { ApiError } from "../api";
 import { Dialog, DialogActions } from "../admin/Dialog";
 import { LookupPicker } from "../lookups";
@@ -6,7 +8,7 @@ import { UUID_RE, fieldErrors, salesError } from "./errors";
 import { salesApi, type CreateSubmission } from "./salesApi";
 import { Field, useFocusAfterFailure } from "./ui";
 
-const FIELDS = ["jobTitle", "clientId", "vendorId", "rate"] as const;
+const FIELDS = ["jobTitle", "clientId", "vendorId", "rate", "jobId"] as const;
 
 export const DUPLICATE_WARNING =
   "Possible duplicate: this candidate was already submitted to this client in the last 90 days. Check with your lead before submitting again.";
@@ -19,7 +21,18 @@ export const DUPLICATE_WARNING =
 export function LogSubmissionDialog({ candidate, onClose, onLogged }: {
   candidate: { id: string; name: string }; onClose: () => void; onLogged: (r: { id: string; duplicateWarning: boolean }) => void;
 }) {
-  const [v, setV] = useState({ jobTitle: "", clientId: "", vendorId: "", rate: "" });
+  const [v, setV] = useState({ jobTitle: "", clientId: "", vendorId: "", rate: "", jobId: "" });
+  // jobs-portal: open client requirements the user can read (job:read); no picker without them.
+  const jobs = useQuery({
+    queryKey: ["jobs", "list", { kind: "client_requirement", status: "open", picker: true }],
+    queryFn: () => jobsApi.list({ kind: "client_requirement", status: "open", limit: 200 }),
+    staleTime: 60_000, retry: false,
+  });
+  const openJobs = jobs.data?.items ?? [];
+  const pickJob = (id: string) => {
+    const j = openJobs.find((x) => x.id === id);
+    setV((s) => ({ ...s, jobId: id, ...(j ? { jobTitle: j.title, clientId: j.client?.id ?? s.clientId } : {}) }));
+  };
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
   const [conflict, setConflict] = useState(false);
@@ -28,7 +41,10 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged }: {
   const failed = useFocusAfterFailure(formRef);
   const [done, setDone] = useState<{ id: string; duplicateWarning: boolean } | null>(null);
   const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement>) => setV((s) => ({ ...s, [k]: e.target.value }));
-  const pick = (k: "clientId" | "vendorId") => (id: string) => setV((s) => ({ ...s, [k]: id }));
+  // Changing the client away from the chosen job's client drops the job.
+  const pick = (k: "clientId" | "vendorId") => (id: string) => setV((s) => ({
+    ...s, [k]: id, ...(k === "clientId" && s.jobId && openJobs.find((j) => j.id === s.jobId)?.client?.id !== id ? { jobId: "" } : {}),
+  }));
 
   const validate = () => {
     const e: Record<string, string> = {};
@@ -52,6 +68,7 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged }: {
       candidateId: candidate.id, jobTitle: v.jobTitle.trim(), clientId: v.clientId.trim(),
       ...(v.vendorId.trim() ? { vendorId: v.vendorId.trim() } : {}),
       ...(v.rate.trim() ? { rate: Number(v.rate) } : {}),
+      ...(v.jobId ? { jobId: v.jobId } : {}),
     };
     setBusy(true);
     try {
@@ -80,8 +97,18 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged }: {
   return (
     <Dialog key="form" title={`Log submission for ${candidate.name}`} onClose={onClose}>
       <form ref={formRef} onSubmit={submit} noValidate>
+        {openJobs.length > 0 && (
+          <Field label="Job (optional)" error={errors.jobId} hint="Pick the client requirement this submission answers; it fills in the title and client.">
+            {(p) => (
+              <select {...p} value={v.jobId} onChange={(e) => pickJob(e.target.value)} data-autofocus>
+                <option value="">No job</option>
+                {openJobs.map((j) => <option key={j.id} value={j.id}>{j.title}{j.client?.name ? ` · ${j.client.name}` : ""}</option>)}
+              </select>
+            )}
+          </Field>
+        )}
         <Field label="Job title" error={errors.jobTitle}>
-          {(p) => <input {...p} value={v.jobTitle} onChange={set("jobTitle")} maxLength={200} data-autofocus />}
+          {(p) => <input {...p} value={v.jobTitle} onChange={set("jobTitle")} maxLength={200} {...(openJobs.length ? {} : { "data-autofocus": true })} />}
         </Field>
         <LookupPicker kind="clients" label="Client" value={v.clientId} onChange={pick("clientId")} error={errors.clientId} />
         <LookupPicker kind="vendors" label="Vendor (optional)" optional placeholder="No vendor" value={v.vendorId} onChange={pick("vendorId")} error={errors.vendorId} />
