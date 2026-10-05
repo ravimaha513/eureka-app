@@ -39,6 +39,9 @@ const sha256 = (s: string) => createHash("sha256").update(s).digest();
  * WebAuthn (the design's fallback if Google cannot prove a fresh sign-in) is
  * not built: follow-up after the Phase 0 spike.
  */
+/** Google returned to the callback without a code (the user cancelled or Google refused). */
+class StepUpCancelled extends Error {}
+
 @Controller("api/auth/step-up")
 export class StepUpController {
   private readonly log = new Logger("StepUp");
@@ -114,13 +117,11 @@ export class StepUpController {
     let r: { outcome: string; return_to: string | null };
     let identity: { sub: string; authTime: Date } | null = null;
     let failure: "cancelled" | "token_refused" | null = null;
-    if (typeof code !== "string" || !code) {
-      failure = "cancelled"; // error=access_denied or no code
-    } else {
-      try {
-        const idToken = await this.oidc.exchange(code, saved.verifier, this.redirectUri());
-        identity = await this.oidc.verifyStepUp(idToken, saved.nonce);
-      } catch (err) {
+    try {
+      identity = await this.verifyCallback(code, saved);
+    } catch (err) {
+      if (err instanceof StepUpCancelled) failure = "cancelled";
+      else {
         this.log.warn(`step-up token refused: ${(err as Error).message}`);
         failure = "token_refused";
       }
@@ -140,6 +141,13 @@ export class StepUpController {
     if (target.origin !== new URL(this.config.PUBLIC_BASE_URL).origin) throw new ForbiddenException("Step-up return path refused");
     if (r.outcome !== "granted") target.searchParams.set("stepUp", "failed");
     void reply.redirect(target.toString(), 302);
+  }
+
+  /** Exchanges Google's code and verifies the fresh login; throws StepUpCancelled when Google sent no code. */
+  private async verifyCallback(code: string | undefined, saved: { nonce: string; verifier: string }) {
+    if (typeof code !== "string" || !code) throw new StepUpCancelled(); // error=access_denied or no code
+    const idToken = await this.oidc.exchange(code, saved.verifier, this.redirectUri());
+    return this.oidc.verifyStepUp(idToken, saved.nonce);
   }
 
   /** Development identity provider's step-up; unreachable unless AUTH_MODE=dev (never in production). */
