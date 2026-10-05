@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DOCUMENT_TYPES, DOCUMENT_TYPE_LIST, candidateVisible, documentAccess, resolveScope } from "@eureka/shared";
 import { migrate } from "../src/db/migrate.js";
-import { asUser, createTestDb, type TestDb } from "./db-harness.js";
+import { PLANNER_VARIANTS, asUser, createTestDb, rule3Probe, type Rule3Probe, type TestDb } from "./db-harness.js";
 import { U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 import { createPlacement, newCandidate, selectedSubmission } from "./placement-seed.js";
 
@@ -130,33 +130,26 @@ describe("differential: RLS alone matches the engine", () => {
     expect(seeing.sort()).toEqual(["acct", "hr", "imm"]);
   });
 
-  /** Calls of every authz.* function while `sql` runs as eureka_app for `userId`. */
-  async function authzCalls(userId: string, sql: string): Promise<{ calls: number; rows: number }> {
-    const c = await db.admin.connect();
-    try {
-      await c.query("BEGIN");
-      await c.query("SET LOCAL track_functions = 'all'");
-      await c.query("SELECT set_config('eureka.user_id', $1, true)", [userId]);
-      const count = async () => Number((await c.query<{ n: string }>(
-        `SELECT coalesce(sum(pg_stat_get_xact_function_calls(p.oid)), 0)::bigint AS n
-         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'authz'`)).rows[0]!.n);
-      const before = await count();
-      await c.query("SET LOCAL ROLE eureka_app");
-      const rows = (await c.query(sql)).rowCount ?? 0;
-      await c.query("RESET ROLE");
-      return { calls: (await count()) - before, rows };
-    } finally {
-      await c.query("ROLLBACK").catch(() => undefined);
-      c.release();
-    }
+  // Rule 3 (HANDOFF): no authz call per document row. Checked under every
+  // planner variant, before and after doubling the documents and their files:
+  // the authz calls are all InitPlans, none rescanned, and their number is
+  // unchanged. The same probe run against a deliberately per-row copy of
+  // file_object_read must report it, so the check cannot pass vacuously.
+  const RULE3_SQL = `SELECT d.id FROM eureka.document d JOIN eureka.file_object f ON f.id = d.file_id`;
+  const PER_ROW_POLICY = [`ALTER POLICY file_object_read ON eureka.file_object USING (
+    authz.current_user_id() IS NOT NULL AND EXISTS (SELECT 1 FROM eureka.document d WHERE d.file_id = file_object.id))`];
+
+  async function probeAll(userId: string, setup: readonly string[] = []): Promise<Record<string, Rule3Probe>> {
+    const out: Record<string, Rule3Probe> = {};
+    for (const [name, planner] of Object.entries(PLANNER_VARIANTS)) out[name] = await rule3Probe(db.admin, userId, RULE3_SQL, { planner, setup });
+    return out;
   }
 
-  it.each(["l1", "r1a", "hr", "acct"] as const)("rule 3: authz calls for %s do not grow with the number of document rows", async (key) => {
-    const sql = `SELECT d.id FROM eureka.document d JOIN eureka.file_object f ON f.id = d.file_id`;
-    // Fresh planner statistics before each measurement (as autovacuum keeps them in production): a background
-    // auto-analyze landing between the two measurements changes the plan, and with it the count, at random.
-    await db.admin.query("ANALYZE");
-    const one = await authzCalls(U[key], sql);
+  it.each(["l1", "r1a", "hr", "acct"] as const)("rule 3: authz calls for %s do not grow with the number of document rows, under every plan", async (key) => {
+    const one = await probeAll(U[key]);
+    // The per-row self-check once (it is slow on purpose): for the location lead.
+    const selfCheck = key === "l1";
+    const oneBad = selfCheck ? await probeAll(U[key], PER_ROW_POLICY) : {};
     const extra = await raw(`WITH f AS (
         INSERT INTO eureka.file_object (classification, status, scan_result, content_type, size_bytes, sha256_hex, uploaded_by, upload_expires_at, scanned_at)
         SELECT classification, 'clean', 'NO_THREATS_FOUND', content_type, 11, sha256_hex, uploaded_by, now(), now() FROM eureka.file_object WHERE size_bytes = 10
@@ -174,16 +167,28 @@ describe("differential: RLS alone matches the engine", () => {
         await raw(`INSERT INTO eureka.document (candidate_id, doc_type, classification, file_id, created_by) VALUES ($1, 'drivers_license', 'restricted', $2, $3)`,
           [d.candidate_id, byCls.restricted.pop(), U.hr]);
       }
-      await db.admin.query("ANALYZE");
-      const two = await authzCalls(U[key], sql);
-      expect(two.rows).toBe(one.rows * 2);
-      expect(one.calls).toBeGreaterThan(0);
-      expect(two.calls).toBe(one.calls);
+      const two = await probeAll(U[key]);
+      const twoBad = selfCheck ? await probeAll(U[key], PER_ROW_POLICY) : {};
+      for (const name of Object.keys(PLANNER_VARIANTS)) {
+        const [a, b] = [one[name]!, two[name]!];
+        expect(a.rows, name).toBeGreaterThan(0);
+        expect(b.rows, name).toBe(a.rows * 2);
+        expect(a.calls, name).toBeGreaterThan(0);
+        expect([...a.perRow, ...b.perRow], name).toEqual([]);
+        expect(a.rescannedInitPlans + b.rescannedInitPlans, name).toBe(0);
+        expect(b.calls, name).toBe(a.calls);
+        if (!selfCheck) continue;
+        // The probe sees a per-row call: in the plan, and in a count that grows.
+        const [x, y] = [oneBad[name]!, twoBad[name]!];
+        expect(y.rows, name).toBe(b.rows);
+        expect(x.perRow.length, name).toBeGreaterThan(0);
+        expect(y.calls, name).toBeGreaterThan(x.calls);
+      }
     } finally {
       await raw(`DELETE FROM eureka.document WHERE file_id IN (SELECT id FROM eureka.file_object WHERE size_bytes = 11)`);
       await raw(`DELETE FROM eureka.file_object WHERE size_bytes = 11`);
     }
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await raw(`DELETE FROM eureka.document`);

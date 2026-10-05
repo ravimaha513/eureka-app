@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { candidateVisible, resolveScope, resumeAccess } from "@eureka/shared";
-import { asUser, createTestDb, type TestDb } from "./db-harness.js";
+import { PLANNER_VARIANTS, asUser, createTestDb, rule3Probe, type Rule3Probe, type TestDb } from "./db-harness.js";
 import { U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 
 /**
@@ -75,33 +75,16 @@ describe("differential: RLS alone matches the engine", () => {
     expect(actual).toEqual(expected);
   });
 
-  /** Calls of every authz.* function while `sql` runs as eureka_app for `userId` (track_functions, as ownedCandidateCalls). */
-  async function authzCalls(userId: string, sql: string): Promise<{ calls: number; rows: number }> {
-    const c = await db.admin.connect();
-    try {
-      await c.query("BEGIN");
-      await c.query("SET LOCAL track_functions = 'all'");
-      await c.query("SELECT set_config('eureka.user_id', $1, true)", [userId]);
-      const count = async () => Number((await c.query<{ n: string }>(
-        `SELECT coalesce(sum(pg_stat_get_xact_function_calls(p.oid)), 0)::bigint AS n
-         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'authz'`)).rows[0]!.n);
-      const before = await count();
-      await c.query("SET LOCAL ROLE eureka_app");
-      const rows = (await c.query(sql)).rowCount ?? 0;
-      await c.query("RESET ROLE");
-      return { calls: (await count()) - before, rows };
-    } finally {
-      await c.query("ROLLBACK").catch(() => undefined);
-      c.release();
-    }
+  /** rule3Probe under every planner variant (statistics refreshed before each, so counts are reproducible). */
+  async function probeAll(userId: string, sql: string): Promise<Record<string, Rule3Probe>> {
+    const out: Record<string, Rule3Probe> = {};
+    for (const [name, planner] of Object.entries(PLANNER_VARIANTS)) out[name] = await rule3Probe(db.admin, userId, sql, { planner });
+    return out;
   }
 
   it.each(["l1", "m1", "r1a", "hr"] as const)(
     "rule 3: authz calls for %s do not grow with the number of resume rows (scope evaluated once per statement)", async (key) => {
-      // Fresh planner statistics before each measurement (as autovacuum keeps them in production): a background
-      // auto-analyze landing between the two measurements changes the plan, and with it the count, at random.
-      await db.admin.query("ANALYZE");
-      const one = await authzCalls(U[key], `SELECT id FROM eureka.resume`);
+      const one = await probeAll(U[key], `SELECT id FROM eureka.resume`);
       // Double the table: a second resume for every candidate.
       const c = await db.admin.connect();
       try {
@@ -112,11 +95,15 @@ describe("differential: RLS alone matches the engine", () => {
           SELECT candidate_id, 'clean', 'NO_THREATS_FOUND', content_type, 10, sha256_hex, 200 + $1::int, false, uploaded_by, now(), now()
           FROM eureka.resume WHERE version = 100`, [Object.keys(U).indexOf(key)]);
         await c.query("COMMIT");
-        await db.admin.query("ANALYZE");
-        const two = await authzCalls(U[key], `SELECT id FROM eureka.resume`);
-        expect(two.rows).toBe(one.rows * 2);
-        expect(one.calls).toBeGreaterThan(0);
-        expect(two.calls).toBe(one.calls);
+        const two = await probeAll(U[key], `SELECT id FROM eureka.resume`);
+        for (const name of Object.keys(PLANNER_VARIANTS)) {
+          const [a, b] = [one[name]!, two[name]!];
+          expect(b.rows, name).toBe(a.rows * 2);
+          expect(a.calls, name).toBeGreaterThan(0);
+          expect([...a.perRow, ...b.perRow], name).toEqual([]);
+          expect(a.rescannedInitPlans + b.rescannedInitPlans, name).toBe(0);
+          expect(b.calls, name).toBe(a.calls);
+        }
       } finally {
         c.release();
         const d = await db.admin.connect();
@@ -129,7 +116,7 @@ describe("differential: RLS alone matches the engine", () => {
           d.release();
         }
       }
-    });
+    }, 120_000);
 
   it("sanity: some users see some resumes and some see none", async () => {
     const counts = await Promise.all(users.map((k) =>
