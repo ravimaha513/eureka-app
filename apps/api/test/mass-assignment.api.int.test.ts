@@ -111,7 +111,7 @@ const freshOwn = () => newCandidate(db, { teamId: T.t1, recruiterId: U.r1a, loca
 /** A staged import batch with one sales row (as the import CLI would open it with an admin's ticket). */
 async function importBatch(): Promise<string> {
   const ticket = (await ok("admin", "POST", "/api/v1/imports/tickets", {})).ticket as string;
-  const id = (await rows(`SELECT authz.import_open_batch($1, md5(random()::text) || md5(random()::text), '{}', false) AS id`, [ticket]))[0]!.id as string;
+  const id = (await rows(`SELECT authz.import_open_batch($1, md5(random()::text) || md5(random()::text), '{}', false, 'sheets', false) AS id`, [ticket]))[0]!.id as string;
   await rows(`INSERT INTO eureka.import_row (batch_id, sheet, row_no, row_key, raw, norm, state, reasons)
               VALUES ($1, 'sales', 2, md5(random()::text) || md5(random()::text), '{}', '{}', 'review', '{missing:name}')`, [id]);
   return id;
@@ -740,7 +740,7 @@ const CASES: RejectCase[] = [
         state: () => rows(`SELECT status, approved_by, approved_digest FROM eureka.import_batch WHERE id = $1`, [id]),
       };
     },
-    forbidden: { approvedBy: U.admin, status: "approved", operatorId: U.admin2, placementsCommit: true, approvedAt: PAST },
+    forbidden: { approvedBy: U.admin, status: "approved", operatorId: U.admin2, placementsCommit: true, source: "crewnex", historical: true, approvedAt: PAST },
   },
 ];
 

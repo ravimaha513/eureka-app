@@ -75,14 +75,29 @@ const toRecord = (r: StagedRow) => ({
 
 export interface StageResult { batchId: string; created: boolean }
 
+/** Where a batch comes from (docs/crewnex-consolidation.md, C1a.3). */
+export const BATCH_SOURCES = ["sheets", "crewnex"] as const;
+export type BatchSource = (typeof BATCH_SOURCES)[number];
+export interface StageOptions {
+  ticket?: string;
+  hmac: Hmac;
+  /** Fixed on the batch when it opens; immutable, shown in the preview, part of the approval digest. */
+  source?: BatchSource;
+  /** Historical replay (4.6): fixed like source. */
+  historical?: boolean;
+}
+
 /**
  * Stages CSV exports. An open batch with the same files and mapping is
  * re-analysed; otherwise `ticket` (from the API) opens a new batch.
  */
 export async function stage(
-  pool: pg.Pool, files: StageFiles, mappingText: string, opts: { ticket?: string; hmac: Hmac },
+  pool: pg.Pool, files: StageFiles, mappingText: string, opts: StageOptions,
 ): Promise<StageResult> {
   const cfg = parseMapping(JSON.parse(mappingText));
+  const source = opts.source ?? "sheets";
+  const historical = opts.historical ?? false;
+  if (!BATCH_SOURCES.includes(source)) throw new Error(`Unknown batch source "${String(source)}" (one of ${BATCH_SOURCES.join(", ")})`);
   const given = SHEETS.filter((s) => files[s]);
   if (given.length === 0) throw new Error("Give at least one of --sales, --interviews, --placements");
   const texts = Object.fromEntries(given.map((s) => [s, readFileSync(files[s]!, "utf8")])) as Partial<Record<Sheet, string>>;
@@ -111,7 +126,13 @@ export async function stage(
       raws.push({ ...raw, cells: redactCells(raw, cfg, opts.hmac, today) });
     }
   }
-  const digest = sha256(JSON.stringify({ files: Object.fromEntries(given.map((s) => [s, sha256(texts[s]!)])), mapping: sha256(mappingText) }));
+  // The batch settings join the source digest only when not the default, so a
+  // sheet batch keeps the digest it always had, and re-staging the same files
+  // with other settings never re-analyses a batch opened with different ones.
+  const settings = source !== "sheets" || historical ? { batch: { source, historical } } : {};
+  const digest = sha256(JSON.stringify({
+    files: Object.fromEntries(given.map((s) => [s, sha256(texts[s]!)])), mapping: sha256(mappingText), ...settings,
+  }));
 
   return withTx(pool, async (c) => {
     const open = (await c.query<{ id: string }>(
@@ -121,9 +142,10 @@ export async function stage(
       return { batchId: open.id, created: false };
     }
     if (!opts.ticket) throw new Error("A new batch needs --ticket (POST /api/v1/imports/tickets as an org admin)");
-    // placements.commit is fixed on the batch here; the approver sees it and it is part of the digest.
-    const batchId = (await c.query<{ id: string }>(`SELECT authz.import_open_batch($1, $2, $3, $4) AS id`,
-      [opts.ticket, digest, { ...meta, mapping: JSON.parse(mappingText) }, cfg.placements.commit])).rows[0]!.id;
+    // placements.commit, source and historical are fixed on the batch here; the
+    // approver sees them and they are part of the digest.
+    const batchId = (await c.query<{ id: string }>(`SELECT authz.import_open_batch($1, $2, $3, $4, $5, $6) AS id`,
+      [opts.ticket, digest, { ...meta, mapping: JSON.parse(mappingText) }, cfg.placements.commit, source, historical])).rows[0]!.id;
     const refs = await loadRefs(c);
     const first = raws.map((r) => normalizeRow(r, cfg, refs, opts.hmac, today));
     await c.query(
