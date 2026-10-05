@@ -256,16 +256,15 @@ allows it; such rows go to review (`interview_conflict`).
 
 | CrewNex | Eureka |
 |---|---|
-| Placement open, `startDate` ≤ load date | `joined` (walk `confirmed → paperwork → bgc → ready → joined`), assignment `start_date` = CrewNex `startDate` (needs C1e.1) |
+| Placement open (`endedAt` null), `startDate` ≤ load date | `joined`, assignment `start_date` = CrewNex `startDate` (replay 4.6) |
 | Placement open, `startDate` in the future | `ready` (default; Q14) |
-| Placement ended | `joined`, then `assignment.end_date` = `endedAt`, reason per 2.2 |
+| Placement ended with a reason | `joined`, then assignment ended on `endedAt` with the mapped reason (replay 4.6) |
+| Placement ended **without** a reason, or ended before it started | `backout` (replay 4.6) |
 | `SubmittalType` C2C / TEN99 | `placement_type` `c2c` / `1099` (CrewNex has no W2) |
 | `PlacementWorkMode` REMOTE / HYBRID / ONSITE | `remote` / `hybrid` / `onsite`; NULL → review (Eureka NOT NULL) |
 | `VisaType` CPT, INITIAL_OPT, STEM_OPT, H1B, H4EAD, GC, US_CITIZEN | `auth_type` F-1 CPT, F-1 OPT, STEM OPT, H-1B, H-4 EAD, green card; **US_CITIZEN unmappable** (not a work authorisation: no record, Q12) |
 
-Running a historical placement through `authz.create_placement` queues `placement.created` outbox events and the
-paperwork checklist. For CrewNex rows both are wrong: C1e.1 adds a batch-level `historical` flag that suppresses
-outbox rows and creates the checklist with every item `waived` (reason code `historical_import`) (Q15).
+Historical side effects are handled by the replay rules in 4.6.
 
 ### 4.5 Document categories → `authz.document_type`
 
@@ -277,6 +276,44 @@ outbox rows and creates the checklist with every item `waived` (reason code `his
 | IDENTITY (legacy coarse) | review | restricted until classified |
 | CERTIFICATION, NDA, OTHER | `other` | internal |
 | RESUME, CONTRACT (retired in CrewNex) | `resume` / `contract` tables | not documents |
+
+### 4.6 Historical replay (D5)
+
+Eureka's state machines move one step at a time and fire side effects on every step. A CrewNex history has to be
+**replayed per candidate, in order**, through the same definer functions (`authz.transition_submission`,
+`authz.create_placement`, `authz.transition_placement`, `authz.end_assignment`, `authz.return_employee_to_market`),
+in **historical mode**. The replay is a pure function of the exported rows (`replayPlan(candidate)` in the
+importer, unit-tested on fixtures) whose output is the ordered step list the loader executes; the dry run and the
+preview show that list.
+
+Order of steps for one candidate:
+
+| # | Step | Rule |
+|---|---|---|
+| 1 | Person and candidate | Created `in_training` (server default); `in_training → active` if the candidate ever reached IN_MARKETING or has any submittal. |
+| 2 | Submissions | Created in `submittedOn` order, each walked forward only to the furthest **non-terminal** state its interviews and outcome require (4.2). |
+| 3 | Interviews | Inserted in `scheduledAt` order under their submission while it is still open (Eureka refuses an interview on a terminal submission, migration 0017). An orphan interview (no submittal) gets a synthesised submission only when it has a vendor or end client **and** a role title; otherwise review (`orphan_interview_incomplete`). |
+| 4 | Terminal submission outcomes | `rejected` / `withdrawn` / `selected` applied **after** step 3 for that submission. |
+| 5 | Placements | In `startDate` order (ties by `createdAt`). Each: `create_placement` from its `selected` submission (needs the candidate `active`/`full_of_interviews`), walk to `joined`. A placement with no submittal: synthesised submission (C1e.2) or review. |
+| 6 | End of a placement with a reason | `end_assignment(endedAt, reason)` → candidate `placed → bench` (0045). Ended placements never stay live. |
+| 7 | Between placements | Before the next placement's step 5: `bench → active` (`return_employee_to_market`). |
+| 8 | End before start (`endedAt` < `startDate`) | `backout` before `joined` (reason code `ended_before_start`); candidate back to `active`. |
+| 9 | Ended with a NULL `endReason` | CrewNex's correction path (leaving PLACED through the stage control writes no reason, CrewNex `CLAUDE.md`): the placement fell through. `backout` (reason code `crewnex_correction`); review if it lasted more than 30 days. |
+| 10 | Final status | Last placement open → `placed`. Last placement ended and CrewNex status IN_MARKETING → walk `bench → active`. CrewNex IN_TRAINING after a project end (`endPlacement()` resets to training) → stays `bench`: Eureka has no `bench → in_training` edge and the readiness reset waits for C2.5. Deactivated → `terminated` last (Q17). |
+
+Historical mode = `authz.import_active()` **and** the batch's `historical` column (immutable, part of the digest,
+C1e.1). In it, every side effect that would be wrong for the past is suppressed or back-dated:
+
+| Side effect | Normal | Historical mode |
+|---|---|---|
+| `placement.created`, `placement.state_changed` outbox rows (`0022`, `0023`) | emitted | not emitted |
+| `employee.benched`, `employee.exited` outbox rows (`0045` triggers) | emitted | not emitted |
+| `work_authorization.expiring` notices | daily job | not emitted for dates already past at load |
+| Candidate feedback email | 1 h after an interview | never (already true for interviews ended before load, `docs/import.md`) |
+| Paperwork checklist on create (0035) | items `pending` | items `waived`, reason code `historical_import` |
+| `placement.joined_at`, `status_changed_at`, `submission.status_changed_at`, `assignment.start_date` | `now()` / the day marked joined | back-dated to the CrewNex dates (`startDate`, `endedAt`, `submittedOn`) |
+| `is_first_placement` | computed | computed, correct because placements replay in start order |
+| `candidate_event` rows | written by triggers at `now()` | written at `now()` (append-only, no back-dating, Q22); the timeline shows the import day |
 
 ## 5. Import path
 
