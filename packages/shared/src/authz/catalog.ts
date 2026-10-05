@@ -141,6 +141,9 @@ export const PERMISSIONS = [
   "training:read",
   "training:manage",
   "training.progress:update",
+  // interviews-settings
+  /** Staff contact details (phone, bio) entered in Settings; read by HR and in Users & Access. */
+  "staff.contact:read",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -353,6 +356,8 @@ export const GRANTS: Record<Role, Grants> = {
     // datahub
     "datahub:read": "own",
     "datahub:manage": "org",
+    // interviews-settings
+    "staff.contact:read": "org",
   },
   associate_hr: {
     "assignment:read": "org",
@@ -427,6 +432,8 @@ export const GRANTS: Record<Role, Grants> = {
   org_admin: {
     "access:manage": "org",
     "audit:read": "org",
+    // interviews-settings: staff directory data (work phone), not business data.
+    "staff.contact:read": "org",
   },
 };
 

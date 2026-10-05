@@ -321,7 +321,8 @@ describe("interviews", () => {
       submissionId: sub, recruiter: { id: U.r1a }, team: { id: T.t1 }, location: { id: LOC.dallas },
       client: { id: CLIENT_ID, name: "Northwind Financial" }, callStatus: "scheduled", cleared: false, consentCaptured: false,
     });
-    expect(got.editableFields).toEqual(["callStatus", "coachId", "endsAt", "inviteReceived", "otterUrl", "recordingUrl", "round", "startsAt"]);
+    expect(got.editableFields).toEqual(["callStatus", "coachId", "durationMin", "endsAt", "interviewType", "inviteReceived", "leadId",
+      "meetingUrl", "otterUrl", "panelIds", "recordingUrl", "round", "startsAt"]);
   });
 
   it("creation is authorized against the parent submission", async () => {

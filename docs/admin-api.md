@@ -28,6 +28,8 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 ### Users
 - `GET /api/v1/admin/users?search=&status=active|inactive&cursor=&limit=` (default 50, max 200) returns
   `{ items: [{ id, email, displayName, designation, status, primaryLocation: {id,name}|null, manager: {id,displayName}|null, roles: [{ key, label, locationId, locationName }], teams: [{ id, name, asLead: boolean }] }], nextCursor }`
+  (interviews-settings, SD-1/ST-3: plus `contactVisible` and, for `staff.contact:read` holders, each item's `phone`).
+- `GET /api/v1/admin/users/summary` returns `{ active, inactive, roles: [{ key, label, count }] }`: active users per role, roles with users only (`docs/interviews-settings-api.md` SD-1).
 - `POST /api/v1/admin/users` with `{ email, displayName, designation?, primaryLocationId? }` returns 201 `{ id }`. A duplicate email is a 409. The email must be in `GOOGLE_HOSTED_DOMAIN` when that is set (422).
 - `POST /api/v1/admin/users/:id/deactivate` returns 204 (AD-5).
 - `POST /api/v1/admin/users/:id/reactivate` returns 204.

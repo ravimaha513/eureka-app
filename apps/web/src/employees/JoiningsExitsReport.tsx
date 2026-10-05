@@ -6,7 +6,7 @@ import { employeeKeys, employeesApi, employmentError, employmentLabel, localToda
 
 const EXPORT_ROW_CAP = 50_000;
 
-function download(blob: Blob, filename: string) {
+export function download(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

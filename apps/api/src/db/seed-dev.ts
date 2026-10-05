@@ -10,6 +10,7 @@ import { seedDevPipeline } from "./dev-pipeline.js";
 import { seedDevFacilities } from "./dev-facilities.js";
 import { seedDevDatahub } from "./dev-datahub.js";
 import { seedDevTraining } from "./dev-training.js";
+import { seedDevInterviewsSettings } from "./dev-interviews-settings.js";
 
 if (process.env.NODE_ENV === "production") throw new Error("seed-dev must not run in production");
 const url = process.env.MIGRATION_DATABASE_URL;
@@ -38,6 +39,9 @@ if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-
   // training: fictional courses, one Dallas batch trained by the fixture coach, some progress
   const t = await seedDevTraining(admin);
   if (t.courses) console.log(`seeded training: ${t.courses} courses, ${t.students} students, ${t.completions} completed modules`);
+  // Interview details, panels, scorecards, staff profiles (skipped once any panel exists).
+  const s = await seedDevInterviewsSettings(admin);
+  if (s.panels) console.log(`seeded interview details: ${s.panels} panels, ${s.scorecards} scorecards, ${s.profiles} staff profiles`);
 }
 // Fictional companies, facilities, utilities and bills (skipped when a company exists).
 if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-0000-0000-000000000014'")).rowCount) {

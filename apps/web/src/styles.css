@@ -649,3 +649,48 @@ td.rowactions > .iconbtn + .iconbtn { margin-left: 2px; }
   .tr-progress { flex: 1 1 100%; min-width: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .tr-acctoggle .tr-caret { transition: none; } }
+/* Interviews: details drawer, scorecards, scheduling (interviews-settings) */
+.stars { display: inline-flex; gap: 2px; font-size: 16px; line-height: 1; }
+.star { color: var(--line-strong); }
+.star.on { color: var(--t-amber); }
+.infogrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); gap: 12px 16px; margin: 0; }
+.infogrid dt { color: var(--muted); font-size: 12px; font-weight: 600; }
+.infogrid dd { margin: 2px 0 0; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.scorecard { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr)); gap: 10px 16px; margin: 0; }
+.scorecard dt { color: var(--muted); font-size: 12px; font-weight: 600; }
+.scorecard dd { margin: 2px 0 0; }
+.drawerperson { display: flex; gap: 12px; align-items: center; }
+.drawerperson .badge { margin-left: 8px; }
+.reviewers { display: flex; flex-direction: column; gap: 12px; }
+.sectiontitle { font-size: 15px; }
+.reviewer h3 { font-size: 14px; }
+.reviewnotes { white-space: pre-wrap; color: var(--text2); margin: 0; }
+.calbtn { align-self: flex-start; text-decoration: none; }
+.radiorow input[type="radio"] { height: auto; min-width: 0; width: auto; padding: 0; box-shadow: none; }
+.radiorow { flex-direction: row; flex-wrap: wrap; gap: 14px; border: 0; padding: 0; margin: 0 0 12px; }
+.radiorow legend, .panelpicker legend, .scoreinputs legend { font-weight: 600; color: var(--text2); font-size: 13px; padding: 0; margin-bottom: 4px; }
+.panelpicker, .scoreinputs { border: 0; padding: 0; margin: 0 0 12px; min-width: 0; }
+.pickresults { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.actions.left { justify-content: flex-start; }
+.dialog .grid2 .field input { min-width: 0; }
+/* People directories */
+.contactcell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.contactlink { display: inline-flex; align-items: center; gap: 6px; color: var(--text2); overflow-wrap: anywhere; }
+a.contactlink { color: var(--pri); }
+.rolecounts { margin-bottom: 16px; grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr)); }
+/* Settings & Preferences */
+.settings { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; align-items: start; }
+.settingsnav { display: flex; flex-direction: column; gap: 4px; padding: 10px; }
+.settingsnav button { justify-content: flex-start; border: 0; background: none; padding: 9px 12px; border-radius: 10px; font-weight: 600; color: var(--text2); display: flex; gap: 8px; align-items: center; text-align: left; }
+.settingsnav button[aria-selected="true"] { background: var(--pri-50); color: var(--pri); }
+.settingsnav button:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; }
+.settings form, .settings section { display: flex; flex-direction: column; gap: 10px; }
+.prefrow { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line2); }
+.prefrow:first-of-type { border-top: 0; }
+.prefrow p { margin: 2px 0 0; }
+.signinnote { display: flex; gap: 8px; align-items: center; color: var(--text2); }
+@media (max-width: 768px) {
+  .settings { grid-template-columns: minmax(0, 1fr); }
+  .settingsnav { flex-direction: row; flex-wrap: wrap; }
+  .prefrow { flex-direction: column; align-items: flex-start; }
+}

@@ -32,6 +32,8 @@ export interface Employee {
   exitReason: string | null;
   location: Named | null;
   team: Named | null;
+  /** Personal email and phone; masked unless the caller may read the candidate's contacts (EM-C1). */
+  contact?: { email: string | null; phone: string | null; masked: boolean };
   /** Latest assignment the caller can read (null when none is readable). */
   assignment: EmployeeAssignment | null;
   actions: EmployeeActions;
@@ -120,6 +122,15 @@ export const employeesApi = {
     api<{ id: string; status: string }>(`/api/v1/employees/${enc(id)}/exit`, { method: "POST", ...json({ exitDate, reason }) }),
   returnToMarket: (id: string) =>
     api<{ id: string; candidateStatus: string }>(`/api/v1/employees/${enc(id)}/return-to-market`, { method: "POST", ...json({}) }),
+  exportEmployees: async (f: Omit<EmployeeFilters, "cursor" | "limit">): Promise<ExportResult> => {
+    const body = Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+    const res = await apiFetch("/api/v1/employees/export", { method: "POST", ...json(body) });
+    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "employees.csv";
+    return {
+      blob: await res.blob(), filename: name,
+      rows: Number(res.headers.get("x-export-rows") ?? 0), truncated: res.headers.get("x-export-truncated") === "true",
+    };
+  },
   joiningsExits: (from: string, to: string) => api<JoiningsExits>(`/api/v1/reports/joinings-exits?${qs({ from, to })}`),
   exportJoiningsExits: async (from: string, to: string): Promise<ExportResult> => {
     const res = await apiFetch("/api/v1/reports/joinings-exits/export", { method: "POST", ...json({ from, to }) });

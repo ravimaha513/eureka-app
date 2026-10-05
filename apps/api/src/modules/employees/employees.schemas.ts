@@ -22,6 +22,10 @@ export const EmployeeListQuery = z
   .strict();
 export type EmployeeListQuery = z.infer<typeof EmployeeListQuery>;
 
+/** POST /employees/export (EM-X1): the list filters without paging. */
+export const EmployeeExportQuery = EmployeeListQuery.omit({ cursor: true, limit: true }).strict();
+export type EmployeeExportQuery = z.infer<typeof EmployeeExportQuery>;
+
 /** POST /assignments/:id/end — project exit. */
 export const EndAssignment = z.object({ endDate: day, reason: z.enum(ASSIGNMENT_END_REASONS) }).strict();
 export type EndAssignment = z.infer<typeof EndAssignment>;

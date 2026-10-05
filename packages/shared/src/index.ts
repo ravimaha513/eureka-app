@@ -8,3 +8,5 @@ export * from "./documents.js";
 export * from "./workAuthorization.js";
 export * from "./datahub.js";
 export * from "./authz/training.js";
+export * from "./interviews.js";
+export * from "./notifications.js";

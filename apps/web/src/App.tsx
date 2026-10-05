@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api, setCsrf, type Me } from "./api";
-import { visibleNav, type NavItem } from "./nav";
+import { SETTINGS_NAV, visibleNav, type NavItem } from "./nav";
+import { SettingsPage } from "./settings/SettingsPage";
 import { AccessPage } from "./admin/AccessPage";
 import { DashboardPage } from "./dashboard/DashboardPage";
 import { CandidateProfile } from "./sales/CandidateProfile";
@@ -145,7 +146,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     openProfile(e.id);
   };
   const sections = [...new Set(items.map((i) => i.section))];
-  const current = items.find((i) => i.key === active);
+  const current = active === SETTINGS_NAV.key ? SETTINGS_NAV : items.find((i) => i.key === active);
   // Phones: the sidebar is an off-canvas drawer opened from the top bar's menu button.
   const [navOpen, setNavOpen] = useState(false);
   const [theme, setTheme] = useTheme();
@@ -196,7 +197,8 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <span className="topbrand"><span className="logo"><Sparkles size={14} aria-hidden="true" /></span>Eureka</span>
           <div className="topright">
             <NotificationBell onOpen={openEntity} canOpen={canOpenEntity} />
-            <UserMenu name={me.displayName} roles={me.roles.map((r) => r.label).join(", ")} onSignOut={onSignOut} />
+            <UserMenu name={me.displayName} roles={me.roles.map((r) => r.label).join(", ")} onSignOut={onSignOut}
+              onSettings={() => { setActive(SETTINGS_NAV.key); setProfileId(null); setPlacementId(null); setNavOpen(false); }} />
           </div>
         </div>
         <div className="content">
@@ -223,6 +225,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "datahub" ? <DataHubPage />
             : current.key === "training" ? <TrainingPage me={me} />
             : current.key === "courses" ? <CoursesPage me={me} />
+            : current.key === "settings" ? <SettingsPage me={me} />
             : current.key === "dashboard" ? (
               <DashboardPage firstName={me.displayName.split(" ")[0]} canOpen={(t) => items.some((i) => i.key === t)}
                 onOpen={(t, id) => { if (t === "placements") openPlacement(id); else setActive(t); }} />

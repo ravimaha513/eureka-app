@@ -33,6 +33,11 @@ export class AdminController {
     return this.svc.listUsers(user, UserListQuery.parse(q));
   }
 
+  @Get("users/summary")
+  userSummary(@CurrentUser() user: AuthedUser) {
+    return this.svc.userSummary(user);
+  }
+
   @Post("users")
   createUser(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createUser(user, CreateUser.parse(body));

@@ -563,7 +563,7 @@ The catalog is in `packages/shared/src/authz/catalog.ts`. It defines the followi
 | Employees and finance | `employee:read`, `assignment:update`, `invoice:read`, `invoice:update` |
 | Reports | `report:read`, `report:export`, `performance:read` |
 | Vendors and teams | `vendor.preferred:create`, `vendor.preferred:read`, `team:move_member`, `designation:change` |
-| Administration | `access:manage`, `audit:read` |
+| Administration | `access:manage`, `audit:read`, `staff.contact:read` (staff phone and bio from Settings; interviews-settings) |
 | DataHub (0075, docs/datahub-api.md) | `datahub:read`, `datahub:manage` |
 | Training (0065, `docs/training-api.md`) | `training:read`, `training:manage`, `training.progress:update` |
 
@@ -581,14 +581,14 @@ The catalog is in `packages/shared/src/authz/catalog.ts`. It defines the followi
 | CEO | **own:** datahub:read<br>**org:** assignment:read, candidate:read, employee:read, hotlist:read, interview:read, invoice:read, performance:read, placement:read, rate:read, report:export, report:read, submission:read, training:read, vendor.preferred:read |
 | Location Incharge | **own:** datahub:read<br>**location:** candidate.phone:read, candidate.rating:update, candidate:read, hotlist:read, interview.feedback:create, interview:read, interview:update, performance:read, placement:read, report:read, submission:read, training.progress:update, training:manage, training:read |
 | Location Ops Admin | **own:** datahub:read<br>**location:** bill:manage, bill:read, candidate.phone:read, candidate.rating:update, candidate:read, company:manage, company:read, datahub:manage, facility:manage, facility:read, hotlist:read, interview.feedback:create, interview:read, interview:update, placement:read, report:read, submission:read, training.progress:update, training:manage, training:read, utility.secret:read, utility:manage, utility:read |
-| HR | **own:** datahub:read<br>**org:** assignment:read, assignment:update, bgc:update, candidate.dob:read, candidate.phone:read, candidate:read, datahub:manage, document.restricted:read, document:read, document:upload, document:verify, employee:read, placement:read, report:read, visa:read |
+| HR | **own:** datahub:read<br>**org:** assignment:read, assignment:update, bgc:update, candidate.dob:read, candidate.phone:read, candidate:read, datahub:manage, document.restricted:read, document:read, document:upload, document:verify, employee:read, placement:read, report:read, staff.contact:read, visa:read |
 | Associate HR | **own:** datahub:read<br>**org:** assignment:read, assignment:update, candidate.phone:read, candidate:read, document:read, document:upload, employee:read, placement:read |
 | Accounts | **own:** datahub:read<br>**org:** assignment:read, assignment:update, candidate:read, datahub:manage, document.restricted:read, document:read, employee:read, invoice:read, invoice:update, placement:read, rate:read, report:read |
 | Immigration | **own:** datahub:read<br>**org:** assignment:read, candidate.dob:read, candidate.phone:read, candidate:read, document.restricted:read, document:read, document:upload, document:verify, employee:read, visa:read, visa:update |
 | Interview Coach | **own:** datahub:read<br>**coached:** candidate:read, hotlist:read, interview.feedback:create, interview:read, training.progress:update, training:read |
 | Documents Team | **own:** datahub:read<br>**org:** candidate:read, document:read, document:upload, document:verify |
 | BU Head | **own:** datahub:read<br>**org:** assignment:read, employee:read, placement:read, report:read |
-| Org Admin | **org:** access:manage, audit:read |
+| Org Admin | **org:** access:manage, audit:read, staff.contact:read |
 
 Notes:
 
