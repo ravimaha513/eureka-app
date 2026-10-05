@@ -566,7 +566,7 @@ The catalog is in `packages/shared/src/authz/catalog.ts`. It defines the followi
 | Administration | `access:manage`, `audit:read` |
 | DataHub (0075, docs/datahub-api.md) | `datahub:read`, `datahub:manage` |
 
-**Restricted permissions (second approver):** `document.restricted:read`, `candidate.dob:read`, `visa:update`.
+**Restricted permissions (second approver):** `document.restricted:read`, `candidate.dob:read`, `visa:update`, `datahub:manage` (DataHub, docs/datahub-api.md DH-3).
 
 ### B4.2 Role grants (generated from the catalog)
 

@@ -17,7 +17,11 @@ function stepUpError(e: unknown): string {
  * comes back to this page; in development a button grants it directly.
  * `onConfirmed` runs after a development step-up (Google returns by redirect).
  */
-export function StepUpDialog({ onClose, onConfirmed }: { onClose: () => void; onConfirmed: () => void }) {
+export function StepUpDialog({ onClose, onConfirmed, message = "This is a restricted document." }: {
+  onClose: () => void; onConfirmed: () => void;
+  /** What is being opened (DataHub passes its own wording). */
+  message?: string;
+}) {
   const bodyId = useId();
   const status = useQuery({ queryKey: documentKeys.stepUp, queryFn: documentsApi.stepUpStatus });
   const { busy, error, run } = useSubmit(stepUpError);
@@ -38,7 +42,7 @@ export function StepUpDialog({ onClose, onConfirmed }: { onClose: () => void; on
     <Dialog title="Confirm it's you" onClose={onClose} describedBy={bodyId}>
       <form onSubmit={(e) => { e.preventDefault(); void confirm(); }}>
         <div id={bodyId} className="dialogbody">
-          <p>This is a restricted document. Sign in again to open restricted documents for the next {minutes} minutes.</p>
+          <p>{message} Sign in again to open restricted documents for the next {minutes} minutes.</p>
           {mode === "dev" && <p className="muted">Development sign-in: no password is asked.</p>}
           <p className="muted">Each document you open is recorded in its access log.</p>
         </div>

@@ -126,6 +126,15 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   Left: DOB is not read or written anywhere (OD-04); when it is, encrypt with class `dob`, set `dob_bidx` with
   `dobBlindIndex`, add `dob` to the rotation job (definer functions like `work_auth_number`) and use the index in
   the duplicate check.
+- DataHub (Phase 3c, migration 0075, contract `docs/datahub-api.md`): organisation folders (Internal = all staff,
+  Confidential = chosen catalog roles, Restricted = named members with step-up on every download), one level of subfolders,
+  versioned files (same name = next version) on the 0043 pipeline (`file_object`, presigned POST into
+  `quarantine/documents/`, the unchanged `document-scan` job, restricted folders under `restricted/` and the restricted KMS
+  key), soft deletes, an access log of every download for folder managers, name search over readable folders. Permissions:
+  `datahub:read` (every role but `org_admin`, own scope: nav only) and `datahub:manage` (HR and Accounts org, Location Ops
+  Admin location; in `RESTRICTED_PERMISSIONS` because a manager can add themself to a restricted folder). Managers of a
+  restricted folder who are not members see its settings, members and log, not its files. Audit: ids, levels, counts.
+  Screen "DataHub" (Operations); dev seed `apps/api/src/db/dev-datahub.ts`. Open questions in `docs/datahub-api.md`.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 - First-admin bootstrap (migrations 0037, 0039): `dist/db/bootstrap.js` as a one-off migrate task creates two
   `org_admin` users for hosted-domain emails; break-glass only: refuses while an active `org_admin` exists

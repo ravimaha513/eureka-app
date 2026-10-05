@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
-  BadgeCheck, CalendarClock, ChevronDown, FileBarChart, FileCheck2, Flame, LayoutDashboard, LogOut, Moon,
+  BadgeCheck, CalendarClock, ChevronDown, Database, FileBarChart, FileCheck2, Flame, LayoutDashboard, LogOut, Moon,
   Send, ShieldCheck, Sun, TrendingUp, Users, UserRoundCheck, Wallet, type LucideIcon,
 } from "lucide-react";
 import type { Theme } from "./theme";
@@ -10,6 +10,8 @@ export const NAV_ICONS: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard, hotlist: Flame, candidates: Users, submissions: Send, interviews: CalendarClock,
   placements: BadgeCheck, paperwork: FileCheck2, employees: UserRoundCheck, payments: Wallet,
   performance: TrendingUp, reports: FileBarChart, access: ShieldCheck,
+  // datahub
+  datahub: Database,
 };
 
 const TINTS = ["indigo", "teal", "amber", "rose", "violet", "sky"] as const;

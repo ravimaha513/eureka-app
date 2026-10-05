@@ -108,7 +108,7 @@ const fileList = async (who: string, folderId: string) => {
 };
 const getUrl = async (url: string) => app.inject({ method: "GET", url });
 
-const F: Record<string, string> = {};
+const F = { internal: "", confidential: "", restricted: "", dallas: "", sub: "" };
 
 describe("folders", () => {
   it("navigation: every staff role holds datahub:read; org_admin and the API agree", async () => {
