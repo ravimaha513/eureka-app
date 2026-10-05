@@ -23,6 +23,9 @@ export interface Reconciliation {
   batchId: string;
   status: string;
   operator: string;
+  /** Batch settings fixed at stage (C1a.3). */
+  source: string;
+  historical: boolean;
   approvedBy: string | null;
   files: Record<string, unknown>;
   sheets: Record<Sheet, SheetTotals>;
@@ -35,8 +38,10 @@ const emptyTotals = (): SheetTotals => ({
 });
 
 export async function reconcile(pool: pg.Pool | pg.PoolClient, batchId: string): Promise<Reconciliation> {
-  const b = (await pool.query<{ status: string; files: Record<string, unknown>; operator: string; approver: string | null }>(
-    `SELECT b.status, b.files, o.email::text AS operator, a.email::text AS approver
+  const b = (await pool.query<{
+    status: string; files: Record<string, unknown>; operator: string; approver: string | null; source: string; historical: boolean;
+  }>(
+    `SELECT b.status, b.files, b.source, b.historical, o.email::text AS operator, a.email::text AS approver
      FROM eureka.import_batch b JOIN eureka.app_user o ON o.id = b.operator_id
      LEFT JOIN eureka.app_user a ON a.id = b.approved_by WHERE b.id = $1`, [batchId])).rows[0];
   if (!b) throw new Error(`No import batch ${batchId}`);
@@ -63,7 +68,10 @@ export async function reconcile(pool: pg.Pool | pg.PoolClient, batchId: string):
     const meta = files[s] as { rows?: number } | undefined;
     return t.in === STATES.reduce((a, st) => a + t[st], 0) && (meta === undefined || meta.rows === t.in);
   });
-  return { batchId, status: b.status, operator: b.operator, approvedBy: b.approver, files, sheets, balanced };
+  return {
+    batchId, status: b.status, operator: b.operator, source: b.source, historical: b.historical, approvedBy: b.approver,
+    files, sheets, balanced,
+  };
 }
 
 const pad = (s: string | number, n: number) => String(s).padStart(n);
@@ -71,6 +79,7 @@ const pad = (s: string | number, n: number) => String(s).padStart(n);
 export function formatReport(r: Reconciliation, commit?: CommitResult): string {
   const lines: string[] = [];
   lines.push(`Import batch ${r.batchId}  status: ${r.status}  staged by: ${r.operator}  approved by: ${r.approvedBy ?? "-"}`);
+  lines.push(`source: ${r.source}  historical: ${r.historical ? "yes" : "no"}`);
   lines.push("");
   lines.push(`${"sheet".padEnd(12)}${pad("in", 6)}${pad("clean", 7)}${pad("held", 6)}${pad("review", 8)}${pad("rejected", 10)}${pad("skipped", 9)}${pad("loaded", 8)}`);
   for (const s of SHEETS) {

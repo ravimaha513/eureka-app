@@ -6,6 +6,7 @@
  *   pnpm --filter @eureka/api exec tsx src/import/cli.ts <command> [options]
  *
  *   stage      --sales a.csv --interviews b.csv --placements c.csv --ticket T [--mapping m.json]
+ *              [--source sheets|crewnex] [--historical]   (fixed on a new batch, signed by the approver)
  *   reanalyse  --batch ID              (after review decisions made in the API)
  *   review     --batch ID
  *   commit     --batch ID [--commit]   (dry run unless --commit)
@@ -24,7 +25,7 @@ import { commitBatch } from "./commit.js";
 import { DEFAULT_MAPPING_PATH } from "./mapping.js";
 import { formatReport, reconcile } from "./report.js";
 import { listReview, purgeBatch, purgeExpired } from "./review.js";
-import { recompute, stage } from "./stage.js";
+import { BATCH_SOURCES, recompute, stage, type BatchSource } from "./stage.js";
 
 const USAGE = `usage: cli.ts <stage|reanalyse|review|commit|report|purge> [options]  (see docs/import.md)`;
 
@@ -37,6 +38,7 @@ export async function run(
     options: {
       sales: { type: "string" }, interviews: { type: "string" }, placements: { type: "string" },
       mapping: { type: "string" }, ticket: { type: "string" }, batch: { type: "string" },
+      source: { type: "string" }, historical: { type: "boolean", default: false },
       commit: { type: "boolean", default: false }, expired: { type: "boolean", default: false },
       json: { type: "boolean", default: false },
     },
@@ -55,9 +57,13 @@ export async function run(
 
   switch (command) {
     case "stage": {
+      const source = v.source ?? "sheets";
+      if (!(BATCH_SOURCES as readonly string[]).includes(source)) {
+        throw new Error(`--source must be one of ${BATCH_SOURCES.join(", ")}\n${USAGE}`);
+      }
       const mappingText = readFileSync(v.mapping ?? DEFAULT_MAPPING_PATH, "utf8");
       const r = await stage(pool, { sales: v.sales, interviews: v.interviews, placements: v.placements }, mappingText,
-        { ticket: v.ticket, hmac: hmac() });
+        { ticket: v.ticket, hmac: hmac(), source: source as BatchSource, historical: v.historical });
       const rep = await reconcile(pool, r.batchId);
       print({ ...r, report: rep }, `${r.created ? "Staged new" : "Re-analysed open"} batch ${r.batchId} (nothing loaded)\n\n${formatReport(rep)}`);
       return;

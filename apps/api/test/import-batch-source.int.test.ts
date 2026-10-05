@@ -12,6 +12,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.module.js";
 import { makeHmac } from "../src/import/analyze.js";
+import { run } from "../src/import/cli.js";
 import { commitBatch } from "../src/import/commit.js";
 import { stage } from "../src/import/stage.js";
 import { migrate, seedCatalog } from "../src/db/migrate.js";
@@ -181,6 +182,33 @@ describe("batch source and historical (C1a.3)", () => {
     const c = await commitBatch(imp, s.batchId, { dryRun: false });
     expect(c.failures.map((f) => f.error)).toEqual([expect.stringMatching(/batch_changed/)]);
     expect(c.loaded.candidates).toBe(0);
+  });
+});
+
+describe("CLI: stage --source / --historical", () => {
+  const ENV = { IMPORT_HMAC_KEY: "test-import-hmac-key-test-import-hmac-key" };
+  const stageCli = async (extra: string[], json = true) => {
+    const out: string[] = [];
+    await run(["stage", "--sales", oneSales(), "--mapping", join(DIR, "mapping.json"), "--ticket", await ticket(), ...extra,
+      ...(json ? ["--json"] : [])], imp, (x) => out.push(x), ENV);
+    return out[0]!;
+  };
+
+  it("records the flags on the new batch and reports them; the default is sheets, not historical", async () => {
+    const plain = JSON.parse(await stageCli([])) as { batchId: string; report: { source: string; historical: boolean } };
+    expect(plain.report).toMatchObject({ source: "sheets", historical: false });
+    expect(await batch(plain.batchId)).toMatchObject({ source: "sheets", historical: false });
+    const cn = JSON.parse(await stageCli(["--source", "crewnex", "--historical"])) as typeof plain;
+    expect(cn.report).toMatchObject({ source: "crewnex", historical: true });
+    expect(await batch(cn.batchId)).toMatchObject({ source: "crewnex", historical: true });
+    expect(await stageCli(["--source", "crewnex"], false)).toMatch(/^source: crewnex {2}historical: no$/m);
+  });
+
+  it("refuses an unknown source before opening anything", async () => {
+    const n = async () => (await db.admin.query<{ n: number }>(`SELECT count(*)::int AS n FROM eureka.import_batch`)).rows[0]!.n;
+    const before = await n();
+    await expect(stageCli(["--source", "excel"])).rejects.toThrow(/--source must be one of sheets, crewnex/);
+    expect(await n()).toBe(before);
   });
 });
 
