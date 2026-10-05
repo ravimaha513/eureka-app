@@ -66,7 +66,9 @@ export class ImportsService {
   }
 
   async createTicket(user: AuthedUser) {
-    const ticket = randomBytes(32).toString("base64url");
+    // Prefixed so the ticket can never start with "-": base64url does about 1 time in 64, and
+    // `cli.ts stage --ticket -Xyz...` then fails in parseArgs ("argument is ambiguous").
+    const ticket = `imp_${randomBytes(32).toString("base64url")}`;
     const hash = createHash("sha256").update(ticket).digest("hex");
     return this.tx(user, async (c) => {
       const r = await c.query<{ e: Date }>(`SELECT authz.import_create_ticket($1) AS e`, [hash]);

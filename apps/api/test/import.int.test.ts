@@ -71,7 +71,10 @@ async function call(key: keyof typeof U, method: "GET" | "POST", url: string, pa
 async function ticket(key: keyof typeof U = "admin"): Promise<string> {
   const r = await call(key, "POST", "/api/v1/imports/tickets");
   expect(r.statusCode, r.body).toBe(201);
-  return r.json().ticket as string;
+  const t = r.json().ticket as string;
+  // Never starts with "-", which the CLI's parseArgs would read as an option.
+  expect(t).toMatch(/^imp_[A-Za-z0-9_-]{43}$/);
+  return t;
 }
 /** Sign-off as the API client does it: read the preview, approve quoting its digest. */
 async function approve(key: keyof typeof U, id = batchId) {
