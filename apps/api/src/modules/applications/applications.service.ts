@@ -18,7 +18,7 @@ import { toCsv } from "../hotlist/csv.js";
 import { JobsService, JOB_SELECT, companyNames, type JobRow } from "../jobs/jobs.service.js";
 import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import type {
-  ApplicantListQuery, ApplicationExport, ApplicationListQuery, CreateCandidateFromApplication, ScheduleInterview, Scorecard, StatusChange,
+  ApplicantListQuery, ApplicationExport, ApplicationListQuery, CreateCandidateFromApplication, ScheduleInterview, Scorecard, SetPeople, StatusChange,
 } from "./applications.schemas.js";
 
 /**
@@ -62,6 +62,7 @@ const CODES: Record<string, () => HttpException> = {
   invalid_interviewer: () => new UnprocessableEntityException("invalid_interviewer"),
   invalid_slot: () => new UnprocessableEntityException("invalid_slot"),
   interview_closed: () => new UnprocessableEntityException("interview_closed"),
+  interview_not_started: () => new UnprocessableEntityException("interview_not_started"),
   application_not_hired: () => new UnprocessableEntityException("application_not_hired"),
   candidate_exists: () => new ConflictException("candidate_exists"),
   candidate_not_found: () => new UnprocessableEntityException("candidate_not_found"),
@@ -96,6 +97,13 @@ export class ApplicationsService {
     return resolveScope(access, "application:manage")?.all === true || (r.hiring_manager_id !== null && r.hiring_manager_id === access.userId);
   }
 
+  /** Applicant contact details follow applicant:read / applicant.phone:read, not the job or interview that revealed the application. */
+  private email(access: UserAccess, v: string | null) {
+    if (v === null || resolveScope(access, "applicant:read")?.all === true) return v;
+    const at = v.indexOf("@");
+    return at < 1 ? "•••" : `${v[0]}•••${v.slice(at)}`;
+  }
+
   private phone(access: UserAccess, v: string | null) {
     if (v === null) return { phone: null, phoneMasked: false };
     const ok = resolveScope(access, "applicant.phone:read")?.all === true;
@@ -115,7 +123,7 @@ export class ApplicationsService {
       job: { id: r.job_id, title: r.job_title, kind: r.job_kind },
       company: r.company_id ? { id: r.company_id, name: companies?.get(r.job_id) ?? null } : null,
       applicant: {
-        id: r.applicant_id, name: fullName(r), email: r.email, emailVerified: r.email_verified_at !== null, ...this.phone(access, r.phone_e164),
+        id: r.applicant_id, name: fullName(r), email: this.email(access, r.email), emailVerified: r.email_verified_at !== null, ...this.phone(access, r.phone_e164),
       },
       candidateId: r.candidate_id,
       /** Hints for the UI; the database checks every action again. */
@@ -217,7 +225,7 @@ export class ApplicationsService {
             })),
             actions: {
               setStatus: manage && i.status === "scheduled",
-              scorecard: reviewer && (i.status === "scheduled" || i.status === "completed"),
+              scorecard: reviewer && (i.status === "completed" || (i.status === "scheduled" && i.starts_at.getTime() <= Date.now())),
             },
           };
         }),
@@ -226,11 +234,15 @@ export class ApplicationsService {
     });
   }
 
-  /** Fire and forget after commit; the applicant's email never carries staff comments. */
-  private notifyApplicant(to: string | null, first: string | null, subject: string, lines: string[], kind: string) {
+  /**
+   * Fire and forget after commit; the applicant's email never carries staff comments, and greets without
+   * the name (typed at sign-up by whoever created the account). Failures log the error class only: provider
+   * messages can contain the recipient address.
+   */
+  private notifyApplicant(to: string | null, _first: string | null, subject: string, lines: string[], kind: string) {
     if (!to) return;
-    const text = `Hi ${first ?? "there"},\n\n${lines.join("\n")}\n\nSign in to Eureka Careers for the details: ${new URL("/portal/applications", this.config.PUBLIC_BASE_URL).toString()}\n\n— Eureka Careers\n`;
-    void this.mail.send({ to, subject, text }).catch((err: Error) => this.log.warn(`applicant ${kind} email failed: ${err.message}`));
+    const text = `Hello,\n\n${lines.join("\n")}\n\nSign in to Eureka Careers for the details: ${new URL("/portal/applications", this.config.PUBLIC_BASE_URL).toString()}\n\n— Eureka Careers\n`;
+    void this.mail.send({ to, subject, text }).catch((err: unknown) => this.log.warn(`applicant ${kind} email failed (${(err as { name?: string })?.name ?? "error"})`));
   }
 
   async transition(user: AuthedUser, id: string, expected: number | null, body: StatusChange) {
@@ -263,7 +275,7 @@ export class ApplicationsService {
           [id, b.interviewType, b.round, b.leadUserId, b.panelUserIds, b.startsAt, b.durationMinutes, b.meetingLink ?? null])).rows[0]!;
       } catch (err) { mapApplicationError(err); }
       await this.audit.record(c, { actorId: user.id, action: "application.interview_scheduled", entityType: "application_interview", entityId: res.interview_id,
-        changes: { applicationId: id, interviewType: b.interviewType, round: b.round, panel: b.panelUserIds.length, statusTo: res.to_status } });
+        changes: { applicationId: id, interviewType: b.interviewType, round: b.round, leadUserId: b.leadUserId, panelUserIds: b.panelUserIds, statusTo: res.to_status } });
       return { r, res };
     });
     const when = new Date(b.startsAt).toISOString().replace("T", " ").slice(0, 16);
@@ -287,6 +299,28 @@ export class ApplicationsService {
       await this.audit.record(c, { actorId: user.id, action: "application.interview_status", entityType: "application_interview", entityId: interviewId,
         changes: { from: "scheduled", to: status } });
       return { id: interviewId, status };
+    });
+  }
+
+  /** Replace the lead and panel of a scheduled interview; ids of who was added and removed go to the audit. */
+  async setPeople(user: AuthedUser, interviewId: string, b: SetPeople) {
+    return this.db.withUser(user.id, async (c) => {
+      const cur = (await c.query<{ application_id: string; lead_user_id: string; panel: string[] | null }>(
+        `SELECT i.application_id, i.lead_user_id,
+                (SELECT array_agg(p.user_id) FROM eureka.application_interview_panel p WHERE p.interview_id = i.id) AS panel
+         FROM eureka.application_interview i WHERE i.id = $1`, [interviewId])).rows[0];
+      if (!cur) throw new NotFoundException();
+      const r = await this.load(c, cur.application_id);
+      if (!this.manageable(user.access, r)) throw new ForbiddenException("Not permitted");
+      try {
+        await c.query(`SELECT authz.application_interview_set_people($1, $2, $3::uuid[])`, [interviewId, b.leadUserId, b.panelUserIds]);
+      } catch (err) { mapApplicationError(err); }
+      const before = new Set(cur.panel ?? []);
+      const after = new Set(b.panelUserIds);
+      await this.audit.record(c, { actorId: user.id, action: "application.interview_people", entityType: "application_interview", entityId: interviewId,
+        changes: { applicationId: cur.application_id, leadFrom: cur.lead_user_id, leadTo: b.leadUserId,
+          added: [...after].filter((x) => !before.has(x)), removed: [...before].filter((x) => !after.has(x)) } });
+      return { id: interviewId };
     });
   }
 
@@ -319,7 +353,9 @@ export class ApplicationsService {
     if (r.first_name === null || r.last_name === null) throw new NotFoundException();
     const created = await this.candidates.create(user, {
       firstName: r.first_name, lastName: r.last_name, technologyId: b.technologyId, locationId: b.locationId,
-      ...(b.teamId ? { teamId: b.teamId } : {}), ...(r.email ? { email: r.email } : {}), ...(r.phone_e164 ? { phone: r.phone_e164 } : {}),
+      ...(b.teamId ? { teamId: b.teamId } : {}), ...(r.email ? { email: r.email } : {}),
+      // The phone is copied only for callers who may read applicant phones; others create the candidate without it.
+      ...(r.phone_e164 && resolveScope(user.access, "applicant.phone:read")?.all === true ? { phone: r.phone_e164 } : {}),
       ...(b.confirmDuplicate !== undefined ? { confirmDuplicate: b.confirmDuplicate } : {}),
     }, async (c, candidateId) => {
       try {

@@ -12,6 +12,7 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { IdempotencyKey } from "../placements/placements.schemas.js";
 import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
+import { PARTY_PERMISSIONS } from "../lookups/lookups.controller.js";
 import type { CreateJob, JobListQuery, UpdateJob } from "./jobs.schemas.js";
 
 /**
@@ -125,6 +126,7 @@ function canonical(v: unknown): string {
 const CODES: Record<string, () => HttpException> = {
   invalid_skill: () => new UnprocessableEntityException("invalid_skill"),
   invalid_hiring_manager: () => new UnprocessableEntityException("invalid_hiring_manager"),
+  client_locked: () => new UnprocessableEntityException("client_locked"),
   server_managed_field: () => new UnprocessableEntityException("server_managed_field"),
 };
 
@@ -241,12 +243,18 @@ export class JobsService {
     }));
   }
 
+  /** Clients are visible only to callers who work submissions or placements (the lookups rule); the FK check itself bypasses RLS. */
+  private checkClientVisible(user: AuthedUser, clientId: string | null | undefined) {
+    if (clientId && !PARTY_PERMISSIONS.some((p) => can(user.access, p))) throw new UnprocessableEntityException("invalid_client");
+  }
+
   private checkKind(user: AuthedUser, kind: JobKind) {
     if (!creatableJobKinds(user.access).includes(kind)) throw new ForbiddenException("Not permitted to create this kind of job");
   }
 
   async create(user: AuthedUser, body: CreateJob, idempotencyKey: string | undefined) {
     this.checkKind(user, body.kind);
+    this.checkClientVisible(user, body.clientId);
     let key: string | null = null;
     if (idempotencyKey !== undefined) {
       const k = IdempotencyKey.safeParse(idempotencyKey);
@@ -309,6 +317,7 @@ export class JobsService {
       if (!cur) throw new NotFoundException();
       if (!jobAllowed(user.access, "job:manage", jobRef(cur))) throw new ForbiddenException("Not permitted");
       const b = parse();
+      this.checkClientVisible(user, b.clientId);
       if (expected !== cur.row_version) throw new HttpException("stale", HttpStatus.PRECONDITION_FAILED);
       const kind = cur.kind;
       if (kind === "client_requirement" && (b.companyId != null || b.clientId === null)) throw new UnprocessableEntityException("invalid_job_reference");

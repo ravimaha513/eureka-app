@@ -54,6 +54,8 @@ CREATE TABLE eureka.job_application (
 );
 CREATE INDEX job_application_list ON eureka.job_application (applied_at DESC, id DESC);
 CREATE INDEX job_application_applicant ON eureka.job_application (applicant_id);
+-- A candidate belongs to at most one application.
+CREATE UNIQUE INDEX job_application_candidate_once ON eureka.job_application (candidate_id) WHERE candidate_id IS NOT NULL;
 
 CREATE TABLE eureka.application_event (
   id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -177,25 +179,46 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
    WHERE authz.current_user_id() IS NOT NULL AND j.hiring_manager_id = authz.current_user_id()
 $$;
 
--- Applications with an interview the current user leads or sits on.
+-- Applications the current user reviews: an interview they lead or sit on that is scheduled or completed, on an
+-- application that is not final. Access ends with the interview (cancelled, no show) or the application (hired,
+-- rejected, withdrawn) and when a manager removes the person (authz.application_interview_set_people).
 CREATE FUNCTION authz.my_interview_application_ids() RETURNS uuid[]
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
   SELECT coalesce(array_agg(DISTINCT i.application_id), '{}') FROM eureka.application_interview i
-   WHERE authz.current_user_id() IS NOT NULL AND (i.lead_user_id = authz.current_user_id()
-      OR EXISTS (SELECT 1 FROM eureka.application_interview_panel p WHERE p.interview_id = i.id AND p.user_id = authz.current_user_id()))
+   JOIN eureka.job_application a ON a.id = i.application_id
+   WHERE authz.current_user_id() IS NOT NULL
+     AND i.status IN ('scheduled', 'completed') AND a.status IN ('applied', 'shortlisted', 'interview_scheduled', 'offered')
+     AND (i.lead_user_id = authz.current_user_id()
+          OR EXISTS (SELECT 1 FROM eureka.application_interview_panel p WHERE p.interview_id = i.id AND p.user_id = authz.current_user_id()))
 $$;
 
--- Jobs and applicants reachable through those two paths (job details and applicant tab for reviewers and hiring managers).
+-- Jobs and applicants reachable through those two paths (job details and applicant tab for reviewers and hiring
+-- managers). Rule 3: each is one statement over the base tables with no nested set-returning definer call per
+-- row, so a policy that calls it in an InitPlan evaluates it once.
 CREATE FUNCTION authz.my_interview_job_ids() RETURNS uuid[]
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-  SELECT coalesce(array_agg(DISTINCT a.job_id), '{}') FROM eureka.job_application a
-   WHERE a.id = ANY (authz.my_interview_application_ids())
+  SELECT coalesce(array_agg(DISTINCT a.job_id), '{}') FROM eureka.application_interview i
+   JOIN eureka.job_application a ON a.id = i.application_id
+   WHERE authz.current_user_id() IS NOT NULL
+     AND i.status IN ('scheduled', 'completed') AND a.status IN ('applied', 'shortlisted', 'interview_scheduled', 'offered')
+     AND (i.lead_user_id = authz.current_user_id()
+          OR EXISTS (SELECT 1 FROM eureka.application_interview_panel p WHERE p.interview_id = i.id AND p.user_id = authz.current_user_id()))
 $$;
 
 CREATE FUNCTION authz.my_application_applicant_ids() RETURNS uuid[]
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-  SELECT coalesce(array_agg(DISTINCT a.applicant_id), '{}') FROM eureka.job_application a
-   WHERE a.job_id = ANY (authz.my_hiring_job_ids()) OR a.id = ANY (authz.my_interview_application_ids())
+  SELECT coalesce(array_agg(DISTINCT x.applicant_id), '{}') FROM (
+    SELECT a.applicant_id FROM eureka.job_application a
+     JOIN eureka.job j ON j.id = a.job_id
+     WHERE authz.current_user_id() IS NOT NULL AND j.hiring_manager_id = authz.current_user_id()
+    UNION
+    SELECT a.applicant_id FROM eureka.application_interview i
+     JOIN eureka.job_application a ON a.id = i.application_id
+     WHERE authz.current_user_id() IS NOT NULL
+       AND i.status IN ('scheduled', 'completed') AND a.status IN ('applied', 'shortlisted', 'interview_scheduled', 'offered')
+       AND (i.lead_user_id = authz.current_user_id()
+            OR EXISTS (SELECT 1 FROM eureka.application_interview_panel p WHERE p.interview_id = i.id AND p.user_id = authz.current_user_id()))
+  ) x
 $$;
 
 -- Readable by the current staff user (mirrors job_application_staff_read).
@@ -378,7 +401,7 @@ CREATE FUNCTION authz.application_scorecard_submit(p_interview uuid, p_technical
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE i record; me uuid := authz.current_user_id(); sid uuid;
 BEGIN
-  SELECT x.id, x.application_id, x.lead_user_id, x.status INTO i FROM eureka.application_interview x WHERE x.id = p_interview;
+  SELECT x.id, x.application_id, x.lead_user_id, x.status, x.starts_at INTO i FROM eureka.application_interview x WHERE x.id = p_interview;
   IF me IS NULL OR i.id IS NULL OR NOT coalesce(authz.application_readable(i.application_id), false) THEN
     RAISE EXCEPTION 'interview_not_found' USING ERRCODE = 'no_data_found';
   END IF;
@@ -389,6 +412,10 @@ BEGIN
   END IF;
   IF i.status IS DISTINCT FROM 'completed' AND i.status IS DISTINCT FROM 'scheduled' THEN
     RAISE EXCEPTION 'interview_closed' USING ERRCODE = 'check_violation';
+  END IF;
+  -- Reviews follow the interview: once it started (or was marked completed), not before.
+  IF i.status = 'scheduled' AND i.starts_at > pg_catalog.now() THEN
+    RAISE EXCEPTION 'interview_not_started' USING ERRCODE = 'check_violation';
   END IF;
   INSERT INTO eureka.application_scorecard (interview_id, reviewer_id, technical, communication, problem_solving, attitude, notes)
   VALUES (i.id, me, p_technical, p_communication, p_problem, p_attitude, nullif(pg_catalog.btrim(p_notes), ''))
@@ -410,11 +437,46 @@ BEGIN
   IF a.candidate_id IS NOT NULL THEN
     RAISE EXCEPTION 'candidate_exists' USING ERRCODE = 'check_violation';
   END IF;
-  IF p_candidate IS NULL OR NOT coalesce(authz.candidate_visible(p_candidate, 'candidate:read'), false) THEN
+  IF NOT coalesce(authz.has_perm('candidate:create'), false) THEN
+    RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  -- Only the candidate this very transaction created (the API creates it and links it in one transaction), that
+  -- the caller can read and that no other application points at: a hired application cannot adopt an existing candidate.
+  IF p_candidate IS NULL OR NOT coalesce(authz.candidate_visible(p_candidate, 'candidate:read'), false)
+     OR NOT EXISTS (SELECT 1 FROM eureka.candidate c WHERE c.id = p_candidate AND c.xmin = pg_catalog.pg_current_xact_id()::xid)
+     OR EXISTS (SELECT 1 FROM eureka.job_application x WHERE x.candidate_id = p_candidate) THEN
     RAISE EXCEPTION 'candidate_not_found' USING ERRCODE = 'check_violation';
   END IF;
   UPDATE eureka.job_application SET candidate_id = p_candidate, row_version = row_version + 1 WHERE id = a.id;
   INSERT INTO eureka.application_event (application_id, kind, actor_id) VALUES (a.id, 'candidate_created', authz.current_user_id());
+END $$;
+
+-- Change the lead and/or replace the panel of a scheduled interview (re-checks manage). Removing someone ends their
+-- access to the application at once (my_interview_application_ids reads the panel). Returns the previous lead.
+CREATE FUNCTION authz.application_interview_set_people(p_interview uuid, p_lead uuid, p_panel uuid[]) RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE i record; panel uuid[] := ARRAY(SELECT DISTINCT x FROM pg_catalog.unnest(coalesce(p_panel, '{}')) x WHERE x IS NOT NULL);
+BEGIN
+  SELECT x.id, x.application_id, x.status, x.lead_user_id INTO i FROM eureka.application_interview x WHERE x.id = p_interview;
+  IF i.id IS NULL OR NOT coalesce(authz.application_readable(i.application_id), false) THEN
+    RAISE EXCEPTION 'interview_not_found' USING ERRCODE = 'no_data_found';
+  END IF;
+  PERFORM authz.application_for_update(i.application_id);
+  IF i.status IS DISTINCT FROM 'scheduled' THEN
+    RAISE EXCEPTION 'invalid_transition' USING ERRCODE = 'check_violation';
+  END IF;
+  IF pg_catalog.cardinality(panel) > 10 THEN
+    RAISE EXCEPTION 'invalid_panel' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_lead IS NULL OR NOT EXISTS (SELECT 1 FROM eureka.app_user u WHERE u.id = p_lead AND u.status = 'active')
+     OR (SELECT count(*) FROM eureka.app_user u WHERE u.id = ANY (panel) AND u.status = 'active') <> pg_catalog.cardinality(panel) THEN
+    RAISE EXCEPTION 'invalid_interviewer' USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE eureka.application_interview SET lead_user_id = p_lead, updated_at = pg_catalog.now() WHERE id = i.id;
+  DELETE FROM eureka.application_interview_panel p WHERE p.interview_id = i.id AND NOT (p.user_id = ANY (panel));
+  INSERT INTO eureka.application_interview_panel (interview_id, user_id)
+  SELECT i.id, x FROM pg_catalog.unnest(panel) x ON CONFLICT DO NOTHING;
+  RETURN i.lead_user_id;
 END $$;
 
 -- ---------- notifications: application.received ----------
@@ -631,6 +693,7 @@ REVOKE ALL ON FUNCTION authz.application_scorecard_submit(uuid, integer, integer
 REVOKE ALL ON FUNCTION authz.application_link_candidate(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.job_company_names(uuid[]) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.portal_job_company_names(uuid[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION authz.application_interview_set_people(uuid, uuid, uuid[]) FROM PUBLIC;
 -- Policies evaluate as the querying role.
 GRANT EXECUTE ON FUNCTION authz.my_hiring_job_ids() TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.my_interview_application_ids() TO eureka_app;
@@ -645,6 +708,7 @@ GRANT EXECUTE ON FUNCTION authz.application_schedule_interview(uuid, text, text,
 GRANT EXECUTE ON FUNCTION authz.application_interview_set_status(uuid, text) TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.application_scorecard_submit(uuid, integer, integer, integer, integer, text) TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.application_link_candidate(uuid, uuid) TO eureka_app;
+GRANT EXECUTE ON FUNCTION authz.application_interview_set_people(uuid, uuid, uuid[]) TO eureka_app;
 
 -- The portal role writes its own audit rows (ids only, as the applicant), append-only like the app's.
 SET ROLE eureka_owner;

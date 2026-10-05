@@ -72,6 +72,8 @@ export const applicationsApi = {
   schedule: (id: string, body: { interviewType: string; round: string; leadUserId: string; panelUserIds: string[]; startsAt: string; durationMinutes: number; meetingLink?: string }) =>
     api<{ id: string; applicationStatus: string }>(`/api/v1/applications/${id}/interviews`, post(body)),
   interviewStatus: (id: string, status: string) => api<{ id: string; status: string }>(`/api/v1/application-interviews/${id}/status`, post({ status })),
+  setPeople: (id: string, body: { leadUserId: string; panelUserIds: string[] }) =>
+    api<{ id: string }>(`/api/v1/application-interviews/${id}/people`, { method: "PUT", body: JSON.stringify(body) }),
   scorecard: (id: string, body: { technical: number; communication: number; problemSolving: number; attitude: number; notes?: string }) =>
     api<{ id: string }>(`/api/v1/application-interviews/${id}/scorecard`, { method: "PUT", body: JSON.stringify(body) }),
   createCandidate: (id: string, body: { technologyId: string; locationId: string; confirmDuplicate?: boolean }) =>

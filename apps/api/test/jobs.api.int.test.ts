@@ -194,6 +194,19 @@ describe("submissions name a client requirement (JP-8)", () => {
     expect(r.json().detail).toBe(code);
   });
 
+  it("the client of a job is locked once any submission answers it, and free before", async () => {
+    const free = await created("l1", clientReq({ title: "Free client" }));
+    const ok = await call("l1", "PATCH", `/api/v1/jobs/${free}`, { clientId: OTHER_CLIENT }, { "if-match": '"1"' });
+    expect(ok.statusCode, ok.body).toBe(200);
+    expect(ok.json().client.id).toBe(OTHER_CLIENT);
+    const locked = await call("l1", "PATCH", `/api/v1/jobs/${jobId}`, { clientId: OTHER_CLIENT }, { "if-match": `"${(await call("l1", "GET", `/api/v1/jobs/${jobId}`)).json().rowVersion}"` });
+    expect(locked.statusCode).toBe(422);
+    expect(locked.json().detail).toBe("client_locked");
+    // Direct SQL: the database refuses it too, even for a manager who cannot see the other team's submission.
+    await expect(asUser(db.app, U.l1, (c) => c.query(`UPDATE eureka.job SET client_id = $2 WHERE id = $1`, [jobId, OTHER_CLIENT])))
+      .rejects.toThrow(/client_locked/);
+  });
+
   it("refuses a job the recruiter cannot read", async () => {
     const r3Cand = (await db.admin.query(`SELECT id FROM eureka.candidate WHERE recruiter_id = $1 AND marketing_status = 'active' LIMIT 1`, [U.r3a])).rows[0].id;
     const r = await call("r3a", "POST", "/api/v1/submissions", { candidateId: r3Cand, clientId: CLIENT_ID, jobTitle: "x", jobId });

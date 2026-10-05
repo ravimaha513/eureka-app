@@ -6,7 +6,7 @@ import { clientIp } from "../../platform/client-ip.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { DevMailbox, MAIL_PORT, type MailPort } from "../../platform/mail.js";
-import { PORTAL_COOKIE, PortalSessionService } from "../../platform/portal-session.service.js";
+import { PortalSessionService } from "../../platform/portal-session.service.js";
 import { PortalAuthService } from "./portal-auth.service.js";
 import { RequestLink, SignUp, VerifyLink } from "./portal.schemas.js";
 
@@ -44,7 +44,16 @@ export class PortalAuthController {
   async verify(@Req() req: FastifyRequest, @Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
     const { token } = VerifyLink.parse(body);
     const { sid } = await this.svc.verify(token, clientIp(req, this.config));
-    void reply.setCookie(PORTAL_COOKIE, sid, this.sessions.cookieOptions());
+    void reply.setCookie(this.sessions.cookieName, sid, this.sessions.cookieOptions());
+  }
+
+  /** Sign out everywhere: ends every session of the applicant, this one included. */
+  @PortalRoute()
+  @Post("sign-out-all")
+  @HttpCode(204)
+  async signOutAll(@CurrentApplicant() a: AuthedApplicant, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
+    await this.sessions.revokeAll(a.id);
+    void reply.clearCookie(this.sessions.cookieName, this.sessions.clearOptions());
   }
 
   @PortalRoute()
@@ -52,7 +61,7 @@ export class PortalAuthController {
   @HttpCode(204)
   async signOut(@CurrentApplicant() a: AuthedApplicant, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
     await this.sessions.revoke(a.sessionHash);
-    void reply.clearCookie(PORTAL_COOKIE, { path: this.sessions.cookieOptions().path });
+    void reply.clearCookie(this.sessions.cookieName, this.sessions.clearOptions());
   }
 }
 

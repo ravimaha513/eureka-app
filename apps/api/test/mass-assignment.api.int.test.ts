@@ -1285,6 +1285,14 @@ const CASES: RejectCase[] = [
     forbidden: { applicationId: FOREIGN_ID, startsAt: PAST, leadUserId: U.l2, meetingLink: "https://x.example" },
   },
   {
+    route: "PUT /api/v1/application-interviews/:id/people", actor: "hr",
+    prepare: async () => ({
+      url: `/api/v1/application-interviews/${FOREIGN_ID}/people`, body: { leadUserId: U.coach, panelUserIds: [] },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.application_interview_panel`),
+    }),
+    forbidden: { applicationId: FOREIGN_ID, status: "completed", startsAt: PAST, add: [U.r1a], remove: [U.r1b] },
+  },
+  {
     route: "PUT /api/v1/application-interviews/:id/scorecard", actor: "hr",
     prepare: async () => ({
       url: `/api/v1/application-interviews/${FOREIGN_ID}/scorecard`, body: { technical: 3, communication: 3, problemSolving: 3, attitude: 3 },
@@ -1419,18 +1427,21 @@ const IGNORED: IgnoreCase[] = [
   },
   // jobs-portal: sign-out ends the caller's own applicant session, whatever the body names
   {
+    route: "POST /api/portal/auth/sign-out-all",
+    run: async () => {
+      const a = await portalSignIn(app, `ma-all-a-${Date.now()}@example.com`, "All", "Applicant");
+      const b = await portalSignIn(app, `ma-all-b-${Date.now()}@example.com`, "All", "Applicant");
+      const res = await app.inject({ method: "POST", url: "/api/portal/auth/sign-out-all", headers: { cookie: a.cookie, "x-csrf-token": a.csrf },
+        payload: { applicantId: b.id, ...SERVER_MANAGED } });
+      expect(res.statusCode, res.body).toBe(204);
+      expect((await app.inject({ method: "GET", url: "/api/portal/me", headers: { cookie: a.cookie } })).statusCode).toBe(401);
+      expect((await app.inject({ method: "GET", url: "/api/portal/me", headers: { cookie: b.cookie } })).statusCode).toBe(200);
+    },
+  },
+  {
     route: "POST /api/portal/auth/sign-out",
     run: async () => {
-      const signIn = async (email: string) => {
-        await app.inject({ method: "POST", url: "/api/portal/auth/sign-up", headers: { "x-eureka-portal": "1" },
-          payload: { firstName: "Out", lastName: "Applicant", email, phone: "+1 469 555 0178" } });
-        const mail = (await app.inject({ method: "GET", url: `/api/portal/dev/mailbox?to=${encodeURIComponent(email)}` })).json().items[0];
-        const token = /#token=([^\s]+)/.exec(mail.text)![1]!;
-        const v = await app.inject({ method: "POST", url: "/api/portal/auth/verify", headers: { "x-eureka-portal": "1" }, payload: { token } });
-        const cookie = String(v.headers["set-cookie"]).split(";")[0]!;
-        const me = (await app.inject({ method: "GET", url: "/api/portal/me", headers: { cookie } })).json();
-        return { cookie, csrf: me.csrfToken as string, id: me.id as string };
-      };
+      const signIn = (email: string) => portalSignIn(app, email, "Out", "Applicant");
       const a = await signIn("ma-out-a@example.com");
       const b = await signIn("ma-out-b@example.com");
       const res = await app.inject({ method: "POST", url: "/api/portal/auth/sign-out", headers: { cookie: a.cookie, "x-csrf-token": a.csrf },
