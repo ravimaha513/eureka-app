@@ -65,7 +65,7 @@ Routes under `/api/portal/*` only.
 | `POST /auth/sign-up` | JP-10: first name, last name, E.164 phone, email. **202** with a fixed message for new, existing, unverified and unknown emails alike; the mail is sent after the answer, not awaited. An unverified applicant's name and phone are replaced; a verified account is untouched. |
 | `POST /auth/request-link` | JP-11: same generic 202 whether or not the email has an account |
 | `POST /auth/verify` | JP-12: body `{ token }` (`<link id>.<secret>`); the web page reads it from the link's **fragment**, removes it from the address bar and posts it only on "Continue" (mail scanners that open links cannot burn it). 204 + cookie, or 400 `link_invalid` (same for malformed, wrong, used, expired). |
-| `POST /auth/sign-out` | ends the caller's session |
+| `POST /auth/sign-out`, `POST /auth/sign-out-all` | end the caller's session / every session of the applicant (disabling an applicant revokes theirs too) |
 | `GET /me` | the applicant (own row) and the CSRF token |
 | `GET /jobs`, `GET /jobs/:id` | JP-22/23: published open internal openings (list: short plain excerpt; detail: rich text); no hiring manager or owner |
 | `POST /jobs/:id/apply` | JP-24: no body; 201 `{ id }`; 409 `already_applied`; 404 not published/draft/client requirement; 422 `job_not_open` |
@@ -75,12 +75,20 @@ Routes under `/api/portal/*` only.
 
 Links (JP-13): 256-bit secret; only its SHA-256 is stored; **single use, 15 minutes** (the database caps the TTL at 30); redeeming one link
 burns the applicant's other open links; the stored hash is compared in constant time (`timingSafeEqual`, against a dummy hash when no link is open).
-Rate limits: per email 5 requests / 15 minutes in memory per task and, in the database, at most 5 links per applicant per hour (shared by all
-tasks); per client address 20 sign-up/link requests and 30 verifications per 15 minutes (429). The client address is the CloudFront-set
-`x-eureka-viewer-ip` when the origin guard is on (same rule as the public feedback form). Every response to sign-up and link requests is the same
-whichever case applies.
+Sign-up and link requests are answered **before** any work: the reply is the same fixed 202 whatever the account state, and the database call and the mail
+run afterwards (so latency cannot tell known from unknown addresses). The mail contains **no text the requester chose** (fixed greeting "Hello,", never the
+typed name) because it goes to an unverified address. An existing applicant row is never overwritten by a sign-up: what a sign-up submitted travels on the
+link it issued and is applied, to an *unverified* row only, when that link is redeemed (the mailbox owner confirms it).
 
-Sessions (JP-14): separate table `applicant_session`, cookie `eureka_portal_sid`, **path `/api/portal`**, `HttpOnly`, `SameSite=Strict`, `Secure` in
+Limits (JP-13b): per client address in memory per task (20 sign-up/link requests, 30 verifications per 15 minutes; IPv6 keyed by its /64; the map is hard-capped
+with oldest-first eviction); everything per email or global is **database-backed and shared by all tasks, counted only for links actually issued**, so asking
+for somebody else's link cannot lock them out: one link per 60 s and 10 per hour per applicant, and database-wide hourly caps of 600 links and 200 new
+accounts (`eureka.portal_throttle`, definer-only). Infra: WAF rate rule `portal-auth-rate-limit` (60 requests / 5 minutes per IP on `/api/portal/auth/`; it is a 7th
+rule, so on the CloudFront flat-rate Free plan, limited to 5 rules, drop or merge another rule first). Worker job `portal-prune-unverified` (daily 04:45 New York)
+deletes applicants who never confirmed their mailbox after 30 days (no application, no open link); only counts are logged. CAPTCHA/proof-of-work on sign-up is an
+open question (not built).
+
+Sessions (JP-14): separate table `applicant_session`, cookie `eureka_portal_sid` (`__Secure-eureka_portal_sid` in production; `__Host-` needs Path=/, which would widen the scope), **path `/api/portal`**, `HttpOnly`, `SameSite=Strict`, `Secure` in
 production; idle 60 min and absolute 12 h (`PORTAL_SESSION_IDLE_MINUTES`, `PORTAL_SESSION_HOURS`). The auth guard: portal routes take only the portal
 cookie (a staff cookie, even renamed, is not an applicant session) and reject staff sessions with 401; staff routes never read the portal cookie, and
 any non-portal handler under `/api/portal` is refused. Unauthenticated portal writes need the `x-eureka-portal: 1` header; authenticated writes need the
@@ -100,6 +108,13 @@ The link is never logged in production (the SES path logs nothing of the message
 API role's earlier unused "any address at the domain" SES grant. The web app serves `/portal/*` from the same CloudFront distribution (SPA rewrite); the portal is a
 separate minimal shell with its own Light/Dark switch.
 
+### Production prerequisites (applicant mail)
+
+1. A **verified SES domain identity with DKIM** (and SPF/DMARC alignment) for the sender's domain, out of the SES sandbox, so mail to arbitrary applicants is delivered.
+2. `portal_from_email` set in `infra/live/<env>/env.hcl` (an address at that verified domain; Terraform creates the email identity and scopes the API task's `ses:SendEmail` to it).
+   The API refuses to start in production without `PORTAL_MAIL_MODE=ses` and `PORTAL_FROM_EMAIL`.
+3. The CloudFront origin secret and viewer-IP function are in place (the per-IP limits trust `x-eureka-viewer-ip` only behind them).
+
 ## Applications (staff)
 
 State machine (JP-20, `applicationTransitionAllowed`, mirrored by `authz.application_transition_ok`): `applied → shortlisted → interview_scheduled → offered → hired`,
@@ -117,6 +132,18 @@ scheduled interviews.
 | `PUT /application-interviews/:id/scorecard` | JP-29: the caller's own scorecard (technical, communication, problemSolving, attitude 1–5, notes); lead, panel or a manager of the application |
 | `POST /applications/:id/candidate` | JP-30: hired only, `candidate:create`; reuses `CandidatesService.create` (team rules, duplicate check, `409 possible_duplicate` unless `confirmDuplicate`) and links the application in the same transaction |
 | `GET /api/v1/applicants`, `POST /applicants/export` | JP-21: `applicant:read`; the phone needs `applicant.phone:read` (masked otherwise); export audited |
+
+Interviewer access (JP-18b): an interviewer (lead or panel member) reads the application only while the interview is **scheduled or completed** and the
+application is not final (hired, rejected, withdrawn). A manager can change the lead and replace the panel of a scheduled interview
+(`PUT /application-interviews/:id/people`, definer re-checks manage); removed people lose access at once. Ids of lead, panel, additions and removals go to the audit.
+Scorecards need a started (or completed) interview (`interview_not_started`). Applicant contact data follows the applicant permissions, not the job: **email and phone are
+masked for everyone without `applicant:read` / `applicant.phone:read`**, and *Create candidate* copies the phone only for callers who hold
+`applicant.phone:read` (otherwise the candidate is created without a phone). The link function requires `candidate:create` and only accepts a candidate created in the
+same transaction and not linked to another application. The client of a job is locked once any submission answers it and may be set only by callers who can see clients
+(the lookups rule).
+
+Accepted (rationale): `GET /jobs/options` lists active staff (id and display name) to any `job:manage` holder for the hiring-manager and interview pickers: names only, the
+same data the app's lookups already expose, and filtering by "holds a role at the job's scope" would hide legitimate cross-team interviewers.
 
 Overall rating = mean of all scorecard averages of the application. Audit rows and outbox payloads hold ids and codes only; comments and notes are never audited.
 Notification (JP-31): `application.received` (ids only) from `authz.application_apply` → in-app inbox for HR and the job's hiring manager (no email), entity `application`;

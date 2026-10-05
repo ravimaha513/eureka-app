@@ -125,7 +125,8 @@ describe("staff: reading applications (JP-17..JP-19)", () => {
     expect(hr.applicant).toMatchObject({ name: "Asha Iyer", email: "applicant-a@example.com", phone: "+12125550123", phoneMasked: false, emailVerified: true });
     expect(hr.job).toMatchObject({ id: jobId, title: "Sales Development Representative", kind: "internal_opening" });
     const hm = (await call("l2", "GET", `/api/v1/applications/${appId}`)).json();
-    expect(hm.applicant).toMatchObject({ phoneMasked: true });
+    expect(hm.applicant).toMatchObject({ phoneMasked: true, email: "a•••@example.com" });
+    expect(hr.applicant.email).toBe("applicant-a@example.com");
     expect(hm.applicant.phone).not.toBe("+12125550123");
     expect(hm.actions.transition).toContain("shortlisted");
   });
@@ -182,6 +183,11 @@ describe("status changes, interviews and scorecards (JP-20, JP-27..JP-29)", () =
     expect((await call("r2a", "GET", `/api/v1/applications/${appId}`)).statusCode).toBe(200);
     const card = { technical: 4, communication: 5, problemSolving: 4, attitude: 5, notes: "Clear and structured" };
     expect((await call("r1b", "PUT", `/api/v1/application-interviews/${interviewId}/scorecard`, card)).statusCode).toBe(404);
+    // A review waits for the interview: it is still ahead.
+    const early = await call("r2a", "PUT", `/api/v1/application-interviews/${interviewId}/scorecard`, card);
+    expect(early.statusCode).toBe(422);
+    expect(early.json().detail).toBe("interview_not_started");
+    expect((await call("l2", "POST", `/api/v1/application-interviews/${interviewId}/status`, { status: "completed" })).statusCode).toBe(200);
     expect((await call("r2a", "PUT", `/api/v1/application-interviews/${interviewId}/scorecard`, card)).statusCode).toBe(200);
     expect((await call("coach", "PUT", `/api/v1/application-interviews/${interviewId}/scorecard`, { ...card, communication: 3, notes: undefined })).statusCode).toBe(200);
     expect((await call("r2a", "PUT", `/api/v1/application-interviews/${interviewId}/scorecard`, { ...card, technical: 6 })).statusCode).toBe(422);
@@ -191,7 +197,7 @@ describe("status changes, interviews and scorecards (JP-20, JP-27..JP-29)", () =
     expect(d.overallRating).toBe(4.3);
     expect(d.interviews[0].scorecards).toHaveLength(2);
     expect(d.interviews[0]).toMatchObject({ lead: { id: U.coach }, panel: [{ id: U.r2a, name: "r2a" }], meetingLink: "https://meet.example.com/x" });
-    expect((await call("l2", "POST", `/api/v1/application-interviews/${interviewId}/status`, { status: "completed" })).statusCode).toBe(200);
+    expect(d.history.some((h: { kind: string }) => h.kind === "interview_status")).toBe(true);
   });
 
   it("the applicant sees the interview's type, round, slot and status only", async () => {
@@ -200,6 +206,32 @@ describe("status changes, interviews and scorecards (JP-20, JP-27..JP-29)", () =
     expect(d.interviews).toHaveLength(1);
     expect(Object.keys(d.interviews[0]).sort()).toEqual(["durationMinutes", "id", "interviewType", "meetingLink", "round", "startsAt", "status"]);
     expect(JSON.stringify(d)).not.toMatch(/Clear and structured|SECRETNOTE|overallRating|scorecard/);
+  });
+});
+
+describe("interviewer access ends with the people, the interview and the application", () => {
+  const people = (k: Key, id: string, body: unknown) => call(k, "PUT", `/api/v1/application-interviews/${id}/people`, body);
+  it("the manager removes a panelist and changes the lead; the audit names ids only", async () => {
+    const r = await call("l2", "POST", `/api/v1/applications/${appId}/interviews`, { interviewType: "phone", round: "hr", leadUserId: U.coach,
+      panelUserIds: [U.r3a], startsAt: new Date(Date.now() + 2 * 86_400_000).toISOString(), durationMinutes: 30 });
+    expect(r.statusCode, r.body).toBe(201);
+    const id = r.json().id as string;
+    expect((await call("r3a", "GET", `/api/v1/applications/${appId}`)).statusCode).toBe(200);
+    expect((await people("r3a", id, { leadUserId: U.coach, panelUserIds: [] })).statusCode).toBe(403);
+    expect((await people("l1", id, { leadUserId: U.coach, panelUserIds: [] })).statusCode).toBe(404);
+    expect((await people("l2", id, { leadUserId: "00000000-0000-0000-0000-0000000fffff", panelUserIds: [] })).json().detail).toBe("invalid_interviewer");
+    expect((await people("l2", id, { leadUserId: U.r1b, panelUserIds: [] })).statusCode).toBe(200);
+    // r3a lost the application at once; the new lead gained it.
+    expect((await call("r3a", "GET", `/api/v1/applications/${appId}`)).statusCode).toBe(404);
+    expect((await call("r3a", "GET", "/api/v1/applications")).json().items).toEqual([]);
+    expect((await call("r1b", "GET", `/api/v1/applications/${appId}`)).statusCode).toBe(200);
+    const au = (await db.admin.query(`SELECT changes FROM eureka.audit_event WHERE action IN ('application.interview_people','application.interview_scheduled') AND entity_id = $1 ORDER BY seq`, [id])).rows;
+    expect(au[0].changes).toMatchObject({ leadUserId: U.coach, panelUserIds: [U.r3a] });
+    expect(au[1].changes).toMatchObject({ leadFrom: U.coach, leadTo: U.r1b, added: [], removed: [U.r3a] });
+    // A cancelled interview ends its reviewers' access too.
+    expect((await call("l2", "POST", `/api/v1/application-interviews/${id}/status`, { status: "cancelled" })).statusCode).toBe(200);
+    expect((await call("r1b", "GET", `/api/v1/applications/${appId}`)).statusCode).toBe(404);
+    expect((await people("l2", id, { leadUserId: U.r1b, panelUserIds: [] })).json().detail).toBe("invalid_transition");
   });
 });
 
@@ -220,13 +252,24 @@ describe("withdraw, hire and create candidate (JP-26, JP-30)", () => {
       expect(r.statusCode, r.body).toBe(200);
       v = r.json().rowVersion;
     }
+    // Hired: the finished application no longer opens to its interviewers.
+    expect((await call("r2a", "GET", `/api/v1/applications/${appId}`)).statusCode).toBe(404);
     const body = { technologyId: TECH_ID, locationId: LOC.dallas };
+    // The link function itself refuses an existing candidate and a caller without candidate:create.
+    const existing = (await db.admin.query(`SELECT id FROM eureka.candidate WHERE team_id = $1 LIMIT 1`, [T.t2])).rows[0].id as string;
+    await expect(asUser(db.app, U.l2, (c) => c.query(`SELECT authz.application_link_candidate($1, $2)`, [appId, existing])))
+      .rejects.toThrow(/candidate_not_found/);
+    await expect(asUser(db.app, U.hr, (c) => c.query(`SELECT authz.application_link_candidate($1, $2)`, [appId, existing])))
+      .rejects.toThrow(/not_permitted/);
     expect((await call("hr", "POST", `/api/v1/applications/${appId}/candidate`, body)).statusCode).toBe(403);
     expect((await call("l1", "POST", `/api/v1/applications/${appId}/candidate`, body)).statusCode).toBe(404);
     const c = await call("l2", "POST", `/api/v1/applications/${appId}/candidate`, body);
     expect(c.statusCode, c.body).toBe(201);
     const cand = (await call("l2", "GET", `/api/v1/candidates/${c.json().candidateId}`)).json();
     expect(cand).toMatchObject({ name: "Asha Iyer", team: { id: T.t2 } });
+    // l2 may not read applicant phones: the candidate was created without one.
+    expect((await db.admin.query(`SELECT p.phone_e164, p.personal_email FROM eureka.candidate c JOIN eureka.person p ON p.id = c.person_id WHERE c.id = $1`, [c.json().candidateId])).rows[0])
+      .toEqual({ phone_e164: null, personal_email: "applicant-a@example.com" });
     expect((await call("l2", "GET", `/api/v1/applications/${appId}`)).json().candidateId).toBe(c.json().candidateId);
     expect((await call("l2", "POST", `/api/v1/applications/${appId}/candidate`, body)).json().detail).toBe("candidate_exists");
   });
@@ -267,11 +310,54 @@ describe("audit, outbox and RLS (direct SQL)", () => {
     const n = (u: string, t: string) => asUser(db.app, u, async (c) => (await c.query(`SELECT 1 FROM eureka.${t}`)).rowCount);
     expect(await n(U.hr, "job_application")).toBe(2);
     expect(await n(U.l2, "job_application")).toBe(2);
-    expect(await n(U.r2a, "job_application")).toBe(1);
+    expect(await n(U.r2a, "job_application")).toBe(0); // hired: the interviewers' access ended
     expect(await n(U.l1, "job_application")).toBe(0);
     expect(await n(U.l1, "application_scorecard")).toBe(0);
-    expect(await n(U.r2a, "application_scorecard")).toBe(2);
+    expect(await n(U.r2a, "application_scorecard")).toBe(0);
     await expect(asUser(db.app, U.hr, (c) => c.query(`UPDATE eureka.job_application SET status = 'hired'`))).rejects.toMatchObject({ code: "42501" });
     await expect(asUser(db.app, U.hr, (c) => c.query(`SELECT authz.application_apply('${jobId}')`))).rejects.toMatchObject({ code: "42501" });
+  });
+});
+
+describe("rule 3: the access sets are computed once per statement", () => {
+  /** Calls of the given functions while running `sql` as `userId` (track_functions; superuser pool; rolled back). */
+  async function calls(userId: string, sql: string, fns: string[]) {
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL track_functions = 'all'");
+      await c.query("SELECT set_config('eureka.user_id', $1, true)", [userId]);
+      const count = async (f: string) => Number((await c.query<{ n: string | null }>(`SELECT pg_stat_get_xact_function_calls($1::regprocedure) AS n`, [f])).rows[0]!.n ?? 0);
+      const before = await Promise.all(fns.map(count));
+      await c.query("SET LOCAL ROLE eureka_app");
+      const rows = (await c.query(sql)).rowCount ?? 0;
+      await c.query("RESET ROLE");
+      return { rows, calls: await Promise.all(fns.map(async (f, i) => (await count(f)) - before[i]!)) };
+    } finally { await c.query("ROLLBACK").catch(() => undefined); c.release(); }
+  }
+
+  it("applicant, job and application reads call each set once, not once per row", async () => {
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL session_replication_role = replica");
+      await c.query(`INSERT INTO eureka.applicant (first_name, last_name, email)
+        SELECT 'P', 'Q' || g, 'bulk' || g || '@example.com' FROM generate_series(1, 40) g`);
+      await c.query(`INSERT INTO eureka.job_application (job_id, applicant_id)
+        SELECT $1, id FROM eureka.applicant WHERE email LIKE 'bulk%'`, [jobId]);
+      await c.query("COMMIT");
+    } finally { c.release(); }
+    const fns = ["authz.my_application_applicant_ids()", "authz.my_interview_job_ids()", "authz.my_hiring_job_ids()", "authz.my_interview_application_ids()"];
+    const a = await calls(U.l2, `SELECT id FROM eureka.applicant`, fns);
+    expect(a.rows).toBeGreaterThan(40);
+    expect(a.calls[0]).toBe(1);
+    const j = await calls(U.l2, `SELECT id FROM eureka.job`, fns);
+    expect(j.calls[1]).toBeLessThanOrEqual(1);
+    const ap = await calls(U.l2, `SELECT id FROM eureka.job_application`, fns);
+    expect(ap.rows).toBeGreaterThan(40);
+    expect(ap.calls[2]).toBeLessThanOrEqual(1);
+    expect(ap.calls[3]).toBeLessThanOrEqual(1);
+    // The sets are single statements over base tables: the applicants of 40 bulk rows did not multiply the nested calls.
+    expect(a.calls[2] + a.calls[3]).toBe(0);
   });
 });

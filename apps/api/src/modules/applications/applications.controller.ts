@@ -4,7 +4,7 @@ import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/
 import { parseIfMatch } from "../work-authorization/work-authorization.schemas.js";
 import {
   ApplicantExport, ApplicantListQuery, ApplicationExport, ApplicationListQuery, CreateCandidateFromApplication, InterviewStatus,
-  ScheduleInterview, Scorecard, StatusChange,
+  ScheduleInterview, Scorecard, SetPeople, StatusChange,
 } from "./applications.schemas.js";
 import { ApplicationsService } from "./applications.service.js";
 
@@ -74,6 +74,12 @@ export class ApplicationInterviewsController {
   @HttpCode(200)
   status(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.setInterviewStatus(user, id, InterviewStatus.parse(body).status);
+  }
+
+  /** Change the lead / remove panelists of a scheduled interview (the application's managers). */
+  @Put(":id/people")
+  people(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.setPeople(user, id, SetPeople.parse(body));
   }
 
   /** The caller's own scorecard (insert or replace). */

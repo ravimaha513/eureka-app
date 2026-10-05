@@ -843,6 +843,14 @@ const CASES: RejectCase[] = [
     forbidden: { applicationId: FOREIGN_ID, startsAt: PAST, leadUserId: U.l2, meetingLink: "https://x.example" },
   },
   {
+    route: "PUT /api/v1/application-interviews/:id/people", actor: "hr",
+    prepare: async () => ({
+      url: `/api/v1/application-interviews/${FOREIGN_ID}/people`, body: { leadUserId: U.coach, panelUserIds: [] },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.application_interview_panel`),
+    }),
+    forbidden: { applicationId: FOREIGN_ID, status: "completed", startsAt: PAST, add: [U.r1a], remove: [U.r1b] },
+  },
+  {
     route: "PUT /api/v1/application-interviews/:id/scorecard", actor: "hr",
     prepare: async () => ({
       url: `/api/v1/application-interviews/${FOREIGN_ID}/scorecard`, body: { technical: 3, communication: 3, problemSolving: 3, attitude: 3 },

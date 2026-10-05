@@ -134,7 +134,7 @@ export function ApplicationsPage({ me, initialOpenId }: { me: Pick<Me, "capabili
 }
 
 type Tab = "job" | "applicant" | "interviews";
-type Action = { kind: "status" } | { kind: "schedule" } | { kind: "candidate" } | { kind: "scorecard"; interview: AppInterview } | { kind: "interview"; interview: AppInterview };
+type Action = { kind: "people"; interview: AppInterview } | { kind: "status" } | { kind: "schedule" } | { kind: "candidate" } | { kind: "scorecard"; interview: AppInterview } | { kind: "interview"; interview: AppInterview };
 
 function ApplicationDrawer({ id, initial, me, onClose, onNotice }: {
   id: string; initial?: Application; me: Pick<Me, "id" | "capabilities">; onClose: () => void; onNotice: (m: string) => void;
@@ -241,7 +241,8 @@ function ApplicationDrawer({ id, initial, me, onClose, onNotice }: {
       {a && action?.kind === "schedule" && <ScheduleDialog a={a} me={me} onClose={() => setAction(null)} onDone={() => done("Interview scheduled. The applicant was emailed.")} />}
       {a && action?.kind === "candidate" && <CandidateDialog a={a} onClose={() => setAction(null)} onDone={() => done("Candidate created in Eureka.")} />}
       {a && action?.kind === "scorecard" && <ScorecardDialog i={action.interview} meId={me.id} onClose={() => setAction(null)} onDone={() => done("Review saved.")} />}
-      {a && action?.kind === "interview" && <InterviewDialog i={action.interview} onClose={() => setAction(null)} onDone={(m) => done(m)} />}
+      {a && action?.kind === "interview" && <InterviewDialog i={action.interview} onClose={() => setAction(null)} onDone={(m) => done(m)} onPeople={() => setAction({ kind: "people", interview: action.interview })} />}
+      {a && action?.kind === "people" && <PeopleDialog i={action.interview} onClose={() => setAction(null)} onDone={() => done("Interviewers updated.")} />}
     </>
   );
 }
@@ -360,7 +361,28 @@ function ScorecardDialog({ i, meId, onClose, onDone }: { i: AppInterview; meId: 
   );
 }
 
-function InterviewDialog({ i, onClose, onDone }: { i: AppInterview; onClose: () => void; onDone: (m: string) => void }) {
+function PeopleDialog({ i, onClose, onDone }: { i: AppInterview; onClose: () => void; onDone: () => void }) {
+  const opts = useQuery({ queryKey: jobKeys.options, queryFn: jobsApi.options, retry: false, staleTime: 5 * 60_000 });
+  const staff = opts.data?.staff ?? [];
+  const [lead, setLead] = useState(i.lead.id);
+  const [panel, setPanel] = useState<string[]>(i.panel.map((p) => p.id));
+  const { busy, error, run } = useSubmit(applicationError);
+  return (
+    <Dialog title="Lead and panel" onClose={onClose}>
+      <form onSubmit={(e) => { e.preventDefault(); void run(async () => { await applicationsApi.setPeople(i.id, { leadUserId: lead, panelUserIds: panel }); onDone(); }); }}>
+        <p className="dialogbody">People removed here lose access to this application at once.</p>
+        <Field label="Lead user">{(p) => <select {...p} value={lead} onChange={(e) => setLead(e.target.value)} data-autofocus>
+          {[{ id: i.lead.id, name: i.lead.name ?? "Current lead" }, ...staff.filter((s) => s.id !== i.lead.id)].map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}</Field>
+        <Field label="Panel" hint="Hold Ctrl or Cmd to choose several.">{(p) => <select {...p} multiple size={6} value={panel}
+          onChange={(e) => setPanel([...e.target.selectedOptions].map((o) => o.value).slice(0, 10))}>
+          {[...i.panel, ...staff.filter((s) => !i.panel.some((x) => x.id === s.id))].map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}</Field>
+        <DialogActions onCancel={onClose} submitLabel="Save" busy={busy} error={error} />
+      </form>
+    </Dialog>
+  );
+}
+
+function InterviewDialog({ i, onClose, onDone, onPeople }: { i: AppInterview; onClose: () => void; onDone: (m: string) => void; onPeople: () => void }) {
   const { busy, error, run } = useSubmit(applicationError);
   return (
     <Dialog title={`Interview · ${APP_INTERVIEW_LABELS[i.round]}`} onClose={onClose} wide>
@@ -389,6 +411,7 @@ function InterviewDialog({ i, onClose, onDone }: { i: AppInterview; onClose: () 
             Mark {(APP_INTERVIEW_LABELS[s] ?? s).toLowerCase()}
           </button>
         ))}
+        {i.actions.setStatus && <button type="button" className="btn" disabled={busy} onClick={onPeople}>Change lead or panel…</button>}
         <button type="button" className="btn primary" onClick={onClose} data-autofocus>Close</button>
       </div>
     </Dialog>

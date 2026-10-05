@@ -49,6 +49,10 @@ export const InterviewStatus = z.object({
   status: z.enum(APP_INTERVIEW_STATUSES).refine((s) => s !== "scheduled", "not a final status"),
 }).strict();
 
+/** Replace the lead and the panel of a scheduled interview (removing someone ends their access at once). */
+export const SetPeople = z.object({ leadUserId: uuid, panelUserIds: z.array(uuid).max(10) }).strict();
+export type SetPeople = z.infer<typeof SetPeople>;
+
 const score = z.number().int().min(1).max(5);
 export const Scorecard = z.object({
   technical: score, communication: score, problemSolving: score, attitude: score,

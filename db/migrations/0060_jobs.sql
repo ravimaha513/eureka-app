@@ -88,6 +88,12 @@ BEGIN
      AND NOT EXISTS (SELECT 1 FROM eureka.app_user u WHERE u.id = NEW.hiring_manager_id AND u.status = 'active') THEN
     RAISE EXCEPTION 'invalid_hiring_manager' USING ERRCODE = 'check_violation';
   END IF;
+  -- The client of a job cannot change once any submission (of any team) answers it.
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.client_id IS DISTINCT FROM OLD.client_id AND coalesce(authz.job_has_submissions(OLD.id), true) THEN
+      RAISE EXCEPTION 'client_locked' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
   IF TG_OP = 'INSERT' THEN
     IF authz.current_user_id() IS NULL
        OR (NEW.owner_id IS NOT NULL AND NEW.owner_id IS DISTINCT FROM authz.current_user_id())
@@ -162,6 +168,13 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
       OR (j.kind = 'internal_opening' AND authz.has_org_kind('job:read', false))))
 $$;
 
+-- True when any submission, whoever's team, points at the job (reads submission without RLS; the answer is a boolean).
+CREATE FUNCTION authz.job_has_submissions(p_job uuid) RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+BEGIN
+  RETURN EXISTS (SELECT 1 FROM eureka.submission s WHERE s.job_id = p_job);
+END $$;
+
 -- Submission -> job link (BEFORE INSERT on submission): a readable, open
 -- client requirement of the submission's client, or nothing.
 CREATE FUNCTION authz.submission_job_check() RETURNS trigger
@@ -225,7 +238,9 @@ REVOKE ALL ON FUNCTION eureka.job_truncate_guard() FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.has_org_kind(text, boolean) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.job_can_manage(text, uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.job_visible(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION authz.job_has_submissions(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.submission_job_check() FROM PUBLIC;
 -- Policies evaluate as the querying role: the app needs the helpers it calls.
 GRANT EXECUTE ON FUNCTION authz.has_org_kind(text, boolean) TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.job_can_manage(text, uuid, uuid) TO eureka_app;
+GRANT EXECUTE ON FUNCTION authz.job_has_submissions(uuid) TO eureka_app;
