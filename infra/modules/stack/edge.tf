@@ -144,6 +144,41 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
+  # jobs-portal: applicant sign-up / sign-in-link / verify are unauthenticated and send email. A tighter
+  # per-IP limit than the staff login rule (CloudFront evaluates it per 5 minutes). NOTE: this is a 7th rule;
+  # the CloudFront flat-rate Free plan allows 5, so on that plan merge or drop a managed rule (infra/README.md).
+  rule {
+    name     = "portal-auth-rate-limit"
+    priority = 7
+    action {
+      block {}
+    }
+    statement {
+      rate_based_statement {
+        limit              = 60
+        aggregate_key_type = "IP"
+        scope_down_statement {
+          byte_match_statement {
+            search_string         = "/api/portal/auth/"
+            positional_constraint = "STARTS_WITH"
+            field_to_match {
+              uri_path {}
+            }
+            text_transformation {
+              priority = 0
+              type     = "NONE"
+            }
+          }
+        }
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-portal-auth-rate"
+      sampled_requests_enabled   = true
+    }
+  }
+
   visibility_config {
     cloudwatch_metrics_enabled = true
     metric_name                = local.name

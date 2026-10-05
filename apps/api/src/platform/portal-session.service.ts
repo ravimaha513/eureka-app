@@ -11,6 +11,8 @@ import { DbService } from "./db.service.js";
  * SHA-256 is stored.
  */
 export const PORTAL_COOKIE = "eureka_portal_sid";
+/** Production uses the __Secure- prefix (the browser then refuses it without Secure). __Host- needs Path=/, which would widen the scope. */
+export const portalCookieName = (production: boolean) => (production ? `__Secure-${PORTAL_COOKIE}` : PORTAL_COOKIE);
 export const PORTAL_COOKIE_PATH = "/api/portal";
 /** Header every unauthenticated portal write must carry (a cross-site form cannot send it). */
 export const PORTAL_HEADER = "x-eureka-portal";
@@ -19,7 +21,11 @@ export interface PortalSessionInfo { applicantId: string; idHash: Buffer }
 
 @Injectable()
 export class PortalSessionService {
-  constructor(private readonly db: DbService, @Inject(CONFIG) private readonly config: AppConfig) {}
+  readonly cookieName: string;
+
+  constructor(private readonly db: DbService, @Inject(CONFIG) private readonly config: AppConfig) {
+    this.cookieName = portalCookieName(config.NODE_ENV === "production");
+  }
 
   static hash(v: string | Buffer): Buffer {
     return createHash("sha256").update(v).digest();
@@ -40,6 +46,11 @@ export class PortalSessionService {
     return id ? { applicantId: id, idHash } : null;
   }
 
+  /** Sign out everywhere: every session of this applicant. */
+  async revokeAll(applicantId: string): Promise<void> {
+    await this.db.system((c) => c.query(`SELECT authz.portal_sessions_revoke_all($1)`, [applicantId]));
+  }
+
   async revoke(idHash: Buffer): Promise<void> {
     await this.db.system((c) => c.query(`SELECT authz.portal_session_revoke($1)`, [idHash]));
   }
@@ -54,6 +65,11 @@ export class PortalSessionService {
     const expected = Buffer.from(this.csrfToken(idHash));
     const given = Buffer.from(token);
     return expected.length === given.length && timingSafeEqual(expected, given);
+  }
+
+  /** Options to clear the cookie (a __Secure- cookie can only be touched with Secure). */
+  clearOptions() {
+    return { path: PORTAL_COOKIE_PATH, secure: this.config.NODE_ENV === "production", httpOnly: true, sameSite: "strict" as const };
   }
 
   cookieOptions() {

@@ -13,7 +13,7 @@ import { can, type Permission, type UserAccess } from "@eureka/shared";
 import { AccessService } from "./access.service.js";
 import { DbService } from "./db.service.js";
 import { SESSION_COOKIE, SessionService } from "./session.service.js";
-import { PORTAL_COOKIE, PORTAL_HEADER, PortalSessionService } from "./portal-session.service.js";
+import { PORTAL_HEADER, PortalSessionService } from "./portal-session.service.js";
 
 export interface AuthedUser {
   id: string;
@@ -112,7 +112,7 @@ export class AuthGuard implements CanActivate {
       if (write && req.headers[PORTAL_HEADER] !== "1") throw new ForbiddenException("Invalid request");
       return true;
     }
-    const session = await this.portalSessions.resolve(req.cookies?.[PORTAL_COOKIE]);
+    const session = await this.portalSessions.resolve(req.cookies?.[this.portalSessions.cookieName]);
     if (!session) throw new UnauthorizedException("Applicant sign-in required");
     if (write) {
       const token = req.headers["x-csrf-token"];

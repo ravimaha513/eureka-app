@@ -222,11 +222,15 @@ export class ApplicationsService {
     });
   }
 
-  /** Fire and forget after commit; the applicant's email never carries staff comments. */
-  private notifyApplicant(to: string | null, first: string | null, subject: string, lines: string[], kind: string) {
+  /**
+   * Fire and forget after commit; the applicant's email never carries staff comments, and greets without
+   * the name (typed at sign-up by whoever created the account). Failures log the error class only: provider
+   * messages can contain the recipient address.
+   */
+  private notifyApplicant(to: string | null, _first: string | null, subject: string, lines: string[], kind: string) {
     if (!to) return;
-    const text = `Hi ${first ?? "there"},\n\n${lines.join("\n")}\n\nSign in to Eureka Careers for the details: ${new URL("/portal/applications", this.config.PUBLIC_BASE_URL).toString()}\n\n— Eureka Careers\n`;
-    void this.mail.send({ to, subject, text }).catch((err: Error) => this.log.warn(`applicant ${kind} email failed: ${err.message}`));
+    const text = `Hello,\n\n${lines.join("\n")}\n\nSign in to Eureka Careers for the details: ${new URL("/portal/applications", this.config.PUBLIC_BASE_URL).toString()}\n\n— Eureka Careers\n`;
+    void this.mail.send({ to, subject, text }).catch((err: unknown) => this.log.warn(`applicant ${kind} email failed (${(err as { name?: string })?.name ?? "error"})`));
   }
 
   async transition(user: AuthedUser, id: string, expected: number | null, body: StatusChange) {
