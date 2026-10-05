@@ -17,7 +17,8 @@ export const NAV: NavItem[] = [
   { key: "placements", label: "Placements", section: "Workspace", anyOf: ["placement:read"] },
   // jobs-portal
   { key: "jobs", label: "Jobs", section: "Hiring", anyOf: ["job:read"] },
-  { key: "applications", label: "Applications", section: "Hiring", anyOf: ["application:read"] },
+  // Hiring managers (job:read) and interviewers (often coaches, interview:read) see the applications they work on.
+  { key: "applications", label: "Applications", section: "Hiring", anyOf: ["application:read", "job:read", "interview:read"] },
   { key: "applicants", label: "Applicants", section: "Hiring", anyOf: ["applicant:read"] },
   { key: "paperwork", label: "Paperwork & BGC", section: "Operations", anyOf: ["document:read", "bgc:update"] },
   { key: "employees", label: "Employees", section: "Operations", anyOf: ["employee:read"] },

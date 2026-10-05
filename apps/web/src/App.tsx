@@ -15,6 +15,8 @@ import { NotificationBell, type InboxItem } from "./notifications/Inbox";
 import { EmployeesPage } from "./employees/EmployeesPage";
 import { ReportsPage } from "./employees/JoiningsExitsReport";
 import { JobsPage } from "./jobs/JobsPage";
+import { ApplicationsPage } from "./jobs/ApplicationsPage";
+import { ApplicantsPage } from "./jobs/ApplicantsPage";
 import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sparkles, Sun } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
@@ -119,6 +121,8 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // A placement to open when switching to Placements from another screen (e.g. right after creating it).
   const [placementId, setPlacementId] = useState<string | null>(null);
   const openPlacement = (id: string) => { setPlacementId(id); setActive("placements"); };
+  // jobs-portal: an application to open when switching to Applications (from the inbox).
+  const [applicationId, setApplicationId] = useState<string | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const [restoreFocus, setRestoreFocus] = useState(false);
   const openProfile = (id: string) => { opener.current = document.activeElement as HTMLElement | null; setProfileId(id); };
@@ -133,8 +137,10 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // Inbox entries open the placement or the candidate profile when the user has that screen.
   const has = (key: string) => items.some((i) => i.key === key);
   const candidateScreen = has("candidates") ? "candidates" : has("hotlist") ? "hotlist" : null;
-  const canOpenEntity = (e: InboxItem["entity"]) => (e.type === "placement" ? has("placements") : candidateScreen !== null);
+  const canOpenEntity = (e: InboxItem["entity"]) =>
+    (e.type === "placement" ? has("placements") : e.type === "application" ? has("applications") : candidateScreen !== null);
   const openEntity = (e: InboxItem["entity"]) => {
+    if (e.type === "application") { setProfileId(null); setApplicationId(e.id); setActive("applications"); return; }
     if (e.type === "placement") { setProfileId(null); openPlacement(e.id); return; }
     if (!candidateScreen) return;
     setPlacementId(null);
@@ -175,7 +181,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                 const Icon = NAV_ICONS[i.key];
                 return (
                   <button key={i.key} className="nav" title={collapsed ? i.label : undefined} aria-current={i.key === active ? "page" : undefined}
-                    onClick={() => { setActive(i.key); setProfileId(null); setPlacementId(null); setNavOpen(false); }}>
+                    onClick={() => { setActive(i.key); setProfileId(null); setPlacementId(null); setApplicationId(null); setNavOpen(false); }}>
                     {Icon && <Icon className="navicon" size={19} strokeWidth={1.8} aria-hidden="true" />}<span className="navlabel">{i.label}</span>
                   </button>
                 );
@@ -216,6 +222,8 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "employees" ? <EmployeesPage me={me} />
             : current.key === "reports" ? <ReportsPage me={me} />
             : current.key === "jobs" ? <JobsPage me={me} />
+            : current.key === "applications" ? <ApplicationsPage key={applicationId ?? "list"} me={me} initialOpenId={applicationId} />
+            : current.key === "applicants" ? <ApplicantsPage />
             : current.key === "dashboard" ? (
               <DashboardPage firstName={me.displayName.split(" ")[0]} canOpen={(t) => items.some((i) => i.key === t)}
                 onOpen={(t, id) => { if (t === "placements") openPlacement(id); else setActive(t); }} />

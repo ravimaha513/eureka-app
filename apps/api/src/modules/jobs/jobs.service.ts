@@ -71,7 +71,7 @@ export const JOB_SELECT = `
          j.row_version, j.created_at, j.updated_at, j.posted_at, ${toMicros("j.created_at")} AS k,
          CASE WHEN j.kind = 'client_requirement'
               THEN (SELECT count(*) FROM eureka.submission s WHERE s.job_id = j.id)
-              ELSE 0 END::int AS applicants
+              ELSE (SELECT count(*) FROM eureka.job_application a WHERE a.job_id = j.id) END::int AS applicants
   FROM eureka.job j
   LEFT JOIN eureka.client cl ON cl.id = j.client_id
   LEFT JOIN eureka.app_user hm ON hm.id = j.hiring_manager_id
