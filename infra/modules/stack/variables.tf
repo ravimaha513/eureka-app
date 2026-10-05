@@ -83,3 +83,48 @@ locals {
   is_prod    = var.environment == "production"
   use_domain = var.domain_name != "" && var.hosted_zone_name != ""
 }
+
+# ---------------- Cost guardrails (cost.tf, alarms.tf; infra/README.md "Cost guardrails") ----------------
+variable "alert_emails" {
+  description = "Addresses that receive budget, cost-anomaly and CloudWatch alarm email. Each SNS subscription must be confirmed from the inbox (hand step)."
+  type        = list(string)
+  default     = []
+  validation {
+    condition     = alltrue([for e in var.alert_emails : can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", e))])
+    error_message = "alert_emails must contain email addresses only."
+  }
+}
+variable "cost_budgets_enabled" {
+  description = "Create the tag-scoped budgets and the cost-anomaly monitor. One environment per account only (production): the Project=Eureka filter already covers every environment, so a second copy would double every email."
+  type        = bool
+  default     = false
+}
+variable "cost_allocation_tags_active" {
+  description = "The Project tag key is an ACTIVE cost-allocation tag (Billing > Cost allocation tags), activated by this stack or by an Organization payer. Budgets and the anomaly monitor are created only once it is: before activation a TagKeyValue filter cannot see the tag, so the untagged budget would count the whole shared account (spokenly included) and fire on day one."
+  type        = bool
+  default     = false
+  validation {
+    condition     = !(var.cost_allocation_tags_active && var.cost_budgets_enabled) || length(var.alert_emails) > 0
+    error_message = "Budgets and the anomaly subscription need at least one address in alert_emails."
+  }
+}
+variable "budget_monthly_usd" {
+  description = "Monthly budget for Project=Eureka spend, all environments. 40 until cutover; raise to ~60 at C1f (CloudFront Pro $15 + worker)."
+  type        = number
+  default     = 40
+}
+variable "budget_crewnex_migration_usd" {
+  description = "Monthly budget for Workstream=crewnex: the CrewNex migration tasks only (exporter, import, rehearsal stack), not Eureka's running cost."
+  type        = number
+  default     = 15
+}
+variable "budget_untagged_usd" {
+  description = "Monthly budget for spend with no Project tag (SES, data transfer, support, tax, and spokenly until it tags itself). Set from the first month's actuals."
+  type        = number
+  default     = 10
+}
+variable "cost_anomaly_threshold_usd" {
+  description = "Email a Project=Eureka cost anomaly when its total impact is at least this many dollars."
+  type        = number
+  default     = 10
+}

@@ -35,4 +35,8 @@ locals {
   audit_lock_days = 1
   log_retention_days = 7
   waf_rate_limit_per_5min = 2000
+
+  # Budgets and the anomaly monitor live in production only: their Project=Eureka
+  # filter already covers staging, so a copy here would double every email.
+  cost_budgets_enabled = false
 }
