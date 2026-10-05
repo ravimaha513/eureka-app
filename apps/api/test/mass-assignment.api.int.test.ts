@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +20,7 @@ import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob } from "../src/worker/jobs/r
 import { documentScanJob } from "../src/worker/jobs/document-scan.js";
 import { DEFAULT_SCAN_OPTIONS } from "../src/worker/jobs/scan-pipeline.js";
 import { StartStepUp } from "../src/modules/identity/step-up.controller.js";
+import { portalCall, portalSignIn } from "./portal-seed.js";
 import { silentLogger } from "../src/worker/log.js";
 import { JobRunner } from "../src/worker/runner.js";
 
@@ -217,6 +218,21 @@ const employmentState = async (personId: string) => ({
   outbox: await rows(`SELECT count(*)::int AS n FROM eureka.outbox_event`),
 });
 
+/** A fresh Dallas company or facility (as locD, the Dallas Location Ops Admin). */
+async function ownerOf(plural: "companies" | "facilities"): Promise<string> {
+  return (await ok("locD", "POST", `/api/v1/${plural}`, { locationId: LOC.dallas, name: `MA owner ${++n}` })).id as string;
+}
+async function utilityOf(plural: "companies" | "facilities") {
+  const owner = await ownerOf(plural);
+  const utility = (await ok("locD", "POST", `/api/v1/${plural}/${owner}/utilities`, { utilityType: "water", serviceProvider: "MA", password: "ma-pw" })).id as string;
+  return { owner, utility };
+}
+async function billOf(): Promise<string> {
+  const { owner, utility } = await utilityOf("companies");
+  return (await ok("locD", "POST", `/api/v1/companies/${owner}/bills`,
+    { utilityId: utility, paymentMethod: "card", amount: "9.99", billingStart: "2025-01-01", billingEnd: "2025-01-31", dueDate: "2025-02-10" })).id as string;
+}
+
 // ---- cases --------------------------------------------------------------------------------------
 
 interface Prepared {
@@ -265,7 +281,145 @@ async function lmsEnrolled() {
   return { b, m: c.moduleIds[0]! };
 }
 
+/** Fields a DataHub folder write never takes from the client (migration 0075). */
+const DATAHUB_FOLDER_FORBIDDEN: Record<string, unknown> = {
+  deletedAt: PAST, deletedBy: U.hr, row_version: 9, fileCount: 9, memberCount: 9, isMember: true, actions: { manage: true },
+  ownerId: U.r1b, classification: "restricted", folderId: FOREIGN_ID,
+};
+
+// ---- chat (migration 0070) ----------------------------------------------------------------------
+
+/** A fresh group owned by r1a with r1b (the database caps groups per hour: refused requests change nothing, so cases share one). */
+async function freshChatGroup() {
+  const g = await ok("r1a", "POST", "/api/v1/chat/conversations/group", { name: `MA chat ${++n}`, memberIds: [U.r1b] });
+  return g.id as string;
+}
+let sharedGroup: Promise<string> | null = null;
+const chatGroup = () => (sharedGroup ??= freshChatGroup());
+let sharedMessage: Promise<string> | null = null;
+async function chatMessage(conv: string) {
+  return (sharedMessage ??= ok("r1a", "POST", `/api/v1/chat/conversations/${conv}/messages`, { clientId: randomUUID(), body: "MA hello" }).then((r) => r.message.id as string));
+}
+/** Every chat row (the definer functions also audit; the audit head is checked separately). */
+const chatState = () => rows(`SELECT
+  (SELECT count(*)::int FROM eureka.chat_conversation) AS conversations,
+  (SELECT coalesce(json_agg(json_build_object('c', c.id, 'n', c.name, 'v', c.row_version, 'r', c.last_rev) ORDER BY c.id), '[]') FROM eureka.chat_conversation c) AS convs,
+  (SELECT coalesce(json_agg(json_build_object('c', m.conversation_id, 'u', m.user_id, 'r', m.role, 'l', m.left_at) ORDER BY m.conversation_id, m.user_id), '[]') FROM eureka.chat_member m) AS members,
+  (SELECT coalesce(json_agg(s ORDER BY s.conversation_id, s.user_id), '[]') FROM eureka.chat_member_state s) AS states,
+  (SELECT coalesce(json_agg(json_build_object('id', m.id, 'b', m.body, 'r', m.rev) ORDER BY m.id), '[]') FROM eureka.chat_message m) AS messages,
+  (SELECT count(*)::int FROM eureka.chat_attachment) AS attachments,
+  (SELECT count(*)::int FROM eureka.file_object) AS files`);
+const CHAT_FORBIDDEN: Record<string, unknown> = {
+  conversationId: FOREIGN_ID, userId: U.admin, senderId: U.r1b, kind: "group", directKey: `${U.r1a}:${U.r1b}`,
+  deletedAt: PAST, leftAt: PAST, joinedAt: PAST, seq: 1, rev: 1, lastReadSeq: 0, visibleAfterSeq: 0, notifiedAt: PAST,
+};
+
+function chatCases(): RejectCase[] {
+  return [
+    {
+      route: "POST /api/v1/chat/conversations/direct", actor: "r1a",
+      prepare: async () => ({ url: "/api/v1/chat/conversations/direct", body: { userId: U.l2 }, state: chatState }),
+      // userId is this endpoint's own field (the other person).
+      forbidden: { ...Object.fromEntries(Object.entries(CHAT_FORBIDDEN).filter(([k]) => k !== "userId")), role: "owner", memberIds: [U.admin], otherId: U.admin },
+    },
+    {
+      route: "POST /api/v1/chat/conversations/group", actor: "r1a",
+      prepare: async () => ({ url: "/api/v1/chat/conversations/group", body: { name: "MA group", memberIds: [U.r1b] }, state: chatState }),
+      forbidden: { ...CHAT_FORBIDDEN, role: "member", owners: [U.admin], createdBy: U.admin },
+    },
+    {
+      route: "PATCH /api/v1/chat/conversations/:id", actor: "r1a",
+      prepare: async () => {
+        const g = await chatGroup();
+        return { url: `/api/v1/chat/conversations/${g}`, body: { name: "MA renamed" }, state: chatState, headers: { "if-match": '"1"' } };
+      },
+      forbidden: { ...CHAT_FORBIDDEN, role: "member" },
+    },
+    {
+      route: "PATCH /api/v1/chat/conversations/:id/preferences", actor: "r1a",
+      prepare: async () => {
+        const g = await chatGroup();
+        return { url: `/api/v1/chat/conversations/${g}/preferences`, body: { favorite: true }, state: chatState };
+      },
+      forbidden: { ...CHAT_FORBIDDEN, role: "member", hidden: false, lastReadMessageId: FOREIGN_ID, lastViewedAt: PAST },
+    },
+    {
+      route: "POST /api/v1/chat/conversations/:id/members", actor: "r1a",
+      prepare: async () => {
+        const g = await chatGroup();
+        return { url: `/api/v1/chat/conversations/${g}/members`, body: { userIds: [U.l1] }, state: chatState };
+      },
+      forbidden: { ...CHAT_FORBIDDEN, role: "owner" },
+    },
+    {
+      route: "PATCH /api/v1/chat/conversations/:id/members/:userId", actor: "r1a",
+      prepare: async () => {
+        const g = await chatGroup();
+        return { url: `/api/v1/chat/conversations/${g}/members/${U.r1b}`, body: { role: "owner" }, state: chatState };
+      },
+      forbidden: CHAT_FORBIDDEN,
+    },
+    {
+      route: "POST /api/v1/chat/conversations/:id/messages", actor: "r1a",
+      prepare: async () => {
+        const g = await chatGroup();
+        return { url: `/api/v1/chat/conversations/${g}/messages`, body: { clientId: randomUUID(), body: "MA" }, state: chatState };
+      },
+      forbidden: { ...CHAT_FORBIDDEN, role: "owner", createdAt: PAST, editedAt: PAST, deleted: false, mine: true, sender: { id: U.r1b } },
+    },
+    {
+      route: "POST /api/v1/chat/conversations/:id/read", actor: "r1b",
+      prepare: async () => {
+        const g = await chatGroup();
+        await chatMessage(g);
+        return { url: `/api/v1/chat/conversations/${g}/read`, body: {}, state: chatState };
+      },
+      forbidden: { ...CHAT_FORBIDDEN, role: "owner", lastViewedAt: PAST, lastReadMessageId: FOREIGN_ID },
+    },
+    {
+      route: "PATCH /api/v1/chat/messages/:messageId", actor: "r1a",
+      prepare: async () => {
+        const g = await chatGroup();
+        const m = await chatMessage(g);
+        return { url: `/api/v1/chat/messages/${m}`, body: { body: "MA edited" }, state: chatState };
+      },
+      forbidden: { ...CHAT_FORBIDDEN, role: "owner", editedAt: PAST, deleted: true, attachments: [] },
+    },
+  ];
+}
+
+
 const CASES: RejectCase[] = [
+  // interviews-settings (migration 0081): the owner, version and times of a staff profile are the server's;
+  // name, email and designation are not editable in Settings
+  {
+    route: "PUT /api/v1/settings/profile", actor: "r1a",
+    prepare: async () => {
+      const v = (await rows(`SELECT row_version FROM eureka.staff_profile WHERE user_id = $1`, [U.r1a]))[0]?.row_version ?? 0;
+      return {
+        url: "/api/v1/settings/profile", body: { phone: null, bio: null }, headers: { "if-match": `"${v}"` },
+        state: () => rows(`SELECT * FROM eureka.staff_profile ORDER BY user_id`),
+      };
+    },
+    forbidden: { userId: U.r1b, displayName: "Boss", email: "boss@eureka.example", designation: "CEO", phoneE164: "+14695550199", status: "inactive" },
+  },
+  {
+    route: "PUT /api/v1/settings/notifications/:type", actor: "hr",
+    prepare: async () => ({
+      url: "/api/v1/settings/notifications/employee.exited", body: { inApp: false },
+      state: () => rows(`SELECT * FROM eureka.notification_preference ORDER BY user_id, type`),
+    }),
+    forbidden: { userId: U.acct, type: "work_authorization.expiring", mandatory: false, email: false, recipientId: U.acct },
+  },
+  // employees export (EM-X1): only the list filters
+  {
+    route: "POST /api/v1/employees/export", actor: "ceo",
+    prepare: async () => ({
+      url: "/api/v1/employees/export", body: {},
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.audit_event WHERE action = 'employee.export'`),
+    }),
+    forbidden: { cursor: "2026-01-01.00000000-0000-4000-8000-0000000000ff", limit: 100000, cap: 1_000_000, contact: true, unmasked: true, userId: U.hr },
+  },
   // resumes (FR-CAN-07, migration 0036): status, scan result, version, digest, uploader and key are the server's
   {
     route: "POST /api/v1/candidates/:id/resumes", actor: "r1a",
@@ -644,7 +798,7 @@ const CASES: RejectCase[] = [
     }),
     forbidden: { version: 5, publishedAt: PAST, publishedBy: U.admin, active: true },
   },
-  // LMS (docs/lms-api.md, migration 0054): ids, versions, timestamps, ownership, completion stamps and structure are the server's
+  // LMS (docs/lms-api.md, migration 0082): ids, versions, timestamps, ownership, completion stamps and structure are the server's
   {
     route: "POST /api/v1/lms/courses", actor: "hr",
     prepare: async () => ({ url: "/api/v1/lms/courses", body: { title: "MA course" }, state: lmsState }),
@@ -827,11 +981,561 @@ const CASES: RejectCase[] = [
     },
     forbidden: { approvedBy: U.admin, status: "approved", operatorId: U.admin2, placementsCommit: true, approvedAt: PAST },
   },
+  // companies, facilities, utilities and bills (migration 0054): location, status at creation, row version,
+  // ciphertext, owner, void and invoice columns are the server's
+  ...(["companies", "facilities"] as const).flatMap((plural): RejectCase[] => [
+    {
+      route: `POST /api/v1/${plural}`, actor: "locD",
+      prepare: async () => ({
+        url: `/api/v1/${plural}`, body: { locationId: LOC.dallas, name: `MA ${plural} ${++n}`, city: "Dallas" },
+        state: () => rows(`SELECT (SELECT count(*) FROM eureka.company)::int AS c, (SELECT count(*) FROM eureka.facility)::int AS f`),
+      }),
+      forbidden: {
+        status: "inactive", incharges: [U.locD], employeeCount: 3, location: { id: LOC.austin }, actions: { manage: true },
+        companyId: FOREIGN_ID, row_version: 9, created_by: U.hr,
+      },
+    },
+    {
+      route: `PATCH /api/v1/${plural}/:id`, actor: "locD",
+      prepare: async () => {
+        const o = await ownerOf(plural);
+        return {
+          url: `/api/v1/${plural}/${o}`, body: { city: "Plano", status: "inactive" }, headers: { "if-match": "1" },
+          state: () => rows(`SELECT * FROM eureka.${plural === "companies" ? "company" : "facility"} WHERE id = $1`, [o]),
+        };
+      },
+      forbidden: { incharges: [U.locD], employeeCount: 3, location: { id: LOC.austin }, actions: { manage: true }, row_version: 9 },
+    },
+    {
+      route: `POST /api/v1/${plural}/:id/incharges`, actor: "locD",
+      prepare: async () => {
+        const o = await ownerOf(plural);
+        return {
+          url: `/api/v1/${plural}/${o}/incharges`, body: { userId: U.locD },
+          state: () => rows(`SELECT (SELECT count(*) FROM eureka.company_incharge)::int AS c, (SELECT count(*) FROM eureka.facility_incharge)::int AS f`),
+        };
+      },
+      forbidden: { assignedBy: U.hr, assignedAt: PAST, companyId: FOREIGN_ID, facilityId: FOREIGN_ID, name: "Hijacked" },
+    },
+    {
+      route: `POST /api/v1/${plural}/:id/utilities`, actor: "locD",
+      prepare: async () => {
+        const o = await ownerOf(plural);
+        return {
+          url: `/api/v1/${plural}/${o}/utilities`, body: { utilityType: "water", serviceProvider: "MA Water", password: "ma-secret" },
+          state: () => rows(`SELECT (SELECT count(*) FROM eureka.utility)::int AS u, (SELECT count(*) FROM eureka.field_key)::int AS k`),
+        };
+      },
+      forbidden: {
+        passwordEnc: "AQ==", password_enc: "AQ==", passwordMac: "AQ==", passwordKeyId: FOREIGN_ID, hasPassword: false, status: "inactive",
+        companyId: FOREIGN_ID, facilityId: FOREIGN_ID, locationId: LOC.austin,
+      },
+    },
+    {
+      route: `POST /api/v1/${plural}/:id/bills`, actor: "locD",
+      prepare: async () => {
+        const { owner, utility } = await utilityOf(plural);
+        return {
+          url: `/api/v1/${plural}/${owner}/bills`,
+          body: { utilityId: utility, paymentMethod: "ach", amount: "10.00", billingStart: "2025-01-01", billingEnd: "2025-01-31", dueDate: "2025-02-10" },
+          state: () => rows(`SELECT count(*)::int AS n FROM eureka.utility_bill`),
+        };
+      },
+      forbidden: {
+        status: "paid", voidedAt: PAST, voidedBy: U.hr, voidReason: "x", invoiceDocumentId: FOREIGN_ID, invoice: { documentId: FOREIGN_ID },
+        companyId: FOREIGN_ID, facilityId: FOREIGN_ID, locationId: LOC.austin, utility: { id: FOREIGN_ID },
+      },
+    },
+  ]),
+  {
+    route: "POST /api/v1/companies/:id/employees", actor: "locD",
+    prepare: async () => {
+      const o = await ownerOf("companies");
+      const e = await joinedEmployee(db);
+      return {
+        url: `/api/v1/companies/${o}/employees`, body: { employeeId: e.personId, startDate: "2025-01-01" },
+        state: () => rows(`SELECT count(*)::int AS n FROM eureka.company_employee`),
+      };
+    },
+    forbidden: { endDate: "2025-12-31", companyId: FOREIGN_ID, status: "exited", endedBy: U.hr, name: "X" },
+  },
+  {
+    route: "POST /api/v1/companies/:id/employees/:employeeId/end", actor: "locD",
+    prepare: async () => {
+      const o = await ownerOf("companies");
+      const e = await joinedEmployee(db);
+      await ok("locD", "POST", `/api/v1/companies/${o}/employees`, { employeeId: e.personId, startDate: "2025-01-01" });
+      return {
+        url: `/api/v1/companies/${o}/employees/${e.personId}/end`, body: { endDate: "2025-06-30" },
+        state: () => rows(`SELECT * FROM eureka.company_employee WHERE person_id = $1`, [e.personId]),
+      };
+    },
+    forbidden: { startDate: "2024-01-01", companyId: FOREIGN_ID, endedBy: U.hr, endedAt: PAST, employeeId: FOREIGN_ID },
+  },
+  {
+    route: "PATCH /api/v1/utilities/:id", actor: "locD",
+    prepare: async () => {
+      const { utility } = await utilityOf("companies");
+      return {
+        url: `/api/v1/utilities/${utility}`, body: { status: "inactive", password: "ma-new" }, headers: { "if-match": "1" },
+        state: () => rows(`SELECT * FROM eureka.utility WHERE id = $1`, [utility]),
+      };
+    },
+    forbidden: {
+      passwordEnc: "AQ==", passwordMac: "AQ==", passwordKeyId: FOREIGN_ID, hasPassword: false, companyId: FOREIGN_ID,
+      facilityId: FOREIGN_ID, locationId: LOC.austin, row_version: 9,
+    },
+  },
+  {
+    route: "PATCH /api/v1/bills/:id", actor: "locD",
+    prepare: async () => {
+      const b = await billOf();
+      return {
+        url: `/api/v1/bills/${b}`, body: { amount: "11.00", paidOn: "2025-02-01" }, headers: { "if-match": "1" },
+        state: () => rows(`SELECT * FROM eureka.utility_bill WHERE id = $1`, [b]),
+      };
+    },
+    forbidden: { status: "due", voidedAt: PAST, voidReason: "x", invoiceDocumentId: FOREIGN_ID, invoice: null, utility: { id: FOREIGN_ID }, row_version: 9 },
+  },
+  {
+    route: "POST /api/v1/bills/:id/void", actor: "locD",
+    prepare: async () => {
+      const b = await billOf();
+      return {
+        url: `/api/v1/bills/${b}/void`, body: { reason: "Entered twice" },
+        state: () => rows(`SELECT * FROM eureka.utility_bill WHERE id = $1`, [b]),
+      };
+    },
+    forbidden: { voidedAt: PAST, voidedBy: U.hr, status: "paid", billId: FOREIGN_ID },
+  },
+  {
+    route: "POST /api/v1/bills/:id/invoice", actor: "locD",
+    prepare: async () => {
+      const b = await billOf();
+      return {
+        url: `/api/v1/bills/${b}/invoice`, body: { fileName: "invoice.pdf", contentType: PDF, size: 1234 },
+        state: () => rows(`SELECT (SELECT count(*) FROM eureka.document)::int AS d, (SELECT count(*) FROM eureka.file_object)::int AS f,
+                                  (SELECT row_version FROM eureka.utility_bill WHERE id = $1) AS v`, [b]),
+      };
+    },
+    forbidden: (({ fileName: _f, ...rest }) => ({ ...rest, billId: FOREIGN_ID, docType: "i9" }))(DOCUMENT_FORBIDDEN),
+  },
+  // datahub (docs/datahub-api.md, migration 0075): owner, location of a subfolder, row version, status, file and key are the server's
+  {
+    route: "POST /api/v1/datahub/folders", actor: "hr",
+    prepare: async () => ({
+      url: "/api/v1/datahub/folders", body: { name: `MA folder ${++n}`, level: "internal" },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.datahub_folder`),
+    }),
+    forbidden: DATAHUB_FOLDER_FORBIDDEN,
+  },
+  {
+    route: "PATCH /api/v1/datahub/folders/:id", actor: "hr",
+    prepare: async () => {
+      const f = await ok("hr", "POST", "/api/v1/datahub/folders", { name: `MA patch ${++n}`, level: "internal" });
+      return {
+        url: `/api/v1/datahub/folders/${f.id}`, body: { description: "Changed" }, headers: { "if-match": "1" },
+        state: () => rows(`SELECT * FROM eureka.datahub_folder WHERE id = $1`, [f.id]),
+      };
+    },
+    forbidden: DATAHUB_FOLDER_FORBIDDEN,
+  },
+  {
+    route: "POST /api/v1/datahub/folders/:id/files", actor: "hr",
+    prepare: async () => {
+      const f = await ok("hr", "POST", "/api/v1/datahub/folders", { name: `MA files ${++n}`, level: "internal" });
+      return {
+        url: `/api/v1/datahub/folders/${f.id}/files`, body: { name: "Policy.pdf", contentType: PDF, size: 1234 },
+        state: () => rows(`SELECT (SELECT count(*)::int FROM eureka.datahub_file_version) AS v, (SELECT count(*)::int FROM eureka.file_object) AS f`),
+      };
+    },
+    forbidden: {
+      ...DOCUMENT_FORBIDDEN, folderId: FOREIGN_ID, fileObjectId: FOREIGN_ID, version: 7, versionId: FOREIGN_ID, latestVersion: 7,
+      level: "internal", deletedAt: PAST,
+    },
+  },
+  // training (migration 0065, docs/training-api.md): owners, creators, versions, statuses and progress stamps are the server's
+  {
+    route: "POST /api/v1/training/batches", actor: "locD",
+    prepare: async () => ({
+      url: "/api/v1/training/batches", body: { locationId: LOC.dallas, technologyId: TECH_ID, startDate: nextTrainingMonth() },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.batch`),
+    }),
+    forbidden: { status: "in_training", createdBy: U.l1, startMonth: "2030-01", students: 5, courses: 2, customName: "x", trainer: U.coach },
+  },
+  {
+    route: "PATCH /api/v1/training/batches/:id", actor: "locD",
+    prepare: async () => {
+      const b = await trainingBatch();
+      return { url: `/api/v1/training/batches/${b}`, body: { name: "Renamed" }, headers: { "if-match": '"2"' },
+        state: () => rows(`SELECT * FROM eureka.batch WHERE id = $1`, [b]) };
+    },
+    forbidden: { status: "completed", locationId: LOC.austin, technologyId: FOREIGN_ID, startMonth: "2030-01", createdBy: U.l1 },
+  },
+  {
+    route: "PUT /api/v1/training/batches/:id/status", actor: "locD",
+    prepare: async () => {
+      const b = await trainingBatch();
+      return { url: `/api/v1/training/batches/${b}/status`, body: { to: "in_training" }, state: () => rows(`SELECT * FROM eureka.batch WHERE id = $1`, [b]) };
+    },
+    forbidden: { status: "completed", from: "planned", batchId: FOREIGN_ID },
+  },
+  {
+    route: "POST /api/v1/training/batches/:id/courses", actor: "locD",
+    prepare: async () => {
+      const b = await trainingBatch();
+      const c = await trainingCourse();
+      return { url: `/api/v1/training/batches/${b}/courses`, body: { courseId: c.id },
+        state: () => rows(`SELECT * FROM eureka.batch_course WHERE batch_id = $1`, [b]) };
+    },
+    forbidden: { position: 1, addedBy: U.l1, addedAt: PAST, batchId: FOREIGN_ID },
+  },
+  {
+    route: "PUT /api/v1/training/batches/:id/courses/order", actor: "locD",
+    prepare: async () => {
+      const b = await trainingBatch();
+      const c = await trainingCourse();
+      await ok("locD", "POST", `/api/v1/training/batches/${b}/courses`, { courseId: c.id });
+      return { url: `/api/v1/training/batches/${b}/courses/order`, body: { courseIds: [c.id] },
+        state: () => rows(`SELECT * FROM eureka.batch_course WHERE batch_id = $1`, [b]) };
+    },
+    forbidden: { positions: [1], batchId: FOREIGN_ID },
+  },
+  {
+    route: "POST /api/v1/training/batches/:id/students", actor: "locD",
+    prepare: async () => {
+      const b = await trainingBatch();
+      const cand = await freshOwn();
+      return { url: `/api/v1/training/batches/${b}/students`, body: { candidateId: cand.id },
+        state: () => rows(`SELECT batch_id FROM eureka.candidate WHERE id = $1`, [cand.id]) };
+    },
+    forbidden: { batchId: FOREIGN_ID, locationId: LOC.austin, status: "active", progress: 100 },
+  },
+  {
+    route: "PUT /api/v1/training/batches/:id/students/:candidateId/modules/:moduleId", actor: "locD",
+    prepare: async () => {
+      const b = await trainingBatch();
+      const c = await trainingCourse();
+      await ok("locD", "POST", `/api/v1/training/batches/${b}/courses`, { courseId: c.id });
+      const cand = await freshOwn();
+      await ok("locD", "POST", `/api/v1/training/batches/${b}/students`, { candidateId: cand.id });
+      return { url: `/api/v1/training/batches/${b}/students/${cand.id}/modules/${c.moduleId}`, body: { completed: true },
+        state: () => rows(`SELECT * FROM eureka.module_progress WHERE batch_id = $1`, [b]) };
+    },
+    forbidden: { completedAt: PAST, completedBy: U.coach, candidateId: FOREIGN_ID, moduleId: FOREIGN_ID },
+  },
+  {
+    route: "POST /api/v1/training/courses", actor: "locD",
+    prepare: async () => ({
+      url: "/api/v1/training/courses", body: { title: "MA course" },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.course`),
+    }),
+    forbidden: { archived: true, createdBy: U.l1, canEdit: true, totalMinutes: 5, location: { id: LOC.austin } },
+  },
+  {
+    route: "PATCH /api/v1/training/courses/:id", actor: "locD",
+    prepare: async () => {
+      const c = await trainingCourse();
+      return { url: `/api/v1/training/courses/${c.id}`, body: { title: "Renamed" }, headers: { "if-match": '"1"' },
+        state: () => rows(`SELECT * FROM eureka.course WHERE id = $1`, [c.id]) };
+    },
+    forbidden: { locationId: LOC.austin, createdBy: U.l1, modules: [] },
+  },
+  {
+    route: "POST /api/v1/training/courses/:id/modules", actor: "locD",
+    prepare: async () => {
+      const c = await trainingCourse();
+      return { url: `/api/v1/training/courses/${c.id}/modules`, body: { title: "More", durationMinutes: 15 },
+        state: () => rows(`SELECT * FROM eureka.course_module WHERE course_id = $1 ORDER BY position`, [c.id]) };
+    },
+    forbidden: { position: 1, courseId: FOREIGN_ID },
+  },
+  {
+    route: "PUT /api/v1/training/courses/:id/modules/order", actor: "locD",
+    prepare: async () => {
+      const c = await trainingCourse();
+      return { url: `/api/v1/training/courses/${c.id}/modules/order`, body: { moduleIds: [c.moduleId] },
+        state: () => rows(`SELECT * FROM eureka.course_module WHERE course_id = $1 ORDER BY position`, [c.id]) };
+    },
+    forbidden: { positions: [1], courseId: FOREIGN_ID },
+  },
+  {
+    route: "PATCH /api/v1/training/courses/:id/modules/:moduleId", actor: "locD",
+    prepare: async () => {
+      const c = await trainingCourse();
+      return { url: `/api/v1/training/courses/${c.id}/modules/${c.moduleId}`, body: { durationMinutes: 20 }, headers: { "if-match": '"1"' },
+        state: () => rows(`SELECT * FROM eureka.course_module WHERE course_id = $1`, [c.id]) };
+    },
+    forbidden: { position: 3, courseId: FOREIGN_ID },
+  },
+  // chat (migration 0070, docs/chat-api.md): members, roles, sender, revisions, read marks and keys are the server's
+  ...chatCases(),
+  // jobs-portal (migration 0060): owner, team, version, posting time and kind are the server's
+  {
+    route: "POST /api/v1/jobs", actor: "l1",
+    prepare: async () => ({
+      url: "/api/v1/jobs",
+      body: { kind: "client_requirement", title: "MA job", category: "engineering", experienceLevel: "mid", employmentType: "contract",
+        workMode: "remote", clientId: CLIENT_ID },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.job`),
+    }),
+    forbidden: { ownerId: U.l2, teamId: T.t3, postedAt: PAST, applicants: 9, owner: { id: U.l2 }, actions: { edit: true } },
+  },
+  {
+    route: "PATCH /api/v1/jobs/:id", actor: "l1",
+    prepare: async () => {
+      const j = await ok("l1", "POST", "/api/v1/jobs", { kind: "client_requirement", title: "MA job 2", category: "engineering",
+        experienceLevel: "mid", employmentType: "contract", workMode: "remote", clientId: CLIENT_ID }, 201);
+      return {
+        url: `/api/v1/jobs/${j.id}`, body: { title: "Renamed" }, headers: { "if-match": "1" },
+        state: () => rows(`SELECT * FROM eureka.job WHERE id = $1`, [j.id]),
+      };
+    },
+    forbidden: { kind: "internal_opening", ownerId: U.l2, teamId: T.t3, postedAt: PAST, row_version: 9 },
+  },
+  // jobs-portal applicant auth (migration 0061): verification, status and ids are the server's
+  {
+    route: "POST /api/portal/auth/sign-up", actor: null,
+    prepare: async () => ({
+      url: "/api/portal/auth/sign-up", headers: { "x-eureka-portal": "1" },
+      body: { firstName: "Ma", lastName: "Applicant", email: `ma-${++n}@example.com`, phone: "+1 469 555 0177" },
+      state: () => rows(`SELECT (SELECT count(*) FROM eureka.applicant)::int AS a, (SELECT count(*) FROM eureka.applicant_login_link)::int AS l`),
+    }),
+    forbidden: { emailVerified: true, emailVerifiedAt: PAST, status: "active", applicantId: FOREIGN_ID, dob: "1990-01-01", role: "hr" },
+  },
+  {
+    route: "POST /api/portal/auth/request-link", actor: null,
+    prepare: async () => ({
+      url: "/api/portal/auth/request-link", headers: { "x-eureka-portal": "1" }, body: { email: "ma-link@example.com" },
+      state: () => rows(`SELECT count(*)::int AS l FROM eureka.applicant_login_link`),
+    }),
+    forbidden: { applicantId: FOREIGN_ID, linkId: FOREIGN_ID, expiresAt: "2099-01-01T00:00:00Z", ttlMinutes: 600 },
+  },
+  {
+    route: "POST /api/portal/auth/verify", actor: null,
+    prepare: async () => ({
+      url: "/api/portal/auth/verify", headers: { "x-eureka-portal": "1" }, body: { token: `${FOREIGN_ID}.${"a".repeat(43)}` },
+      state: () => rows(`SELECT count(*)::int AS s FROM eureka.applicant_session`),
+    }),
+    forbidden: { applicantId: FOREIGN_ID, sessionHours: 999, emailVerifiedAt: PAST },
+  },
+  // jobs-portal applications (migration 0062): status history, versions, reviewers and links are the server's
+  {
+    route: "POST /api/v1/applications/:id/status", actor: "hr",
+    prepare: async () => {
+      const a = await portalApplication();
+      return {
+        url: `/api/v1/applications/${a}/status`, body: { to: "shortlisted" }, headers: { "if-match": "1" },
+        state: () => rows(`SELECT * FROM eureka.job_application WHERE id = $1`, [a]),
+      };
+    },
+    forbidden: { applicantId: FOREIGN_ID, jobId: FOREIGN_ID, candidateId: FOREIGN_ID, statusChangedAt: PAST, actorId: U.l2, from: "hired" },
+  },
+  {
+    route: "POST /api/v1/applications/:id/interviews", actor: "hr",
+    prepare: async () => {
+      const a = await portalApplication();
+      return {
+        url: `/api/v1/applications/${a}/interviews`,
+        body: { interviewType: "video", round: "screening", leadUserId: U.coach, startsAt: "2030-01-01T10:00:00Z", durationMinutes: 30 },
+        state: () => rows(`SELECT count(*)::int AS n FROM eureka.application_interview`),
+      };
+    },
+    forbidden: { applicationId: FOREIGN_ID, status: "completed", createdBy: U.l2, scorecards: [], overallRating: 5 },
+  },
+  {
+    route: "POST /api/v1/applications/:id/candidate", actor: "l1",
+    prepare: async () => ({
+      url: `/api/v1/applications/${FOREIGN_ID}/candidate`, body: { technologyId: TECH_ID, locationId: LOC.dallas },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.candidate`),
+    }),
+    forbidden: { firstName: "X", lastName: "Y", email: "x@example.com", phone: "+12125550100", recruiterId: U.r1a, candidateId: FOREIGN_ID, status: "active" },
+  },
+  {
+    route: "POST /api/v1/applications/export", actor: "hr",
+    prepare: async () => ({ url: "/api/v1/applications/export", body: {}, state: () => rows(`SELECT 1`) }),
+    forbidden: { cap: 100000, includePhones: true, columns: ["phone"] },
+  },
+  {
+    route: "POST /api/v1/applicants/export", actor: "hr",
+    prepare: async () => ({ url: "/api/v1/applicants/export", body: {}, state: () => rows(`SELECT 1`) }),
+    forbidden: { cap: 100000, includePhones: true, columns: ["phone"] },
+  },
+  {
+    route: "POST /api/v1/application-interviews/:id/status", actor: "hr",
+    prepare: async () => ({
+      url: `/api/v1/application-interviews/${FOREIGN_ID}/status`, body: { status: "completed" },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.application_event`),
+    }),
+    forbidden: { applicationId: FOREIGN_ID, startsAt: PAST, leadUserId: U.l2, meetingLink: "https://x.example" },
+  },
+  {
+    route: "PUT /api/v1/application-interviews/:id/people", actor: "hr",
+    prepare: async () => ({
+      url: `/api/v1/application-interviews/${FOREIGN_ID}/people`, body: { leadUserId: U.coach, panelUserIds: [] },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.application_interview_panel`),
+    }),
+    forbidden: { applicationId: FOREIGN_ID, status: "completed", startsAt: PAST, add: [U.r1a], remove: [U.r1b] },
+  },
+  {
+    route: "PUT /api/v1/application-interviews/:id/scorecard", actor: "hr",
+    prepare: async () => ({
+      url: `/api/v1/application-interviews/${FOREIGN_ID}/scorecard`, body: { technical: 3, communication: 3, problemSolving: 3, attitude: 3 },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.application_scorecard`),
+    }),
+    forbidden: { reviewerId: U.l2, interviewId: FOREIGN_ID, overall: 5 },
+  },
 ];
+
+
+let trainingMonth = 0;
+/** A start date in a month no other case uses (one batch per location, technology and month). */
+const nextTrainingMonth = () => {
+  const m = trainingMonth++;
+  return `${2060 + Math.floor(m / 12)}-${String((m % 12) + 1).padStart(2, "0")}-05`;
+};
+/** A planned Dallas batch created by the Dallas Location Ops Admin (row version 2 after the details are set). */
+const trainingBatch = async () =>
+  (await ok("locD", "POST", "/api/v1/training/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startDate: nextTrainingMonth() })).id as string;
+/** A Dallas course with one module. */
+async function trainingCourse(): Promise<{ id: string; moduleId: string }> {
+  const { id } = await ok("locD", "POST", "/api/v1/training/courses", { title: `MA course ${++n}`, modules: [{ title: "M1", durationMinutes: 30 }] });
+  const moduleId = (await rows(`SELECT id FROM eureka.course_module WHERE course_id = $1`, [id]))[0]!.id as string;
+  return { id, moduleId };
+}
+
+/** jobs-portal: an applicant's fresh application to a fresh published internal opening (HR's). */
+let portalSeq = 0;
+async function portalApplication(): Promise<string> {
+  const job = await ok("hr", "POST", "/api/v1/jobs", { kind: "internal_opening", title: "MA opening", category: "hr", experienceLevel: "mid",
+    employmentType: "full_time", workMode: "remote", status: "open", publishedToPortal: true });
+  const s = await portalSignIn(app, `ma-app-${++portalSeq}-${Date.now()}@example.com`);
+  const r = await portalCall(app, s, "POST", `/api/portal/jobs/${job.id}/apply`);
+  expect(r.statusCode, r.body).toBe(201);
+  return r.json().id as string;
+}
 
 /** Endpoints that read no body: what they change comes from the URL and the session only. */
 interface IgnoreCase { route: string; run: () => Promise<void> }
 const IGNORED: IgnoreCase[] = [
+  // interviews-settings (ST-7): the session comes from the URL, its owner from the caller's session
+  {
+    route: "POST /api/v1/settings/sessions/:id/revoke",
+    run: async () => {
+      const a = await login("r2a", true);
+      const b = await login("r2a", true);
+      const other = await login("r3a", true);
+      const list = (await call(null, "GET", "/api/v1/settings/sessions", undefined, {}, a)).json().items as { id: string; current: boolean }[];
+      const bId = (await rows(`SELECT public_id FROM eureka.session WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1 OFFSET 0`, [U.r2a]))[0]!.public_id as string;
+      expect(list.some((i) => i.id === bId)).toBe(true);
+      const otherId = (await rows(`SELECT public_id FROM eureka.session WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, [U.r3a]))[0]!.public_id as string;
+      const res = await call(null, "POST", `/api/v1/settings/sessions/${bId}/revoke`,
+        { ...SERVER_MANAGED, id: otherId, userId: U.r3a, sessionId: otherId, all: true, revokedAt: PAST }, {}, a);
+      expect(res.statusCode, res.body).toBe(204);
+      expect((await call(null, "GET", "/api/v1/me", undefined, {}, b)).statusCode).toBe(401);
+      expect((await call(null, "GET", "/api/v1/me", undefined, {}, a)).statusCode).toBe(200);
+      expect((await call(null, "GET", "/api/v1/me", undefined, {}, other)).statusCode).toBe(200);
+    },
+  },
+  {
+    route: "POST /api/v1/settings/sessions/revoke-others",
+    run: async () => {
+      const a = await login("r3a", true);
+      const b = await login("r3a", true);
+      const other = await login("r2a", true);
+      const res = await call(null, "POST", "/api/v1/settings/sessions/revoke-others", { userId: U.r2a, keep: [], all: true, ...SERVER_MANAGED }, {}, a);
+      expect(res.statusCode, res.body).toBe(200);
+      expect((await call(null, "GET", "/api/v1/me", undefined, {}, b)).statusCode).toBe(401);
+      expect((await call(null, "GET", "/api/v1/me", undefined, {}, a)).statusCode).toBe(200);
+      expect((await call(null, "GET", "/api/v1/me", undefined, {}, other)).statusCode).toBe(200);
+    },
+  },
+  // chat (migration 0070)
+  {
+    route: "POST /api/v1/chat/conversations/:id/leave",
+    run: async () => {
+      const g = await freshChatGroup();
+      await ok("r1a", "POST", `/api/v1/chat/conversations/${g}/members`, { userIds: [U.l1] }, 200);
+      const r = await call("r1b", "POST", `/api/v1/chat/conversations/${g}/leave`,
+        { ...SERVER_MANAGED, userId: U.l1, conversationId: FOREIGN_ID, role: "owner", leftAt: PAST });
+      expect(r.statusCode, r.body).toBe(204);
+      const left = await rows(`SELECT user_id, role, left_at IS NOT NULL AS gone FROM eureka.chat_member WHERE conversation_id = $1 ORDER BY user_id`, [g]);
+      expect(left).toEqual([
+        { user_id: U.l1, role: "member", gone: false }, { user_id: U.r1a, role: "owner", gone: false }, { user_id: U.r1b, role: "member", gone: true },
+      ].sort((a, b) => a.user_id.localeCompare(b.user_id)));
+    },
+  },
+  {
+    route: "POST /api/v1/chat/attachments/:attachmentId/download",
+    run: async () => {
+      const g = await chatGroup();
+      const sent = await ok("r1a", "POST", `/api/v1/chat/conversations/${g}/messages`,
+        { clientId: randomUUID(), body: "", attachments: [{ fileName: "ma.pdf", contentType: "application/pdf", size: 10 }] });
+      const att = sent.message.attachments[0].id as string;
+      const before = await auditHead();
+      // Still pending: refused whatever the body claims.
+      const r = await call("r1b", "POST", `/api/v1/chat/attachments/${att}/download`,
+        { ...SERVER_MANAGED, status: "clean", fileId: FOREIGN_ID, key: `clean/documents/${FOREIGN_ID}` });
+      expect(r.statusCode, r.body).toBe(409);
+      expect(r.json().detail).toBe("not_available");
+      expect(await rows(`SELECT f.status FROM eureka.chat_attachment a JOIN eureka.file_object f ON f.id = a.file_id WHERE a.id = $1`, [att]))
+        .toEqual([{ status: "pending" }]);
+      expect(await auditHead()).toBe(before);
+    },
+  },
+  // jobs-portal: applying and withdrawing take the job/application from the URL and the applicant from the session
+  {
+    route: "POST /api/portal/jobs/:id/apply",
+    run: async () => {
+      const job = await ok("hr", "POST", "/api/v1/jobs", { kind: "internal_opening", title: "MA apply", category: "hr", experienceLevel: "mid",
+        employmentType: "full_time", workMode: "remote", status: "open", publishedToPortal: true });
+      const a = await portalSignIn(app, `ma-apply-a-${Date.now()}@example.com`);
+      const b = await portalSignIn(app, `ma-apply-b-${Date.now()}@example.com`);
+      const res = await portalCall(app, a, "POST", `/api/portal/jobs/${job.id}/apply`,
+        { ...SERVER_MANAGED, applicantId: b.id, status: "hired", candidateId: FOREIGN_ID, jobId: FOREIGN_ID, appliedAt: PAST });
+      expect(res.statusCode, res.body).toBe(201);
+      expect(await rows(`SELECT applicant_id, job_id, status, candidate_id, row_version FROM eureka.job_application WHERE id = $1`, [res.json().id]))
+        .toEqual([{ applicant_id: a.id, job_id: job.id, status: "applied", candidate_id: null, row_version: 1 }]);
+    },
+  },
+  {
+    route: "POST /api/portal/applications/:id/withdraw",
+    run: async () => {
+      const job = await ok("hr", "POST", "/api/v1/jobs", { kind: "internal_opening", title: "MA withdraw", category: "hr", experienceLevel: "mid",
+        employmentType: "full_time", workMode: "remote", status: "open", publishedToPortal: true });
+      const a = await portalSignIn(app, `ma-wd-${Date.now()}@example.com`);
+      const id = (await portalCall(app, a, "POST", `/api/portal/jobs/${job.id}/apply`)).json().id;
+      const res = await portalCall(app, a, "POST", `/api/portal/applications/${id}/withdraw`, { ...SERVER_MANAGED, status: "hired", to: "hired" });
+      expect(res.statusCode, res.body).toBe(200);
+      expect(await rows(`SELECT status FROM eureka.job_application WHERE id = $1`, [id])).toEqual([{ status: "withdrawn" }]);
+    },
+  },
+  // jobs-portal: sign-out ends the caller's own applicant session, whatever the body names
+  {
+    route: "POST /api/portal/auth/sign-out-all",
+    run: async () => {
+      const a = await portalSignIn(app, `ma-all-a-${Date.now()}@example.com`, "All", "Applicant");
+      const b = await portalSignIn(app, `ma-all-b-${Date.now()}@example.com`, "All", "Applicant");
+      const res = await app.inject({ method: "POST", url: "/api/portal/auth/sign-out-all", headers: { cookie: a.cookie, "x-csrf-token": a.csrf },
+        payload: { applicantId: b.id, ...SERVER_MANAGED } });
+      expect(res.statusCode, res.body).toBe(204);
+      expect((await app.inject({ method: "GET", url: "/api/portal/me", headers: { cookie: a.cookie } })).statusCode).toBe(401);
+      expect((await app.inject({ method: "GET", url: "/api/portal/me", headers: { cookie: b.cookie } })).statusCode).toBe(200);
+    },
+  },
+  {
+    route: "POST /api/portal/auth/sign-out",
+    run: async () => {
+      const signIn = (email: string) => portalSignIn(app, email, "Out", "Applicant");
+      const a = await signIn("ma-out-a@example.com");
+      const b = await signIn("ma-out-b@example.com");
+      const res = await app.inject({ method: "POST", url: "/api/portal/auth/sign-out", headers: { cookie: a.cookie, "x-csrf-token": a.csrf },
+        payload: { applicantId: b.id, sessionId: b.cookie, ...SERVER_MANAGED } });
+      expect(res.statusCode, res.body).toBe(204);
+      expect((await app.inject({ method: "GET", url: "/api/portal/me", headers: { cookie: a.cookie } })).statusCode).toBe(401);
+      expect((await app.inject({ method: "GET", url: "/api/portal/me", headers: { cookie: b.cookie } })).statusCode).toBe(200);
+    },
+  },
   {
     route: "POST /api/v1/notifications/:id/read",
     run: async () => {
@@ -1054,6 +1758,67 @@ const IGNORED: IgnoreCase[] = [
         .toEqual([{ user_id: U.r1b, role_key: "accounts", status: "rejected", decided_by: U.admin2 }]);
       expect(await rows(`SELECT role_key FROM eureka.user_role WHERE user_id = ANY($1) AND valid @> now() ORDER BY 1`, [[U.r1b, U.r2a]]))
         .toEqual([{ role_key: "recruiter" }, { role_key: "recruiter" }]);
+    },
+  },
+  {
+    route: "POST /api/v1/utilities/:id/reveal-password",
+    run: async () => {
+      const o = await ownerOf("companies");
+      const a = await ok("locD", "POST", `/api/v1/companies/${o}/utilities`, { utilityType: "gas", serviceProvider: "A", password: "pw-A" });
+      const b = await ok("locD", "POST", `/api/v1/companies/${o}/utilities`, { utilityType: "gas", serviceProvider: "B", password: "pw-B" });
+      const before = await rows(`SELECT * FROM eureka.utility ORDER BY id`);
+      await rows(`INSERT INTO authz.policy_setting (key, value) VALUES ('dev_step_up', 'on') ON CONFLICT (key) DO UPDATE SET value = 'on'`);
+      const s = await login("locD", true);
+      try {
+        expect((await call(null, "POST", "/api/auth/step-up/dev", undefined, {}, s)).statusCode).toBe(200);
+      } finally {
+        await rows(`DELETE FROM authz.policy_setting WHERE key = 'dev_step_up'`);
+      }
+      const r = await call(null, "POST", `/api/v1/utilities/${a.id}/reveal-password`, {
+        ...SERVER_MANAGED, utilityId: b.id, password: "chosen", actorId: U.hr, stepUpGrantId: FOREIGN_ID,
+      }, {}, s);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(r.json()).toEqual({ password: "pw-A" });
+      expect(await rows(`SELECT * FROM eureka.utility ORDER BY id`)).toEqual(before);
+      const audit = await rows(`SELECT actor_id, entity_id, changes FROM eureka.audit_event WHERE action = 'utility.password_revealed' ORDER BY seq DESC LIMIT 1`);
+      expect(audit).toEqual([{ actor_id: U.locD, entity_id: a.id, changes: { ownerKind: "company", ownerId: o, stepUpGrantId: expect.any(String) } }]);
+      expect(audit[0]!.changes.stepUpGrantId).not.toBe(FOREIGN_ID);
+    },
+  },
+  {
+    // Membership comes from the URL (folder, user) and the session; nothing in the body counts.
+    route: "PUT /api/v1/datahub/folders/:id/members/:userId",
+    run: async () => {
+      const f = await ok("hr", "POST", "/api/v1/datahub/folders", { name: `MA members ${++n}`, level: "restricted" });
+      const res = await call("hr", "PUT", `/api/v1/datahub/folders/${f.id}/members/${U.r1a}`,
+        { ...SERVER_MANAGED, userId: U.r2a, folderId: FOREIGN_ID, addedBy: U.admin, addedAt: PAST });
+      expect(res.statusCode, res.body).toBe(204);
+      const m = await rows(`SELECT folder_id, user_id, added_by FROM eureka.datahub_folder_member WHERE folder_id = $1`, [f.id]);
+      expect(m).toEqual([{ folder_id: f.id, user_id: U.r1a, added_by: U.hr }]);
+    },
+  },
+  {
+    route: "POST /api/v1/datahub/versions/:id/download",
+    run: async () => {
+      const f = await ok("hr", "POST", "/api/v1/datahub/folders", { name: `MA download ${++n}`, level: "internal" });
+      const file = pdf("datahub download");
+      const r = await ok("hr", "POST", `/api/v1/datahub/folders/${f.id}/files`, { name: "Policy.pdf", contentType: PDF, size: file.length });
+      const up = await app.inject({ method: "POST", url: r.upload.url, ...form(r.upload.fields, file) });
+      expect(up.statusCode, up.body).toBe(204);
+      await new JobRunner(db.worker, [documentScanJob(new LocalDocumentStore(docs), DEFAULT_SCAN_OPTIONS)], silentLogger).tick();
+      const res = await call("hr", "POST", `/api/v1/datahub/versions/${r.versionId}/download`, {
+        ...SERVER_MANAGED, key: `restricted/documents/${FOREIGN_ID}`, fileObjectId: FOREIGN_ID, classification: "restricted",
+        fileName: "payload.html", contentType: "text/html", expiresSeconds: 86_400, stepUpGrantId: FOREIGN_ID, level: "restricted",
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      const { url, expiresAt } = res.json() as { url: string; expiresAt: string };
+      expect(Date.parse(expiresAt) - Date.now()).toBeLessThanOrEqual(60_000);
+      const got = await app.inject({ method: "GET", url });
+      expect(got.rawPayload.equals(file)).toBe(true);
+      expect(got.headers["content-type"]).toBe(PDF);
+      expect(String(got.headers["content-disposition"])).toBe('attachment; filename="Policy-v1.pdf"');
+      const log = await rows(`SELECT user_id, level, step_up_grant_id FROM eureka.datahub_access WHERE version_id = $1`, [r.versionId]);
+      expect(log).toEqual([{ user_id: U.hr, level: "internal", step_up_grant_id: null }]);
     },
   },
 ];

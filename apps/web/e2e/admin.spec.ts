@@ -11,7 +11,7 @@ const person = (tag: string) => ({ name: `E2E ${tag} ${run}`, email: `e2e-${tag.
 
 async function signIn(page: Page, label: string) {
   await page.goto("/");
-  await page.getByLabel("Development sign-in (fictional users)").selectOption({ label });
+  await page.getByLabel("Sign in as").selectOption({ label });
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("complementary", { name: "Main navigation" })).toBeVisible();
 }
@@ -85,7 +85,7 @@ test("org admin: create a user, grant and revoke roles, second approver, deactiv
   // A location-bound role asks for a location.
   await row.getByRole("button", { name: `Grant role to ${a.name}` }).click();
   dlg = page.getByRole("dialog", { name: `Grant a role to ${a.name}` });
-  await dlg.getByLabel("Role").selectOption({ label: "Location Ops Admin" });
+  await dlg.getByLabel("Role").selectOption({ label: "Location Incharge" });
   await expect(dlg.getByLabel("Location")).toBeVisible();
   await expect(dlg.getByRole("button", { name: "Grant role" })).toBeDisabled();
   await dlg.getByRole("button", { name: "Cancel" }).click();

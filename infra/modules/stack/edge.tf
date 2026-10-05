@@ -112,6 +112,10 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
+  # Staff sign-in (/api/auth/) and the unauthenticated applicant sign-up / sign-in-link / verify
+  # (/api/portal/auth/, which send email) share one per-IP limit (per 5 minutes), so the web ACL stays
+  # at 5 rules, the limit of the CloudFront flat-rate Free plan. The portal also has its own database
+  # caps and per-applicant limits (docs/jobs-portal-api.md).
   rule {
     name     = "login-rate-limit"
     priority = 6
@@ -123,15 +127,32 @@ resource "aws_wafv2_web_acl" "main" {
         limit              = 100
         aggregate_key_type = "IP"
         scope_down_statement {
-          byte_match_statement {
-            search_string         = "/api/auth/"
-            positional_constraint = "STARTS_WITH"
-            field_to_match {
-              uri_path {}
+          or_statement {
+            statement {
+              byte_match_statement {
+                search_string         = "/api/auth/"
+                positional_constraint = "STARTS_WITH"
+                field_to_match {
+                  uri_path {}
+                }
+                text_transformation {
+                  priority = 0
+                  type     = "NONE"
+                }
+              }
             }
-            text_transformation {
-              priority = 0
-              type     = "NONE"
+            statement {
+              byte_match_statement {
+                search_string         = "/api/portal/auth/"
+                positional_constraint = "STARTS_WITH"
+                field_to_match {
+                  uri_path {}
+                }
+                text_transformation {
+                  priority = 0
+                  type     = "NONE"
+                }
+              }
             }
           }
         }

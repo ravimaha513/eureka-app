@@ -354,7 +354,8 @@ describe("configuration", () => {
   const base = { NODE_ENV: "production", AUTH_MODE: "google", SESSION_SECRET: "x".repeat(40), DATABASE_URL: "postgres://x@y/z",
     GOOGLE_CLIENT_ID: "c", GOOGLE_CLIENT_SECRET: "s", GOOGLE_HOSTED_DOMAIN: "eureka.example", ORIGIN_VERIFY_SECRET: "o".repeat(40),
     AWS_REGION: "us-east-2", FIELD_KMS_KEY_ARN: "arn:aws:kms:us-east-2:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab",
-    BIDX_KMS_KEY_ARN: "arn:aws:kms:us-east-2:123456789012:key/9876abcd-12ab-34cd-56ef-1234567890ab" };
+    BIDX_KMS_KEY_ARN: "arn:aws:kms:us-east-2:123456789012:key/9876abcd-12ab-34cd-56ef-1234567890ab",
+    PORTAL_MAIL_MODE: "ses", PORTAL_FROM_EMAIL: "careers@eureka.example" }; // jobs-portal: production needs the applicant mail sender
   it("production needs the documents bucket (no local driver)", () => {
     expect(() => loadConfig(base)).toThrow(/DOCUMENTS_BUCKET is required/);
     expect(loadConfig({ ...base, DOCUMENTS_BUCKET: "eureka-prod-documents" }).DOCUMENTS_BUCKET).toBe("eureka-prod-documents");

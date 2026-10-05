@@ -3,7 +3,7 @@ import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { U, seedFixtures } from "./fixtures.js";
 import { lmsCall, newBatch, newCourse } from "./lms-seed.js";
 
-/** Database-only checks for migration 0054 (LMS): every rule holds with the API removed (design B8). */
+/** Database-only checks for migration 0082 (LMS): every rule holds with the API removed (design B8). */
 let db: TestDb;
 let batch1: string;
 let batch2: string;

@@ -11,6 +11,14 @@ export const REDACT: ReadonlySet<string> = new Set([
   "dob", "dob_enc", "rate",
   // Encrypted fields (work authorization number, migration 0042): never the value or its ciphertext.
   "number", "numberEnc", "number_enc", "workAuthNumber",
+  // Companies, facilities, utilities and bills (migration 0054): never passwords,
+  // account numbers, usernames, owner contact, notes or void reasons.
+  "password", "passwordEnc", "password_enc", "passwordMac", "password_mac",
+  "accountNumber", "account_number", "username",
+  "ownerName", "owner_name", "ownerEmail", "owner_email", "ownerPhone", "owner_phone",
+  "voidReason", "void_reason",
+  // Staff profile free text and interview meeting links (interviews-settings): only "set"/flags are audited.
+  "bio", "meeting_url",
 ]);
 
 /** The audit form of a change set: redacted keys keep their name, not their value. */

@@ -63,6 +63,8 @@ among `hr`, `accounts`, `immigration`.
 | `employee.bench_time` | FR-NTF-05 (bench-time) | 0046 job `bench-time` (`authz.emit_bench_time`) | `candidateId`, `benchSince`, `benchDays`, `thresholdDays` | the candidate's recruiter, its team's lead, that lead's manager (reporting line), `ceo` | `recruiter`, `lead`, `manager`, `ceo` | email + inbox | candidate |
 | `candidate.assigned` | FR-NTF-10, FR-EMP-05 (team assigned) | not emitted yet (team reassignment) | `candidateId`, `teamId` (the new team), optional `fromTeamId` | the lead of the candidate's current team (only while it equals `teamId`; otherwise nobody, the event alerts) and that lead's manager | `lead`, `manager` | email + inbox | candidate |
 | `checklist.item_overdue` | FR-NTF-04 (paperwork pending), FR-NTF-03 / FR-VIS-04 (documents pending) | 0052 job `paperwork-overdue` (`authz.emit_paperwork_overdue`): outstanding (pending/received) items past `due_on` on placements not backed out, once per item and due date | `checklistItemId`, `placementId`, `daysOverdue` (0..3650), optional `assigneeId` | the placement's recruiter, the lead of its team snapshot, that lead's manager; plus `assigneeId` when that user holds `documents_team` and is the item's current assignee (checked by the resolver, 0052) | `recruiter`, `lead`, `manager`, `documents_team` | email + inbox | placement |
+| `chat.direct_message` | internal chat (docs/chat-api.md CH-8) | 0070 `authz.chat_send`: a direct message whose recipient has not viewed the chat for 10 minutes and was not notified since their last view; never when muted, never for groups | `conversationId` (= aggregate id), `recipientId` | `recipientId` while a current member of that direct conversation | none | inbox | conversation (opens Chat) |
+| `application.received` | jobs-portal JP-31 | 0062 `authz.application_apply` (an applicant applied) | `applicationId`, `jobId`, `notify` | `hr` and the job's current hiring manager (reason `hiring_manager`, only while the payload's job is the application's job) | `hiring_manager`, `hr` | inbox only | application |
 
 `employee.benched` (0045) is the move to the bench at project exit; `employee.bench_time` (0046) is the reminder
 once a candidate has been on the bench for N days. Emails and inbox rows never show the dates, reasons or codes
@@ -116,6 +118,7 @@ placement or candidate when the user has that screen.
 ## Privileges (migrations 0046, 0051)
 
 - `eureka_app`: SELECT own `notification` rows, UPDATE (`read_at`) own rows. Nothing on `inbox_fanout` or the ledger.
+- `eureka_worker` (0081): SELECT (`user_id`, `type`, `in_app`) on `notification_preference`.
 - `eureka_worker`: EXECUTE `authz.notification_recipients`, `authz.emit_bench_time`, `authz.emit_paperwork_overdue` (0052); `notification` SELECT of
   the key columns only (never titles or bodies), INSERT during fan-out for named recipients, DELETE past 30 days;
   `inbox_fanout` SELECT/INSERT. An inbox row's `entity_type`/`entity_id` must equal `authz.notification_entity(event)`
@@ -128,7 +131,10 @@ placement or candidate when the user has that screen.
 
 ## Open questions and follow-ups
 
-- **Preferences:** the design defines no per-user notification preferences (channel or type opt-out). Not built.
+- **Preferences:** in-app on/off per type in Settings (migration 0081, `docs/interviews-settings-api.md` ST-4): the
+  inbox fan-out skips recipients who switched a type off (`eureka.notification_preference`, worker SELECT only);
+  `work_authorization.expiring` and `checklist.item_overdue` are mandatory. Email opt-out is not offered. A new in-app
+  type must be added to `packages/shared/src/notifications.ts` too (a test compares it with `INBOX_TYPES`).
 - **FR-NTF-02 candidate-unresponsive** ("warn candidate after N days without response"): not built. Nothing in
   the data records a candidate's response, the threshold is OD-05, and warning the candidate means emailing an
   external address with content to agree. Needs: what counts as a response, N, the message, and whether the

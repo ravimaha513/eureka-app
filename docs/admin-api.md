@@ -28,6 +28,8 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 ### Users
 - `GET /api/v1/admin/users?search=&status=active|inactive&cursor=&limit=` (default 50, max 200) returns
   `{ items: [{ id, email, displayName, designation, status, primaryLocation: {id,name}|null, manager: {id,displayName}|null, roles: [{ key, label, locationId, locationName }], teams: [{ id, name, asLead: boolean }] }], nextCursor }`
+  (interviews-settings, SD-1/ST-3: plus `contactVisible` and, for `staff.contact:read` holders, each item's `phone`).
+- `GET /api/v1/admin/users/summary` returns `{ active, inactive, roles: [{ key, label, count }] }`: active users per role, roles with users only (`docs/interviews-settings-api.md` SD-1).
 - `POST /api/v1/admin/users` with `{ email, displayName, designation?, primaryLocationId? }` returns 201 `{ id }`. A duplicate email is a 409. The email must be in `GOOGLE_HOSTED_DOMAIN` when that is set (422).
 - `POST /api/v1/admin/users/bulk` with `{ dryRun, rows: [{ email, displayName, designation?, location? }] }` (1 to 500 rows; `location` is a location name, case-insensitive) returns 200
   `{ dryRun, committed, created, failed, rows: [{ row, email, displayName, status: "ok" | "error", error?, id? }] }`. All or nothing: one transaction, rolled back when `dryRun` is true or any row fails, so a dry run previews exactly what a real run does (`id` is only present when committed). Row errors: `invalid_email`, `email_domain`, `name_required`, `duplicate_in_file`, `unknown_location`, `email_exists`. Each user is created by `authz.admin_create_user` and audited as `admin.user.created` (`bulk: true`), plus one `admin.user.bulk_created` with the count. Users get no roles; grant them afterwards (AD-3 still applies).

@@ -153,6 +153,9 @@ describe("differential: RLS alone matches the engine", () => {
 
   it.each(["l1", "r1a", "hr", "acct"] as const)("rule 3: authz calls for %s do not grow with the number of document rows", async (key) => {
     const sql = `SELECT d.id FROM eureka.document d JOIN eureka.file_object f ON f.id = d.file_id`;
+    // Fresh planner statistics before each measurement (as autovacuum keeps them in production): a background
+    // auto-analyze landing between the two measurements changes the plan, and with it the count, at random.
+    await db.admin.query("ANALYZE");
     const one = await authzCalls(U[key], sql);
     const extra = await raw(`WITH f AS (
         INSERT INTO eureka.file_object (classification, status, scan_result, content_type, size_bytes, sha256_hex, uploaded_by, upload_expires_at, scanned_at)
@@ -171,6 +174,7 @@ describe("differential: RLS alone matches the engine", () => {
         await raw(`INSERT INTO eureka.document (candidate_id, doc_type, classification, file_id, created_by) VALUES ($1, 'drivers_license', 'restricted', $2, $3)`,
           [d.candidate_id, byCls.restricted.pop(), U.hr]);
       }
+      await db.admin.query("ANALYZE");
       const two = await authzCalls(U[key], sql);
       expect(two.rows).toBe(one.rows * 2);
       expect(one.calls).toBeGreaterThan(0);

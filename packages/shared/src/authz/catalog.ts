@@ -119,6 +119,16 @@ export const PERMISSIONS = [
   // vendors and org
   "vendor.preferred:create",
   "vendor.preferred:read",
+  // own companies and facilities (guest houses), their utilities and bills
+  "company:read",
+  "company:manage",
+  "facility:read",
+  "facility:manage",
+  "utility:read",
+  "utility:manage",
+  "utility.secret:read",
+  "bill:read",
+  "bill:manage",
   "team:move_member",
   "designation:change",
   // training (LMS)
@@ -127,6 +137,25 @@ export const PERMISSIONS = [
   // administration
   "access:manage",
   "audit:read",
+  // datahub
+  "datahub:read",
+  "datahub:manage",
+  // training
+  "training:read",
+  "training:manage",
+  "training.progress:update",
+  // interviews-settings
+  /** Staff contact details (phone, bio) entered in Settings; read by HR and in Users & Access. */
+  "staff.contact:read",
+  // chat
+  "chat:use",
+  // jobs-portal: jobs (client requirements, internal openings), applicants and their applications
+  "job:read",
+  "job:manage",
+  "applicant:read",
+  "applicant.phone:read",
+  "application:read",
+  "application:manage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -136,6 +165,9 @@ export const RESTRICTED_PERMISSIONS: readonly Permission[] = [
   "candidate.dob:read",
   "visa:read",
   "visa:update",
+  "utility.secret:read",
+  // datahub: a manager can name themself a member of any Restricted folder they manage (docs/datahub-api.md DH-3).
+  "datahub:manage",
 ];
 
 type Grants = Partial<Record<Permission, Scope>>;
@@ -186,6 +218,14 @@ const BASE_GRANTS: Record<Role, Grants> = {
     "document:read": "own",
     "document:upload": "own",
     "vendor.preferred:create": "own",
+    // datahub
+    "datahub:read": "own",
+    // training
+    "training:read": "own",
+    // chat
+    "chat:use": "own",
+    // jobs-portal
+    "job:read": "team",
   },
   lead: {
     ...salesLine("team", "team"),
@@ -194,6 +234,15 @@ const BASE_GRANTS: Record<Role, Grants> = {
     "report:export": "team",
     "vendor.preferred:create": "own",
     "vendor.preferred:read": "team",
+    // datahub
+    "datahub:read": "own",
+    // training
+    "training:read": "team",
+    // chat
+    "chat:use": "own",
+    // jobs-portal
+    "job:read": "team",
+    "job:manage": "team",
   },
   manager: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -205,6 +254,15 @@ const BASE_GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     "designation:change": "hierarchy",
+    // datahub
+    "datahub:read": "own",
+    // training
+    "training:read": "hierarchy",
+    // chat
+    "chat:use": "own",
+    // jobs-portal
+    "job:read": "hierarchy",
+    "job:manage": "hierarchy",
   },
   assoc_director: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -216,6 +274,15 @@ const BASE_GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     "designation:change": "hierarchy",
+    // datahub
+    "datahub:read": "own",
+    // training
+    "training:read": "hierarchy",
+    // chat
+    "chat:use": "own",
+    // jobs-portal
+    "job:read": "hierarchy",
+    "job:manage": "hierarchy",
   },
   offshore_manager: {
     "candidate:read": "org",
@@ -233,6 +300,14 @@ const BASE_GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "org",
     "team:move_member": "org",
     "designation:change": "org",
+    // datahub
+    "datahub:read": "own",
+    // training
+    "training:read": "org",
+    // chat
+    "chat:use": "own",
+    // jobs-portal
+    "job:read": "org",
   },
   ceo: {
     "candidate:read": "org",
@@ -248,6 +323,14 @@ const BASE_GRANTS: Record<Role, Grants> = {
     "report:read": "org",
     "report:export": "org",
     "vendor.preferred:read": "org",
+    // datahub
+    "datahub:read": "own",
+    // training
+    "training:read": "org",
+    // chat
+    "chat:use": "own",
+    // jobs-portal
+    "job:read": "org",
   },
   location_incharge: {
     "candidate:read": "location",
@@ -261,8 +344,27 @@ const BASE_GRANTS: Record<Role, Grants> = {
     "placement:read": "location",
     "performance:read": "location",
     "report:read": "location",
+    // datahub
+    "datahub:read": "own",
+    // training
+    "training:read": "location",
+    "training:manage": "location",
+    "training.progress:update": "location",
+    // chat
+    "chat:use": "own",
   },
   location_ops_admin: {
+    // Companies and facilities of their location, with utilities and bills (utility
+    // portal passwords: restricted, step-up on every reveal).
+    "company:read": "location",
+    "company:manage": "location",
+    "facility:read": "location",
+    "facility:manage": "location",
+    "utility:read": "location",
+    "utility:manage": "location",
+    "utility.secret:read": "location",
+    "bill:read": "location",
+    "bill:manage": "location",
     "candidate:read": "location",
     "candidate.phone:read": "location",
     "candidate.rating:update": "location",
@@ -273,6 +375,15 @@ const BASE_GRANTS: Record<Role, Grants> = {
     "interview.feedback:create": "location",
     "placement:read": "location",
     "report:read": "location",
+    // datahub
+    "datahub:read": "own",
+    "datahub:manage": "location",
+    // training
+    "training:read": "location",
+    "training:manage": "location",
+    "training.progress:update": "location",
+    // chat
+    "chat:use": "own",
   },
   hr: {
     "assignment:read": "org",
@@ -289,6 +400,20 @@ const BASE_GRANTS: Record<Role, Grants> = {
     "bgc:update": "org",
     "visa:read": "org",
     "report:read": "org",
+    // datahub
+    "datahub:read": "own",
+    "datahub:manage": "org",
+    // interviews-settings
+    "staff.contact:read": "org",
+    // chat
+    "chat:use": "own",
+    // jobs-portal
+    "job:read": "org",
+    "job:manage": "org",
+    "applicant:read": "org",
+    "applicant.phone:read": "org",
+    "application:read": "org",
+    "application:manage": "org",
   },
   associate_hr: {
     "assignment:read": "org",
@@ -299,6 +424,10 @@ const BASE_GRANTS: Record<Role, Grants> = {
     "assignment:update": "org",
     "document:read": "org",
     "document:upload": "org",
+    // datahub
+    "datahub:read": "own",
+    // chat
+    "chat:use": "own",
   },
   accounts: {
     "assignment:read": "org",
@@ -312,6 +441,11 @@ const BASE_GRANTS: Record<Role, Grants> = {
     "document:read": "org",
     "document.restricted:read": "org",
     "report:read": "org",
+    // datahub
+    "datahub:read": "own",
+    "datahub:manage": "org",
+    // chat
+    "chat:use": "own",
   },
   immigration: {
     "assignment:read": "org",
@@ -325,28 +459,51 @@ const BASE_GRANTS: Record<Role, Grants> = {
     "document.restricted:read": "org",
     "visa:read": "org",
     "visa:update": "org",
+    // datahub
+    "datahub:read": "own",
+    // chat
+    "chat:use": "own",
   },
   interview_coach: {
     "candidate:read": "coached",
     "hotlist:read": "coached",
     "interview:read": "coached",
     "interview.feedback:create": "coached",
+    // datahub
+    "datahub:read": "own",
+    // training: batches where they are the trainer (and progress of coached teams' candidates)
+    "training:read": "coached",
+    "training.progress:update": "coached",
+    // chat
+    "chat:use": "own",
   },
   documents_team: {
     "candidate:read": "org",
     "document:read": "org",
     "document:upload": "org",
     "document:verify": "org",
+    // datahub
+    "datahub:read": "own",
+    // chat
+    "chat:use": "own",
   },
   bu_head: {
     "assignment:read": "org",
     "employee:read": "org",
     "placement:read": "org",
     "report:read": "org",
+    // datahub
+    "datahub:read": "own",
+    // chat
+    "chat:use": "own",
   },
   org_admin: {
     "access:manage": "org",
     "audit:read": "org",
+    // interviews-settings: staff directory data (work phone), not business data.
+    "staff.contact:read": "org",
+    // chat
+    "chat:use": "own",
   },
 };
 
@@ -383,6 +540,8 @@ export const ORG_SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "candidate:assign",
   "team:move_member",
   "document:read",
+  // jobs-portal
+  "applicant.phone:read",
 ];
 
 export function isRestrictedRole(role: Role): boolean {

@@ -1,6 +1,6 @@
 # Handoff: state of Eureka and next tasks
 
-Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation-plan.md`,
+Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation-plan.md`,
 `docs/admin-api.md` and `docs/placements-api.md`.
 
 ## How to work in this repo
@@ -9,7 +9,7 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - `pnpm -r typecheck` and `pnpm -r test` must pass before every commit (integration tests need
   PostgreSQL 16 at `TEST_PG_ADMIN_URL`, default `postgres://postgres:postgres@127.0.0.1:5432`).
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0055**; 0040 and 0049 are unused) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0083**; 0040 and 0049 are unused) and must apply as a
   non-superuser (Amazon RDS master): CI checks this.
 - Commit small and atomic; get an independent review of every security-relevant change.
 
@@ -126,7 +126,48 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   Left: DOB is not read or written anywhere (OD-04); when it is, encrypt with class `dob`, set `dob_bidx` with
   `dobBlindIndex`, add `dob` to the rotation job (definer functions like `work_auth_number`) and use the index in
   the duplicate check.
-- LMS / training backend (migration 0054, contract `docs/lms-api.md`): `lms_course/module/batch/batch_course/enrollment/module_progress`,
+- Companies, facilities, utilities and bills (Phase 3b, migration 0054, `docs/facilities-api.md`): the group's own
+  companies and rented guest houses per location, managed by the location's Location Ops Admin (new permissions
+  `company:*`, `facility:*`, `utility:*`, `utility.secret:read` (restricted, so Location Ops Admin now needs a second
+  approver; the `--demo-data` user "locd" became a Location Incharge), `bill:*`, location scope only). Incharges, company
+  employees (one open company per employee; names/status through a definer read since `employee` is org-scoped), utilities
+  with portal passwords encrypted as field class `utility_password` (MAC, no app column privilege on the ciphertext,
+  reveal with `utility.secret:read` + step-up + DB rate limit + audit; rotated by the monthly `key-rotation` job; KMS
+  classes updated in `kms.tf`), bills with derived status, void instead of delete, invoices on the 0043 document
+  pipeline (`document.bill_id` owner kind), summaries by month/type/owner, CSV exports. 404 outside the location.
+  Dev seed `dev-facilities.ts` (dev-only Austin ops admin `opsA@eureka.example`, password `dev-only-password`).
+- DataHub (Phase 3c, migration 0075, contract `docs/datahub-api.md`): organisation folders (Internal = all staff,
+  Confidential = chosen catalog roles, Restricted = named members with step-up on every download), one level of subfolders,
+  versioned files (same name = next version) on the 0043 pipeline (`file_object`, presigned POST into
+  `quarantine/documents/`, the unchanged `document-scan` job, restricted folders under `restricted/` and the restricted KMS
+  key), soft deletes, an access log of every download for folder managers, name search over readable folders. Permissions:
+  `datahub:read` (every role but `org_admin`, own scope: nav only) and `datahub:manage` (HR and Accounts org, Location Ops
+  Admin location; in `RESTRICTED_PERMISSIONS` because a manager can add themself to a restricted folder). Managers of a
+  restricted folder who are not members see its settings, members and log, not its files. Audit: ids, levels, counts.
+  Screen "DataHub" (Operations); dev seed `apps/api/src/db/dev-datahub.ts`. Open questions in `docs/datahub-api.md`.
+- Interviews details, Settings & Preferences, people directories (Phase 3c package interviews-settings, migrations
+  0080-0081, contract `docs/interviews-settings-api.md`): interview type, https meeting link, duration (derived into
+  `endsAt`, 15-240 min), panel with lead through `authz.set_interview_panel` (Sales grant, active users, at most 10;
+  the panel grants no access), scorecards (four criteria 1-5) on coach and client feedback, `.ics` calendar file with the
+  panel's work emails only; Create/Edit Interview dialog and details drawer with read-only stars ("4 out of 5").
+  Settings (avatar menu): profile (phone and bio only; `staff_profile`, If-Match), in-app notification switches per
+  type (mandatory: work-authorization expiry, overdue paperwork; the worker skips muted inbox rows), Login activity
+  (own sessions with device class, browser family and a masked IP stored at sign-in; sign out one or all other
+  sessions). Users & Access shows active users per role and the staff phone to `staff.contact:read` (HR, Org Admin;
+  new permission). Employees show email and phone (masked unless `candidate.phone:read` over the candidate) and export
+  CSV (`report:export` + `employee:read`, capped, audited). E2E: `e2e/interviews-settings.spec.ts`.
+- Internal chat (Phase 3c, migration 0070, contract `docs/chat-api.md` CH-1 to CH-11): staff-only direct (one per
+  pair) and group conversations, `chat:use` for every role at own scope (org_admin included; the catalog test allows it
+  as a non-data permission). RLS: current members only (left members and deleted groups: no access, history included),
+  members added later see messages from then on; writes only through `authz.chat_*` definer functions. Messages
+  (4000 chars, idempotent `clientId`, soft delete), attachments on the documents pipeline (internal `file_object`,
+  `document-scan`, download only when clean), unread counts and read marks, presence from `session.last_seen_at`
+  (2 minutes), polling with `rev` cursors (conversation row lock keeps revisions in commit order), in-app
+  `chat.direct_message` after 10 minutes unseen (registry: `notification_recipients`/`notification_entity` replaced
+  in 0070 on top of 0052; anyone replacing them again must keep the chat branch). Audit: ids and counts only. Web: Chat
+  screen (nav section Other, unread badge), dev seed `apps/api/src/db/dev-chat.ts`, e2e `apps/web/e2e/chat.spec.ts`.
+  Open questions in `docs/chat-api.md` (retention, history after leaving, admin access, presence opt-out, idle timeout).
+- LMS / training backend (migration 0082, contract `docs/lms-api.md`): `lms_course/module/batch/batch_course/enrollment/module_progress`,
   reads under RLS (`lms:manage` org sees all; a learner only their enrollments, those courses and their own progress), writes only through
   `authz.lms_*` definer functions that re-check `lms:manage` / `lms:learn` (guards stamp version, archived_at, completed_at); module
   `/api/v1/lms` (staff and `me/trainings`), audit holds ids and counts only; dev seed `src/db/dev-lms.ts` (sign in as hr or r1a).
@@ -138,6 +179,24 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   Optional `--demo-data` loads a fictional org (`@demo.invalid`, cannot sign in) only where `EUREKA_ENVIRONMENT`
   is `staging`/`local` and the stack has no real users or candidates.
   Runbook: infra/README.md "First admin (bootstrap)".
+- Training (Phase 3c, migration 0065, contract `docs/training-api.md` TR-1..TR-13): extends the 0026 batches
+  (name, trainer, start/end date, cover, row version) instead of duplicating them; a student is a candidate whose
+  `batch_id` points at the batch. Course catalog (`course`, ordered `course_module` with durations and https links;
+  org-wide read, edited by `training:manage` at the owning location), ordered `batch_course`, and
+  `module_progress` (who/when, written only by `authz.set_module_progress`). Batch-level coverage
+  (`authz.training_batch_ids`): org, location, or **coached = the batch's trainer**; Sales read progress of
+  candidates they own (`training:read` own/team/hierarchy). Students are added by training managers through
+  `authz.set_batch_student` (the candidate column guard now lets only definer code change `batch_id` without
+  `candidate:update`). Progress is weighted by module duration (TR-9). Screens: Training Batches (cards, detail
+  with View Courses / View Students), Courses, and a Training card on the candidate profile. New permissions
+  `training:read`, `training:manage`, `training.progress:update` (grants in the doc). No notifications.
+
+- Jobs and applicant portal (jobs-portal package, migrations 0060-0062, `docs/jobs-portal-api.md`): jobs (client requirements and internal
+  openings, rich text as a sanitised document tree, optional `submission.job_id`), the **applicant portal** at `/portal` (no passwords: one-time
+  email links, separate session kind/cookie/path, role `eureka_portal` with RLS on the applicant's own rows, mail port with dev mailbox and SES),
+  applications with status machine, interviews, scorecards, "Create candidate" from a hired application, `application.received` notice. Production
+  needs `portal_from_email` in `env.hcl` (verified SES identity) or the API refuses to start. `company_id` has no FK until the companies migration is integrated.
+  Notification registry gained `application.received` and inbox entity `application` (0062 replaces the two resolver functions: later replacements must carry the branch over).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
@@ -222,6 +281,17 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   (placeholder: H-1B, H-4 EAD, L-1, L-2 EAD, F-1 OPT/STEM OPT/CPT, EAD, green card, TN, O-1, other), whether
   `valid_to` is required for some types, whether an "expired" notice (day 0) is wanted, and whether the
   expiry notices may name the candidate (today: ids and dates only).
+
+- Companies/facilities (migration 0054, `docs/facilities-api.md` "Open questions"): should other roles (Accounts for
+  bills, HR for company employees) get these permissions; should invoices be restricted; is moving a company/facility to
+  another location needed?
+- Training (migration 0065): course ownership (owning location vs central), whether trainers may manage students
+  and courses, HR access to progress, one batch per candidate, corrections in completed batches, which candidate
+  statuses may join, and a batch-start reminder: `docs/training-api.md` "Open product questions".
+- Interviews and Settings (`docs/interviews-settings-api.md` "Deviations and open product questions"): should panel
+  members get read access to the interviews they sit on? May location admins add scorecards? Which notification types
+  are mandatory (built: work-authorization expiry, overdue paperwork)? Who besides HR and Org Admin may see staff work
+  phones? Session rows are still never pruned.
 
 ## Waiting on Ravi (not code)
 

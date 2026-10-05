@@ -65,19 +65,27 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
  * Side drawer (modal): focus moves in on open, Tab is trapped, Escape and the
  * backdrop close it, and focus returns to the opener. Same contract as admin/Dialog.
  */
-export function Drawer({ title, onClose, children, suspended = false, wide = false, closeLabel = "Close quick view" }: {
+export function Drawer({ title, onClose, children, suspended = false, wide = false, closeLabel = "Close quick view", isSuspended }: {
   title: string; onClose: () => void; children: ReactNode;
   /** True while a dialog opened from the drawer is on top: the drawer then leaves Escape and focus to it. */
   suspended?: boolean;
   wide?: boolean;
   closeLabel?: string;
+  /**
+   * Checked at event time in addition to `suspended`, for dialogs that open from deep inside
+   * the drawer (portaled to the body) before the drawer has re-rendered.
+   */
+  isSuspended?: () => boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  const suspendedRef = useRef(suspended);
-  suspendedRef.current = suspended;
+  const suspendedProp = useRef(suspended);
+  suspendedProp.current = suspended;
+  const isSuspendedRef = useRef(isSuspended);
+  isSuspendedRef.current = isSuspended;
+  const suspendedRef = { get current() { return suspendedProp.current || Boolean(isSuspendedRef.current?.()); } };
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;

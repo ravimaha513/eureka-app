@@ -119,8 +119,8 @@ describe("employees list and detail", () => {
       actions: { endAssignment: true, setEndDate: true, exit: false, returnToMarket: false },
     });
     expect(typeof ia.candidate.name).toBe("string");
-    // No contact data on the list.
-    expect(JSON.stringify(items)).not.toMatch(/phone|email|rate|\+1469/i);
+    // No rates on the list; contacts only in `contact`, gated by candidate.phone:read (interviews-settings EM-C1).
+    expect(JSON.stringify(items.map(({ contact: _c, ...rest }) => rest))).not.toMatch(/phone|email|rate|\+1469/i);
     const ic = items.find((i) => i.id === c.personId)!;
     expect(ic).toMatchObject({ status: "bench", actions: { endAssignment: false, setEndDate: false, exit: true, returnToMarket: true } });
   });

@@ -26,11 +26,21 @@ function Figure({ label, height, children }: { label: string; height: number; ch
 export interface Series { key: string; label: string; color: string }
 
 /** Smooth areas over time, one per series. `data` rows carry `date` and a value per series key. */
-export function TrendChart({ data, series, label }: { data: ({ date: string } & Record<string, number | string>)[]; series: Series[]; label: string }) {
+export function TrendChart({ data, series, label, xFormat = shortDay, yFormat, valueFormat, height = 280 }: {
+  data: ({ date: string } & Record<string, number | string>)[]; series: Series[]; label: string;
+  /** Tick and tooltip label of the x value (default: a short day, e.g. "Oct 5"). */
+  xFormat?: (x: string) => string;
+  /** Y-axis ticks, e.g. short money. */
+  yFormat?: (n: number) => string;
+  /** Values in the tooltip and the text alternative (default: the plain number). */
+  valueFormat?: (n: number) => string;
+  height?: number;
+}) {
   const id = useId().replace(/:/g, "");
   const total = (k: string) => data.reduce((n, r) => n + Number(r[k] ?? 0), 0);
+  const fmt = valueFormat ?? String;
   return (
-    <Figure height={280} label={`${label}: ${series.map((s) => `${s.label} ${total(s.key)} in total`).join(", ")}`}>
+    <Figure height={height} label={`${label}: ${series.map((s) => `${s.label} ${fmt(total(s.key))} in total`).join(", ")}`}>
       <AreaChart data={data} margin={{ top: 10, right: 12, bottom: 0, left: -14 }}>
         <defs>
           {series.map((s) => (
@@ -41,9 +51,10 @@ export function TrendChart({ data, series, label }: { data: ({ date: string } & 
           ))}
         </defs>
         <CartesianGrid vertical={false} strokeDasharray="4 4" />
-        <XAxis dataKey="date" tickFormatter={shortDay} tickLine={false} axisLine={false} minTickGap={24} dy={6} />
-        <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={44} />
-        <Tooltip labelFormatter={(d) => shortDay(String(d))} cursor={{ strokeDasharray: "4 4" }} />
+        <XAxis dataKey="date" tickFormatter={xFormat} tickLine={false} axisLine={false} minTickGap={24} dy={6} />
+        <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={yFormat ? 56 : 44} tickFormatter={yFormat} />
+        <Tooltip labelFormatter={(d) => xFormat(String(d))} cursor={{ strokeDasharray: "4 4" }}
+          formatter={valueFormat ? (v) => valueFormat(Number(v)) : undefined} />
         {series.map((s) => (
           <Area key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={s.color} strokeWidth={2.25}
             fill={`url(#${id}-${s.key})`} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} isAnimationActive={false} />
@@ -54,12 +65,18 @@ export function TrendChart({ data, series, label }: { data: ({ date: string } & 
 }
 
 /** A donut of parts of a whole: total in the middle, a legend beside it. */
-export function PieShare({ parts, label, centre }: { parts: { key: string; label: string; value: number }[]; label: string; centre: string }) {
+export function PieShare({ parts, label, centre, format = String, centreFormat }: {
+  parts: { key: string; label: string; value: number }[]; label: string; centre: string;
+  /** Values in the legend, tooltip and text alternative (e.g. money). */
+  format?: (n: number) => string;
+  /** The total in the middle (default: `format`). */
+  centreFormat?: (n: number) => string;
+}) {
   const total = parts.reduce((n, p) => n + p.value, 0);
   const colour = (key: string) => PALETTE[Math.max(0, parts.findIndex((p) => p.key === key)) % PALETTE.length]!;
   const shown = parts.filter((p) => p.value > 0);
   return (
-    <div className="piefig" role="img" aria-label={`${label}: ${parts.map((p) => `${p.label} ${p.value}`).join(", ")}`}>
+    <div className="piefig" role="img" aria-label={`${label}: ${parts.map((p) => `${p.label} ${format(p.value)}`).join(", ")}`}>
       <div className="piewrap">
         <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 180, height: 180 }}>
           <PieChart>
@@ -67,14 +84,14 @@ export function PieShare({ parts, label, centre }: { parts: { key: string; label
               innerRadius="70%" outerRadius="100%" paddingAngle={shown.length > 1 ? 3 : 0} cornerRadius={6} stroke="none" isAnimationActive={false}>
               {shown.length ? shown.map((p) => <Cell key={p.key} fill={colour(p.key)} />) : <Cell className="pieempty" />}
             </Pie>
-            {shown.length > 0 && <Tooltip />}
+            {shown.length > 0 && <Tooltip formatter={(v) => format(Number(v))} />}
           </PieChart>
         </ResponsiveContainer>
-        <div className="piecentre"><b>{total}</b><span>{centre}</span></div>
+        <div className="piecentre"><b>{(centreFormat ?? format)(total)}</b><span>{centre}</span></div>
       </div>
       <div className="legend" aria-hidden="true">
         {parts.map((p) => (
-          <span key={p.key} className="legenditem"><i className="swatch" style={{ background: colour(p.key) }} />{p.label} <b>{p.value}</b></span>
+          <span key={p.key} className="legenditem"><i className="swatch" style={{ background: colour(p.key) }} />{p.label} <b>{format(p.value)}</b></span>
         ))}
       </div>
     </div>

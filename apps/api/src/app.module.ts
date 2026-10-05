@@ -16,6 +16,8 @@ import { originGuard } from "./platform/origin-guard.js";
 import { SessionService } from "./platform/session.service.js";
 import { AuthController } from "./modules/identity/auth.controller.js";
 import { MeController } from "./modules/identity/me.controller.js";
+import { SettingsController } from "./modules/identity/settings.controller.js";
+import { SettingsService } from "./modules/identity/settings.service.js";
 import { CandidatesController } from "./modules/candidates/candidates.controller.js";
 import { CandidatesService } from "./modules/candidates/candidates.service.js";
 import { SubmissionsController, SubmissionsService } from "./modules/submissions/submissions.controller.js";
@@ -48,6 +50,22 @@ import { WorkAuthorizationController } from "./modules/work-authorization/work-a
 import { WorkAuthorizationService } from "./modules/work-authorization/work-authorization.service.js";
 import { LmsController } from "./modules/lms/lms.controller.js";
 import { LmsService } from "./modules/lms/lms.service.js";
+import {
+  BillsController, BillsService, CompaniesController, CompanyEmployeeOptionsController, CompanyEmployeesController, FacilitiesController,
+  OwnersService, UtilitiesController, UtilitiesService,
+} from "./modules/facilities/facilities.controller.js";
+import { DatahubController } from "./modules/datahub/datahub.controller.js";
+import { DatahubService } from "./modules/datahub/datahub.service.js";
+import { CandidateTrainingController, TrainingController } from "./modules/training/training.controller.js";
+import { TrainingService } from "./modules/training/training.service.js";
+import { ChatController } from "./modules/chat/chat.controller.js";
+import { ChatService } from "./modules/chat/chat.service.js";
+import { JobsController, JobsService } from "./modules/jobs/jobs.controller.js";
+import { PortalAuthController, PortalAuthService, PortalDevMailboxController, PortalMeController } from "./modules/portal/portal-auth.controller.js";
+import { PortalSessionService } from "./platform/portal-session.service.js";
+import { MAIL_PORT, createMailPort } from "./platform/mail.js";
+import { ApplicantsController, ApplicationInterviewsController, ApplicationsController, ApplicationsService } from "./modules/applications/applications.controller.js";
+import { PortalJobsController, PortalJobsService } from "./modules/portal/portal-jobs.controller.js";
 
 @Controller("api")
 class HealthController {
@@ -72,14 +90,32 @@ export class AppModule {
         PaperworkController,
         ResumesController, NotificationsController, DocumentsController, StepUpController,
         EmployeesController, AssignmentsController, ReportsController, WorkAuthorizationController, LmsController,
+        CompaniesController, FacilitiesController, CompanyEmployeesController, CompanyEmployeeOptionsController,
+        UtilitiesController, BillsController,
+        DatahubController,
+        // training
+        TrainingController, CandidateTrainingController,
+        SettingsController,
+        ChatController,
+        // jobs-portal
+        JobsController, PortalAuthController, PortalMeController, PortalDevMailboxController,
+        ApplicationsController, ApplicationInterviewsController, ApplicantsController, PortalJobsController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
-        DbService, SessionService, AccessService, AuditService, OidcService,
+        DbService, SessionService, AccessService, AuditService, OidcService, SettingsService,
         CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
         PaperworkService,
         ResumesService, NotificationsService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
-        WorkAuthorizationService, LmsService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
+        WorkAuthorizationService, LmsService, OwnersService, UtilitiesService, BillsService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
+        DatahubService,
+        // training
+        TrainingService,
+        WorkAuthorizationService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
+        ChatService,
+        // jobs-portal
+        JobsService, PortalSessionService, PortalAuthService, { provide: MAIL_PORT, useFactory: () => createMailPort(config) },
+        ApplicationsService, PortalJobsService,
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],

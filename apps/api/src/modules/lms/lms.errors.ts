@@ -18,7 +18,7 @@ const CODES: Record<string, (code: string) => HttpException> = {
   course_has_progress: conflict,
 };
 
-/** Maps errors raised by the LMS definer functions (migration 0054) to problem details with a stable code in `detail`. */
+/** Maps errors raised by the LMS definer functions (migration 0082) to problem details with a stable code in `detail`. */
 export function mapLmsError(err: unknown): never {
   const e = err as { message?: string; code?: string };
   const make = e.message !== undefined ? CODES[e.message] : undefined;

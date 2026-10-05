@@ -307,7 +307,9 @@ describe("key-rotation job (worker)", () => {
     expect(await runner.runOnce(job, thisMonth())).toBe("ran");
     for (const id of ids) expect(await versionOf(id)).toBe(before + 1);
     const detail = (await db.admin.query(`SELECT detail FROM eureka.job_run WHERE job_name = $1 AND run_key = $2`, [KEY_ROTATION_JOB, thisMonth()])).rows[0].detail;
-    expect(detail).toEqual({ work_auth_number: { keyVersion: before + 1, reencrypted: total, skipped: 0, failed: 0 } });
+    // No utility passwords in this database: that class has no key and is skipped (migration 0054).
+    expect(detail).toEqual({ work_auth_number: { keyVersion: before + 1, reencrypted: total, skipped: 0, failed: 0 },
+      utility_password: { keyVersion: null, reencrypted: 0, skipped: 0, failed: 0 } });
     expect(JSON.stringify(detail)).not.toMatch(/ROT-/);
     expect((await db.admin.query(`SELECT count(*)::int AS n FROM eureka.field_rotation_log WHERE row_id = ANY ($1::uuid[])`, [ids])).rows[0].n).toBe(ids.length);
 
@@ -327,7 +329,8 @@ describe("key-rotation job (worker)", () => {
 
     // Idempotent: the same month again is done (runner) and finds nothing (job), one key per month.
     expect(await runner.runOnce(job, thisMonth())).toBe("done-before");
-    expect(await job.run(thisMonth(), ctx())).toEqual({ work_auth_number: { keyVersion: before + 2, reencrypted: 0, skipped: 0, failed: 0 } });
+    expect(await job.run(thisMonth(), ctx())).toEqual({ work_auth_number: { keyVersion: before + 2, reencrypted: 0, skipped: 0, failed: 0 },
+      utility_password: { keyVersion: null, reencrypted: 0, skipped: 0, failed: 0 } });
     expect((await db.admin.query(`SELECT count(*)::int AS n FROM eureka.field_key WHERE field_class = $1 AND rotation_key = $2`, [CLS, thisMonth()])).rows[0].n).toBe(1);
     // Another month's label is refused outright.
     await expect(job.run(lastMonth(), ctx())).rejects.toThrow(/not the current month/);

@@ -8,7 +8,7 @@ Everything else in the reference deck (jobs, applicants, applications, chat, Dat
 dashboards, auth, settings) is out of scope: other tracks own it. Eureka's existing `eureka.batch` (candidate
 sales cohorts) is unrelated; LMS tables are all prefixed `lms_` and the API uses "training batch".
 
-## Model (migration 0054, schema `eureka`)
+## Model (migration 0082, schema `eureka`)
 
 | Table | Columns / rules |
 |---|---|
@@ -82,7 +82,7 @@ Errors: 422 validation (zod; the repo-wide mapping, 400 only for a malformed uui
 - My Training: list of own batches with progress, detail with per-module progress controls (mark complete / set percent).
 - Match the existing shell (`shell/ui.tsx`, dark mode, focus-after-failure in new forms, styles.css tokens).
 
-## As built (migration 0054, `apps/api/src/modules/lms`) - differences and additions
+## As built (migration 0082, `apps/api/src/modules/lms`) - differences and additions
 
 - Validation errors are 422 (ProblemFilter maps zod to 422 everywhere), not 400. Problem `detail` carries the stable code.
 - Extra codes: 422 `course_not_found` (unknown id in `courseIds`), `invalid_module` (module id not of this course),

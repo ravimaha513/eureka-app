@@ -9,7 +9,7 @@ import { mapLmsError } from "./lms.errors.js";
 import type { BatchCreate, BatchListQuery, BatchPatch, CourseCreate, CourseListQuery, CoursePatch, ModulesPut, StudentListQuery } from "./lms.schemas.js";
 
 /**
- * LMS (migration 0054, docs/lms-api.md). Reads run under the caller's RLS; writes go through the
+ * LMS (migration 0082, docs/lms-api.md). Reads run under the caller's RLS; writes go through the
  * definer functions (which re-check lms:manage / lms:learn). Read-before-write: 404 when not
  * visible (learners: not enrolled), 403 when visible but not allowed. Audit rows hold ids and counts only.
  */
