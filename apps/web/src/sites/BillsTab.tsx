@@ -157,7 +157,14 @@ export function BillsTab({ kind, ownerId, canManage }: { kind: SiteKind; ownerId
       {voiding && (
         <Layer>
           <VoidDialog bill={voiding} onClose={() => setVoiding(null)}
-            onDone={(m) => { setVoiding(null); setMessage(m); refresh(); }} />
+            onDone={(m) => {
+              // Drop the voided bill from every cached search of this owner at once, so a refetch
+              // racing the debounced search cannot show it again; then refetch for the totals.
+              const gone = voiding.id;
+              qc.setQueriesData<{ items: Bill[] }>({ queryKey: [kind, "detail", ownerId, "bills"] },
+                (d) => (d ? { ...d, items: d.items.filter((b) => b.id !== gone) } : d));
+              setVoiding(null); setMessage(m); refresh();
+            }} />
         </Layer>
       )}
     </div>

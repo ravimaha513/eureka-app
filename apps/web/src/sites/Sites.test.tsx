@@ -344,7 +344,7 @@ describe("Utilities", () => {
     expect(order).toEqual([`/api/v1/utilities/${U1}/reveal-password`, "/api/auth/step-up/dev", `/api/v1/utilities/${U1}/reveal-password`]);
     fireEvent.click(within(drawer).getByRole("button", { name: "Copy password for Electricity" }));
     await waitFor(() => expect(copied).toHaveBeenCalledWith("Pa55-Electric"));
-    expect(await within(drawer).findByText("Electricity password copied.")).toBeInTheDocument();
+    expect(await within(drawer).findByText("Electricity password copied. The clipboard is cleared in 30 seconds.")).toBeInTheDocument();
 
     await act(async () => { vi.advanceTimersByTime(PASSWORD_VISIBLE_MS - 1000); });
     expect(within(drawer).getByText("Pa55-Electric")).toBeInTheDocument();

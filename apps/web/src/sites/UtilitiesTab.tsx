@@ -17,6 +17,10 @@ export const PASSWORD_VISIBLE_MS = 30_000;
 /** Clipboard hook the tests replace. */
 export const clipboard = {
   write: (text: string) => (navigator.clipboard?.writeText ? navigator.clipboard.writeText(text) : Promise.reject(new Error("Copy is not available in this browser."))),
+  /** Empties the clipboard if it still holds `text` (skipped silently when the browser will not let us read it). */
+  clearIf: async (text: string) => {
+    try { if ((await navigator.clipboard.readText()) === text) await navigator.clipboard.writeText(""); } catch { /* not allowed: leave it */ }
+  },
 };
 
 /**
@@ -60,7 +64,11 @@ export function UtilitiesTab({ kind, ownerId, canManage, canReveal }: { kind: Si
   };
 
   const copy = async (u: Utility, password: string) => {
-    try { await clipboard.write(password); setMessage(`${utilityLabel(u.utilityType)} password copied.`); }
+    try {
+      await clipboard.write(password);
+      setTimeout(() => void clipboard.clearIf(password), PASSWORD_VISIBLE_MS);
+      setMessage(`${utilityLabel(u.utilityType)} password copied. The clipboard is cleared in 30 seconds.`);
+    }
     catch (err) { setError(err instanceof Error ? err.message : "Could not copy."); }
   };
 
