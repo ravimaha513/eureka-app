@@ -1,4 +1,10 @@
+import { scrypt } from "node:crypto";
 import type { MacProvider } from "./key-provider.js";
+
+/** scrypt cost for secrets people choose (utility portal passwords): ~50 ms, 16 MiB. */
+const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 } as const;
+const scryptAsync = (secret: string, salt: Buffer): Promise<Buffer> =>
+  new Promise((resolve, reject) => scrypt(secret, salt, 32, SCRYPT_PARAMS, (err, key) => (err ? reject(err) : resolve(key))));
 
 /**
  * Blind index for equality lookups on encrypted fields (design A6.3):
@@ -29,6 +35,19 @@ export class BlindIndexer {
    */
   async integrityMac(cls: string, rowId: string, plaintext: string): Promise<Buffer> {
     return this.provider.mac(Buffer.from(`eureka-mac:v1\0${cls}\0${rowId.toLowerCase()}\0${plaintext}`, "utf8"));
+  }
+
+  /**
+   * integrityMac for a secret a person chose (a utility portal password): the value is first
+   * stretched with scrypt, salted by class and row id, and only the 32-byte result goes into the
+   * keyed MAC. Someone holding the MAC key (or a KMS GenerateMac oracle) and a leaked tag still
+   * cannot test guesses cheaply. Same purpose, binding and domain separation as integrityMac,
+   * under its own version tag ("eureka-mac:v2s").
+   */
+  async stretchedIntegrityMac(cls: string, rowId: string, secret: string): Promise<Buffer> {
+    const salt = Buffer.from(`eureka-mac:v2s:salt\0${cls}\0${rowId.toLowerCase()}`, "utf8");
+    const stretched = await scryptAsync(secret, salt);
+    return this.provider.mac(Buffer.concat([Buffer.from(`eureka-mac:v2s\0${cls}\0${rowId.toLowerCase()}\0`, "utf8"), stretched]));
   }
 }
 

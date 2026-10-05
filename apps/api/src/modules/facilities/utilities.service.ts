@@ -78,7 +78,7 @@ export class UtilitiesService {
 
   private async seal(c: pg.PoolClient, id: string, password: string) {
     const sealed = await this.crypto.cipher.encrypt(c, { cls: "utility_password", rowId: id }, password);
-    return { ...sealed, mac: await this.crypto.blindIndex.integrityMac("utility_password", id, password) };
+    return { ...sealed, mac: await this.crypto.blindIndex.stretchedIntegrityMac("utility_password", id, password) };
   }
 
   /** The utility as the caller sees it (RLS); 404 when not visible. */
@@ -169,7 +169,7 @@ export class UtilitiesService {
       const s = (await c.query<{ enc: Buffer; mac: Buffer }>(`SELECT enc, mac FROM authz.utility_password_reveal($1, $2)`, [id, user.sessionHash])
         .catch(mapDbError)).rows[0]!;
       const password = await this.crypto.cipher.decrypt(c, { cls: "utility_password", rowId: id }, s.enc);
-      const expected = await this.crypto.blindIndex.integrityMac("utility_password", id, password);
+      const expected = await this.crypto.blindIndex.stretchedIntegrityMac("utility_password", id, password);
       if (s.mac.length !== expected.length || !timingSafeEqual(s.mac, expected)) {
         // Committed (not thrown inside the transaction) so the evidence stays.
         await this.audit.record(c, { actorId: user.id, action: "utility.integrity_failed", entityType: "utility", entityId: id });

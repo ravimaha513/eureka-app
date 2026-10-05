@@ -75,7 +75,7 @@ export async function seedDevFacilities(admin: pg.Pool): Promise<DevFacilitiesRe
     const id = randomUUID();
     await asUser(admin, actor, async (c) => {
       const sealed = s.password ? await crypto.cipher.encrypt(c, { cls: "utility_password", rowId: id }, s.password) : null;
-      const mac = s.password ? await crypto.blindIndex.integrityMac("utility_password", id, s.password) : null;
+      const mac = s.password ? await crypto.blindIndex.stretchedIntegrityMac("utility_password", id, s.password) : null;
       await c.query(`SELECT authz.utility_create($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL)`,
         [id, kind, owner, s.type, s.provider, s.account ?? null, s.url ?? null, s.username ?? null, sealed?.enc ?? null, sealed?.keyId ?? null, mac]);
     });

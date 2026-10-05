@@ -38,7 +38,7 @@ async function utilityWithPassword(actor: string, kind: "company" | "facility", 
   const id = randomUUID();
   await asUser(db.app, actor, async (c) => {
     const sealed = password ? await apiCipher.encrypt(c, { cls: "utility_password", rowId: id }, password) : null;
-    const mac = password ? await macs.integrityMac("utility_password", id, password) : null;
+    const mac = password ? await macs.stretchedIntegrityMac("utility_password", id, password) : null;
     await c.query(`SELECT authz.utility_create($1, $2, $3, 'electricity', 'Fictional Power', NULL, NULL, NULL, $4, $5, $6, NULL)`,
       [id, kind, owner, sealed?.enc ?? null, sealed?.keyId ?? null, mac]);
   }, true);

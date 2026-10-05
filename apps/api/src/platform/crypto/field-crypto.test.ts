@@ -221,3 +221,31 @@ describe("key material handling (review findings 6 and 7)", () => {
     expect(cipher.cacheSize).toBe(3);
   });
 });
+
+describe("stretched integrity MAC (secrets people choose)", () => {
+  const ix = new BlindIndexer(new LocalMacProvider());
+  const id = randomUUID();
+
+  it("is deterministic, 32 bytes, and bound to class, row and secret", async () => {
+    const a = await ix.stretchedIntegrityMac("utility_password", id, "correct horse");
+    expect(a).toHaveLength(32);
+    expect((await ix.stretchedIntegrityMac("utility_password", id, "correct horse")).equals(a)).toBe(true);
+    expect((await ix.stretchedIntegrityMac("utility_password", id.toUpperCase(), "correct horse")).equals(a)).toBe(true);
+    expect((await ix.stretchedIntegrityMac("utility_password", id, "correct horsf")).equals(a)).toBe(false);
+    expect((await ix.stretchedIntegrityMac("utility_password", randomUUID(), "correct horse")).equals(a)).toBe(false);
+    expect((await ix.stretchedIntegrityMac("other_class", id, "correct horse")).equals(a)).toBe(false);
+  });
+
+  it("is domain-separated from the plain integrity MAC and depends on the MAC key", async () => {
+    const stretched = await ix.stretchedIntegrityMac("utility_password", id, "pw");
+    expect((await ix.integrityMac("utility_password", id, "pw")).equals(stretched)).toBe(false);
+    const other = new BlindIndexer(new LocalMacProvider("cd".repeat(32)));
+    expect((await other.stretchedIntegrityMac("utility_password", id, "pw")).equals(stretched)).toBe(false);
+  });
+
+  it("costs real work per guess (scrypt), not a bare hash", async () => {
+    const t = process.hrtime.bigint();
+    await ix.stretchedIntegrityMac("utility_password", id, "pw");
+    expect(Number(process.hrtime.bigint() - t) / 1e6).toBeGreaterThan(5);
+  });
+});
