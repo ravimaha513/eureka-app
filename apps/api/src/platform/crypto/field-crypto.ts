@@ -28,6 +28,8 @@ export const FIELD_CLASSES = {
   work_auth_number: { table: "work_authorization", column: "number" },
   /** person.dob_enc: format and helper only; no read or write path until OD-04 is decided. */
   dob: { table: "person", column: "dob" },
+  /** utility.password_enc (migration 0054): utility portal passwords. */
+  utility_password: { table: "utility", column: "password" },
 } as const;
 export type FieldClass = keyof typeof FIELD_CLASSES;
 

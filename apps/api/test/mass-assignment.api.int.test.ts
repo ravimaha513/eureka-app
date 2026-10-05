@@ -216,6 +216,21 @@ const employmentState = async (personId: string) => ({
   outbox: await rows(`SELECT count(*)::int AS n FROM eureka.outbox_event`),
 });
 
+/** A fresh Dallas company or facility (as locD, the Dallas Location Ops Admin). */
+async function ownerOf(plural: "companies" | "facilities"): Promise<string> {
+  return (await ok("locD", "POST", `/api/v1/${plural}`, { locationId: LOC.dallas, name: `MA owner ${++n}` })).id as string;
+}
+async function utilityOf(plural: "companies" | "facilities") {
+  const owner = await ownerOf(plural);
+  const utility = (await ok("locD", "POST", `/api/v1/${plural}/${owner}/utilities`, { utilityType: "water", serviceProvider: "MA", password: "ma-pw" })).id as string;
+  return { owner, utility };
+}
+async function billOf(): Promise<string> {
+  const { owner, utility } = await utilityOf("companies");
+  return (await ok("locD", "POST", `/api/v1/companies/${owner}/bills`,
+    { utilityId: utility, paymentMethod: "card", amount: "9.99", billingStart: "2025-01-01", billingEnd: "2025-01-31", dueDate: "2025-02-10" })).id as string;
+}
+
 // ---- cases --------------------------------------------------------------------------------------
 
 interface Prepared {
@@ -742,6 +757,145 @@ const CASES: RejectCase[] = [
     },
     forbidden: { approvedBy: U.admin, status: "approved", operatorId: U.admin2, placementsCommit: true, approvedAt: PAST },
   },
+  // companies, facilities, utilities and bills (migration 0054): location, status at creation, row version,
+  // ciphertext, owner, void and invoice columns are the server's
+  ...(["companies", "facilities"] as const).flatMap((plural): RejectCase[] => [
+    {
+      route: `POST /api/v1/${plural}`, actor: "locD",
+      prepare: async () => ({
+        url: `/api/v1/${plural}`, body: { locationId: LOC.dallas, name: `MA ${plural} ${++n}`, city: "Dallas" },
+        state: () => rows(`SELECT (SELECT count(*) FROM eureka.company)::int AS c, (SELECT count(*) FROM eureka.facility)::int AS f`),
+      }),
+      forbidden: {
+        status: "inactive", incharges: [U.locD], employeeCount: 3, location: { id: LOC.austin }, actions: { manage: true },
+        companyId: FOREIGN_ID, row_version: 9, created_by: U.hr,
+      },
+    },
+    {
+      route: `PATCH /api/v1/${plural}/:id`, actor: "locD",
+      prepare: async () => {
+        const o = await ownerOf(plural);
+        return {
+          url: `/api/v1/${plural}/${o}`, body: { city: "Plano", status: "inactive" }, headers: { "if-match": "1" },
+          state: () => rows(`SELECT * FROM eureka.${plural === "companies" ? "company" : "facility"} WHERE id = $1`, [o]),
+        };
+      },
+      forbidden: { incharges: [U.locD], employeeCount: 3, location: { id: LOC.austin }, actions: { manage: true }, row_version: 9 },
+    },
+    {
+      route: `POST /api/v1/${plural}/:id/incharges`, actor: "locD",
+      prepare: async () => {
+        const o = await ownerOf(plural);
+        return {
+          url: `/api/v1/${plural}/${o}/incharges`, body: { userId: U.locD },
+          state: () => rows(`SELECT (SELECT count(*) FROM eureka.company_incharge)::int AS c, (SELECT count(*) FROM eureka.facility_incharge)::int AS f`),
+        };
+      },
+      forbidden: { assignedBy: U.hr, assignedAt: PAST, companyId: FOREIGN_ID, facilityId: FOREIGN_ID, name: "Hijacked" },
+    },
+    {
+      route: `POST /api/v1/${plural}/:id/utilities`, actor: "locD",
+      prepare: async () => {
+        const o = await ownerOf(plural);
+        return {
+          url: `/api/v1/${plural}/${o}/utilities`, body: { utilityType: "water", serviceProvider: "MA Water", password: "ma-secret" },
+          state: () => rows(`SELECT (SELECT count(*) FROM eureka.utility)::int AS u, (SELECT count(*) FROM eureka.field_key)::int AS k`),
+        };
+      },
+      forbidden: {
+        passwordEnc: "AQ==", password_enc: "AQ==", passwordMac: "AQ==", passwordKeyId: FOREIGN_ID, hasPassword: false, status: "inactive",
+        companyId: FOREIGN_ID, facilityId: FOREIGN_ID, locationId: LOC.austin,
+      },
+    },
+    {
+      route: `POST /api/v1/${plural}/:id/bills`, actor: "locD",
+      prepare: async () => {
+        const { owner, utility } = await utilityOf(plural);
+        return {
+          url: `/api/v1/${plural}/${owner}/bills`,
+          body: { utilityId: utility, paymentMethod: "ach", amount: "10.00", billingStart: "2025-01-01", billingEnd: "2025-01-31", dueDate: "2025-02-10" },
+          state: () => rows(`SELECT count(*)::int AS n FROM eureka.utility_bill`),
+        };
+      },
+      forbidden: {
+        status: "paid", voidedAt: PAST, voidedBy: U.hr, voidReason: "x", invoiceDocumentId: FOREIGN_ID, invoice: { documentId: FOREIGN_ID },
+        companyId: FOREIGN_ID, facilityId: FOREIGN_ID, locationId: LOC.austin, utility: { id: FOREIGN_ID },
+      },
+    },
+  ]),
+  {
+    route: "POST /api/v1/companies/:id/employees", actor: "locD",
+    prepare: async () => {
+      const o = await ownerOf("companies");
+      const e = await joinedEmployee(db);
+      return {
+        url: `/api/v1/companies/${o}/employees`, body: { employeeId: e.personId, startDate: "2025-01-01" },
+        state: () => rows(`SELECT count(*)::int AS n FROM eureka.company_employee`),
+      };
+    },
+    forbidden: { endDate: "2025-12-31", companyId: FOREIGN_ID, status: "exited", endedBy: U.hr, name: "X" },
+  },
+  {
+    route: "POST /api/v1/companies/:id/employees/:employeeId/end", actor: "locD",
+    prepare: async () => {
+      const o = await ownerOf("companies");
+      const e = await joinedEmployee(db);
+      await ok("locD", "POST", `/api/v1/companies/${o}/employees`, { employeeId: e.personId, startDate: "2025-01-01" });
+      return {
+        url: `/api/v1/companies/${o}/employees/${e.personId}/end`, body: { endDate: "2025-06-30" },
+        state: () => rows(`SELECT * FROM eureka.company_employee WHERE person_id = $1`, [e.personId]),
+      };
+    },
+    forbidden: { startDate: "2024-01-01", companyId: FOREIGN_ID, endedBy: U.hr, endedAt: PAST, employeeId: FOREIGN_ID },
+  },
+  {
+    route: "PATCH /api/v1/utilities/:id", actor: "locD",
+    prepare: async () => {
+      const { utility } = await utilityOf("companies");
+      return {
+        url: `/api/v1/utilities/${utility}`, body: { status: "inactive", password: "ma-new" }, headers: { "if-match": "1" },
+        state: () => rows(`SELECT * FROM eureka.utility WHERE id = $1`, [utility]),
+      };
+    },
+    forbidden: {
+      passwordEnc: "AQ==", passwordMac: "AQ==", passwordKeyId: FOREIGN_ID, hasPassword: false, companyId: FOREIGN_ID,
+      facilityId: FOREIGN_ID, locationId: LOC.austin, row_version: 9,
+    },
+  },
+  {
+    route: "PATCH /api/v1/bills/:id", actor: "locD",
+    prepare: async () => {
+      const b = await billOf();
+      return {
+        url: `/api/v1/bills/${b}`, body: { amount: "11.00", paidOn: "2025-02-01" }, headers: { "if-match": "1" },
+        state: () => rows(`SELECT * FROM eureka.utility_bill WHERE id = $1`, [b]),
+      };
+    },
+    forbidden: { status: "due", voidedAt: PAST, voidReason: "x", invoiceDocumentId: FOREIGN_ID, invoice: null, utility: { id: FOREIGN_ID }, row_version: 9 },
+  },
+  {
+    route: "POST /api/v1/bills/:id/void", actor: "locD",
+    prepare: async () => {
+      const b = await billOf();
+      return {
+        url: `/api/v1/bills/${b}/void`, body: { reason: "Entered twice" },
+        state: () => rows(`SELECT * FROM eureka.utility_bill WHERE id = $1`, [b]),
+      };
+    },
+    forbidden: { voidedAt: PAST, voidedBy: U.hr, status: "paid", billId: FOREIGN_ID },
+  },
+  {
+    route: "POST /api/v1/bills/:id/invoice", actor: "locD",
+    prepare: async () => {
+      const b = await billOf();
+      return {
+        url: `/api/v1/bills/${b}/invoice`, body: { fileName: "invoice.pdf", contentType: PDF, size: 1234 },
+        state: () => rows(`SELECT (SELECT count(*) FROM eureka.document)::int AS d, (SELECT count(*) FROM eureka.file_object)::int AS f,
+                                  (SELECT invoice_document_id FROM eureka.utility_bill WHERE id = $1) AS i`, [b]),
+      };
+    },
+    forbidden: (({ fileName: _f, ...rest }) => ({ ...rest, billId: FOREIGN_ID, docType: "i9" }))(DOCUMENT_FORBIDDEN),
+  },
 ];
 
 /** Endpoints that read no body: what they change comes from the URL and the session only. */
@@ -969,6 +1123,31 @@ const IGNORED: IgnoreCase[] = [
         .toEqual([{ user_id: U.r1b, role_key: "accounts", status: "rejected", decided_by: U.admin2 }]);
       expect(await rows(`SELECT role_key FROM eureka.user_role WHERE user_id = ANY($1) AND valid @> now() ORDER BY 1`, [[U.r1b, U.r2a]]))
         .toEqual([{ role_key: "recruiter" }, { role_key: "recruiter" }]);
+    },
+  },
+  {
+    route: "POST /api/v1/utilities/:id/reveal-password",
+    run: async () => {
+      const o = await ownerOf("companies");
+      const a = await ok("locD", "POST", `/api/v1/companies/${o}/utilities`, { utilityType: "gas", serviceProvider: "A", password: "pw-A" });
+      const b = await ok("locD", "POST", `/api/v1/companies/${o}/utilities`, { utilityType: "gas", serviceProvider: "B", password: "pw-B" });
+      const before = await rows(`SELECT * FROM eureka.utility ORDER BY id`);
+      await rows(`INSERT INTO authz.policy_setting (key, value) VALUES ('dev_step_up', 'on') ON CONFLICT (key) DO UPDATE SET value = 'on'`);
+      const s = await login("locD", true);
+      try {
+        expect((await call(null, "POST", "/api/auth/step-up/dev", undefined, {}, s)).statusCode).toBe(200);
+      } finally {
+        await rows(`DELETE FROM authz.policy_setting WHERE key = 'dev_step_up'`);
+      }
+      const r = await call(null, "POST", `/api/v1/utilities/${a.id}/reveal-password`, {
+        ...SERVER_MANAGED, utilityId: b.id, password: "chosen", actorId: U.hr, stepUpGrantId: FOREIGN_ID,
+      }, {}, s);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(r.json()).toEqual({ password: "pw-A" });
+      expect(await rows(`SELECT * FROM eureka.utility ORDER BY id`)).toEqual(before);
+      const audit = await rows(`SELECT actor_id, entity_id, changes FROM eureka.audit_event WHERE action = 'utility.password_revealed' ORDER BY seq DESC LIMIT 1`);
+      expect(audit).toEqual([{ actor_id: U.locD, entity_id: a.id, changes: { ownerKind: "company", ownerId: o, stepUpGrantId: expect.any(String) } }]);
+      expect(audit[0]!.changes.stepUpGrantId).not.toBe(FOREIGN_ID);
     },
   },
 ];

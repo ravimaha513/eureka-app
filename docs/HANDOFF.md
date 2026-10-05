@@ -1,6 +1,6 @@
 # Handoff: state of Eureka and next tasks
 
-Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation-plan.md`,
+Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation-plan.md`,
 `docs/admin-api.md` and `docs/placements-api.md`.
 
 ## How to work in this repo
@@ -9,7 +9,7 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - `pnpm -r typecheck` and `pnpm -r test` must pass before every commit (integration tests need
   PostgreSQL 16 at `TEST_PG_ADMIN_URL`, default `postgres://postgres:postgres@127.0.0.1:5432`).
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0054**; 0040 and 0049 are unused) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0055**; 0040 and 0049 are unused) and must apply as a
   non-superuser (Amazon RDS master): CI checks this.
 - Commit small and atomic; get an independent review of every security-relevant change.
 
@@ -126,6 +126,16 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   Left: DOB is not read or written anywhere (OD-04); when it is, encrypt with class `dob`, set `dob_bidx` with
   `dobBlindIndex`, add `dob` to the rotation job (definer functions like `work_auth_number`) and use the index in
   the duplicate check.
+- Companies, facilities, utilities and bills (Phase 3b, migration 0054, `docs/facilities-api.md`): the group's own
+  companies and rented guest houses per location, managed by the location's Location Ops Admin (new permissions
+  `company:*`, `facility:*`, `utility:*`, `utility.secret:read` (restricted, so Location Ops Admin now needs a second
+  approver; the `--demo-data` user "locd" became a Location Incharge), `bill:*`, location scope only). Incharges, company
+  employees (one open company per employee; names/status through a definer read since `employee` is org-scoped), utilities
+  with portal passwords encrypted as field class `utility_password` (MAC, no app column privilege on the ciphertext,
+  reveal with `utility.secret:read` + step-up + DB rate limit + audit; rotated by the monthly `key-rotation` job; KMS
+  classes updated in `kms.tf`), bills with derived status, void instead of delete, invoices on the 0043 document
+  pipeline (`document.bill_id` owner kind), summaries by month/type/owner, CSV exports. 404 outside the location.
+  Dev seed `dev-facilities.ts` (dev-only Austin ops admin `opsA@eureka.example`, password `dev-only-password`).
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 - First-admin bootstrap (migrations 0037, 0039): `dist/db/bootstrap.js` as a one-off migrate task creates two
   `org_admin` users for hosted-domain emails; break-glass only: refuses while an active `org_admin` exists
@@ -218,6 +228,10 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   (placeholder: H-1B, H-4 EAD, L-1, L-2 EAD, F-1 OPT/STEM OPT/CPT, EAD, green card, TN, O-1, other), whether
   `valid_to` is required for some types, whether an "expired" notice (day 0) is wanted, and whether the
   expiry notices may name the candidate (today: ids and dates only).
+
+- Companies/facilities (migration 0054, `docs/facilities-api.md` "Open questions"): should other roles (Accounts for
+  bills, HR for company employees) get these permissions; should invoices be restricted; is moving a company/facility to
+  another location needed?
 
 ## Waiting on Ravi (not code)
 

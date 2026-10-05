@@ -31,8 +31,8 @@ import { KEY_ROTATION_SCHEDULE, dueMonthlyKeys } from "../schedule.js";
  */
 export const KEY_ROTATION_JOB = "key-rotation";
 
-/** Classes the job rotates. dob joins once DOB is written (OD-04). */
-export const ROTATED_CLASSES: readonly FieldClass[] = ["work_auth_number"];
+/** Classes the job rotates (utility_password: migration 0054). dob joins once DOB is written (OD-04). */
+export const ROTATED_CLASSES: readonly FieldClass[] = ["work_auth_number", "utility_password"];
 
 export interface KeyRotationOptions { batchSize: number; classes?: readonly FieldClass[] }
 

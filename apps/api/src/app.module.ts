@@ -46,6 +46,10 @@ import { registerLocalStorageRoutes } from "./platform/storage/local-routes.js";
 import { FIELD_CRYPTO, createFieldCrypto } from "./platform/crypto/config.js";
 import { WorkAuthorizationController } from "./modules/work-authorization/work-authorization.controller.js";
 import { WorkAuthorizationService } from "./modules/work-authorization/work-authorization.service.js";
+import {
+  BillsController, BillsService, CompaniesController, CompanyEmployeeOptionsController, CompanyEmployeesController, FacilitiesController,
+  OwnersService, UtilitiesController, UtilitiesService,
+} from "./modules/facilities/facilities.controller.js";
 
 @Controller("api")
 class HealthController {
@@ -70,6 +74,8 @@ export class AppModule {
         PaperworkController,
         ResumesController, NotificationsController, DocumentsController, StepUpController,
         EmployeesController, AssignmentsController, ReportsController, WorkAuthorizationController,
+        CompaniesController, FacilitiesController, CompanyEmployeesController, CompanyEmployeeOptionsController,
+        UtilitiesController, BillsController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
@@ -77,7 +83,7 @@ export class AppModule {
         CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
         PaperworkService,
         ResumesService, NotificationsService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
-        WorkAuthorizationService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
+        WorkAuthorizationService, OwnersService, UtilitiesService, BillsService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],

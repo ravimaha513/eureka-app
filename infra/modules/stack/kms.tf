@@ -16,8 +16,8 @@ locals {
   # with FIELD_CLASSES (API) and ROTATED_CLASSES (worker key-rotation job).
   # dob joins both once DOB is written (OD-04).
   field_context_keys    = ["eureka:purpose", "eureka:field-class", "eureka:key-id"]
-  api_field_classes     = ["work_auth_number"]
-  rotated_field_classes = ["work_auth_number"]
+  api_field_classes     = ["work_auth_number", "utility_password"]
+  rotated_field_classes = ["work_auth_number", "utility_password"]
   # Only these principals may decrypt with, or generate data keys under, the
   # restricted key (key policy below). Everyone else in the account, including
   # the deploy roles and administrators, is denied, whatever their IAM policy.
