@@ -25,6 +25,8 @@ legal entities (AS-09). If this is wrong, nothing below applies: two firms would
 | **Decision** | Eureka is the system of record. CrewNex is retired by a **strangler migration**: one slice at a time is imported, reconciled, cut over and frozen in CrewNex; CrewNex keeps running, unchanged, for every slice not yet cut over. Exactly one system is the writer of a slice at any moment. |
 | **Status** | Proposed (C0). Needs Ravi's answers to Q1–Q6 before C1b starts. |
 | **Slices** | C1 marketing data (people, submissions, interviews, placements) cut over together at C1f; C2 feature ports one by one; C3 the LMS, after a decision. |
+| **Commit model (D1)** | **Nothing is committed to Eureka production until the whole C1 chain is built and approved.** Every run during the overlap window is a **dry run** (`cli.ts commit` without `--commit`, always rolled back) plus a reconciliation report. There is exactly **one committed import**, at the C1f cutover, from the frozen CrewNex snapshot. Reason: committed rows in Eureka during the overlap would need update-in-place re-imports (a second write path into every table, with backwards status moves to arbitrate) and a read-only lock to stop Eureka users editing them; one final commit needs neither. |
+| **After C1f (D7)** | The LMS stays in CrewNex (C3 default), so CrewNex still creates consultants and decides when training ends. Default: a **one-way CrewNex → Eureka feed** of new consultants and readiness-gate events (IN_TRAINING → IN_MARKETING) only, through the same import pipeline; Eureka refuses a manual `in_training → active` on a CrewNex-sourced candidate (Q31). Nothing flows back. |
 
 Why Eureka and not CrewNex:
 
@@ -332,11 +334,11 @@ The current sheet format cannot carry these. Each line is one PR in section 6.
 | Topic | Rule |
 |---|---|
 | Identity matching | As `docs/import.md`: email (personal or marketing), then phone, as keyed HMAC hashes; name + DOB and name alone are suggestions for review. CrewNex id becomes the row's `sourceId`, so a consultant is the same row on every run. A CrewNex consultant may already exist from the **sheet** import: the ledger and `authz.import_live_match` route that to review (`matches_imported_person`, `matches_existing_candidate`), never to a second person. |
-| Idempotency | The ledger (`import_link`, `import_identity`, `import_natural_key`) skips what is loaded; with `sourceId`, a changed CrewNex row updates the loaded entity through the same definer functions (status walks forward only; a backwards move goes to review). |
-| Overlap window | CrewNex is the writer for marketing data until C1f. Eureka shows imported records read-only for Sales (C1f.2 adds the lock); weekly runs (export → stage → review → approve → commit) keep Eureka current. `IMPORT_HMAC_KEY` must stay the same for the whole window or re-runs stop recognising rows. |
-| Cutover | C1f: (1) announce; (2) CrewNex marketing writes frozen (a CrewNex flag that turns the marketing actions read-only, Q26); (3) final export from the frozen snapshot; (4) stage, review to zero, dry run, second-admin approval, commit; (5) reconciliation signed off; (6) Eureka lock lifted; CrewNex marketing pages stay read-only and link to Eureka. Target: one business day. |
+| Idempotency | One committed import (D1), so no update-in-place is needed. The ledger (`import_link`, `import_identity`, `import_natural_key`) still makes the cutover commit restartable: a person whose load failed is retried by the next `commit --commit` of the same batch, and anything already loaded is skipped. After C1f the D7 feed adds only new CrewNex ids; a CrewNex id already in the ledger is skipped, never updated. |
+| Overlap window | CrewNex is the only writer for marketing data until C1f; Eureka holds **no** CrewNex rows. Weekly runs are export → stage → review → dry run → reconciliation report; review decisions persist per source row across re-staging (`import_decision`), so the review queue shrinks run by run. Batches are purged (`purge --expired`). `IMPORT_HMAC_KEY` must stay the same for the whole window or decisions and identity hashes stop matching. |
+| Cutover | C1f: (1) announce; (2) CrewNex marketing writes frozen (a CrewNex flag that turns the marketing actions read-only, Q26); (3) final export from the frozen snapshot; (4) stage, review to zero, dry run, second-admin approval, **the one commit**; (5) reconciliation signed off; (6) CrewNex marketing pages stay read-only and link to Eureka; the D7 feed starts. Target: one business day. |
 | Reconciliation | The exporter writes `control-totals.json` (per consultant: submittals by outcome, interviews by outcome, placements open/ended; per status totals). `cli.ts report --reconcile` compares them with what the ledger loaded and lists every difference by source id (no personal data), plus every row still in review, held or rejected, Trap A leads and consultants without a team. Sign-off needs zero unexplained differences. |
-| Rollback | Before step 6: unfreeze CrewNex; nothing was written by users in Eureka. After step 6: within the first week, unfreeze CrewNex and re-key Eureka edits in CrewNex by hand (ledger lists entities changed since commit). Imported rows are never deleted (Eureka keeps candidate history and audit); a later re-cutover re-runs deltas. |
+| Rollback | Before step 4's commit: unfreeze CrewNex; Eureka holds nothing. After the commit: within the first week, unfreeze CrewNex and re-key Eureka edits in CrewNex by hand (the audit trail lists entities changed since the commit). Imported rows are never deleted (Eureka has no delete path for candidates or their history); a second cutover would need a delta design, which D1 deliberately does not build. |
 
 ## 6. Phase plan
 
@@ -496,7 +498,7 @@ Migration-specific risks:
 |---|---|
 | Real PII handled outside production | Exporter only in the prod ECS task; S3 prefix 7-day lifecycle; staging tables purged; no laptop runs; fixtures fictional. |
 | CrewNex schema moves during the window (it ships daily) | Fingerprint check stops the export; exporter updated by PR. |
-| Two writers during the overlap | C1f.2 lock; CrewNex is writer until cutover, Eureka after. |
+| Two writers during the overlap | Not possible: Eureka holds no CrewNex rows before the one commit (D1). After it, CrewNex writes only through the one-way feed (D7). |
 | Same person from the sheets and from CrewNex | Ledger + live-match review; never auto-merge. |
 | Users lose functions at cutover (consultant self-entry, DOB, visa, rates for offshore staff) | Listed in Q2, Q3, Q9–Q13 and answered before C1f, not discovered after. |
 | CrewNex's per-company scoping for HR/Accounts/Immigration becomes org-wide | Q6; second approver for restricted roles still applies. |
@@ -536,3 +538,4 @@ Ask, don't guess (HANDOFF). Each has the default this plan uses until answered.
 28. **Actual CrewNex vendor costs** (Vendors.md business columns are TODO). Default: list prices in section 7.
 29. **Marketing email / Vitel number holder history** (CrewNex keeps old and new values in audit). Default: not carried; add a holder-history table if "who held this number in June" must stay answerable.
 30. **LMS direction (C3).** Default: (A) keep CrewNex as LMS-only, revisit after C1f with measured usage.
+31. **Who creates consultants and ends training after C1f?** Default (D7): CrewNex, with a one-way feed of new consultants and readiness-gate events into Eureka; Eureka refuses a manual `in_training → active` on CrewNex-sourced candidates. Alternative: Eureka creates candidates and CrewNex learns of them, which needs a feed the other way.
