@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
-  dobToken, identityHashes, makeHmac, matchPerson, normalizeRow, resolveBatch, rowKeyOf,
+  dobToken, identityHashes, makeHmac, matchPerson, normalizeRow, resolveBatch, rowKeyFor, rowKeyOf, sourceRowKey,
   type Decision, type Ledger, type RawRow, type Refs, type SalesNorm,
 } from "./analyze.js";
 import { DEFAULT_MAPPING_PATH, parseMapping, type MappingConfig } from "./mapping.js";
@@ -234,5 +234,108 @@ describe("resolveBatch", () => {
   it("flags a person whose email or phone a live candidate already uses", () => {
     const s = sales(2);
     expect(resolve([s], { live: new Set([key(s)]) })["sales 2"]!.reasons).toEqual(["matches_existing_candidate"]);
+  });
+});
+
+describe("crewnex batches: source ids (C1a.2, D3)", () => {
+  const cn = () => cfg((m) => {
+    m.placements.commit = true;
+    for (const sheet of ["sales", "interviews", "placements"]) m.sheets[sheet].columns.sourceId = "Source Id";
+    for (const sheet of ["interviews", "placements"]) m.sheets[sheet].columns.consultantSourceId = "Consultant Id";
+  });
+  const cnKey = (r: RawRow) => rowKeyFor(r.sheet, r.cells, cn(), "crewnex", h);
+  function resolveCn(raws: RawRow[], o: { ledger?: Ledger; decisions?: Map<string, Decision> } = {}) {
+    const c = cn();
+    const rows = raws.map((r) => normalizeRow(r, c, refs, h, TODAY, "crewnex"));
+    const out = resolveBatch({ rows, ledger: o.ledger ?? emptyLedger(), decisions: o.decisions ?? new Map(), liveMatches: new Set(),
+      placementsCommit: true, hmac: h, source: "crewnex" });
+    return Object.fromEntries(out.map((r) => [`${r.sheet} ${r.rowNo}`, r]));
+  }
+  const srcHash = (id: string) => identityHashes({ emails: [], phone: null, nameKey: null, dob: null, source: id }, h).source!;
+
+  it("keys a row by sheet + CrewNex id, so a cell edit keeps the key and the review decision", () => {
+    const before = sales(2, { "Source Id": "cn_1", Phone: "12" });
+    const edited = sales(7, { "Source Id": "cn_1", Phone: "12", Priority: "P2", "Last Name": "Verma-Rao" });
+    expect(cnKey(edited)).toBe(cnKey(before));
+    expect(cnKey(before)).toBe(sourceRowKey("sales", "cn_1", h));
+    expect(cnKey(before)).not.toBe(key(before)); // not the cell hash
+    expect(cnKey(interview(2, { "Source Id": "cn_1" }))).not.toBe(cnKey(before)); // the sheet is part of the key
+    expect(cnKey(sales(2, { "Source Id": "cn_2" }))).not.toBe(cnKey(before));
+    // A sheet batch ignores the column: the cell hash, as before.
+    expect(rowKeyFor("sales", before.cells, cn(), "sheets", h)).toBe(key(before));
+    const decisions = new Map([[`sales:${cnKey(before)}`, dec("approve", null, ["invalid_phone:phone"])]]);
+    expect(resolveCn([before], { decisions })["sales 2"]).toMatchObject({ state: "clean", rowKey: cnKey(before) });
+    expect(resolveCn([edited], { decisions })["sales 7"]).toMatchObject({ state: "clean", rowKey: cnKey(before) });
+    // In a sheet batch the same edit is a new row: the decision no longer applies.
+    expect(resolve([edited], { decisions: new Map([[`sales:${key(before)}`, dec("approve", null, ["invalid_phone:phone"])]]) })["sales 7"]!.state)
+      .toBe("review");
+  });
+
+  it("a missing or unusable source id is a review reason no reviewer can approve", () => {
+    const r = resolveCn([sales(2), sales(3, { "Source Id": "  ", Phone: "214-555-0133" }), sales(4, { "Source Id": "has space" }), sales(5, { "Source Id": "x".repeat(201) })]);
+    expect(r["sales 2"]).toMatchObject({ state: "review", reasons: ["missing_source_id"] });
+    expect(r["sales 3"]!.reasons).toContain("missing_source_id");
+    expect(r["sales 4"]!.reasons).toContain("invalid_source_id");
+    expect(r["sales 5"]!.reasons).toContain("invalid_source_id");
+    const iv = resolveCn([sales(2, { "Source Id": "cn_1" }), interview(2, { "Consultant Id": "cn_1" })]);
+    expect(iv["interviews 2"]).toMatchObject({ state: "review", reasons: ["missing_source_id"] });
+  });
+
+  it("two rows of one sheet with the same source id both go to review; the same id on another sheet is fine", () => {
+    const r = resolveCn([sales(2, { "Source Id": "cn_1" }), sales(3, { "Source Id": "cn_1", Phone: "214-555-0199", "Marketing Email": "" }),
+      interview(2, { "Source Id": "iv_1", "Consultant Id": "cn_1" }), interview(3, { "Source Id": "iv_1", "Consultant Id": "cn_1", "Job Title": "Other" }),
+      placement(2, { "Source Id": "cn_1", "Consultant Id": "cn_1" })]);
+    expect(r["sales 2"]!.state).toBe("review");
+    expect(r["sales 2"]!.reasons).toContain("duplicate_source_id");
+    expect(r["sales 3"]!.state).toBe("review");
+    expect(r["sales 3"]!.reasons).toContain("duplicate_source_id");
+    expect(r["interviews 2"]!.reasons).toContain("duplicate_source_id");
+    expect(r["interviews 3"]!.reasons).toContain("duplicate_source_id");
+    expect(r["placements 2"]!.reasons).not.toContain("duplicate_source_id");
+    expect(r["placements 2"]!.state).toBe("held"); // its person cannot load
+  });
+
+  it("a shared marketing email never makes two CrewNex consultants one person (the sheet rule would)", () => {
+    const a = sales(2, { "Source Id": "cn_a", "Personal Email": "asha@p.example", Phone: "214-555-0101" });
+    const b = sales(3, { "Source Id": "cn_b", "First Name": "Bina", "Last Name": "Rao", "Personal Email": "bina@p.example", Phone: "214-555-0102" });
+    const r = resolveCn([a, b]); // both carry Marketing Email asha@m.example
+    expect(r["sales 2"]).toMatchObject({ state: "clean", personKey: cnKey(a) });
+    expect(r["sales 3"]).toMatchObject({ state: "clean", personKey: cnKey(b) });
+    const mkt = identityHashes({ emails: ["asha@m.example"], phone: null, nameKey: null, dob: null }, h).emails[0]!;
+    expect((r["sales 2"]!.norm as SalesNorm).identities).not.toContain(mkt);
+    expect((r["sales 2"]!.norm as SalesNorm).identities).toContain(srcHash("cn_a"));
+    expect((r["sales 2"]!.norm as SalesNorm).marketingEmail).toBe("asha@m.example"); // still loaded, just not identity
+    // An earlier batch that loaded cn_a: cn_b is not skipped as that person.
+    const ledger = emptyLedger();
+    for (const x of (r["sales 2"]!.norm as SalesNorm).identities) ledger.identities.set(x, { candidateId: "cand-a", ownerId: "user-r1" });
+    ledger.identities.set(mkt, { candidateId: "cand-a", ownerId: "user-r1" }); // even if a sheet batch had recorded it
+    expect(resolveCn([b], { ledger })["sales 3"]).toMatchObject({ state: "clean", personKey: cnKey(b) });
+    // The sheet rule, for contrast: the shared marketing email is one person.
+    const sh = resolve([sales(2, { "Personal Email": "asha@p.example" }),
+      sales(3, { "First Name": "Bina", "Last Name": "Rao", "Personal Email": "bina@p.example", Phone: "214-555-0102" })]);
+    expect(sh["sales 3"]!.reasons).toEqual(["probable_duplicate"]);
+  });
+
+  it("a consultant id already in the ledger is that person: its sales row is skipped and new activity attaches to it", () => {
+    const s = sales(2, { "Source Id": "cn_1", Status: "On Hold" });
+    const ledger = emptyLedger();
+    ledger.identities.set(srcHash("cn_1"), { candidateId: "cand-1", ownerId: "user-r1" });
+    const r = resolveCn([s, interview(2, { "Source Id": "iv_9", "Consultant Id": "cn_1", "Candidate Email": "" })], { ledger });
+    expect(r["sales 2"]).toMatchObject({ state: "skipped", reasons: ["person_already_imported"], personKey: "ledger:cand-1" });
+    expect(r["interviews 2"]).toMatchObject({ state: "clean", personKey: "ledger:cand-1" });
+    // The same row (same id, edited cells) loaded before: skipped by its key.
+    ledger.links.set(`sales:${cnKey(s)}`, "cand-1");
+    expect(resolveCn([sales(4, { "Source Id": "cn_1", Priority: "P3" })], { ledger })["sales 4"])
+      .toMatchObject({ state: "skipped", reasons: ["already_imported"], personKey: "ledger:cand-1" });
+  });
+
+  it("a consultant id decides the person alone: unknown ids go to review even when the email matches", () => {
+    const r = resolveCn([sales(2, { "Source Id": "cn_1" }),
+      interview(2, { "Source Id": "iv_1", "Consultant Id": "cn_2" }),
+      interview(3, { "Source Id": "iv_2", "Consultant Id": "cn_1", "Candidate Email": "someone@else.example", "Candidate Name": "X Y" }),
+      interview(4, { "Source Id": "iv_3", "Consultant Id": "bad id" })]);
+    expect(r["interviews 2"]).toMatchObject({ state: "review", reasons: ["unknown_consultant_source_id"], personKey: null });
+    expect(r["interviews 3"]).toMatchObject({ state: "clean", personKey: cnKey(sales(2, { "Source Id": "cn_1" })) });
+    expect(r["interviews 4"]!.reasons).toContain("invalid_consultant_source_id");
   });
 });

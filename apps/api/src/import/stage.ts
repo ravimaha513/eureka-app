@@ -10,9 +10,9 @@ import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import type pg from "pg";
 import { parseCsv } from "./csv.js";
-import { parseMapping, SHEETS, type MappingConfig, type Sheet } from "./mapping.js";
+import { BATCH_SOURCES, parseMapping, SHEETS, type BatchSource, type MappingConfig, type Sheet } from "./mapping.js";
 import {
-  normalizeRow, redactCells, resolveBatch, rowKeyOf, sha256, todayIso, type Decision, type Hmac, type Ledger,
+  normalizeRow, redactCells, resolveBatch, rowKeyFor, sha256, todayIso, type Decision, type Hmac, type Ledger,
   type RawRow, type Refs, type StagedRow,
 } from "./analyze.js";
 
@@ -75,9 +75,7 @@ const toRecord = (r: StagedRow) => ({
 
 export interface StageResult { batchId: string; created: boolean }
 
-/** Where a batch comes from (docs/crewnex-consolidation.md, C1a.3). */
-export const BATCH_SOURCES = ["sheets", "crewnex"] as const;
-export type BatchSource = (typeof BATCH_SOURCES)[number];
+export { BATCH_SOURCES, type BatchSource } from "./mapping.js";
 export interface StageOptions {
   ticket?: string;
   hmac: Hmac;
@@ -112,7 +110,13 @@ export async function stage(
     const cols = cfg.sheets[sheet].columns as Record<string, string | undefined>;
     const present = new Set(table.headers.map((h) => h.toLowerCase()));
     const nameCols = cols.fullName && present.has(cols.fullName.toLowerCase()) ? [] : ["firstName", "lastName"];
-    const missing = [...REQUIRED[sheet], ...nameCols].map((f) => cols[f]).filter((h): h is string => !!h && !present.has(h.toLowerCase()));
+    // A CrewNex batch keys every row by its CrewNex id (C1a.2, D3): the column
+    // must be mapped and exported; a blank cell sends that row to review.
+    if (source === "crewnex" && !cols.sourceId) {
+      throw new Error(`${sheet}: a crewnex batch needs sheets.${sheet}.columns.sourceId in the mapping`);
+    }
+    const sourceCols = source === "crewnex" ? ["sourceId"] : [];
+    const missing = [...REQUIRED[sheet], ...nameCols, ...sourceCols].map((f) => cols[f]).filter((h): h is string => !!h && !present.has(h.toLowerCase()));
     if (missing.length) throw new Error(`${sheet}: missing column(s) ${missing.map((m) => `"${m}"`).join(", ")} (see the mapping file)`);
     const mapped = new Set(Object.values(cols).filter((h): h is string => !!h).map((h) => h.toLowerCase()));
     meta[sheet] = {
@@ -120,9 +124,10 @@ export async function stage(
       unmappedColumns: table.headers.filter((h) => h && !mapped.has(h.toLowerCase())),
     };
     for (const row of table.rows) {
-      // The row key comes from the cells as exported; the stored cells carry
-      // a DOB token instead of the date (only its keyed hash is kept).
-      const rowKey = rowKeyOf(sheet, row.cells, opts.hmac);
+      // The row key comes from the cells as exported (or, in a crewnex batch,
+      // from the row's CrewNex id); the stored cells carry a DOB token instead
+      // of the date (only its keyed hash is kept).
+      const rowKey = rowKeyFor(sheet, row.cells, cfg, source, opts.hmac);
       const raw: RawRow = { sheet, rowNo: row.line, cells: row.cells, rowKey };
       raws.push({ ...raw, cells: redactCells(raw, cfg, opts.hmac, today) });
     }
@@ -151,7 +156,7 @@ export async function stage(
     const batchId = (await c.query<{ id: string }>(`SELECT authz.import_open_batch($1, $2, $3, $4, $5, $6) AS id`,
       [opts.ticket, digest, { ...meta, mapping: JSON.parse(mappingText) }, cfg.placements.commit, source, historical])).rows[0]!.id;
     const refs = await loadRefs(c);
-    const first = raws.map((r) => normalizeRow(r, cfg, refs, opts.hmac, today));
+    const first = raws.map((r) => normalizeRow(r, cfg, refs, opts.hmac, today, source));
     await c.query(
       `INSERT INTO eureka.import_row (batch_id, sheet, row_no, row_key, raw, norm, status_key, person_key, state, reasons)
        SELECT $1, x.sheet, x.row_no, x.row_key, x.raw, x.norm, x.status_key, NULL, 'review', x.reasons
@@ -176,8 +181,8 @@ export async function recompute(pool: pg.Pool, batchId: string, hmac: Hmac): Pro
 }
 
 async function recomputeIn(c: pg.PoolClient, batchId: string, hmac: Hmac): Promise<void> {
-  const b = (await c.query<{ status: string; files: { mapping: unknown }; purged_at: string | null; placements_commit: boolean }>(
-    `SELECT status, files, purged_at, placements_commit FROM eureka.import_batch WHERE id = $1 FOR UPDATE`, [batchId])).rows[0];
+  const b = (await c.query<{ status: string; files: { mapping: unknown }; purged_at: string | null; placements_commit: boolean; source: BatchSource }>(
+    `SELECT status, files, purged_at, placements_commit, source FROM eureka.import_batch WHERE id = $1 FOR UPDATE`, [batchId])).rows[0];
   if (!b) throw new Error(`No import batch ${batchId}`);
   if (b.status !== "staged") return;
   if (b.purged_at) throw new Error("Batch data was purged; stage the files again");
@@ -186,7 +191,7 @@ async function recomputeIn(c: pg.PoolClient, batchId: string, hmac: Hmac): Promi
     `SELECT id, sheet, row_no, row_key, raw, state FROM eureka.import_row WHERE batch_id = $1
      ORDER BY array_position(ARRAY['sales','interviews','placements'], sheet), row_no`, [batchId])).rows;
   const refs = await loadRefs(c);
-  const normalized = rows.map((r) => normalizeRow({ sheet: r.sheet, rowNo: r.row_no, cells: r.raw, rowKey: r.row_key }, cfg, refs, hmac));
+  const normalized = rows.map((r) => normalizeRow({ sheet: r.sheet, rowNo: r.row_no, cells: r.raw, rowKey: r.row_key }, cfg, refs, hmac, undefined, b.source));
   // Live duplicates: the database reads the stored row itself (yes/no answer).
   const live = new Set<string>();
   for (const r of rows) {
@@ -195,7 +200,7 @@ async function recomputeIn(c: pg.PoolClient, batchId: string, hmac: Hmac): Promi
   }
   const staged = resolveBatch({
     rows: normalized, ledger: await loadLedger(c), decisions: await loadDecisions(c), liveMatches: live,
-    placementsCommit: b.placements_commit, hmac,
+    placementsCommit: b.placements_commit, hmac, source: b.source,
   });
   const committed = new Set(rows.filter((r) => r.state === "committed").map((r) => `${r.sheet}:${r.row_no}`));
   const changes = staged.filter((s) => !committed.has(`${s.sheet}:${s.rowNo}`));

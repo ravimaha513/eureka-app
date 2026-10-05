@@ -26,6 +26,14 @@ const MAPPING = readFileSync(join(DIR, "mapping.json"), "utf8");
 const ADMIN_BASE = process.env.TEST_PG_ADMIN_URL ?? "postgres://postgres:postgres@127.0.0.1:5432";
 const hmac = makeHmac("test-import-hmac-key-test-import-hmac-key");
 const TMP = mkdtempSync(join(tmpdir(), "eureka-batch-source-"));
+/** The fixture mapping plus the CrewNex id column a crewnex batch requires (C1a.2). */
+const MAPPING_CN_PATH = join(TMP, "mapping.crewnex.json");
+const MAPPING_CN = JSON.stringify((() => {
+  const m = JSON.parse(MAPPING);
+  for (const sheet of ["sales", "interviews", "placements"]) m.sheets[sheet].columns.sourceId = "Source Id";
+  return m;
+})());
+writeFileSync(MAPPING_CN_PATH, MAPPING_CN);
 
 let db: TestDb;
 let imp: pg.Pool;
@@ -64,14 +72,17 @@ async function call(key: keyof typeof U, method: "GET" | "POST", url: string, pa
 }
 const ticket = async () => (await call("admin", "POST", "/api/v1/imports/tickets")).json().ticket as string;
 
-/** A one-person sales sheet (one clean row), distinct per name so each stage opens its own batch. */
+/**
+ * A one-person sales sheet (one clean row), distinct per name so each stage
+ * opens its own batch. It carries a CrewNex id, which a sheet batch ignores.
+ */
 let seq = 0;
 function oneSales(): string {
   const n = ++seq;
   const header = readFileSync(join(DIR, "sales.csv"), "utf8").split("\n")[0]!;
   const p = join(TMP, `sales_${n}.csv`);
   const name = `Dee${"abcdefghijklmnop"[n]}`;
-  writeFileSync(p, `${header}\n${name},Gee,${name.toLowerCase()}.g@example.com,,(214) 555-01${String(10 + n)},,Java,Dallas,r1a@eureka.example,Active,,,\n`);
+  writeFileSync(p, `${header},Source Id\n${name},Gee,${name.toLowerCase()}.g@example.com,,(214) 555-01${String(10 + n)},,Java,Dallas,r1a@eureka.example,Active,,,,cn_${n}\n`);
   return p;
 }
 const batch = async (id: string) => (await db.admin.query<{ source: string; historical: boolean; status: string }>(
@@ -133,7 +144,7 @@ describe("batch source and historical (C1a.3)", () => {
   });
 
   it("source and historical are recorded at stage, shown in the preview, and drive import_historical() in a dry run", async () => {
-    const s = await stage(imp, { sales: oneSales() }, MAPPING, { hmac, ticket: await ticket(), source: "crewnex", historical: true });
+    const s = await stage(imp, { sales: oneSales() }, MAPPING_CN, { hmac, ticket: await ticket(), source: "crewnex", historical: true });
     expect(await batch(s.batchId)).toMatchObject({ source: "crewnex", historical: true });
     expect((await call("admin2", "GET", `/api/v1/imports/${s.batchId}/preview`)).json())
       .toMatchObject({ source: "crewnex", historical: true });
@@ -154,7 +165,7 @@ describe("batch source and historical (C1a.3)", () => {
   });
 
   it("a CrewNex batch dry-runs, but approval and commit are refused until the crewnex_commit switch is on", async () => {
-    const s = await stage(imp, { sales: oneSales() }, MAPPING, { hmac, ticket: await ticket(), source: "crewnex" });
+    const s = await stage(imp, { sales: oneSales() }, MAPPING_CN, { hmac, ticket: await ticket(), source: "crewnex" });
     expect(await dryRunOne(s.batchId)).toMatchObject({ historical: false, counts: { candidates: 1 } });
     // Approval: the verification reports the problem and refuses.
     const p = (await call("admin2", "GET", `/api/v1/imports/${s.batchId}/preview`)).json();
@@ -185,7 +196,7 @@ describe("batch source and historical (C1a.3)", () => {
   });
 
   it("neither flag can be changed after staging: not by the CLI role, the app role, the definer or a superuser", async () => {
-    const s = await stage(imp, { sales: oneSales() }, MAPPING, { hmac, ticket: await ticket(), source: "crewnex" });
+    const s = await stage(imp, { sales: oneSales() }, MAPPING_CN, { hmac, ticket: await ticket(), source: "crewnex" });
     for (const set of ["source = 'sheets'", "historical = true"]) {
       await expect(imp.query(`UPDATE eureka.import_batch SET ${set} WHERE id = $1`, [s.batchId])).rejects.toThrow(/permission denied/);
       await expect(db.app.query(`UPDATE eureka.import_batch SET ${set} WHERE id = $1`, [s.batchId])).rejects.toThrow(/permission denied/);
@@ -203,7 +214,7 @@ describe("batch source and historical (C1a.3)", () => {
     }
     expect(await batch(s.batchId)).toMatchObject({ source: "crewnex", historical: false });
     // Re-staging the same files with other settings opens a new batch, never re-analyses this one.
-    const again = await stage(imp, { sales: join(TMP, `sales_${seq}.csv`) }, MAPPING, { hmac, ticket: await ticket(), source: "crewnex", historical: true });
+    const again = await stage(imp, { sales: join(TMP, `sales_${seq}.csv`) }, MAPPING_CN, { hmac, ticket: await ticket(), source: "crewnex", historical: true });
     expect(again.created).toBe(true);
     expect(again.batchId).not.toBe(s.batchId);
   });
@@ -211,7 +222,7 @@ describe("batch source and historical (C1a.3)", () => {
   it("the digest covers both flags: an approval quoting the old digest is refused, and so is a commit", async () => {
     await crewnexCommit(true); // isolates the digest from the switch's verification problem
     try {
-      const s = await stage(imp, { sales: oneSales() }, MAPPING, { hmac, ticket: await ticket(), source: "crewnex" });
+      const s = await stage(imp, { sales: oneSales() }, MAPPING_CN, { hmac, ticket: await ticket(), source: "crewnex" });
       const d0 = await digestOf(s.batchId);
       expect((await call("admin2", "GET", `/api/v1/imports/${s.batchId}/preview`)).json().digest).toBe(d0);
       await tamper(s.batchId, "historical = true");
@@ -241,7 +252,8 @@ describe("CLI: stage --source / --historical", () => {
   const ENV = { IMPORT_HMAC_KEY: "test-import-hmac-key-test-import-hmac-key" };
   const stageCli = async (extra: string[], json = true) => {
     const out: string[] = [];
-    await run(["stage", "--sales", oneSales(), "--mapping", join(DIR, "mapping.json"), "--ticket", await ticket(), ...extra,
+    const mapping = extra.includes("crewnex") ? MAPPING_CN_PATH : join(DIR, "mapping.json");
+    await run(["stage", "--sales", oneSales(), "--mapping", mapping, "--ticket", await ticket(), ...extra,
       ...(json ? ["--json"] : [])], imp, (x) => out.push(x), ENV);
     return out[0]!;
   };

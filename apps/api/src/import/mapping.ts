@@ -21,7 +21,16 @@ export type CallStatus = (typeof CALL_STATUSES)[number];
 
 const header = z.string().min(1).max(100);
 
+/** Where a batch comes from (docs/crewnex-consolidation.md, C1a.3). */
+export const BATCH_SOURCES = ["sheets", "crewnex"] as const;
+export type BatchSource = (typeof BATCH_SOURCES)[number];
+
 const nameColumns = {
+  /**
+   * CrewNex record id of the row (C1a.2, D3). Required in `crewnex` batches,
+   * where it keys the row; ignored entirely in `sheets` batches.
+   */
+  sourceId: header.optional(),
   firstName: header.optional(),
   lastName: header.optional(),
   /** One "Name" cell instead of first/last: "First Last" or "Last, First". */
@@ -44,8 +53,12 @@ const SalesColumns = z.object({
   marketingStartDate: header.optional(),
 }).strict();
 
+/** CrewNex id of the consultant an interview or placement row belongs to (crewnex batches only). */
+const personColumns = { consultantSourceId: header.optional() };
+
 const InterviewColumns = z.object({
   ...nameColumns,
+  ...personColumns,
   email: header.optional(),
   phone: header.optional(),
   dob: header.optional(),
@@ -65,6 +78,7 @@ const InterviewColumns = z.object({
 
 const PlacementColumns = z.object({
   ...nameColumns,
+  ...personColumns,
   email: header.optional(),
   phone: header.optional(),
   dob: header.optional(),
