@@ -25,6 +25,16 @@ const ConfigSchema = z
     GOOGLE_CLIENT_ID: z.string().optional(),
     GOOGLE_CLIENT_SECRET: z.string().optional(),
     GOOGLE_HOSTED_DOMAIN: z.string().optional(),
+    // Staging/local test users: comma-separated exact emails outside the hosted
+    // domain that may sign in with Google. Refused unless EUREKA_ENVIRONMENT is
+    // staging or local (and never in production).
+    AUTH_TEST_EMAILS: z.string().optional(),
+    EUREKA_ENVIRONMENT: z.string().optional(),
+    // Username + password sign-in (migration 0083) for staging and local test
+    // environments only; production keeps Google SSO. Also gated in the database.
+    PASSWORD_LOGIN: z.enum(["on", "off"]).default("off"),
+    PASSWORD_MAX_FAILURES: z.coerce.number().int().min(3).max(10).default(5),
+    PASSWORD_LOCK_MINUTES: z.coerce.number().int().min(1).max(60).default(15),
     PUBLIC_BASE_URL: z.string().url().default("http://localhost:5173"),
     SESSION_IDLE_MINUTES: z.coerce.number().int().positive().default(60),
     SESSION_ABSOLUTE_HOURS: z.coerce.number().int().positive().default(12),
@@ -60,6 +70,17 @@ const ConfigSchema = z
     // Design A6.1: the development identity provider can never run in production.
     if (c.NODE_ENV === "production" && c.AUTH_MODE === "dev") {
       ctx.addIssue({ code: "custom", message: "AUTH_MODE=dev is not allowed in production" });
+    }
+    if (parseEmailList(c.AUTH_TEST_EMAILS).length > 0) {
+      if (c.EUREKA_ENVIRONMENT !== "staging" && c.EUREKA_ENVIRONMENT !== "local") {
+        ctx.addIssue({ code: "custom", message: "AUTH_TEST_EMAILS is only allowed when EUREKA_ENVIRONMENT is staging or local" });
+      }
+      if (parseEmailList(c.AUTH_TEST_EMAILS).some((e) => !/^[^@\s<>"]+@[^@\s<>"]+$/.test(e))) {
+        ctx.addIssue({ code: "custom", message: "AUTH_TEST_EMAILS must be a comma-separated list of exact email addresses" });
+      }
+    }
+    if (c.PASSWORD_LOGIN === "on" && c.EUREKA_ENVIRONMENT !== "staging" && c.EUREKA_ENVIRONMENT !== "local") {
+      ctx.addIssue({ code: "custom", message: "PASSWORD_LOGIN=on is only allowed when EUREKA_ENVIRONMENT is staging or local" });
     }
     if (c.ORIGIN_VERIFY_SECRET !== undefined) {
       const secrets = parseSecretList(c.ORIGIN_VERIFY_SECRET);
@@ -99,6 +120,11 @@ const ConfigSchema = z
       }
     }
   });
+
+/** Lower-cased, trimmed, empty entries dropped. */
+export function parseEmailList(v: string | undefined): string[] {
+  return (v ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+}
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
 

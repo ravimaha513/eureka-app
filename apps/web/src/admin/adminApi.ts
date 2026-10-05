@@ -60,10 +60,13 @@ export const adminApi = {
     return api<UserPage>(`/api/v1/admin/users?${q}`);
   },
   userSummary: () => api<UserSummary>("/api/v1/admin/users/summary"),
-  createUser: (b: { email: string; displayName: string; designation?: string; primaryLocationId?: string }) =>
+  createUser: (b: { email: string; displayName: string; designation?: string; primaryLocationId?: string; temporaryPassword?: string }) =>
     api<{ id: string }>("/api/v1/admin/users", { method: "POST", ...json(b) }),
   bulkCreateUsers: (b: { dryRun: boolean; rows: { email: string; displayName: string; designation?: string; location?: string }[] }) =>
     api<BulkReport>("/api/v1/admin/users/bulk", { method: "POST", ...json(b) }),
+  /** Staging/local: a temporary password the user must change at first sign-in (not for restricted-role users). */
+  setPassword: (id: string, password: string) =>
+    api<void>(`/api/v1/admin/users/${enc(id)}/password`, { method: "POST", ...json({ password }) }),
   deactivate: (id: string) => api<void>(`/api/v1/admin/users/${enc(id)}/deactivate`, { method: "POST" }),
   reactivate: (id: string) => api<void>(`/api/v1/admin/users/${enc(id)}/reactivate`, { method: "POST" }),
   setManager: (id: string, managerId: string | null) =>

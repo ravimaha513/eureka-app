@@ -105,3 +105,17 @@ describe("origin guard", () => {
     expect(() => originGuard(" , ")).toThrow();
   });
 });
+
+describe("AUTH_TEST_EMAILS (staging test users)", () => {
+  const withEnv = (env: string | undefined) => ({ ...google, GOOGLE_CLIENT_ID: "c", GOOGLE_CLIENT_SECRET: "s", AUTH_TEST_EMAILS: "t@gmail.com", EUREKA_ENVIRONMENT: env });
+  it("is accepted on staging and local", () => {
+    expect(loadConfig(withEnv("staging")).AUTH_TEST_EMAILS).toBe("t@gmail.com");
+    expect(loadConfig(withEnv("local")).AUTH_TEST_EMAILS).toBe("t@gmail.com");
+  });
+  it.each([undefined, "production", "prod"])("is refused when EUREKA_ENVIRONMENT is %s", (e) => {
+    expect(() => loadConfig(withEnv(e))).toThrow(/AUTH_TEST_EMAILS is only allowed/);
+  });
+  it("rejects entries that are not exact emails", () => {
+    expect(() => loadConfig({ ...withEnv("staging"), AUTH_TEST_EMAILS: "@gmail.com,nope" })).toThrow(/exact email/);
+  });
+});

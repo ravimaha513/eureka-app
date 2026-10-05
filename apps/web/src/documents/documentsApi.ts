@@ -29,7 +29,7 @@ export interface DocumentList { items: DocumentItem[]; canUpload: boolean; canUp
 
 export type DocumentOwner = { kind: "candidate"; id: string } | { kind: "placement"; id: string };
 
-export interface StepUpStatus { active: boolean; expiresAt: string | null; method: string | null; mode: "google" | "dev"; ttlMinutes: number }
+export interface StepUpStatus { active: boolean; expiresAt: string | null; method: string | null; mode: "google" | "dev" | "password"; ttlMinutes: number }
 
 export interface AccessLogEntry {
   id: string; documentId: string; docType: string; classification: DocumentClassification;
@@ -52,6 +52,8 @@ export const documentsApi = {
   /** Google: returns the URL to send the browser to; it comes back to `returnTo`. */
   startStepUp: (returnTo: string) => api<{ redirectUrl: string }>("/api/auth/step-up/start", { method: "POST", ...json({ returnTo }) }),
   /** Development only (the server refuses it elsewhere). */
+  /** Staging/local: re-enter the password; the database verifies it. */
+  passwordStepUp: (password: string) => api<{ active: true; expiresAt: string }>("/api/auth/step-up/password", { method: "POST", ...json({ password }) }),
   devStepUp: () => api<{ active: true; expiresAt: string }>("/api/auth/step-up/dev", { method: "POST" }),
 };
 

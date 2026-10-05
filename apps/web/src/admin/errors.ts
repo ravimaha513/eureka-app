@@ -17,7 +17,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   separation_of_duties: "Admins can't hold business roles, and people with business roles can't be admins. Use a separate account.",
   requester_not_admin: "The person who asked for this role is no longer an admin, so it can't be approved. Ask for it again.",
   email_exists: "A user with this email already exists.",
-  email_domain: "That email isn't allowed. Use an address in the company's Google domain.",
+  email_domain: "That email isn't allowed. Use an address in the company's Google domain (or a listed test address).",
   role_already_held: "This person already has that role.",
   request_pending: "A request for this role is already waiting for approval.",
   request_not_pending: "This request has already been decided.",
@@ -27,6 +27,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   invalid_lead: "Pick an active person as the lead.",
   not_a_member: "This person isn't in that team any more. Refresh and try again.",
   same_team: "Pick a different team.",
+  restricted_target: "This user holds a restricted role. Their password is set by whoever manages the database (set-password), not here.",
+  password_weak: "Use 10 to 72 characters with at least one letter and one number.",
+  password_login_disabled: "Password sign-in is not enabled in this environment.",
   unknown_role: "That role doesn't exist. Refresh and try again.",
 };
 
@@ -37,7 +40,7 @@ export function friendlyError(e: unknown, ctx: ErrorContext = "generic"): string
   if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";
   if (e.detail && ERROR_MESSAGES[e.detail]) return ERROR_MESSAGES[e.detail]!;
   if (ctx === "createUser" && e.status === 409) return "A user with this email already exists.";
-  if (ctx === "createUser" && e.status === 422) return "That email isn't allowed. Use an address in the company's Google domain.";
+  if (ctx === "createUser" && e.status === 422) return "That email isn't allowed. Use an address in the company's Google domain (or a listed test address).";
   if (ctx === "addMember" && e.status === 409) return ERROR_MESSAGES.already_member!;
   if (e.status === 403) return "You don't have permission to do that.";
   if (e.status === 404) return "That record no longer exists. Refresh and try again.";

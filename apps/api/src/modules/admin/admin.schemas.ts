@@ -19,6 +19,8 @@ export const CreateUser = z
     displayName: z.string().trim().min(1).max(120),
     designation: z.string().trim().min(1).max(120).optional(),
     primaryLocationId: uuid.optional(),
+    // Staging/local password sign-in only: a temporary password the user must change at first sign-in.
+    temporaryPassword: z.string().min(10).max(72).optional(),
   })
   .strict();
 export type CreateUser = z.infer<typeof CreateUser>;
@@ -71,3 +73,5 @@ export const MoveMember = z
   .object({ userId: uuid, toTeamId: uuid, reassignTo: uuid.optional() })
   .strict();
 export type MoveMember = z.infer<typeof MoveMember>;
+
+export const SetPassword = z.object({ password: z.string().min(10).max(72) }).strict();

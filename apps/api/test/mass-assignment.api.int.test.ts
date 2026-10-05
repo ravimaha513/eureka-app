@@ -55,12 +55,14 @@ const SERVER_MANAGED: Record<string, unknown> = {
 };
 
 beforeAll(async () => {
+  process.env.EUREKA_ENVIRONMENT = "local"; // password sign-in routes exist only where this says staging or local
   db = await createTestDb();
   candidates = await seedFixtures(db.admin);
   docs = await mkdtemp(join(tmpdir(), "eureka-ma-docs-"));
   const url = new URL(process.env.TEST_PG_ADMIN_URL ?? "postgres://postgres:postgres@127.0.0.1:5432");
   config = loadConfig({
     NODE_ENV: "test", AUTH_MODE: "dev", SESSION_SECRET: "test-secret-test-secret-test-secret-123",
+    PASSWORD_LOGIN: "on", EUREKA_ENVIRONMENT: "local",
     DATABASE_URL: `postgres://eureka_app:eureka_app_test@${url.host}/${db.name}`, LOCAL_STORAGE_DIR: docs,
   });
   app = await createApp(config);
@@ -69,6 +71,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await app?.close();
   await db?.drop();
+  delete process.env.EUREKA_ENVIRONMENT;
   if (docs) await rm(docs, { recursive: true, force: true });
 });
 
@@ -1515,6 +1518,46 @@ const IGNORED: IgnoreCase[] = [
       expect(await rows(`SELECT * FROM eureka.document ORDER BY id`)).toEqual(before);
       const log = await rows(`SELECT user_id, classification, step_up_grant_id FROM eureka.document_access WHERE document_id = $1`, [r.id]);
       expect(log).toEqual([{ user_id: U.r1a, classification: "internal", step_up_grant_id: null }]);
+    },
+  },
+  // password sign-in (migration 0083): strict schemas; nothing but the documented fields is read
+  {
+    route: "POST /api/auth/password-login",
+    run: async () => {
+      const before = await rows(`SELECT count(*)::int AS n FROM eureka.session`);
+      const res = await call(null, "POST", "/api/auth/password-login",
+        { ...SERVER_MANAGED, email: "r1a@eureka.example", password: "whatever-pass-1", userId: U.admin, sessionId: "x", mustChange: false }, {});
+      expect([400, 422]).toContain(res.statusCode);
+      expect(await rows(`SELECT count(*)::int AS n FROM eureka.session`)).toEqual(before);
+    },
+  },
+  {
+    route: "POST /api/auth/password/change",
+    run: async () => {
+      const mine = await login("r1a", true);
+      const res = await call(null, "POST", "/api/auth/password/change",
+        { ...SERVER_MANAGED, currentPassword: "a-password-1", newPassword: "another-password-2", userId: U.hr, mustChange: false }, {}, mine);
+      expect([400, 422]).toContain(res.statusCode);
+      expect(await rows(`SELECT count(*)::int AS n FROM authz.user_credential`)).toEqual([{ n: 0 }]);
+    },
+  },
+  {
+    route: "POST /api/auth/step-up/password",
+    run: async () => {
+      const mine = await login("acct", true);
+      const res = await call(null, "POST", "/api/auth/step-up/password",
+        { ...SERVER_MANAGED, password: "a-password-1", userId: U.hr, method: "google", expiresAt: "2099-01-01T00:00:00Z" }, {}, mine);
+      expect([400, 422]).toContain(res.statusCode);
+      expect(await rows(`SELECT count(*)::int AS n FROM eureka.step_up_grant WHERE method = 'password'`)).toEqual([{ n: 0 }]);
+    },
+  },
+  {
+    route: "POST /api/v1/admin/users/:id/password",
+    run: async () => {
+      const res = await call("admin", "POST", `/api/v1/admin/users/${U.r1b}/password`,
+        { ...SERVER_MANAGED, password: "Temp-pass-123", userId: U.hr, mustChange: false, failedCount: 9, lockedUntil: PAST, passwordHash: "x" });
+      expect([400, 422]).toContain(res.statusCode);
+      expect(await rows(`SELECT count(*)::int AS n FROM authz.user_credential`)).toEqual([{ n: 0 }]);
     },
   },
   {

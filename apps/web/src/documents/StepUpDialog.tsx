@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
@@ -8,6 +8,7 @@ function stepUpError(e: unknown): string {
   if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";
   if (e.status === 401) return "Your session ended. Sign in again.";
   if (e.status === 429) return "Too many attempts. Wait a few minutes and try again.";
+  if (e.detail === "password_incorrect") return "That password is not correct.";
   return e.detail ?? "Could not confirm it's you. Try again.";
 }
 
@@ -31,8 +32,13 @@ export function StepUpDialog({ onClose, onConfirmed, purpose, logNote, message }
   const mode = status.data?.mode;
   const minutes = status.data?.ttlMinutes ?? 10;
 
+  const [password, setPassword] = useState("");
+
   const confirm = () => run(async () => {
-    if (mode === "dev") {
+    if (mode === "password") {
+      await documentsApi.passwordStepUp(password);
+      onConfirmed();
+    } else if (mode === "dev") {
       await documentsApi.devStepUp();
       onConfirmed();
     } else {
@@ -48,11 +54,16 @@ export function StepUpDialog({ onClose, onConfirmed, purpose, logNote, message }
           <p>{purpose
             ? `Sign in again to ${purpose} for the next ${minutes} minutes.`
             : `${message ?? "This is a restricted document."} Sign in again to open restricted documents for the next ${minutes} minutes.`}</p>
+          {mode === "password" && (
+            <div className="field"><label htmlFor={`${bodyId}-pw`}>Your password</label>
+              <input id={`${bodyId}-pw`} type="password" autoComplete="current-password" required data-autofocus
+                value={password} onChange={(e) => setPassword(e.target.value)} /></div>
+          )}
           {mode === "dev" && <p className="muted">Development sign-in: no password is asked.</p>}
           <p className="muted">{logNote ?? "Each document you open is recorded in its access log."}</p>
         </div>
         <DialogActions onCancel={onClose} busy={busy || status.isLoading} error={error}
-          submitLabel={mode === "dev" ? "Confirm (development)" : "Continue with Google"} />
+          submitLabel={mode === "dev" ? "Confirm (development)" : mode === "password" ? "Confirm" : "Continue with Google"} />
       </form>
     </Dialog>
   );

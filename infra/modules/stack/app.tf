@@ -550,6 +550,11 @@ locals {
     { name = "AUTH_MODE", value = "google" },
     { name = "PUBLIC_BASE_URL", value = local.public_base_url },
     { name = "GOOGLE_HOSTED_DOMAIN", value = var.google_hosted_domain },
+    { name = "EUREKA_ENVIRONMENT", value = var.environment },
+    # Staging only (the API refuses it elsewhere): exact emails outside the domain that may sign in.
+    { name = "AUTH_TEST_EMAILS", value = var.auth_test_emails },
+    # Staging only: username + password sign-in for test users (migration 0083); the API refuses "on" elsewhere.
+    { name = "PASSWORD_LOGIN", value = var.password_login },
     { name = "NODE_EXTRA_CA_CERTS", value = "/app/certs/rds-global-bundle.pem" },
     { name = "AWS_REGION", value = var.aws_region },
     { name = "DOCUMENTS_BUCKET", value = aws_s3_bucket.b["documents"].id },
@@ -589,6 +594,14 @@ resource "aws_ecs_task_definition" "api" {
   }
   volume { name = "tmp" }
   lifecycle {
+    precondition {
+      condition     = !local.is_prod || trimspace(var.auth_test_emails) == ""
+      error_message = "auth_test_emails must be empty in production."
+    }
+    precondition {
+      condition     = !local.is_prod || var.password_login == "off"
+      error_message = "password_login must be off in production."
+    }
     precondition {
       condition     = trimspace(var.google_hosted_domain) != ""
       error_message = "google_hosted_domain is empty: set it to the company Google Workspace domain in infra/live/<env>/env.hcl before deploying the API."

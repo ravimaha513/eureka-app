@@ -15,6 +15,7 @@ import { OidcService } from "./platform/oidc.service.js";
 import { originGuard } from "./platform/origin-guard.js";
 import { SessionService } from "./platform/session.service.js";
 import { AuthController } from "./modules/identity/auth.controller.js";
+import { PasswordController } from "./modules/identity/password.controller.js";
 import { MeController } from "./modules/identity/me.controller.js";
 import { SettingsController } from "./modules/identity/settings.controller.js";
 import { SettingsService } from "./modules/identity/settings.service.js";
@@ -83,7 +84,7 @@ export class AppModule {
     return {
       module: AppModule,
       controllers: [
-        FeedbackController, HealthController, AuthController, MeController, CandidatesController, SubmissionsController, InterviewsController,
+        FeedbackController, HealthController, AuthController, PasswordController, MeController, CandidatesController, SubmissionsController, InterviewsController,
         AdminController, TeamsController, PlacementsController, LookupsController, DashboardController, HotlistController, ImportsController,
         PaperworkController,
         ResumesController, NotificationsController, DocumentsController, StepUpController,
