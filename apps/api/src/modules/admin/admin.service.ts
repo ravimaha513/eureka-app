@@ -101,7 +101,14 @@ export class AdminService {
          SELECT t.lead_id, t.id, t.name, true FROM eureka.team t WHERE t.lead_id = ANY($1::uuid[])
          ORDER BY name`, [ids]);
 
+      // Staff phone (Settings profile) only for staff.contact:read holders (ST-3); RLS hides other rows anyway.
+      const contact = resolveScope(user.access, "staff.contact:read")?.all === true;
+      const phones = contact ? await c.query<{ user_id: string; phone_e164: string | null }>(
+        `SELECT user_id, phone_e164 FROM eureka.staff_profile WHERE user_id = ANY($1::uuid[])`, [ids]) : { rows: [] };
+
       return {
+        /** Presentation hint: whether the phone column applies to this caller. */
+        contactVisible: contact,
         items: page.map((r) => {
           const m = managers.rows.find((x) => x.user_id === r.id);
           return {
@@ -109,6 +116,7 @@ export class AdminService {
             email: r.email,
             displayName: r.display_name,
             designation: r.designation,
+            ...(contact ? { phone: phones.rows.find((x) => x.user_id === r.id)?.phone_e164 ?? null } : {}),
             status: r.status,
             primaryLocation: r.location_id ? { id: r.location_id, name: r.location_name } : null,
             manager: m ? { id: m.id, displayName: m.display_name } : null,
@@ -119,6 +127,26 @@ export class AdminService {
           };
         }),
         nextCursor: rows.length > q.limit ? page[page.length - 1]!.id : null,
+      };
+    });
+  }
+
+  /** KPI cards above the staff list: active users per role, only roles that have users (ST-3). */
+  async userSummary(user: AuthedUser) {
+    return this.tx(user, async (c) => {
+      const { rows } = await c.query<{ role_key: string; n: number }>(
+        `SELECT ur.role_key, count(DISTINCT ur.user_id)::int AS n
+         FROM eureka.user_role ur JOIN eureka.app_user u ON u.id = ur.user_id
+         WHERE ur.valid @> now() AND u.status = 'active'
+         GROUP BY ur.role_key HAVING count(*) > 0`);
+      const counts = new Map(rows.map((r) => [r.role_key, r.n]));
+      const totals = (await c.query<{ active: number; inactive: number }>(
+        `SELECT count(*) FILTER (WHERE status = 'active')::int AS active, count(*) FILTER (WHERE status = 'inactive')::int AS inactive
+         FROM eureka.app_user`)).rows[0]!;
+      return {
+        active: totals.active,
+        inactive: totals.inactive,
+        roles: ROLES.filter((k) => counts.has(k)).map((key) => ({ key, label: ROLE_LABELS[key], count: counts.get(key)! })),
       };
     });
   }

@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { EmployeeListQuery, EndAssignment, ExitEmployee, PlannedEndDate, ReportPeriod, ReturnToMarket } from "./employees.schemas.js";
+import { EmployeeExportQuery, EmployeeListQuery, EndAssignment, ExitEmployee, PlannedEndDate, ReportPeriod, ReturnToMarket } from "./employees.schemas.js";
 import { EmployeesService } from "./employees.service.js";
 import { ReportsService } from "./reports.service.js";
 
@@ -16,6 +16,20 @@ export class EmployeesController {
   @RequirePermission("employee:read")
   list(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.list(user, EmployeeListQuery.parse(q));
+  }
+
+  /** EM-X1. POST, not GET: audited and CSRF-protected, like the Hot List export. */
+  @Post("export")
+  @HttpCode(200)
+  @RequirePermission("report:export")
+  async export(@CurrentUser() user: AuthedUser, @Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
+    const out = await this.svc.exportCsv(user, EmployeeExportQuery.parse(body ?? {}));
+    void reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="employees-${new Date().toISOString().slice(0, 10)}.csv"`)
+      .header("x-export-rows", String(out.rows))
+      .header("x-export-truncated", String(out.truncated));
+    return out.csv;
   }
 
   @Get(":id")

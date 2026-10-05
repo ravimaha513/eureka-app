@@ -53,6 +53,11 @@ const CODES: Record<string, (code: string) => HttpException> = {
   rejection_reason_required: (c) => new UnprocessableEntityException(c),
   rejection_reason_not_allowed: (c) => new UnprocessableEntityException(c),
   submission_closed: (c) => new UnprocessableEntityException(c),
+  // interviews-settings (migration 0080): authz.set_interview_panel
+  panel_too_large: (c) => new UnprocessableEntityException(c),
+  invalid_panel: (c) => new UnprocessableEntityException(c),
+  invalid_panel_member: (c) => new UnprocessableEntityException(c),
+  lead_not_in_panel: (c) => new UnprocessableEntityException(c),
 };
 
 /**

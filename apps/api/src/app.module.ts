@@ -16,6 +16,8 @@ import { originGuard } from "./platform/origin-guard.js";
 import { SessionService } from "./platform/session.service.js";
 import { AuthController } from "./modules/identity/auth.controller.js";
 import { MeController } from "./modules/identity/me.controller.js";
+import { SettingsController } from "./modules/identity/settings.controller.js";
+import { SettingsService } from "./modules/identity/settings.service.js";
 import { CandidatesController } from "./modules/candidates/candidates.controller.js";
 import { CandidatesService } from "./modules/candidates/candidates.service.js";
 import { SubmissionsController, SubmissionsService } from "./modules/submissions/submissions.controller.js";
@@ -70,10 +72,11 @@ export class AppModule {
         PaperworkController,
         ResumesController, NotificationsController, DocumentsController, StepUpController,
         EmployeesController, AssignmentsController, ReportsController, WorkAuthorizationController,
+        SettingsController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
-        DbService, SessionService, AccessService, AuditService, OidcService,
+        DbService, SessionService, AccessService, AuditService, OidcService, SettingsService,
         CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
         PaperworkService,
         ResumesService, NotificationsService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },

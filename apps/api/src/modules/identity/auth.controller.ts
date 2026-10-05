@@ -3,6 +3,7 @@ import { Body, Controller, ForbiddenException, Get, HttpCode, Inject, NotFoundEx
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AuditService } from "../../platform/audit.service.js";
+import { clientInfo } from "../../platform/client-info.js";
 import { CurrentUser, Public, type AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
@@ -69,7 +70,7 @@ export class AuthController {
     const idToken = await this.oidc.exchange(code, saved.verifier, this.redirectUri());
     const identity = await this.oidc.verify(idToken, saved.nonce);
     const userId = await this.linkUser(identity.sub, identity.email);
-    const sid = await this.sessions.create(userId, identity.authTime);
+    const sid = await this.sessions.create(userId, identity.authTime, clientInfo(req, this.config));
     this.setSessionCookie(reply, sid);
     void reply.clearCookie(OIDC_COOKIE, { path: "/api/auth" }).redirect(this.config.PUBLIC_BASE_URL, 302);
   }
@@ -103,13 +104,13 @@ export class AuthController {
   @Public()
   @Post("dev-login")
   @HttpCode(204)
-  async devLogin(@Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
+  async devLogin(@Body() body: unknown, @Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
     if (this.config.AUTH_MODE !== "dev" || this.config.NODE_ENV === "production") throw new NotFoundException();
     const { email } = DevLogin.parse(body);
     const { rows } = await this.db.system((c) =>
       c.query<{ id: string }>(`SELECT id FROM eureka.app_user WHERE email = $1 AND status = 'active'`, [email]));
     if (!rows[0]) throw new ForbiddenException("Unknown user");
-    this.setSessionCookie(reply, await this.sessions.create(rows[0].id, new Date()));
+    this.setSessionCookie(reply, await this.sessions.create(rows[0].id, new Date(), clientInfo(req, this.config)));
   }
 
   @Post("logout")

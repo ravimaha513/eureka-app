@@ -57,7 +57,8 @@ describe("catalog integrity", () => {
   });
 
   it("org_admin holds no data permissions (no self-escalation into data)", () => {
-    expect(Object.keys(GRANTS.org_admin).sort()).toEqual(["access:manage", "audit:read"]);
+    // staff.contact:read is the staff directory's own data (work phone), not business data.
+    expect(Object.keys(GRANTS.org_admin).sort()).toEqual(["access:manage", "audit:read", "staff.contact:read"]);
   });
 
   it("restricted permissions are held only by HR, Accounts and Immigration, and utility passwords by Location Ops Admin", () => {
