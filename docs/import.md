@@ -104,8 +104,10 @@ which queues `placement.created` outbox events for HR, Accounts and Immigration 
 
 `stage --source` (`sheets`, the default, or `crewnex`) and `stage --historical` are copied onto a
 new batch the same way (`import_batch.source`, `import_batch.historical`, migration 0054): set only
-by `authz.import_open_batch`, immutable (the batch guard refuses even a superuser; no role holds a
-column privilege on them), shown in the preview and the report, part of the digest. Non-default
+by `authz.import_open_batch`, immutable (no role holds a column privilege on them, and the batch
+guard refuses the owner and a superuser; only disabling triggers, e.g.
+`session_replication_role = replica`, gets past it), shown in the preview and the report, part of
+the digest. `--historical` needs `--source crewnex` (CHECK `import_batch_historical`). Non-default
 settings also join the batch's source digest, so staging the same files with other settings opens
 a new batch (new ticket) instead of re-analysing one opened with different settings. Each
 `import_load_person` call records its batch on the session marker (`import_session.active_batch`,
@@ -113,7 +115,16 @@ dry run or not), and `authz.import_historical()` is true inside a call for a his
 loader reports it as `historical` in its result. Historical mode changes nothing yet: the
 side-effect rules arrive with CrewNex consolidation C1e.1 (`docs/crewnex-consolidation.md` 4.6).
 0054 changed the digest formula, so it withdrew every approval given before it (back to staged);
-committed batches keep their recorded digest.
+committed batches keep their recorded digest. 0054 also replaced the 4-argument
+`import_open_batch` with the 6-argument one, so an older CLI cannot stage against a migrated
+database; the migrate task and the CLI ship in the same image.
+
+**A CrewNex batch is not committed yet.** It stages, analyses and dry-runs, but until
+`authz.policy_setting` `crewnex_commit = 'on'` (absent means off; CrewNex consolidation C1f sets it
+by migration) the verification reports `crewnex_commit_disabled` on each clean row, so approval is
+refused, and `import_load_person` refuses outside a dry run. Today such a batch would run through
+the sheet loader, which would load personal contacts, match on marketing email and ignore source
+ids (consolidation decisions D1, D3, D4).
 
 ## Normalization and matching
 

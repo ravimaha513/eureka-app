@@ -61,7 +61,12 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   API); a ledger with keyed hashes and natural keys keeps re-runs idempotent. The database verifies
   the rows before sign-off and the approver approves a per-row preview by its digest (0041).
   A batch's `source` (sheets/crewnex) and `historical` flag are fixed at stage, immutable and part
-  of the digest (0054, CrewNex consolidation C1a.3).
+  of the digest (0054, CrewNex consolidation C1a.3); CrewNex batches dry-run but cannot be approved
+  or committed until `policy_setting crewnex_commit = 'on'` (C1f).
+  **Release note for 0054:** deploying it sends every approved-but-uncommitted import batch back to
+  staged (its digest can never match again), so each needs a fresh second-admin approval; a partly
+  loaded batch keeps its committed rows and loads the rest after re-approval. It also drops the
+  4-argument `import_open_batch` (migrate task and CLI ship in one image).
   Append-only exception: the `GRANT eureka_app TO eureka_import` line was removed from 0028 after
   it was pushed, because no environment had applied it; 0033 revokes any copy and fails if it cannot.
 - Resumes (FR-CAN-07, migration 0036, design B2.2 "Built in migration 0036"): presigned POST into
