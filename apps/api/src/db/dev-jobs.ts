@@ -83,3 +83,33 @@ export async function seedDevJobs(admin: pg.Pool): Promise<{ jobs: number; ids: 
   }
   return { jobs: JOBS.length, ids };
 }
+
+/**
+ * Fictional applicants and applications on the seeded portal jobs (dev only):
+ * rows are written as superuser with triggers off, since applicants normally
+ * sign up by email link. Applicants cannot sign in without a mailbox here;
+ * use the portal sign-up page and the dev mailbox (GET /api/portal/dev/mailbox).
+ */
+export async function seedDevApplications(admin: pg.Pool, ids: Record<string, string>): Promise<number> {
+  if (!ids["HR Generalist"] || (await admin.query("SELECT 1 FROM eureka.applicant LIMIT 1")).rowCount) return 0;
+  const c = await admin.connect();
+  try {
+    await c.query("SET session_replication_role = replica");
+    const people = [["Emily", "Student", "emily.student@applicants.invalid", "+12125550111", "hired", "Sales Development Representative"],
+      ["Venkat", "Rao", "venkat.rao@applicants.invalid", "+12125550112", "interview_scheduled", "HR Generalist"],
+      ["Mina", "Park", "mina.park@applicants.invalid", "+12125550113", "applied", "HR Generalist"]] as const;
+    for (const [f, l, email, phone, status, title] of people) {
+      const a = (await c.query<{ id: string }>(
+        `INSERT INTO eureka.applicant (first_name, last_name, email, phone_e164, email_verified_at) VALUES ($1,$2,$3,$4, now()) RETURNING id`, [f, l, email, phone])).rows[0]!.id;
+      const app = (await c.query<{ id: string }>(
+        `INSERT INTO eureka.job_application (job_id, applicant_id, status, applied_at) VALUES ($1,$2,$3, now() - interval '3 days') RETURNING id`, [ids[title], a, status])).rows[0]!.id;
+      await c.query(`INSERT INTO eureka.application_event (application_id, kind, to_status) VALUES ($1, 'applied', 'applied')`, [app]);
+      if (status === "interview_scheduled") {
+        await c.query(`INSERT INTO eureka.application_interview (application_id, interview_type, round, lead_user_id, starts_at, duration_minutes, meeting_link, created_by)
+          VALUES ($1, 'video', 'technical', $2, now() + interval '3 days', 30, 'https://meet.example.com/demo', $2)`, [app, "00000000-0000-0000-0000-000000000016"]);
+      }
+    }
+    await c.query("RESET session_replication_role");
+  } finally { c.release(); }
+  return 3;
+}

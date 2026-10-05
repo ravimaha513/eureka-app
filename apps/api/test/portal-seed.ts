@@ -19,7 +19,7 @@ export async function portalSignIn(app: NestFastifyApplication, email: string, f
   return { cookie, csrf: me.csrfToken as string, id: me.id as string };
 }
 
-export function portalCall(app: NestFastifyApplication, s: PortalSession, method: "GET" | "POST", url: string, payload?: unknown) {
+export function portalCall(app: NestFastifyApplication, s: PortalSession, method: "GET" | "POST", url: string, payload?: unknown): ReturnType<NestFastifyApplication["inject"]> {
   return app.inject({ method, url, payload: payload as never, headers: { cookie: s.cookie, ...(method !== "GET" ? { "x-csrf-token": s.csrf } : {}) } });
 }
 

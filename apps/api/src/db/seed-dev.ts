@@ -7,7 +7,7 @@ import pg from "pg";
 import { migrate } from "./migrate.js";
 import { seedFixtures } from "../../test/fixtures.js";
 import { seedDevPipeline } from "./dev-pipeline.js";
-import { seedDevJobs } from "./dev-jobs.js";
+import { seedDevApplications, seedDevJobs } from "./dev-jobs.js";
 
 if (process.env.NODE_ENV === "production") throw new Error("seed-dev must not run in production");
 const url = process.env.MIGRATION_DATABASE_URL;
@@ -37,7 +37,7 @@ if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-
 // jobs-portal: fictional jobs (client requirements and internal openings on the careers portal).
 if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-0000-0000-000000000016'")).rowCount) {
   const j = await seedDevJobs(admin);
-  if (j.jobs) console.log(`seeded ${j.jobs} jobs`);
+  if (j.jobs) console.log(`seeded ${j.jobs} jobs, ${await seedDevApplications(admin, j.ids)} applications`);
 }
 // Development step-up ("Confirm it's you" without Google) needs this database switch as well as
 // AUTH_MODE=dev in the API (migration 0043); no migration sets it, so other environments refuse it.
