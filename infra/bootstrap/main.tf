@@ -21,6 +21,12 @@ variable "github_repository" {
   default     = "ravimaha513/eureka-app"
 }
 
+variable "github_subject_prefix" {
+  description = "Prefix of the OIDC `sub` claim GitHub issues for this repository. The repo uses immutable subjects (ids, not names): see `gh api repos/<owner>/<repo>/actions/oidc/customization/sub` (sub_claim_prefix)."
+  type        = string
+  default     = "repo:ravimaha513@4232985/eureka-app@1394148618"
+}
+
 variable "create_github_oidc_provider" {
   description = "Set false if the account already has token.actions.githubusercontent.com"
   type        = bool
@@ -105,8 +111,8 @@ locals {
   oidc_arn = var.create_github_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
   # Each role is usable only from its GitHub environment (with required reviewers on production).
   deploy_envs = {
-    staging    = "repo:${var.github_repository}:environment:staging"
-    production = "repo:${var.github_repository}:environment:production"
+    staging    = "${var.github_subject_prefix}:environment:staging"
+    production = "${var.github_subject_prefix}:environment:production"
   }
 }
 
