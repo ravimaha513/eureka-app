@@ -56,6 +56,8 @@ import { DatahubController } from "./modules/datahub/datahub.controller.js";
 import { DatahubService } from "./modules/datahub/datahub.service.js";
 import { CandidateTrainingController, TrainingController } from "./modules/training/training.controller.js";
 import { TrainingService } from "./modules/training/training.service.js";
+import { ChatController } from "./modules/chat/chat.controller.js";
+import { ChatService } from "./modules/chat/chat.service.js";
 
 @Controller("api")
 class HealthController {
@@ -86,6 +88,7 @@ export class AppModule {
         // training
         TrainingController, CandidateTrainingController,
         SettingsController,
+        ChatController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
@@ -97,6 +100,8 @@ export class AppModule {
         DatahubService,
         // training
         TrainingService,
+        WorkAuthorizationService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
+        ChatService,
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],

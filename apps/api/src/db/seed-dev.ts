@@ -11,6 +11,7 @@ import { seedDevFacilities } from "./dev-facilities.js";
 import { seedDevDatahub } from "./dev-datahub.js";
 import { seedDevTraining } from "./dev-training.js";
 import { seedDevInterviewsSettings } from "./dev-interviews-settings.js";
+import { seedDevChat } from "./dev-chat.js";
 
 if (process.env.NODE_ENV === "production") throw new Error("seed-dev must not run in production");
 const url = process.env.MIGRATION_DATABASE_URL;
@@ -55,6 +56,11 @@ if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-
 if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-0000-0000-000000000016'")).rowCount) {
   const n = await seedDevDatahub(admin);
   if (n) console.log(`seeded DataHub: ${n} folders`);
+}
+// Fictional chats between the dev users (skipped when a conversation exists).
+if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-0000-0000-000000000009'")).rowCount) {
+  const chat = await seedDevChat(admin);
+  if (chat.conversations) console.log(`seeded chat: ${chat.conversations} conversations, ${chat.messages} messages`);
 }
 // Development step-up ("Confirm it's you" without Google) needs this database switch as well as
 // AUTH_MODE=dev in the API (migration 0043); no migration sets it, so other environments refuse it.

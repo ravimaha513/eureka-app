@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
-  BadgeCheck, BookOpen, Building2, CalendarClock, ChevronDown, Database, FileBarChart, FileCheck2, Flame, LayoutDashboard, LogOut, Moon,
+  BadgeCheck, BookOpen, Building2, CalendarClock, ChevronDown, Database, FileBarChart, FileCheck2, Flame, LayoutDashboard, LogOut, MessageCircle, Moon,
   GraduationCap, House, Send, Settings, ShieldCheck, Sun, TrendingUp, Users, UserRoundCheck, Wallet, type LucideIcon,
 } from "lucide-react";
 import type { Theme } from "./theme";
@@ -14,6 +14,8 @@ export const NAV_ICONS: Record<string, LucideIcon> = {
   datahub: Database,
   // training
   training: GraduationCap, courses: BookOpen,
+  // chat
+  chat: MessageCircle,
 };
 
 const TINTS = ["indigo", "teal", "amber", "rose", "violet", "sky"] as const;

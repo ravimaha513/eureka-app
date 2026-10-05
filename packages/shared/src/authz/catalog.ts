@@ -144,6 +144,8 @@ export const PERMISSIONS = [
   // interviews-settings
   /** Staff contact details (phone, bio) entered in Settings; read by HR and in Users & Access. */
   "staff.contact:read",
+  // chat
+  "chat:use",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -206,6 +208,8 @@ export const GRANTS: Record<Role, Grants> = {
     "datahub:read": "own",
     // training
     "training:read": "own",
+    // chat
+    "chat:use": "own",
   },
   lead: {
     ...salesLine("team", "team"),
@@ -218,6 +222,8 @@ export const GRANTS: Record<Role, Grants> = {
     "datahub:read": "own",
     // training
     "training:read": "team",
+    // chat
+    "chat:use": "own",
   },
   manager: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -233,6 +239,8 @@ export const GRANTS: Record<Role, Grants> = {
     "datahub:read": "own",
     // training
     "training:read": "hierarchy",
+    // chat
+    "chat:use": "own",
   },
   assoc_director: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -248,6 +256,8 @@ export const GRANTS: Record<Role, Grants> = {
     "datahub:read": "own",
     // training
     "training:read": "hierarchy",
+    // chat
+    "chat:use": "own",
   },
   offshore_manager: {
     "candidate:read": "org",
@@ -269,6 +279,8 @@ export const GRANTS: Record<Role, Grants> = {
     "datahub:read": "own",
     // training
     "training:read": "org",
+    // chat
+    "chat:use": "own",
   },
   ceo: {
     "candidate:read": "org",
@@ -288,6 +300,8 @@ export const GRANTS: Record<Role, Grants> = {
     "datahub:read": "own",
     // training
     "training:read": "org",
+    // chat
+    "chat:use": "own",
   },
   location_incharge: {
     "candidate:read": "location",
@@ -307,6 +321,8 @@ export const GRANTS: Record<Role, Grants> = {
     "training:read": "location",
     "training:manage": "location",
     "training.progress:update": "location",
+    // chat
+    "chat:use": "own",
   },
   location_ops_admin: {
     // Companies and facilities of their location, with utilities and bills (utility
@@ -337,6 +353,8 @@ export const GRANTS: Record<Role, Grants> = {
     "training:read": "location",
     "training:manage": "location",
     "training.progress:update": "location",
+    // chat
+    "chat:use": "own",
   },
   hr: {
     "assignment:read": "org",
@@ -358,6 +376,8 @@ export const GRANTS: Record<Role, Grants> = {
     "datahub:manage": "org",
     // interviews-settings
     "staff.contact:read": "org",
+    // chat
+    "chat:use": "own",
   },
   associate_hr: {
     "assignment:read": "org",
@@ -370,6 +390,8 @@ export const GRANTS: Record<Role, Grants> = {
     "document:upload": "org",
     // datahub
     "datahub:read": "own",
+    // chat
+    "chat:use": "own",
   },
   accounts: {
     "assignment:read": "org",
@@ -386,6 +408,8 @@ export const GRANTS: Record<Role, Grants> = {
     // datahub
     "datahub:read": "own",
     "datahub:manage": "org",
+    // chat
+    "chat:use": "own",
   },
   immigration: {
     "assignment:read": "org",
@@ -401,6 +425,8 @@ export const GRANTS: Record<Role, Grants> = {
     "visa:update": "org",
     // datahub
     "datahub:read": "own",
+    // chat
+    "chat:use": "own",
   },
   interview_coach: {
     "candidate:read": "coached",
@@ -412,6 +438,8 @@ export const GRANTS: Record<Role, Grants> = {
     // training: batches where they are the trainer (and progress of coached teams' candidates)
     "training:read": "coached",
     "training.progress:update": "coached",
+    // chat
+    "chat:use": "own",
   },
   documents_team: {
     "candidate:read": "org",
@@ -420,6 +448,8 @@ export const GRANTS: Record<Role, Grants> = {
     "document:verify": "org",
     // datahub
     "datahub:read": "own",
+    // chat
+    "chat:use": "own",
   },
   bu_head: {
     "assignment:read": "org",
@@ -428,12 +458,16 @@ export const GRANTS: Record<Role, Grants> = {
     "report:read": "org",
     // datahub
     "datahub:read": "own",
+    // chat
+    "chat:use": "own",
   },
   org_admin: {
     "access:manage": "org",
     "audit:read": "org",
     // interviews-settings: staff directory data (work phone), not business data.
     "staff.contact:read": "org",
+    // chat
+    "chat:use": "own",
   },
 };
 
