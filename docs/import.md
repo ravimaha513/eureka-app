@@ -129,9 +129,9 @@ decisions D1, D3, D4).
 ### CrewNex source ids (C1a.2)
 
 In a `crewnex` batch every row is keyed by its CrewNex record id (consolidation D3). The mapping
-names the column per sheet (`sheets.<sheet>.columns.sourceId`); interview and placement sheets may
-also name the consultant's id (`consultantSourceId`). Staging a crewnex batch refuses a mapping
-without `sourceId` or an export without that column. A sheet batch never reads either column: its
+names the column per sheet (`sheets.<sheet>.columns.sourceId`); interview and placement sheets
+must also name the consultant's id (`consultantSourceId`). Staging a crewnex batch refuses a
+mapping or an export without these columns. A sheet batch never reads either column: its
 row keys and analysis are unchanged (`src/import/sheets-golden.test.ts` pins them).
 
 - **Row key** = HMAC(`src:crewnex:<sheet>:<id>`) instead of the cell hash, so a record edited
@@ -140,15 +140,18 @@ row keys and analysis are unchanged (`src/import/sheets-golden.test.ts` pins the
 - **Identity**: a person's ledger hashes add HMAC(`src:crewnex:person:<consultant id>`) and leave
   out the marketing email (reissued between consultants; CrewNex's Vitel number is not mapped at
   all). A later sales row with the same consultant id is that person (skipped); an interview or
-  placement row naming a consultant id is matched by the id alone, never by contact details.
+  placement row is matched by its consultant id alone, never by contact details, and a reviewer
+  `link` to a sales row with a different id is `invalid_link`.
 - **Review** (not approvable; fix the export and re-stage): `missing_source_id`,
   `invalid_source_id` (over 200 characters, or spaces/control characters), `duplicate_source_id`
-  (two rows of one sheet with the same id: both), `invalid_consultant_source_id`,
+  (two rows of one sheet with the same id: both, even if that id was loaded before),
+  `missing_consultant_source_id`, `invalid_consultant_source_id`,
   `unknown_consultant_source_id` (in neither the batch's sales rows nor the ledger; **link** still
   works).
-- Not yet: a contact (personal email or phone) hit on a person loaded from the sheets or under
-  another CrewNex id is still `person_already_imported`; C1b.3 turns it into review
-  (`matches_imported_person`). The live-duplicate check (`authz.import_live_match`) still compares
+- **Known gap (until C1b.3):** a contact (personal email or phone) hit on a person loaded from the
+  sheets or under another CrewNex id is still skipped as `person_already_imported`; C1b.3 turns it
+  into review (`matches_imported_person`). C1b.3 must be merged before the first real-data dry run
+  and before `crewnex_commit` is enabled. The live-duplicate check (`authz.import_live_match`) still compares
   the marketing email; identity-only columns are C1a.4.
 
 ## Normalization and matching
