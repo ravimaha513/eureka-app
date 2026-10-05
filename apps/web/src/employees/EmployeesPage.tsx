@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { Person } from "../shell/ui";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Me } from "../api";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../admin/Dialog";
@@ -112,7 +113,7 @@ export function EmployeesPage(_: { me?: Pick<Me, "capabilities"> }) {
                 const open = a !== null && a.endDate === null;
                 return (
                   <tr key={e.id}>
-                    <td><b>{nameOf(e)}</b><span className="block muted">Since {fmtDate(e.employeeSince)}</span></td>
+                    <td><Person name={nameOf(e)}><b>{nameOf(e)}</b><span className="block muted">Since {fmtDate(e.employeeSince)}</span></Person></td>
                     <td><EmployeeStatus status={e.status} /><span className="block muted">{fmtDate(e.statusSince)}</span></td>
                     <td>{open && a.client ? a.client.name : <span className="muted">—</span>}</td>
                     <td>{a ? <>No. {a.assignmentNo}<span className="block muted">{fmtDate(a.startDate)} – {a.endDate ? fmtDate(a.endDate) : "ongoing"}</span></> : <span className="muted">—</span>}</td>

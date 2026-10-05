@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { Bell } from "lucide-react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 
@@ -71,7 +72,7 @@ export function NotificationBell({ onOpen, canOpen, pollMs = UNREAD_POLL_MS }: {
     <div className="inbox-wrap">
       <button ref={bell} type="button" className="bell" aria-label={label} aria-expanded={open} aria-controls={panelId}
         onClick={() => { if (open) close(); else { setOpen(true); void qc.invalidateQueries({ queryKey: inboxKeys.all }); } }}>
-        <span aria-hidden="true">🔔</span>
+        <Bell size={18} strokeWidth={1.8} aria-hidden="true" />
         {n > 0 && <span className="bell-count" aria-hidden="true">{countLabel(n, capped)}</span>}
       </button>
       <span className="sr-only" role="status" aria-live="polite">{announce}</span>
