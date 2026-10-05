@@ -28,6 +28,8 @@ infra/
     storage.tf    S3: documents (quarantine -> clean/restricted, GuardDuty scan), audit (Object Lock), web, logs
     app.tf        ECR, ECS Fargate ARM64 (api, worker, migrate), API Gateway HTTP API + VPC link + Cloud Map
     edge.tf       CloudFront + WAF (5 rules), SPA rewrite function, ACM, Route 53, security headers
+    cost.tf       tag-scoped budgets, cost anomaly monitor, Workstream tag plumbing, opt-in tag activation
+    alarms.tf     SNS alert topic(s) + email, RDS and CloudFront cost alarms
   .checkov.yaml   accepted Checkov skips, each with a reason
 ```
 
@@ -131,6 +133,110 @@ The WAF web ACL has `prevent_destroy`, so a staging teardown first removes it
 from state (`terragrunt state rm aws_wafv2_web_acl.main`), then deletes it in
 the console after the distribution is gone. Never do this for production while
 it is on a flat-rate plan.
+
+## Cost guardrails
+
+Built in C1a.0 (`docs/crewnex-consolidation.md` section 7). Account
+`637423353261` is **shared with spokenly**, so nothing is account-wide: every
+budget and the anomaly monitor filter on a cost-allocation tag (`Project`,
+from the provider default tags, and `Workstream`). An account-wide budget or a
+per-service anomaly monitor would fire on spokenly's bill.
+
+| Guardrail | What it is for | Threshold (variable) | Where |
+|---|---|---|---|
+| Budget `eureka-monthly` | Everything Eureka costs, all environments | $40/month (`budget_monthly_usd`); email at 50 %, 80 %, 100 % actual and 100 % forecast | production only |
+| Budget `eureka-crewnex-migration-tasks` | **The CrewNex migration tasks only** (exporter, import, a rehearsal stack): `Workstream=crewnex`. Not Eureka's running cost | $15 (`budget_crewnex_migration_usd`); 50/80/100 % actual | production only |
+| Budget `eureka-untagged-spend` | Spend with **no** `Project` tag: SES, some data transfer, support, tax, one-off tasks run without tag propagation, and spokenly's until it tags itself `Project=spokenly` | $10 (`budget_untagged_usd`); set it from the first month's actuals | production only |
+| Anomaly monitor `eureka-project-tag` | Sudden spend changes on `Project=Eureka` (CUSTOM monitor, Tags selector) | daily email when total impact ≥ $10 (`cost_anomaly_threshold_usd`) | production only |
+| Alarm `<env>-rds-cpu-credit-balance-low` | Unlimited-mode surplus credits being billed: the cue for `db.t4g.small` | `CPUCreditBalance` < 50 for 15 min | every env (burstable classes) |
+| Alarm `<env>-rds-freeable-memory-low` | The other sizing signal | `FreeableMemory` < 128 MiB for 15 min | every env |
+| Alarm `<env>-cloudfront-bytes-downloaded-high` | Video or a scrape going out through the app distribution | daily `BytesDownloaded` above 1/30 of 1,000 GB (`alarm_cloudfront_monthly_gb`) | every env, us-east-1 |
+
+Budgets and the anomaly monitor live in **production only** (`cost_budgets_enabled`):
+the `Project=Eureka` filter already covers staging, so a second copy would
+double every email. Alarms notify the SNS topic `<env>-alerts`
+(output `alerts_topic_arn`); CloudFront metrics exist only in us-east-1, so a
+stack in another region (staging, us-east-2) gets a second `<env>-alerts` topic
+there. The topics are not KMS-encrypted: CloudWatch cannot publish to the
+AWS-managed SNS key (the alarms would be dropped silently), and a CMK would
+cost $1/month per region to protect alarm names.
+
+**What the guardrails cost.** Anomaly detection, SNS email (first 1,000/month)
+and tag activation are free. Budgets: the first two in the account are free,
+then $0.02 per budget per day (~$0.62/month each); the account is shared, so
+if spokenly already has two, these three cost ~$1.86/month. CloudWatch alarms:
+10 free per account (shared too), then $0.10/month each, so $0–0.30 for
+production's three. **Total: $0–2.20/month.**
+
+### Turning them on (the activation sequence)
+
+A cost-allocation tag can be activated only after its key has appeared on
+**billed** usage; activation fails before that, takes up to 24 hours to reach
+Cost Explorer and Budgets, and is **not retroactive**. Until then a
+`TagKeyValue` filter cannot see the tag, so the budgets and monitor are not
+created at all (the untagged budget would otherwise count the whole shared
+account on day one).
+
+1. **First deploy** (`cost_budgets_enabled = true`, the other two `false`):
+   tagged resources, the SNS topic and the alarms are created. Set
+   `alert_emails` in `live/production/env.hcl` first.
+2. **Confirm the subscriptions (hand step):** each address in `alert_emails`
+   gets an "AWS Notification - Subscription Confirmation" email per topic;
+   click it. Unconfirmed subscriptions receive nothing, and nothing says so.
+   Check: `aws sns list-subscriptions-by-topic --topic-arn <alerts_topic_arn>`
+   shows no `PendingConfirmation`.
+3. **Wait about 24 hours**, until `Project` is listed under Billing → Cost
+   allocation tags (status Inactive).
+4. **Activate and create the budgets:** set `manage_cost_allocation_tags = true`
+   and `cost_allocation_tags_active = true`, apply. The budgets report
+   meaningfully from the next Cost Explorer refresh (up to 24 hours).
+5. **Later, once the first `Workstream=crewnex` task has been billed:** add
+   `"Workstream"` to `cost_allocation_tag_keys` and apply. Until then the
+   migration budget shows $0.
+
+**AWS Organizations (Q35).** If the account is a member of an Organization,
+cost-allocation tags (and some Cost Explorer settings) are managed from the
+**payer** account, and step 4's activation fails here. Then leave
+`manage_cost_allocation_tags = false`, ask the payer to activate `Project`
+(and later `Workstream`), and set only `cost_allocation_tags_active = true`.
+Activation is account-wide: **destroying** `aws_ce_cost_allocation_tag.active`
+deactivates the key for spokenly too.
+
+### Tagging migration resources
+
+The future exporter and import tasks (not created yet) take
+`tags = local.migration_tags` (`Workstream = var.migration_workstream`,
+"crewnex") on their task definitions and log groups, set
+`retention_in_days = var.migration_log_retention_days` (7 or 14; never
+`var.log_retention_days`, which is 30 in production), and are started with
+`aws ecs run-task ... --propagate-tags TASK_DEFINITION`. A standalone Fargate
+task carries no tags otherwise and its cost lands in the untagged budget; the
+caller also needs `ecs:TagResource`. The existing `migrate` and restore-drill
+`run-task` calls do not propagate today (small, untagged).
+
+### Monthly review (hand step)
+
+Once a month: Cost Explorer, last full month, **Group by: Tag → Project**, with
+"No tag key: Project" visible. Eureka should be under the budget; "No tag key"
+should be explainable (SES, transfer, tax, spokenly). Anything new there is a
+resource missing its tags. Also check that the CloudFront distribution is still
+on the flat-rate plan (Pro from C1f).
+
+### Raising the budget at C1f
+
+At the cutover (CloudFront Pro, $15, enrolled **before** cutover traffic, plus
+the worker) set `budget_monthly_usd = 60` in `live/production/env.hcl` and
+apply. Change any threshold the same way; never by editing the budget in the
+console (the next apply reverts it).
+
+### Rules
+
+- **Never serve video on pay-as-you-go CloudFront.** CrewNex's ~800k minutes a
+  month are 12–30 TB, $250–2,000 (section 7). The `BytesDownloaded` alarm is
+  the tripwire, not the control.
+- **No task in a private subnet.** It would need a NAT gateway, $33/month each.
+  Private subnets are for RDS only.
+- At C1f.4 delete the pre-cutover manual RDS snapshots and the export SSM secret.
 
 ## One-time setup (you run this, from a machine with admin AWS credentials)
 

@@ -474,7 +474,7 @@ migration-bearing increment is roll-forward only; "Revert" means revert the code
 
 | # | Increment | What changes | Tests | Size | Startable now? |
 |---|---|---|---|---|---|
-| C1a.0 | Cost guardrails | Terraform: AWS Budget, tag budget, anomaly monitor, log retention, RDS alarms (section 7 "Cost guardrails"). | `terraform validate`, Checkov | S | Yes (applies with the first deploy) |
+| C1a.0 | Cost guardrails | Terraform: AWS Budget, tag budget, anomaly monitor, log retention, RDS alarms (section 7 "Cost guardrails"). | `terraform validate`, Checkov | S | **Built** (`infra/modules/stack/cost.tf`, `alarms.tf`); applies in steps, infra/README "Cost guardrails" |
 | C1a.1 | Sheet-type registry | Migration: widen the `sheet` CHECKs on `import_row` and `import_decision` (`0028_import_staging.sql:51`, `:70`) and `import_link.sheet`/`entity_type` (`0028:83-85`) to the new sheets (`staff`, `lookups`, `submissions`, `work_authorizations`, `crewnex_events`); `import_natural_key.kind` (`0033_import_hardening.sql:83-85`) is **not** widened (source ids replace natural keys for CrewNex rows); `mapping.ts`/`stage.ts` parse the sheets; **no loader yet**: `authz.import_verify_batch` reports an explicit problem `unsupported_sheet` per row of a sheet with no loader, so approval is refused by the existing "problems block approval" rule. | Old fixtures stage, digest and commit byte-identically; new sheets stage and are refused at approval with `unsupported_sheet` | M | Yes |
 | C1a.2 | `sourceId` row keys (D3) | Mapping `sourceId` column per sheet; row key `h("src:crewnex:"+sheet+id)`; decisions survive edits; ledger hit on the same source id → `skipped`. | Edited row keeps its key and decision; sheet batches unaffected | M | Yes |
 | C1a.3 | Batch `source` + `historical` | `import_batch.source` (`sheets`/`crewnex`) and `historical`, fixed at `import_open_batch`, immutable (guard), part of `authz.import_batch_digest` exactly like `placements_commit` (`0041_import_review.sql:36`, `:87`), so every pending approval is withdrawn when it lands (its digest no longer matches). Adds `import_session.active_batch` (set on every `import_load_person` call, dry or not) and `authz.import_historical()`. | Digest changes when either flag would; guard refuses updates; `import_historical()` true in a dry run of a historical batch | S | Yes |
@@ -591,6 +591,12 @@ CrewNex costs retired (list prices; actual plans are TODO in CrewNex `docs/Vendo
 C1 and C2 retire little (two Supabase projects and Vercel seats); the bill drops substantially only at C3.
 
 ### Cost guardrails (C1a.0, first increment)
+
+**Built.** `infra/modules/stack/cost.tf` (budgets, anomaly monitor, `local.migration_tags`, opt-in
+`aws_ce_cost_allocation_tag`) and `alarms.tf` (SNS + alarms); runbook and thresholds in infra/README "Cost
+guardrails". Two choices beyond the table: budgets and the monitor are created only once
+`cost_allocation_tags_active` is set (step 3 below), and the SNS topics are unencrypted, because CloudWatch
+cannot publish to the AWS-managed SNS key and a CMK costs $1/month per region for alarm names.
 
 The production account is shared with spokenly (`infra/live/production/env.hcl`, account `637423353261`), so
 account-wide budgets and per-service anomaly monitors would fire on spokenly's spend. Everything is **tag-scoped**:
