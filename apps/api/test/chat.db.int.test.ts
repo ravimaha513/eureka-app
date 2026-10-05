@@ -347,3 +347,67 @@ describe("audit has ids and counts only (CH-10, rule 5)", () => {
     for (const p of payloads) expect(Object.keys(p.payload).sort()).toEqual(["conversationId", "recipientId"]);
   });
 });
+
+describe("database limits (CH-12) and presence scope (CH-7)", () => {
+  it("refuses groups, members added, sends, edits and deletes above the caps", async () => {
+    for (let i = 0; i < 20; i++) await group(U.coach, `Cap ${i}`, [U.locD]);
+    await expect(group(U.coach, "Cap 20", [U.locD])).rejects.toThrow(/rate_limited/);
+
+    // Members added: 200 per hour (add and remove the same person repeatedly).
+    const g = await group(U.ceo, "Churn", [U.om]);
+    for (let i = 0; i < 200; i++) {
+      await as(U.ceo, (q) => q(`SELECT authz.chat_add_members($1, $2::uuid[])`, [g, [U.ad]]));
+      await as(U.ceo, (q) => q(`SELECT authz.chat_remove_member($1, $2)`, [g, U.ad]));
+    }
+    await expect(as(U.ceo, (q) => q(`SELECT authz.chat_add_members($1, $2::uuid[])`, [g, [U.ad]]))).rejects.toThrow(/rate_limited/);
+
+    // Edits 30/minute, deletes 60/minute, sends 120/minute.
+    const d = (await direct(U.locA, U.imm)).conversation_id;
+    const ids: string[] = [];
+    for (let i = 0; i < 61; i++) ids.push((await send(U.locA, d, `m${i}`)).message_id);
+    for (let i = 0; i < 30; i++) await as(U.locA, (q) => q(`SELECT authz.chat_edit_message($1, 'e')`, [ids[i]]));
+    await expect(as(U.locA, (q) => q(`SELECT authz.chat_edit_message($1, 'e')`, [ids[30]]))).rejects.toThrow(/rate_limited/);
+    for (let i = 0; i < 60; i++) await as(U.locA, (q) => q(`SELECT authz.chat_delete_message($1)`, [ids[i]]));
+    await expect(as(U.locA, (q) => q(`SELECT authz.chat_delete_message($1)`, [ids[60]]))).rejects.toThrow(/rate_limited/);
+    for (let i = 0; i < 59; i++) await send(U.locA, d, `x${i}`);
+    await expect(send(U.locA, d, "one too many")).rejects.toThrow(/rate_limited/);
+  }, 120_000);
+
+  it("a concurrent duplicate client id returns the first message", async () => {
+    const d = (await direct(U.m1, U.coach)).conversation_id;
+    const client = randomUUID();
+    const rs = await Promise.all([1, 2, 3, 4].map(() => send(U.m1, d, "dup", [], client)));
+    expect(new Set(rs.map((r) => r.message_id)).size).toBe(1);
+    expect(rs.filter((r) => r.created)).toHaveLength(1);
+  });
+
+  it("chat_online: only people sharing a current conversation, only live sessions; not callable by the worker", async () => {
+    const ses = async (user: string, ageMinutes: number) => db.admin.query(
+      `INSERT INTO eureka.session (id_hash, user_id, expires_at, auth_time, access_version, last_seen_at)
+       VALUES (sha256(gen_random_uuid()::text::bytea), $1, now() + interval '1 hour', now(), 1, now() - make_interval(mins => $2))`, [user, ageMinutes]);
+    await ses(U.imm, 0);
+    await ses(U.r2a, 5);
+    await ses(U.m2, 0);
+    const g = await group(U.imm, "Presence db", [U.r2a]);
+    const online = (u: string, who: string[]) => one<{ ids: string[] }>(u, `SELECT authz.chat_online($1::uuid[]) AS ids`, [who]).then((r) => r.ids);
+    expect(await online(U.imm, [U.r2a, U.m2, U.imm])).toEqual([U.imm]); // r2a's session is stale (5 min); m2 shares nothing
+    expect(await online(U.r2a, [U.imm, U.m2])).toEqual([U.imm]);
+    await as(U.imm, (q) => q(`SELECT authz.chat_leave($1)`, [g]));
+    expect(await online(U.r2a, [U.imm])).toEqual([]); // no shared conversation any more
+    await expect(db.worker.query(`SELECT authz.chat_online('{}'::uuid[])`)).rejects.toThrow(/permission denied/);
+  });
+
+  it("deactivated users: not chat users; reactivation moves their visibility to now; ownerless groups can be claimed", async () => {
+    const g = await group(U.l1, "Dormant db", [U.r1a, U.r1b]);
+    await send(U.l1, g, "old");
+    await db.admin.query(`UPDATE eureka.app_user SET status = 'inactive' WHERE id = $1`, [U.l1]);
+    await expect(direct(U.r1a, U.l1)).rejects.toThrow(/invalid_member/);
+    await expect(as(U.r1b, (q) => q(`SELECT authz.chat_set_member_role($1, $2, 'owner')`, [g, U.r1b]))).resolves.toBeDefined(); // ownerless: claim
+    await expect(as(U.r1a, (q) => q(`SELECT authz.chat_set_member_role($1, $2, 'owner')`, [g, U.r1a]))).rejects.toThrow(/not_permitted/);
+    await send(U.r1a, g, "meanwhile");
+    await db.admin.query(`UPDATE eureka.app_user SET status = 'active' WHERE id = $1`, [U.l1]);
+    expect(await as(U.l1, (q) => q(`SELECT body FROM eureka.chat_message WHERE conversation_id = $1`, [g]))).toEqual([]);
+    await send(U.r1a, g, "after");
+    expect(await as(U.l1, (q) => q(`SELECT body FROM eureka.chat_message WHERE conversation_id = $1`, [g]))).toEqual([{ body: "after" }]);
+  });
+});

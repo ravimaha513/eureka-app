@@ -26,6 +26,14 @@ export const CHAT_DOWNLOAD_TTL_SECONDS = 60;
 export const CHAT_MESSAGES_PER_MINUTE = 60;
 export const CHAT_UPLOADS_PER_MINUTE = 10;
 export const CHAT_DOWNLOADS_PER_MINUTE = 30;
+/** First line of defence per task; the database enforces the real limits across tasks (docs/chat-api.md CH-12). */
+export const CHAT_WRITES_PER_MINUTE = 60;
+export const CHAT_READS_PER_MINUTE = 240;
+
+/** SQL: the user `alias` may still take part in chats (active, a valid role holding chat:use); mirrors authz.chat_user_ok. */
+const chatUser = (alias: string) => `(${alias}.status = 'active' AND EXISTS (
+  SELECT 1 FROM eureka.user_role ur JOIN eureka.role_permission rp ON rp.role_key = ur.role_key AND rp.permission = 'chat:use'
+   WHERE ur.user_id = ${alias}.id AND ur.valid @> now()))`;
 /** Unread messages counted at most per conversation and in total (the badge shows "99+" well before this). */
 export const CHAT_UNREAD_CAP = 999;
 /** Changes returned by one poll (`after`); `more: true` asks the client to poll again at once. */
@@ -49,6 +57,7 @@ const DB_ERRORS: Record<string, () => HttpException> = {
   message_deleted: () => new ConflictException("message_deleted"),
   last_owner: () => new ConflictException("last_owner"),
   stale: () => new HttpException("stale", HttpStatus.PRECONDITION_FAILED),
+  rate_limited: () => new HttpException("rate_limited", HttpStatus.TOO_MANY_REQUESTS),
 };
 
 function mapDbError(err: unknown): never {
@@ -115,24 +124,33 @@ export class ChatService {
   private readonly sendLimiter = new RateLimiter(CHAT_MESSAGES_PER_MINUTE, 60_000);
   private readonly uploadLimiter = new RateLimiter(CHAT_UPLOADS_PER_MINUTE, 60_000);
   private readonly downloadLimiter = new RateLimiter(CHAT_DOWNLOADS_PER_MINUTE, 60_000);
+  private readonly writeLimiter = new RateLimiter(CHAT_WRITES_PER_MINUTE, 60_000);
+  private readonly readLimiter = new RateLimiter(CHAT_READS_PER_MINUTE, 60_000);
+
+  private write(user: AuthedUser) {
+    if (!this.writeLimiter.take(user.id)) throw new HttpException("rate_limited", HttpStatus.TOO_MANY_REQUESTS);
+  }
+  private read(user: AuthedUser) {
+    if (!this.readLimiter.take(user.id)) throw new HttpException("rate_limited", HttpStatus.TOO_MANY_REQUESTS);
+  }
 
   constructor(
     private readonly db: DbService,
     @Inject(DOCUMENT_STORAGE) private readonly storage: DocumentStorage,
   ) {}
 
-  /** Users with a live session seen within CHAT_ONLINE_SECONDS (CH-7). */
+  /**
+   * Which of `ids` are online (a live session seen within CHAT_ONLINE_SECONDS). Decided in the database
+   * (authz.chat_online) and only for the caller and people they share a current conversation with (CH-7).
+   */
   private async online(c: pg.PoolClient, ids: string[]): Promise<Set<string>> {
     if (ids.length === 0) return new Set();
-    const { rows } = await c.query<{ user_id: string }>(
-      `SELECT DISTINCT s.user_id FROM eureka.session s JOIN eureka.app_user u ON u.id = s.user_id AND u.status = 'active'
-        WHERE s.user_id = ANY ($1::uuid[]) AND s.revoked_at IS NULL AND s.expires_at > now()
-          AND s.last_seen_at > now() - make_interval(secs => $2)`,
-      [ids, CHAT_ONLINE_SECONDS]);
-    return new Set(rows.map((r) => r.user_id));
+    const r = (await c.query<{ ids: string[] }>(`SELECT authz.chat_online($1::uuid[]) AS ids`, [ids])).rows[0]!;
+    return new Set(r.ids);
   }
 
   async listConversations(user: AuthedUser, q: ConversationListQuery) {
+    this.read(user);
     const cursor = q.cursor === undefined ? null : decodeListCursor(q.cursor);
     if (q.cursor !== undefined && !cursor) throw new UnprocessableEntityException("Invalid cursor");
     return this.db.withUser(user.id, async (c) => {
@@ -167,7 +185,8 @@ export class ChatService {
                      WHERE m.conversation_id = c.id AND m.seq > s.last_read_seq AND m.sender_id <> $1 AND m.deleted_at IS NULL
                      LIMIT $2) n) AS unread,
                   o.user_id AS other_id, ou.display_name AS other_name, ou.designation AS other_designation,
-                  (SELECT count(*)::int FROM eureka.chat_member mm WHERE mm.conversation_id = c.id AND mm.left_at IS NULL) AS member_count
+                  (SELECT count(*)::int FROM eureka.chat_member mm JOIN eureka.app_user mu ON mu.id = mm.user_id
+                    WHERE mm.conversation_id = c.id AND mm.left_at IS NULL AND ${chatUser("mu")}) AS member_count
              FROM eureka.chat_conversation c
              JOIN eureka.chat_member_state s ON s.conversation_id = c.id AND s.user_id = $1
              LEFT JOIN LATERAL (SELECT m.user_id FROM eureka.chat_member m
@@ -210,6 +229,7 @@ export class ChatService {
 
   /** Total unread messages in the caller's visible, unmuted conversations (the nav badge). */
   async unread(user: AuthedUser) {
+    this.read(user);
     return this.db.withUser(user.id, async (c) => {
       const r = (await c.query<{ unread: number; conversations: number }>(
         `SELECT coalesce(sum(n), 0)::int AS unread, count(*) FILTER (WHERE n > 0)::int AS conversations FROM (
@@ -225,6 +245,7 @@ export class ChatService {
 
   /** One conversation with its current members; 404 unless the caller is a current member (RLS). */
   async get(user: AuthedUser, id: string) {
+    this.read(user);
     return this.db.withUser(user.id, (c) => this.detail(c, user, id));
   }
 
@@ -238,7 +259,7 @@ export class ChatService {
     const members = (await c.query<{ user_id: string; role: "owner" | "member"; joined_at: Date; name: string | null; designation: string | null }>(
       `SELECT m.user_id, m.role, m.joined_at, u.display_name AS name, u.designation
          FROM eureka.chat_member m JOIN eureka.app_user u ON u.id = m.user_id
-        WHERE m.conversation_id = $1 AND m.left_at IS NULL
+        WHERE m.conversation_id = $1 AND m.left_at IS NULL AND ${chatUser("u")}
         ORDER BY (m.role = 'owner') DESC, u.display_name, m.user_id`, [id])).rows;
     const online = await this.online(c, members.map((m) => m.user_id));
     const mine = members.find((m) => m.user_id === user.id);
@@ -253,6 +274,8 @@ export class ChatService {
       archived: conv.archived, favorite: conv.favorite, muted: conv.muted,
       myRole: mine?.role ?? "member",
       canManage: conv.kind === "group" && mine?.role === "owner",
+      /** A group whose owners are all deactivated: any member may take ownership (PATCH members/:me). */
+      ownerless: conv.kind === "group" && !members.some((m) => m.role === "owner"),
       members: members.map((m) => ({
         id: m.user_id, name: m.name, designation: m.designation, role: m.role, online: online.has(m.user_id), me: m.user_id === user.id,
       })),
@@ -260,6 +283,7 @@ export class ChatService {
   }
 
   async openDirect(user: AuthedUser, otherId: string) {
+    this.write(user);
     return this.db.withUser(user.id, async (c) => {
       const r = (await c.query<{ conversation_id: string; created: boolean }>(
         `SELECT * FROM authz.chat_open_direct($1)`, [otherId]).catch(mapDbError)).rows[0]!;
@@ -268,6 +292,7 @@ export class ChatService {
   }
 
   async createGroup(user: AuthedUser, name: string, memberIds: string[]) {
+    this.write(user);
     return this.db.withUser(user.id, async (c) => {
       const id = (await c.query<{ id: string }>(`SELECT authz.chat_create_group($1, $2::uuid[]) AS id`, [name, memberIds])
         .catch(mapDbError)).rows[0]!.id;
@@ -278,6 +303,7 @@ export class ChatService {
   /** 428 without If-Match, 412 `stale` when the group changed since the client read it. */
   async rename(user: AuthedUser, id: string, name: string, expectedVersion: number | null) {
     if (expectedVersion === null) throw new HttpException("if_match_required", HttpStatus.PRECONDITION_REQUIRED);
+    this.write(user);
     return this.db.withUser(user.id, async (c) => {
       await c.query(`SELECT authz.chat_rename($1, $2, $3)`, [id, name, expectedVersion]).catch(mapDbError);
       return this.detail(c, user, id);
@@ -285,6 +311,7 @@ export class ChatService {
   }
 
   async setPreferences(user: AuthedUser, id: string, p: { archived?: boolean; favorite?: boolean; muted?: boolean }) {
+    this.write(user);
     return this.db.withUser(user.id, async (c) => (await c.query<{ archived: boolean; favorite: boolean; muted: boolean }>(
       `SELECT * FROM authz.chat_set_prefs($1, $2, $3, $4)`, [id, p.archived ?? null, p.favorite ?? null, p.muted ?? null])
       .catch(mapDbError)).rows[0]!);
@@ -292,6 +319,7 @@ export class ChatService {
 
   /** "Delete chat": a direct chat is hidden for the caller; a group is deleted for everyone (owners only). */
   async remove(user: AuthedUser, id: string) {
+    this.write(user);
     await this.db.withUser(user.id, async (c) => {
       const kind = (await c.query<{ kind: string }>(`SELECT kind FROM eureka.chat_conversation WHERE id = $1`, [id])).rows[0]?.kind;
       if (!kind) throw new NotFoundException();
@@ -300,10 +328,12 @@ export class ChatService {
   }
 
   async leave(user: AuthedUser, id: string) {
+    this.write(user);
     await this.db.withUser(user.id, (c) => c.query(`SELECT authz.chat_leave($1)`, [id]).catch(mapDbError));
   }
 
   async addMembers(user: AuthedUser, id: string, userIds: string[]) {
+    this.write(user);
     return this.db.withUser(user.id, async (c) => {
       const added = (await c.query<{ n: number }>(`SELECT authz.chat_add_members($1, $2::uuid[]) AS n`, [id, userIds])
         .catch(mapDbError)).rows[0]!.n;
@@ -312,10 +342,12 @@ export class ChatService {
   }
 
   async removeMember(user: AuthedUser, id: string, userId: string) {
+    this.write(user);
     await this.db.withUser(user.id, (c) => c.query(`SELECT authz.chat_remove_member($1, $2)`, [id, userId]).catch(mapDbError));
   }
 
   async setMemberRole(user: AuthedUser, id: string, userId: string, role: "owner" | "member") {
+    this.write(user);
     return this.db.withUser(user.id, async (c) => {
       await c.query(`SELECT authz.chat_set_member_role($1, $2, $3)`, [id, userId, role]).catch(mapDbError);
       return this.detail(c, user, id);
@@ -337,6 +369,7 @@ export class ChatService {
    * poll cursor (new, edited and deleted messages), with the next cursor.
    */
   async messages(user: AuthedUser, id: string, q: MessagesQuery) {
+    this.read(user);
     return this.db.withUser(user.id, async (c) => {
       const conv = (await c.query<{ last_rev: string }>(
         `SELECT last_rev::text AS last_rev FROM eureka.chat_conversation WHERE id = $1`, [id])).rows[0];
@@ -408,6 +441,7 @@ export class ChatService {
   }
 
   async editMessage(user: AuthedUser, messageId: string, body: string) {
+    this.write(user);
     return this.db.withUser(user.id, async (c) => {
       await c.query(`SELECT authz.chat_edit_message($1, $2)`, [messageId, body]).catch(mapDbError);
       const m = (await c.query<MessageRow>(
@@ -419,10 +453,12 @@ export class ChatService {
   }
 
   async deleteMessage(user: AuthedUser, messageId: string) {
+    this.write(user);
     await this.db.withUser(user.id, (c) => c.query(`SELECT authz.chat_delete_message($1)`, [messageId]).catch(mapDbError));
   }
 
   async markRead(user: AuthedUser, conversationId: string, messageId: string | undefined) {
+    this.read(user);
     await this.db.withUser(user.id, (c) => c.query(`SELECT authz.chat_mark_read($1, $2)`, [conversationId, messageId ?? null]).catch(mapDbError));
   }
 
@@ -439,8 +475,12 @@ export class ChatService {
     return { url, expiresAt: new Date(Date.now() + CHAT_DOWNLOAD_TTL_SECONDS * 1000).toISOString() };
   }
 
-  /** Active staff who may chat (name and designation only), for the pickers. */
+  /**
+   * Active staff who may chat (name and designation only), for the pickers. No presence here: "online" is shown only
+   * for people the caller shares a conversation with (CH-7).
+   */
   async people(user: AuthedUser, q: { q?: string; limit: number }) {
+    this.read(user);
     return this.db.withUser(user.id, async (c) => {
       const params: unknown[] = [user.id, q.limit];
       let match = "";
@@ -450,13 +490,9 @@ export class ChatService {
       }
       const { rows } = await c.query<{ id: string; display_name: string; designation: string | null }>(
         `SELECT u.id, u.display_name, u.designation FROM eureka.app_user u
-          WHERE u.status = 'active' AND u.id <> $1 ${match}
-            AND EXISTS (SELECT 1 FROM eureka.user_role ur JOIN eureka.role_permission rp
-                          ON rp.role_key = ur.role_key AND rp.permission = 'chat:use'
-                         WHERE ur.user_id = u.id AND ur.valid @> now())
+          WHERE u.id <> $1 AND ${chatUser("u")} ${match}
           ORDER BY u.display_name, u.id LIMIT $2`, params);
-      const online = await this.online(c, rows.map((r) => r.id));
-      return { items: rows.map((r) => ({ id: r.id, name: r.display_name, designation: r.designation, online: online.has(r.id) })) };
+      return { items: rows.map((r) => ({ id: r.id, name: r.display_name, designation: r.designation })) };
     });
   }
 }

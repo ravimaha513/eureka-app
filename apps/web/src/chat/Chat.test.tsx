@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setCsrf, type Me } from "../api";
 import { browser } from "../sales/resumesApi";
 import { ChatPage } from "./ChatPage";
-import { attachmentState, mergeMessages, type ConversationDetail, type ConversationSummary, type Message } from "./chatApi";
+import { attachmentState, mergeMessages, pollDelay, type ConversationDetail, type ConversationSummary, type Message } from "./chatApi";
 import { splitLinks } from "./linkify";
 
 // Chat screen (API: apps/api/src/modules/chat, docs/chat-api.md).
@@ -23,7 +23,7 @@ const summary = (over: Partial<ConversationSummary> = {}): ConversationSummary =
 });
 const detail = (over: Partial<ConversationDetail> = {}): ConversationDetail => ({
   id: CONV, kind: "direct", title: "Hema HR", name: null, rowVersion: 1, createdAt: "2026-10-01T10:00:00.000Z",
-  archived: false, favorite: false, muted: false, myRole: "member", canManage: false,
+  archived: false, favorite: false, muted: false, myRole: "member", canManage: false, ownerless: false,
   members: [
     { id: ME, name: "Riya Recruiter", designation: null, role: "member", online: true, me: true },
     { id: HR, name: "Hema HR", designation: "HR Executive", role: "member", online: true, me: false },
@@ -52,8 +52,8 @@ beforeEach(() => {
   routes = {
     "GET /api/v1/chat/conversations": (_b, s) => ({ body: { items: s.get("filter") === "group" ? [] : [summary()], nextCursor: null } }),
     "GET /api/v1/chat/unread": () => ({ body: { unread: 2, capped: false, conversations: 1 } }),
-    "GET /api/v1/chat/people": () => ({ body: { items: [{ id: HR, name: "Hema HR", designation: "HR Executive", online: true },
-      { id: "00000000-0000-4000-8000-000000000003", name: "Lalit Lead", designation: null, online: false }] } }),
+    "GET /api/v1/chat/people": () => ({ body: { items: [{ id: HR, name: "Hema HR", designation: "HR Executive" },
+      { id: "00000000-0000-4000-8000-000000000003", name: "Lalit Lead", designation: null }] } }),
     [`GET /api/v1/chat/conversations/${CONV}`]: () => ({ body: detail() }),
     [`GET /api/v1/chat/conversations/${CONV}/messages`]: (_b, s) => (s.get("after") !== null
       ? { body: { items: [], cursor: 10, more: false } }
@@ -116,6 +116,17 @@ function renderLinkified(text: string) {
 }
 
 describe("helpers", () => {
+  it("backs off with jitter after errors and stops on 401/403", () => {
+    expect(pollDelay(4000, 0)).toBe(4000);
+    expect(pollDelay(4000, 1, undefined, () => 0.5)).toBe(8000);
+    expect(pollDelay(4000, 3, undefined, () => 0.5)).toBe(32000);
+    expect(pollDelay(4000, 9, undefined, () => 0.5)).toBe(300000);
+    expect(pollDelay(4000, 2, undefined, () => 0)).toBe(12000);
+    expect(pollDelay(4000, 2, undefined, () => 1)).toBe(20000);
+    expect(pollDelay(4000, 0, 401)).toBeNull();
+    expect(pollDelay(4000, 2, 403)).toBeNull();
+    expect(pollDelay(4000, 2, 429, () => 0.5)).toBe(16000);
+  });
   it("merges messages by id, newest revision wins, in send order", () => {
     const a = msg({ body: "a" });
     const b = msg({ body: "b" });

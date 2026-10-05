@@ -85,8 +85,8 @@ export const MarkRead = z.object({ messageId: z.string().uuid().optional() }).st
  */
 export const MessagesQuery = z
   .object({
-    before: z.coerce.number().int().min(1).optional(),
-    after: z.coerce.number().int().min(0).optional(),
+    before: z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+    after: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
     limit: z.coerce.number().int().min(1).max(100).default(50),
   })
   .strict()

@@ -81,6 +81,14 @@ CREATE TABLE eureka.chat_member (
 );
 CREATE INDEX chat_member_current ON eureka.chat_member (user_id, conversation_id) WHERE left_at IS NULL;
 
+-- One row per member added by someone else (also rejoins): the limit on members added per hour counts these.
+CREATE TABLE eureka.chat_add_event (
+  id       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  actor_id uuid NOT NULL REFERENCES eureka.app_user(id),
+  at       timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX chat_add_event_actor ON eureka.chat_add_event (actor_id, at DESC);
+
 CREATE TABLE eureka.chat_member_state (
   conversation_id      uuid NOT NULL,
   user_id              uuid NOT NULL,
@@ -224,6 +232,9 @@ ALTER TABLE eureka.chat_member ENABLE ROW LEVEL SECURITY;       ALTER TABLE eure
 ALTER TABLE eureka.chat_member_state ENABLE ROW LEVEL SECURITY; ALTER TABLE eureka.chat_member_state FORCE ROW LEVEL SECURITY;
 ALTER TABLE eureka.chat_message ENABLE ROW LEVEL SECURITY;      ALTER TABLE eureka.chat_message FORCE ROW LEVEL SECURITY;
 ALTER TABLE eureka.chat_attachment ENABLE ROW LEVEL SECURITY;   ALTER TABLE eureka.chat_attachment FORCE ROW LEVEL SECURITY;
+ALTER TABLE eureka.chat_add_event ENABLE ROW LEVEL SECURITY;    ALTER TABLE eureka.chat_add_event FORCE ROW LEVEL SECURITY;
+CREATE POLICY definer_read   ON eureka.chat_add_event FOR SELECT TO authz_definer USING (true);
+CREATE POLICY definer_insert ON eureka.chat_add_event FOR INSERT TO authz_definer WITH CHECK (true);
 
 -- The definer functions (and the notification resolver) read and write everything; nobody deletes.
 CREATE POLICY definer_read   ON eureka.chat_conversation FOR SELECT TO authz_definer USING (true);
@@ -255,6 +266,8 @@ ALTER TABLE eureka.notification ADD CONSTRAINT notification_entity_type_check
 
 RESET ROLE;
 
+REVOKE ALL ON eureka.chat_add_event FROM PUBLIC;
+GRANT SELECT, INSERT (actor_id) ON eureka.chat_add_event TO authz_definer;
 REVOKE ALL ON eureka.chat_conversation, eureka.chat_member, eureka.chat_member_state, eureka.chat_message,
   eureka.chat_attachment FROM PUBLIC;
 REVOKE ALL ON SEQUENCE eureka.chat_rev_seq FROM PUBLIC;
@@ -266,6 +279,8 @@ GRANT SELECT, INSERT, UPDATE ON eureka.chat_conversation, eureka.chat_member, eu
   eureka.chat_message TO authz_definer;
 GRANT SELECT, INSERT ON eureka.chat_attachment TO authz_definer;
 GRANT USAGE ON SEQUENCE eureka.chat_rev_seq TO authz_definer;
+-- Presence (authz.chat_online) reads session liveness.
+GRANT SELECT (id_hash, user_id, expires_at, revoked_at, last_seen_at) ON eureka.session TO authz_definer;
 -- Repeated from 0033/0037/0043 so this migration stands alone.
 GRANT INSERT (actor_id, action, entity_type, entity_id, changes) ON eureka.audit_event TO authz_definer;
 GRANT USAGE ON SEQUENCE eureka.audit_event_seq_seq TO authz_definer;
@@ -332,6 +347,27 @@ BEGIN
   RETURN QUERY SELECT k, r, s;
 END $$;
 
+-- API: which of p_users have a live session seen in the last 2 minutes, but
+-- only users who share a current conversation with the caller (or the caller):
+-- presence is no directory-wide oracle (CH-7).
+CREATE FUNCTION authz.chat_online(p_users uuid[]) RETURNS uuid[]
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE me uuid := authz.chat_me();
+BEGIN
+  RETURN coalesce((
+    SELECT pg_catalog.array_agg(DISTINCT u.id)
+      FROM pg_catalog.unnest(coalesce(p_users, '{}'::uuid[])) AS u(id)
+     WHERE (u.id = me OR EXISTS (
+              SELECT 1 FROM eureka.chat_member a
+                JOIN eureka.chat_member b ON b.conversation_id = a.conversation_id AND b.left_at IS NULL AND b.user_id = u.id
+                JOIN eureka.chat_conversation c ON c.id = a.conversation_id AND c.deleted_at IS NULL
+               WHERE a.user_id = me AND a.left_at IS NULL))
+       AND coalesce(authz.chat_user_ok(u.id), false)
+       AND EXISTS (SELECT 1 FROM eureka.session s
+                    WHERE s.user_id = u.id AND s.revoked_at IS NULL AND s.expires_at > pg_catalog.now()
+                      AND s.last_seen_at > pg_catalog.now() - interval '2 minutes')), '{}'::uuid[]);
+END $$;
+
 -- Internal: one audit row about a conversation.
 CREATE FUNCTION authz.chat_audit(p_action text, p_conv uuid, p_changes jsonb) RETURNS void
 LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -366,6 +402,12 @@ BEGIN
     RAISE EXCEPTION 'invalid_member' USING ERRCODE = 'check_violation';
   END IF;
   k := CASE WHEN me::text < p_other::text THEN me::text || ':' || p_other::text ELSE p_other::text || ':' || me::text END;
+  -- Limit (CH-12): at most 50 new direct chats per user per hour.
+  IF NOT EXISTS (SELECT 1 FROM eureka.chat_conversation x WHERE x.direct_key = k)
+     AND (SELECT pg_catalog.count(*) FROM eureka.chat_conversation x
+           WHERE x.created_by = me AND x.kind = 'direct' AND x.created_at > pg_catalog.now() - interval '1 hour') >= 50 THEN
+    RAISE EXCEPTION 'rate_limited' USING ERRCODE = 'check_violation';
+  END IF;
   INSERT INTO eureka.chat_conversation AS c (kind, direct_key, created_by) VALUES ('direct', k, me)
   ON CONFLICT (direct_key) DO NOTHING
   RETURNING c.id INTO c_id;
@@ -389,6 +431,11 @@ BEGIN
   IF p_name IS NULL OR NOT coalesce(char_length(p_name) BETWEEN 1 AND 80, false)
      OR p_name ~ '[[:cntrl:]]' OR p_name IS DISTINCT FROM pg_catalog.btrim(p_name) THEN
     RAISE EXCEPTION 'invalid_name' USING ERRCODE = 'check_violation';
+  END IF;
+  -- Limit (CH-12): at most 20 groups per user per hour.
+  IF (SELECT pg_catalog.count(*) FROM eureka.chat_conversation x
+       WHERE x.created_by = me AND x.kind = 'group' AND x.created_at > pg_catalog.now() - interval '1 hour') >= 20 THEN
+    RAISE EXCEPTION 'rate_limited' USING ERRCODE = 'check_violation';
   END IF;
   others := ARRAY(SELECT DISTINCT x FROM pg_catalog.unnest(coalesce(p_members, '{}'::uuid[])) x WHERE x IS DISTINCT FROM me);
   IF coalesce(pg_catalog.cardinality(others), 0) < 1 OR pg_catalog.cardinality(others) > 99 THEN
@@ -456,6 +503,17 @@ BEGIN
     END IF;
   END LOOP;
   SELECT * INTO e FROM authz.chat_enter(p_conv, true);
+  -- A concurrent send with the same client id may have committed while this one waited for the lock (L4).
+  SELECT x.id INTO prior FROM eureka.chat_message x WHERE x.sender_id = me AND x.client_id = p_client;
+  IF prior.id IS NOT NULL THEN
+    RETURN QUERY SELECT prior.id, false;
+    RETURN;
+  END IF;
+  -- Limit (CH-12): at most 120 messages per user per minute, across all API tasks.
+  IF (SELECT pg_catalog.count(*) FROM eureka.chat_message x
+       WHERE x.sender_id = me AND x.created_at > pg_catalog.now() - interval '1 minute') >= 120 THEN
+    RAISE EXCEPTION 'rate_limited' USING ERRCODE = 'check_violation';
+  END IF;
   IF n_files > 0 THEN
     PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('chat_upload:' || me::text, 0));
     IF (SELECT pg_catalog.count(*) FROM eureka.chat_attachment a JOIN eureka.file_object o ON o.id = a.file_id
@@ -526,6 +584,11 @@ BEGIN
      OR (pg_catalog.btrim(p_body, E' \t\n') = '' AND NOT EXISTS (SELECT 1 FROM eureka.chat_attachment a WHERE a.message_id = p_message)) THEN
     RAISE EXCEPTION 'invalid_message' USING ERRCODE = 'check_violation';
   END IF;
+  -- Limit (CH-12): at most 30 edited messages per user per minute.
+  IF (SELECT pg_catalog.count(*) FROM eureka.chat_message x
+       WHERE x.sender_id = me AND x.edited_at > pg_catalog.now() - interval '1 minute') >= 30 THEN
+    RAISE EXCEPTION 'rate_limited' USING ERRCODE = 'check_violation';
+  END IF;
   r := pg_catalog.nextval('eureka.chat_rev_seq');
   UPDATE eureka.chat_message SET body = p_body, edited_at = pg_catalog.now(), rev = r WHERE id = p_message;
   UPDATE eureka.chat_conversation SET last_rev = r WHERE id = m.conversation_id;
@@ -553,6 +616,11 @@ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM eureka.chat_message x WHERE x.id = p_message AND x.deleted_at IS NOT NULL) THEN
     RETURN;
+  END IF;
+  -- Limit (CH-12): at most 60 deleted messages per user per minute.
+  IF (SELECT pg_catalog.count(*) FROM eureka.chat_message x
+       WHERE x.sender_id = me AND x.deleted_at > pg_catalog.now() - interval '1 minute') >= 60 THEN
+    RAISE EXCEPTION 'rate_limited' USING ERRCODE = 'check_violation';
   END IF;
   r := pg_catalog.nextval('eureka.chat_rev_seq');
   UPDATE eureka.chat_message SET body = '', deleted_at = pg_catalog.now(), rev = r WHERE id = p_message;
@@ -621,7 +689,7 @@ END $$;
 CREATE FUNCTION authz.chat_owner_count(p_conv uuid) RETURNS integer
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
   SELECT pg_catalog.count(*)::integer FROM eureka.chat_member m
-   WHERE m.conversation_id = p_conv AND m.left_at IS NULL AND m.role = 'owner'
+   WHERE m.conversation_id = p_conv AND m.left_at IS NULL AND m.role = 'owner' AND authz.chat_user_ok(m.user_id)
 $$;
 
 -- API (group owner): adds chat users; a former member rejoins and sees only
@@ -652,8 +720,15 @@ BEGIN
      + coalesce(pg_catalog.cardinality(adds), 0) > 100 THEN
     RAISE EXCEPTION 'too_many_members' USING ERRCODE = 'check_violation';
   END IF;
+  -- Limit (CH-12): at most 200 members added per user per hour (all conversations).
+  IF (SELECT pg_catalog.count(*) FROM eureka.chat_add_event a
+       WHERE a.actor_id = me AND a.at > pg_catalog.now() - interval '1 hour')
+     + coalesce(pg_catalog.cardinality(adds), 0) > 200 THEN
+    RAISE EXCEPTION 'rate_limited' USING ERRCODE = 'check_violation';
+  END IF;
   FOREACH u IN ARRAY adds LOOP
     PERFORM authz.chat_join(p_conv, u, 'member', e.last_seq);
+    INSERT INTO eureka.chat_add_event (actor_id) VALUES (me);
     PERFORM authz.chat_audit('chat.member_added', p_conv, pg_catalog.jsonb_build_object('userId', u));
     n := n + 1;
   END LOOP;
@@ -695,7 +770,12 @@ BEGIN
   IF e.kind IS DISTINCT FROM 'group' THEN
     RAISE EXCEPTION 'not_group' USING ERRCODE = 'check_violation';
   END IF;
-  IF e.my_role IS DISTINCT FROM 'owner' THEN
+  IF p_role IS NULL OR p_role NOT IN ('owner', 'member') THEN
+    RAISE EXCEPTION 'invalid_role' USING ERRCODE = 'check_violation';
+  END IF;
+  -- Owners manage roles. A member may take ownership of a group whose owners are all deactivated (L6).
+  IF e.my_role IS DISTINCT FROM 'owner'
+     AND NOT (p_user IS NOT DISTINCT FROM me AND p_role = 'owner' AND authz.chat_owner_count(p_conv) = 0) THEN
     RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
   END IF;
   IF p_role IS NULL OR p_role NOT IN ('owner', 'member') THEN
@@ -735,8 +815,9 @@ BEGIN
   ELSE
     IF authz.chat_owner_count(p_conv) = 0 THEN
       SELECT m.user_id INTO heir FROM eureka.chat_member m
-       WHERE m.conversation_id = p_conv AND m.left_at IS NULL ORDER BY m.joined_at, m.user_id LIMIT 1;
-      UPDATE eureka.chat_member SET role = 'owner' WHERE conversation_id = p_conv AND user_id = heir;
+       WHERE m.conversation_id = p_conv AND m.left_at IS NULL AND authz.chat_user_ok(m.user_id)
+       ORDER BY m.joined_at, m.user_id LIMIT 1;
+      UPDATE eureka.chat_member SET role = 'owner' WHERE conversation_id = p_conv AND user_id = heir AND heir IS NOT NULL;
     END IF;
     UPDATE eureka.chat_conversation SET row_version = row_version + 1 WHERE id = p_conv;
   END IF;
@@ -935,6 +1016,29 @@ END $$;
 
 RESET ROLE;
 
+-- L6: reactivating a user must not show them what was sent to their chats
+-- while they were deactivated: their visible_after_seq moves to each
+-- conversation's newest message (CH-2).
+SET ROLE authz_definer;
+CREATE FUNCTION authz.chat_on_user_reactivated() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+BEGIN
+  IF NEW.status = 'active' AND OLD.status IS DISTINCT FROM 'active' THEN
+    UPDATE eureka.chat_member_state s
+       SET visible_after_seq = GREATEST(s.visible_after_seq, c.last_seq), last_read_seq = GREATEST(s.last_read_seq, c.last_seq)
+      FROM eureka.chat_conversation c
+     WHERE s.user_id = NEW.id AND c.id = s.conversation_id;
+  END IF;
+  RETURN NEW;
+END $$;
+RESET ROLE;
+REVOKE ALL ON FUNCTION authz.chat_on_user_reactivated() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION authz.chat_on_user_reactivated() TO eureka_owner;
+SET ROLE eureka_owner;
+CREATE TRIGGER chat_user_reactivated AFTER UPDATE OF status ON eureka.app_user
+  FOR EACH ROW EXECUTE FUNCTION authz.chat_on_user_reactivated();
+RESET ROLE;
+
 -- ---------- read policies (need authz.chat_conversation_ids) ----------
 SET ROLE eureka_owner;
 
@@ -968,6 +1072,7 @@ REVOKE ALL ON FUNCTION authz.chat_user_ok(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.chat_conversation_ids() FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.chat_enter(uuid, boolean) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.chat_audit(text, uuid, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION authz.chat_online(uuid[]) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.chat_join(uuid, uuid, text, bigint) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.chat_owner_count(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.chat_open_direct(uuid) FROM PUBLIC;
@@ -989,6 +1094,7 @@ REVOKE ALL ON FUNCTION authz.notification_recipients(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.notification_entity(uuid) FROM PUBLIC;
 -- RLS calls it as the querying role.
 GRANT EXECUTE ON FUNCTION authz.chat_conversation_ids() TO eureka_app;
+GRANT EXECUTE ON FUNCTION authz.chat_online(uuid[]) TO eureka_app;
 GRANT EXECUTE ON FUNCTION
   authz.chat_open_direct(uuid), authz.chat_create_group(text, uuid[]), authz.chat_send(uuid, uuid, text, jsonb),
   authz.chat_edit_message(uuid, text), authz.chat_delete_message(uuid), authz.chat_mark_read(uuid, uuid),

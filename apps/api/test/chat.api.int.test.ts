@@ -243,11 +243,65 @@ describe("chat API", () => {
     expect(p2.items.map((m: { body: string }) => m.body)).toEqual(["m1", "m2", "m3"]);
 
     const people = await ok("r2a", "GET", `${C}/people?q=hr`);
-    expect(people.items).toEqual([{ id: U.hr, name: "hr", designation: "HR Executive", online: true }]);
-    const everyone = (await ok("r2a", "GET", `${C}/people?limit=50`)).items as { id: string; online: boolean }[];
+    expect(people.items).toEqual([{ id: U.hr, name: "hr", designation: "HR Executive" }]);
+    const everyone = (await ok("r2a", "GET", `${C}/people?limit=50`)).items as { id: string }[];
     expect(everyone.map((p) => p.id)).not.toContain(U.r2a);
-    expect(everyone.find((p) => p.id === U.imm)?.online).toBe(false); // never signed in
-    expect(Object.keys(everyone[0]!).sort()).toEqual(["designation", "id", "name", "online"]);
+    expect(Object.keys(everyone[0]!).sort()).toEqual(["designation", "id", "name"]); // no presence in the directory
+  });
+
+  it("presence only for people the caller shares a chat with", async () => {
+    await login("imm"); // imm has a live session; nobody chats with imm yet
+    await login("locA");
+    const conv = await openDirect("acct", U.locA);
+    const mine = (await ok("acct", "GET", `${C}/conversations`)).items.find((c: { id: string }) => c.id === conv.id);
+    expect(mine.counterpart.online).toBe(true); // locA is online and shares this chat
+    const g = await ok("acct", "POST", `${C}/conversations/group`, { name: "Presence", memberIds: [U.locA, U.imm] }, 201);
+    expect(g.members.find((m: { id: string }) => m.id === U.imm).online).toBe(true);
+    // A stranger sees nothing about members of chats they are not in, and the picker has no presence.
+    expect((await call("r3a", "GET", `${C}/conversations/${g.id}`)).statusCode).toBe(404);
+    const stranger = await db.admin.query(`SELECT authz.chat_online($1::uuid[])`, [[U.imm]]).catch(() => null);
+    expect(stranger).toBeNull(); // not executable outside the app role
+  });
+
+  it("bounds cursors (422, not 500)", async () => {
+    const conv = await openDirect("l3", U.r3a);
+    for (const q of ["after=1e30", "before=1e30", "after=99999999999999999999", "before=-1"]) {
+      expect((await call("l3", "GET", `${C}/conversations/${conv.id}/messages?${q}`)).statusCode, q).toBe(422);
+    }
+  });
+
+  it("two concurrent sends with the same clientId post once (200 for the loser)", async () => {
+    const conv = await openDirect("l3", U.m2, 201);
+    const clientId = randomUUID();
+    const rs = await Promise.all([1, 2, 3].map(() => call("l3", "POST", `${C}/conversations/${conv.id}/messages`, { clientId, body: "race" })));
+    expect(rs.map((r) => r.statusCode).sort(), rs.map((r) => r.body).join()).toEqual([200, 200, 201]);
+    expect(new Set(rs.map((r) => r.json().message.id)).size).toBe(1);
+  });
+
+  it("a deactivated member leaves lists and member lists; reactivation shows nothing sent meanwhile; an ownerless group can be claimed", async () => {
+    const g = await ok("ad", "POST", `${C}/conversations/group`, { name: "Dormant", memberIds: [U.m1, U.m2] }, 201);
+    await send("m1", g.id, "before");
+    await db.admin.query(`UPDATE eureka.app_user SET status = 'inactive' WHERE id = ANY($1)`, [[U.ad, U.m2]]);
+    sessions.delete("ad"); sessions.delete("m2");
+    const d = await ok("m1", "GET", `${C}/conversations/${g.id}`);
+    expect(d.members.map((m: { id: string }) => m.id)).toEqual([U.m1]);
+    expect(d).toMatchObject({ ownerless: true, canManage: false });
+    const claimed = await ok("m1", "PATCH", `${C}/conversations/${g.id}/members/${U.m1}`, { role: "owner" });
+    expect(claimed).toMatchObject({ canManage: true, ownerless: false });
+    await send("m1", g.id, "while m2 was away");
+    await db.admin.query(`UPDATE eureka.app_user SET status = 'active' WHERE id = ANY($1)`, [[U.ad, U.m2]]);
+    const back = await ok("m2", "GET", `${C}/conversations/${g.id}/messages`);
+    expect(back.items).toEqual([]);
+    await send("m1", g.id, "welcome back");
+    expect((await ok("m2", "GET", `${C}/conversations/${g.id}/messages`)).items.map((m: { body: string }) => m.body)).toEqual(["welcome back"]);
+    // Claiming ownership is only for ownerless groups.
+    expect((await call("m2", "PATCH", `${C}/conversations/${g.id}/members/${U.m2}`, { role: "owner" })).statusCode).toBe(403);
+  });
+
+  it("DB limits answer 429 rate_limited (groups per hour)", async () => {
+    for (let i = 0; i < 20; i++) await ok("r1b", "POST", `${C}/conversations/group`, { name: `Spam ${i}`, memberIds: [U.r2a] }, 201);
+    const r = await call("r1b", "POST", `${C}/conversations/group`, { name: "Spam 21", memberIds: [U.r2a] });
+    expect([r.statusCode, r.json().detail]).toEqual([429, "rate_limited"]);
   });
 
   it("attachments: presigned upload, scan, download when clean; blocked files never open", async () => {

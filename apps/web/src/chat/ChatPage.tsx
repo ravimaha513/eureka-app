@@ -12,7 +12,7 @@ import { browser, postToStorage } from "../sales/resumesApi";
 import { Drawer } from "../sales/ui";
 import { Avatar } from "../shell/ui";
 import {
-  MAX_ATTACHMENTS, attachmentState, chatApi, chatError, chatKeys, mergeMessages,
+  MAX_ATTACHMENTS, attachmentState, chatApi, chatError, chatKeys, errorStatus, mergeMessages, pollDelay,
   type ConversationDetail, type ConversationSummary, type Member, type Message, type Person,
 } from "./chatApi";
 import { Linkified } from "./linkify";
@@ -40,7 +40,7 @@ export function useChatUnread(enabled: boolean) {
     queryKey: chatKeys.unread,
     queryFn: chatApi.unread,
     enabled,
-    refetchInterval: hidden ? CHAT_POLL.badgeHiddenMs : CHAT_POLL.badgeMs,
+    refetchInterval: (query) => pollDelay(hidden ? CHAT_POLL.badgeHiddenMs : CHAT_POLL.badgeMs, query.state.fetchFailureCount, errorStatus(query.state.error)) || false,
     refetchIntervalInBackground: true,
   });
 }
@@ -93,7 +93,7 @@ export function ChatPage({ me, initialConversationId = null }: { me: Me; initial
   const list = useQuery({
     queryKey: chatKeys.list(filter, term),
     queryFn: () => chatApi.list(filter, term),
-    refetchInterval: hidden ? CHAT_POLL.listHiddenMs : CHAT_POLL.listMs,
+    refetchInterval: (query) => pollDelay(hidden ? CHAT_POLL.listHiddenMs : CHAT_POLL.listMs, query.state.fetchFailureCount, errorStatus(query.state.error)) || false,
     refetchIntervalInBackground: true,
   });
   const people = useQuery({
@@ -170,7 +170,7 @@ export function ChatPage({ me, initialConversationId = null }: { me: Me; initial
                           {matchingPeople.map((p) => (
                             <li key={p.id}>
                               <button type="button" className="chat-conv" onClick={() => void startDirect(p)} aria-label={`Start a chat with ${p.name}`}>
-                                <PresenceAvatar name={p.name} online={p.online} />
+                                <PresenceAvatar name={p.name} />
                                 <span className="chat-conv-text"><b>{p.name}</b><small>{p.designation ?? " "}</small></span>
                               </button>
                             </li>
@@ -265,6 +265,7 @@ function ConversationView({ id, meId, onBack, onGone, onChanged }: {
   const stick = useRef(true);
   const hiddenRef = useRef(hidden);
   hiddenRef.current = hidden;
+  const failures = useRef(0);
   const messagesRef = useRef<Message[]>([]);
   messagesRef.current = messages;
 
@@ -308,6 +309,7 @@ function ConversationView({ id, meId, onBack, onGone, onChanged }: {
     const poll = async () => {
       if (!live || cursor.current === null) return;
       let again = false;
+      let delay: number | null = null;
       try {
         const r = await chatApi.changes(id, cursor.current);
         if (!live) return;
@@ -326,12 +328,17 @@ function ConversationView({ id, meId, onBack, onGone, onChanged }: {
         const incoming = r.items.some((m) => !m.mine);
         if (!hiddenRef.current && (incoming || Date.now() - lastMark.current > 60_000)) void markRead(messagesRef.current);
         setError("");
+        failures.current = 0;
       } catch (e) {
         if (!live) return;
         if (gone(e)) return;
+        failures.current += 1;
+        const st = errorStatus(e);
+        if (st === 401 || st === 403) { setError("Your session ended or you no longer have access. Reload the page."); return; }
         setError("Connection problem. Retrying…");
       }
-      timer = setTimeout(poll, again ? 0 : hiddenRef.current ? CHAT_POLL.conversationHiddenMs : CHAT_POLL.conversationMs);
+      delay = again ? 0 : pollDelay(hiddenRef.current ? CHAT_POLL.conversationHiddenMs : CHAT_POLL.conversationMs, failures.current);
+      timer = setTimeout(poll, delay ?? CHAT_POLL.conversationMs);
     };
     timer = setTimeout(poll, hiddenRef.current ? CHAT_POLL.conversationHiddenMs : CHAT_POLL.conversationMs);
     return () => { live = false; clearTimeout(timer); };
@@ -755,6 +762,12 @@ function MembersPanel({ d, meId, onClose, onChanged, onGone }: {
             </div>
             <button type="submit" className="btn" disabled={busy || name.trim() === "" || name.trim() === d.name}>Rename</button>
           </form>
+        )}
+        {d.ownerless && (
+          <p className="note">
+            This group has no active owner.{" "}
+            <button type="button" className="btn sm" disabled={busy} onClick={() => void run(() => chatApi.setRole(d.id, meId, "owner"))}>Take ownership</button>
+          </p>
         )}
         <ul className="chat-members" aria-label="Members">
           {d.members.map((m) => <MemberRow key={m.id} m={m} canManage={d.canManage} self={m.id === meId} busy={busy}
