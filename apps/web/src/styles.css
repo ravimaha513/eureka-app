@@ -374,6 +374,85 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .inbox-list li .btn { justify-self: start; }
 .linkish { border: 0; background: none; padding: 0; color: var(--pri-700); font: inherit; text-align: left; cursor: pointer; text-decoration: underline; }
 
+/* Companies and facilities (src/sites) */
+.small { font-size: 12px; }
+a.btn { text-decoration: none; }
+.btn.outline { color: var(--pri); border-color: var(--pri-200); background: var(--surface); }
+.btn.outline:hover:not(:disabled) { background: var(--pri-50); }
+.btn.primary svg, .btn.outline svg { flex: none; }
+.kpis { grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); }
+.kpi { gap: 10px; }
+.kpi .tilevalue { font-size: 26px; }
+.siteicon { display: inline-grid; place-items: center; flex: none; }
+.siteicon.sm { width: 34px; height: 34px; border-radius: 10px; }
+.siteicon.lg { width: 52px; height: 52px; border-radius: 14px; }
+.badge.pill { padding: 3px 11px; }
+.badge.bill-paid { background: var(--ok-bg); color: var(--ok-fg); }
+.badge.bill-due { background: var(--warn-bg); color: var(--warn-fg); }
+.badge.bill-overdue { background: var(--bad-bg); color: var(--bad-fg); }
+.listcard { display: flex; flex-direction: column; }
+.cardhead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.cardhead h2 { font-size: 16px; font-weight: 700; letter-spacing: -.01em; margin-right: auto; }
+.cardtools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cardfoot { padding: 12px 20px; border-top: 1px solid var(--line2); }
+.searchbox { position: relative; display: inline-flex; align-items: center; }
+.searchbox input { height: 38px; width: 240px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); font: inherit; padding: 0 12px 0 36px; }
+.searchbox input:focus { border-color: var(--pri); box-shadow: 0 0 0 3px var(--pri-100); outline: none; }
+.searchbox input::placeholder { color: var(--faint); }
+.inicon { position: absolute; left: 12px; color: var(--muted); pointer-events: none; }
+.inicon.prefix { font-weight: 600; font-size: 14px; }
+.iconinput { position: relative; display: flex; align-items: center; }
+.iconinput .inicon { top: 50%; transform: translateY(-50%); }
+.field .iconinput input, .field .iconinput select { width: 100%; min-width: 0; padding-left: 36px; }
+.pwinput { position: relative; display: block; }
+.field .pwinput input { padding-right: 44px; }
+.pwtoggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); }
+tr.clickrow { cursor: pointer; }
+.editlink { font-weight: 600; }
+.editlink:hover { text-decoration: underline; }
+.dialog.wide { width: min(700px, 100%); }
+.dialog.xwide { width: min(940px, 100%); }
+.formgrid { display: grid; gap: 0 14px; }
+.formgrid.cols2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.formgrid.cols3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.formgrid .field input, .formgrid .field select { min-width: 0; width: 100%; }
+.formgrid .spanall { grid-column: 1 / -1; }
+.formgrid .checkfield { justify-content: flex-end; }
+.field textarea { background: var(--surface); }
+.drawer.wide:has(> .sitehead) { width: min(880px, 100%); }
+.sitehead { display: flex; align-items: center; gap: 14px; }
+.siteheadtext { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.sitename { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sitename b { font-size: 18px; color: var(--text); letter-spacing: -.01em; }
+.addr { display: flex; align-items: center; gap: 6px; color: var(--text2); font-size: 13px; overflow-wrap: anywhere; }
+.addr svg { color: var(--muted); flex: none; }
+.pilltabs { padding-bottom: 2px; }
+.tabpanel { display: flex; flex-direction: column; gap: 12px; }
+.panelhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.panelhead h3 { font-size: 15px; margin-right: auto; }
+.panelhead .searchbox input { width: 200px; height: 30px; }
+.roundtable { border: 1px solid var(--line); border-radius: 12px; }
+.roundtable th, .roundtable td { padding: 10px 12px; }
+.secret { display: inline-flex; align-items: center; gap: 4px; }
+.secret code { font-size: 13px; padding: 2px 6px; border-radius: 6px; background: var(--neutral-bg); color: var(--text); }
+.iconbtn.sm { width: 30px; height: 30px; border-radius: 8px; }
+.iconbtn:disabled { opacity: .5; cursor: not-allowed; }
+.iconbtn.danger { color: var(--bad-fg); }
+.iconbtn.danger:hover { background: var(--bad-bg); color: var(--bad-fg); }
+td.rowactions > .iconbtn { display: inline-grid; }
+td.rowactions > .iconbtn + .iconbtn { margin-left: 2px; }
+.peoplelist { list-style: none; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; }
+.peoplelist li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line2); }
+.peoplelist li:last-child { border-bottom: 0; }
+.filename { display: inline-block; max-width: 160px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.minihead { font-size: 13px; color: var(--text2); }
+.notes { white-space: pre-wrap; color: var(--text2); }
+.sharecell { width: 30%; }
+.sharebar { display: block; height: 8px; border-radius: 999px; background: var(--line2); overflow: hidden; min-width: 80px; }
+.sharebar span { display: block; height: 8px; border-radius: 999px; background: var(--pri); }
+.sitecharts .chartcard { min-width: 0; }
+@media (max-width: 960px) { .formgrid.cols3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
 /* Phones and small tablets: off-canvas navigation, full-width controls, scrollable tables */
 .menubtn, .topbrand, .navscrim { display: none; }
 @media (max-width: 768px) {
@@ -417,6 +496,17 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .funnelheads span { font-size: 11px; }
   .funnel svg { height: 150px; }
   .inbox { position: fixed; top: 60px; left: 12px; right: 12px; width: auto; }
+  .formgrid.cols2, .formgrid.cols3 { grid-template-columns: minmax(0, 1fr); }
+  .dialog.wide, .dialog.xwide { width: 100%; }
+  .cardhead { padding: 14px 12px; align-items: stretch; }
+  .cardhead h2 { flex: 1 1 100%; }
+  .cardtools, .cardtools .searchbox, .panelhead .searchbox { flex: 1 1 100%; }
+  .searchbox input, .panelhead .searchbox input { width: 100%; }
+  .cardfoot { padding: 10px 12px; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpi .tilevalue { font-size: 20px; }
+  .sitehead { flex-wrap: wrap; }
+  .sharecell { display: none; }
 }
 @media (max-width: 768px) and (prefers-reduced-motion: reduce) { .side { transition: none; } }
 

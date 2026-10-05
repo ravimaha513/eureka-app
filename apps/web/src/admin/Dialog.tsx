@@ -6,8 +6,10 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
  * Modal dialog: moves focus inside on open, traps Tab, closes on Escape and
  * returns focus to the element that opened it.
  */
-export function Dialog({ title, onClose, children, describedBy }: {
+export function Dialog({ title, onClose, children, describedBy, className }: {
   title: string; onClose: () => void; children: ReactNode; describedBy?: string;
+  /** Extra classes on the dialog box, e.g. "wide" for two-column forms. */
+  className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -48,7 +50,7 @@ export function Dialog({ title, onClose, children, describedBy }: {
 
   return (
     <div className="backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div ref={ref} className="dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}
+      <div ref={ref} className={className ? `dialog ${className}` : "dialog"} role="dialog" aria-modal="true" aria-labelledby={titleId}
         aria-describedby={describedBy} tabIndex={-1} onKeyDown={onKeyDown}>
         <h2 id={titleId}>{title}</h2>
         {children}

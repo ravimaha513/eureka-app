@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
-  BadgeCheck, CalendarClock, ChevronDown, FileBarChart, FileCheck2, Flame, LayoutDashboard, LogOut, Moon,
-  Send, ShieldCheck, Sun, TrendingUp, Users, UserRoundCheck, Wallet, type LucideIcon,
+  BadgeCheck, Building2, CalendarClock, ChevronDown, FileBarChart, FileCheck2, Flame, LayoutDashboard, LogOut, Moon,
+  House, Send, ShieldCheck, Sun, TrendingUp, Users, UserRoundCheck, Wallet, type LucideIcon,
 } from "lucide-react";
 import type { Theme } from "./theme";
 
@@ -9,7 +9,7 @@ import type { Theme } from "./theme";
 export const NAV_ICONS: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard, hotlist: Flame, candidates: Users, submissions: Send, interviews: CalendarClock,
   placements: BadgeCheck, paperwork: FileCheck2, employees: UserRoundCheck, payments: Wallet,
-  performance: TrendingUp, reports: FileBarChart, access: ShieldCheck,
+  companies: Building2, facilities: House, performance: TrendingUp, reports: FileBarChart, access: ShieldCheck,
 };
 
 const TINTS = ["indigo", "teal", "amber", "rose", "violet", "sky"] as const;
