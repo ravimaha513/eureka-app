@@ -39,7 +39,6 @@ export interface Job {
 export interface JobOptions {
   kinds: JobKind[];
   clients: { id: string; name: string }[];
-  companies: { id: string; name: string }[];
   staff: { id: string; name: string }[];
 }
 
@@ -74,12 +73,14 @@ const qs = (f: object) => {
   return s ? `?${s}` : "";
 };
 
-export const jobKeys = { all: ["jobs"] as const, detail: (id: string) => ["jobs", "detail", id] as const, options: ["jobs", "options"] as const };
+export const jobKeys = { all: ["jobs"] as const, detail: (id: string) => ["jobs", "detail", id] as const, options: ["jobs", "options"] as const, companyOptions: ["jobs", "company-options"] as const };
 
 export const jobsApi = {
   list: (f: JobFilters) => api<{ items: Job[]; nextCursor: string | null }>(`/api/v1/jobs${qs(f)}`),
   get: (id: string) => api<Job>(`/api/v1/jobs/${id}`),
   options: () => api<JobOptions>("/api/v1/jobs/options"),
+  /** Company picker (id and name only) for internal openings: HR (job:manage, org scope). */
+  companyOptions: () => api<{ companies: { id: string; name: string }[] }>("/api/v1/jobs/company-options"),
   create: (body: JobInput, idempotencyKey: string) =>
     api<{ id: string; rowVersion: number }>("/api/v1/jobs", { method: "POST", body: JSON.stringify(body), headers: { "idempotency-key": idempotencyKey } }),
   update: (id: string, rowVersion: number, body: Partial<JobInput>) =>

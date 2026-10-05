@@ -63,7 +63,7 @@ if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-
   const chat = await seedDevChat(admin);
   if (chat.conversations) console.log(`seeded chat: ${chat.conversations} conversations, ${chat.messages} messages`);
 }
-// jobs-portal: fictional jobs (client requirements and internal openings on the careers portal).
+// jobs-portal: fictional jobs (must run after the facilities seed above: openings attach to its companies) (client requirements and internal openings on the careers portal).
 if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-0000-0000-000000000016'")).rowCount) {
   const j = await seedDevJobs(admin);
   if (j.jobs) console.log(`seeded ${j.jobs} jobs, ${await seedDevApplications(admin, j.ids)} applications`);

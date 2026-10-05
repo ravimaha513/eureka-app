@@ -130,7 +130,12 @@ export function JobDialog({ job, onClose, onSaved }: { job?: Job; onClose: () =>
 
   const staff = opts.data?.staff ?? [];
   const clients = opts.data?.clients ?? [];
-  const companies = opts.data?.companies ?? [];
+  // Company picker: only for internal openings and only for who may create them (HR); the job's current company
+  // stays selectable by name even when it is no longer offered (inactive).
+  const companyOpts = useQuery({ queryKey: jobKeys.companyOptions, queryFn: jobsApi.companyOptions, staleTime: 5 * 60_000,
+    enabled: kind === "internal_opening" && kinds.includes("internal_opening") });
+  const companies = [...(companyOpts.data?.companies ?? [])];
+  if (job?.company && !companies.some((c) => c.id === job.company!.id)) companies.unshift({ id: job.company.id, name: job.company.name ?? "Current company" });
   return (
     <Dialog title={job ? `Edit job · ${job.title}` : "Create job"} onClose={onClose} wide>
       <form ref={formRef} onSubmit={submit} noValidate>
@@ -182,11 +187,11 @@ export function JobDialog({ job, onClose, onSaved }: { job?: Job; onClose: () =>
                 </select>
               )}
             </Field>
-          ) : companies.length > 0 ? (
+          ) : kinds.includes("internal_opening") ? (
             <Field label="Company (optional)">
               {(p) => (
-                <select {...p} value={v.companyId} onChange={text("companyId")}>
-                  <option value="">None</option>
+                <select {...p} value={v.companyId} onChange={text("companyId")} disabled={companyOpts.isPending && !job?.company}>
+                  <option value="">{companyOpts.isPending && !job?.company ? "Loading…" : "None"}</option>
                   {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               )}

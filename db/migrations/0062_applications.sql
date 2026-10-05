@@ -524,6 +524,41 @@ BEGIN
    WHERE u.status = 'active' AND (p_user IS NULL OR r.uid = p_user);
 END $$;
 
+-- ---------- company display names (least privilege) ----------
+-- eureka.company is readable only by company:read holders (location scope), and
+-- stays so. Job readers, application reviewers and the portal need the NAME of
+-- the company of a job they can already read, nothing else of the company
+-- (address, incharges, utilities, bills, status). These batch functions return
+-- (job id, name) for the requested jobs the caller may read, re-checked here
+-- against the same rules as the job read policies (job_read, job_read_reviewer,
+-- job_portal_read); a job the caller cannot read is simply absent. Only internal
+-- openings have a company (job_kind_ref). Called from SELECT lists once per
+-- page, never from RLS policies. At most 500 ids per call.
+CREATE FUNCTION authz.job_company_names(p_jobs uuid[]) RETURNS TABLE (job_id uuid, name text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+  SELECT j.id, c.name
+    FROM eureka.job j JOIN eureka.company c ON c.id = j.company_id
+   WHERE authz.current_user_id() IS NOT NULL
+     AND coalesce(cardinality(p_jobs), 0) BETWEEN 1 AND 500
+     AND j.id = ANY (p_jobs) AND j.kind = 'internal_opening'
+     AND (j.hiring_manager_id = authz.current_user_id()
+          OR (SELECT authz.has_org_kind('job:read', false))
+          OR j.id = ANY (authz.my_interview_job_ids()))
+$$;
+
+-- Portal role: published open internal openings and the jobs of the applicant's own applications.
+CREATE FUNCTION authz.portal_job_company_names(p_jobs uuid[]) RETURNS TABLE (job_id uuid, name text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+  SELECT j.id, c.name
+    FROM eureka.job j JOIN eureka.company c ON c.id = j.company_id
+   WHERE authz.current_applicant_id() IS NOT NULL
+     AND coalesce(cardinality(p_jobs), 0) BETWEEN 1 AND 500
+     AND j.id = ANY (p_jobs) AND j.kind = 'internal_opening'
+     AND ((j.published_to_portal AND j.status = 'open')
+          OR EXISTS (SELECT 1 FROM eureka.job_application a
+                      WHERE a.job_id = j.id AND a.applicant_id = authz.current_applicant_id()))
+$$;
+
 RESET ROLE;
 
 -- ---------- policies ----------
@@ -594,11 +629,15 @@ REVOKE ALL ON FUNCTION authz.application_schedule_interview(uuid, text, text, uu
 REVOKE ALL ON FUNCTION authz.application_interview_set_status(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.application_scorecard_submit(uuid, integer, integer, integer, integer, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.application_link_candidate(uuid, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION authz.job_company_names(uuid[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION authz.portal_job_company_names(uuid[]) FROM PUBLIC;
 -- Policies evaluate as the querying role.
 GRANT EXECUTE ON FUNCTION authz.my_hiring_job_ids() TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.my_interview_application_ids() TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.my_interview_job_ids() TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.my_application_applicant_ids() TO eureka_app;
+GRANT EXECUTE ON FUNCTION authz.job_company_names(uuid[]) TO eureka_app;
+GRANT EXECUTE ON FUNCTION authz.portal_job_company_names(uuid[]) TO eureka_portal;
 GRANT EXECUTE ON FUNCTION authz.application_apply(uuid) TO eureka_portal;
 GRANT EXECUTE ON FUNCTION authz.application_withdraw(uuid) TO eureka_portal;
 GRANT EXECUTE ON FUNCTION authz.application_transition(uuid, text, text, integer) TO eureka_app;

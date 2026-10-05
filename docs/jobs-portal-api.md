@@ -7,8 +7,8 @@ Migrations `0060_jobs.sql`, `0061_applicant_portal.sql`, `0062_applications.sql`
 ## Product decisions (owner, 2026-10-05) and how they were built
 
 - A job is a **client requirement** (opening at a client; `client_id`; recruiters submit candidates to it; `submission.job_id` is optional)
-  or an **internal opening** (position at one of the group's companies; `company_id uuid` has **no foreign key yet**, marked
-  `-- TODO(jobs-portal): FK to eureka.company added at integration` in 0060; the company name is `null` in API output until then).
+  or an **internal opening** (position at one of the group's companies; `company_id` is a foreign key to `eureka.company(id)`,
+  `ON DELETE RESTRICT`, in 0060; see "Companies" below).
 - Only internal openings can be `published_to_portal` (DB CHECK). The portal shows published openings in status `open`.
 - Applicants are not `app_user` rows; no passwords, no Google: one-time email links.
 - Date of birth is **not collected** (deviation, see Open questions): the `dob` field class has no read or write path yet (OD-04).
@@ -35,6 +35,7 @@ Client-requirement pay is a rate: shown to managers of the job and `rate:read` h
 |---|---|
 | `GET /` | JP-1: `job:read`; RLS decides rows; `kind`, `status`, `clientId`, `search`, `mine`, keyset `cursor`; `{ items, nextCursor }` |
 | `GET /options` | `job:manage`: creatable kinds, clients, staff for the hiring-manager picker |
+| `GET /company-options` | JP-31: `job:manage` and the caller may create internal openings (HR; 403 otherwise): `{ companies: [{ id, name }] }`, active companies, all locations |
 | `GET /:id` | RLS: 404 when not readable (also for the hiring manager and reviewers) |
 | `POST /` | JP-2: `job:manage` and the kind must be creatable by the caller (403 otherwise); optional `Idempotency-Key`; strict body |
 | `PATCH /:id` | JP-3: read-before-write (404/403); `If-Match` rowVersion (428 without, 412 stale); `kind`, owner, team never change |
@@ -55,6 +56,24 @@ editor builds its DOM from text nodes and allow-listed elements and converts it 
 `POST /api/v1/submissions` accepts optional `jobId`. A definer trigger (0060) accepts only a job the caller can read that is an **open client
 requirement of the same client**; errors `job_not_found`, `job_client_mismatch`, `job_not_open` (422). The Log submission dialog has a job
 picker (open client requirements the user can read) that fills title and client.
+
+## Companies (JP-31..JP-33; migrations 0054, 0060, 0062; `docs/facilities-api.md`)
+
+`eureka.job.company_id` (internal openings only; client requirements keep `company_id NULL`, CHECK) references `eureka.company` with
+`ON DELETE RESTRICT` (companies are never deleted, 0054 guard). `eureka.company` stays RLS-scoped to `company:read` holders (location
+scope) and nobody in the jobs module gets table access or wider policies. Instead three narrow SECURITY DEFINER functions (pinned
+`search_path`, `REVOKE FROM PUBLIC`, EXECUTE to one role each) expose the **name and nothing else** (no address, incharges, utilities,
+bills, notes or status):
+
+| Function | EXECUTE | Returns | Who gets what |
+|---|---|---|---|
+| `authz.job_company_names(p_jobs uuid[])` (0062) | `eureka_app` | `(job_id, name)` for the requested jobs (max 500) the caller can read, internal openings only | JP-32: HR (`job:read` org, non-Sales); the job's hiring manager; an interviewer (lead or panel) of an application to the job. Same rules as the `job_read` / `job_read_reviewer` policies, re-checked inside; a job the caller cannot read is absent. Used for job and application lists, details and the applications CSV (one batch call per page, never per row and never from a policy). Sales readers read client requirements only, which have no company. |
+| `authz.portal_job_company_names(p_jobs uuid[])` (0062) | `eureka_portal` | same | Applicants: published, open internal openings and the jobs of their own applications (as `job_portal_read`); portal `employer` is this name. |
+| `authz.company_options()` (0060) | `eureka_app` | `(id, name)` of active companies | JP-33: callers with `job:manage` at org scope from a non-Sales role (HR), all locations. Behind `GET /api/v1/jobs/company-options` (403 for anyone who cannot create internal openings). Feeds the Company picker of the job dialog (internal openings only; an inactive current company stays selectable by name). |
+
+Attaching a company is `companyId` on `POST`/`PATCH /api/v1/jobs` (internal openings, HR); an unknown id is 422 `invalid_company`.
+Whoever reads a job sees the company's name there even without `company:read`; they still cannot open the company
+(`/api/v1/companies/*` follows `company:read`). The dev seed attaches its internal openings to Eureka Info Tech and Endeavour Technology.
 
 ## Applicant portal (JP-10..JP-16)
 
@@ -131,7 +150,7 @@ Portal: `/portal/sign-up`, `/portal/sign-in`, `/portal/verify`, `/portal/jobs` (
 
 - Date of birth at sign-up was requested "if collected": it is not, because the `dob` class has no read/write path (OD-04). Collecting it needs the encrypt-at-write path, the
   `dob` class in the KMS `api_field_classes`, and a decision on who may read it.
-- Company display name and FK: `company_id` has no FK and the name is `null` until the companies migration (0054) is integrated.
+- Should HR (org-wide for internal openings) be limited to the companies of certain locations? Built: all active companies are offered.
 - Interviews of applications are separate from the sales `interview` table (different people, no client); is a unified calendar wanted (interviews-settings package)?
 - Should the careers portal be on its own hostname (cookie isolation is by path today)?
 - Email notices to applicants say only the status; wording and the sender name need approval. Applicant timezone is not collected (emails show UTC).
