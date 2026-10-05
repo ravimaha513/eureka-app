@@ -26,7 +26,13 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
    `col = ANY ((SELECT authz.x('perm'))::uuid[])` (InitPlan) for small sets (user, team, location
    ids), `col IN (SELECT pg_catalog.unnest((SELECT authz.x('perm'))))` (InitPlan feeding a hashed
    SubPlan: one hash probe per row) for large sets such as `owned_candidate_ids` (0034/0038; `= ANY`
-   searches the array linearly per row), and `EXISTS` by primary key.
+   searches the array linearly per row), and `EXISTS` by primary key. Inside authz functions, filter
+   on `(SELECT authz.current_user_id())`, never the bare call (a seq scan would run it per row, 0082),
+   and mark a CTE holding the caller's scope `AS MATERIALIZED` (one referenced once is inlined and
+   evaluated per row). The latest definitions of `grants`, `recruiter_ids`, `coached_team_ids`,
+   `actor_team`, `hotlist_open`, `checklist_item_texts`, `session_is_mine`, the step-up functions and
+   the jobs/chat/training/DataHub scope functions listed in 0082 are in 0082, so copy from there.
+   Run `RULE3_EXHAUSTIVE=1` when a migration touches `authz.*` or a policy.
 4. Clients never set server-managed columns (status, snapshots, timestamps): BEFORE INSERT guards.
 5. No rates, phones, emails, free-text reasons or recording links in `audit_event` or `outbox_event`.
 6. Writes to sensitive tables only through SECURITY DEFINER functions that re-check permission
