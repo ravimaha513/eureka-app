@@ -249,14 +249,16 @@ const DOCUMENT_FORBIDDEN: Record<string, unknown> = {
 
 // ---- chat (migration 0070) ----------------------------------------------------------------------
 
-/** A fresh group owned by r1a with r1b. */
-async function chatGroup() {
+/** A fresh group owned by r1a with r1b (the database caps groups per hour: refused requests change nothing, so cases share one). */
+async function freshChatGroup() {
   const g = await ok("r1a", "POST", "/api/v1/chat/conversations/group", { name: `MA chat ${++n}`, memberIds: [U.r1b] });
   return g.id as string;
 }
+let sharedGroup: Promise<string> | null = null;
+const chatGroup = () => (sharedGroup ??= freshChatGroup());
+let sharedMessage: Promise<string> | null = null;
 async function chatMessage(conv: string) {
-  const r = await ok("r1a", "POST", `/api/v1/chat/conversations/${conv}/messages`, { clientId: randomUUID(), body: "MA hello" });
-  return r.message.id as string;
+  return (sharedMessage ??= ok("r1a", "POST", `/api/v1/chat/conversations/${conv}/messages`, { clientId: randomUUID(), body: "MA hello" }).then((r) => r.message.id as string));
 }
 /** Every chat row (the definer functions also audit; the audit head is checked separately). */
 const chatState = () => rows(`SELECT
@@ -854,7 +856,7 @@ const IGNORED: IgnoreCase[] = [
   {
     route: "POST /api/v1/chat/conversations/:id/leave",
     run: async () => {
-      const g = await chatGroup();
+      const g = await freshChatGroup();
       await ok("r1a", "POST", `/api/v1/chat/conversations/${g}/members`, { userIds: [U.l1] }, 200);
       const r = await call("r1b", "POST", `/api/v1/chat/conversations/${g}/leave`,
         { ...SERVER_MANAGED, userId: U.l1, conversationId: FOREIGN_ID, role: "owner", leftAt: PAST });

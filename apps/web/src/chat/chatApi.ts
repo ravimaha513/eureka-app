@@ -34,6 +34,8 @@ export interface ConversationDetail {
   muted: boolean;
   myRole: "owner" | "member";
   canManage: boolean;
+  /** All owners deactivated: any member may take ownership. */
+  ownerless: boolean;
   members: Member[];
 }
 
@@ -54,7 +56,8 @@ export interface Message {
   attachments: Attachment[];
 }
 
-export interface Person { id: string; name: string; designation: string | null; online: boolean }
+/** The directory shows no presence (docs/chat-api.md CH-7). */
+export interface Person { id: string; name: string; designation: string | null }
 
 export interface MessagePage { items: Message[]; nextCursor: string | null; cursor: number }
 export interface MessageChanges { items: Message[]; cursor: number; more: boolean }
@@ -126,6 +129,7 @@ export function chatError(e: unknown, fallback = "Something went wrong. Try agai
     case "too_many_pending": return "Too many files are still uploading. Wait for them to finish.";
     case "too_many_members": return "A group can have at most 100 members.";
     case "last_owner": return "A group needs at least one owner. Make someone else an owner first.";
+    case "rate_limited": return "You are going too fast. Wait a little and try again.";
     case "stale": return "This group changed meanwhile. Reopen it and try again.";
     case "not_available": return "This file is not available.";
     case "message_deleted": return "That message was deleted.";
@@ -151,3 +155,17 @@ export function attachmentState(a: Attachment): { label: string; ready: boolean 
   if (a.status === "infected" || a.status === "rejected") return { label: "Blocked", ready: false };
   return { label: "Upload failed", ready: false };
 }
+
+/**
+ * Delay before the next poll. Healthy: `base`. After errors: exponential backoff (x2 per consecutive failure, at most
+ * 5 minutes) with +-25% jitter. 401 and 403 stop polling (null): the session ended or the right is gone.
+ */
+export function pollDelay(base: number, failures: number, status?: number, random: () => number = Math.random): number | null {
+  if (status === 401 || status === 403) return null;
+  if (failures <= 0) return base;
+  const backoff = Math.min(300_000, base * 2 ** Math.min(failures, 10));
+  return Math.round(backoff * (0.75 + random() * 0.5));
+}
+
+/** HTTP status of a failed call, if any. */
+export const errorStatus = (e: unknown): number | undefined => (e instanceof ApiError ? e.status : undefined);
