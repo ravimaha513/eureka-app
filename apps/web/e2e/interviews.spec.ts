@@ -34,10 +34,10 @@ test("recruiter schedules, location clears and coach records feedback", async ({
   const schedule = page.getByRole("dialog");
   await schedule.getByRole("combobox", { name: "Submission", exact: true }).selectOption(submission.id);
   await schedule.getByLabel("Round", { exact: true }).fill(jobTitle);
-  await schedule.getByLabel("Start", { exact: true }).fill(`${day}T10:00`);
-  await schedule.getByLabel("End", { exact: true }).fill(`${day}T11:00`);
+  await schedule.getByLabel("Interview slot", { exact: true }).fill(`${day}T10:00`);
+  await schedule.getByRole("combobox", { name: "Duration (minutes)", exact: true }).selectOption("60");
   await schedule.getByRole("combobox", { name: "Coach", exact: true }).selectOption("00000000-0000-0000-0000-000000000013");
-  await schedule.getByRole("button", { name: "Schedule", exact: true }).click();
+  await schedule.getByRole("button", { name: "Create interview", exact: true }).click();
   await expect(schedule).toBeHidden();
   const row = page.locator("tbody tr").filter({ hasText: jobTitle });
   await expect(row).toBeVisible();

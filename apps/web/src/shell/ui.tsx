@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
-  BadgeCheck, CalendarClock, ChevronDown, FileBarChart, FileCheck2, Flame, LayoutDashboard, LogOut, Moon,
-  Send, ShieldCheck, Sun, TrendingUp, Users, UserRoundCheck, Wallet, type LucideIcon,
+  BadgeCheck, BookOpen, BriefcaseBusiness, Building2, CalendarClock, ChevronDown, Database, FileBarChart, FileCheck2, FolderOpen, Flame, LayoutDashboard, LogOut, MessageCircle, Moon,
+  GraduationCap, House, Send, Settings, ShieldCheck, Sun, TrendingUp, Users, UserRoundCheck, UserRoundSearch, Wallet, type LucideIcon,
 } from "lucide-react";
 import type { Theme } from "./theme";
 
@@ -9,7 +9,15 @@ import type { Theme } from "./theme";
 export const NAV_ICONS: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard, hotlist: Flame, candidates: Users, submissions: Send, interviews: CalendarClock,
   placements: BadgeCheck, paperwork: FileCheck2, employees: UserRoundCheck, payments: Wallet,
-  performance: TrendingUp, reports: FileBarChart, access: ShieldCheck,
+  companies: Building2, facilities: House, performance: TrendingUp, reports: FileBarChart, access: ShieldCheck, settings: Settings,
+  // datahub
+  datahub: Database,
+  // training
+  training: GraduationCap, courses: BookOpen,
+  // chat
+  chat: MessageCircle,
+  // jobs-portal
+  jobs: BriefcaseBusiness, applications: FolderOpen, applicants: UserRoundSearch,
 };
 
 const TINTS = ["indigo", "teal", "amber", "rose", "violet", "sky"] as const;
@@ -46,7 +54,7 @@ export function ThemeSwitch({ theme, onChange }: { theme: Theme; onChange: (t: T
 }
 
 /** The signed-in user in the top bar; opens a small panel with Sign out. */
-export function UserMenu({ name, roles, onSignOut }: { name: string; roles: string; onSignOut: () => void }) {
+export function UserMenu({ name, roles, onSignOut, onSettings }: { name: string; roles: string; onSignOut: () => void; onSettings?: () => void }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const wrap = useRef<HTMLDivElement>(null);
@@ -70,6 +78,7 @@ export function UserMenu({ name, roles, onSignOut }: { name: string; roles: stri
       {open && (
         <div id={id} className="userpanel">
           <div className="userpanel-head"><Avatar name={name} /><span><b>{name}</b><small>{roles}</small></span></div>
+          {onSettings && <button type="button" className="userpanel-item" onClick={() => { setOpen(false); onSettings(); }}><Settings size={16} aria-hidden="true" />Settings</button>}
           <button type="button" className="userpanel-item" onClick={onSignOut}><LogOut size={16} aria-hidden="true" />Sign out</button>
         </div>
       )}

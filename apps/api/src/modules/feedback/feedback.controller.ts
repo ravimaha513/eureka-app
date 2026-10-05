@@ -1,9 +1,9 @@
-import { isIP } from "node:net";
 import { createHash } from "node:crypto";
 import { Body, Controller, Get, Inject, HttpException, NotFoundException, Param, Post, Req } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { Public } from "../../platform/auth.guard.js";
+import { clientIp } from "../../platform/client-info.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 
@@ -22,8 +22,7 @@ export class FeedbackController {
   private check(req: FastifyRequest, token: string) {
     const now = Date.now();
     for (const [key, value] of this.limits) if (value.until <= now) this.limits.delete(key);
-    const viewer = req.headers["x-eureka-viewer-ip"];
-    const ip = this.config.ORIGIN_VERIFY_SECRET && typeof viewer === "string" && isIP(viewer) ? viewer : req.ip;
+    const ip = clientIp(req, this.config);
     for (const key of [`ip:${ip}`, `token:${hashToken(token)}`]) {
       const entry = this.limits.get(key) ?? { n: 0, until: now + 60_000 };
       if (++entry.n > 30 || (!this.limits.has(key) && this.limits.size >= 10_000)) throw new HttpException("Too many requests", 429);

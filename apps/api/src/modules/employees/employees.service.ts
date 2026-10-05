@@ -1,18 +1,22 @@
-import { ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
+import { ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import type pg from "pg";
 import {
   canManageEmployment,
   employeeActions,
   ownsActivity,
+  ownsCandidate,
   resolveScope,
   type UserAccess,
 } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
+import { RateLimiter } from "../../platform/rate-limit.js";
+import { toCsv } from "../hotlist/csv.js";
+import { EXPORTS_PER_WINDOW, EXPORT_ROW_CAP, EXPORT_WINDOW_MS } from "../hotlist/hotlist.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import { mapEmploymentError } from "./employees.errors.js";
-import type { EmployeeListQuery, EndAssignment, ExitEmployee, PlannedEndDate } from "./employees.schemas.js";
+import type { EmployeeExportQuery, EmployeeListQuery, EndAssignment, ExitEmployee, PlannedEndDate } from "./employees.schemas.js";
 
 /**
  * Employees (FR-EMP-01..09, migration 0045, docs/employees-api.md). Reads run
@@ -48,6 +52,10 @@ interface EmployeeRow {
   recruiter_id: string | null;
   pl_team_id: string | null;
   pl_location_id: string | null;
+  c_recruiter_id: string | null;
+  visibility: "team" | "all_teams" | null;
+  email: string | null;
+  phone: string | null;
 }
 
 /** The latest assignment the caller can read (RLS), with its placement's actor snapshot and plan. */
@@ -59,7 +67,8 @@ const SELECT = `
          la.id AS assignment_id, la.assignment_no, la.start_date::text AS start_date, la.end_date::text AS end_date,
          la.end_reason, pp.planned_end_date::text AS planned_end_date,
          pl.id AS placement_id, pl.client_id, cl.name AS client_name,
-         pl.recruiter_id, pl.team_id AS pl_team_id, pl.location_id AS pl_location_id
+         pl.recruiter_id, pl.team_id AS pl_team_id, pl.location_id AS pl_location_id,
+         c.recruiter_id AS c_recruiter_id, c.visibility, p.personal_email::text AS email, p.phone_e164 AS phone
   FROM eureka.employee e
   LEFT JOIN eureka.person p ON p.id = e.person_id
   LEFT JOIN eureka.candidate c ON c.id = e.candidate_id
@@ -74,6 +83,31 @@ const SELECT = `
   LEFT JOIN eureka.assignment_plan pp ON pp.assignment_id = la.id`;
 
 const ref = (id: string | null, name: string | null) => (id ? { id, name } : null);
+
+/** Hot List style: the last two digits only. */
+export const maskPhone = (v: string | null) => (v === null ? null : `•••-•••-${v.replace(/\D/g, "").slice(-2).padStart(2, "•")}`);
+/** First character of the mailbox and the domain. */
+export const maskEmail = (v: string | null) => {
+  if (v === null) return null;
+  const at = v.lastIndexOf("@");
+  return at > 0 ? `${v[0]}•••${v.slice(at)}` : "•••";
+};
+
+/**
+ * EM-C1: an employee's personal email and phone follow the candidate phone
+ * rule (design B4.6, like the marketing contacts on the profile):
+ * candidate.phone:read over a candidate the caller owns. Otherwise masked.
+ */
+export function employeeContact(access: UserAccess, r: Pick<EmployeeRow, "c_recruiter_id" | "team_id" | "location_id" | "visibility" | "marketing_status" | "email" | "phone">) {
+  const scope = resolveScope(access, "candidate.phone:read");
+  const allowed = scope !== null && ownsCandidate(scope, {
+    recruiterId: r.c_recruiter_id, teamId: r.team_id, locationId: r.location_id,
+    visibility: r.visibility ?? "team", marketingStatus: r.marketing_status ?? "",
+  });
+  return allowed
+    ? { email: r.email, phone: r.phone, masked: false }
+    : { email: maskEmail(r.email), phone: maskPhone(r.phone), masked: r.email !== null || r.phone !== null };
+}
 
 const latestActor = (r: EmployeeRow) =>
   r.placement_id && r.recruiter_id ? { recruiterId: r.recruiter_id, teamId: r.pl_team_id, locationId: r.pl_location_id } : null;
@@ -109,6 +143,7 @@ export class EmployeesService {
       exitReason: r.exit_reason,
       location: ref(r.location_id, r.location_name),
       team: ref(r.team_id, r.team_name),
+      contact: employeeContact(access, r),
       /** Latest assignment the caller can read; null when none is readable. */
       assignment: r.assignment_id ? {
         id: r.assignment_id, assignmentNo: r.assignment_no, placementId: r.placement_id,
@@ -124,6 +159,53 @@ export class EmployeesService {
 
   async list(user: AuthedUser, q: EmployeeListQuery) {
     this.requireEmployeeRead(user.access);
+    const { sql, params } = this.listSql(q, q.limit + 1);
+    const rows = await this.db.withUser(user.id, async (c) => (await c.query<EmployeeRow>(sql, params)).rows);
+    const page = rows.slice(0, q.limit);
+    const last = page[page.length - 1];
+    return {
+      items: page.map((r) => this.present(user.access, r)),
+      nextCursor: rows.length > q.limit && last ? `${last.status_since}.${last.person_id}` : null,
+    };
+  }
+
+  private readonly exportLimiter = new RateLimiter(EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
+
+  /**
+   * EM-X1: CSV of the employee list with the same filters, for report:export
+   * holders who also read employees (employee:read at org scope). Contacts are
+   * masked exactly as in the list; cells are formula-injection safe; capped at
+   * EXPORT_ROW_CAP, rate-limited and audited (filter names and counts only).
+   */
+  async exportCsv(user: AuthedUser, q: EmployeeExportQuery): Promise<{ csv: string; rows: number; truncated: boolean }> {
+    this.requireEmployeeRead(user.access);
+    if (!resolveScope(user.access, "report:export")) throw new ForbiddenException();
+    if (!this.exportLimiter.take(user.id)) {
+      throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
+    }
+    const { sql, params } = this.listSql(q, EXPORT_ROW_CAP + 1);
+    const rows = await this.db.withUser(user.id, async (c) => {
+      const out = (await c.query<EmployeeRow>(sql, params)).rows;
+      await this.audit.record(c, {
+        actorId: user.id, action: "employee.export", entityType: "employee",
+        changes: { rows: Math.min(out.length, EXPORT_ROW_CAP), truncated: out.length > EXPORT_ROW_CAP, cap: EXPORT_ROW_CAP,
+          filters: Object.keys(q).filter((k) => q[k as keyof EmployeeExportQuery] !== undefined).sort() },
+      });
+      return out;
+    });
+    const page = rows.slice(0, EXPORT_ROW_CAP);
+    const csv = toCsv(
+      ["Name", "Email", "Phone", "Status", "Employee since", "Status since", "Location", "Team", "Client", "Assignment no.", "Start date", "Planned end date"],
+      page.map((r) => {
+        const contact = employeeContact(user.access, r);
+        return [r.name ?? "(not visible)", contact.email, contact.phone, r.status, r.employee_since, r.status_since,
+          r.location_name, r.team_name, r.client_name, r.assignment_no, r.start_date, r.planned_end_date];
+      }),
+    );
+    return { csv, rows: page.length, truncated: rows.length > EXPORT_ROW_CAP };
+  }
+
+  private listSql(q: EmployeeExportQuery & { cursor?: string }, limit: number) {
     const params: unknown[] = [];
     const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
     const where: string[] = ["true"];
@@ -140,14 +222,8 @@ export class EmployeesService {
       const i = q.cursor.indexOf(".");
       where.push(`(e.status_since, e.person_id) < (${p(q.cursor.slice(0, i))}::date, ${p(q.cursor.slice(i + 1))}::uuid)`);
     }
-    const sql = `${SELECT} WHERE ${where.join(" AND ")} ORDER BY e.status_since DESC, e.person_id DESC LIMIT ${p(q.limit + 1)}`;
-    const rows = await this.db.withUser(user.id, async (c) => (await c.query<EmployeeRow>(sql, params)).rows);
-    const page = rows.slice(0, q.limit);
-    const last = page[page.length - 1];
-    return {
-      items: page.map((r) => this.present(user.access, r)),
-      nextCursor: rows.length > q.limit && last ? `${last.status_since}.${last.person_id}` : null,
-    };
+    const sql = `${SELECT} WHERE ${where.join(" AND ")} ORDER BY e.status_since DESC, e.person_id DESC LIMIT ${p(limit)}`;
+    return { sql, params };
   }
 
   async get(user: AuthedUser, id: string) {

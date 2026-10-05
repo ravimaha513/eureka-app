@@ -73,8 +73,9 @@ describe("notification bell", () => {
   it("polls the unread count and announces only growth in a polite live region", async () => {
     wrap({ pollMs: 40 });
     await waitFor(() => expect(bell()).toHaveAccessibleName("Notifications, 2 unread"));
-    const status = screen.getByRole("status");
-    expect(status).toHaveAttribute("aria-live", "polite");
+    // A polite live region without role="status": the page owns the page-level status region.
+    const status = document.querySelector<HTMLElement>(".sr-only[aria-live='polite']")!;
+    expect(status).not.toBeNull();
     expect(status).toHaveTextContent("");                                  // nothing on the first answer
     unread = { unread: 3, capped: false };
     await waitFor(() => expect(status).toHaveTextContent("1 new notification. 3 unread."), { timeout: 2000 });

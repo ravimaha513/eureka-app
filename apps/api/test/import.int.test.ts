@@ -73,6 +73,9 @@ async function ticket(key: keyof typeof U = "admin"): Promise<string> {
   expect(r.statusCode, r.body).toBe(201);
   return r.json().ticket as string;
 }
+it("tickets are plain hex, so `--ticket <token>` can never be read as a flag", async () => {
+  for (let i = 0; i < 20; i++) expect(await ticket("admin")).toMatch(/^[0-9a-f]{64}$/);
+});
 /** Sign-off as the API client does it: read the preview, approve quoting its digest. */
 async function approve(key: keyof typeof U, id = batchId) {
   const p = await call(key, "GET", `/api/v1/imports/${id}/preview`);

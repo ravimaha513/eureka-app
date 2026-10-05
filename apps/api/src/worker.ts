@@ -19,6 +19,7 @@ import { LocalMail, SesMail } from "./worker/feedback-mail.js";
 import { feedbackEmailJob, feedbackNotificationJob } from "./worker/jobs/feedback-email.js";
 import { idempotencyCleanupJob, outboxDeliveryJob, outboxPruneJob } from "./worker/jobs/outbox.js";
 import { benchTimeJob, notificationPruneJob } from "./worker/jobs/notifications.js";
+import { portalPruneJob } from "./worker/jobs/portal-prune.js";
 import { loadWorkerConfig } from "./worker/config.js";
 import { auditExportJob } from "./worker/jobs/audit-export.js";
 import { createLogger, errorFields } from "./worker/log.js";
@@ -70,6 +71,8 @@ const jobs = [
   visaExpiryJob(config.WORK_AUTH_EXPIRY_NOTICE_DAYS),
   // Paperwork items past their due date (FR-NTF-04, migration 0052), once per item and due date.
   paperworkOverdueJob(),
+  // jobs-portal: applicants who never confirmed their mailbox, after 30 days (ids and counts only in the log).
+  portalPruneJob(30),
 ];
 {
   // Without a mail mode only the in-app channel is delivered; emailing events stay unpublished.

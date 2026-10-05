@@ -46,6 +46,14 @@ const ConfigSchema = z
     // Field encryption (design A6.3): KMS keys in AWS, a local provider otherwise
     // (refused in production). See platform/crypto/config.ts.
     ...fieldCryptoEnv,
+    // jobs-portal: email the API sends to applicants (sign-in links, application
+    // notices). "dev" keeps messages in memory (development mailbox endpoint);
+    // "ses" sends from PORTAL_FROM_EMAIL. Production requires ses and a sender.
+    PORTAL_MAIL_MODE: z.enum(["dev", "ses"]).default("dev"),
+    PORTAL_FROM_EMAIL: z.string().email().optional(),
+    // Applicant sessions (separate from staff sessions).
+    PORTAL_SESSION_IDLE_MINUTES: z.coerce.number().int().min(5).max(240).default(60),
+    PORTAL_SESSION_HOURS: z.coerce.number().int().min(1).max(24).default(12),
   })
   .superRefine((c, ctx) => {
     checkFieldCrypto(c, ctx, { bidx: true });
@@ -67,6 +75,13 @@ const ConfigSchema = z
     }
     if (c.NODE_ENV === "production" && !c.DOCUMENTS_BUCKET) {
       ctx.addIssue({ code: "custom", message: "DOCUMENTS_BUCKET is required in production (the local document driver is for development)" });
+    }
+    // jobs-portal: applicants must get real email in production, from a configured sender.
+    if (c.NODE_ENV === "production" && (c.PORTAL_MAIL_MODE !== "ses" || !c.PORTAL_FROM_EMAIL)) {
+      ctx.addIssue({ code: "custom", message: "PORTAL_MAIL_MODE=ses and PORTAL_FROM_EMAIL are required in production" });
+    }
+    if (c.PORTAL_MAIL_MODE === "ses" && (!c.PORTAL_FROM_EMAIL || !c.AWS_REGION)) {
+      ctx.addIssue({ code: "custom", message: "PORTAL_MAIL_MODE=ses needs PORTAL_FROM_EMAIL and AWS_REGION" });
     }
     if (c.DOCUMENTS_BUCKET && c.LOCAL_STORAGE_DIR) {
       ctx.addIssue({ code: "custom", message: "Set only one of DOCUMENTS_BUCKET and LOCAL_STORAGE_DIR" });

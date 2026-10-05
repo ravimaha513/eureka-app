@@ -392,6 +392,8 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
       WHERE c.id = $1`, [candidateId]))[0]!.first_name;
     const a = await newId(db);
     const item = await newId(db);
+    const chat = await asUser(db.app, U.r1a, async (c) => (await c.query<{ conversation_id: string }>(
+      `SELECT conversation_id FROM authz.chat_open_direct($1)`, [U.hr])).rows[0]!.conversation_id, true);
     const events = [
       ["work_authorization.expiring", PAYLOADS.workAuth(candidateId, a)],
       ["employee.benched", PAYLOADS.projectExit(a, placementId, candidateId)],
@@ -400,12 +402,18 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
       ["employee.bench_time", PAYLOADS.benchTime(candidateId)],
       ["candidate.assigned", PAYLOADS.assigned(candidateId, T.t1, T.t2)],
       ["checklist.item_overdue", PAYLOADS.overdue(item, placementId, X.docs)],
+      // chat (migration 0070): a real direct chat r1a-hr; the aggregate is the conversation.
+      ["chat.direct_message", { conversationId: chat, recipientId: U.hr }],
+      // jobs-portal (0062): HR gets it even without a hiring manager.
+      ["application.received", { applicationId: a, jobId: item }],
     ] as const;
     expect(events.map(([t]) => t).sort()).toEqual(Object.keys(EVENT_SPECS).filter((t) => !t.startsWith("placement.")).sort());
     const secrets = [person, "Placed", "81.25", "Irving", "Petra", "petra@vendor.example", "4695550188", "Northwind",
       "2027-01-15", "2026-09-30", "2026-09-29", "2026-11-01", "2026-05-01", "terminated", "resigned", "r1a", "Team Rohit"];
     for (const [type, payload] of events) {
-      const ev = await emitEvent(db, type, "candidate", candidateId, payload);
+      const ev = type === "chat.direct_message"
+        ? await emitEvent(db, type, "chat_conversation", chat, payload)
+        : await emitEvent(db, type, "candidate", candidateId, payload);
       const mail = new FakeMail();
       await deliverEvent(db.worker, EVENT_SPECS[type]!.email ? mail : null, EVENT_SPECS[type]!.email ? ORIGIN : null, ev, ctx());
       const texts = [

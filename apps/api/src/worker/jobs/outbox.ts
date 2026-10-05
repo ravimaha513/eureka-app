@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { MANDATORY_NOTIFICATION_TYPES } from "@eureka/shared";
 import { MailRejected, type MailTransport } from "../feedback-mail.js";
 import type { Logger } from "../log.js";
 import { DEFAULT_RUNNER_OPTIONS, type JobDefinition } from "../runner.js";
@@ -132,12 +133,18 @@ async function prepare(
       else {
         const users = await resolve();
         const box = rendered.inbox!;
+        // Users who switched this type off in Settings get no inbox row (migration 0081);
+        // mandatory types cannot be switched off. The marker counts every resolved recipient.
+        const muted = MANDATORY_NOTIFICATION_TYPES.includes(ev.type) ? [] : (await c.query<{ user_id: string }>(
+          `SELECT user_id FROM eureka.notification_preference WHERE type = $1 AND NOT in_app AND user_id = ANY ($2::uuid[])`,
+          [ev.type, users])).rows.map((r) => r.user_id);
+        const inbox = users.filter((u) => !muted.includes(u));
         await c.query(
           `INSERT INTO eureka.notification (recipient_id, event_id, type, entity_type, entity_id, title, body)
            SELECT u, $2, $3, $4, $5, $6, $7 FROM unnest($1::uuid[]) AS u`,
-          [users, id, ev.type, box.entity.type, box.entity.id, box.title, box.body]);
+          [inbox, id, ev.type, box.entity.type, box.entity.id, box.title, box.body]);
         await c.query("INSERT INTO eureka.inbox_fanout (event_id, recipients) VALUES ($1, $2)", [id, users.length]);
-        inApp = users.length;
+        inApp = inbox.length;
       }
     }
 

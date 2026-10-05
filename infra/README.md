@@ -334,7 +334,7 @@ refuses hosts or database names containing "prod" and any stack with real data:
 a candidate outside the demo teams, or any user besides the active org admins.
 So load it in the bootstrap run, before creating users; a re-run adds nothing. The admins see none of it (no data role):
 to show it, create a business account for the presenter in Users & Access and
-give it, for example, Location Ops Admin for "Demo Dallas" (24 candidates), or
+give it, for example, Location Incharge for "Demo Dallas" (24 candidates), or
 Associate Director and make the demo managers report to it (all 32).
 
 ## Turning on the worker
@@ -519,7 +519,7 @@ operations log. A failed check or an RTO over target is a launch blocker.
 - **Field encryption IAM.** The task roles may use the restricted key directly
   (no `kms:ViaService`, no S3 context) only with the field context: purpose
   `field`, a field class they need (`api_field_classes`, `rotated_field_classes`
-  in `kms.tf`; today `work_auth_number`) and no context keys other than
+  in `kms.tf`; today `work_auth_number` and `utility_password`) and no context keys other than
   `eureka:purpose`, `eureka:field-class`, `eureka:key-id`. The bidx key allows
   only `kms:GenerateMac` with HMAC_SHA_256, to the API only.
 - **The rotation worker can read every encrypted field, by design.** The

@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
+import type { ClientInfo } from "./client-info.js";
 import { CONFIG, type AppConfig } from "./config.js";
 import { DbService } from "./db.service.js";
 
@@ -27,14 +28,16 @@ export class SessionService {
     return createHash("sha256").update(sid).digest();
   }
 
-  async create(userId: string, authTime: Date): Promise<string> {
+  /** `client`: device class, browser family and masked IP for Login activity (never the raw user agent or IP). */
+  async create(userId: string, authTime: Date, client?: ClientInfo): Promise<string> {
     const sid = randomBytes(32).toString("base64url");
     await this.db.system((c) =>
       c.query(
-        `INSERT INTO eureka.session (id_hash, user_id, expires_at, auth_time, access_version)
-         SELECT $1, u.id, now() + make_interval(hours => $3), $4, u.access_version
+        `INSERT INTO eureka.session (id_hash, user_id, expires_at, auth_time, access_version, device_class, browser, ip_masked)
+         SELECT $1, u.id, now() + make_interval(hours => $3), $4, u.access_version, $5, $6, $7
          FROM eureka.app_user u WHERE u.id = $2 AND u.status = 'active'`,
-        [SessionService.hash(sid), userId, this.config.SESSION_ABSOLUTE_HOURS, authTime],
+        [SessionService.hash(sid), userId, this.config.SESSION_ABSOLUTE_HOURS, authTime,
+          client?.deviceClass ?? null, client?.browser ?? null, client?.ipMasked ?? null],
       ),
     );
     return sid;

@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { Download, Mail, Phone } from "lucide-react";
 import { Person } from "../shell/ui";
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { download } from "./JoiningsExitsReport";
 import type { Me } from "../api";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../admin/Dialog";
 import { useLookups } from "../lookups";
@@ -19,7 +21,23 @@ export const EmployeeStatus = ({ status }: { status: string }) => <span classNam
 const nameOf = (e: Pick<Employee, "candidate">) => e.candidate.name ?? "Name hidden";
 
 /** Employees (FR-EMP): list with filters and a drawer with assignment history and lifecycle actions. */
-export function EmployeesPage(_: { me?: Pick<Me, "capabilities"> }) {
+/** Email and phone with icons; masked values are not links (EM-C1). */
+function Contact({ e }: { e: Employee }) {
+  const c = e.contact;
+  if (!c || (!c.email && !c.phone)) return <span className="muted">—</span>;
+  const masked = c.masked;
+  return (
+    <span className="contactcell">
+      {c.email && (masked ? <span className="contactlink" title="Hidden: outside your contact permission"><Mail size={14} aria-hidden="true" />{c.email}</span>
+        : <a className="contactlink" href={`mailto:${c.email}`}><Mail size={14} aria-hidden="true" />{c.email}</a>)}
+      {c.phone && (masked ? <span className="contactlink" title="Hidden: outside your contact permission"><Phone size={14} aria-hidden="true" />{c.phone}</span>
+        : <a className="contactlink" href={`tel:${c.phone}`}><Phone size={14} aria-hidden="true" />{c.phone}</a>)}
+      {masked && <span className="sr-only">Contact details hidden</span>}
+    </span>
+  );
+}
+
+export function EmployeesPage({ me }: { me?: Pick<Me, "capabilities"> }) {
   const id = useId();
   const lookups = useLookups();
   const [status, setStatus] = useState("");
@@ -55,6 +73,14 @@ export function EmployeesPage(_: { me?: Pick<Me, "capabilities"> }) {
     : `${n} ${n === 1 ? "employee" : "employees"} on page ${page + 1}${q.data?.nextCursor ? ", more on the next page" : ""}.`;
   const locations = lookups.data?.locations ?? [];
   const clients = lookups.data?.clients ?? [];
+  const canExport = me?.capabilities.includes("report:export") ?? false;
+  const exportRun = useMutation({
+    mutationFn: () => employeesApi.exportEmployees({ status, locationId, clientId, endingWithinDays: soon ? SOON_DAYS : undefined, search }),
+    onSuccess: (r) => {
+      download(r.blob, r.filename);
+      setNotice(`Exported ${r.rows} ${r.rows === 1 ? "employee" : "employees"}${r.truncated ? " (capped: narrow the filters for the rest)" : ""}.`);
+    },
+  });
 
   return (
     <>
@@ -93,8 +119,13 @@ export function EmployeesPage(_: { me?: Pick<Me, "capabilities"> }) {
               setStatus(""); setLocationId(""); setClientId(""); setSoon(false); setSearchText(""); setSearch(""); reset();
             }}>Clear filters</button>
           )}
+          {canExport && (
+            <button type="button" className="btn push" disabled={exportRun.isPending} aria-busy={exportRun.isPending || undefined}
+              onClick={() => exportRun.mutate()}><Download size={15} aria-hidden="true" /> {exportRun.isPending ? "Exporting…" : "Export CSV"}</button>
+          )}
         </div>
       </form>
+      {exportRun.error && <p className="error" role="alert">{employmentError(exportRun.error)}</p>}
 
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
 
@@ -104,7 +135,7 @@ export function EmployeesPage(_: { me?: Pick<Me, "capabilities"> }) {
         ) : (
           <div className="tablewrap"><table aria-label="Employees" aria-busy={q.isFetching || undefined}>
             <thead><tr>
-              <th>Employee</th><th>Status</th><th>Current client</th><th>Assignment</th><th>Planned end</th><th>Location / team</th>
+              <th>Employee</th><th>Contact</th><th>Status</th><th>Current client</th><th>Assignment</th><th>Planned end</th><th>Location / team</th>
               <th><span className="sr-only">Actions</span></th>
             </tr></thead>
             <tbody>
@@ -114,6 +145,7 @@ export function EmployeesPage(_: { me?: Pick<Me, "capabilities"> }) {
                 return (
                   <tr key={e.id}>
                     <td><Person name={nameOf(e)}><b>{nameOf(e)}</b><span className="block muted">Since {fmtDate(e.employeeSince)}</span></Person></td>
+                    <td><Contact e={e} /></td>
                     <td><EmployeeStatus status={e.status} /><span className="block muted">{fmtDate(e.statusSince)}</span></td>
                     <td>{open && a.client ? a.client.name : <span className="muted">—</span>}</td>
                     <td>{a ? <>No. {a.assignmentNo}<span className="block muted">{fmtDate(a.startDate)} – {a.endDate ? fmtDate(a.endDate) : "ongoing"}</span></> : <span className="muted">—</span>}</td>
@@ -126,7 +158,7 @@ export function EmployeesPage(_: { me?: Pick<Me, "capabilities"> }) {
                 );
               })}
               {items.length === 0 && (
-                <tr><td colSpan={7} className="empty">{hasFilters ? "No employees match these filters." : "No employees yet. A person becomes an employee when their placement is marked Joined."}</td></tr>
+                <tr><td colSpan={8} className="empty">{hasFilters ? "No employees match these filters." : "No employees yet. A person becomes an employee when their placement is marked Joined."}</td></tr>
               )}
             </tbody>
           </table></div>

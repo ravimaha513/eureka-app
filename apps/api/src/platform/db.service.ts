@@ -34,6 +34,28 @@ export class DbService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * jobs-portal: a portal request runs as the eureka_portal role (SET LOCAL
+   * ROLE, migration 0061) with ONLY the applicant id; no staff user id is set,
+   * and that role's policies limit every row to this applicant.
+   */
+  async withApplicant<T>(applicantId: string, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
+    const c = await this.pool.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL ROLE eureka_portal");
+      await c.query("SELECT set_config('eureka.applicant_id', $1, true)", [applicantId]);
+      const out = await fn(c);
+      await c.query("COMMIT");
+      return out;
+    } catch (err) {
+      await c.query("ROLLBACK").catch(() => undefined);
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+
   /** Queries that must run without a user (session lookup, login). */
   async system<T>(fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
     const c = await this.pool.connect();

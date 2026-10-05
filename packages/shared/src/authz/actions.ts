@@ -98,7 +98,8 @@ export function placementTransitions(
 /**
  * Batch planning (FR-CAN-02): Sales leadership, i.e. candidate:create at team,
  * hierarchy or org scope; a recruiter's "own" grant does not qualify. Mirrors
- * authz.batch_manager() (migration 0026).
+ * authz.batch_manager() (migration 0026). Training managers plan batches too
+ * since migration 0065, through the training API (canPlanBatch in training.ts).
  */
 export const BATCH_MANAGER_SCOPES = ["team", "hierarchy", "org"] as const;
 

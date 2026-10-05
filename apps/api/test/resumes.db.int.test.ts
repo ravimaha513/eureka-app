@@ -98,6 +98,9 @@ describe("differential: RLS alone matches the engine", () => {
 
   it.each(["l1", "m1", "r1a", "hr"] as const)(
     "rule 3: authz calls for %s do not grow with the number of resume rows (scope evaluated once per statement)", async (key) => {
+      // Fresh planner statistics before each measurement (as autovacuum keeps them in production): a background
+      // auto-analyze landing between the two measurements changes the plan, and with it the count, at random.
+      await db.admin.query("ANALYZE");
       const one = await authzCalls(U[key], `SELECT id FROM eureka.resume`);
       // Double the table: a second resume for every candidate.
       const c = await db.admin.connect();
@@ -109,6 +112,7 @@ describe("differential: RLS alone matches the engine", () => {
           SELECT candidate_id, 'clean', 'NO_THREATS_FOUND', content_type, 10, sha256_hex, 200 + $1::int, false, uploaded_by, now(), now()
           FROM eureka.resume WHERE version = 100`, [Object.keys(U).indexOf(key)]);
         await c.query("COMMIT");
+        await db.admin.query("ANALYZE");
         const two = await authzCalls(U[key], `SELECT id FROM eureka.resume`);
         expect(two.rows).toBe(one.rows * 2);
         expect(one.calls).toBeGreaterThan(0);

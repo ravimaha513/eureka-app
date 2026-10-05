@@ -57,19 +57,37 @@ describe("catalog integrity", () => {
   });
 
   it("org_admin holds no data permissions (no self-escalation into data)", () => {
-    expect(Object.keys(GRANTS.org_admin).sort()).toEqual(["access:manage", "audit:read"]);
+    // staff.contact:read is the staff directory's own data (work phone), and chat:use only lets the admin take
+    // part in their own conversations (no admin read access to chats; docs/chat-api.md CH-9): neither is business data.
+    expect(Object.keys(GRANTS.org_admin).sort()).toEqual(["access:manage", "audit:read", "chat:use", "staff.contact:read"]);
   });
 
-  it("restricted permissions are held only by HR, Accounts and Immigration", () => {
+  it("every role may chat, at own scope only (internal staff chat; docs/chat-api.md CH-1)", () => {
+    for (const role of ROLES) expect(GRANTS[role]["chat:use"], role).toBe("own");
+    expect(RESTRICTED_PERMISSIONS).not.toContain("chat:use");
+    expect(ORG_SENSITIVE_PERMISSIONS).not.toContain("chat:use");
+  });
+
+  it("restricted permissions are held only by HR, Accounts and Immigration, and utility passwords and DataHub management by Location Ops Admin", () => {
     for (const role of ROLES) {
       const holds = RESTRICTED_PERMISSIONS.filter((p) => GRANTS[role][p]);
-      if (holds.length) expect(["hr", "accounts", "immigration"]).toContain(role);
+      if (role === "location_ops_admin") expect(holds).toEqual(["utility.secret:read", "datahub:manage"]);
+      else if (holds.length) expect(["hr", "accounts", "immigration"]).toContain(role);
     }
+  });
+
+  it("DataHub: every staff role reads (own scope, for the nav); HR and Accounts manage org-wide, Location Ops Admin its location; org_admin neither", () => {
+    for (const role of ROLES) {
+      expect(GRANTS[role]["datahub:read"], role).toBe(role === "org_admin" ? undefined : "own");
+    }
+    expect(ROLES.filter((r) => GRANTS[r]["datahub:manage"]).map((r) => [r, GRANTS[r]["datahub:manage"]]))
+      .toEqual([["location_ops_admin", "location"], ["hr", "org"], ["accounts", "org"]]);
+    expect(RESTRICTED_PERMISSIONS).toContain("datahub:manage");
   });
 
   it("restricted roles (second approver): org_admin, restricted-permission holders, org-wide sensitive holders", () => {
     expect(ROLES.filter(isRestrictedRole).sort()).toEqual(
-      ["accounts", "associate_hr", "bu_head", "ceo", "documents_team", "hr", "immigration", "offshore_manager", "org_admin"]);
+      ["accounts", "associate_hr", "bu_head", "ceo", "documents_team", "hr", "immigration", "location_ops_admin", "offshore_manager", "org_admin"]);
     for (const role of ROLES) {
       const holdsRestricted = RESTRICTED_PERMISSIONS.some((p) => GRANTS[role][p]);
       const orgSensitive = ORG_SENSITIVE_PERMISSIONS.some((p) => GRANTS[role][p] === "org");

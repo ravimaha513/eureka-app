@@ -13,6 +13,8 @@ export interface AdminUser {
   email: string;
   displayName: string;
   designation: string | null;
+  /** Present only when the caller holds staff.contact:read (Settings profile phone). */
+  phone?: string | null;
   status: "active" | "inactive";
   primaryLocation: Place | null;
   manager: Ref | null;
@@ -20,6 +22,8 @@ export interface AdminUser {
   teams: { id: string; name: string; asLead: boolean }[];
 }
 export interface Page<T> { items: T[]; nextCursor: string | null }
+export interface UserPage extends Page<AdminUser> { contactVisible?: boolean }
+export interface UserSummary { active: number; inactive: number; roles: { key: string; label: string; count: number }[] }
 
 export type RequestStatus = "pending" | "approved" | "rejected" | "expired";
 export interface RoleRequest {
@@ -50,8 +54,9 @@ export const adminApi = {
     if (p.status) q.set("status", p.status);
     if (p.cursor) q.set("cursor", p.cursor);
     q.set("limit", String(p.limit ?? 50));
-    return api<Page<AdminUser>>(`/api/v1/admin/users?${q}`);
+    return api<UserPage>(`/api/v1/admin/users?${q}`);
   },
+  userSummary: () => api<UserSummary>("/api/v1/admin/users/summary"),
   createUser: (b: { email: string; displayName: string; designation?: string; primaryLocationId?: string }) =>
     api<{ id: string }>("/api/v1/admin/users", { method: "POST", ...json(b) }),
   deactivate: (id: string) => api<void>(`/api/v1/admin/users/${enc(id)}/deactivate`, { method: "POST" }),

@@ -14,7 +14,7 @@ const run = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`;
 
 async function signIn(page: Page, label: string) {
   await page.goto("/");
-  await page.getByLabel("Development sign-in (fictional users)").selectOption({ label });
+  await page.getByLabel("Sign in as").selectOption({ label });
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("complementary", { name: "Main navigation" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Hot List" })).toBeVisible();

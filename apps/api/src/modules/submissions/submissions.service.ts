@@ -35,6 +35,8 @@ export const CreateSubmission = z
     clientId: uuid,
     vendorId: uuid.optional(),
     rate: z.number().positive().max(1000).optional(),
+    /** jobs-portal: the client requirement this submission answers (an open job of the same client). */
+    jobId: uuid.optional(),
   })
   .strict(); // recruiter, team and location snapshots are set by the database
 export type CreateSubmission = z.infer<typeof CreateSubmission>;
@@ -81,6 +83,7 @@ interface SubmissionRow {
   rate: string | null;
   status: string;
   rejection_reason: string | null;
+  job_id: string | null;
   submitted_at: Date;
   status_changed_at: Date | null;
   k: string;
@@ -93,7 +96,7 @@ interface SubmissionRow {
 
 const SELECT = `
   SELECT s.id, s.candidate_id, s.recruiter_id, s.team_id, s.location_id, s.job_title, s.client_id, s.vendor_id,
-         s.rate, s.status, s.rejection_reason, s.submitted_at, s.status_changed_at, ${toMicros("s.submitted_at")} AS k,
+         s.rate, s.status, s.rejection_reason, s.job_id, s.submitted_at, s.status_changed_at, ${toMicros("s.submitted_at")} AS k,
          cl.name AS client, ru.display_name AS recruiter_name,
          CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name END AS candidate_name,
          c.recruiter_id AS c_recruiter, c.team_id AS c_team, c.location_id AS c_location,
@@ -131,6 +134,15 @@ export function activityPredicate(scope: EffectiveScope, params: unknown[], acti
   return `(${actor} OR ${owner})`;
 }
 
+/** jobs-portal (migration 0060): the submission's job must be a readable, open client requirement of its client. */
+function mapSubmissionJobError(err: unknown): never {
+  const e = err as { message?: string; code?: string };
+  if (e.code === "23514" && (e.message === "job_not_found" || e.message === "job_client_mismatch" || e.message === "job_not_open")) {
+    throw new UnprocessableEntityException(e.message);
+  }
+  throw err;
+}
+
 @Injectable()
 export class SubmissionsService {
   constructor(private readonly db: DbService, private readonly audit: AuditService) {}
@@ -155,6 +167,7 @@ export class SubmissionsService {
       ...(showRate ? { rate: r.rate === null ? null : Number(r.rate) } : {}),
       status: r.status,
       rejectionReason: r.rejection_reason,
+      jobId: r.job_id,
       submittedAt: r.submitted_at,
       statusChangedAt: r.status_changed_at,
       /** Hints for the UI (docs/placements-api.md); every write is checked again. */
@@ -177,13 +190,15 @@ export class SubmissionsService {
 
       const dup = await c.query<{ d: boolean }>(`SELECT authz.recent_submission_exists($1,$2) AS d`, [body.candidateId, body.clientId]);
       const ins = await c.query<{ id: string }>(
-        `INSERT INTO eureka.submission (candidate_id, job_title, client_id, vendor_id, rate)
-         VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-        [body.candidateId, body.jobTitle, body.clientId, body.vendorId ?? null, body.rate ?? null]);
+        `INSERT INTO eureka.submission (candidate_id, job_title, client_id, vendor_id, rate, job_id)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [body.candidateId, body.jobTitle, body.clientId, body.vendorId ?? null, body.rate ?? null, body.jobId ?? null])
+        .catch(mapSubmissionJobError);
       await this.audit.record(c, {
         actorId: user.id, action: "submission.created", entityType: "submission", entityId: ins.rows[0]!.id,
         // Design B3: duplicate checks are audited (yes/no only, like the answer itself).
-        changes: { candidateId: body.candidateId, clientId: body.clientId, duplicateWarning: dup.rows[0]!.d },
+        changes: { candidateId: body.candidateId, clientId: body.clientId, duplicateWarning: dup.rows[0]!.d,
+          ...(body.jobId ? { jobId: body.jobId } : {}) },
       });
       return { id: ins.rows[0]!.id, duplicateWarning: dup.rows[0]!.d };
     });

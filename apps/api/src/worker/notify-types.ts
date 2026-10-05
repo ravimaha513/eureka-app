@@ -18,7 +18,7 @@
 export interface OutboxEvent { id: string; type: string; aggregate_id: string; payload: Record<string, unknown> }
 
 /** What a recipient can open from the inbox (the web app has a screen for each). */
-export interface EntityRef { type: "placement" | "candidate"; id: string }
+export interface EntityRef { type: "placement" | "candidate" | "conversation" | "application"; id: string }
 
 export interface Rendered {
   subject: string;
@@ -297,6 +297,50 @@ export const EVENT_SPECS: Record<string, EventSpec> = {
       };
     },
   },
+
+  // Internal chat (migration 0070, docs/chat-api.md CH-8): a direct message the recipient has not seen for
+  // 10 minutes (once per unseen stretch, never when muted). In-app only; never the sender, the text or a name.
+  "chat.direct_message": {
+    email: false, inApp: true,
+    render: (ev) => {
+      const conversationId = uuid(ev.payload, "conversationId");
+      uuid(ev.payload, "recipientId");
+      if (aggregate(ev) !== conversationId) throw new Error("outbox event payload has an invalid conversationId");
+      checkNotify(ev.payload, []);
+      return {
+        subject: "Eureka: new direct message",
+        message: "You have a new direct message in Eureka.",
+        refLabel: "Conversation reference", refId: conversationId,
+        inbox: {
+          title: "New direct message",
+          body: "You have a new direct message. Open Chat to read it.",
+          entity: { type: "conversation", id: conversationId },
+        },
+      };
+    },
+  },
+};
+
+// jobs-portal (migration 0062): an applicant applied to a job; the job's hiring manager and HR, in-app only.
+// The inbox entry names no applicant or job: open the application for the details.
+EVENT_SPECS["application.received"] = {
+  email: false, inApp: true,
+  render: (ev) => {
+    aggregate(ev);
+    const applicationId = uuid(ev.payload, "applicationId");
+    uuid(ev.payload, "jobId");
+    checkNotify(ev.payload, ["hiring_manager", "hr"]);
+    return {
+      subject: "Eureka: new application",
+      message: "An applicant applied to a job you hire for or manage applications of.",
+      refLabel: "Application reference", refId: applicationId,
+      inbox: {
+        title: "New application",
+        body: "An applicant applied to a job you hire for. Open the application to review it.",
+        entity: { type: "application", id: applicationId },
+      },
+    };
+  },
 };
 
 export const DELIVERED_TYPES = Object.keys(EVENT_SPECS);
@@ -313,7 +357,8 @@ export function specOf(type: string): EventSpec {
 const GROUP_LABELS: Record<string, string> = { hr: "HR", accounts: "Accounts", immigration: "Immigration" };
 const OTHER_LABELS: Record<string, string> = {
   ceo: "the CEO", bu_head: "a BU Head", recruiter: "the recruiter", lead: "the team lead",
-  manager: "the team lead's manager", documents_team: "the assigned Documents Team member",
+  manager: "the team lead's manager", documents_team: "the assigned Documents Team member", chat: "a chat member",
+  hiring_manager: "the job's hiring manager",
 };
 
 export function whyLine(reasons: readonly string[]): string {

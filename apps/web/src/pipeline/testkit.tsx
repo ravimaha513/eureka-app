@@ -18,7 +18,8 @@ export function mockApi(initial: Record<string, Handler>) {
     const url = new URL(String(input), "http://localhost");
     const method = (init.method ?? "GET").toUpperCase();
     const key = `${method} ${url.pathname}`;
-    const body = init.body ? JSON.parse(String(init.body)) : undefined;
+    // Uploads to storage send a multipart form; everything else is JSON.
+    const body = init.body instanceof FormData ? init.body : init.body ? JSON.parse(String(init.body)) : undefined;
     const headers = (init.headers ?? {}) as Record<string, string>;
     calls.push({ method, path: url.pathname, url, body, headers });
     const h = routes[key];

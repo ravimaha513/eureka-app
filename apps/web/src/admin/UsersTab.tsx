@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { Phone as PhoneIcon, Users as UsersIcon } from "lucide-react";
 import { Person } from "../shell/ui";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { adminApi, type AdminUser, type UserRole } from "./adminApi";
@@ -15,6 +16,8 @@ type Modal =
   | { kind: "deactivate"; user: AdminUser }
   | { kind: "reactivate"; user: AdminUser }
   | { kind: "revoke"; user: AdminUser; role: UserRole };
+
+const TINTS = ["indigo", "teal", "amber", "rose", "violet", "sky"] as const;
 
 const roleText = (r: { label: string; locationName: string | null }) => (r.locationName ? `${r.label} · ${r.locationName}` : r.label);
 
@@ -40,6 +43,9 @@ export function UsersTab() {
     placeholderData: keepPreviousData,
   });
 
+  const summary = useQuery({ queryKey: [...keys.users, "summary"], queryFn: adminApi.userSummary });
+  const contact = q.data?.contactVisible === true;
+
   const close = () => setModal(null);
   const done = (msg: string) => {
     close();
@@ -51,6 +57,18 @@ export function UsersTab() {
 
   return (
     <>
+      {summary.data && summary.data.roles.length > 0 && (
+        <ul className="tiles rolecounts" aria-label="Active users per role">
+          {summary.data.roles.map((r, i) => (
+            <li key={r.key} className="tile card">
+              <span className="tilehead"><span className={`tileicon tint-${TINTS[i % TINTS.length]}`} aria-hidden="true"><UsersIcon size={18} /></span>
+                <span className="tilelabel">{r.label}</span></span>
+              <span className="tilevalue">{r.count}</span>
+              <span className="tilehint">{r.count === 1 ? "active user" : "active users"}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="toolbar">
         <div className="field inline">
           <label htmlFor="user-search">Search users</label>
@@ -68,7 +86,7 @@ export function UsersTab() {
       <div className="card">
         {q.isLoading ? <p className="empty">Loading…</p> : q.error ? <p className="empty error" role="alert">{friendlyError(q.error)}</p> : (
           <div className="tablewrap"><table aria-label="Users" aria-busy={q.isFetching || undefined}>
-            <thead><tr><th>User</th><th>Designation</th><th>Status</th><th>Roles</th><th>Teams</th><th>Manager</th><th><span className="sr-only">Actions</span></th></tr></thead>
+            <thead><tr><th>User</th><th>Designation</th>{contact && <th>Phone</th>}<th>Status</th><th>Roles</th><th>Teams</th><th>Manager</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {q.data!.items.map((u) => {
                 const self = u.id === me.id;
@@ -76,6 +94,7 @@ export function UsersTab() {
                   <tr key={u.id}>
                     <td><Person name={u.displayName}><b>{u.displayName}</b>{self && <span className="tag">you</span>}<small className="block">{u.email}</small></Person></td>
                     <td>{u.designation ?? "—"}</td>
+                    {contact && <td>{u.phone ? <a className="contactlink" href={`tel:${u.phone}`}><PhoneIcon size={14} aria-hidden="true" />{u.phone}</a> : "—"}</td>}
                     <td><span className={`badge ${u.status}`}>{u.status}</span></td>
                     <td>
                       <ul className="chips" aria-label={`Roles of ${u.displayName}`}>
@@ -107,7 +126,7 @@ export function UsersTab() {
                   </tr>
                 );
               })}
-              {q.data!.items.length === 0 && <tr><td colSpan={7} className="empty">No users match.</td></tr>}
+              {q.data!.items.length === 0 && <tr><td colSpan={contact ? 8 : 7} className="empty">No users match.</td></tr>}
             </tbody>
           </table></div>
         )}

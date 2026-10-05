@@ -10,7 +10,8 @@
  *   accepts hosted-domain accounts and links by that email.
  * - Only non-restricted roles: no second approver is bypassed. org_admin sees
  *   none of this data (rule 7); to show it, give a real account a business
- *   role in Users & Access (e.g. Location Ops Admin for "Demo Dallas").
+ *   role in Users & Access (e.g. Location Incharge for "Demo Dallas"; Location
+ *   Ops Admin is restricted since it reveals utility passwords).
  * - Org rows are written by the migration user (it owns the org tables).
  *   Candidates and submissions are written as the app role, as each demo
  *   recruiter, through RLS, the guards and audit, exactly like the API.
@@ -47,7 +48,7 @@ export const DEMO_USERS: readonly DemoUser[] = [
   { key: "r2a", name: "Chetan Kumar (demo)", designation: "Recruiter", role: "recruiter", manager: "l2" },
   { key: "r3a", name: "Divya Reddy (demo)", designation: "Recruiter", role: "recruiter", manager: "l3" },
   { key: "coach", name: "Karthik Menon (demo)", designation: "Interview Coach", role: "interview_coach" },
-  { key: "locd", name: "Lakshmi Patel (demo)", designation: "Location Ops Admin", role: "location_ops_admin", location: "Demo Dallas" },
+  { key: "locd", name: "Lakshmi Patel (demo)", designation: "Location Incharge", role: "location_incharge", location: "Demo Dallas" },
 ];
 
 export const DEMO_TEAMS = [

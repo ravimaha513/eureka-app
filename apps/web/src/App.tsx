@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api, setCsrf, type Me } from "./api";
-import { visibleNav, type NavItem } from "./nav";
+import { SETTINGS_NAV, visibleNav, type NavItem } from "./nav";
+import { SettingsPage } from "./settings/SettingsPage";
 import { AccessPage } from "./admin/AccessPage";
 import { DashboardPage } from "./dashboard/DashboardPage";
 import { CandidateProfile } from "./sales/CandidateProfile";
@@ -14,6 +15,14 @@ import { PaperworkPage } from "./paperwork/PaperworkPage";
 import { NotificationBell, type InboxItem } from "./notifications/Inbox";
 import { EmployeesPage } from "./employees/EmployeesPage";
 import { ReportsPage } from "./employees/JoiningsExitsReport";
+import { CompaniesPage, FacilitiesPage } from "./sites/SitesPage";
+import { DataHubPage } from "./datahub/DataHubPage";
+import { TrainingPage } from "./training/TrainingPage";
+import { CoursesPage } from "./training/CoursesPage";
+import { ChatNavBadge, ChatPage } from "./chat/ChatPage";
+import { JobsPage } from "./jobs/JobsPage";
+import { ApplicationsPage } from "./jobs/ApplicationsPage";
+import { ApplicantsPage } from "./jobs/ApplicantsPage";
 import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sparkles, Sun } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
@@ -118,6 +127,8 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // A placement to open when switching to Placements from another screen (e.g. right after creating it).
   const [placementId, setPlacementId] = useState<string | null>(null);
   const openPlacement = (id: string) => { setPlacementId(id); setActive("placements"); };
+  // jobs-portal: an application to open when switching to Applications (from the inbox).
+  const [applicationId, setApplicationId] = useState<string | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const [restoreFocus, setRestoreFocus] = useState(false);
   const openProfile = (id: string) => { opener.current = document.activeElement as HTMLElement | null; setProfileId(id); };
@@ -132,16 +143,21 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // Inbox entries open the placement or the candidate profile when the user has that screen.
   const has = (key: string) => items.some((i) => i.key === key);
   const candidateScreen = has("candidates") ? "candidates" : has("hotlist") ? "hotlist" : null;
-  const canOpenEntity = (e: InboxItem["entity"]) => (e.type === "placement" ? has("placements") : candidateScreen !== null);
+  // A chat conversation to open when switching to Chat (from a direct-message notification).
+  const [chatId, setChatId] = useState<string | null>(null);
+  const canOpenEntity = (e: InboxItem["entity"]) =>
+    (e.type === "placement" ? has("placements") : e.type === "conversation" ? has("chat") : e.type === "application" ? has("applications") : candidateScreen !== null);
   const openEntity = (e: InboxItem["entity"]) => {
+    if (e.type === "application") { setProfileId(null); setApplicationId(e.id); setActive("applications"); return; }
     if (e.type === "placement") { setProfileId(null); openPlacement(e.id); return; }
+    if (e.type === "conversation") { setProfileId(null); setChatId(e.id); setActive("chat"); return; }
     if (!candidateScreen) return;
     setPlacementId(null);
     setActive(candidateScreen);
     openProfile(e.id);
   };
   const sections = [...new Set(items.map((i) => i.section))];
-  const current = items.find((i) => i.key === active);
+  const current = active === SETTINGS_NAV.key ? SETTINGS_NAV : items.find((i) => i.key === active);
   // Phones: the sidebar is an off-canvas drawer opened from the top bar's menu button.
   const [navOpen, setNavOpen] = useState(false);
   const [theme, setTheme] = useTheme();
@@ -174,14 +190,17 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                 const Icon = NAV_ICONS[i.key];
                 return (
                   <button key={i.key} className="nav" title={collapsed ? i.label : undefined} aria-current={i.key === active ? "page" : undefined}
-                    onClick={() => { setActive(i.key); setProfileId(null); setPlacementId(null); setNavOpen(false); }}>
+                    aria-describedby={i.key === "chat" ? "chat-nav-unread" : undefined}
+                    onClick={() => { setActive(i.key); setProfileId(null); setPlacementId(null); setChatId(null); setApplicationId(null); setNavOpen(false); }}>
                     {Icon && <Icon className="navicon" size={19} strokeWidth={1.8} aria-hidden="true" />}<span className="navlabel">{i.label}</span>
+                    {i.key === "chat" && <ChatNavBadge id="chat-nav-unread" part="badge" />}
                   </button>
                 );
               })}
             </div>
           ))}
         </nav>
+        {items.some((i) => i.key === "chat") && <ChatNavBadge id="chat-nav-unread" part="text" />}
         <ThemeSwitch theme={theme} onChange={setTheme} />
       </aside>
       {navOpen && <div className="navscrim" aria-hidden="true" onClick={() => setNavOpen(false)} />}
@@ -192,7 +211,8 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <span className="topbrand"><span className="logo"><Sparkles size={14} aria-hidden="true" /></span>Eureka</span>
           <div className="topright">
             <NotificationBell onOpen={openEntity} canOpen={canOpenEntity} />
-            <UserMenu name={me.displayName} roles={me.roles.map((r) => r.label).join(", ")} onSignOut={onSignOut} />
+            <UserMenu name={me.displayName} roles={me.roles.map((r) => r.label).join(", ")} onSignOut={onSignOut}
+              onSettings={() => { setActive(SETTINGS_NAV.key); setProfileId(null); setPlacementId(null); setNavOpen(false); }} />
           </div>
         </div>
         <div className="content">
@@ -214,6 +234,16 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "access" ? <AccessPage me={me} />
             : current.key === "employees" ? <EmployeesPage me={me} />
             : current.key === "reports" ? <ReportsPage me={me} />
+            : current.key === "companies" ? <CompaniesPage key="companies" me={me} />
+            : current.key === "facilities" ? <FacilitiesPage key="facilities" me={me} />
+            : current.key === "datahub" ? <DataHubPage />
+            : current.key === "training" ? <TrainingPage me={me} />
+            : current.key === "courses" ? <CoursesPage me={me} />
+            : current.key === "settings" ? <SettingsPage me={me} />
+            : current.key === "chat" ? <ChatPage me={me} initialConversationId={chatId} />
+            : current.key === "jobs" ? <JobsPage me={me} />
+            : current.key === "applications" ? <ApplicationsPage key={applicationId ?? "list"} me={me} initialOpenId={applicationId} />
+            : current.key === "applicants" ? <ApplicantsPage />
             : current.key === "dashboard" ? (
               <DashboardPage firstName={me.displayName.split(" ")[0]} canOpen={(t) => items.some((i) => i.key === t)}
                 onOpen={(t, id) => { if (t === "placements") openPlacement(id); else setActive(t); }} />

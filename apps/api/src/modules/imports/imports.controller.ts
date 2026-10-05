@@ -66,7 +66,8 @@ export class ImportsService {
   }
 
   async createTicket(user: AuthedUser) {
-    const ticket = randomBytes(32).toString("base64url");
+    // Hex, not base64url: a token starting with "-" would be read as a flag by `--ticket <token>`.
+    const ticket = randomBytes(32).toString("hex");
     const hash = createHash("sha256").update(ticket).digest("hex");
     return this.tx(user, async (c) => {
       const r = await c.query<{ e: Date }>(`SELECT authz.import_create_ticket($1) AS e`, [hash]);
