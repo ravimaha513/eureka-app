@@ -1,7 +1,7 @@
 # Sheet migration: CSV import
 
 Design B9. Code in `apps/api/src/import/` (CLI) and `apps/api/src/modules/imports/` (API),
-schema in `db/migrations/0028_import_staging.sql`, `0033_import_hardening.sql` and `0041_import_review.sql`, fictional
+schema in `db/migrations/0028_import_staging.sql`, `0033_import_hardening.sql`, `0041_import_review.sql` and `0054_import_batch_source.sql`, fictional
 fixtures in `apps/api/test/fixtures/import/`.
 
 ## Who does what
@@ -37,7 +37,7 @@ the CSRF header, as the e2e tests do).
    a sales row's target status and visibility against the status/row-colour mapping; the person
    link; live duplicates only with an approve decision that accepted them; placements only when
    the batch loads them. Any problem blocks approval. The approval quotes the preview's digest,
-   which covers `placements_commit` and every row's id, sheet, row number, row key, person key,
+   which covers `placements_commit`, `source`, `historical` and every row's id, sheet, row number, row key, person key,
    status key, state, normalized values and reasons. Row writes take the batch row `FOR SHARE`,
    so they serialize with approval; from then on the CLI cannot change the rows.
 6. **commit --commit**: loads the clean rows. Each person is checked against the digest, the
@@ -72,7 +72,8 @@ SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'eureka_i
 
 ```sh
 cli() { pnpm --filter @eureka/api exec tsx src/import/cli.ts "$@"; }
-cli stage --sales sales.csv --interviews interviews.csv --placements placements.csv --ticket <ticket> [--mapping m.json]
+cli stage --sales sales.csv --interviews interviews.csv --placements placements.csv --ticket <ticket> [--mapping m.json] \
+          [--source sheets|crewnex] [--historical]   # fixed on a new batch
 cli review    --batch <id>
 cli reanalyse --batch <id>          # after decisions made in the API
 cli commit    --batch <id>          # dry run
@@ -100,6 +101,19 @@ When text and colour are both mapped they must agree.
 (`import_batch.placements_commit`, immutable, shown in the preview, part of the digest); changing
 the mapping later does not change an open batch. Loading a placement runs `authz.create_placement`,
 which queues `placement.created` outbox events for HR, Accounts and Immigration (open question).
+
+`stage --source` (`sheets`, the default, or `crewnex`) and `stage --historical` are copied onto a
+new batch the same way (`import_batch.source`, `import_batch.historical`, migration 0054): set only
+by `authz.import_open_batch`, immutable (the batch guard refuses even a superuser; no role holds a
+column privilege on them), shown in the preview and the report, part of the digest. Non-default
+settings also join the batch's source digest, so staging the same files with other settings opens
+a new batch (new ticket) instead of re-analysing one opened with different settings. Each
+`import_load_person` call records its batch on the session marker (`import_session.active_batch`,
+dry run or not), and `authz.import_historical()` is true inside a call for a historical batch; the
+loader reports it as `historical` in its result. Historical mode changes nothing yet: the
+side-effect rules arrive with CrewNex consolidation C1e.1 (`docs/crewnex-consolidation.md` 4.6).
+0054 changed the digest formula, so it withdrew every approval given before it (back to staged);
+committed batches keep their recorded digest.
 
 ## Normalization and matching
 
