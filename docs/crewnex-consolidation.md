@@ -595,7 +595,8 @@ C1 and C2 retire little (two Supabase projects and Vercel seats); the bill drops
 **Built.** `infra/modules/stack/cost.tf` (budgets, anomaly monitor, `local.migration_tags`, opt-in
 `aws_ce_cost_allocation_tag`) and `alarms.tf` (SNS + alarms); runbook and thresholds in infra/README "Cost
 guardrails". Two choices beyond the table: budgets and the monitor are created only once
-`cost_allocation_tags_active` is set (step 3 below), and the SNS topics are unencrypted, because CloudWatch
+`cost_allocation_tags_active` is set (step 3 below); the untagged budget is off until spokenly tags itself
+(`untagged_budget_enabled`); the CloudFront alarm defaults to the Free plan's 100 GB/month; and the SNS topics are unencrypted, because CloudWatch
 cannot publish to the AWS-managed SNS key and a CMK costs $1/month per region for alarm names.
 
 The production account is shared with spokenly (`infra/live/production/env.hcl`, account `637423353261`), so

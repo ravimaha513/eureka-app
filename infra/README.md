@@ -145,12 +145,12 @@ per-service anomaly monitor would fire on spokenly's bill.
 | Guardrail | What it is for | Threshold (variable) | Where |
 |---|---|---|---|
 | Budget `eureka-monthly` | Everything Eureka costs, all environments | $40/month (`budget_monthly_usd`); email at 50 %, 80 %, 100 % actual and 100 % forecast | production only |
-| Budget `eureka-crewnex-migration-tasks` | **The CrewNex migration tasks only** (exporter, import, a rehearsal stack): `Workstream=crewnex`. Not Eureka's running cost | $15 (`budget_crewnex_migration_usd`); 50/80/100 % actual | production only |
-| Budget `eureka-untagged-spend` | Spend with **no** `Project` tag: SES, some data transfer, support, tax, one-off tasks run without tag propagation, and spokenly's until it tags itself `Project=spokenly` | $10 (`budget_untagged_usd`); set it from the first month's actuals | production only |
+| Budget `eureka-crewnex-migration-tasks` | **The CrewNex migration tasks only** (exporter, import, a rehearsal stack): `Workstream=crewnex`. Not Eureka's running cost | $15 (`budget_crewnex_migration_usd`); 50/80/100 % actual; created only once `"Workstream"` is in `cost_allocation_tag_keys` | production only |
+| Budget `eureka-untagged-spend` | Spend with **no** `Project` tag: SES, some data transfer, support, tax, one-off tasks run without tag propagation, and spokenly's until it tags itself `Project=spokenly` | $10 (`budget_untagged_usd`); **off** (`untagged_budget_enabled = false`): until spokenly tags itself it would count all of spokenly. Turn on after spokenly tags `Project=spokenly`, or after setting the limit from one month of actuals | production only |
 | Anomaly monitor `eureka-project-tag` | Sudden spend changes on `Project=Eureka` (CUSTOM monitor, Tags selector) | daily email when total impact ≥ $10 (`cost_anomaly_threshold_usd`) | production only |
-| Alarm `<env>-rds-cpu-credit-balance-low` | Unlimited-mode surplus credits being billed: the cue for `db.t4g.small` | `CPUCreditBalance` < 50 for 15 min | every env (burstable classes) |
+| Alarm `<env>-rds-cpu-credit-balance-low` | Unlimited-mode surplus credits being billed: the cue for `db.t4g.small` | `CPUCreditBalance` < 50 for 15 min | production (burstable classes) |
 | Alarm `<env>-rds-freeable-memory-low` | The other sizing signal | `FreeableMemory` < 128 MiB for 15 min | every env |
-| Alarm `<env>-cloudfront-bytes-downloaded-high` | Video or a scrape going out through the app distribution | daily `BytesDownloaded` above 1/30 of 1,000 GB (`alarm_cloudfront_monthly_gb`) | every env, us-east-1 |
+| Alarm `<env>-cloudfront-bytes-downloaded-high` | Video or a scrape going out through the app distribution | daily `BytesDownloaded` above 1/30 of 100 GB (`alarm_cloudfront_monthly_gb`: the Free plan's monthly allowance) | every env, us-east-1 |
 
 Budgets and the anomaly monitor live in **production only** (`cost_budgets_enabled`):
 the `Project=Eureka` filter already covers staging, so a second copy would
@@ -161,12 +161,12 @@ there. The topics are not KMS-encrypted: CloudWatch cannot publish to the
 AWS-managed SNS key (the alarms would be dropped silently), and a CMK would
 cost $1/month per region to protect alarm names.
 
-**What the guardrails cost.** Anomaly detection, SNS email (first 1,000/month)
-and tag activation are free. Budgets: the first two in the account are free,
-then $0.02 per budget per day (~$0.62/month each); the account is shared, so
-if spokenly already has two, these three cost ~$1.86/month. CloudWatch alarms:
-10 free per account (shared too), then $0.10/month each, so $0–0.30 for
-production's three. **Total: $0–2.20/month.**
+**What the guardrails cost.** Budgets without actions are free (only
+action-enabled budgets are billed beyond two; none here have actions,
+aws.amazon.com/aws-cost-management/aws-budgets/pricing). Anomaly detection,
+SNS email (first 1,000/month) and tag activation are free. CloudWatch alarms:
+10 free per account (shared with spokenly), then $0.10/month each, so $0–0.30
+for production's three. **Total: $0–0.30/month.**
 
 ### Turning them on (the activation sequence)
 
@@ -181,8 +181,10 @@ account on day one).
    tagged resources, the SNS topic and the alarms are created. Set
    `alert_emails` in `live/production/env.hcl` first.
 2. **Confirm the subscriptions (hand step):** each address in `alert_emails`
-   gets an "AWS Notification - Subscription Confirmation" email per topic;
-   click it. Unconfirmed subscriptions receive nothing, and nothing says so.
+   gets an "AWS Notification - Subscription Confirmation" email **per topic,
+   per region**; click each. Production has one topic; staging (us-east-2) has
+   two, the second in us-east-1 for the CloudFront alarm, and both need
+   confirming every time staging is recreated. Unconfirmed subscriptions receive nothing, and nothing says so.
    Check: `aws sns list-subscriptions-by-topic --topic-arn <alerts_topic_arn>`
    shows no `PendingConfirmation`.
 3. **Wait about 24 hours**, until `Project` is listed under Billing → Cost
@@ -190,9 +192,16 @@ account on day one).
 4. **Activate and create the budgets:** set `manage_cost_allocation_tags = true`
    and `cost_allocation_tags_active = true`, apply. The budgets report
    meaningfully from the next Cost Explorer refresh (up to 24 hours).
+   On this first plan that creates budgets, check the plan **after** the apply
+   too: `limit_amount` is sent as `format("%.2f")` ("40.00") and the API may
+   return "40.0". If a second plan shows a perpetual diff on `limit_amount`,
+   change the format in `cost.tf` to match what the API returns.
 5. **Later, once the first `Workstream=crewnex` task has been billed:** add
    `"Workstream"` to `cost_allocation_tag_keys` and apply. Until then the
-   migration budget shows $0.
+   migration budget is not created (it would read $0).
+6. **Untagged budget, when meaningful:** once spokenly tags itself
+   `Project=spokenly` (or after one month of actuals, with
+   `budget_untagged_usd` set from them), set `untagged_budget_enabled = true`.
 
 **AWS Organizations (Q35).** If the account is a member of an Organization,
 cost-allocation tags (and some Cost Explorer settings) are managed from the
@@ -200,7 +209,8 @@ cost-allocation tags (and some Cost Explorer settings) are managed from the
 `manage_cost_allocation_tags = false`, ask the payer to activate `Project`
 (and later `Workstream`), and set only `cost_allocation_tags_active = true`.
 Activation is account-wide: **destroying** `aws_ce_cost_allocation_tag.active`
-deactivates the key for spokenly too.
+deactivates the key for spokenly too, so it carries `prevent_destroy`; to hand
+the key over, `terragrunt state rm` it instead of turning the flag off.
 
 ### Tagging migration resources
 
@@ -211,8 +221,9 @@ The future exporter and import tasks (not created yet) take
 `var.log_retention_days`, which is 30 in production), and are started with
 `aws ecs run-task ... --propagate-tags TASK_DEFINITION`. A standalone Fargate
 task carries no tags otherwise and its cost lands in the untagged budget; the
-caller also needs `ecs:TagResource`. The existing `migrate` and restore-drill
-`run-task` calls do not propagate today (small, untagged).
+caller also needs `ecs:TagResource` (the deploy roles have it through
+`PowerUserAccess`). The `migrate` run in `deploy.yml` and the restore drill
+already propagate, and the drill's RDS copy is tagged `Project=Eureka`.
 
 ### Monthly review (hand step)
 
@@ -222,11 +233,25 @@ should be explainable (SES, transfer, tax, spokenly). Anything new there is a
 resource missing its tags. Also check that the CloudFront distribution is still
 on the flat-rate plan (Pro from C1f).
 
+### Expected alarms and when to raise thresholds
+
+- **A staging rehearsal trips the Eureka budget.** `eureka-monthly` covers
+  every environment and staging costs $25–35/month while it exists, on top of
+  production's ~$30. Raise `budget_monthly_usd` (to ~75) for the months
+  staging exists, and lower it again after `terragrunt destroy`.
+- **CPU credits after a new or restored instance.** t4g RDS runs in unlimited
+  mode with no launch credits, so a new instance (first deploy, an instance
+  class change, a restore) starts at a balance of 0 and the
+  `rds-cpu-credit-balance-low` alarm fires until credits accrue (hours). Expect
+  it then; it matters only when it fires on an instance that has been running.
+  It is not created in staging, which is always new.
+
 ### Raising the budget at C1f
 
 At the cutover (CloudFront Pro, $15, enrolled **before** cutover traffic, plus
 the worker) set `budget_monthly_usd = 60` in `live/production/env.hcl` and
-apply. Change any threshold the same way; never by editing the budget in the
+raise `alarm_cloudfront_monthly_gb` from 100 (the Free plan's allowance) to
+1,000–5,000 (Pro includes 50 TB), then apply. Change any threshold the same way; never by editing the budget in the
 console (the next apply reverts it).
 
 ### Rules
