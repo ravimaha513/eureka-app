@@ -9,7 +9,12 @@
 --       confidential  staff holding one of the folder's role keys read it
 --       restricted    only the named members (eureka.datahub_folder_member)
 --                     read it; every download needs a live step-up grant
---     A subfolder is readable only by those who can read its parent too.
+--     A subfolder is readable only by those who can read its parent too, and
+--     its level is never below its parent's (internal < confidential <
+--     restricted): creating or changing a subfolder below its parent, or
+--     raising a parent above a live subfolder, is refused (raise the subfolder
+--     first). Uploads, step-up and the access log use the effective level (the
+--     stricter of the folder and its parent) as a second line of defence.
 --   * Managers: datahub:manage covering the folder (org scope: every folder;
 --     location scope: folders of that location). They see every folder they
 --     manage (settings, members, access log), read the files of the
@@ -282,6 +287,17 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
     WHERE ur.user_id = p_user AND ur.valid @> pg_catalog.now())
 $$;
 
+-- Internal: the stricter of two levels (internal < confidential < restricted);
+-- NULL counts as nothing (the other level wins).
+CREATE FUNCTION authz.datahub_stricter(a text, b text) RETURNS text
+LANGUAGE sql IMMUTABLE SET search_path = pg_catalog, pg_temp AS $$
+  SELECT CASE
+    WHEN a = 'restricted' OR b = 'restricted' THEN 'restricted'
+    WHEN a = 'confidential' OR b = 'confidential' THEN 'confidential'
+    WHEN a = 'internal' OR b = 'internal' THEN 'internal'
+  END
+$$;
+
 -- The folders whose files the caller may read (RLS, InitPlan: rule 3). A
 -- subfolder needs its parent readable too.
 CREATE FUNCTION authz.datahub_readable_folders() RETURNS uuid[]
@@ -356,7 +372,7 @@ CREATE FUNCTION authz.datahub_create_folder(
   p_members_can_upload boolean, p_location uuid)
 RETURNS uuid
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-DECLARE par record; loc uuid; f_id uuid; nmembers integer := 0;
+DECLARE par record; loc uuid; f_id uuid; nmembers integer := 0; plevel text;
 BEGIN
   IF authz.current_user_id() IS NULL OR NOT coalesce(authz.has_perm('datahub:read'), false) THEN
     RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
@@ -365,7 +381,9 @@ BEGIN
     RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
   END IF;
   IF p_parent IS NOT NULL THEN
-    SELECT x.id, x.parent_id, x.location_id INTO par FROM eureka.datahub_folder x WHERE x.id = p_parent AND x.deleted_at IS NULL;
+    -- FOR SHARE: serialises with a concurrent change or delete of the parent (FOR UPDATE there).
+    SELECT x.id, x.parent_id, x.location_id, x.level INTO par FROM eureka.datahub_folder x
+     WHERE x.id = p_parent AND x.deleted_at IS NULL FOR SHARE;
     IF NOT FOUND OR NOT (p_parent = ANY (authz.datahub_visible_folders())) THEN
       RAISE EXCEPTION 'not_found' USING ERRCODE = 'no_data_found';
     END IF;
@@ -379,6 +397,7 @@ BEGIN
       RAISE EXCEPTION 'invalid_location' USING ERRCODE = 'check_violation';
     END IF;
     loc := par.location_id;
+    plevel := par.level;
   ELSE
     loc := p_location;
     IF loc IS NULL AND NOT coalesce(authz.has_org('datahub:manage'), false) THEN
@@ -393,6 +412,9 @@ BEGIN
   END IF;
   IF p_level IS NULL OR p_level NOT IN ('internal', 'confidential', 'restricted') THEN
     RAISE EXCEPTION 'invalid_level' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_parent IS NOT NULL AND authz.datahub_stricter(p_level, plevel) IS DISTINCT FROM p_level THEN
+    RAISE EXCEPTION 'level_below_parent' USING ERRCODE = 'check_violation';
   END IF;
   IF p_level = 'confidential' AND NOT coalesce(authz.datahub_valid_roles(p_roles), false) THEN
     RAISE EXCEPTION 'invalid_roles' USING ERRCODE = 'check_violation';
@@ -476,6 +498,19 @@ BEGIN
   END IF;
   IF n_level IS NULL OR n_level NOT IN ('internal', 'confidential', 'restricted') THEN
     RAISE EXCEPTION 'invalid_level' USING ERRCODE = 'check_violation';
+  END IF;
+  IF n_level IS DISTINCT FROM f.level THEN
+    -- Never below the parent (locked FOR SHARE: a concurrent parent change waits or is seen).
+    IF f.parent_id IS NOT NULL AND EXISTS (
+         SELECT 1 FROM eureka.datahub_folder px WHERE px.id = f.parent_id
+           AND authz.datahub_stricter(n_level, px.level) IS DISTINCT FROM n_level FOR SHARE) THEN
+      RAISE EXCEPTION 'level_below_parent' USING ERRCODE = 'check_violation';
+    END IF;
+    -- Never above a live subfolder: raise the subfolders first.
+    IF EXISTS (SELECT 1 FROM eureka.datahub_folder cx WHERE cx.parent_id = p_folder AND cx.deleted_at IS NULL
+                 AND authz.datahub_stricter(cx.level, n_level) IS DISTINCT FROM cx.level) THEN
+      RAISE EXCEPTION 'subfolder_level_below' USING ERRCODE = 'check_violation';
+    END IF;
   END IF;
   IF n_level = 'confidential' AND NOT coalesce(authz.datahub_valid_roles(n_roles), false) THEN
     RAISE EXCEPTION 'invalid_roles' USING ERRCODE = 'check_violation';
@@ -596,15 +631,25 @@ CREATE FUNCTION authz.datahub_create_upload(p_folder uuid, p_name text, p_conten
 RETURNS TABLE (file_id uuid, version_id uuid, version integer, file_object_id uuid, classification text, upload_expires_at timestamptz)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
-  f record; cls text; ext text; fl record; fid uuid; ver integer; o_id uuid; o_exp timestamptz; v_id uuid;
+  f record; cls text; ext text; fl record; fid uuid; ver integer; o_id uuid; o_exp timestamptz; v_id uuid; eff text; plevel text;
 BEGIN
   IF authz.current_user_id() IS NULL THEN
     RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
   END IF;
-  SELECT x.id, x.level, x.members_can_upload INTO f FROM eureka.datahub_folder x WHERE x.id = p_folder AND x.deleted_at IS NULL;
+  -- FOR SHARE on the folder and its parent: a concurrent level change or delete
+  -- (FOR UPDATE) waits for this upload, or this upload sees its result.
+  SELECT x.id, x.level, x.members_can_upload, x.parent_id INTO f FROM eureka.datahub_folder x
+   WHERE x.id = p_folder AND x.deleted_at IS NULL FOR SHARE;
   IF NOT FOUND OR NOT (p_folder = ANY (authz.datahub_readable_folders())) THEN
     RAISE EXCEPTION 'not_found' USING ERRCODE = 'no_data_found';
   END IF;
+  IF f.parent_id IS NOT NULL THEN
+    SELECT px.level INTO plevel FROM eureka.datahub_folder px WHERE px.id = f.parent_id AND px.deleted_at IS NULL FOR SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'not_found' USING ERRCODE = 'no_data_found';
+    END IF;
+  END IF;
+  eff := authz.datahub_stricter(f.level, plevel);
   IF NOT coalesce(f.members_can_upload OR p_folder = ANY (authz.datahub_managed_folders()), false) THEN
     RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
   END IF;
@@ -619,7 +664,7 @@ BEGIN
        OR (p_content_type = 'image/jpeg' AND ext IN ('jpg', 'jpeg')), false) THEN
     RAISE EXCEPTION 'invalid_upload' USING ERRCODE = 'check_violation';
   END IF;
-  cls := CASE WHEN f.level = 'restricted' THEN 'restricted' ELSE 'internal' END;
+  cls := CASE WHEN eff = 'restricted' THEN 'restricted' ELSE 'internal' END;
   PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('datahub:upload:' || authz.current_user_id()::text, 0));
   IF (SELECT pg_catalog.count(*) FROM eureka.datahub_file_version v JOIN eureka.file_object o ON o.id = v.file_object_id
        WHERE v.uploaded_by = authz.current_user_id() AND o.status = 'pending') >= 10 THEN
@@ -646,7 +691,7 @@ BEGIN
   RETURNING v.id INTO v_id;
   INSERT INTO eureka.audit_event (actor_id, action, entity_type, entity_id, changes)
   VALUES (authz.current_user_id(), 'datahub.upload_requested', 'datahub_file', fid, pg_catalog.jsonb_build_object(
-    'folderId', p_folder, 'versionId', v_id, 'version', ver, 'fileObjectId', o_id, 'level', f.level,
+    'folderId', p_folder, 'versionId', v_id, 'version', ver, 'fileObjectId', o_id, 'level', eff,
     'classification', cls, 'contentType', p_content_type, 'sizeBytes', p_size));
   RETURN QUERY SELECT fid, v_id, ver, o_id, cls, o_exp;
 END $$;
@@ -684,27 +729,32 @@ END $$;
 CREATE FUNCTION authz.datahub_download(p_version uuid, p_session bytea)
 RETURNS TABLE (outcome text, file_object_id uuid, classification text, content_type text, version integer, access_id uuid)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-DECLARE d record; g_id uuid; a_id uuid; strict_level boolean;
+DECLARE d record; g_id uuid; a_id uuid; strict_level boolean; eff text;
 BEGIN
   IF authz.current_user_id() IS NULL THEN
     RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
   END IF;
-  SELECT v.id, v.file_id, v.version, v.file_object_id, x.folder_id, fo.level, o.classification, o.status, o.content_type INTO d
+  SELECT v.id, v.file_id, v.version, v.file_object_id, x.folder_id, fo.level, pf.level AS parent_level,
+         o.classification, o.status, o.content_type INTO d
     FROM eureka.datahub_file_version v
     JOIN eureka.datahub_file x ON x.id = v.file_id AND x.deleted_at IS NULL
     JOIN eureka.datahub_folder fo ON fo.id = x.folder_id AND fo.deleted_at IS NULL
+    LEFT JOIN eureka.datahub_folder pf ON pf.id = fo.parent_id
     JOIN eureka.file_object o ON o.id = v.file_object_id
    WHERE v.id = p_version;
   IF NOT FOUND OR NOT (d.folder_id = ANY (authz.datahub_readable_folders())) THEN
     RAISE EXCEPTION 'not_found' USING ERRCODE = 'no_data_found';
   END IF;
-  strict_level := d.level = 'restricted' OR d.classification = 'restricted';
+  -- The effective level: the stricter of the folder and its parent; a file stored as restricted stays restricted.
+  eff := authz.datahub_stricter(authz.datahub_stricter(d.level, d.parent_level),
+                                CASE WHEN d.classification = 'restricted' THEN 'restricted' END);
+  strict_level := eff = 'restricted';
   IF strict_level THEN
     SELECT s.grant_id INTO g_id FROM authz.step_up_current(p_session) s;
     IF g_id IS NULL THEN
       INSERT INTO eureka.audit_event (actor_id, action, entity_type, entity_id, changes)
       VALUES (authz.current_user_id(), 'datahub.view_refused', 'datahub_file', d.file_id, pg_catalog.jsonb_build_object(
-        'folderId', d.folder_id, 'versionId', d.id, 'level', d.level, 'reason', 'step_up_required'));
+        'folderId', d.folder_id, 'versionId', d.id, 'level', eff, 'reason', 'step_up_required'));
       RETURN QUERY SELECT 'step_up_required'::text, NULL::uuid, d.classification, NULL::text, d.version, NULL::uuid;
       RETURN;
     END IF;
@@ -715,13 +765,13 @@ BEGIN
   END IF;
   INSERT INTO eureka.datahub_access AS a (folder_id, file_id, version_id, version, user_id, action, level, step_up_grant_id)
   VALUES (d.folder_id, d.file_id, d.id, d.version, authz.current_user_id(), 'download',
-          CASE WHEN strict_level THEN 'restricted' ELSE d.level END, g_id)
+          eff, g_id)
   RETURNING a.id INTO a_id;
   INSERT INTO eureka.audit_event (actor_id, action, entity_type, entity_id, changes)
   VALUES (authz.current_user_id(), CASE WHEN strict_level THEN 'datahub.viewed' ELSE 'datahub.downloaded' END,
           'datahub_file', d.file_id, pg_catalog.jsonb_build_object(
             'folderId', d.folder_id, 'versionId', d.id, 'version', d.version, 'fileObjectId', d.file_object_id,
-            'level', d.level, 'accessId', a_id, 'stepUpGrantId', g_id));
+            'level', eff, 'accessId', a_id, 'stepUpGrantId', g_id));
   RETURN QUERY SELECT 'ok'::text, d.file_object_id, d.classification, d.content_type, d.version, a_id;
 END $$;
 
@@ -734,7 +784,7 @@ CREATE POLICY datahub_folder_read ON eureka.datahub_folder FOR SELECT TO eureka_
   deleted_at IS NULL AND id = ANY ((SELECT authz.datahub_visible_folders())::uuid[])
 );
 CREATE POLICY datahub_folder_member_read ON eureka.datahub_folder_member FOR SELECT TO eureka_app USING (
-  user_id = (SELECT authz.current_user_id())
+  (user_id = (SELECT authz.current_user_id()) AND folder_id = ANY ((SELECT authz.datahub_visible_folders())::uuid[]))
   OR folder_id = ANY ((SELECT authz.datahub_managed_folders())::uuid[])
 );
 CREATE POLICY datahub_file_read ON eureka.datahub_file FOR SELECT TO eureka_app USING (
@@ -778,6 +828,7 @@ RESET ROLE;
 -- Rule 2: no PUBLIC execute; each function to exactly the role that calls it.
 -- The three folder-set functions run inside eureka_app's RLS policies and API queries.
 REVOKE ALL ON FUNCTION authz.datahub_my_roles() FROM PUBLIC;
+REVOKE ALL ON FUNCTION authz.datahub_stricter(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.datahub_user_is_staff(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.datahub_readable_folders() FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.datahub_managed_folders() FROM PUBLIC;

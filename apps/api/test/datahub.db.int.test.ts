@@ -85,7 +85,7 @@ beforeAll(async () => {
   await add(U.hr, "Company policies", { parent: null, level: "internal", roles: [], members: [], location: null }, true);
   await add(U.hr, "Sales playbooks", { parent: null, level: "confidential", roles: ["lead", "manager"], members: [], location: null });
   await add(U.acct, "Payroll exports", { parent: null, level: "restricted", roles: [], members: [U.r1a, U.acct], location: null });
-  await add(U.acct, "Payroll 2026", { parent: F["Payroll exports"]!, level: "internal", roles: [], members: [], location: null });
+  await add(U.acct, "Payroll 2026", { parent: F["Payroll exports"]!, level: "restricted", roles: [], members: [U.r1a, U.acct], location: null });
   await add(U.locD, "Dallas guest house", { parent: null, level: "internal", roles: [], members: [], location: LOC.dallas });
   await add(U.hr, "Austin office", { parent: null, level: "confidential", roles: ["location_incharge"], members: [], location: LOC.austin });
   await add(U.locD, "Dallas leases", { parent: null, level: "restricted", roles: [], members: [U.locD], location: LOC.dallas });
@@ -301,6 +301,75 @@ describe("files, versions, scan, download, access log", () => {
     expect(await err(db.admin.query(`UPDATE eureka.datahub_file_version SET version = 9 WHERE id = $1`, [f.version_id]))).toMatchObject({ code: "42501" });
     expect(await err(db.admin.query(`DELETE FROM eureka.datahub_file WHERE id = $1`, [f.file_id]))).toMatchObject({ code: "42501" });
     expect(await err(q(U.hr, `UPDATE eureka.datahub_file SET name = 'x.pdf' WHERE id = $1`, [f.file_id]))).toMatchObject({ code: "42501" });
+  });
+});
+
+describe("review fixes: levels never weaken below the parent; locks; membership rows", () => {
+  const raw = (sql: string, params: unknown[] = []) => db.admin.query(sql, params).then((r) => r.rows);
+
+  it("a subfolder below its parent's level is refused on create and update; a parent is not raised above a live subfolder", async () => {
+    const par = await createFolder(U.hr, { name: "Lvl parent", level: "restricted", members: [U.hr, U.r1a] });
+    expect(await err(createFolder(U.hr, { parent: par, name: "weak", level: "internal" }))).toMatchObject({ message: "level_below_parent" });
+    expect(await err(createFolder(U.hr, { parent: par, name: "weak2", level: "confidential", roles: ["hr"] }))).toMatchObject({ message: "level_below_parent" });
+    const sub = await createFolder(U.hr, { parent: par, name: "strong", level: "restricted", members: [U.hr, U.r1a] });
+    expect(await err(q(U.hr, `SELECT authz.datahub_update_folder($1, 1, '{"level":"internal"}', '{}')`, [sub]))).toMatchObject({ message: "level_below_parent" });
+    const par2 = await createFolder(U.hr, { name: "Lvl parent2", level: "internal" });
+    const sub2 = await createFolder(U.hr, { parent: par2, name: "kid", level: "internal" });
+    expect(await err(q(U.hr, `SELECT authz.datahub_update_folder($1, 1, '{"level":"restricted"}', $2)`, [par2, [U.hr]]))).toMatchObject({ message: "subfolder_level_below" });
+    // Raise the subfolder first, then the parent.
+    await q(U.hr, `SELECT authz.datahub_update_folder($1, 1, '{"level":"restricted"}', $2)`, [sub2, [U.hr]]);
+    await q(U.hr, `SELECT authz.datahub_update_folder($1, 1, '{"level":"restricted"}', $2)`, [par2, [U.hr]]);
+  });
+
+  it("even a forced weaker subfolder uses the effective level: restricted storage, step-up, logged level", async () => {
+    const par = await createFolder(U.hr, { name: "Secret", level: "restricted", members: [U.hr, U.r1a] });
+    const sub = await createFolder(U.hr, { parent: par, name: "Secret sub", level: "restricted", members: [U.hr, U.r1a] });
+    // Simulate legacy/forced data (superuser, triggers off): the subfolder row is internal.
+    await db.admin.query("BEGIN");
+    await db.admin.query("SET LOCAL session_replication_role = replica");
+    await db.admin.query(`UPDATE eureka.datahub_folder SET level = 'internal' WHERE id = $1`, [sub]);
+    await db.admin.query("COMMIT");
+    const up = await upload(U.hr, sub, "Forced.pdf");
+    expect(up.classification).toBe("restricted");
+    expect((await raw(`SELECT level FROM eureka.audit_event, LATERAL (SELECT changes->>'level' AS level) l WHERE action = 'datahub.upload_requested' AND entity_id = $1`, [up.file_id]))[0].level).toBe("restricted");
+    await finish(up.file_object_id, "clean", "NO_THREATS_FOUND", SHA, 1000);
+    const s = await session(U.r1a);
+    expect((await download(U.r1a, up.version_id, s)).outcome).toBe("step_up_required");
+    await q(U.r1a, `SELECT * FROM authz.step_up_dev($1, 10)`, [s]);
+    expect(await download(U.r1a, up.version_id, s)).toMatchObject({ outcome: "ok", classification: "restricted" });
+    expect((await raw(`SELECT level FROM eureka.datahub_access WHERE version_id = $1`, [up.version_id]))[0].level).toBe("restricted");
+  });
+
+  it("an upload into a deleted folder is refused (the folder row is locked and re-read)", async () => {
+    const id = await createFolder(U.hr, { name: "Soon gone", level: "internal" });
+    await q(U.hr, `SELECT authz.datahub_delete_folder($1, 1)`, [id]);
+    expect(await err(upload(U.hr, id, "late.pdf"))).toMatchObject({ message: "not_found" });
+    // A concurrent delete waits for an upload in flight (FOR SHARE vs FOR UPDATE).
+    const id2 = await createFolder(U.hr, { name: "Racing", level: "internal" });
+    const c1 = await db.app.connect();
+    const c2 = await db.app.connect();
+    try {
+      await c1.query("BEGIN"); await c1.query("SELECT set_config('eureka.user_id', $1, true)", [U.hr]);
+      await c1.query(`SELECT * FROM authz.datahub_create_upload($1, 'a.pdf', $2, 10)`, [id2, PDF]);
+      await c2.query("BEGIN"); await c2.query("SELECT set_config('eureka.user_id', $1, true)", [U.hr]);
+      await c2.query("SET LOCAL lock_timeout = '300ms'");
+      await expect(c2.query(`SELECT authz.datahub_delete_folder($1, 1)`, [id2])).rejects.toMatchObject({ code: "55P03" });
+    } finally {
+      await c2.query("ROLLBACK").catch(() => undefined); await c1.query("ROLLBACK").catch(() => undefined);
+      c1.release(); c2.release();
+    }
+  });
+
+  it("membership rows are visible only for folders the user can see", async () => {
+    const id = await createFolder(U.hr, { name: "Gone member", level: "restricted", members: [U.hr, U.r2a] });
+    expect((await q(U.r2a, `SELECT folder_id FROM eureka.datahub_folder_member WHERE folder_id = $1`, [id])).length).toBe(1);
+    // r2a goes inactive-staff-equivalent: lose the role entirely, the row must not leak.
+    await db.admin.query(`UPDATE eureka.user_role SET valid = tstzrange(now() - interval '2 days', now() - interval '1 day') WHERE user_id = $1`, [U.r2a]);
+    try {
+      expect(await q(U.r2a, `SELECT folder_id FROM eureka.datahub_folder_member`)).toEqual([]);
+    } finally {
+      await db.admin.query(`UPDATE eureka.user_role SET valid = tstzrange(now() - interval '1 day', NULL) WHERE user_id = $1`, [U.r2a]);
+    }
   });
 });
 

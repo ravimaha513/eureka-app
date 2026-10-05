@@ -49,6 +49,8 @@ const DB_ERRORS: Record<string, () => HttpException> = {
   invalid_member: () => new UnprocessableEntityException("invalid_member"),
   invalid_folder: () => new UnprocessableEntityException("invalid_folder"),
   invalid_upload: () => new UnprocessableEntityException("invalid_upload"),
+  level_below_parent: () => new UnprocessableEntityException("level_below_parent"),
+  subfolder_level_below: () => new UnprocessableEntityException("subfolder_level_below"),
   not_restricted: () => new UnprocessableEntityException("not_restricted"),
 };
 

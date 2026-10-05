@@ -155,6 +155,8 @@ export function datahubError(e: unknown): string {
     case "location_required": return "Choose the location this folder belongs to.";
     case "invalid_member": return "Only active staff can be added to a restricted folder.";
     case "invalid_roles": return "Choose at least one role for a confidential folder.";
+    case "level_below_parent": return "A subfolder can't be less restricted than its folder.";
+    case "subfolder_level_below": return "Raise the subfolders to at least this level first.";
     case "not_available": return "This version isn't available (it is still being scanned or did not pass).";
     case "not_member": return "You aren't a member of this restricted folder.";
     default: break;
