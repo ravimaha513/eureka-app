@@ -508,6 +508,15 @@ const CASES: RejectCase[] = [
     forbidden: { status: "inactive", googleSub: "sub-1", roles: ["org_admin"], managerId: U.m1, teamId: T.t1 },
   },
   {
+    route: "POST /api/v1/admin/users/bulk", actor: "admin",
+    prepare: async () => ({
+      url: "/api/v1/admin/users/bulk",
+      body: { dryRun: false, rows: [{ email: "ma-bulk@eureka.example", displayName: "MA Bulk" }] },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.app_user`),
+    }),
+    forbidden: { status: "inactive", googleSub: "sub-1", roles: ["org_admin"], managerId: U.m1, teamId: T.t1 },
+  },
+  {
     route: "PUT /api/v1/admin/users/:id/manager", actor: "admin",
     prepare: async () => ({
       url: `/api/v1/admin/users/${U.r1b}/manager`, body: { managerId: U.l2 },
