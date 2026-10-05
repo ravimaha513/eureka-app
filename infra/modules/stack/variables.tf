@@ -128,3 +128,18 @@ variable "cost_anomaly_threshold_usd" {
   type        = number
   default     = 10
 }
+variable "alarm_rds_cpu_credit_balance_min" {
+  description = "Alarm when the burstable RDS instance's CPUCreditBalance stays below this for 15 minutes (the cue for db.t4g.small)."
+  type        = number
+  default     = 50
+}
+variable "alarm_rds_freeable_memory_mb" {
+  description = "Alarm when RDS FreeableMemory stays below this many MiB for 15 minutes."
+  type        = number
+  default     = 128
+}
+variable "alarm_cloudfront_monthly_gb" {
+  description = "CloudFront egress, in GB per month, that should never happen on this distribution (video or a scrape). Alarmed as a daily sum of one thirtieth of it."
+  type        = number
+  default     = 1000
+}

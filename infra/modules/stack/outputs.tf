@@ -19,3 +19,7 @@ output "api_gateway_endpoint" { value = aws_apigatewayv2_api.api.api_endpoint }
 output "aws_region" { value = var.aws_region }
 output "api_service" { value = aws_ecs_service.api.name }
 output "worker_service" { value = aws_ecs_service.worker.name }
+output "alerts_topic_arn" {
+  description = "SNS topic for the cost and RDS alarms; each email subscription must be confirmed from the inbox."
+  value       = aws_sns_topic.alerts.arn
+}
