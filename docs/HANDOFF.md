@@ -8,6 +8,9 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - `pnpm local` runs everything locally (Docker Postgres on 55432, seed, API :3000, web :5173).
 - `pnpm -r typecheck` and `pnpm -r test` must pass before every commit (integration tests need
   PostgreSQL 16 at `TEST_PG_ADMIN_URL`, default `postgres://postgres:postgres@127.0.0.1:5432`).
+- Rule-3 call-count tests (`rule3Probe`, `PLANNER_VARIANTS` in `apps/api/test/db-harness.ts`) run under the
+  default plan, nested loops only and index scans off. `RULE3_EXHAUSTIVE=1 pnpm -r test` adds nested loops off,
+  which is slow (hash/merge joins inside every authz call); run it after changing an RLS policy or an authz function.
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
 - Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0055**; 0040 and 0049 are unused) and must apply as a
 - Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0054** (0060-0062 are jobs-portal); 0040 and 0049 are unused) and must apply as a

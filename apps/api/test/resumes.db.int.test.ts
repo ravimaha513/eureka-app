@@ -78,7 +78,7 @@ describe("differential: RLS alone matches the engine", () => {
   /** rule3Probe under every planner variant (statistics refreshed before each, so counts are reproducible). */
   async function probeAll(userId: string, sql: string): Promise<Record<string, Rule3Probe>> {
     const out: Record<string, Rule3Probe> = {};
-    for (const [name, planner] of Object.entries(PLANNER_VARIANTS)) out[name] = await rule3Probe(db.admin, userId, sql, { planner });
+    for (const [name, planner] of Object.entries(PLANNER_VARIANTS)) out[name] = await rule3Probe(db.admin, userId, sql, { analyze: ["eureka.resume", "eureka.candidate"], planner });
     return out;
   }
 

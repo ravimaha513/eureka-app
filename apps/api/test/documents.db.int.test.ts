@@ -136,12 +136,13 @@ describe("differential: RLS alone matches the engine", () => {
   // unchanged. The same probe run against a deliberately per-row copy of
   // file_object_read must report it, so the check cannot pass vacuously.
   const RULE3_SQL = `SELECT d.id FROM eureka.document d JOIN eureka.file_object f ON f.id = d.file_id`;
+  const RULE3_TABLES = ["eureka.document", "eureka.file_object", "eureka.candidate"];
   const PER_ROW_POLICY = [`ALTER POLICY file_object_read ON eureka.file_object USING (
     authz.current_user_id() IS NOT NULL AND EXISTS (SELECT 1 FROM eureka.document d WHERE d.file_id = file_object.id))`];
 
   async function probeAll(userId: string, setup: readonly string[] = []): Promise<Record<string, Rule3Probe>> {
     const out: Record<string, Rule3Probe> = {};
-    for (const [name, planner] of Object.entries(PLANNER_VARIANTS)) out[name] = await rule3Probe(db.admin, userId, RULE3_SQL, { planner, setup });
+    for (const [name, planner] of Object.entries(PLANNER_VARIANTS)) out[name] = await rule3Probe(db.admin, userId, RULE3_SQL, { analyze: RULE3_TABLES, planner, setup });
     return out;
   }
 

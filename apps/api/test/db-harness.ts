@@ -108,13 +108,22 @@ export async function ownedCandidateCalls(admin: pg.Pool, userId: string, sql: s
  * not just the one today's statistics happen to pick, so each check repeats
  * under forced join and scan strategies (they also apply to the plans inside
  * the authz functions; both measurements of one comparison use the same).
+ * "nestloop off" is slow (hash and merge joins over the tiny access tables in
+ * every authz call) and runs only with RULE3_EXHAUSTIVE=1 (docs/HANDOFF.md).
  */
 export const PLANNER_VARIANTS: Record<string, readonly string[]> = {
   default: [],
-  "nestloop off": ["SET LOCAL enable_nestloop = off"],
   "nestloop only": ["SET LOCAL enable_hashjoin = off", "SET LOCAL enable_mergejoin = off"],
   "index scans off": ["SET LOCAL enable_indexscan = off", "SET LOCAL enable_indexonlyscan = off", "SET LOCAL enable_bitmapscan = off"],
+  ...(process.env.RULE3_EXHAUSTIVE === "1" ? { "nestloop off": ["SET LOCAL enable_nestloop = off"] } : {}),
 };
+
+/** Calls of every authz.* function so far in this transaction (pending counters; take a delta). */
+export async function authzCallCount(c: pg.PoolClient): Promise<number> {
+  return Number((await c.query<{ n: string }>(
+    `SELECT coalesce(sum(pg_stat_get_xact_function_calls(p.oid)), 0)::bigint AS n
+     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'authz'`)).rows[0]!.n);
+}
 
 export interface Rule3Probe {
   /** Calls of every authz.* function (nested ones included) while `sql` ran. */
@@ -140,17 +149,18 @@ interface PlanNode {
  * Runs `sql` as eureka_app for `userId` under EXPLAIN ANALYZE with function
  * tracking and reports what rule 3 is about: how many authz.* calls it made,
  * where in the plan authz functions are called, and whether any InitPlan ran
- * more than once. Superuser pool; always rolled back.
+ * more than once. Superuser pool; always rolled back. The plan-text match on
+ * `authz.` is complete because RLS policies may call no other schema's
+ * functions (checked from pg_depend in rls.int.test.ts).
  *
- * Statistics are refreshed first (committed ANALYZE). The total call count
- * includes calls nested in the authz functions, and those depend on plans
- * over the access tables: with no statistics `authz.grants` probes user_role
- * by index and calls authz.current_user_id() once, after (auto)analyze it
- * scans the small table and calls it per user_role row. An autoanalyze landing
- * between two measurements moved the count from 137 to 555 with no change to
- * the rows measured. ANALYZE samples every row of tables this small, so a
- * refresh before each measurement makes the counts reproducible, and a later
- * autoanalyze of unchanged tables computes the same statistics.
+ * `analyze` lists the tables the measured statement and its policies read;
+ * they are analyzed (committed) first. Since 0082 the authz functions make the
+ * same calls whatever their plans, but which InitPlans a statement evaluates
+ * still follows its own plan (an OR stops at the first true branch), and that
+ * plan follows these tables' statistics. Refreshing them pins the plan to the
+ * data: an autoanalyze landing between two measurements could otherwise switch
+ * it. Tables this small are sampled completely, so a later autoanalyze of
+ * unchanged data computes the same statistics.
  *
  * `setup` runs as superuser inside the rolled-back transaction before the
  * statement (a self-test uses it to install a deliberately per-row policy).
@@ -159,9 +169,9 @@ export async function rule3Probe(
   admin: pg.Pool,
   userId: string,
   sql: string,
-  opts: { planner?: readonly string[]; setup?: readonly string[] } = {},
+  opts: { analyze: readonly string[]; planner?: readonly string[]; setup?: readonly string[] },
 ): Promise<Rule3Probe> {
-  await admin.query("ANALYZE");
+  if (opts.analyze.length > 0) await admin.query(`ANALYZE ${opts.analyze.join(", ")}`);
   const c = await admin.connect();
   try {
     await c.query("BEGIN");
@@ -170,9 +180,7 @@ export async function rule3Probe(
     for (const s of opts.planner ?? []) await c.query(s);
     for (const s of opts.setup ?? []) await c.query(s);
     // Delta of the per-transaction counters (see ownedCandidateCalls).
-    const count = async () => Number((await c.query<{ n: string }>(
-      `SELECT coalesce(sum(pg_stat_get_xact_function_calls(p.oid)), 0)::bigint AS n
-       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'authz'`)).rows[0]!.n);
+    const count = () => authzCallCount(c);
     const before = await count();
     await c.query("SET LOCAL ROLE eureka_app");
     const res = await c.query<{ "QUERY PLAN": [{ Plan: PlanNode }] }>(

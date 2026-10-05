@@ -60,6 +60,25 @@ describe("RLS coverage and hardening", () => {
     expect(anyPublic.rows).toEqual([]);
   });
 
+  // Rule 3 is checked by matching `authz.` in plan text (rule3Probe), which is
+  // complete only if policies call no function outside authz. pg_depend records
+  // every function a policy expression references (pg_catalog's are pinned and
+  // not recorded, which is fine: they are not definer functions).
+  it("RLS policies call only authz.* functions", async () => {
+    const { rows } = await db.admin.query<{ policy: string; fn: string }>(`
+      SELECT pol.polname || ' ON ' || pol.polrelid::regclass AS policy, p.oid::regprocedure::text AS fn
+      FROM pg_depend d
+      JOIN pg_policy pol ON d.classid = 'pg_policy'::regclass AND d.objid = pol.oid
+      JOIN pg_proc p ON d.refclassid = 'pg_proc'::regclass AND d.refobjid = p.oid
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname NOT IN ('authz', 'pg_catalog')`);
+    expect(rows).toEqual([]);
+    const seen = await db.admin.query<{ n: number }>(`
+      SELECT count(DISTINCT d.refobjid)::int AS n FROM pg_depend d
+      WHERE d.classid = 'pg_policy'::regclass AND d.refclassid = 'pg_proc'::regclass`);
+    expect(seen.rows[0]!.n).toBeGreaterThan(5); // the dependency rows exist (the check is not vacuous)
+  });
+
   it("role_permission matches the catalog seed and is read-only for the app", async () => {
     const { rows } = await db.admin.query(`SELECT count(*)::int AS n FROM eureka.role_permission`);
     expect(rows[0].n).toBeGreaterThan(150);
