@@ -453,6 +453,7 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .reviewer h3 { font-size: 14px; }
 .reviewnotes { white-space: pre-wrap; color: var(--text2); margin: 0; }
 .calbtn { align-self: flex-start; text-decoration: none; }
+.radiorow input[type="radio"] { height: auto; min-width: 0; width: auto; padding: 0; box-shadow: none; }
 .radiorow { flex-direction: row; flex-wrap: wrap; gap: 14px; border: 0; padding: 0; margin: 0 0 12px; }
 .radiorow legend, .panelpicker legend, .scoreinputs legend { font-weight: 600; color: var(--text2); font-size: 13px; padding: 0; margin-bottom: 4px; }
 .panelpicker, .scoreinputs { border: 0; padding: 0; margin: 0 0 12px; min-width: 0; }
@@ -470,6 +471,7 @@ a.contactlink { color: var(--pri); }
 .settingsnav button { justify-content: flex-start; border: 0; background: none; padding: 9px 12px; border-radius: 10px; font-weight: 600; color: var(--text2); display: flex; gap: 8px; align-items: center; text-align: left; }
 .settingsnav button[aria-selected="true"] { background: var(--pri-50); color: var(--pri); }
 .settingsnav button:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; }
+.settings form, .settings section { display: flex; flex-direction: column; gap: 10px; }
 .prefrow { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line2); }
 .prefrow:first-of-type { border-top: 0; }
 .prefrow p { margin: 2px 0 0; }
