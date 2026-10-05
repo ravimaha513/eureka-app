@@ -132,6 +132,10 @@ describe("differential: RLS alone matches the engine", () => {
 
   /** Calls of every authz.* function while `sql` runs as eureka_app for `userId`. */
   async function authzCalls(userId: string, sql: string): Promise<{ calls: number; rows: number }> {
+    // Fresh statistics before every measurement: otherwise the planner may pick
+    // a different join (and with it a different number of policy calls) for the
+    // doubled table depending on whether autovacuum has analysed it yet.
+    await db.admin.query("ANALYZE eureka.document, eureka.file_object, eureka.candidate");
     const c = await db.admin.connect();
     try {
       await c.query("BEGIN");
