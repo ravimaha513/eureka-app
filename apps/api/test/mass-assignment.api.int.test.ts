@@ -248,6 +248,36 @@ const DOCUMENT_FORBIDDEN: Record<string, unknown> = {
 };
 
 const CASES: RejectCase[] = [
+  // interviews-settings (migration 0081): the owner, version and times of a staff profile are the server's;
+  // name, email and designation are not editable in Settings
+  {
+    route: "PUT /api/v1/settings/profile", actor: "r1a",
+    prepare: async () => {
+      const v = (await rows(`SELECT row_version FROM eureka.staff_profile WHERE user_id = $1`, [U.r1a]))[0]?.row_version ?? 0;
+      return {
+        url: "/api/v1/settings/profile", body: { phone: null, bio: null }, headers: { "if-match": `"${v}"` },
+        state: () => rows(`SELECT * FROM eureka.staff_profile ORDER BY user_id`),
+      };
+    },
+    forbidden: { userId: U.r1b, displayName: "Boss", email: "boss@eureka.example", designation: "CEO", phoneE164: "+14695550199", status: "inactive" },
+  },
+  {
+    route: "PUT /api/v1/settings/notifications/:type", actor: "hr",
+    prepare: async () => ({
+      url: "/api/v1/settings/notifications/employee.exited", body: { inApp: false },
+      state: () => rows(`SELECT * FROM eureka.notification_preference ORDER BY user_id, type`),
+    }),
+    forbidden: { userId: U.acct, type: "work_authorization.expiring", mandatory: false, email: false, recipientId: U.acct },
+  },
+  // employees export (EM-X1): only the list filters
+  {
+    route: "POST /api/v1/employees/export", actor: "ceo",
+    prepare: async () => ({
+      url: "/api/v1/employees/export", body: {},
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.audit_event WHERE action = 'employee.export'`),
+    }),
+    forbidden: { cursor: "2026-01-01.00000000-0000-4000-8000-0000000000ff", limit: 100000, cap: 1_000_000, contact: true, unmasked: true, userId: U.hr },
+  },
   // resumes (FR-CAN-07, migration 0036): status, scan result, version, digest, uploader and key are the server's
   {
     route: "POST /api/v1/candidates/:id/resumes", actor: "r1a",
@@ -747,6 +777,38 @@ const CASES: RejectCase[] = [
 /** Endpoints that read no body: what they change comes from the URL and the session only. */
 interface IgnoreCase { route: string; run: () => Promise<void> }
 const IGNORED: IgnoreCase[] = [
+  // interviews-settings (ST-7): the session comes from the URL, its owner from the caller's session
+  {
+    route: "POST /api/v1/settings/sessions/:id/revoke",
+    run: async () => {
+      const a = await login("r2a", true);
+      const b = await login("r2a", true);
+      const other = await login("r3a", true);
+      const list = (await call(null, "GET", "/api/v1/settings/sessions", undefined, {}, a)).json().items as { id: string; current: boolean }[];
+      const bId = (await rows(`SELECT public_id FROM eureka.session WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1 OFFSET 0`, [U.r2a]))[0]!.public_id as string;
+      expect(list.some((i) => i.id === bId)).toBe(true);
+      const otherId = (await rows(`SELECT public_id FROM eureka.session WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, [U.r3a]))[0]!.public_id as string;
+      const res = await call(null, "POST", `/api/v1/settings/sessions/${bId}/revoke`,
+        { ...SERVER_MANAGED, id: otherId, userId: U.r3a, sessionId: otherId, all: true, revokedAt: PAST }, {}, a);
+      expect(res.statusCode, res.body).toBe(204);
+      expect((await call(null, "GET", "/api/v1/me", undefined, {}, b)).statusCode).toBe(401);
+      expect((await call(null, "GET", "/api/v1/me", undefined, {}, a)).statusCode).toBe(200);
+      expect((await call(null, "GET", "/api/v1/me", undefined, {}, other)).statusCode).toBe(200);
+    },
+  },
+  {
+    route: "POST /api/v1/settings/sessions/revoke-others",
+    run: async () => {
+      const a = await login("r3a", true);
+      const b = await login("r3a", true);
+      const other = await login("r2a", true);
+      const res = await call(null, "POST", "/api/v1/settings/sessions/revoke-others", { userId: U.r2a, keep: [], all: true, ...SERVER_MANAGED }, {}, a);
+      expect(res.statusCode, res.body).toBe(200);
+      expect((await call(null, "GET", "/api/v1/me", undefined, {}, b)).statusCode).toBe(401);
+      expect((await call(null, "GET", "/api/v1/me", undefined, {}, a)).statusCode).toBe(200);
+      expect((await call(null, "GET", "/api/v1/me", undefined, {}, other)).statusCode).toBe(200);
+    },
+  },
   {
     route: "POST /api/v1/notifications/:id/read",
     run: async () => {

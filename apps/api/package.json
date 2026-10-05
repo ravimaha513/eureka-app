@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "swc src -d dist --strip-leading-paths --ignore 'src/db/seed-dev.ts' --ignore 'src/db/dev-pipeline.ts' --ignore '**/*.test.ts'",
+    "build": "swc src -d dist --strip-leading-paths --ignore 'src/db/seed-dev.ts' --ignore 'src/db/dev-pipeline.ts' --ignore 'src/db/dev-interviews-settings.ts' --ignore '**/*.test.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "db:migrate": "tsx src/db/migrate.ts",

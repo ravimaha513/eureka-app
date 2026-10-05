@@ -126,6 +126,17 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   Left: DOB is not read or written anywhere (OD-04); when it is, encrypt with class `dob`, set `dob_bidx` with
   `dobBlindIndex`, add `dob` to the rotation job (definer functions like `work_auth_number`) and use the index in
   the duplicate check.
+- Interviews details, Settings & Preferences, people directories (Phase 3c package interviews-settings, migrations
+  0080-0081, contract `docs/interviews-settings-api.md`): interview type, https meeting link, duration (derived into
+  `endsAt`, 15-240 min), panel with lead through `authz.set_interview_panel` (Sales grant, active users, at most 10;
+  the panel grants no access), scorecards (four criteria 1-5) on coach and client feedback, `.ics` calendar file with the
+  panel's work emails only; Create/Edit Interview dialog and details drawer with read-only stars ("4 out of 5").
+  Settings (avatar menu): profile (phone and bio only; `staff_profile`, If-Match), in-app notification switches per
+  type (mandatory: work-authorization expiry, overdue paperwork; the worker skips muted inbox rows), Login activity
+  (own sessions with device class, browser family and a masked IP stored at sign-in; sign out one or all other
+  sessions). Users & Access shows active users per role and the staff phone to `staff.contact:read` (HR, Org Admin;
+  new permission). Employees show email and phone (masked unless `candidate.phone:read` over the candidate) and export
+  CSV (`report:export` + `employee:read`, capped, audited). E2E: `e2e/interviews-settings.spec.ts`.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 - First-admin bootstrap (migrations 0037, 0039): `dist/db/bootstrap.js` as a one-off migrate task creates two
   `org_admin` users for hosted-domain emails; break-glass only: refuses while an active `org_admin` exists
@@ -218,6 +229,11 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   (placeholder: H-1B, H-4 EAD, L-1, L-2 EAD, F-1 OPT/STEM OPT/CPT, EAD, green card, TN, O-1, other), whether
   `valid_to` is required for some types, whether an "expired" notice (day 0) is wanted, and whether the
   expiry notices may name the candidate (today: ids and dates only).
+
+- Interviews and Settings (`docs/interviews-settings-api.md` "Deviations and open product questions"): should panel
+  members get read access to the interviews they sit on? May location admins add scorecards? Which notification types
+  are mandatory (built: work-authorization expiry, overdue paperwork)? Who besides HR and Org Admin may see staff work
+  phones? Session rows are still never pruned.
 
 ## Waiting on Ravi (not code)
 

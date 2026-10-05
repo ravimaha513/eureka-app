@@ -62,6 +62,9 @@ advisory lock, assignment row, employee row.
   no., Client, Team, Recruiter, Location, First placement, End reason`), additionally limited to the `report:export` scope,
   capped at 50,000 lines (`x-export-truncated`), 60 s timeout, 5 per user per 10 minutes, formula-injection safe, audited
   as `report.export` `{ report: "joinings_exits", from, to, rows, truncated, cap }`. No phone, email, rate or reason text.
+- interviews-settings (`docs/interviews-settings-api.md` EM-C1, EM-X1): list and detail items carry
+  `contact: { email, phone, masked }` (masked unless `candidate.phone:read` over the candidate), and
+  `POST /api/v1/employees/export` exports the filtered list as CSV.
 
 `Employee` = `{ id (person id), candidate: {id, name|null}, status, employeeSince, statusSince, exitedOn, exitReason,
 location, team, assignment: { id, assignmentNo, placementId, startDate, endDate, endReason, plannedEndDate, client } | null,

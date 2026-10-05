@@ -563,7 +563,7 @@ The catalog is in `packages/shared/src/authz/catalog.ts`. It defines the followi
 | Employees and finance | `employee:read`, `assignment:update`, `invoice:read`, `invoice:update` |
 | Reports | `report:read`, `report:export`, `performance:read` |
 | Vendors and teams | `vendor.preferred:create`, `vendor.preferred:read`, `team:move_member`, `designation:change` |
-| Administration | `access:manage`, `audit:read` |
+| Administration | `access:manage`, `audit:read`, `staff.contact:read` (staff phone and bio from Settings; interviews-settings) |
 
 **Restricted permissions (second approver):** `document.restricted:read`, `candidate.dob:read`, `visa:update`.
 
@@ -578,15 +578,15 @@ The catalog is in `packages/shared/src/authz/catalog.ts`. It defines the followi
 | Offshore Office Manager | **org:** assignment:read, candidate.phone:read, candidate:assign, candidate:read, designation:change, hotlist:read, interview:read, performance:read, placement:read, rate:read, report:export, report:read, submission:read, team:move_member, vendor.preferred:read |
 | CEO | **org:** assignment:read, candidate:read, employee:read, hotlist:read, interview:read, invoice:read, performance:read, placement:read, rate:read, report:export, report:read, submission:read, vendor.preferred:read |
 | Location Incharge | **location:** candidate.phone:read, candidate.rating:update, candidate:read, hotlist:read, interview.feedback:create, interview:read, interview:update, performance:read, placement:read, report:read, submission:read |
-| Location Ops Admin | **location:** candidate.phone:read, candidate.rating:update, candidate:read, hotlist:read, interview.feedback:create, interview:read, interview:update, placement:read, report:read, submission:read |
-| HR | **org:** assignment:read, assignment:update, bgc:update, candidate.dob:read, candidate.phone:read, candidate:read, document.restricted:read, document:read, document:upload, document:verify, employee:read, placement:read, report:read, visa:read |
+| Location Ops Admin | **location:** bill:manage, bill:read, candidate.phone:read, candidate.rating:update, candidate:read, company:manage, company:read, facility:manage, facility:read, hotlist:read, interview.feedback:create, interview:read, interview:update, placement:read, report:read, submission:read, utility.secret:read, utility:manage, utility:read |
+| HR | **org:** assignment:read, assignment:update, bgc:update, candidate.dob:read, candidate.phone:read, candidate:read, document.restricted:read, document:read, document:upload, document:verify, employee:read, placement:read, report:read, staff.contact:read, visa:read |
 | Associate HR | **org:** assignment:read, assignment:update, candidate.phone:read, candidate:read, document:read, document:upload, employee:read, placement:read |
 | Accounts | **org:** assignment:read, assignment:update, candidate:read, document.restricted:read, document:read, employee:read, invoice:read, invoice:update, placement:read, rate:read, report:read |
 | Immigration | **org:** assignment:read, candidate.dob:read, candidate.phone:read, candidate:read, document.restricted:read, document:read, document:upload, document:verify, employee:read, visa:read, visa:update |
 | Interview Coach | **coached:** candidate:read, hotlist:read, interview.feedback:create, interview:read |
 | Documents Team | **org:** candidate:read, document:read, document:upload, document:verify |
 | BU Head | **org:** assignment:read, employee:read, placement:read, report:read |
-| Org Admin | **org:** access:manage, audit:read |
+| Org Admin | **org:** access:manage, audit:read, staff.contact:read |
 
 Notes:
 

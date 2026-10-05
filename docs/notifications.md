@@ -116,6 +116,7 @@ placement or candidate when the user has that screen.
 ## Privileges (migrations 0046, 0051)
 
 - `eureka_app`: SELECT own `notification` rows, UPDATE (`read_at`) own rows. Nothing on `inbox_fanout` or the ledger.
+- `eureka_worker` (0081): SELECT (`user_id`, `type`, `in_app`) on `notification_preference`.
 - `eureka_worker`: EXECUTE `authz.notification_recipients`, `authz.emit_bench_time`, `authz.emit_paperwork_overdue` (0052); `notification` SELECT of
   the key columns only (never titles or bodies), INSERT during fan-out for named recipients, DELETE past 30 days;
   `inbox_fanout` SELECT/INSERT. An inbox row's `entity_type`/`entity_id` must equal `authz.notification_entity(event)`
@@ -128,7 +129,10 @@ placement or candidate when the user has that screen.
 
 ## Open questions and follow-ups
 
-- **Preferences:** the design defines no per-user notification preferences (channel or type opt-out). Not built.
+- **Preferences:** in-app on/off per type in Settings (migration 0081, `docs/interviews-settings-api.md` ST-4): the
+  inbox fan-out skips recipients who switched a type off (`eureka.notification_preference`, worker SELECT only);
+  `work_authorization.expiring` and `checklist.item_overdue` are mandatory. Email opt-out is not offered. A new in-app
+  type must be added to `packages/shared/src/notifications.ts` too (a test compares it with `INBOX_TYPES`).
 - **FR-NTF-02 candidate-unresponsive** ("warn candidate after N days without response"): not built. Nothing in
   the data records a candidate's response, the threshold is OD-05, and warning the candidate means emailing an
   external address with content to agree. Needs: what counts as a response, N, the message, and whether the
