@@ -235,6 +235,9 @@ These rules apply in every phase:
 | Phase 3 | ~~OD-03~~ decided (3 years; inactive after 6 months); OD-04 (DOB visibility) |
 | Phase 4 | OD-02 formula (direction decided: placement-count based, manager-set amount), OD-06 (sample profile) |
 
+CrewNex consolidation (importing the CrewNex app's data and porting its features, phases C0–C3) is planned
+separately in `docs/crewnex-consolidation.md`; it starts after Eureka production is deployed.
+
 ## Progress so far
 
 Work on the foundations of Phases 0 to 2 has started in the `eureka-app` repository. It covers the pieces every other feature depends on, with tests written alongside the code:

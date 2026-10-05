@@ -219,6 +219,9 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   `valid_to` is required for some types, whether an "expired" notice (day 0) is wanted, and whether the
   expiry notices may name the candidate (today: ids and dates only).
 
+- CrewNex consolidation: `docs/crewnex-consolidation.md` is the design of record (Eureka as system of record,
+  strangler migration of the CrewNex app through the import pipeline); its 30 open questions (section 9) gate C1b.
+
 ## Waiting on Ravi (not code)
 
 - One-time AWS bootstrap, Google Workspace domain, Google OAuth client (infra/README.md).
