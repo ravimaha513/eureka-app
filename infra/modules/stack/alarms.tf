@@ -13,7 +13,10 @@ locals {
   # CloudFront metrics exist only in us-east-1, and an alarm can notify only a
   # topic in its own region, so a stack outside us-east-1 needs a second topic.
   alerts_topic_us_east_1 = var.aws_region == "us-east-1" ? aws_sns_topic.alerts.arn : one(aws_sns_topic.alerts_us_east_1[*].arn)
-  db_is_burstable        = startswith(var.db_instance_class, "db.t")
+  # t4g RDS runs in unlimited mode with no launch credits, so a new or restored
+  # instance starts at a balance of 0 and the alarm fires until it accrues.
+  # Staging is created and destroyed on demand, so it would always be "new".
+  db_credit_alarm = startswith(var.db_instance_class, "db.t") && local.is_prod
 }
 
 resource "aws_sns_topic" "alerts" {
@@ -55,7 +58,7 @@ check "alert_recipients" {
 # unlimited mode bills as surplus credits: the signal to move to db.t4g.small
 # (docs/crewnex-consolidation.md section 7, "C2 general").
 resource "aws_cloudwatch_metric_alarm" "rds_cpu_credits" {
-  count               = local.db_is_burstable ? 1 : 0
+  count               = local.db_credit_alarm ? 1 : 0
   alarm_name          = "${local.name}-rds-cpu-credit-balance-low"
   alarm_description   = "RDS ${aws_db_instance.main.identifier}: CPU credits below ${var.alarm_rds_cpu_credit_balance_min} for 15 minutes; surplus credits are being billed. Consider db.t4g.small."
   namespace           = "AWS/RDS"

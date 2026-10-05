@@ -118,6 +118,11 @@ variable "budget_crewnex_migration_usd" {
   type        = number
   default     = 15
 }
+variable "untagged_budget_enabled" {
+  description = "Create the untagged-spend budget (user:Project$). Off by default: in the shared account it matches ALL of spokenly's spend until spokenly tags itself Project=spokenly. Turn on after that, or once budget_untagged_usd is set from one month of actuals."
+  type        = bool
+  default     = false
+}
 variable "budget_untagged_usd" {
   description = "Monthly budget for spend with no Project tag (SES, data transfer, support, tax, and spokenly until it tags itself). Set from the first month's actuals."
   type        = number
@@ -139,9 +144,9 @@ variable "alarm_rds_freeable_memory_mb" {
   default     = 128
 }
 variable "alarm_cloudfront_monthly_gb" {
-  description = "CloudFront egress, in GB per month, that should never happen on this distribution (video or a scrape). Alarmed as a daily sum of one thirtieth of it."
+  description = "CloudFront egress, in GB per month, to alarm at (video or a scrape). Alarmed as a daily sum of one thirtieth of it. 100 = the flat-rate Free plan's allowance; raise to 1000-5000 once Pro (50 TB) is enrolled at C1f."
   type        = number
-  default     = 1000
+  default     = 100
 }
 variable "manage_cost_allocation_tags" {
   description = "This stack activates cost_allocation_tag_keys (aws_ce_cost_allocation_tag). Off until the keys have appeared on BILLED usage (about 24 hours after the first tagged apply): activating an unseen key fails. Leave off if an Organization payer account activates tags instead."
@@ -153,7 +158,7 @@ variable "manage_cost_allocation_tags" {
   }
 }
 variable "cost_allocation_tag_keys" {
-  description = "Tag keys to activate when manage_cost_allocation_tags is on. Add Workstream only after the first Workstream=crewnex task has been billed."
+  description = "Cost-allocation tag keys that are (to be) active. Activated by this stack when manage_cost_allocation_tags is on; also gates the Workstream budget, so list Workstream here once it is active, whoever activated it. Add it only after the first Workstream=crewnex task has been billed."
   type        = list(string)
   default     = ["Project"]
 }

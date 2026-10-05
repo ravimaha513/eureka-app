@@ -13,30 +13,39 @@ locals {
   cost_guardrails_on = var.cost_budgets_enabled && var.cost_allocation_tags_active
 
   # name, limit, TagKeyValue filter ("user:<key>$<value>"; an empty value means
-  # "no such tag"), and whether to alert on the forecast as well.
+  # "no such tag"), whether to alert on the forecast as well, and whether it is
+  # created at all.
   budget_defs = {
     eureka = {
       name     = "${var.project}-monthly"
       limit    = var.budget_monthly_usd
       filter   = "user:Project$Eureka"
       forecast = true
+      enabled  = true
     }
     crewnex-migration = {
       # Migration tasks only (Workstream=crewnex), not Eureka's running cost.
       name     = "${var.project}-crewnex-migration-tasks"
       limit    = var.budget_crewnex_migration_usd
-      filter   = "user:Workstream$crewnex"
+      filter   = "user:Workstream$${var.migration_workstream}"
       forecast = false
+      # Only once Workstream is an active cost-allocation tag (it is billed
+      # only after the first migration task runs); before that it reads $0.
+      enabled = contains(var.cost_allocation_tag_keys, "Workstream")
     }
     untagged = {
       name     = "${var.project}-untagged-spend"
       limit    = var.budget_untagged_usd
       filter   = "user:Project$"
       forecast = false
+      # Matches ALL of spokenly's spend until spokenly tags itself
+      # Project=spokenly, so it is off until then (or until the limit is set
+      # from one month of actuals).
+      enabled = var.untagged_budget_enabled
     }
   }
   # A filter, not `cond ? {...} : {}`: those two object types do not unify.
-  budgets = { for k, v in local.budget_defs : k => v if local.cost_guardrails_on }
+  budgets = { for k, v in local.budget_defs : k => v if local.cost_guardrails_on && v.enabled }
 
   budget_actual_thresholds = [50, 80, 100]
 }
@@ -83,6 +92,7 @@ resource "aws_budgets_budget" "cost" {
 # key because the API returns them and Terraform would otherwise show a diff.
 resource "aws_ce_anomaly_monitor" "eureka" {
   count        = local.cost_guardrails_on ? 1 : 0
+  depends_on   = [aws_ce_cost_allocation_tag.active]
   name         = "${var.project}-project-tag"
   monitor_type = "CUSTOM"
   monitor_specification = jsonencode({
@@ -132,7 +142,8 @@ resource "aws_ce_anomaly_subscription" "eureka" {
 #   retention_in_days = var.migration_log_retention_days
 #
 # and every `aws ecs run-task` of them passes `--propagate-tags TASK_DEFINITION`
-# (the caller then needs ecs:TagResource): a standalone Fargate task carries no
+# (the caller then needs ecs:TagResource; the deploy roles have it through
+# PowerUserAccess): a standalone Fargate task carries no
 # tags otherwise, and its cost lands in the untagged budget instead.
 locals {
   migration_tags = { Workstream = var.migration_workstream }
@@ -141,12 +152,21 @@ locals {
 # ---------------- Cost-allocation tag activation (opt-in, step 3) ----------------
 # Account-wide, so it lives only where the budgets do. Activation fails for a
 # key that has not yet appeared on billed usage, takes up to 24 hours to show in
-# Cost Explorer and is not retroactive. Destroying this resource DEACTIVATES the
-# key for the whole account, spokenly included. In an AWS Organization the payer
+# Cost Explorer and is not retroactive.
+#
+# !!! DESTROYING THIS RESOURCE DEACTIVATES THE TAG KEY FOR THE WHOLE ACCOUNT,
+# !!! SPOKENLY INCLUDED, and deactivated history is not re-applied on
+# !!! reactivation. Hence prevent_destroy: turning manage_cost_allocation_tags
+# !!! off, removing a key, or a stack destroy fails at plan. To hand the key
+# !!! over (e.g. to an Organization payer), `terraform state rm` it instead. In an AWS Organization the payer
 # account may have to activate instead (Q35): then leave this off and set
 # cost_allocation_tags_active once the payer has done it.
 resource "aws_ce_cost_allocation_tag" "active" {
   for_each = var.manage_cost_allocation_tags ? toset(var.cost_allocation_tag_keys) : toset([])
   tag_key  = each.value
   status   = "Active"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
