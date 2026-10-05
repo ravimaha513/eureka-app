@@ -137,6 +137,10 @@ export const PERMISSIONS = [
   // datahub
   "datahub:read",
   "datahub:manage",
+  // training
+  "training:read",
+  "training:manage",
+  "training.progress:update",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -197,6 +201,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:create": "own",
     // datahub
     "datahub:read": "own",
+    // training
+    "training:read": "own",
   },
   lead: {
     ...salesLine("team", "team"),
@@ -207,6 +213,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "team",
     // datahub
     "datahub:read": "own",
+    // training
+    "training:read": "team",
   },
   manager: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -220,6 +228,8 @@ export const GRANTS: Record<Role, Grants> = {
     "designation:change": "hierarchy",
     // datahub
     "datahub:read": "own",
+    // training
+    "training:read": "hierarchy",
   },
   assoc_director: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -233,6 +243,8 @@ export const GRANTS: Record<Role, Grants> = {
     "designation:change": "hierarchy",
     // datahub
     "datahub:read": "own",
+    // training
+    "training:read": "hierarchy",
   },
   offshore_manager: {
     "candidate:read": "org",
@@ -252,6 +264,8 @@ export const GRANTS: Record<Role, Grants> = {
     "designation:change": "org",
     // datahub
     "datahub:read": "own",
+    // training
+    "training:read": "org",
   },
   ceo: {
     "candidate:read": "org",
@@ -269,6 +283,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "org",
     // datahub
     "datahub:read": "own",
+    // training
+    "training:read": "org",
   },
   location_incharge: {
     "candidate:read": "location",
@@ -284,6 +300,10 @@ export const GRANTS: Record<Role, Grants> = {
     "report:read": "location",
     // datahub
     "datahub:read": "own",
+    // training
+    "training:read": "location",
+    "training:manage": "location",
+    "training.progress:update": "location",
   },
   location_ops_admin: {
     // Companies and facilities of their location, with utilities and bills (utility
@@ -310,6 +330,10 @@ export const GRANTS: Record<Role, Grants> = {
     // datahub
     "datahub:read": "own",
     "datahub:manage": "location",
+    // training
+    "training:read": "location",
+    "training:manage": "location",
+    "training.progress:update": "location",
   },
   hr: {
     "assignment:read": "org",
@@ -380,6 +404,9 @@ export const GRANTS: Record<Role, Grants> = {
     "interview.feedback:create": "coached",
     // datahub
     "datahub:read": "own",
+    // training: batches where they are the trainer (and progress of coached teams' candidates)
+    "training:read": "coached",
+    "training.progress:update": "coached",
   },
   documents_team: {
     "candidate:read": "org",

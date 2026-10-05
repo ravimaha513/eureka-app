@@ -16,6 +16,8 @@ import { EmployeesPage } from "./employees/EmployeesPage";
 import { ReportsPage } from "./employees/JoiningsExitsReport";
 import { CompaniesPage, FacilitiesPage } from "./sites/SitesPage";
 import { DataHubPage } from "./datahub/DataHubPage";
+import { TrainingPage } from "./training/TrainingPage";
+import { CoursesPage } from "./training/CoursesPage";
 import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sparkles, Sun } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
@@ -219,6 +221,8 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "companies" ? <CompaniesPage key="companies" me={me} />
             : current.key === "facilities" ? <FacilitiesPage key="facilities" me={me} />
             : current.key === "datahub" ? <DataHubPage />
+            : current.key === "training" ? <TrainingPage me={me} />
+            : current.key === "courses" ? <CoursesPage me={me} />
             : current.key === "dashboard" ? (
               <DashboardPage firstName={me.displayName.split(" ")[0]} canOpen={(t) => items.some((i) => i.key === t)}
                 onOpen={(t, id) => { if (t === "placements") openPlacement(id); else setActive(t); }} />

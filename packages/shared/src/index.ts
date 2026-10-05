@@ -7,3 +7,4 @@ export * from "./normalize.js";
 export * from "./documents.js";
 export * from "./workAuthorization.js";
 export * from "./datahub.js";
+export * from "./authz/training.js";
