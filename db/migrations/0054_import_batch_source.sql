@@ -5,7 +5,9 @@
 --     fixed when the batch opens (authz.import_open_batch, from the CLI's
 --     stage flags) and immutable afterwards (import_batch_guard), exactly like
 --     placements_commit. No role holds a column privilege on them; the guard
---     refuses even the table owner.
+--     refuses the table owner and a superuser (short of disabling triggers,
+--     e.g. session_replication_role = replica). historical requires
+--     source = 'crewnex' (the replay rules of 4.6 are CrewNex's).
 --  2. Both are part of authz.import_batch_digest and shown in the preview, so
 --     an approver signs them. The digest formula changes for every batch, so
 --     every approval given before this migration no longer matches what the
@@ -19,6 +21,13 @@
 --     through it, so a dry run of a historical batch takes the same path as
 --     its commit. The loader reports the mode it ran in ('historical').
 --     Nothing reads import_historical() yet: C1e.1 adds the side-effect rules.
+--  4. A CrewNex batch stages, analyses and dry-runs, but cannot be approved
+--     (import_verify_batch problem crewnex_commit_disabled) or committed
+--     (import_load_person refuses outside a dry run) until
+--     authz.policy_setting crewnex_commit = 'on'. Today such a batch would go
+--     through the sheet loader, which loads personal contacts (D4), matches
+--     on marketing email (D3), ignores source ids and commits before the
+--     cutover (D1). Absent means off; C1f sets it by migration.
 -- Rules 1-7 of docs/HANDOFF.md apply.
 SET search_path = eureka, public;
 
@@ -27,7 +36,8 @@ SET ROLE eureka_owner;
 ALTER TABLE eureka.import_batch
   ADD COLUMN source text NOT NULL DEFAULT 'sheets',
   ADD COLUMN historical boolean NOT NULL DEFAULT false,
-  ADD CONSTRAINT import_batch_source CHECK (source IN ('sheets', 'crewnex'));
+  ADD CONSTRAINT import_batch_source CHECK (source IN ('sheets', 'crewnex')),
+  ADD CONSTRAINT import_batch_historical CHECK (NOT historical OR source = 'crewnex');
 ALTER TABLE eureka.import_session ADD COLUMN active_batch uuid;
 
 -- source and historical are fixed when the batch opens, like placements_commit.
@@ -90,6 +100,14 @@ END $$;
 RESET ROLE;
 
 SET ROLE authz_definer;
+
+-- The CrewNex commit switch (absent = off). C1f turns it on by migration.
+ALTER TABLE authz.policy_setting
+  ADD CONSTRAINT policy_setting_crewnex_commit CHECK (key <> 'crewnex_commit' OR value IN ('on', 'off'));
+CREATE FUNCTION authz.import_crewnex_commit_enabled() RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+  SELECT EXISTS (SELECT 1 FROM authz.policy_setting s WHERE s.key = 'crewnex_commit' AND s.value = 'on')
+$$;
 
 CREATE OR REPLACE FUNCTION authz.import_begin() RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -157,6 +175,82 @@ BEGIN
       FROM authz.import_verify_batch(p_batch) v), '[]'));
 END $$;
 
+-- Verification of 0041, plus: CrewNex rows are refused while the switch is off.
+CREATE OR REPLACE FUNCTION authz.import_verify_batch(p_batch uuid) RETURNS TABLE (sheet text, row_no integer, problem text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+#variable_conflict use_column
+DECLARE m jsonb; pc boolean; src text;
+BEGIN
+  SELECT b.files -> 'mapping', b.placements_commit, b.source INTO m, pc, src FROM eureka.import_batch b WHERE b.id = p_batch;
+  RETURN QUERY
+  WITH r AS (
+    SELECT x.*,
+           authz.import_cell(x.raw, m -> 'sheets' -> x.sheet -> 'columns' ->> 'owner') AS owner_cell
+      FROM eureka.import_row x
+     WHERE x.batch_id = p_batch AND x.state <> 'committed' AND x.norm IS NOT NULL),
+  owners AS (
+    SELECT r.id, (SELECT u.id FROM eureka.app_user u WHERE pg_catalog.lower(u.email::text) = pg_catalog.lower(r.owner_cell)
+                   AND u.status = 'active') AS cell_owner
+      FROM r WHERE coalesce(r.owner_cell, '') <> ''),
+  sales_map AS (
+    SELECT r.id,
+           coalesce(
+             authz.import_map_entry(m -> 'statuses' -> 'sales',
+               authz.import_label(authz.import_cell(r.raw, m -> 'sheets' -> 'sales' -> 'columns' ->> 'status'))),
+             CASE WHEN authz.import_label(authz.import_cell(r.raw, m -> 'sheets' -> 'sales' -> 'columns' ->> 'status')) = ''
+                  THEN authz.import_map_entry(m -> 'rowColors' -> 'sales',
+                         authz.import_color(authz.import_cell(r.raw, m -> 'sheets' -> 'sales' -> 'columns' ->> 'rowColor'))) END) AS entry
+      FROM r WHERE r.sheet = 'sales' AND r.state = 'clean'),
+  problems AS (
+    SELECT r.sheet, r.row_no, 'clean_with_reasons' AS problem FROM r
+     WHERE r.state = 'clean' AND pg_catalog.cardinality(r.reasons) > 0
+    UNION ALL
+    SELECT r.sheet, r.row_no, 'state_without_reasons' FROM r
+     WHERE r.state <> 'clean' AND pg_catalog.cardinality(r.reasons) = 0
+    UNION ALL
+    -- sales rows: owner, status, visibility, person and live duplicates
+    SELECT r.sheet, r.row_no, 'owner_mismatch' FROM r LEFT JOIN owners o ON o.id = r.id
+     WHERE r.sheet = 'sales' AND r.state = 'clean' AND (r.norm ->> 'ownerId') IS DISTINCT FROM o.cell_owner::text
+    UNION ALL
+    SELECT r.sheet, r.row_no, 'status_mismatch' FROM r JOIN sales_map s ON s.id = r.id
+     WHERE (r.norm ->> 'status') IS DISTINCT FROM (s.entry ->> 'status')
+    UNION ALL
+    SELECT r.sheet, r.row_no, 'visibility_mismatch' FROM r JOIN sales_map s ON s.id = r.id
+     WHERE coalesce(r.norm ->> 'visibility', 'team') IS DISTINCT FROM coalesce(s.entry ->> 'visibility', 'team')
+    UNION ALL
+    SELECT r.sheet, r.row_no, 'person_mismatch' FROM r
+     WHERE r.sheet = 'sales' AND r.state = 'clean' AND r.person_key IS DISTINCT FROM r.row_key
+    UNION ALL
+    SELECT r.sheet, r.row_no, 'unapproved_live_match' FROM r
+     WHERE r.sheet = 'sales' AND r.state = 'clean' AND authz.import_live_match_norm(r.norm)
+       AND NOT EXISTS (SELECT 1 FROM eureka.import_decision d WHERE d.sheet = 'sales' AND d.row_key = r.row_key
+                       AND d.action = 'approve' AND 'matches_existing_candidate' = ANY (d.approved_reasons))
+    UNION ALL
+    -- interview and placement rows: person and owner
+    SELECT r.sheet, r.row_no, 'person_mismatch' FROM r
+     WHERE r.sheet <> 'sales' AND r.state = 'clean' AND NOT coalesce(
+       CASE WHEN r.person_key LIKE 'ledger:%'
+            THEN EXISTS (SELECT 1 FROM eureka.import_identity i WHERE i.candidate_id::text = pg_catalog.substr(r.person_key, 8))
+            ELSE EXISTS (SELECT 1 FROM eureka.import_row s WHERE s.batch_id = p_batch AND s.sheet = 'sales'
+                         AND s.state IN ('clean', 'committed') AND s.row_key = r.person_key) END, false)
+    UNION ALL
+    SELECT r.sheet, r.row_no, 'owner_mismatch' FROM r LEFT JOIN owners o ON o.id = r.id
+     WHERE r.sheet <> 'sales' AND r.state = 'clean'
+       AND (r.norm ->> 'ownerId') IS DISTINCT FROM coalesce(o.cell_owner::text, CASE
+             WHEN r.person_key LIKE 'ledger:%' THEN (SELECT i.owner_id::text FROM eureka.import_identity i
+                   WHERE i.candidate_id::text = pg_catalog.substr(r.person_key, 8) ORDER BY i.created_at LIMIT 1)
+             ELSE (SELECT s.norm ->> 'ownerId' FROM eureka.import_row s WHERE s.batch_id = p_batch AND s.sheet = 'sales'
+                   AND s.row_key = r.person_key LIMIT 1) END)
+    UNION ALL
+    SELECT r.sheet, r.row_no, 'placements_disabled' FROM r
+     WHERE r.sheet = 'placements' AND r.state = 'clean' AND NOT coalesce(pc, false)
+    UNION ALL
+    -- 0054: CrewNex rows load only once the CrewNex loaders exist (C1f flips the switch).
+    SELECT r.sheet, r.row_no, 'crewnex_commit_disabled' FROM r
+     WHERE r.state = 'clean' AND src IS DISTINCT FROM 'sheets' AND NOT authz.import_crewnex_commit_enabled())
+  SELECT p.sheet, p.row_no, p.problem FROM problems p ORDER BY 1, 2, 3;
+END $$;
+
 -- CLI: opens a batch with a ticket; placements_commit, source and historical are fixed here.
 DROP FUNCTION authz.import_open_batch(text, text, jsonb, boolean);
 CREATE FUNCTION authz.import_open_batch(p_ticket text, p_digest text, p_files jsonb, p_placements_commit boolean,
@@ -216,6 +310,10 @@ BEGIN
     -- 0041: the approver and the operator must still be active org admins.
     IF NOT authz.import_is_admin(b.approved_by) OR NOT authz.import_is_admin(b.operator_id) THEN
       RAISE EXCEPTION 'approval_not_valid' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    -- 0054: the sheet loader must not commit CrewNex rows (D1, D3, D4) until C1f.
+    IF b.source IS DISTINCT FROM 'sheets' AND NOT authz.import_crewnex_commit_enabled() THEN
+      RAISE EXCEPTION 'crewnex_commit_disabled' USING ERRCODE = 'check_violation';
     END IF;
     UPDATE eureka.import_session SET verified_batch = p_batch
      WHERE xact = pg_catalog.pg_current_xact_id() AND pid = pg_catalog.pg_backend_pid();
@@ -470,8 +568,10 @@ RESET ROLE;
 
 -- ---------- privileges ----------
 REVOKE ALL ON FUNCTION eureka.import_batch_guard() FROM PUBLIC;
-REVOKE ALL ON FUNCTION authz.import_begin(), authz.import_historical(), authz.import_batch_digest(uuid),
+REVOKE ALL ON FUNCTION authz.import_begin(), authz.import_historical(), authz.import_crewnex_commit_enabled(),
+  authz.import_verify_batch(uuid), authz.import_batch_digest(uuid),
   authz.import_load_preview(uuid), authz.import_open_batch(text, text, jsonb, boolean, text, boolean),
   authz.import_load_person(uuid, uuid, boolean) FROM PUBLIC;
--- authz.import_historical() is for the definer's own functions (owner): no role gets EXECUTE.
+-- import_historical() and import_crewnex_commit_enabled() are for the definer's own functions
+-- (owner): no role gets EXECUTE. import_verify_batch keeps no grant, as in 0041.
 GRANT EXECUTE ON FUNCTION authz.import_open_batch(text, text, jsonb, boolean, text, boolean) TO eureka_import;

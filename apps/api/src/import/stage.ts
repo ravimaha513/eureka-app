@@ -98,6 +98,7 @@ export async function stage(
   const source = opts.source ?? "sheets";
   const historical = opts.historical ?? false;
   if (!BATCH_SOURCES.includes(source)) throw new Error(`Unknown batch source "${String(source)}" (one of ${BATCH_SOURCES.join(", ")})`);
+  if (historical && source !== "crewnex") throw new Error("--historical needs --source crewnex (historical replay is for CrewNex batches)");
   const given = SHEETS.filter((s) => files[s]);
   if (given.length === 0) throw new Error("Give at least one of --sales, --interviews, --placements");
   const texts = Object.fromEntries(given.map((s) => [s, readFileSync(files[s]!, "utf8")])) as Partial<Record<Sheet, string>>;
@@ -141,7 +142,10 @@ export async function stage(
       await recomputeIn(c, open.id, opts.hmac);
       return { batchId: open.id, created: false };
     }
-    if (!opts.ticket) throw new Error("A new batch needs --ticket (POST /api/v1/imports/tickets as an org admin)");
+    if (!opts.ticket) {
+      throw new Error("A new batch needs --ticket (POST /api/v1/imports/tickets as an org admin). Staging the same files with "
+        + "a different --source or --historical opens a new batch; re-analysing needs the settings the batch was staged with.");
+    }
     // placements.commit, source and historical are fixed on the batch here; the
     // approver sees them and they are part of the digest.
     const batchId = (await c.query<{ id: string }>(`SELECT authz.import_open_batch($1, $2, $3, $4, $5, $6) AS id`,

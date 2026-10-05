@@ -89,6 +89,17 @@ async function tamper(id: string, set: string) {
     c.release();
   }
 }
+/** authz.policy_setting crewnex_commit (absent = off): what C1f will turn on. */
+async function crewnexCommit(on: boolean) {
+  await db.admin.query(on
+    ? `INSERT INTO authz.policy_setting (key, value) VALUES ('crewnex_commit', 'on') ON CONFLICT (key) DO UPDATE SET value = 'on'`
+    : `DELETE FROM authz.policy_setting WHERE key = 'crewnex_commit'`);
+}
+async function withCrewnexCommit<T>(fn: () => Promise<T>): Promise<T> {
+  await crewnexCommit(true);
+  try { return await fn(); } finally { await crewnexCommit(false); }
+}
+
 /** One person's load in a dry run, as the CLI calls it; returns the function's report. */
 async function dryRunOne(id: string): Promise<{ historical: boolean; counts: Record<string, number> }> {
   const row = (await imp.query<{ id: string }>(
@@ -135,11 +146,47 @@ describe("batch source and historical (C1a.3)", () => {
     // A source the database does not know is refused when the batch opens.
     await expect(imp.query(`SELECT authz.import_open_batch($1, repeat('b', 64), '{}', false, 'excel', false)`, [await ticket()]))
       .rejects.toThrow(/import_batch_source/);
+    // Historical replay is for CrewNex batches only: refused by stage() and by the database.
+    await expect(stage(imp, { sales: oneSales() }, MAPPING, { hmac, ticket: await ticket(), historical: true }))
+      .rejects.toThrow(/--historical needs --source crewnex/);
+    await expect(imp.query(`SELECT authz.import_open_batch($1, repeat('c', 64), '{}', false, 'sheets', true)`, [await ticket()]))
+      .rejects.toThrow(/import_batch_historical/);
+  });
+
+  it("a CrewNex batch dry-runs, but approval and commit are refused until the crewnex_commit switch is on", async () => {
+    const s = await stage(imp, { sales: oneSales() }, MAPPING, { hmac, ticket: await ticket(), source: "crewnex" });
+    expect(await dryRunOne(s.batchId)).toMatchObject({ historical: false, counts: { candidates: 1 } });
+    // Approval: the verification reports the problem and refuses.
+    const p = (await call("admin2", "GET", `/api/v1/imports/${s.batchId}/preview`)).json();
+    expect(p.problems).toEqual([{ sheet: "sales", rowNo: 2, problem: "crewnex_commit_disabled" }]);
+    const a = await call("admin2", "POST", `/api/v1/imports/${s.batchId}/approve`, { digest: p.digest });
+    expect([a.statusCode, a.json().detail]).toEqual([422, "verification_failed"]);
+    // Commit: approved while the switch was on, then switched off: the loader refuses on its own.
+    await withCrewnexCommit(async () => {
+      const q = (await call("admin2", "GET", `/api/v1/imports/${s.batchId}/preview`)).json();
+      expect(q.problems).toEqual([]);
+      expect((await call("admin2", "POST", `/api/v1/imports/${s.batchId}/approve`, { digest: q.digest })).statusCode).toBe(200);
+    });
+    const before = (await db.admin.query(`SELECT count(*)::int AS n FROM eureka.candidate`)).rows[0].n;
+    const refused = await commitBatch(imp, s.batchId, { dryRun: false });
+    expect(refused.failures.map((f) => f.error)).toEqual([expect.stringMatching(/crewnex_commit_disabled/)]);
+    expect((await db.admin.query(`SELECT count(*)::int AS n FROM eureka.candidate`)).rows[0].n).toBe(before);
+    // A dry run of the approved batch still works with the switch off.
+    expect((await commitBatch(imp, s.batchId, { dryRun: true })).failures).toEqual([]);
+    // With the switch on it commits.
+    const done = await withCrewnexCommit(() => commitBatch(imp, s.batchId, { dryRun: false }));
+    expect([done.failures, done.loaded.candidates]).toEqual([[], 1]);
+    // No role but the migration owner can flip the switch.
+    for (const pool of [imp, db.app]) {
+      await expect(pool.query(`INSERT INTO authz.policy_setting (key, value) VALUES ('crewnex_commit', 'on')`)).rejects.toThrow(/permission denied/);
+    }
+    await expect(db.admin.query(`INSERT INTO authz.policy_setting (key, value) VALUES ('crewnex_commit', 'yes')`))
+      .rejects.toThrow(/policy_setting_crewnex_commit/);
   });
 
   it("neither flag can be changed after staging: not by the CLI role, the app role, the definer or a superuser", async () => {
-    const s = await stage(imp, { sales: oneSales() }, MAPPING, { hmac, ticket: await ticket() });
-    for (const set of ["source = 'crewnex'", "historical = true"]) {
+    const s = await stage(imp, { sales: oneSales() }, MAPPING, { hmac, ticket: await ticket(), source: "crewnex" });
+    for (const set of ["source = 'sheets'", "historical = true"]) {
       await expect(imp.query(`UPDATE eureka.import_batch SET ${set} WHERE id = $1`, [s.batchId])).rejects.toThrow(/permission denied/);
       await expect(db.app.query(`UPDATE eureka.import_batch SET ${set} WHERE id = $1`, [s.batchId])).rejects.toThrow(/permission denied/);
       const c = await db.admin.connect();
@@ -151,37 +198,42 @@ describe("batch source and historical (C1a.3)", () => {
         await c.query("ROLLBACK");
         c.release();
       }
-      // A superuser has every privilege and bypasses RLS: the guard still refuses.
+      // A superuser has every privilege and bypasses RLS: the guard still refuses (short of disabling triggers).
       await expect(db.admin.query(`UPDATE eureka.import_batch SET ${set} WHERE id = $1`, [s.batchId])).rejects.toThrow(/column is immutable/);
     }
-    expect(await batch(s.batchId)).toMatchObject({ source: "sheets", historical: false });
+    expect(await batch(s.batchId)).toMatchObject({ source: "crewnex", historical: false });
     // Re-staging the same files with other settings opens a new batch, never re-analyses this one.
-    const again = await stage(imp, { sales: join(TMP, `sales_${seq}.csv`) }, MAPPING, { hmac, ticket: await ticket(), historical: true });
+    const again = await stage(imp, { sales: join(TMP, `sales_${seq}.csv`) }, MAPPING, { hmac, ticket: await ticket(), source: "crewnex", historical: true });
     expect(again.created).toBe(true);
     expect(again.batchId).not.toBe(s.batchId);
   });
 
   it("the digest covers both flags: an approval quoting the old digest is refused, and so is a commit", async () => {
-    const s = await stage(imp, { sales: oneSales() }, MAPPING, { hmac, ticket: await ticket() });
-    const d0 = await digestOf(s.batchId);
-    expect((await call("admin2", "GET", `/api/v1/imports/${s.batchId}/preview`)).json().digest).toBe(d0);
-    await tamper(s.batchId, "historical = true");
-    const d1 = await digestOf(s.batchId);
-    expect(d1).not.toBe(d0);
-    const r = await call("admin2", "POST", `/api/v1/imports/${s.batchId}/approve`, { digest: d0 });
-    expect([r.statusCode, r.json().detail]).toEqual([409, "batch_changed"]);
-    await tamper(s.batchId, "historical = false, source = 'crewnex'");
-    expect(await digestOf(s.batchId)).not.toBe(d0);
-    expect(await digestOf(s.batchId)).not.toBe(d1);
-    await tamper(s.batchId, "source = 'sheets'");
-    expect(await digestOf(s.batchId)).toBe(d0);
+    await crewnexCommit(true); // isolates the digest from the switch's verification problem
+    try {
+      const s = await stage(imp, { sales: oneSales() }, MAPPING, { hmac, ticket: await ticket(), source: "crewnex" });
+      const d0 = await digestOf(s.batchId);
+      expect((await call("admin2", "GET", `/api/v1/imports/${s.batchId}/preview`)).json().digest).toBe(d0);
+      await tamper(s.batchId, "historical = true");
+      const d1 = await digestOf(s.batchId);
+      expect(d1).not.toBe(d0);
+      const r = await call("admin2", "POST", `/api/v1/imports/${s.batchId}/approve`, { digest: d0 });
+      expect([r.statusCode, r.json().detail]).toEqual([409, "batch_changed"]);
+      await tamper(s.batchId, "historical = false, source = 'sheets'");
+      expect(await digestOf(s.batchId)).not.toBe(d0);
+      expect(await digestOf(s.batchId)).not.toBe(d1);
+      await tamper(s.batchId, "source = 'crewnex'");
+      expect(await digestOf(s.batchId)).toBe(d0);
 
-    // Approved, then a flag changes: the loader refuses the commit.
-    expect((await call("admin2", "POST", `/api/v1/imports/${s.batchId}/approve`, { digest: d0 })).statusCode).toBe(200);
-    await tamper(s.batchId, "historical = true");
-    const c = await commitBatch(imp, s.batchId, { dryRun: false });
-    expect(c.failures.map((f) => f.error)).toEqual([expect.stringMatching(/batch_changed/)]);
-    expect(c.loaded.candidates).toBe(0);
+      // Approved, then a flag changes: the loader refuses the commit.
+      expect((await call("admin2", "POST", `/api/v1/imports/${s.batchId}/approve`, { digest: d0 })).statusCode).toBe(200);
+      await tamper(s.batchId, "historical = true");
+      const c = await commitBatch(imp, s.batchId, { dryRun: false });
+      expect(c.failures.map((f) => f.error)).toEqual([expect.stringMatching(/batch_changed/)]);
+      expect(c.loaded.candidates).toBe(0);
+    } finally {
+      await crewnexCommit(false);
+    }
   });
 });
 
@@ -208,12 +260,13 @@ describe("CLI: stage --source / --historical", () => {
     const n = async () => (await db.admin.query<{ n: number }>(`SELECT count(*)::int AS n FROM eureka.import_batch`)).rows[0]!.n;
     const before = await n();
     await expect(stageCli(["--source", "excel"])).rejects.toThrow(/--source must be one of sheets, crewnex/);
+    await expect(stageCli(["--historical"])).rejects.toThrow(/--historical needs --source crewnex/);
     expect(await n()).toBe(before);
   });
 });
 
 describe("migration 0054 on a database with batches", () => {
-  it("withdraws approvals given under the old digest formula; staged and committed batches keep theirs", async () => {
+  it("withdraws approvals given under the old digest formula (partly loaded ones too); staged and committed batches keep theirs", async () => {
     const name = `eureka_test_0054_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
     const root = new pg.Client({ connectionString: `${ADMIN_BASE}/postgres` });
     await root.connect();
@@ -244,6 +297,13 @@ describe("migration 0054 on a database with batches", () => {
       const staged = await ins("staged");
       const approved = await ins("approved");
       const committed = await ins("committed");
+      // Approved and partly loaded: one person committed, one still clean.
+      const partial = await ins("approved");
+      const loadedEntity = "00000000-0000-4000-8000-0000000000aa";
+      await c.query(
+        `INSERT INTO eureka.import_row (batch_id, sheet, row_no, row_key, raw, norm, state, committed_entity)
+         VALUES ($1, 'sales', 2, repeat('a', 64), '{}', '{}', 'committed', $2), ($1, 'sales', 3, repeat('b', 64), '{}', '{}', 'clean', NULL)`,
+        [partial, loadedEntity]);
       await c.query(`UPDATE eureka.import_batch SET approved_digest = authz.import_batch_digest(id) WHERE status <> 'staged'`);
       await c.query("COMMIT");
       const oldDigest = (await c.query<{ d: string }>(`SELECT approved_digest AS d FROM eureka.import_batch WHERE id = $1`, [committed])).rows[0]!.d;
@@ -255,6 +315,10 @@ describe("migration 0054 on a database with batches", () => {
       expect(after.get(approved)).toMatchObject({ status: "staged", approved_by: null, approved_digest: null, source: "sheets", historical: false });
       expect(after.get(staged)).toMatchObject({ status: "staged", approved_digest: null });
       expect(after.get(committed)).toMatchObject({ status: "committed", approved_digest: oldDigest });
+      // The partly loaded batch needs a fresh approval for the rest; what it loaded stays loaded.
+      expect(after.get(partial)).toMatchObject({ status: "staged", approved_by: null, approved_digest: null });
+      expect((await c.query(`SELECT row_no, state, committed_entity FROM eureka.import_row WHERE batch_id = $1 ORDER BY row_no`, [partial])).rows)
+        .toEqual([{ row_no: 2, state: "committed", committed_entity: loadedEntity }, { row_no: 3, state: "clean", committed_entity: null }]);
       // The formula did change: the same batch hashes differently now.
       expect((await c.query<{ d: string }>(`SELECT authz.import_batch_digest($1) AS d`, [committed])).rows[0]!.d).not.toBe(oldDigest);
     } finally {
