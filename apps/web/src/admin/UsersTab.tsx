@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { Person } from "../shell/ui";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { adminApi, type AdminUser, type UserRole } from "./adminApi";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "./Dialog";
@@ -73,7 +74,7 @@ export function UsersTab() {
                 const self = u.id === me.id;
                 return (
                   <tr key={u.id}>
-                    <td><b>{u.displayName}</b>{self && <span className="tag">you</span>}<small className="block">{u.email}</small></td>
+                    <td><Person name={u.displayName}><b>{u.displayName}</b>{self && <span className="tag">you</span>}<small className="block">{u.email}</small></Person></td>
                     <td>{u.designation ?? "—"}</td>
                     <td><span className={`badge ${u.status}`}>{u.status}</span></td>
                     <td>

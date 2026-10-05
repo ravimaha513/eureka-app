@@ -1,5 +1,6 @@
 import { useId, useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { ArrowDownRight, ArrowUpRight, BadgeCheck, CalendarCheck, CalendarClock, Minus, Send, UserPlus, Users, type LucideIcon } from "lucide-react";
 import { FunnelBars, PALETTE, PieShare, TrendChart } from "./Charts";
 import { pipelineError } from "../pipeline/errors";
 import { pipelineLabel } from "../pipeline/pipelineApi";
@@ -31,6 +32,32 @@ function topShares(parts: { key: string; label: string; value: number }[]) {
   const sorted = [...parts].sort((a, b) => b.value - a.value);
   const rest = sorted.slice(6).reduce((n, p) => n + p.value, 0);
   return rest > 0 ? [...sorted.slice(0, 6), { key: "other", label: "Other", value: rest }] : sorted;
+}
+
+/** Icon and tint for each activity tile. */
+const TILE: Record<Metric, { icon: LucideIcon; tint: string }> = {
+  submissions: { icon: Send, tint: "indigo" },
+  interviewsScheduled: { icon: CalendarClock, tint: "rose" },
+  interviewsCleared: { icon: CalendarCheck, tint: "teal" },
+  placementsCreated: { icon: BadgeCheck, tint: "amber" },
+  placementsJoined: { icon: Users, tint: "violet" },
+  candidatesAdded: { icon: UserPlus, tint: "sky" },
+};
+
+/** Change against the period just before this one, as shown under a tile. */
+function Delta({ now, before, periodDays }: { now: number; before: number | undefined; periodDays: number }) {
+  if (before === undefined) return <span className="tilehint">&nbsp;</span>;
+  const vs = `vs previous ${periodDays} days`;
+  if (now === before) return <span className="tiledelta flat"><Minus size={14} aria-hidden="true" />No change <span className="tilehint">{vs}</span></span>;
+  if (before === 0) return <span className="tiledelta up"><ArrowUpRight size={14} aria-hidden="true" />New <span className="tilehint">{vs}</span></span>;
+  const pct = Math.round(((now - before) / before) * 100);
+  const up = now > before;
+  return (
+    <span className={`tiledelta ${up ? "up" : "down"}`}>
+      {up ? <ArrowUpRight size={14} aria-hidden="true" /> : <ArrowDownRight size={14} aria-hidden="true" />}
+      {up ? "+" : ""}{pct}% <span className="tilehint">{vs}</span>
+    </span>
+  );
 }
 
 const days = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
@@ -69,7 +96,8 @@ function detailText(kind: AttentionKind, i: AttentionItem): string {
  * scope over a period, by recruiter, team or location, and the "needs attention"
  * lists. The API decides scope; this page only presents what it returns.
  */
-export function DashboardPage({ canOpen = () => false, onOpen }: {
+export function DashboardPage({ canOpen = () => false, onOpen, firstName }: {
+  firstName?: string;
   canOpen?: (target: DashboardTarget) => boolean;
   onOpen?: (target: DashboardTarget, id: string) => void;
 }) {
@@ -83,6 +111,13 @@ export function DashboardPage({ canOpen = () => false, onOpen }: {
     placeholderData: keepPreviousData,
   });
   const d = q.data;
+  // The period just before, for the change shown on each tile (same length and grouping).
+  const prevRange = useMemo(() => ({ from: new Date(2 * Date.parse(range.from) - Date.parse(range.to)).toISOString(), to: range.from }), [range]);
+  const prev = useQuery({
+    queryKey: ["dashboard", prevRange, groupBy ?? null],
+    queryFn: () => dashboardApi.get({ ...prevRange, groupBy }),
+    enabled: Boolean(d),
+  });
   const [shareMetric, setShareMetric] = useState<Metric | undefined>(undefined);
   const [plotted, setPlotted] = useState<Metric[] | undefined>(undefined);
   const shownMetric = d && d.metrics.length > 0 ? (shareMetric && d.metrics.includes(shareMetric) ? shareMetric : d.metrics[0]!) : undefined;
@@ -96,7 +131,7 @@ export function DashboardPage({ canOpen = () => false, onOpen }: {
     <>
       <div>
         <h1 tabIndex={-1}>Dashboard</h1>
-        <p className="sub">Activity you can see in your own scope, and work that needs attention now.</p>
+        <p className="sub">{firstName ? `Welcome back, ${firstName}. ` : ""}Activity you can see in your own scope, and work that needs attention now.</p>
       </div>
 
       <form className="filters" role="search" aria-label="Dashboard filters" onSubmit={(e) => e.preventDefault()}>
@@ -128,13 +163,20 @@ export function DashboardPage({ canOpen = () => false, onOpen }: {
             </h2>
             {d.metrics.length === 0 ? <p className="muted">Your role has no activity counts.</p> : (
               <ul className="tiles">
-                {d.metrics.map((m) => (
-                  <li key={m} className="tile card">
-                    <span className="tilelabel">{METRIC_LABELS[m]}</span>
-                    <span className="tilevalue">{d.totals[m] ?? 0}</span>
-                    <span className="tilehint">{METRIC_HINTS[m]}</span>
-                  </li>
-                ))}
+                {d.metrics.map((m) => {
+                  const { icon: Icon, tint } = TILE[m];
+                  return (
+                    <li key={m} className="tile card" title={METRIC_HINTS[m]}>
+                      <span className="tilehead">
+                        <span className={`tileicon tint-${tint}`}><Icon size={18} strokeWidth={1.9} aria-hidden="true" /></span>
+                        <span className="tilelabel">{METRIC_LABELS[m]}</span>
+                      </span>
+                      <span className="tilevalue">{d.totals[m] ?? 0}</span>
+                      <Delta now={d.totals[m] ?? 0} before={prev.data?.totals[m]} periodDays={periodDays} />
+                      <span className="sr-only">{METRIC_HINTS[m]}</span>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>
@@ -143,7 +185,7 @@ export function DashboardPage({ canOpen = () => false, onOpen }: {
             <>
               <section className="card chartcard" aria-label="Activity over time">
                 <div className="chartheader">
-                  <h3 className="charttitle">Activity over time</h3>
+                  <div><h3 className="charttitle">Activity over time</h3><p className="chartsub">Per day, {PERIODS.find((p) => p.days === periodDays)?.label.toLowerCase()}</p></div>
                   <div className="tabs wrap" role="group" aria-label="Metrics to plot">
                     {d.metrics.map((m, i) => (
                       <button key={m} type="button" className="tab sm" aria-pressed={plot.includes(m)}

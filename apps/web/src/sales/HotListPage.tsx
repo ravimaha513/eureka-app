@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Person } from "../shell/ui";
 import type { Candidate, Me } from "../api";
 import { salesError } from "./errors";
 import { BulkBar, ExportButton, SavedViews } from "./HotListExtras";
@@ -19,16 +20,18 @@ export const profileOpenable = (c: Candidate, caps: readonly string[]) => caps.i
 export function CandidateName({ c, caps, onOpenProfile }: { c: Candidate; caps: readonly string[]; onOpenProfile?: (id: string) => void }) {
   if (onOpenProfile && profileOpenable(c, caps)) {
     return (
-      <button type="button" className="linkbtn" onClick={() => onOpenProfile(c.id)} aria-label={`Open profile of ${c.name}`}>
-        <b>{c.name}</b>
-      </button>
+      <Person name={c.name}>
+        <button type="button" className="linkbtn" onClick={() => onOpenProfile(c.id)} aria-label={`Open profile of ${c.name}`}>
+          <b>{c.name}</b>
+        </button>
+      </Person>
     );
   }
   return (
-    <>
+    <Person name={c.name}>
       <b>{c.name}</b>
       {c.canOpenProfile === false && caps.includes("candidate:read") && <small className="block">Profile belongs to another team</small>}
-    </>
+    </Person>
   );
 }
 

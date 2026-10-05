@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
+import { X } from "lucide-react";
 import type { Candidate } from "../api";
 import { statusLabel } from "./salesApi";
 
@@ -111,7 +112,7 @@ export function Drawer({ title, onClose, children, suspended = false, wide = fal
         aria-hidden={suspended || undefined}>
         <header className="drawerhead">
           <h2 id={titleId}>{title}</h2>
-          <button type="button" className="btn sm" onClick={onClose} aria-label={closeLabel}>Close</button>
+          <button type="button" className="iconbtn" onClick={onClose} aria-label={closeLabel}><X size={18} aria-hidden="true" /></button>
         </header>
         {children}
       </div>

@@ -65,6 +65,30 @@ describe("mobile menu", () => {
   });
 });
 
+describe("theme and account menu", () => {
+  it("switches to dark and back, and remembers the choice", () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    wrap(<Shell me={meFor("org_admin")} onSignOut={() => undefined} />);
+    const theme = screen.getByRole("group", { name: "Theme" });
+    fireEvent.click(within(theme).getByRole("button", { name: "Dark" }));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem("eureka-theme")).toBe("dark");
+    fireEvent.click(within(theme).getByRole("button", { name: "Light" }));
+    expect(document.documentElement.dataset.theme).toBe("light");
+  });
+
+  it("signs out from the account menu in the top bar", () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    const onSignOut = vi.fn();
+    wrap(<Shell me={meFor("org_admin")} onSignOut={onSignOut} />);
+    const account = screen.getByRole("button", { name: "Account: Test User" });
+    expect(account).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(account);
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(onSignOut).toHaveBeenCalled();
+  });
+});
+
 describe("notification bell in the shell", () => {
   it("every role gets the bell in the top bar, outside the sidebar", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => new Response(JSON.stringify(
