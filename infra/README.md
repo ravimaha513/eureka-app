@@ -145,7 +145,10 @@ it is on a flat-rate plan.
    ```
 
 2. **GitHub repository settings** (`ravimaha513/eureka-app`):
-   - Variables → `AWS_ACCOUNT_ID = 637423353261`
+   - Variables → `AWS_ACCOUNT_ID = 637423353261`. As an **environment** variable
+     (e.g. on `staging` only) it enables hand-run deploys to that environment; as a
+     **repository** variable it also turns on the automatic production deploy after
+     CI on `main` (a job-level `if` cannot read environment variables).
    - Environments → create `production` (restrict it to `main`; add yourself
      as a required reviewer if you want to approve each deploy) and `staging`.
    - No AWS secrets are needed.
