@@ -131,6 +131,7 @@ jobs:
             --launch-type FARGATE \
             --network-configuration "awsvpcConfiguration={subnets=[${{ steps.out.outputs.subnets }}],securityGroups=[${{ steps.out.outputs.sg }}],assignPublicIp=ENABLED}" \
             --started-by "gha-${{ github.run_id }}" \
+            --propagate-tags TASK_DEFINITION \
             --query 'tasks[0].taskArn' --output text)
           echo "migrate task: $TASK"
           aws ecs wait tasks-stopped --cluster "${{ steps.out.outputs.cluster }}" --tasks "$TASK"

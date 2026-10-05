@@ -65,7 +65,8 @@ CLASS=$(jq -r .DBInstanceClass <<<"$SRC")
 # shellcheck disable=SC2054 # the commas are inside the --tags values
 COMMON=(--db-subnet-group-name "$SUBNET_GROUP" --vpc-security-group-ids "${DB_SGS[@]}"
   --db-parameter-group-name "$PARAM_GROUP" --db-instance-class "$CLASS" --no-multi-az --no-publicly-accessible
-  --no-deletion-protection --tags Key=purpose,Value=restore-drill Key=source,Value="$SOURCE")
+  --no-deletion-protection --tags Key=purpose,Value=restore-drill Key=source,Value="$SOURCE"
+  Key=Project,Value=Eureka Key=Environment,Value="$ENVIRONMENT")
 
 cleanup() {
   if [ "$KEEP" = true ]; then
@@ -128,7 +129,7 @@ OVERRIDES=$(jq -nc --arg host "$ENDPOINT" \
   '{containerOverrides: [{name: "migrate", command: ["node", "dist/db/restore-check.js"], environment: [{name: "DB_HOST", value: $host}]}]}')
 TASK=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASK_FAMILY" --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[${SUBNETS}],securityGroups=[${SECURITY_GROUP}],assignPublicIp=ENABLED}" \
-  --overrides "$OVERRIDES" --started-by "restore-drill" --query 'tasks[0].taskArn' --output text)
+  --overrides "$OVERRIDES" --started-by "restore-drill" --propagate-tags TASK_DEFINITION --query 'tasks[0].taskArn' --output text)
 aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK"
 CODE=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" --query 'tasks[0].containers[0].exitCode' --output text)
 T_CHECKED=$(now)
