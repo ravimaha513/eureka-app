@@ -3,7 +3,7 @@ import type { Permission } from "@eureka/shared";
 export interface NavItem {
   key: string;
   label: string;
-  section: "Workspace" | "Operations" | "Insights" | "Admin";
+  section: "Workspace" | "Operations" | "Insights" | "Admin" | "Other";
   /** Shown when the user holds ANY of these capabilities (presentation only; the API decides). */
   anyOf: Permission[];
 }
@@ -21,6 +21,8 @@ export const NAV: NavItem[] = [
   { key: "performance", label: "Performance", section: "Insights", anyOf: ["performance:read"] },
   { key: "reports", label: "Reports", section: "Insights", anyOf: ["report:read"] },
   { key: "access", label: "Users & Access", section: "Admin", anyOf: ["access:manage"] },
+  // chat
+  { key: "chat", label: "Chat", section: "Other", anyOf: ["chat:use"] },
 ];
 
 export function visibleNav(capabilities: readonly string[]): NavItem[] {

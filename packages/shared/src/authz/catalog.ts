@@ -134,6 +134,8 @@ export const PERMISSIONS = [
   // administration
   "access:manage",
   "audit:read",
+  // chat
+  "chat:use",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -190,6 +192,8 @@ export const GRANTS: Record<Role, Grants> = {
     "document:read": "own",
     "document:upload": "own",
     "vendor.preferred:create": "own",
+    // chat
+    "chat:use": "own",
   },
   lead: {
     ...salesLine("team", "team"),
@@ -198,6 +202,8 @@ export const GRANTS: Record<Role, Grants> = {
     "report:export": "team",
     "vendor.preferred:create": "own",
     "vendor.preferred:read": "team",
+    // chat
+    "chat:use": "own",
   },
   manager: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -209,6 +215,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     "designation:change": "hierarchy",
+    // chat
+    "chat:use": "own",
   },
   assoc_director: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -220,6 +228,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     "designation:change": "hierarchy",
+    // chat
+    "chat:use": "own",
   },
   offshore_manager: {
     "candidate:read": "org",
@@ -237,6 +247,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "org",
     "team:move_member": "org",
     "designation:change": "org",
+    // chat
+    "chat:use": "own",
   },
   ceo: {
     "candidate:read": "org",
@@ -252,6 +264,8 @@ export const GRANTS: Record<Role, Grants> = {
     "report:read": "org",
     "report:export": "org",
     "vendor.preferred:read": "org",
+    // chat
+    "chat:use": "own",
   },
   location_incharge: {
     "candidate:read": "location",
@@ -265,6 +279,8 @@ export const GRANTS: Record<Role, Grants> = {
     "placement:read": "location",
     "performance:read": "location",
     "report:read": "location",
+    // chat
+    "chat:use": "own",
   },
   location_ops_admin: {
     // Companies and facilities of their location, with utilities and bills (utility
@@ -288,6 +304,8 @@ export const GRANTS: Record<Role, Grants> = {
     "interview.feedback:create": "location",
     "placement:read": "location",
     "report:read": "location",
+    // chat
+    "chat:use": "own",
   },
   hr: {
     "assignment:read": "org",
@@ -304,6 +322,8 @@ export const GRANTS: Record<Role, Grants> = {
     "bgc:update": "org",
     "visa:read": "org",
     "report:read": "org",
+    // chat
+    "chat:use": "own",
   },
   associate_hr: {
     "assignment:read": "org",
@@ -314,6 +334,8 @@ export const GRANTS: Record<Role, Grants> = {
     "assignment:update": "org",
     "document:read": "org",
     "document:upload": "org",
+    // chat
+    "chat:use": "own",
   },
   accounts: {
     "assignment:read": "org",
@@ -327,6 +349,8 @@ export const GRANTS: Record<Role, Grants> = {
     "document:read": "org",
     "document.restricted:read": "org",
     "report:read": "org",
+    // chat
+    "chat:use": "own",
   },
   immigration: {
     "assignment:read": "org",
@@ -340,28 +364,38 @@ export const GRANTS: Record<Role, Grants> = {
     "document.restricted:read": "org",
     "visa:read": "org",
     "visa:update": "org",
+    // chat
+    "chat:use": "own",
   },
   interview_coach: {
     "candidate:read": "coached",
     "hotlist:read": "coached",
     "interview:read": "coached",
     "interview.feedback:create": "coached",
+    // chat
+    "chat:use": "own",
   },
   documents_team: {
     "candidate:read": "org",
     "document:read": "org",
     "document:upload": "org",
     "document:verify": "org",
+    // chat
+    "chat:use": "own",
   },
   bu_head: {
     "assignment:read": "org",
     "employee:read": "org",
     "placement:read": "org",
     "report:read": "org",
+    // chat
+    "chat:use": "own",
   },
   org_admin: {
     "access:manage": "org",
     "audit:read": "org",
+    // chat
+    "chat:use": "own",
   },
 };
 

@@ -14,6 +14,7 @@ import { PaperworkPage } from "./paperwork/PaperworkPage";
 import { NotificationBell, type InboxItem } from "./notifications/Inbox";
 import { EmployeesPage } from "./employees/EmployeesPage";
 import { ReportsPage } from "./employees/JoiningsExitsReport";
+import { ChatNavBadge, ChatPage } from "./chat/ChatPage";
 import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sparkles, Sun } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
@@ -132,9 +133,13 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // Inbox entries open the placement or the candidate profile when the user has that screen.
   const has = (key: string) => items.some((i) => i.key === key);
   const candidateScreen = has("candidates") ? "candidates" : has("hotlist") ? "hotlist" : null;
-  const canOpenEntity = (e: InboxItem["entity"]) => (e.type === "placement" ? has("placements") : candidateScreen !== null);
+  // A chat conversation to open when switching to Chat (from a direct-message notification).
+  const [chatId, setChatId] = useState<string | null>(null);
+  const canOpenEntity = (e: InboxItem["entity"]) =>
+    (e.type === "placement" ? has("placements") : e.type === "conversation" ? has("chat") : candidateScreen !== null);
   const openEntity = (e: InboxItem["entity"]) => {
     if (e.type === "placement") { setProfileId(null); openPlacement(e.id); return; }
+    if (e.type === "conversation") { setProfileId(null); setChatId(e.id); setActive("chat"); return; }
     if (!candidateScreen) return;
     setPlacementId(null);
     setActive(candidateScreen);
@@ -174,14 +179,17 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                 const Icon = NAV_ICONS[i.key];
                 return (
                   <button key={i.key} className="nav" title={collapsed ? i.label : undefined} aria-current={i.key === active ? "page" : undefined}
-                    onClick={() => { setActive(i.key); setProfileId(null); setPlacementId(null); setNavOpen(false); }}>
+                    aria-describedby={i.key === "chat" ? "chat-nav-unread" : undefined}
+                    onClick={() => { setActive(i.key); setProfileId(null); setPlacementId(null); setChatId(null); setNavOpen(false); }}>
                     {Icon && <Icon className="navicon" size={19} strokeWidth={1.8} aria-hidden="true" />}<span className="navlabel">{i.label}</span>
+                    {i.key === "chat" && <ChatNavBadge id="chat-nav-unread" part="badge" />}
                   </button>
                 );
               })}
             </div>
           ))}
         </nav>
+        {items.some((i) => i.key === "chat") && <ChatNavBadge id="chat-nav-unread" part="text" />}
         <ThemeSwitch theme={theme} onChange={setTheme} />
       </aside>
       {navOpen && <div className="navscrim" aria-hidden="true" onClick={() => setNavOpen(false)} />}
@@ -214,6 +222,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "access" ? <AccessPage me={me} />
             : current.key === "employees" ? <EmployeesPage me={me} />
             : current.key === "reports" ? <ReportsPage me={me} />
+            : current.key === "chat" ? <ChatPage me={me} initialConversationId={chatId} />
             : current.key === "dashboard" ? (
               <DashboardPage firstName={me.displayName.split(" ")[0]} canOpen={(t) => items.some((i) => i.key === t)}
                 onOpen={(t, id) => { if (t === "placements") openPlacement(id); else setActive(t); }} />

@@ -57,7 +57,15 @@ describe("catalog integrity", () => {
   });
 
   it("org_admin holds no data permissions (no self-escalation into data)", () => {
-    expect(Object.keys(GRANTS.org_admin).sort()).toEqual(["access:manage", "audit:read"]);
+    // chat:use exposes no business data: it lets the admin take part in their own conversations
+    // only (no admin read access to chats; docs/chat-api.md CH-9).
+    expect(Object.keys(GRANTS.org_admin).sort()).toEqual(["access:manage", "audit:read", "chat:use"]);
+  });
+
+  it("every role may chat, at own scope only (internal staff chat; docs/chat-api.md CH-1)", () => {
+    for (const role of ROLES) expect(GRANTS[role]["chat:use"], role).toBe("own");
+    expect(RESTRICTED_PERMISSIONS).not.toContain("chat:use");
+    expect(ORG_SENSITIVE_PERMISSIONS).not.toContain("chat:use");
   });
 
   it("restricted permissions are held only by HR, Accounts and Immigration, and utility passwords by Location Ops Admin", () => {

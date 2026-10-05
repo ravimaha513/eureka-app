@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -246,6 +246,106 @@ const DOCUMENT_FORBIDDEN: Record<string, unknown> = {
   key: `restricted/documents/${FOREIGN_ID}`, storageKey: `clean/documents/${FOREIGN_ID}`, kmsKeyAlias: "alias/other",
   fileName: "../../etc/passwd", scannedAt: PAST, uploadExpiresAt: "2099-01-01T00:00:00Z", verifiedBy: U.hr, expiresOn: "2099-01-01",
 };
+
+// ---- chat (migration 0070) ----------------------------------------------------------------------
+
+/** A fresh group owned by r1a with r1b. */
+async function chatGroup() {
+  const g = await ok("r1a", "POST", "/api/v1/chat/conversations/group", { name: `MA chat ${++n}`, memberIds: [U.r1b] });
+  return g.id as string;
+}
+async function chatMessage(conv: string) {
+  const r = await ok("r1a", "POST", `/api/v1/chat/conversations/${conv}/messages`, { clientId: randomUUID(), body: "MA hello" });
+  return r.message.id as string;
+}
+/** Every chat row (the definer functions also audit; the audit head is checked separately). */
+const chatState = () => rows(`SELECT
+  (SELECT count(*)::int FROM eureka.chat_conversation) AS conversations,
+  (SELECT coalesce(json_agg(json_build_object('c', c.id, 'n', c.name, 'v', c.row_version, 'r', c.last_rev) ORDER BY c.id), '[]') FROM eureka.chat_conversation c) AS convs,
+  (SELECT coalesce(json_agg(json_build_object('c', m.conversation_id, 'u', m.user_id, 'r', m.role, 'l', m.left_at) ORDER BY m.conversation_id, m.user_id), '[]') FROM eureka.chat_member m) AS members,
+  (SELECT coalesce(json_agg(s ORDER BY s.conversation_id, s.user_id), '[]') FROM eureka.chat_member_state s) AS states,
+  (SELECT coalesce(json_agg(json_build_object('id', m.id, 'b', m.body, 'r', m.rev) ORDER BY m.id), '[]') FROM eureka.chat_message m) AS messages,
+  (SELECT count(*)::int FROM eureka.chat_attachment) AS attachments,
+  (SELECT count(*)::int FROM eureka.file_object) AS files`);
+const CHAT_FORBIDDEN: Record<string, unknown> = {
+  conversationId: FOREIGN_ID, userId: U.admin, senderId: U.r1b, kind: "group", directKey: `${U.r1a}:${U.r1b}`,
+  deletedAt: PAST, leftAt: PAST, joinedAt: PAST, seq: 1, rev: 1, lastReadSeq: 0, visibleAfterSeq: 0, notifiedAt: PAST,
+};
+
+function chatCases(): RejectCase[] {
+  return [
+    {
+      route: "POST /api/v1/chat/conversations/direct", actor: "r1a",
+      prepare: async () => ({ url: "/api/v1/chat/conversations/direct", body: { userId: U.l2 }, state: chatState }),
+      // userId is this endpoint's own field (the other person).
+      forbidden: { ...Object.fromEntries(Object.entries(CHAT_FORBIDDEN).filter(([k]) => k !== "userId")), role: "owner", memberIds: [U.admin], otherId: U.admin },
+    },
+    {
+      route: "POST /api/v1/chat/conversations/group", actor: "r1a",
+      prepare: async () => ({ url: "/api/v1/chat/conversations/group", body: { name: "MA group", memberIds: [U.r1b] }, state: chatState }),
+      forbidden: { ...CHAT_FORBIDDEN, role: "member", owners: [U.admin], createdBy: U.admin },
+    },
+    {
+      route: "PATCH /api/v1/chat/conversations/:id", actor: "r1a",
+      prepare: async () => {
+        const g = await chatGroup();
+        return { url: `/api/v1/chat/conversations/${g}`, body: { name: "MA renamed" }, state: chatState, headers: { "if-match": '"1"' } };
+      },
+      forbidden: { ...CHAT_FORBIDDEN, role: "member" },
+    },
+    {
+      route: "PATCH /api/v1/chat/conversations/:id/preferences", actor: "r1a",
+      prepare: async () => {
+        const g = await chatGroup();
+        return { url: `/api/v1/chat/conversations/${g}/preferences`, body: { favorite: true }, state: chatState };
+      },
+      forbidden: { ...CHAT_FORBIDDEN, role: "member", hidden: false, lastReadMessageId: FOREIGN_ID, lastViewedAt: PAST },
+    },
+    {
+      route: "POST /api/v1/chat/conversations/:id/members", actor: "r1a",
+      prepare: async () => {
+        const g = await chatGroup();
+        return { url: `/api/v1/chat/conversations/${g}/members`, body: { userIds: [U.l1] }, state: chatState };
+      },
+      forbidden: { ...CHAT_FORBIDDEN, role: "owner" },
+    },
+    {
+      route: "PATCH /api/v1/chat/conversations/:id/members/:userId", actor: "r1a",
+      prepare: async () => {
+        const g = await chatGroup();
+        return { url: `/api/v1/chat/conversations/${g}/members/${U.r1b}`, body: { role: "owner" }, state: chatState };
+      },
+      forbidden: CHAT_FORBIDDEN,
+    },
+    {
+      route: "POST /api/v1/chat/conversations/:id/messages", actor: "r1a",
+      prepare: async () => {
+        const g = await chatGroup();
+        return { url: `/api/v1/chat/conversations/${g}/messages`, body: { clientId: randomUUID(), body: "MA" }, state: chatState };
+      },
+      forbidden: { ...CHAT_FORBIDDEN, role: "owner", createdAt: PAST, editedAt: PAST, deleted: false, mine: true, sender: { id: U.r1b } },
+    },
+    {
+      route: "POST /api/v1/chat/conversations/:id/read", actor: "r1b",
+      prepare: async () => {
+        const g = await chatGroup();
+        await chatMessage(g);
+        return { url: `/api/v1/chat/conversations/${g}/read`, body: {}, state: chatState };
+      },
+      forbidden: { ...CHAT_FORBIDDEN, role: "owner", lastViewedAt: PAST, lastReadMessageId: FOREIGN_ID },
+    },
+    {
+      route: "PATCH /api/v1/chat/messages/:messageId", actor: "r1a",
+      prepare: async () => {
+        const g = await chatGroup();
+        const m = await chatMessage(g);
+        return { url: `/api/v1/chat/messages/${m}`, body: { body: "MA edited" }, state: chatState };
+      },
+      forbidden: { ...CHAT_FORBIDDEN, role: "owner", editedAt: PAST, deleted: true, attachments: [] },
+    },
+  ];
+}
+
 
 const CASES: RejectCase[] = [
   // resumes (FR-CAN-07, migration 0036): status, scan result, version, digest, uploader and key are the server's
@@ -742,11 +842,47 @@ const CASES: RejectCase[] = [
     },
     forbidden: { approvedBy: U.admin, status: "approved", operatorId: U.admin2, placementsCommit: true, approvedAt: PAST },
   },
+  // chat (migration 0070, docs/chat-api.md): members, roles, sender, revisions, read marks and keys are the server's
+  ...chatCases(),
 ];
+
 
 /** Endpoints that read no body: what they change comes from the URL and the session only. */
 interface IgnoreCase { route: string; run: () => Promise<void> }
 const IGNORED: IgnoreCase[] = [
+  // chat (migration 0070)
+  {
+    route: "POST /api/v1/chat/conversations/:id/leave",
+    run: async () => {
+      const g = await chatGroup();
+      await ok("r1a", "POST", `/api/v1/chat/conversations/${g}/members`, { userIds: [U.l1] }, 200);
+      const r = await call("r1b", "POST", `/api/v1/chat/conversations/${g}/leave`,
+        { ...SERVER_MANAGED, userId: U.l1, conversationId: FOREIGN_ID, role: "owner", leftAt: PAST });
+      expect(r.statusCode, r.body).toBe(204);
+      const left = await rows(`SELECT user_id, role, left_at IS NOT NULL AS gone FROM eureka.chat_member WHERE conversation_id = $1 ORDER BY user_id`, [g]);
+      expect(left).toEqual([
+        { user_id: U.l1, role: "member", gone: false }, { user_id: U.r1a, role: "owner", gone: false }, { user_id: U.r1b, role: "member", gone: true },
+      ].sort((a, b) => a.user_id.localeCompare(b.user_id)));
+    },
+  },
+  {
+    route: "POST /api/v1/chat/attachments/:attachmentId/download",
+    run: async () => {
+      const g = await chatGroup();
+      const sent = await ok("r1a", "POST", `/api/v1/chat/conversations/${g}/messages`,
+        { clientId: randomUUID(), body: "", attachments: [{ fileName: "ma.pdf", contentType: "application/pdf", size: 10 }] });
+      const att = sent.message.attachments[0].id as string;
+      const before = await auditHead();
+      // Still pending: refused whatever the body claims.
+      const r = await call("r1b", "POST", `/api/v1/chat/attachments/${att}/download`,
+        { ...SERVER_MANAGED, status: "clean", fileId: FOREIGN_ID, key: `clean/documents/${FOREIGN_ID}` });
+      expect(r.statusCode, r.body).toBe(409);
+      expect(r.json().detail).toBe("not_available");
+      expect(await rows(`SELECT f.status FROM eureka.chat_attachment a JOIN eureka.file_object f ON f.id = a.file_id WHERE a.id = $1`, [att]))
+        .toEqual([{ status: "pending" }]);
+      expect(await auditHead()).toBe(before);
+    },
+  },
   {
     route: "POST /api/v1/notifications/:id/read",
     run: async () => {

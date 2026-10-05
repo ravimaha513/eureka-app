@@ -126,6 +126,17 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   Left: DOB is not read or written anywhere (OD-04); when it is, encrypt with class `dob`, set `dob_bidx` with
   `dobBlindIndex`, add `dob` to the rotation job (definer functions like `work_auth_number`) and use the index in
   the duplicate check.
+- Internal chat (Phase 3c, migration 0070, contract `docs/chat-api.md` CH-1 to CH-11): staff-only direct (one per
+  pair) and group conversations, `chat:use` for every role at own scope (org_admin included; the catalog test allows it
+  as a non-data permission). RLS: current members only (left members and deleted groups: no access, history included),
+  members added later see messages from then on; writes only through `authz.chat_*` definer functions. Messages
+  (4000 chars, idempotent `clientId`, soft delete), attachments on the documents pipeline (internal `file_object`,
+  `document-scan`, download only when clean), unread counts and read marks, presence from `session.last_seen_at`
+  (2 minutes), polling with `rev` cursors (conversation row lock keeps revisions in commit order), in-app
+  `chat.direct_message` after 10 minutes unseen (registry: `notification_recipients`/`notification_entity` replaced
+  in 0070 on top of 0052; anyone replacing them again must keep the chat branch). Audit: ids and counts only. Web: Chat
+  screen (nav section Other, unread badge), dev seed `apps/api/src/db/dev-chat.ts`, e2e `apps/web/e2e/chat.spec.ts`.
+  Open questions in `docs/chat-api.md` (retention, history after leaving, admin access, presence opt-out, idle timeout).
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 - First-admin bootstrap (migrations 0037, 0039): `dist/db/bootstrap.js` as a one-off migrate task creates two
   `org_admin` users for hosted-domain emails; break-glass only: refuses while an active `org_admin` exists
