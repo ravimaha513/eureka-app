@@ -404,6 +404,8 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
       ["checklist.item_overdue", PAYLOADS.overdue(item, placementId, X.docs)],
       // chat (migration 0070): a real direct chat r1a-hr; the aggregate is the conversation.
       ["chat.direct_message", { conversationId: chat, recipientId: U.hr }],
+      // jobs-portal (0062): HR gets it even without a hiring manager.
+      ["application.received", { applicationId: a, jobId: item }],
     ] as const;
     expect(events.map(([t]) => t).sort()).toEqual(Object.keys(EVENT_SPECS).filter((t) => !t.startsWith("placement.")).sort());
     const secrets = [person, "Placed", "81.25", "Irving", "Petra", "petra@vendor.example", "4695550188", "Northwind",

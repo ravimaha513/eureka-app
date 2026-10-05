@@ -58,6 +58,12 @@ import { CandidateTrainingController, TrainingController } from "./modules/train
 import { TrainingService } from "./modules/training/training.service.js";
 import { ChatController } from "./modules/chat/chat.controller.js";
 import { ChatService } from "./modules/chat/chat.service.js";
+import { JobsController, JobsService } from "./modules/jobs/jobs.controller.js";
+import { PortalAuthController, PortalAuthService, PortalDevMailboxController, PortalMeController } from "./modules/portal/portal-auth.controller.js";
+import { PortalSessionService } from "./platform/portal-session.service.js";
+import { MAIL_PORT, createMailPort } from "./platform/mail.js";
+import { ApplicantsController, ApplicationInterviewsController, ApplicationsController, ApplicationsService } from "./modules/applications/applications.controller.js";
+import { PortalJobsController, PortalJobsService } from "./modules/portal/portal-jobs.controller.js";
 
 @Controller("api")
 class HealthController {
@@ -89,6 +95,9 @@ export class AppModule {
         TrainingController, CandidateTrainingController,
         SettingsController,
         ChatController,
+        // jobs-portal
+        JobsController, PortalAuthController, PortalMeController, PortalDevMailboxController,
+        ApplicationsController, ApplicationInterviewsController, ApplicantsController, PortalJobsController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
@@ -102,6 +111,9 @@ export class AppModule {
         TrainingService,
         WorkAuthorizationService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
         ChatService,
+        // jobs-portal
+        JobsService, PortalSessionService, PortalAuthService, { provide: MAIL_PORT, useFactory: () => createMailPort(config) },
+        ApplicationsService, PortalJobsService,
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],

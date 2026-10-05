@@ -19,6 +19,7 @@ import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob } from "../src/worker/jobs/r
 import { documentScanJob } from "../src/worker/jobs/document-scan.js";
 import { DEFAULT_SCAN_OPTIONS } from "../src/worker/jobs/scan-pipeline.js";
 import { StartStepUp } from "../src/modules/identity/step-up.controller.js";
+import { portalCall, portalSignIn } from "./portal-seed.js";
 import { silentLogger } from "../src/worker/log.js";
 import { JobRunner } from "../src/worker/runner.js";
 
@@ -1182,6 +1183,113 @@ const CASES: RejectCase[] = [
   },
   // chat (migration 0070, docs/chat-api.md): members, roles, sender, revisions, read marks and keys are the server's
   ...chatCases(),
+  // jobs-portal (migration 0060): owner, team, version, posting time and kind are the server's
+  {
+    route: "POST /api/v1/jobs", actor: "l1",
+    prepare: async () => ({
+      url: "/api/v1/jobs",
+      body: { kind: "client_requirement", title: "MA job", category: "engineering", experienceLevel: "mid", employmentType: "contract",
+        workMode: "remote", clientId: CLIENT_ID },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.job`),
+    }),
+    forbidden: { ownerId: U.l2, teamId: T.t3, postedAt: PAST, applicants: 9, owner: { id: U.l2 }, actions: { edit: true } },
+  },
+  {
+    route: "PATCH /api/v1/jobs/:id", actor: "l1",
+    prepare: async () => {
+      const j = await ok("l1", "POST", "/api/v1/jobs", { kind: "client_requirement", title: "MA job 2", category: "engineering",
+        experienceLevel: "mid", employmentType: "contract", workMode: "remote", clientId: CLIENT_ID }, 201);
+      return {
+        url: `/api/v1/jobs/${j.id}`, body: { title: "Renamed" }, headers: { "if-match": "1" },
+        state: () => rows(`SELECT * FROM eureka.job WHERE id = $1`, [j.id]),
+      };
+    },
+    forbidden: { kind: "internal_opening", ownerId: U.l2, teamId: T.t3, postedAt: PAST, row_version: 9 },
+  },
+  // jobs-portal applicant auth (migration 0061): verification, status and ids are the server's
+  {
+    route: "POST /api/portal/auth/sign-up", actor: null,
+    prepare: async () => ({
+      url: "/api/portal/auth/sign-up", headers: { "x-eureka-portal": "1" },
+      body: { firstName: "Ma", lastName: "Applicant", email: `ma-${++n}@example.com`, phone: "+1 469 555 0177" },
+      state: () => rows(`SELECT (SELECT count(*) FROM eureka.applicant)::int AS a, (SELECT count(*) FROM eureka.applicant_login_link)::int AS l`),
+    }),
+    forbidden: { emailVerified: true, emailVerifiedAt: PAST, status: "active", applicantId: FOREIGN_ID, dob: "1990-01-01", role: "hr" },
+  },
+  {
+    route: "POST /api/portal/auth/request-link", actor: null,
+    prepare: async () => ({
+      url: "/api/portal/auth/request-link", headers: { "x-eureka-portal": "1" }, body: { email: "ma-link@example.com" },
+      state: () => rows(`SELECT count(*)::int AS l FROM eureka.applicant_login_link`),
+    }),
+    forbidden: { applicantId: FOREIGN_ID, linkId: FOREIGN_ID, expiresAt: "2099-01-01T00:00:00Z", ttlMinutes: 600 },
+  },
+  {
+    route: "POST /api/portal/auth/verify", actor: null,
+    prepare: async () => ({
+      url: "/api/portal/auth/verify", headers: { "x-eureka-portal": "1" }, body: { token: `${FOREIGN_ID}.${"a".repeat(43)}` },
+      state: () => rows(`SELECT count(*)::int AS s FROM eureka.applicant_session`),
+    }),
+    forbidden: { applicantId: FOREIGN_ID, sessionHours: 999, emailVerifiedAt: PAST },
+  },
+  // jobs-portal applications (migration 0062): status history, versions, reviewers and links are the server's
+  {
+    route: "POST /api/v1/applications/:id/status", actor: "hr",
+    prepare: async () => {
+      const a = await portalApplication();
+      return {
+        url: `/api/v1/applications/${a}/status`, body: { to: "shortlisted" }, headers: { "if-match": "1" },
+        state: () => rows(`SELECT * FROM eureka.job_application WHERE id = $1`, [a]),
+      };
+    },
+    forbidden: { applicantId: FOREIGN_ID, jobId: FOREIGN_ID, candidateId: FOREIGN_ID, statusChangedAt: PAST, actorId: U.l2, from: "hired" },
+  },
+  {
+    route: "POST /api/v1/applications/:id/interviews", actor: "hr",
+    prepare: async () => {
+      const a = await portalApplication();
+      return {
+        url: `/api/v1/applications/${a}/interviews`,
+        body: { interviewType: "video", round: "screening", leadUserId: U.coach, startsAt: "2030-01-01T10:00:00Z", durationMinutes: 30 },
+        state: () => rows(`SELECT count(*)::int AS n FROM eureka.application_interview`),
+      };
+    },
+    forbidden: { applicationId: FOREIGN_ID, status: "completed", createdBy: U.l2, scorecards: [], overallRating: 5 },
+  },
+  {
+    route: "POST /api/v1/applications/:id/candidate", actor: "l1",
+    prepare: async () => ({
+      url: `/api/v1/applications/${FOREIGN_ID}/candidate`, body: { technologyId: TECH_ID, locationId: LOC.dallas },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.candidate`),
+    }),
+    forbidden: { firstName: "X", lastName: "Y", email: "x@example.com", phone: "+12125550100", recruiterId: U.r1a, candidateId: FOREIGN_ID, status: "active" },
+  },
+  {
+    route: "POST /api/v1/applications/export", actor: "hr",
+    prepare: async () => ({ url: "/api/v1/applications/export", body: {}, state: () => rows(`SELECT 1`) }),
+    forbidden: { cap: 100000, includePhones: true, columns: ["phone"] },
+  },
+  {
+    route: "POST /api/v1/applicants/export", actor: "hr",
+    prepare: async () => ({ url: "/api/v1/applicants/export", body: {}, state: () => rows(`SELECT 1`) }),
+    forbidden: { cap: 100000, includePhones: true, columns: ["phone"] },
+  },
+  {
+    route: "POST /api/v1/application-interviews/:id/status", actor: "hr",
+    prepare: async () => ({
+      url: `/api/v1/application-interviews/${FOREIGN_ID}/status`, body: { status: "completed" },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.application_event`),
+    }),
+    forbidden: { applicationId: FOREIGN_ID, startsAt: PAST, leadUserId: U.l2, meetingLink: "https://x.example" },
+  },
+  {
+    route: "PUT /api/v1/application-interviews/:id/scorecard", actor: "hr",
+    prepare: async () => ({
+      url: `/api/v1/application-interviews/${FOREIGN_ID}/scorecard`, body: { technical: 3, communication: 3, problemSolving: 3, attitude: 3 },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.application_scorecard`),
+    }),
+    forbidden: { reviewerId: U.l2, interviewId: FOREIGN_ID, overall: 5 },
+  },
 ];
 
 
@@ -1199,6 +1307,17 @@ async function trainingCourse(): Promise<{ id: string; moduleId: string }> {
   const { id } = await ok("locD", "POST", "/api/v1/training/courses", { title: `MA course ${++n}`, modules: [{ title: "M1", durationMinutes: 30 }] });
   const moduleId = (await rows(`SELECT id FROM eureka.course_module WHERE course_id = $1`, [id]))[0]!.id as string;
   return { id, moduleId };
+}
+
+/** jobs-portal: an applicant's fresh application to a fresh published internal opening (HR's). */
+let portalSeq = 0;
+async function portalApplication(): Promise<string> {
+  const job = await ok("hr", "POST", "/api/v1/jobs", { kind: "internal_opening", title: "MA opening", category: "hr", experienceLevel: "mid",
+    employmentType: "full_time", workMode: "remote", status: "open", publishedToPortal: true });
+  const s = await portalSignIn(app, `ma-app-${++portalSeq}-${Date.now()}@example.com`);
+  const r = await portalCall(app, s, "POST", `/api/portal/jobs/${job.id}/apply`);
+  expect(r.statusCode, r.body).toBe(201);
+  return r.json().id as string;
 }
 
 /** Endpoints that read no body: what they change comes from the URL and the session only. */
@@ -1267,6 +1386,56 @@ const IGNORED: IgnoreCase[] = [
       expect(await rows(`SELECT f.status FROM eureka.chat_attachment a JOIN eureka.file_object f ON f.id = a.file_id WHERE a.id = $1`, [att]))
         .toEqual([{ status: "pending" }]);
       expect(await auditHead()).toBe(before);
+    },
+  },
+  // jobs-portal: applying and withdrawing take the job/application from the URL and the applicant from the session
+  {
+    route: "POST /api/portal/jobs/:id/apply",
+    run: async () => {
+      const job = await ok("hr", "POST", "/api/v1/jobs", { kind: "internal_opening", title: "MA apply", category: "hr", experienceLevel: "mid",
+        employmentType: "full_time", workMode: "remote", status: "open", publishedToPortal: true });
+      const a = await portalSignIn(app, `ma-apply-a-${Date.now()}@example.com`);
+      const b = await portalSignIn(app, `ma-apply-b-${Date.now()}@example.com`);
+      const res = await portalCall(app, a, "POST", `/api/portal/jobs/${job.id}/apply`,
+        { ...SERVER_MANAGED, applicantId: b.id, status: "hired", candidateId: FOREIGN_ID, jobId: FOREIGN_ID, appliedAt: PAST });
+      expect(res.statusCode, res.body).toBe(201);
+      expect(await rows(`SELECT applicant_id, job_id, status, candidate_id, row_version FROM eureka.job_application WHERE id = $1`, [res.json().id]))
+        .toEqual([{ applicant_id: a.id, job_id: job.id, status: "applied", candidate_id: null, row_version: 1 }]);
+    },
+  },
+  {
+    route: "POST /api/portal/applications/:id/withdraw",
+    run: async () => {
+      const job = await ok("hr", "POST", "/api/v1/jobs", { kind: "internal_opening", title: "MA withdraw", category: "hr", experienceLevel: "mid",
+        employmentType: "full_time", workMode: "remote", status: "open", publishedToPortal: true });
+      const a = await portalSignIn(app, `ma-wd-${Date.now()}@example.com`);
+      const id = (await portalCall(app, a, "POST", `/api/portal/jobs/${job.id}/apply`)).json().id;
+      const res = await portalCall(app, a, "POST", `/api/portal/applications/${id}/withdraw`, { ...SERVER_MANAGED, status: "hired", to: "hired" });
+      expect(res.statusCode, res.body).toBe(200);
+      expect(await rows(`SELECT status FROM eureka.job_application WHERE id = $1`, [id])).toEqual([{ status: "withdrawn" }]);
+    },
+  },
+  // jobs-portal: sign-out ends the caller's own applicant session, whatever the body names
+  {
+    route: "POST /api/portal/auth/sign-out",
+    run: async () => {
+      const signIn = async (email: string) => {
+        await app.inject({ method: "POST", url: "/api/portal/auth/sign-up", headers: { "x-eureka-portal": "1" },
+          payload: { firstName: "Out", lastName: "Applicant", email, phone: "+1 469 555 0178" } });
+        const mail = (await app.inject({ method: "GET", url: `/api/portal/dev/mailbox?to=${encodeURIComponent(email)}` })).json().items[0];
+        const token = /#token=([^\s]+)/.exec(mail.text)![1]!;
+        const v = await app.inject({ method: "POST", url: "/api/portal/auth/verify", headers: { "x-eureka-portal": "1" }, payload: { token } });
+        const cookie = String(v.headers["set-cookie"]).split(";")[0]!;
+        const me = (await app.inject({ method: "GET", url: "/api/portal/me", headers: { cookie } })).json();
+        return { cookie, csrf: me.csrfToken as string, id: me.id as string };
+      };
+      const a = await signIn("ma-out-a@example.com");
+      const b = await signIn("ma-out-b@example.com");
+      const res = await app.inject({ method: "POST", url: "/api/portal/auth/sign-out", headers: { cookie: a.cookie, "x-csrf-token": a.csrf },
+        payload: { applicantId: b.id, sessionId: b.cookie, ...SERVER_MANAGED } });
+      expect(res.statusCode, res.body).toBe(204);
+      expect((await app.inject({ method: "GET", url: "/api/portal/me", headers: { cookie: a.cookie } })).statusCode).toBe(401);
+      expect((await app.inject({ method: "GET", url: "/api/portal/me", headers: { cookie: b.cookie } })).statusCode).toBe(200);
     },
   },
   {

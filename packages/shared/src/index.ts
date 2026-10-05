@@ -11,3 +11,4 @@ export * from "./authz/training.js";
 export * from "./interviews.js";
 export * from "./notifications.js";
 export * from "./chat.js";
+export * from "./jobs.js";

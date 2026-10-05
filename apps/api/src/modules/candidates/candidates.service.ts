@@ -432,7 +432,11 @@ export class CandidatesService implements OnModuleInit {
     });
   }
 
-  async create(user: AuthedUser, body: CreateCandidate) {
+  /**
+   * `then` runs in the same transaction after the candidate row exists (jobs-portal:
+   * linking the hired application), so both commit or neither does.
+   */
+  async create(user: AuthedUser, body: CreateCandidate, then?: (c: pg.PoolClient, candidateId: string) => Promise<void>) {
     const team = body.teamId ?? user.access.teamIds[0];
     if (!team) throw new ForbiddenException("No team to assign");
     const scope = resolveScope(user.access, "candidate:create");
@@ -466,6 +470,7 @@ export class CandidatesService implements OnModuleInit {
         actorId: user.id, action: "candidate.created", entityType: "candidate", entityId: cand.rows[0]!.id,
         ...(duplicates > 0 ? { changes: { duplicateConfirmed: true } } : {}),
       });
+      if (then) await then(c, cand.rows[0]!.id);
       return { id: cand.rows[0]!.id };
     });
   }

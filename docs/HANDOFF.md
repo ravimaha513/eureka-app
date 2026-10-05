@@ -10,6 +10,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   PostgreSQL 16 at `TEST_PG_ADMIN_URL`, default `postgres://postgres:postgres@127.0.0.1:5432`).
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
 - Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0055**; 0040 and 0049 are unused) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0054** (0060-0062 are jobs-portal); 0040 and 0049 are unused) and must apply as a
   non-superuser (Amazon RDS master): CI checks this.
 - Commit small and atomic; get an independent review of every security-relevant change.
 
@@ -186,6 +187,13 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   `candidate:update`). Progress is weighted by module duration (TR-9). Screens: Training Batches (cards, detail
   with View Courses / View Students), Courses, and a Training card on the candidate profile. New permissions
   `training:read`, `training:manage`, `training.progress:update` (grants in the doc). No notifications.
+
+- Jobs and applicant portal (jobs-portal package, migrations 0060-0062, `docs/jobs-portal-api.md`): jobs (client requirements and internal
+  openings, rich text as a sanitised document tree, optional `submission.job_id`), the **applicant portal** at `/portal` (no passwords: one-time
+  email links, separate session kind/cookie/path, role `eureka_portal` with RLS on the applicant's own rows, mail port with dev mailbox and SES),
+  applications with status machine, interviews, scorecards, "Create candidate" from a hired application, `application.received` notice. Production
+  needs `portal_from_email` in `env.hcl` (verified SES identity) or the API refuses to start. `company_id` has no FK until the companies migration is integrated.
+  Notification registry gained `application.received` and inbox entity `application` (0062 replaces the two resolver functions: later replacements must carry the branch over).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

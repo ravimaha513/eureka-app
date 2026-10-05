@@ -20,6 +20,7 @@ export const NOTIFICATION_PREFERENCE_TYPES: readonly NotificationTypeInfo[] = [
   { type: "assignment.ending_soon", label: "Assignment ending soon", description: "An assignment is close to its planned end date.", mandatory: false },
   { type: "employee.bench_time", label: "Bench-time reminder", description: "A candidate has been on the bench for the configured number of days.", mandatory: false },
   { type: "candidate.assigned", label: "Candidate assigned to a team", description: "A candidate moved to a team you lead.", mandatory: false },
+  { type: "application.received", label: "New job application", description: "An applicant applied to a job you manage or to an HR-managed opening.", mandatory: false },
   { type: "chat.direct_message", label: "New direct message", description: "Someone wrote to you in Chat and you have not looked at the conversation for 10 minutes.", mandatory: false },
 ];
 

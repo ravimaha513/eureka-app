@@ -20,6 +20,9 @@ import { DataHubPage } from "./datahub/DataHubPage";
 import { TrainingPage } from "./training/TrainingPage";
 import { CoursesPage } from "./training/CoursesPage";
 import { ChatNavBadge, ChatPage } from "./chat/ChatPage";
+import { JobsPage } from "./jobs/JobsPage";
+import { ApplicationsPage } from "./jobs/ApplicationsPage";
+import { ApplicantsPage } from "./jobs/ApplicantsPage";
 import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sparkles, Sun } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
@@ -124,6 +127,8 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // A placement to open when switching to Placements from another screen (e.g. right after creating it).
   const [placementId, setPlacementId] = useState<string | null>(null);
   const openPlacement = (id: string) => { setPlacementId(id); setActive("placements"); };
+  // jobs-portal: an application to open when switching to Applications (from the inbox).
+  const [applicationId, setApplicationId] = useState<string | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const [restoreFocus, setRestoreFocus] = useState(false);
   const openProfile = (id: string) => { opener.current = document.activeElement as HTMLElement | null; setProfileId(id); };
@@ -141,8 +146,9 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // A chat conversation to open when switching to Chat (from a direct-message notification).
   const [chatId, setChatId] = useState<string | null>(null);
   const canOpenEntity = (e: InboxItem["entity"]) =>
-    (e.type === "placement" ? has("placements") : e.type === "conversation" ? has("chat") : candidateScreen !== null);
+    (e.type === "placement" ? has("placements") : e.type === "conversation" ? has("chat") : e.type === "application" ? has("applications") : candidateScreen !== null);
   const openEntity = (e: InboxItem["entity"]) => {
+    if (e.type === "application") { setProfileId(null); setApplicationId(e.id); setActive("applications"); return; }
     if (e.type === "placement") { setProfileId(null); openPlacement(e.id); return; }
     if (e.type === "conversation") { setProfileId(null); setChatId(e.id); setActive("chat"); return; }
     if (!candidateScreen) return;
@@ -185,7 +191,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                 return (
                   <button key={i.key} className="nav" title={collapsed ? i.label : undefined} aria-current={i.key === active ? "page" : undefined}
                     aria-describedby={i.key === "chat" ? "chat-nav-unread" : undefined}
-                    onClick={() => { setActive(i.key); setProfileId(null); setPlacementId(null); setChatId(null); setNavOpen(false); }}>
+                    onClick={() => { setActive(i.key); setProfileId(null); setPlacementId(null); setChatId(null); setApplicationId(null); setNavOpen(false); }}>
                     {Icon && <Icon className="navicon" size={19} strokeWidth={1.8} aria-hidden="true" />}<span className="navlabel">{i.label}</span>
                     {i.key === "chat" && <ChatNavBadge id="chat-nav-unread" part="badge" />}
                   </button>
@@ -235,6 +241,9 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "courses" ? <CoursesPage me={me} />
             : current.key === "settings" ? <SettingsPage me={me} />
             : current.key === "chat" ? <ChatPage me={me} initialConversationId={chatId} />
+            : current.key === "jobs" ? <JobsPage me={me} />
+            : current.key === "applications" ? <ApplicationsPage key={applicationId ?? "list"} me={me} initialOpenId={applicationId} />
+            : current.key === "applicants" ? <ApplicantsPage />
             : current.key === "dashboard" ? (
               <DashboardPage firstName={me.displayName.split(" ")[0]} canOpen={(t) => items.some((i) => i.key === t)}
                 onOpen={(t, id) => { if (t === "placements") openPlacement(id); else setActive(t); }} />

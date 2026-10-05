@@ -18,7 +18,7 @@
 export interface OutboxEvent { id: string; type: string; aggregate_id: string; payload: Record<string, unknown> }
 
 /** What a recipient can open from the inbox (the web app has a screen for each). */
-export interface EntityRef { type: "placement" | "candidate" | "conversation"; id: string }
+export interface EntityRef { type: "placement" | "candidate" | "conversation" | "application"; id: string }
 
 export interface Rendered {
   subject: string;
@@ -321,6 +321,28 @@ export const EVENT_SPECS: Record<string, EventSpec> = {
   },
 };
 
+// jobs-portal (migration 0062): an applicant applied to a job; the job's hiring manager and HR, in-app only.
+// The inbox entry names no applicant or job: open the application for the details.
+EVENT_SPECS["application.received"] = {
+  email: false, inApp: true,
+  render: (ev) => {
+    aggregate(ev);
+    const applicationId = uuid(ev.payload, "applicationId");
+    uuid(ev.payload, "jobId");
+    checkNotify(ev.payload, ["hiring_manager", "hr"]);
+    return {
+      subject: "Eureka: new application",
+      message: "An applicant applied to a job you hire for or manage applications of.",
+      refLabel: "Application reference", refId: applicationId,
+      inbox: {
+        title: "New application",
+        body: "An applicant applied to a job you hire for. Open the application to review it.",
+        entity: { type: "application", id: applicationId },
+      },
+    };
+  },
+};
+
 export const DELIVERED_TYPES = Object.keys(EVENT_SPECS);
 export const EMAIL_TYPES = DELIVERED_TYPES.filter((t) => EVENT_SPECS[t]!.email);
 export const INBOX_TYPES = DELIVERED_TYPES.filter((t) => EVENT_SPECS[t]!.inApp);
@@ -336,6 +358,7 @@ const GROUP_LABELS: Record<string, string> = { hr: "HR", accounts: "Accounts", i
 const OTHER_LABELS: Record<string, string> = {
   ceo: "the CEO", bu_head: "a BU Head", recruiter: "the recruiter", lead: "the team lead",
   manager: "the team lead's manager", documents_team: "the assigned Documents Team member", chat: "a chat member",
+  hiring_manager: "the job's hiring manager",
 };
 
 export function whyLine(reasons: readonly string[]): string {

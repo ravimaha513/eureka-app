@@ -51,6 +51,16 @@ variable "outbox_from_email" {
     error_message = "outbox_from_email must be empty or an email address."
   }
 }
+# jobs-portal: applicant sign-in links and application notices (the API sends them).
+variable "portal_from_email" {
+  description = "SES sender for the applicant portal (sign-in links, application notices). Required: the API refuses to start in production without it."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.portal_from_email == "" || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.portal_from_email))
+    error_message = "portal_from_email must be empty or an email address."
+  }
+}
 variable "outbox_deliver_since" {
   description = "RFC 3339 cut-off: unpublished placement events created before it are marked published without email. Set when first enabling outbox mail."
   type        = string

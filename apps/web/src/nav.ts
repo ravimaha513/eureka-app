@@ -3,7 +3,7 @@ import type { Permission } from "@eureka/shared";
 export interface NavItem {
   key: string;
   label: string;
-  section: "Workspace" | "Operations" | "Training" | "Insights" | "Admin" | "Other";
+  section: "Workspace" | "Hiring" | "Operations" | "Training" | "Insights" | "Admin" | "Other";
   /** Shown when the user holds ANY of these capabilities (presentation only; the API decides). */
   anyOf: Permission[];
 }
@@ -15,6 +15,11 @@ export const NAV: NavItem[] = [
   { key: "submissions", label: "Submissions", section: "Workspace", anyOf: ["submission:read"] },
   { key: "interviews", label: "Interviews", section: "Workspace", anyOf: ["interview:read"] },
   { key: "placements", label: "Placements", section: "Workspace", anyOf: ["placement:read"] },
+  // jobs-portal
+  { key: "jobs", label: "Jobs", section: "Hiring", anyOf: ["job:read"] },
+  // Hiring managers (job:read) and interviewers (often coaches, interview:read) see the applications they work on.
+  { key: "applications", label: "Applications", section: "Hiring", anyOf: ["application:read", "job:read", "interview:read"] },
+  { key: "applicants", label: "Applicants", section: "Hiring", anyOf: ["applicant:read"] },
   { key: "paperwork", label: "Paperwork & BGC", section: "Operations", anyOf: ["document:read", "bgc:update"] },
   { key: "employees", label: "Employees", section: "Operations", anyOf: ["employee:read"] },
   // datahub

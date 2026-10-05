@@ -146,6 +146,13 @@ export const PERMISSIONS = [
   "staff.contact:read",
   // chat
   "chat:use",
+  // jobs-portal: jobs (client requirements, internal openings), applicants and their applications
+  "job:read",
+  "job:manage",
+  "applicant:read",
+  "applicant.phone:read",
+  "application:read",
+  "application:manage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -210,6 +217,8 @@ export const GRANTS: Record<Role, Grants> = {
     "training:read": "own",
     // chat
     "chat:use": "own",
+    // jobs-portal
+    "job:read": "team",
   },
   lead: {
     ...salesLine("team", "team"),
@@ -224,6 +233,9 @@ export const GRANTS: Record<Role, Grants> = {
     "training:read": "team",
     // chat
     "chat:use": "own",
+    // jobs-portal
+    "job:read": "team",
+    "job:manage": "team",
   },
   manager: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -241,6 +253,9 @@ export const GRANTS: Record<Role, Grants> = {
     "training:read": "hierarchy",
     // chat
     "chat:use": "own",
+    // jobs-portal
+    "job:read": "hierarchy",
+    "job:manage": "hierarchy",
   },
   assoc_director: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -258,6 +273,9 @@ export const GRANTS: Record<Role, Grants> = {
     "training:read": "hierarchy",
     // chat
     "chat:use": "own",
+    // jobs-portal
+    "job:read": "hierarchy",
+    "job:manage": "hierarchy",
   },
   offshore_manager: {
     "candidate:read": "org",
@@ -281,6 +299,8 @@ export const GRANTS: Record<Role, Grants> = {
     "training:read": "org",
     // chat
     "chat:use": "own",
+    // jobs-portal
+    "job:read": "org",
   },
   ceo: {
     "candidate:read": "org",
@@ -302,6 +322,8 @@ export const GRANTS: Record<Role, Grants> = {
     "training:read": "org",
     // chat
     "chat:use": "own",
+    // jobs-portal
+    "job:read": "org",
   },
   location_incharge: {
     "candidate:read": "location",
@@ -378,6 +400,13 @@ export const GRANTS: Record<Role, Grants> = {
     "staff.contact:read": "org",
     // chat
     "chat:use": "own",
+    // jobs-portal
+    "job:read": "org",
+    "job:manage": "org",
+    "applicant:read": "org",
+    "applicant.phone:read": "org",
+    "application:read": "org",
+    "application:manage": "org",
   },
   associate_hr: {
     "assignment:read": "org",
@@ -493,6 +522,8 @@ export const ORG_SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "candidate:assign",
   "team:move_member",
   "document:read",
+  // jobs-portal
+  "applicant.phone:read",
 ];
 
 export function isRestrictedRole(role: Role): boolean {

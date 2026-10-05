@@ -11,7 +11,7 @@ interface Row {
   type: string;
   title: string;
   body: string;
-  entity_type: "placement" | "candidate" | "conversation";
+  entity_type: "placement" | "candidate" | "conversation" | "application";
   entity_id: string;
   created_at: Date;
   read_at: Date | null;

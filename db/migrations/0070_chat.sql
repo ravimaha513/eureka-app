@@ -248,10 +248,10 @@ CREATE POLICY chat_definer_audit ON eureka.audit_event FOR INSERT TO authz_defin
                  'chat.member_added', 'chat.member_removed', 'chat.member_left', 'chat.member_role_changed',
                  'chat.message_deleted'));
 
--- Inbox rows of chat.direct_message open the conversation.
+-- Inbox rows of chat.direct_message open the conversation (0062 added 'application', carried over here).
 ALTER TABLE eureka.notification DROP CONSTRAINT notification_entity_type_check;
 ALTER TABLE eureka.notification ADD CONSTRAINT notification_entity_type_check
-  CHECK (entity_type IN ('placement', 'candidate', 'conversation'));
+  CHECK (entity_type IN ('placement', 'candidate', 'application', 'conversation'));
 
 RESET ROLE;
 
@@ -834,6 +834,7 @@ DECLARE
   v_mgr     uuid;
   v_assign  uuid;
   v_chat    uuid;
+  v_hiring  uuid;
 BEGIN
   SELECT e.type, e.payload INTO v_type, v_payload
     FROM eureka.outbox_event e WHERE e.id = p_event AND e.published_at IS NULL;
@@ -868,6 +869,11 @@ BEGIN
      WHERE ci.id = (v_payload ->> 'checklistItemId')::uuid
        AND ci.placement_id = (v_payload ->> 'placementId')::uuid
        AND ci.assignee_id = (v_payload ->> 'assigneeId')::uuid;
+  ELSIF v_type = 'application.received' THEN
+    -- jobs-portal (0062): HR and the job's current hiring manager.
+    v_roles := ARRAY['hr'];
+    SELECT j.hiring_manager_id INTO v_hiring FROM eureka.job_application a JOIN eureka.job j ON j.id = a.job_id
+     WHERE a.id = (v_payload ->> 'applicationId')::uuid AND a.job_id = (v_payload ->> 'jobId')::uuid;
   ELSIF v_type = 'chat.direct_message' THEN
     SELECT m.user_id INTO v_chat
       FROM eureka.chat_conversation c
@@ -896,13 +902,14 @@ BEGIN
     UNION ALL SELECT ur.user_id, 'documents_team' FROM eureka.user_role ur
      WHERE v_assign IS NOT NULL AND ur.user_id = v_assign AND ur.role_key = 'documents_team'
        AND ur.valid @> pg_catalog.now()
+    UNION ALL SELECT v_hiring, 'hiring_manager' WHERE v_hiring IS NOT NULL
     UNION ALL SELECT v_chat, 'chat' WHERE v_chat IS NOT NULL
   )
   SELECT DISTINCT r.uid, r.why FROM r JOIN eureka.app_user u ON u.id = r.uid
    WHERE u.status = 'active' AND (p_user IS NULL OR r.uid = p_user);
 END $$;
 
--- 0051's entity mapping with the conversation of a chat event.
+-- 0051's entity mapping with the conversation of a chat event and the application of 0062 (a later migration replacing this function must carry every branch over).
 CREATE OR REPLACE FUNCTION authz.notification_entity(p_event uuid)
 RETURNS TABLE (entity_type text, entity_id uuid)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -919,6 +926,8 @@ BEGIN
     RETURN QUERY SELECT 'placement'::text, (v_payload ->> 'placementId')::uuid;
   ELSIF v_type IN ('employee.exited', 'employee.bench_time', 'candidate.assigned') THEN
     RETURN QUERY SELECT 'candidate'::text, (v_payload ->> 'candidateId')::uuid;
+  ELSIF v_type = 'application.received' THEN
+    RETURN QUERY SELECT 'application'::text, (v_payload ->> 'applicationId')::uuid;
   ELSIF v_type = 'chat.direct_message' THEN
     RETURN QUERY SELECT 'conversation'::text, (v_payload ->> 'conversationId')::uuid;
   END IF;

@@ -192,13 +192,30 @@ resource "aws_iam_role_policy" "api" {
         Resource  = aws_kms_key.bidx.arn
         Condition = { StringEquals = { "kms:MacAlgorithm" = "HMAC_SHA_256" } }
       },
-      {
-        Effect    = "Allow"
-        Action    = ["ses:SendEmail", "ses:SendRawEmail"]
-        Resource  = "*"
-        Condition = { StringLike = { "ses:FromAddress" = "*@${local.use_domain ? var.domain_name : "example.invalid"}" } }
-      },
     ]
+  })
+}
+
+# jobs-portal: the API emails applicants (sign-in links, application notices)
+# from exactly one sender, the verified portal identity. This replaces the
+# earlier "any address at the domain" SES grant, which the API never used.
+resource "aws_sesv2_email_identity" "portal" {
+  count          = var.portal_from_email != "" ? 1 : 0
+  email_identity = var.portal_from_email
+}
+
+resource "aws_iam_role_policy" "api_portal_mail" {
+  count = var.portal_from_email != "" ? 1 : 0
+  role  = aws_iam_role.api.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "PortalMailFromOneSender"
+      Effect    = "Allow"
+      Action    = ["ses:SendEmail"]
+      Resource  = aws_sesv2_email_identity.portal[0].arn
+      Condition = { StringEquals = { "ses:FromAddress" = var.portal_from_email } }
+    }]
   })
 }
 
@@ -572,11 +589,21 @@ resource "aws_ecs_task_definition" "api" {
       condition     = trimspace(var.google_hosted_domain) != ""
       error_message = "google_hosted_domain is empty: set it to the company Google Workspace domain in infra/live/<env>/env.hcl before deploying the API."
     }
+    # jobs-portal: the API refuses to start in production without the applicant mail sender.
+    precondition {
+      condition     = trimspace(var.portal_from_email) != ""
+      error_message = "portal_from_email is empty: set the applicant portal's SES sender in infra/live/<env>/env.hcl before deploying the API."
+    }
   }
   container_definitions = jsonencode([merge(local.container_base, {
     name         = "api"
     portMappings = [{ containerPort = 3000, protocol = "tcp" }]
-    environment  = concat(local.common_env, [{ name = "PORT", value = "3000" }])
+    environment = concat(local.common_env, [
+      { name = "PORT", value = "3000" },
+      # jobs-portal: applicant email through SES from the one allowed sender.
+      { name = "PORTAL_MAIL_MODE", value = "ses" },
+      { name = "PORTAL_FROM_EMAIL", value = var.portal_from_email },
+    ])
     # SIGTERM starts a 15 s drain (DRAIN_SECONDS) before the server closes;
     # allow for that plus in-flight requests before ECS sends SIGKILL.
     stopTimeout = 30
