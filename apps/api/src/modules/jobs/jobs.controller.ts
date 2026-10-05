@@ -17,11 +17,18 @@ export class JobsController {
     return this.svc.list(user, JobListQuery.parse(q));
   }
 
-  /** Pickers for the job form (kinds, clients, staff for the hiring manager). */
+  /** Pickers for the job form (kinds, clients, staff for the hiring manager); companies: GET company-options. */
   @Get("options")
   @RequirePermission("job:manage")
   options(@CurrentUser() user: AuthedUser) {
     return this.svc.options(user);
+  }
+
+  /** Company picker (id, name) for internal openings: job:manage holders who may create them (HR). */
+  @Get("company-options")
+  @RequirePermission("job:manage")
+  companyOptions(@CurrentUser() user: AuthedUser) {
+    return this.svc.companyOptions(user);
   }
 
   /** Readable with job:read in scope, or by the job's hiring manager (no permission needed; RLS decides). */

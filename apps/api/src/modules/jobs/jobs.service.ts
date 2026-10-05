@@ -79,6 +79,22 @@ export const JOB_SELECT = `
   LEFT JOIN eureka.team tm ON tm.id = j.team_id`;
 
 
+/**
+ * Display names of the companies of the given jobs (id -> name), through the
+ * definer batch function of migration 0062 (one call per page): it returns
+ * only the name, only for jobs the caller may read, and nothing else of the
+ * company. `portal` selects the applicant's variant (eureka_portal).
+ */
+export async function companyNames(c: pg.PoolClient, jobIds: (string | null)[], portal = false): Promise<Map<string, string>> {
+  const ids = [...new Set(jobIds.filter((x): x is string => x !== null))];
+  const out = new Map<string, string>();
+  if (!ids.length) return out;
+  const fn = portal ? "authz.portal_job_company_names" : "authz.job_company_names";
+  const r = await c.query<{ job_id: string; name: string }>(`SELECT job_id, name FROM ${fn}($1::uuid[])`, [ids]);
+  for (const x of r.rows) out.set(x.job_id, x.name);
+  return out;
+}
+
 export const jobRef = (r: Pick<JobRow, "kind" | "owner_id" | "team_id" | "hiring_manager_id">): JobRef => ({
   kind: r.kind, ownerId: r.owner_id, teamId: r.team_id, hiringManagerId: r.hiring_manager_id,
 });
@@ -128,7 +144,7 @@ export function mapJobError(err: unknown): never {
 export class JobsService {
   constructor(private readonly db: DbService, private readonly audit: AuditService) {}
 
-  present(access: UserAccess, r: JobRow) {
+  present(access: UserAccess, r: JobRow, companies?: ReadonlyMap<string, string>) {
     const pay = r.pay_amount !== null && payVisible(access, r)
       ? { amount: Number(r.pay_amount), frequency: r.pay_frequency, currency: r.pay_currency } : null;
     return {
@@ -145,8 +161,7 @@ export class JobsService {
       pay,
       payHidden: r.pay_amount !== null && pay === null,
       client: r.client_id ? { id: r.client_id, name: r.client_name } : null,
-      // TODO(jobs-portal): company name from eureka.company at integration.
-      company: r.company_id ? { id: r.company_id, name: null } : null,
+      company: r.company_id ? { id: r.company_id, name: companies?.get(r.id) ?? null } : null,
       location: r.location,
       skills: r.skills,
       requirements: r.requirements,
@@ -178,11 +193,14 @@ export class JobsService {
       where.push(`(j.created_at, j.id) < (${fromMicros(p(t))}, ${p(id)}::uuid)`);
     }
     const sql = `${JOB_SELECT} WHERE ${where.join(" AND ")} ORDER BY j.created_at DESC, j.id DESC LIMIT ${p(q.limit + 1)}`;
-    const rows = await this.db.withUser(user.id, async (c) => (await c.query<JobRow>(sql, params)).rows);
+    const { rows, names } = await this.db.withUser(user.id, async (c) => {
+      const rs = (await c.query<JobRow>(sql, params)).rows;
+      return { rows: rs, names: await companyNames(c, rs.slice(0, q.limit).map((r) => r.company_id ? r.id : null)) };
+    });
     const page = rows.slice(0, q.limit);
     const last = page[page.length - 1];
     return {
-      items: page.map((r) => this.present(user.access, r)),
+      items: page.map((r) => this.present(user.access, r, names)),
       nextCursor: rows.length > q.limit && last ? `${last.k}.${last.id}` : null,
     };
   }
@@ -195,8 +213,20 @@ export class JobsService {
     return this.db.withUser(user.id, async (c) => {
       const r = await this.load(c, id);
       if (!r) throw new NotFoundException();
-      return this.present(user.access, r);
+      return this.present(user.access, r, await companyNames(c, [r.company_id ? r.id : null]));
     });
+  }
+
+  /**
+   * Company picker for internal openings (id and name only, active companies):
+   * callers who may create internal openings (HR) get every company, through
+   * authz.company_options(); eureka.company itself stays scoped to company:read.
+   */
+  async companyOptions(user: AuthedUser) {
+    if (!creatableJobKinds(user.access).includes("internal_opening")) throw new ForbiddenException("Not permitted");
+    return this.db.withUser(user.id, async (c) => ({
+      companies: (await c.query<{ id: string; name: string }>(`SELECT id, name FROM authz.company_options()`)).rows,
+    }));
   }
 
   /** Pickers for the job form: kinds the caller may create, clients (client requirements), staff (hiring manager). */
@@ -206,8 +236,6 @@ export class JobsService {
       kinds,
       clients: kinds.includes("client_requirement")
         ? (await c.query(`SELECT id, name FROM eureka.client ORDER BY name, id`)).rows : [],
-      // TODO(jobs-portal): companies from eureka.company at integration.
-      companies: [] as { id: string; name: string }[],
       staff: (await c.query(`SELECT id, display_name AS name FROM eureka.app_user WHERE status = 'active' ORDER BY display_name, id`)).rows,
     }));
   }
@@ -322,7 +350,8 @@ export class JobsService {
           ...(b.hiringManagerId !== undefined ? { hiringManagerId: b.hiringManagerId } : {}),
         },
       });
-      return this.present(user.access, (await this.load(c, id))!);
+      const fresh = (await this.load(c, id))!;
+      return this.present(user.access, fresh, await companyNames(c, [fresh.company_id ? fresh.id : null]));
     });
   }
 

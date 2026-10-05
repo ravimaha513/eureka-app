@@ -15,7 +15,7 @@ import { MAIL_PORT, type MailPort } from "../../platform/mail.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
 import { CandidatesService } from "../candidates/candidates.service.js";
 import { toCsv } from "../hotlist/csv.js";
-import { JobsService, JOB_SELECT, type JobRow } from "../jobs/jobs.service.js";
+import { JobsService, JOB_SELECT, companyNames, type JobRow } from "../jobs/jobs.service.js";
 import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import type {
   ApplicantListQuery, ApplicationExport, ApplicationListQuery, CreateCandidateFromApplication, ScheduleInterview, Scorecard, StatusChange,
@@ -102,7 +102,7 @@ export class ApplicationsService {
     return { phone: ok ? v : maskPhone(v), phoneMasked: !ok };
   }
 
-  present(access: UserAccess, r: AppRow) {
+  present(access: UserAccess, r: AppRow, companies?: ReadonlyMap<string, string>) {
     const manage = this.manageable(access, r);
     const open = !["hired", "rejected", "withdrawn"].includes(r.status);
     return {
@@ -113,8 +113,7 @@ export class ApplicationsService {
       rowVersion: r.row_version,
       overallRating: r.rating === null ? null : Number(r.rating),
       job: { id: r.job_id, title: r.job_title, kind: r.job_kind },
-      // TODO(jobs-portal): company name from eureka.company at integration.
-      company: r.company_id ? { id: r.company_id, name: null } : null,
+      company: r.company_id ? { id: r.company_id, name: companies?.get(r.job_id) ?? null } : null,
       applicant: {
         id: r.applicant_id, name: fullName(r), email: r.email, emailVerified: r.email_verified_at !== null, ...this.phone(access, r.phone_e164),
       },
@@ -130,10 +129,13 @@ export class ApplicationsService {
 
   /** Callers without application:read see what RLS gives them (their jobs, their interviews). */
   async list(user: AuthedUser, q: ApplicationListQuery) {
-    const rows = await this.rows(user, q, q.limit + 1, q.cursor);
+    const { rows, names } = await this.db.withUser(user.id, async (c) => {
+      const rs = await this.rows(user, q, q.limit + 1, q.cursor, c);
+      return { rows: rs, names: await companyNames(c, rs.slice(0, q.limit).map((r) => r.company_id ? r.job_id : null)) };
+    });
     const page = rows.slice(0, q.limit);
     const last = page[page.length - 1];
-    return { items: page.map((r) => this.present(user.access, r)), nextCursor: rows.length > q.limit && last ? `${last.k}.${last.id}` : null };
+    return { items: page.map((r) => this.present(user.access, r, names)), nextCursor: rows.length > q.limit && last ? `${last.k}.${last.id}` : null };
   }
 
   private async rows(user: AuthedUser, q: ApplicationExport, limit: number, cursor?: string, c?: pg.PoolClient): Promise<AppRow[]> {
@@ -158,10 +160,11 @@ export class ApplicationsService {
     return this.db.withUser(user.id, async (c) => {
       const rows = await this.rows(user, q, EXPORT_ROW_CAP + 1, undefined, c);
       const page = rows.slice(0, EXPORT_ROW_CAP);
+      const names = await companyNames(c, page.map((r) => r.company_id ? r.job_id : null));
       await this.audit.record(c, { actorId: user.id, action: "application.export", entityType: "job_application",
         changes: { rows: page.length, truncated: rows.length > EXPORT_ROW_CAP, cap: EXPORT_ROW_CAP, status: q.status ?? null, jobId: q.jobId ?? null, search: q.search !== undefined } });
       const csv = toCsv(["Job title", "Applicant", "Email", "Company", "Applied", "Overall rating", "Status"],
-        page.map((r) => [r.job_title ?? "", fullName(r) ?? "", r.email ?? "", r.company_id ?? "", r.applied_at.toISOString().slice(0, 10),
+        page.map((r) => [r.job_title ?? "", fullName(r) ?? "", r.email ?? "", names.get(r.job_id) ?? "", r.applied_at.toISOString().slice(0, 10),
           r.rating ?? "", APPLICATION_STATUS_LABELS[r.status]]));
       return { csv, rows: page.length, truncated: rows.length > EXPORT_ROW_CAP };
     });
@@ -198,10 +201,11 @@ export class ApplicationsService {
          FROM eureka.application_event e LEFT JOIN eureka.app_user u ON u.id = e.actor_id
          WHERE e.application_id = $1 ORDER BY e.id DESC LIMIT 200`, [id])).rows;
       const manage = this.manageable(user.access, r);
-      const base = this.present(user.access, r);
+      const names = await companyNames(c, [r.company_id ? r.job_id : null]);
+      const base = this.present(user.access, r, names);
       return {
         ...base,
-        job: job ? this.jobs.present(user.access, job) : base.job,
+        job: job ? this.jobs.present(user.access, job, names) : base.job,
         interviews: interviews.map((i) => {
           const reviewer = i.lead_user_id === user.id || (i.panel ?? []).some((x) => x.id === user.id) || manage;
           return {

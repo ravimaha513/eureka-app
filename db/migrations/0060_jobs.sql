@@ -3,7 +3,8 @@
 --   1. eureka.job: a client requirement (an opening at a client that recruiters
 --      submit candidates to; client_id REFERENCES eureka.client) or an internal
 --      opening (a position at one of the group's own companies; company_id
---      without a foreign key until the companies package lands, see the TODO).
+--      REFERENCES eureka.company, ON DELETE RESTRICT: companies are never
+--      deleted, migration 0054).
 --      Rich text (requirements, description) is a small JSON document tree
 --      validated by the API against an allow-list (shared RichDocSchema); the
 --      database only bounds its type and size. No HTML is ever stored.
@@ -43,8 +44,7 @@ CREATE TABLE eureka.job (
   pay_frequency       text CHECK (pay_frequency IN ('hourly', 'monthly', 'yearly')),
   pay_currency        text CHECK (pay_currency IN ('USD', 'INR', 'EUR', 'GBP', 'CAD', 'AUD')),
   client_id           uuid REFERENCES eureka.client(id),
-  -- TODO(jobs-portal): FK to eureka.company added at integration
-  company_id          uuid,
+  company_id          uuid REFERENCES eureka.company(id) ON DELETE RESTRICT,
   location            text CHECK (char_length(location) BETWEEN 1 AND 120 AND location !~ '[[:cntrl:]]'),
   skills              text[] NOT NULL DEFAULT '{}' CHECK (cardinality(skills) <= 30),
   requirements        jsonb CHECK (jsonb_typeof(requirements) = 'object' AND pg_column_size(requirements) <= 131072),
@@ -162,6 +162,18 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
       OR (j.kind = 'internal_opening' AND authz.has_org_kind('job:read', false))))
 $$;
 
+-- Company picker of the job form: id and name of the companies an internal
+-- opening may be attached to, for a caller holding job:manage at org scope from
+-- a non-Sales role (HR). Nothing else of the company (address, incharges,
+-- utilities, status) is returned; inactive companies are not offered.
+-- eureka.company is RLS-scoped to company:read holders and stays so.
+CREATE FUNCTION authz.company_options() RETURNS TABLE (id uuid, name text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+  SELECT c.id, c.name FROM eureka.company c
+   WHERE authz.current_user_id() IS NOT NULL AND authz.has_org_kind('job:manage', false) AND c.status = 'active'
+   ORDER BY lower(c.name), c.id
+$$;
+
 -- Submission -> job link (BEFORE INSERT on submission): a readable, open
 -- client requirement of the submission's client, or nothing.
 CREATE FUNCTION authz.submission_job_check() RETURNS trigger
@@ -226,6 +238,8 @@ REVOKE ALL ON FUNCTION authz.has_org_kind(text, boolean) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.job_can_manage(text, uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.job_visible(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.submission_job_check() FROM PUBLIC;
+REVOKE ALL ON FUNCTION authz.company_options() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION authz.company_options() TO eureka_app;
 -- Policies evaluate as the querying role: the app needs the helpers it calls.
 GRANT EXECUTE ON FUNCTION authz.has_org_kind(text, boolean) TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.job_can_manage(text, uuid, uuid) TO eureka_app;

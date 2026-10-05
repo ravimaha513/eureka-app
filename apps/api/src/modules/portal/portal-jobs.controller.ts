@@ -8,6 +8,7 @@ import { AuditService } from "../../platform/audit.service.js";
 import { CurrentApplicant, PortalRoute, type AuthedApplicant } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
+import { companyNames } from "../jobs/jobs.service.js";
 import { PortalApplicationsQuery, PortalJobsQuery } from "../applications/applications.schemas.js";
 
 /**
@@ -49,11 +50,11 @@ function mapPortalError(err: unknown): never {
 export class PortalJobsService {
   constructor(private readonly db: DbService, private readonly audit: AuditService) {}
 
-  private presentJob(r: PortalJobRow, full: boolean) {
+  private presentJob(r: PortalJobRow, full: boolean, names: ReadonlyMap<string, string>) {
     return {
       id: r.id, title: r.title,
-      // TODO(jobs-portal): the company's display name from eureka.company at integration.
-      employer: null as string | null,
+      // The company's name only (authz.portal_job_company_names), never another company column.
+      employer: names.get(r.id) ?? null,
       category: r.category, experienceLevel: r.experience_level, employmentType: r.employment_type, workMode: r.work_mode,
       status: r.status, location: r.location, deadline: r.deadline, workHours: r.work_hours,
       pay: r.pay_amount !== null ? { amount: Number(r.pay_amount), frequency: r.pay_frequency, currency: r.pay_currency } : null,
@@ -72,17 +73,23 @@ export class PortalJobsService {
       where.push(`(coalesce(j.posted_at, 'epoch'::timestamptz), j.id) < (${fromMicros(p(t))}, ${p(id)}::uuid)`);
     }
     const limit = 30;
-    const rows = await this.db.withApplicant(a.id, async (c) => (await c.query<PortalJobRow>(
-      `${JOB_SQL} WHERE ${where.join(" AND ")} ORDER BY coalesce(j.posted_at, 'epoch'::timestamptz) DESC, j.id DESC LIMIT ${p(limit + 1)}`, params)).rows);
+    const { rows, names } = await this.db.withApplicant(a.id, async (c) => {
+      const rs = (await c.query<PortalJobRow>(
+        `${JOB_SQL} WHERE ${where.join(" AND ")} ORDER BY coalesce(j.posted_at, 'epoch'::timestamptz) DESC, j.id DESC LIMIT ${p(limit + 1)}`, params)).rows;
+      return { rows: rs, names: await companyNames(c, rs.slice(0, limit).map((r) => r.company_id ? r.id : null), true) };
+    });
     const page = rows.slice(0, limit);
     const last = page[page.length - 1];
-    return { items: page.map((r) => this.presentJob(r, false)), nextCursor: rows.length > limit && last ? `${last.k}.${last.id}` : null };
+    return { items: page.map((r) => this.presentJob(r, false, names)), nextCursor: rows.length > limit && last ? `${last.k}.${last.id}` : null };
   }
 
   async job(a: AuthedApplicant, id: string) {
-    const r = await this.db.withApplicant(a.id, async (c) => (await c.query<PortalJobRow>(`${JOB_SQL} WHERE j.id = $1`, [id])).rows[0]);
+    const { r, names } = await this.db.withApplicant(a.id, async (c) => {
+      const row = (await c.query<PortalJobRow>(`${JOB_SQL} WHERE j.id = $1`, [id])).rows[0];
+      return { r: row, names: await companyNames(c, [row?.company_id ? row.id : null], true) };
+    });
     if (!r) throw new NotFoundException();
-    return this.presentJob(r, true);
+    return this.presentJob(r, true, names);
   }
 
   async apply(a: AuthedApplicant, jobId: string) {
@@ -111,23 +118,25 @@ export class PortalJobsService {
   private async appRows(c: pg.PoolClient, where: string, params: unknown[]) {
     return (await c.query<{
       id: string; status: ApplicationStatus; applied_at: Date; status_changed_at: Date; job_id: string; title: string; work_mode: string;
-      employment_type: string; job_status: string; location: string | null;
+      employment_type: string; job_status: string; location: string | null; company_id: string | null;
     }>(`SELECT a.id, a.status, a.applied_at, a.status_changed_at, j.id AS job_id, j.title, j.work_mode, j.employment_type,
-               j.status AS job_status, j.location
+               j.status AS job_status, j.location, j.company_id
         FROM eureka.job_application a JOIN eureka.job j ON j.id = a.job_id WHERE ${where} ORDER BY a.applied_at DESC, a.id DESC LIMIT 200`, params)).rows;
   }
 
-  private presentApp(r: Awaited<ReturnType<PortalJobsService["appRows"]>>[number]) {
+  private presentApp(r: Awaited<ReturnType<PortalJobsService["appRows"]>>[number], names: ReadonlyMap<string, string>) {
     return {
       id: r.id, status: r.status, appliedAt: r.applied_at, statusChangedAt: r.status_changed_at, canWithdraw: applicantMayWithdraw(r.status),
-      job: { id: r.job_id, title: r.title, employer: null as string | null, workMode: r.work_mode, employmentType: r.employment_type, status: r.job_status, location: r.location },
+      job: { id: r.job_id, title: r.title, employer: names.get(r.job_id) ?? null, workMode: r.work_mode, employmentType: r.employment_type, status: r.job_status, location: r.location },
     };
   }
 
   async applications(a: AuthedApplicant, status?: string) {
-    return this.db.withApplicant(a.id, async (c) => ({
-      items: (await this.appRows(c, status ? "a.status = $1" : "true", status ? [status] : [])).map((r) => this.presentApp(r)),
-    }));
+    return this.db.withApplicant(a.id, async (c) => {
+      const rows = await this.appRows(c, status ? "a.status = $1" : "true", status ? [status] : []);
+      const names = await companyNames(c, rows.map((r) => r.company_id ? r.job_id : null), true);
+      return { items: rows.map((r) => this.presentApp(r, names)) };
+    });
   }
 
   async application(a: AuthedApplicant, id: string) {
@@ -136,7 +145,7 @@ export class PortalJobsService {
       if (!r) throw new NotFoundException();
       const ints = await this.interviews(c, [id]);
       return {
-        ...this.presentApp(r),
+        ...this.presentApp(r, await companyNames(c, [r.company_id ? r.job_id : null], true)),
         interviews: ints.map((i) => ({ id: i.id, interviewType: i.interview_type, round: i.round, startsAt: i.starts_at,
           durationMinutes: i.duration_minutes, status: i.status, meetingLink: i.status === "scheduled" ? i.meeting_link : null })),
       };
