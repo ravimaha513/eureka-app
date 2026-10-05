@@ -1,7 +1,8 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { Person } from "../shell/ui";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { adminApi, type AdminUser, type UserRole } from "./adminApi";
+import { adminApi, type AdminUser, type BulkReport, type UserRole } from "./adminApi";
+import { CSV_TEMPLATE, csvToRows, type BulkRow } from "./csv";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "./Dialog";
 import { friendlyError } from "./errors";
 import { keys, useAccess, useMeta, usePeople } from "./shared";
@@ -10,6 +11,7 @@ const PAGE_SIZE = 50;
 
 type Modal =
   | { kind: "create" }
+  | { kind: "bulk" }
   | { kind: "grant"; user: AdminUser }
   | { kind: "manager"; user: AdminUser }
   | { kind: "deactivate"; user: AdminUser }
@@ -62,7 +64,8 @@ export function UsersTab() {
             <option value="">All</option><option value="active">Active</option><option value="inactive">Inactive</option>
           </select>
         </div>
-        <button className="btn primary push" onClick={() => setModal({ kind: "create" })}>New user</button>
+        <button className="btn push" onClick={() => setModal({ kind: "bulk" })}>Import users</button>
+        <button className="btn primary" onClick={() => setModal({ kind: "create" })}>New user</button>
       </div>
 
       <div className="card">
@@ -120,6 +123,7 @@ export function UsersTab() {
       </nav>
 
       {modal?.kind === "create" && <CreateUserDialog onClose={close} onDone={(name) => done(`Created ${name}.`)} />}
+      {modal?.kind === "bulk" && <BulkImportDialog onClose={close} onDone={(n) => done(`Created ${n} users.`)} />}
       {modal?.kind === "grant" && <GrantRoleDialog user={modal.user} onClose={close} onDone={done} />}
       {modal?.kind === "manager" && <ManagerDialog user={modal.user} onClose={close} onDone={done} />}
       {modal?.kind === "deactivate" && (
@@ -179,6 +183,91 @@ function CreateUserDialog({ onClose, onDone }: { onClose: () => void; onDone: (n
           </select></div>
         <p className="hint">New users have no roles. Grant roles after creating them.</p>
         <DialogActions onCancel={onClose} submitLabel="Create user" busy={busy} error={error} />
+      </form>
+    </Dialog>
+  );
+}
+
+const BULK_ERRORS: Record<string, string> = {
+  invalid_email: "Not a valid email address",
+  email_domain: "Email is not in the company's Google domain",
+  name_required: "Name is missing",
+  duplicate_in_file: "Email appears earlier in this file",
+  unknown_location: "No location with this name",
+  email_exists: "A user with this email already exists",
+};
+
+function BulkImportDialog({ onClose, onDone }: { onClose: () => void; onDone: (created: number) => void }) {
+  const [rows, setRows] = useState<BulkRow[] | null>(null);
+  const [report, setReport] = useState<BulkReport | null>(null);
+  const [fileError, setFileError] = useState<string | undefined>();
+  const [checking, setChecking] = useState(false);
+  const { busy, error, run } = useSubmit((e) => friendlyError(e));
+
+  async function onFile(file: File | undefined) {
+    setRows(null); setReport(null); setFileError(undefined);
+    if (!file) return;
+    try {
+      const parsed = csvToRows(await file.text());
+      if (parsed.length === 0) throw new Error("The file has a header but no users.");
+      if (parsed.length > 500) throw new Error("A file can have at most 500 users. Split it and import in parts.");
+      setRows(parsed);
+      setChecking(true);
+      setReport(await adminApi.bulkCreateUsers({ dryRun: true, rows: parsed }));
+    } catch (e) {
+      setFileError(e instanceof Error && !("status" in e) ? e.message : friendlyError(e));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  const template = useMemo(() => URL.createObjectURL(new Blob([CSV_TEMPLATE], { type: "text/csv" })), []);
+  useEffect(() => () => URL.revokeObjectURL(template), [template]);
+  const ready = !!report && report.failed === 0;
+  return (
+    <Dialog title="Import users from CSV" onClose={onClose}>
+      <form onSubmit={(e) => {
+        e.preventDefault();
+        if (!rows || !ready) return;
+        void run(async () => {
+          const res = await adminApi.bulkCreateUsers({ dryRun: false, rows });
+          if (res.committed) onDone(res.created);
+          else setReport(res); // the data changed since the preview
+        });
+      }}>
+        <p className="hint">
+          One user per row with the columns <b>email</b>, <b>name</b>, and optionally <b>designation</b> and <b>location</b> (a location name).{" "}
+          <a href={template} download="users-template.csv">Download a template</a>. New users have no roles; grant them afterwards.
+          Nothing is created unless every row is valid.
+        </p>
+        <div className="field"><label htmlFor="bulk-file">CSV file</label>
+          <input id="bulk-file" type="file" accept=".csv,text/csv" data-autofocus onChange={(e) => void onFile(e.target.files?.[0])} /></div>
+        {fileError && <p className="error" role="alert">{fileError}</p>}
+        {checking && <p className="muted" role="status">Checking {rows?.length} rows…</p>}
+        {report && (
+          <>
+            <p role="status">
+              {report.failed === 0
+                ? <>All {report.rows.length} rows are valid and ready to import.</>
+                : <><b>{report.failed}</b> of {report.rows.length} rows have problems. Fix the file and choose it again; nothing has been created.</>}
+            </p>
+            <div className="tablewrap" style={{ maxHeight: "40vh", overflow: "auto" }}>
+              <table aria-label="Import preview">
+                <thead><tr><th>Row</th><th>Name</th><th>Email</th><th>Result</th></tr></thead>
+                <tbody>
+                  {report.rows.map((r) => (
+                    <tr key={r.row}>
+                      <td>{r.row}</td><td>{r.displayName || "—"}</td><td>{r.email}</td>
+                      <td>{r.status === "ok" ? "OK" : <span className="error">{BULK_ERRORS[r.error!] ?? r.error}</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+        <DialogActions onCancel={onClose} submitLabel={ready ? `Create ${report!.rows.length} users` : "Create users"}
+          busy={busy} error={error} disabled={!ready || checking} />
       </form>
     </Dialog>
   );

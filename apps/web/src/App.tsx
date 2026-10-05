@@ -14,6 +14,9 @@ import { PaperworkPage } from "./paperwork/PaperworkPage";
 import { NotificationBell, type InboxItem } from "./notifications/Inbox";
 import { EmployeesPage } from "./employees/EmployeesPage";
 import { ReportsPage } from "./employees/JoiningsExitsReport";
+import { TrainingsPage } from "./lms/TrainingsPage";
+import { CoursesPage } from "./lms/CoursesPage";
+import { MyTrainingPage } from "./lms/MyTrainingPage";
 import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sparkles, Sun } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
@@ -213,6 +216,9 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "paperwork" ? <PaperworkPage me={me} />
             : current.key === "access" ? <AccessPage me={me} />
             : current.key === "employees" ? <EmployeesPage me={me} />
+            : current.key === "trainings" ? <TrainingsPage />
+            : current.key === "courses" ? <CoursesPage />
+            : current.key === "mytraining" ? <MyTrainingPage />
             : current.key === "reports" ? <ReportsPage me={me} />
             : current.key === "dashboard" ? (
               <DashboardPage firstName={me.displayName.split(" ")[0]} canOpen={(t) => items.some((i) => i.key === t)}
@@ -242,5 +248,10 @@ export default function App() {
   });
   if (me.isLoading) return <p className="empty">Loading…</p>;
   if (!me.data) return <Login onSignedIn={() => qc.invalidateQueries()} />;
-  return <Shell me={me.data} onSignOut={async () => { await api("/api/auth/logout", { method: "POST" }); qc.clear(); await qc.invalidateQueries(); }} />;
+  return <Shell me={me.data} onSignOut={async () => {
+    // A 401 here means the session is already gone; either way the client must return to the sign-in screen.
+    try { await api("/api/auth/logout", { method: "POST" }); } catch { /* already signed out */ }
+    qc.clear();
+    await qc.invalidateQueries();
+  }} />;
 }

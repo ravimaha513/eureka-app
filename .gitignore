@@ -12,3 +12,10 @@ test-results
 playwright-report
 .claude/
 .local
+
+# terraform / terragrunt
+.terraform/
+.terragrunt-cache/
+*.tfstate
+*.tfstate.*
+*.tfplan

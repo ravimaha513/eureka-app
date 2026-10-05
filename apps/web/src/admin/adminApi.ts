@@ -35,6 +35,9 @@ export interface RoleRequest {
   decidedAt: string | null;
 }
 
+export interface BulkRowResult { row: number; email: string; displayName: string; status: "ok" | "error"; error?: string; id?: string }
+export interface BulkReport { dryRun: boolean; committed: boolean; created: number; failed: number; rows: BulkRowResult[] }
+
 export interface Team { id: string; name: string; location: Place | null; lead: Ref; members: Ref[] }
 export interface MoveResult { movedCandidates: number; reassignedTo: Ref }
 
@@ -54,6 +57,8 @@ export const adminApi = {
   },
   createUser: (b: { email: string; displayName: string; designation?: string; primaryLocationId?: string }) =>
     api<{ id: string }>("/api/v1/admin/users", { method: "POST", ...json(b) }),
+  bulkCreateUsers: (b: { dryRun: boolean; rows: { email: string; displayName: string; designation?: string; location?: string }[] }) =>
+    api<BulkReport>("/api/v1/admin/users/bulk", { method: "POST", ...json(b) }),
   deactivate: (id: string) => api<void>(`/api/v1/admin/users/${enc(id)}/deactivate`, { method: "POST" }),
   reactivate: (id: string) => api<void>(`/api/v1/admin/users/${enc(id)}/reactivate`, { method: "POST" }),
   setManager: (id: string, managerId: string | null) =>

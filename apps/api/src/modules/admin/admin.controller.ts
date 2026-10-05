@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Pu
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import {
   AddMember,
+  BulkCreateUsers,
   CreateRoleRequest,
   CreateTeam,
   CreateUser,
@@ -36,6 +37,12 @@ export class AdminController {
   @Post("users")
   createUser(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createUser(user, CreateUser.parse(body));
+  }
+
+  @Post("users/bulk")
+  @HttpCode(200)
+  bulkCreateUsers(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
+    return this.svc.bulkCreateUsers(user, BulkCreateUsers.parse(body));
   }
 
   @Post("users/:id/deactivate")

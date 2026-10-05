@@ -23,6 +23,27 @@ export const CreateUser = z
   .strict();
 export type CreateUser = z.infer<typeof CreateUser>;
 
+/** Rows are validated one by one in the service so a bad row is reported, not a rejected request. */
+export const BulkCreateUsers = z
+  .object({
+    dryRun: z.boolean(),
+    rows: z
+      .array(
+        z
+          .object({
+            email: z.string().max(254),
+            displayName: z.string().max(120),
+            designation: z.string().max(120).optional(),
+            location: z.string().max(120).optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(500),
+  })
+  .strict();
+export type BulkCreateUsers = z.infer<typeof BulkCreateUsers>;
+
 export const SetManager = z.object({ managerId: uuid.nullable() }).strict();
 
 export const RoleKey = z.enum(ROLES);

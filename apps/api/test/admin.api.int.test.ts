@@ -67,6 +67,7 @@ const ADMIN_ENDPOINTS: { method: Method; url: string; body?: unknown; adminStatu
   { method: "GET", url: "/api/v1/admin/meta", adminStatus: 200 },
   { method: "GET", url: "/api/v1/admin/users", adminStatus: 200 },
   { method: "POST", url: "/api/v1/admin/users", body: {}, adminStatus: 422 },
+  { method: "POST", url: "/api/v1/admin/users/bulk", body: {}, adminStatus: 422 },
   { method: "POST", url: `/api/v1/admin/users/${NIL}/deactivate`, adminStatus: 404 },
   { method: "POST", url: `/api/v1/admin/users/${NIL}/reactivate`, adminStatus: 404 },
   { method: "PUT", url: `/api/v1/admin/users/${U.r1a}/manager`, body: {}, adminStatus: 422 },
@@ -182,6 +183,61 @@ describe("users", () => {
       id, designation: "Recruiter", primaryLocation: { id: LOC.dallas, name: "Dallas" }, roles: [], teams: [], manager: null,
     })]);
     expect((await audits("admin.user.created")).at(-1)).toMatchObject({ actor_id: U.admin, entity_id: id });
+  });
+
+  describe("bulk create", () => {
+    const bulk = (dryRun: boolean, rows: unknown[]) => call("admin", "POST", "/api/v1/admin/users/bulk", { dryRun, rows });
+    const count = async (like: string) =>
+      Number((await db.admin.query(`SELECT count(*) FROM eureka.app_user WHERE email LIKE $1`, [like])).rows[0].count);
+
+    it("dry run reports every row and creates nothing", async () => {
+      const r = await bulk(true, [
+        { email: "bulk.dry1@eureka.example", displayName: "Dry One", location: "dallas" },
+        { email: "bulk.dry2@eureka.example", displayName: "Dry Two" },
+      ]);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(r.json()).toMatchObject({ dryRun: true, committed: false, created: 0, failed: 0 });
+      expect(await count("bulk.dry%")).toBe(0);
+    });
+
+    it("creates all rows with location by name, one audit event each", async () => {
+      const before = (await audits("admin.user.created")).length;
+      const r = await bulk(false, [
+        { email: "bulk.ok1@eureka.example", displayName: "Ok One", designation: "Recruiter", location: "Dallas" },
+        { email: "bulk.ok2@eureka.example", displayName: "Ok Two" },
+      ]);
+      expect(r.statusCode, r.body).toBe(200);
+      expect(r.json()).toMatchObject({ committed: true, created: 2, failed: 0 });
+      const list = (await call("admin", "GET", "/api/v1/admin/users?search=bulk.ok1")).json();
+      expect(list.items[0]).toMatchObject({ designation: "Recruiter", primaryLocation: { id: LOC.dallas } });
+      expect((await audits("admin.user.created")).length).toBe(before + 2);
+      expect((await audits("admin.user.bulk_created")).at(-1)).toMatchObject({ actor_id: U.admin });
+    });
+
+    it("any bad row creates nobody and each failure is named", async () => {
+      const r = await bulk(false, [
+        { email: "bulk.good@eureka.example", displayName: "Good" },
+        { email: "not-an-email", displayName: "Bad" },
+        { email: "x@gmail.com", displayName: "Wrong domain" },
+        { email: "bulk.noname@eureka.example", displayName: "  " },
+        { email: "bulk.good@eureka.example", displayName: "Twice" },
+        { email: "bulk.loc@eureka.example", displayName: "Loc", location: "Mars" },
+        { email: "NEW.HIRE@eureka.example", displayName: "Exists" },
+      ]);
+      expect(r.statusCode, r.body).toBe(200);
+      const body = r.json();
+      expect(body).toMatchObject({ committed: false, created: 0, failed: 6 });
+      expect(body.rows.map((x: { error?: string }) => x.error)).toEqual([
+        undefined, "invalid_email", "email_domain", "name_required", "duplicate_in_file", "unknown_location", "email_exists",
+      ]);
+      expect(await count("bulk.good%")).toBe(0);
+    });
+
+    it("rejects an empty or oversized request", async () => {
+      expect((await bulk(true, [])).statusCode).toBe(422);
+      const many = Array.from({ length: 501 }, (_, i) => ({ email: `m${i}@eureka.example`, displayName: "M" }));
+      expect((await bulk(true, many)).statusCode).toBe(422);
+    });
   });
 
   it.each([

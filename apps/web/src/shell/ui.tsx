@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
-  BadgeCheck, CalendarClock, ChevronDown, FileBarChart, FileCheck2, Flame, LayoutDashboard, LogOut, Moon,
+  BadgeCheck, BookOpen, CalendarClock, GraduationCap, Library, ChevronDown, FileBarChart, FileCheck2, Flame, LayoutDashboard, LogOut, Moon,
   Send, ShieldCheck, Sun, TrendingUp, Users, UserRoundCheck, Wallet, type LucideIcon,
 } from "lucide-react";
 import type { Theme } from "./theme";
@@ -9,6 +9,7 @@ import type { Theme } from "./theme";
 export const NAV_ICONS: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard, hotlist: Flame, candidates: Users, submissions: Send, interviews: CalendarClock,
   placements: BadgeCheck, paperwork: FileCheck2, employees: UserRoundCheck, payments: Wallet,
+  trainings: GraduationCap, courses: Library, mytraining: BookOpen,
   performance: TrendingUp, reports: FileBarChart, access: ShieldCheck,
 };
 
