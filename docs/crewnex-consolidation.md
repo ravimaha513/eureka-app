@@ -283,12 +283,12 @@ outbox rows and creates the checklist with every item `waived` (reason code `his
 ### 5.1 Shape
 
 ```
-CrewNex production DB (Supabase, read-only role)
-   │ TLS, SELECT only
+CrewNex production DB (Supabase session pooler, role crewnex_export: BYPASSRLS + column grants)
+   │ TLS, SELECT only, one REPEATABLE READ snapshot
    ▼
 crewnex-export task (ECS one-off, Eureka prod account)  ── writes ──▶ s3://<docs bucket>/migration/crewnex/<run>/
    sales.csv  staff.csv  lookups.csv  submissions.csv  interviews.csv  placements.csv              (SSE-KMS, 7-day lifecycle)
-   control-totals.json  mapping.crewnex.json  manifest.json (sha256 per file, schema fingerprint)
+   control-totals.json  mapping.crewnex.json  manifest.json (sha256 per file, column fingerprint)
                                                                   │
                                                                   ▼
                               existing import CLI as eureka_import (stage → review → dry run → 2nd-admin digest approval → commit)
@@ -298,17 +298,27 @@ The exporter **writes the existing sheet format plus new columns**; the pipeline
 (review queue, digest approval, ledger, definer loaders). Nothing writes Eureka tables except
 `authz.import_load_person` and the new loaders the increments add.
 
-### 5.2 Where the exporter runs
+### 5.2 The exporter (D2)
+
+A **separate SQL tool** (`tools/crewnex-export/`, plain `pg` + hand-written `SELECT`s against a pinned column
+list) built and tested in Eureka's CI and run as an ECS one-off task. **Not** a Prisma script inside CrewNex: a
+CrewNex script would run wherever CrewNex code runs (Vercel, laptops with `.env` pointing at production, per
+CrewNex's own `CLAUDE.md`), would load every column Prisma selects by default, and would be reviewed under
+CrewNex's rules rather than the importer's.
 
 | Rule | How |
 |---|---|
-| Never on a laptop | It reads production PII (names, contacts, DOB, visa). It runs as an ECS one-off task in the Eureka **production** account (same pattern as the import, `docs/import.md` "Where it runs"), image built by Eureka CI from `tools/crewnex-export/`. Eureka dev and staging only ever see fictional fixtures (implementation-plan rule 5). |
-| Least privilege at the source | A CrewNex role `crewnex_export`: `SELECT` on the exported tables only, `NOLOGIN` outside the migration window (CrewNex `scripts/audit-lockdown.mjs` pattern), created by a CrewNex-side change (Q26). Connection string in SSM SecureString, deleted at C1f. |
-| Right database | The task refuses unless the connection's Supabase ref is `ihixojcfxuvoyehuwlnd` (CrewNex: "the ref is the identity") and the `_prisma_migrations` head equals the pinned fingerprint; a newer CrewNex schema stops the run instead of exporting with stale assumptions. |
-| No pooler surprises | Session pooler or direct port, one `REPEATABLE READ READ ONLY` transaction for the whole export so every file is one snapshot. |
+| Never on a laptop | It reads production PII (names, contacts, DOB, visa). It runs in the Eureka **production** account, same pattern as the import (`docs/import.md` "Where it runs"). Eureka dev and staging only ever see fictional fixtures (implementation-plan rule 5). |
+| Source role | `crewnex_export`, created by a CrewNex-side change (Q26) with `LOGIN` only during the migration window (CrewNex `scripts/audit-lockdown.mjs` pattern). **`BYPASSRLS`** is required: every CrewNex table has deny-all RLS and the app reads only because it owns the tables (CrewNex `CLAUDE.md` "A new Prisma model arrives with no Row Level Security"); CrewNex already grants `BYPASSRLS` to `crewnex_app`/`crewnex_maintenance` the same way (`docs/Audit-Lockdown.md`). No table-level `SELECT`: **column-level `GRANT SELECT (…)`** only, so the database itself withholds what the exporter must not read. |
+| Columns withheld by the database | `User.passwordHash`, `pendingEmail`, every `Session`/`UserToken`/AI/`AuditLog` column (the audit archive at C1f.6 uses a separate one-time grant), every note and free-text body (`VendorSubmittalNote.body`, `InterviewNote.body`, `ConsultantInterview.debriefNotes`, `Placement.notes`, `Placement.endNote`, `PlacementEndRequest.note`), `vendorContactName/Phone/Email` on submittals and placements, `ConsultantInterview.meetingLink`, every `storagePathname`. Each is granted only in the increment whose loader needs it (C1c.4, C1d.3, C1e.5, C2.x). |
+| Right database (server-side) | The CrewNex PR that creates the role also creates `crewnex_export_identity()` (SQL function, `EXECUTE` to `crewnex_export` only) returning that project's ref; the exporter refuses unless it returns `ihixojcfxuvoyehuwlnd`. Checking the URL alone is client-side and is how CrewNex's `.env` → production trap happens. |
+| Right schema | Fingerprint = SHA-256 over `information_schema.columns` (table, column, type, nullability) of the **exported tables** plus `pg_enum` labels of the exported enums, compared with the value pinned in the exporter. Not the `_prisma_migrations` head: a `prisma db push` changes the schema without a migration row (CrewNex `CLAUDE.md`, the crewnex-v2 drift). Any difference stops the run. |
+| Snapshot | One `REPEATABLE READ READ ONLY` transaction for every file. |
+| Empty tables | The run fails if any expected table returns zero rows (`User` consultants, `VendorSubmittal`, `ConsultantInterview`, `Placement`, `Location`, `VendorCompany`): a missing grant or a wrong database shows up as an empty export, never as "nothing to migrate". |
+| Control totals | Computed by a second path in the same snapshot: plain `count(*) … GROUP BY` on the base tables (no export joins, no filters), cross-checked against `pg_class.reltuples` within a tolerance. The reconciliation (C1f.4) compares Eureka with these, so an exporter join bug cannot hide in both sides. |
+| Connection | Supabase **session pooler** (IPv4; the direct host is IPv6-only and Eureka tasks have public IPv4 only), `sslmode=verify-full`. Session mode keeps the one transaction on one backend. Connection string in SSM SecureString, deleted after C1f (and after each D7 feed run, re-created by hand). |
 | Network | Tasks run in public subnets with a public IP (no NAT, infra/README); Supabase network restrictions, if enabled, need the task's IP for the run. |
-| Files | Streamed to `migration/crewnex/<run>/` (SSE-KMS, lifecycle 7 days); the task has `s3:PutObject` on that prefix only; the import task reads it. No local disk beyond the task's ephemeral storage. |
-| What is never exported | Password hashes, sessions, tokens, AI tables, audit metadata (only at the final archive step), notes and other free text (until their ports), `storagePathname` values (files move in C2.1 by a separate task). |
+| Files | Streamed to `migration/crewnex/<run>/` (SSE-KMS, 7-day lifecycle); the task has `s3:PutObject` on that prefix only; the import task reads it. No local disk beyond the task's ephemeral storage. |
 
 ### 5.3 Format extensions (each a separate increment)
 
@@ -358,7 +368,7 @@ CrewNex rows.
 | # | Increment | What changes | Tests | Rollback |
 |---|---|---|---|---|
 | C1a.1 | `legal_entity` | Migration: `legal_entity` (name unique, kinds text[], status), definer create/archive, lookups read (id, name). | RLS differential, guard (no app writes), lookups API | Revert code; table stays unused |
-| C1a.2 | Exporter skeleton | `tools/crewnex-export`: SQL over a pinned CrewNex schema, ref + fingerprint checks, one snapshot transaction, manifest with hashes, exhaustive enum maps (unknown value = hard stop, CrewNex's allowlist rule). Lookups only: locations, offices, technologies, clients, vendors (merge-resolved), onboarding companies. | Unit tests against a fictional CrewNex-shaped schema loaded into test PG from a checked-in DDL snapshot; refuses wrong ref, wrong fingerprint, unknown enum | Revert |
+| C1a.2 | Exporter skeleton | `tools/crewnex-export` per 5.2. | (see 6.) | Revert |
 | C1a.3 | Lookups sheet | Import accepts `lookups.csv`: create-only reference rows (client, vendor, technology alias, location, legal entity) through definer functions, inside the same review + digest approval. | Import int tests: dry run, approval digest covers lookups, re-run creates nothing | Revert; created lookups are inert |
 | C1a.4 | `mapping.crewnex.json` + UTC | Mapping file (statuses of section 4, technology aliases, `timeZone: UTC`, ISO dates). | Normaliser tests incl. DST instants and `@db.Date` values | Revert |
 | C1a.5 | Infra | Terraform: export task definition, task role (`s3:PutObject` on `migration/crewnex/*`, SSM read of one parameter), prefix lifecycle 7 days. | `terraform validate`, Checkov | `terraform apply` of the revert |
@@ -533,7 +543,7 @@ Ask, don't guess (HANDOFF). Each has the default this plan uses until answered.
 23. **Who signs off CrewNex batches:** org admins (import default) or also a business owner? Default: org admins, with the CEO reviewing the reconciliation report.
 24. **CrewNex `Location` kind** (`training`, `gh`, `office`, `remote`) and offshore offices as `office` locations. Default: `training` and `office`.
 25. **Legal entities:** is the CrewNex onboarding company the paperwork, payroll or offer-letter entity, and is the placed-from company the payroll entity? Do per-location opt-ins matter? Default: onboarding = paperwork entity, placed-from = payroll entity; opt-ins dropped.
-26. **Changes to CrewNex itself:** a read-only `crewnex_export` database role and a marketing write-freeze flag at C1f. Default: yes, as small CrewNex PRs when C1a.2 and C1f start.
+26. **Changes to CrewNex itself:** a `crewnex_export` role (`BYPASSRLS`, column-level grants, login only in the window), the `crewnex_export_identity()` function, and a marketing write-freeze flag at C1f. Default: yes, as small CrewNex PRs when C1a.2 runs against real data and when C1f starts.
 27. **Acceptable-use policy gate and issue reporting in Eureka?** Default: not ported; decide with C2.9.
 28. **Actual CrewNex vendor costs** (Vendors.md business columns are TODO). Default: list prices in section 7.
 29. **Marketing email / Vitel number holder history** (CrewNex keeps old and new values in audit). Default: not carried; add a holder-history table if "who held this number in June" must stay answerable.
