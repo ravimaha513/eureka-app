@@ -13,7 +13,6 @@ import { CLIENT_ID, LOC, T, TECH_ID, U, seedFixtures, type FixtureCandidate } fr
 import { createPlacement, newCandidate, selectedSubmission } from "./placement-seed.js";
 import { deliverInbox, emitEvent, newId } from "./notification-seed.js";
 import { backdate, joinedEmployee } from "./employee-seed.js";
-import { lmsCall, newBatch, newCourse } from "./lms-seed.js";
 import { LOCAL_UPLOAD_PATH } from "../src/platform/storage/document-storage.js";
 import { LocalDocumentStore } from "../src/worker/document-store.js";
 import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob } from "../src/worker/jobs/resume-scan.js";
@@ -263,23 +262,6 @@ const DOCUMENT_FORBIDDEN: Record<string, unknown> = {
   key: `restricted/documents/${FOREIGN_ID}`, storageKey: `clean/documents/${FOREIGN_ID}`, kmsKeyAlias: "alias/other",
   fileName: "../../etc/passwd", scannedAt: PAST, uploadExpiresAt: "2099-01-01T00:00:00Z", verifiedBy: U.hr, expiresOn: "2099-01-01",
 };
-
-const lmsState = async () => [
-  await rows(`SELECT count(*)::int AS n, coalesce(sum(version), 0)::int AS v, md5(string_agg(title || coalesce(archived_at::text, ''), ',' ORDER BY id)) AS h FROM eureka.lms_course`),
-  await rows(`SELECT count(*)::int AS n, md5(string_agg(name || start_date::text || coalesce(archived_at::text, ''), ',' ORDER BY id)) AS h FROM eureka.lms_batch`),
-  await rows(`SELECT count(*)::int AS n FROM eureka.lms_module`),
-  await rows(`SELECT count(*)::int AS n FROM eureka.lms_batch_course`),
-  await rows(`SELECT count(*)::int AS n FROM eureka.lms_enrollment`),
-  await rows(`SELECT count(*)::int AS n, coalesce(sum(percent), 0)::int AS p FROM eureka.lms_module_progress`),
-];
-/** A batch with one course (one module) and r1a enrolled. */
-async function lmsEnrolled() {
-  const c = await newCourse(db, U.hr, "MA enrolled", [{ title: "m", durationMinutes: 10 }]);
-  const b = await newBatch(db, U.hr, "MA enrolled batch");
-  await lmsCall(db, U.hr, `SELECT authz.lms_set_batch_courses($1, $2::uuid[])`, [b, [c.id]]);
-  await lmsCall(db, U.hr, `SELECT authz.lms_add_students($1, $2::uuid[])`, [b, [U.r1a]]);
-  return { b, m: c.moduleIds[0]! };
-}
 
 /** Fields a DataHub folder write never takes from the client (migration 0075). */
 const DATAHUB_FOLDER_FORBIDDEN: Record<string, unknown> = {
@@ -797,73 +779,6 @@ const CASES: RejectCase[] = [
       state: () => rows(`SELECT count(*)::int AS n FROM authz.checklist_template`),
     }),
     forbidden: { version: 5, publishedAt: PAST, publishedBy: U.admin, active: true },
-  },
-  // LMS (docs/lms-api.md, migration 0082): ids, versions, timestamps, ownership, completion stamps and structure are the server's
-  {
-    route: "POST /api/v1/lms/courses", actor: "hr",
-    prepare: async () => ({ url: "/api/v1/lms/courses", body: { title: "MA course" }, state: lmsState }),
-    forbidden: { archivedAt: PAST, version: 7, archived: true, modules: [], moduleCount: 3 },
-  },
-  {
-    route: "PATCH /api/v1/lms/courses/:id", actor: "hr",
-    prepare: async () => {
-      const c = await newCourse(db, U.hr, "MA patch");
-      return { url: `/api/v1/lms/courses/${c.id}`, body: { title: "renamed" }, headers: { "if-match": '"1"' }, state: lmsState };
-    },
-    forbidden: { archivedAt: PAST, version: 7, modules: [], moduleCount: 3, totalMinutes: 5 },
-  },
-  {
-    route: "PUT /api/v1/lms/courses/:id/modules", actor: "hr",
-    prepare: async () => {
-      const c = await newCourse(db, U.hr, "MA modules");
-      return { url: `/api/v1/lms/courses/${c.id}/modules`, body: { modules: [{ title: "m", durationMinutes: 5 }] }, state: lmsState };
-    },
-    forbidden: { version: 7, courseId: FOREIGN_ID, archived: true },
-  },
-  {
-    route: "POST /api/v1/lms/batches", actor: "hr",
-    prepare: async () => ({ url: "/api/v1/lms/batches", body: { name: "MA batch", startDate: "2026-01-01", endDate: "2026-02-01" }, state: lmsState }),
-    forbidden: { status: "completed", archivedAt: PAST, studentCount: 9, courseIds: [], userIds: [U.r1a] },
-  },
-  {
-    route: "PATCH /api/v1/lms/batches/:id", actor: "hr",
-    prepare: async () => {
-      const b = await newBatch(db, U.hr, "MA patch batch");
-      return { url: `/api/v1/lms/batches/${b}`, body: { name: "renamed" }, state: lmsState };
-    },
-    forbidden: { status: "completed", archivedAt: PAST, studentCount: 9, courseCount: 9, createdByName: "x" },
-  },
-  {
-    route: "PUT /api/v1/lms/batches/:id/courses", actor: "hr",
-    prepare: async () => {
-      const b = await newBatch(db, U.hr, "MA courses batch");
-      return { url: `/api/v1/lms/batches/${b}/courses`, body: { courseIds: [] }, state: lmsState };
-    },
-    forbidden: { batchId: FOREIGN_ID, positions: [1], archived: true },
-  },
-  {
-    route: "POST /api/v1/lms/batches/:id/students", actor: "hr",
-    prepare: async () => {
-      const b = await newBatch(db, U.hr, "MA students batch");
-      return { url: `/api/v1/lms/batches/${b}/students`, body: { userIds: [U.r1a] }, state: lmsState };
-    },
-    forbidden: { enrolledAt: PAST, batchId: FOREIGN_ID, userId: U.r1b, percent: 100 },
-  },
-  {
-    route: "PUT /api/v1/lms/batches/:id/students/:userId/progress/:moduleId", actor: "hr",
-    prepare: async () => {
-      const { b, m } = await lmsEnrolled();
-      return { url: `/api/v1/lms/batches/${b}/students/${U.r1a}/progress/${m}`, body: { percent: 50 }, state: lmsState };
-    },
-    forbidden: { completedAt: PAST, updatedAt: PAST, userId: U.r1b, moduleId: FOREIGN_ID, batchId: FOREIGN_ID },
-  },
-  {
-    route: "PUT /api/v1/lms/me/trainings/:batchId/progress/:moduleId", actor: "r1a",
-    prepare: async () => {
-      const { b, m } = await lmsEnrolled();
-      return { url: `/api/v1/lms/me/trainings/${b}/progress/${m}`, body: { percent: 50 }, state: lmsState };
-    },
-    forbidden: { completedAt: PAST, userId: U.r1b, user_id: U.r1b, moduleId: FOREIGN_ID, batchId: FOREIGN_ID },
   },
   // employees and assignments (docs/employees-api.md): status, dates the server sets, snapshots and history are the server's
   {

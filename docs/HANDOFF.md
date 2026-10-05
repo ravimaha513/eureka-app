@@ -9,7 +9,8 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - `pnpm -r typecheck` and `pnpm -r test` must pass before every commit (integration tests need
   PostgreSQL 16 at `TEST_PG_ADMIN_URL`, default `postgres://postgres:postgres@127.0.0.1:5432`).
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0083**; 0040 and 0049 are unused) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0055**; 0040 and 0049 are unused) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0054** (0060-0062 are jobs-portal); 0040 and 0049 are unused) and must apply as a
   non-superuser (Amazon RDS master): CI checks this.
 - Commit small and atomic; get an independent review of every security-relevant change.
 
@@ -167,10 +168,6 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   in 0070 on top of 0052; anyone replacing them again must keep the chat branch). Audit: ids and counts only. Web: Chat
   screen (nav section Other, unread badge), dev seed `apps/api/src/db/dev-chat.ts`, e2e `apps/web/e2e/chat.spec.ts`.
   Open questions in `docs/chat-api.md` (retention, history after leaving, admin access, presence opt-out, idle timeout).
-- LMS / training backend (migration 0082, contract `docs/lms-api.md`): `lms_course/module/batch/batch_course/enrollment/module_progress`,
-  reads under RLS (`lms:manage` org sees all; a learner only their enrollments, those courses and their own progress), writes only through
-  `authz.lms_*` definer functions that re-check `lms:manage` / `lms:learn` (guards stamp version, archived_at, completed_at); module
-  `/api/v1/lms` (staff and `me/trainings`), audit holds ids and counts only; dev seed `src/db/dev-lms.ts` (sign in as hr or r1a).
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 - First-admin bootstrap (migrations 0037, 0039): `dist/db/bootstrap.js` as a one-off migrate task creates two
   `org_admin` users for hosted-domain emails; break-glass only: refuses while an active `org_admin` exists

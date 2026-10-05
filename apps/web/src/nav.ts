@@ -30,9 +30,6 @@ export const NAV: NavItem[] = [
   // training
   { key: "training", label: "Training Batches", section: "Training", anyOf: ["training:read"] },
   { key: "courses", label: "Courses", section: "Training", anyOf: ["training:manage"] },
-  { key: "lms-trainings", label: "LMS Trainings", section: "Training", anyOf: ["lms:manage"] },
-  { key: "lms-courses", label: "LMS Courses", section: "Training", anyOf: ["lms:manage"] },
-  { key: "mytraining", label: "My Training", section: "Training", anyOf: ["lms:learn"] },
   { key: "performance", label: "Performance", section: "Insights", anyOf: ["performance:read"] },
   { key: "reports", label: "Reports", section: "Insights", anyOf: ["report:read"] },
   { key: "access", label: "Users & Access", section: "Admin", anyOf: ["access:manage"] },

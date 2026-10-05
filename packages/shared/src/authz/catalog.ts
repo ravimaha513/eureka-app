@@ -131,9 +131,6 @@ export const PERMISSIONS = [
   "bill:manage",
   "team:move_member",
   "designation:change",
-  // training (LMS)
-  "lms:manage",
-  "lms:learn",
   // administration
   "access:manage",
   "audit:read",
@@ -195,11 +192,7 @@ const salesLine = (s: Scope, submitScope: Scope): Grants => ({
   "document:upload": s,
 });
 
-/** Training: every business role learns; org_admin holds no data permissions (rule 7). */
-const learner = (role: Role): Grants => (role === "org_admin" ? {} : { "lms:learn": "own" });
-const trainer: Grants = { "lms:manage": "org" };
-
-const BASE_GRANTS: Record<Role, Grants> = {
+export const GRANTS: Record<Role, Grants> = {
   recruiter: {
     ...salesLine("team", "team"),
     "candidate:create": "own",
@@ -506,17 +499,6 @@ const BASE_GRANTS: Record<Role, Grants> = {
     "chat:use": "own",
   },
 };
-
-export const GRANTS: Record<Role, Grants> = Object.fromEntries(
-  ROLES.map((role) => [
-    role,
-    {
-      ...BASE_GRANTS[role],
-      ...learner(role),
-      ...(role === "hr" || role === "associate_hr" || role === "interview_coach" ? trainer : {}),
-    },
-  ]),
-) as Record<Role, Grants>;
 
 export function grantFor(role: Role, permission: Permission): Scope | undefined {
   return GRANTS[role][permission];

@@ -15,9 +15,6 @@ import { PaperworkPage } from "./paperwork/PaperworkPage";
 import { NotificationBell, type InboxItem } from "./notifications/Inbox";
 import { EmployeesPage } from "./employees/EmployeesPage";
 import { ReportsPage } from "./employees/JoiningsExitsReport";
-import { TrainingsPage } from "./lms/TrainingsPage";
-import { CoursesPage as LmsCoursesPage } from "./lms/CoursesPage";
-import { MyTrainingPage } from "./lms/MyTrainingPage";
 import { CompaniesPage, FacilitiesPage } from "./sites/SitesPage";
 import { DataHubPage } from "./datahub/DataHubPage";
 import { TrainingPage } from "./training/TrainingPage";
@@ -236,9 +233,6 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "paperwork" ? <PaperworkPage me={me} />
             : current.key === "access" ? <AccessPage me={me} />
             : current.key === "employees" ? <EmployeesPage me={me} />
-            : current.key === "lms-trainings" ? <TrainingsPage />
-            : current.key === "lms-courses" ? <LmsCoursesPage />
-            : current.key === "mytraining" ? <MyTrainingPage />
             : current.key === "reports" ? <ReportsPage me={me} />
             : current.key === "companies" ? <CompaniesPage key="companies" me={me} />
             : current.key === "facilities" ? <FacilitiesPage key="facilities" me={me} />

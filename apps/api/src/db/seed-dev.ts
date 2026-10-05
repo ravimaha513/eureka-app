@@ -7,7 +7,6 @@ import pg from "pg";
 import { migrate } from "./migrate.js";
 import { seedFixtures } from "../../test/fixtures.js";
 import { seedDevPipeline } from "./dev-pipeline.js";
-import { seedDevLms } from "./dev-lms.js";
 import { seedDevFacilities } from "./dev-facilities.js";
 import { seedDevDatahub } from "./dev-datahub.js";
 import { seedDevTraining } from "./dev-training.js";
@@ -69,9 +68,6 @@ if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-
   const j = await seedDevJobs(admin);
   if (j.jobs) console.log(`seeded ${j.jobs} jobs, ${await seedDevApplications(admin, j.ids)} applications`);
 }
-// Fictional training: courses with modules, two batches, students with partial progress (skipped when courses exist).
-const lms = await seedDevLms(admin);
-if (lms.courses) console.log(`seeded training: ${lms.courses} courses, ${lms.batches} batches; sign in as hr@eureka.example (manage) or r1a@eureka.example (learner)`);
 // Development step-up ("Confirm it's you" without Google) needs this database switch as well as
 // AUTH_MODE=dev in the API (migration 0043); no migration sets it, so other environments refuse it.
 await admin.query(`INSERT INTO authz.policy_setting (key, value) VALUES ('dev_step_up', 'on')

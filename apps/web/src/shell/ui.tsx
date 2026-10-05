@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   BadgeCheck, BookOpen, BriefcaseBusiness, Building2, CalendarClock, ChevronDown, Database, FileBarChart, FileCheck2, FolderOpen, Flame, LayoutDashboard, LogOut, MessageCircle, Moon,
-  GraduationCap, House, Library, Send, Settings, ShieldCheck, Sun, TrendingUp, Users, UserRoundCheck, UserRoundSearch, Wallet, type LucideIcon,
+  GraduationCap, House, Send, Settings, ShieldCheck, Sun, TrendingUp, Users, UserRoundCheck, UserRoundSearch, Wallet, type LucideIcon,
 } from "lucide-react";
 import type { Theme } from "./theme";
 
@@ -14,8 +14,6 @@ export const NAV_ICONS: Record<string, LucideIcon> = {
   datahub: Database,
   // training
   training: GraduationCap, courses: BookOpen,
-  // lms
-  "lms-trainings": GraduationCap, "lms-courses": Library, mytraining: BookOpen,
   // chat
   chat: MessageCircle,
   // jobs-portal

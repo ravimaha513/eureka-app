@@ -526,47 +526,6 @@ td.rowactions > .iconbtn + .iconbtn { margin-left: 2px; }
 .funnel svg { width: 100%; height: 210px; display: block; }
 .funneldiv { stroke: var(--surface); stroke-width: 2; opacity: .85; }
 
-/* LMS (training) */
-.lmsgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); gap: 16px; list-style: none; padding: 0; }
-.lmscard { display: flex; flex-direction: column; }
-.lmscover { height: 88px; background: linear-gradient(135deg, var(--t-indigo-bg), var(--t-teal-bg) 60%, var(--t-violet-bg)); display: flex; align-items: flex-end; justify-content: space-between; padding: 10px 14px; color: var(--t-indigo); }
-.lmscardbody { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
-.lmscardbody h2 { font-size: 15px; }
-.lmsmeta { display: flex; gap: 14px; color: var(--muted); font-size: 12.5px; flex-wrap: wrap; }
-.lmsopen { margin-top: auto; align-self: flex-start; }
-.badge.lms-not_started { background: var(--neutral-bg); color: var(--neutral-fg); }
-.badge.lms-in_progress { background: var(--pri-50); color: var(--pri-700); }
-.badge.lms-completed { background: var(--ok-bg); color: var(--ok-fg); }
-.lmsstats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
-.lmsstat { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
-.lmsstat small { color: var(--muted); font-weight: 600; font-size: 12px; }
-.lmsstat b { font-size: 20px; }
-.crumbs { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
-.lmsbar { display: inline-flex; align-items: center; gap: 8px; min-width: 120px; flex: 1; }
-.lmstrack { flex: 1; height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; display: block; }
-.lmsbar.sm .lmstrack { height: 6px; }
-.lmsfill { display: block; height: 100%; background: var(--pri); border-radius: 999px; }
-.lmspct { font-size: 12px; font-weight: 600; color: var(--text2); min-width: 36px; text-align: right; }
-.lmslist { list-style: none; padding: 0; display: flex; flex-direction: column; }
-.lmsrow { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line2); flex-wrap: wrap; }
-.lmsrow .lmstoggle { display: flex; align-items: center; gap: 8px; background: none; border: 0; color: var(--text); font-weight: 600; text-align: left; min-width: 160px; flex: 1 1 200px; padding: 4px 0; }
-.lmsrow .lmstoggle:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; border-radius: 6px; }
-.lmsnest { padding-left: 28px; background: var(--surface2); }
-.lmsnest .lmsrow { border-bottom-color: var(--line); }
-.lmstabs { display: flex; gap: 8px; flex-wrap: wrap; }
-.lmspick { list-style: none; padding: 0; max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; }
-.lmspick li { padding: 8px 12px; border-bottom: 1px solid var(--line2); }
-.lmspick label { display: flex; gap: 10px; align-items: center; cursor: pointer; }
-.lmspick li:last-child { border-bottom: 0; }
-.modrow { display: grid; grid-template-columns: minmax(0, 1fr) 96px auto; gap: 8px; align-items: end; margin-bottom: 8px; }
-.modrow .field { margin-bottom: 0; }
-.modrow .field input { min-width: 0; width: 100%; }
-.modrow .rowactions { flex-wrap: nowrap; }
-.drawer.wide { width: min(560px, 100%); }
-.lmsmine { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.lmsmine input[type="number"] { height: 32px; width: 72px; min-width: 0; border-radius: 8px; border: 1px solid var(--line-strong); padding: 0 8px; background: var(--surface); color: var(--text); font: inherit; }
-.lmsmine input:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; }
-@media (max-width: 520px) { .modrow { grid-template-columns: minmax(0, 1fr) 80px; } .modrow .rowactions { grid-column: 1 / -1; } }
 /* DataHub: folders panel (left) and files (right); stacked on phones */
 .datahub { display: flex; flex-direction: column; gap: 16px; }
 .dh-headactions { display: flex; gap: 8px; }

@@ -48,8 +48,6 @@ import { registerLocalStorageRoutes } from "./platform/storage/local-routes.js";
 import { FIELD_CRYPTO, createFieldCrypto } from "./platform/crypto/config.js";
 import { WorkAuthorizationController } from "./modules/work-authorization/work-authorization.controller.js";
 import { WorkAuthorizationService } from "./modules/work-authorization/work-authorization.service.js";
-import { LmsController } from "./modules/lms/lms.controller.js";
-import { LmsService } from "./modules/lms/lms.service.js";
 import {
   BillsController, BillsService, CompaniesController, CompanyEmployeeOptionsController, CompanyEmployeesController, FacilitiesController,
   OwnersService, UtilitiesController, UtilitiesService,
@@ -89,7 +87,7 @@ export class AppModule {
         AdminController, TeamsController, PlacementsController, LookupsController, DashboardController, HotlistController, ImportsController,
         PaperworkController,
         ResumesController, NotificationsController, DocumentsController, StepUpController,
-        EmployeesController, AssignmentsController, ReportsController, WorkAuthorizationController, LmsController,
+        EmployeesController, AssignmentsController, ReportsController, WorkAuthorizationController,
         CompaniesController, FacilitiesController, CompanyEmployeesController, CompanyEmployeeOptionsController,
         UtilitiesController, BillsController,
         DatahubController,
@@ -107,7 +105,7 @@ export class AppModule {
         CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
         PaperworkService,
         ResumesService, NotificationsService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
-        WorkAuthorizationService, LmsService, OwnersService, UtilitiesService, BillsService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
+        WorkAuthorizationService, OwnersService, UtilitiesService, BillsService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
         DatahubService,
         // training
         TrainingService,
