@@ -57,7 +57,7 @@ archived where noted).
 
 | CrewNex | Eureka | Phase | Semantic differences |
 |---|---|---|---|
-| `User` role CONSULTANT | `person` + `candidate` (existing) | C1b | A consultant is a **signing-in user** in CrewNex (LMS, `/my-marketing`, profile requests, own documents). Eureka has no candidate sign-in (design A1 non-goal). `candidate.team_id` and `technology_id` are NOT NULL; CrewNex `technology` is free text with "Other" and a consultant may have no Team Lead (both go to review). |
+| `User` role CONSULTANT | `person` + `candidate` (existing) | C1b | A consultant is a **signing-in user** in CrewNex (LMS, `/my-marketing`, profile requests, own documents). Eureka has no candidate sign-in (design A1 non-goal). `candidate.team_id` and `technology_id` are NOT NULL; CrewNex `technology` is free text with "Other": aliases live in `mapping.crewnex.json` `technologies` (the sheet mechanism), not in the exporter, so a new alias is a reviewed mapping change; unmatched values and consultants with no Team Lead go to review. |
 | `User` staff roles | `app_user` + `user_role` (existing) | C1b | Eureka users sign in with Google Workspace (A6.1, linked by `sub`); CrewNex uses username or email + argon2. Staff need a Workspace account in the hosted domain. Role assignments are not imported (section 3). |
 | `User.offshoreLeadId`, `offshoreManagerId`, `offshoreDirectorId` | `reporting_line` (existing) | C1b | Effective-dated; closure rebuilt by trigger. |
 | Offshore Team Lead + recruiters with `offshoreLeadId` | `team` (lead) + `team_member` (existing) | C1b | One team per Team Lead. |
@@ -66,9 +66,10 @@ archived where noted).
 | `User.trainerUserId`, `otterTeamUserId` | none | C3 | LMS reviewers. |
 | `User.immigrationUserId` | none | Drop | Eureka Immigration is org-scoped (Q6). |
 | `User.supportTechnologies` | `coach_assignment` (existing), approximated | C2.3 | Technology scope has no Eureka equivalent (Q7). |
-| `Location` | `location` kind `training` (existing) | C1a | CrewNex `code` has no column; kind confirmed by Q24. |
+| `Location` | `location` kind `training` (existing) | C1a | CrewNex `code` is unique, `name` is **not**; Eureka `location.name` is UNIQUE (0003). The exporter matches by code and stops on two active CrewNex locations with the same name. Kind confirmed by Q24. |
+| `User.locationId` NULL on a consultant | review (`no_location`) | C1b | Eureka `candidate.location_id` is NOT NULL; no default location is guessed. |
 | `OffshoreOffice` enum (LOCATION_1, LOCATION_2) and `User.offshoreOffice`, `coveredOffices` | `location` kind `office` (existing) + `candidate.office` (design, NEW column) | C1a / C1b | Office scoping becomes hierarchy scoping (a Director sees the Managers who report to them, not "offices"). `coveredOffices` is dropped; reporting lines replace it. |
-| `OnboardingCompany` (+ `OnboardingCompanyLocation` opt-ins) | `legal_entity` (design AS-09, NEW) | C1a | Opt-ins per location have no home: kept as `legal_entity_location` (NEW) only if Q25 says the rule matters. `accountsUserId`, `hrUserId`, `associateHrUserId`, `contractsUserId` (per-company staff) are dropped with Q6. |
+| `OnboardingCompany` (+ `OnboardingCompanyLocation` opt-ins) | `legal_entity` (design AS-09, NEW) | C1a.1 | Opt-ins per location have no home: kept as `legal_entity_location` (NEW) only if Q25 says the rule matters. `accountsUserId`, `hrUserId`, `associateHrUserId`, `contractsUserId` (per-company staff) are dropped with Q6. |
 | `User.onboardingCompanyId` | `candidate.onboarding_entity_id` (NEW; design has `offer_letter_entity_id`, `everify_entity_id`, `entity_1099_id`) | C1b | Which design column it is, is Q25. |
 | `User.marketingEmail`, `vitelGlobalNumber` | `candidate.marketing_email`, `candidate.vitel_number` (existing) | C1b | Company-issued and **reissued** between consultants (CrewNex releases them on deactivation), so they are **not identity** for CrewNex batches (D3): excluded from identity hashes, and exported only for ACTIVE consultants so a reissued address is never loaded twice. |
 | `User.email`, `phone` (personal) | `person.personal_email`, `person.phone_e164` (existing) | C1b, gated | CrewNex restricts these to the location chain; Eureka shows phone to every recruiter of the team. **Matched, not loaded** until Q9 (D4): identity-only columns (C1b.4) replace the cell with a keyed-hash token at staging, like DOB, and the loader writes NULL. |
@@ -84,10 +85,11 @@ archived where noted).
 
 | CrewNex | Eureka | Phase | Semantic differences |
 |---|---|---|---|
-| `VendorCompany` (277 seeded, `mergedIntoId`) | `vendor` (existing) | C1a | Merged rows resolve to their survivor; only survivors are exported. Curation rights (CEO/Director/Manager merge) are a C2.8 port. |
-| `VendorSubmittal.endClientName` (text) | `client` (existing) | C1a | Names normalised and deduplicated in the exporter; unknown names go to review (`unknown_client`). |
-| `VendorSubmittal` | `submission` (existing) | C1c | Eureka requires `recruiter_id` (actor snapshot) and sets `submitted_at` itself; CrewNex rows are often entered by the consultant and carry `submittedOn` (date). Natural key today is candidate + client + job title, which collapses two CrewNex submittals to one client through different vendors. |
-| `VendorSubmittal.rateUsd` | `submission.rate` (existing) | C1c | Read tiers differ (section 8). |
+| `VendorCompany` (277 seeded, `mergedIntoId`) | `vendor` (existing) | C1a | Merged rows resolve to their survivor; only survivors are exported. The import matches reference names by exact `lower(trim(name))` (`apps/api/src/import/stage.ts:43-46`), so near-duplicates (`Acme Inc` / `Acme, Inc.`, CrewNex `nameNormalised` collisions) are flagged by the lookups sheet as `near_duplicate_name` and go to review rather than becoming two vendors. Curation rights are a C2.8 port. |
+| `VendorSubmittal.endClientName` (text) | `client` (existing) | C1a | Same rule: exact lower-case match, near-duplicates to review, unknown names `unknown_client`. |
+| `VendorSubmittal` | `submission` (existing) | C1c | Eureka requires `recruiter_id` (actor snapshot) and sets `submitted_at` itself; CrewNex rows are often entered by the consultant and carry `submittedOn` (date). Natural key today is candidate + client + job title, which collapses two CrewNex submittals to one client through different vendors (fixed by `sourceId`, D3). `submitted_at`: the insert guard (`eureka.submission_insert_guard`, `0019_review_hardening.sql:25-35`) checks status and reason but **not** `submitted_at`, and `authz_definer` may insert only `(candidate_id, job_title, client_id, vendor_id)` (`0033_import_hardening.sql:354`). C1c.2 closes the gap (a client-set `submitted_at` is refused unless `import_active()`) **and** grants `INSERT (submitted_at)` to `authz_definer`. |
+| `VendorSubmittal.createdByUserId`, `updatedByUserId` | none | Drop | The actor snapshot is the owner (section 3); who typed the row (often the consultant) has no Eureka meaning. |
+| `VendorSubmittal.rateUsd` | `submission.rate` (existing) | C1c | Read tiers differ (section 8). The sheet rule "out-of-range rate → review, approvable, value dropped" (`docs/import.md`) is wrong for CrewNex: a rate is never silently dropped. The exporter lists rates outside (0, 1000] (the placement CHECK, 0022) in its exceptions file and the CrewNex mapping marks `rate` not approvable. |
 | `VendorSubmittal.submittalType` (C2C, TEN99) | `submission.rate_type` (design, NEW) | C1c.3 | |
 | `VendorSubmittal.vendorContactName/Phone/Email` | `submission_contact` (NEW, like `placement_contact`) | C1c.4 | Withheld from Location Manager/Admin in CrewNex; column policy needed. |
 | `VendorSubmittal.intermediateLayers` (text[]) | `submission.implementation_partner_id` (first layer, existing) + `submission_layer` (NEW, ordered) | C1c.5 | |
@@ -96,7 +98,8 @@ archived where noted).
 | `VendorSubmittalNote`, `InterviewNote` (`staffOnly`) | `activity_note` (NEW; design `candidate_note` is the nearest) | C2.2 | Free text: never in audit or outbox (rule 5). Archived until ported (Q20). |
 | `SubmittalImportBatch`, `SubmittalImportRow` | none | Drop | CrewNex's own staged import. |
 | `ConsultantInterview` | `interview` (existing) | C1d | Eureka `submission_id` NOT NULL; CrewNex `vendorSubmittalId` is optional (orphan interviews get a synthesised submission, Q14). Eureka needs `ends_at` (CrewNex has only `scheduledAt`: default 60 min). |
-| `ConsultantInterview.stage` + `round` | `interview.round` (text, existing) | C1d | `"L2"`, `"Technical screening 1"` etc.; a typed `stage` column is C1d.3. |
+| `ConsultantInterview.inviteReceivedAt` | none | Drop | Eureka keeps the boolean only; the date adds nothing a screen uses. |
+| `ConsultantInterview.stage` + `round` | `interview.round` (text, existing) | C1d | `"L2"`, `"Technical screening 1"` etc., **at most 40 characters** (`analyze.ts:337`, `interviews.schemas.ts:29`): the label map in `mapping.crewnex.json` uses short forms. A typed `stage` column is C1d.3. |
 | `.mode`, `.interviewerName`, `.meetingLink`, `.technology` | `interview` columns (NEW) | C1d.3 | `meetingLink` is not `otter_url`/`recording_url` (those need consent, AS-12). `technology` decides Interview Support visibility in CrewNex (C2.3). |
 | `.inviteReceived` | `interview.invite_received` (existing) | C1d | |
 | `.outcome` | `interview.call_status` + submission status | C1d | Section 4.3. |
@@ -106,7 +109,12 @@ archived where noted).
 | `InterviewTechCheck`, `InterviewTechCheckTick`, `TechCheckItem` | `interview_tech_check` (NEW) | C2.3 | Tech Support role gap (Q8). |
 | `Placement` | `placement` + `assignment` (+ `employee`) (existing) | C1e | CrewNex has no pre-join states: a placement is open (`endedAt` null) or ended. Eureka requires a `selected` submission, `work_mode` and `tentative_start` (NOT NULL), and creates the assignment on the day it is marked joined (Q14). |
 | `Placement.billRateUsd`, `payRateUsd` | `placement.rate` (one column, existing) → `bill_rate`, `pay_rate` (NEW) | C1e.3 | Q13. |
-| `Placement.onboardingCompanyId`, `placedFromCompanyId` | `placement.paperwork_entity_id`, `assignment.payroll_entity_id` (design, NEW) | C1e.4 | Which is which: Q25. Old text columns `placedFromCompanyName`, `payrollCompanyName` are dead in CrewNex: not exported. |
+| `Placement.onboardingCompanyId` | `assignment.payroll_entity_id` (design, NEW) | C1e | Decided from the CrewNex schema (D9): "payroll is the onboarding company by definition" (`prisma/schema.prisma:2761`). |
+| `Placement.placedFromCompanyId` | `placement.paperwork_entity_id` (design, NEW) | C1e | It replaced `placedFromCompanyName`, "the company named on the paperwork the consultant was placed under" (`schema.prisma:2751`). The dead text columns `placedFromCompanyName`, `payrollCompanyName` are not exported. |
+| `Placement.vendorCompanyId` | `placement.vendor_id` (existing, snapshot from the submission in `authz.create_placement`) | C1e | A CrewNex placement whose vendor differs from its submittal's goes to review (`vendor_mismatch`). |
+| `Placement.expectedEndDate` | `assignment_plan.planned_end_date` (existing, 0045) | C1e | Drives `assignment.ending_soon`; not set for ended placements. |
+| `Placement.placedByUserId` | none | Drop | The placement's actor is the owner (section 3); the CrewNex placer is in the audit archive. |
+| Placement with no `vendorSubmittalId` | synthesised submission (C1e.2) | C1e | Needs end client and role title (both NOT NULL in CrewNex, so always possible); outcome `selected`. |
 | `Placement.vendorContact*` | `placement_contact` kind `vendor_poc` (existing) | C1e.5 | The sheet import does not load contacts today. |
 | `Placement.intermediateLayers`, `clientLocation`, `paymentTerms`, `payFrequency`, `timesheetPortal`, `poReference`, `notes` | `placement` columns (NEW) / `project_city`, `project_state` (existing) for `clientLocation` | C1e.6 | `clientLocation` is free text: parse to city/state or review. `notes` is free text (archive). |
 | `Placement.endedAt`, `endReason`, `endNote` | `assignment.end_date`, `end_reason` (existing) | C1e.2 | CONTRACT_ENDED→`completed`, TERMINATED→`terminated`, RESIGNED→`resigned`, OTHER→review. `endNote` free text: archive. |
@@ -292,7 +300,7 @@ allows it; such rows go to review (`interview_conflict`).
 | Placement ended **without** a reason, or ended before it started | `backout` (replay 4.6) |
 | `SubmittalType` C2C / TEN99 | `placement_type` `c2c` / `1099` (CrewNex has no W2) |
 | `PlacementWorkMode` REMOTE / HYBRID / ONSITE | `remote` / `hybrid` / `onsite`; NULL → review (Eureka NOT NULL) |
-| `VisaType` CPT, INITIAL_OPT, STEM_OPT, H1B, H4EAD, GC, US_CITIZEN | `auth_type` F-1 CPT, F-1 OPT, STEM OPT, H-1B, H-4 EAD, green card; **US_CITIZEN unmappable** (not a work authorisation: no record, Q12) |
+| `VisaType` CPT, INITIAL_OPT, STEM_OPT, H1B, H4EAD, GC, US_CITIZEN | `auth_type` slugs (`WORK_AUTH_TYPES`, `packages/shared/src/workAuthorization.ts`): `f1_cpt`, `f1_opt`, `f1_stem_opt`, `h1b`, `h4_ead`, `green_card`; **US_CITIZEN unmappable** (not a work authorisation: no record, Q12). `status` is NOT NULL (`0042:86`): loaded as `valid` (expired is derived from `valid_to`). `visaExpiresAt` NULL (CrewNex: "does not expire") → `valid_to` NULL. |
 
 Historical side effects are handled by the replay rules in 4.6.
 
@@ -398,7 +406,7 @@ The current sheet format cannot carry these. Each line is one PR in section 6.
 | Standalone submissions | Submissions exist only implicitly from interview/placement rows (keyed candidate + client + job title) | A `submissions` sheet; interviews and placements reference `submissionSourceId` (C1c.1) |
 | Historical dates | `submitted_at` is server-set; assignment start = day marked joined | Import-only `submittedOn` / `startDate` honoured by the loader, audited as `source: import` (C1c.2, C1e.1) |
 | Team vs owner | Team derives from the owner; a consultant with a lead and no recruiter has no owner | `teamLeadEmail` column; owner falls back to the lead (C1b.3) |
-| Explicit time zone | Sheet default is `America/Chicago` | Exporter writes ISO-8601 UTC instants (`Z`) and `mapping.crewnex.json` sets `timeZone: UTC`; calendar dates (`@db.Date`) as `YYYY-MM-DD` read in UTC (C1a.4) |
+| Explicit time zone | Sheet default is `America/Chicago` | Exporter writes ISO-8601 UTC instants (`Z`) and `mapping.crewnex.json` sets `timeZone: "Etc/UTC"`; calendar dates (`@db.Date`) as `YYYY-MM-DD` read in UTC (C1a.4) |
 | Vendor contact | No column; contacts not loaded | `submission_contact` + `placement_contact` loading (C1c.4, C1e.5) |
 | Rate type, layers | No columns | C1c.3, C1c.5 |
 | Interview stage, mode, link, interviewer, reschedule chain | `round` text only | C1d.3, C1d.4 |
@@ -561,7 +569,7 @@ CrewNex `CLAUDE.md` traps the migration must not regress, and the Eureka mechani
 | Office changes only through `assignment.ts`; Trap A/B | Team moves through `team:move_member` definers; Trap B by the existing `candidate_team_invariant` (0006); Trap A and Director coverage reported at reconciliation. | C1b, C1f.4 |
 | Soft delete fires no FK action; severing children | Eureka has no user delete; deactivation revokes sessions; reporting lines end by `valid` range. | C1b.2 |
 | Single-session consultants | No consultant sign-in in C1–C2. | C3 |
-| ET (America/New_York) for every timestamp; `datetime-local` has no zone | UTC storage; user zone + EST for interviews (AS-05); exporter writes UTC instants explicitly, never relying on the import default `America/Chicago`. | C1a.4 |
+| ET (America/New_York) for every timestamp; `datetime-local` has no zone | UTC storage; user zone plus **ET** (America/New_York, with daylight saving) for interviews. Design AS-05 says "EST"; CrewNex's trap is exactly a fixed UTC-5 reading an hour off for eight months, so Eureka screens must use the zone, not the abbreviation (check when C1d lands). Exporter writes UTC instants explicitly; `mapping.crewnex.json` sets `timeZone: "Etc/UTC"`, never relying on the import default `America/Chicago`. | C1a.4 |
 | Calendar dates read in UTC | `@db.Date` exported as `YYYY-MM-DD` from the UTC value. | C1a.2 |
 | Month-first date display | Eureka web formatting; ISO in all migration files. | — |
 | Blob private; pathnames re-pinned on every read | S3 private, presigned GET 60 s / 5 min, fixed keys `clean/…/<id>`, no client-chosen paths. | C2.1 |
@@ -610,7 +618,7 @@ Ask, don't guess (HANDOFF). Each has the default this plan uses until answered.
 22. **Marketing status history** (`MarketingStatusEvent`) back-dated into `candidate_event`? Default: no (append-only, trigger-written); archived.
 23. **Who signs off CrewNex batches:** org admins (import default) or also a business owner? Default: org admins, with the CEO reviewing the reconciliation report.
 24. **CrewNex `Location` kind** (`training`, `gh`, `office`, `remote`) and offshore offices as `office` locations. Default: `training` and `office`.
-25. **Legal entities:** is the CrewNex onboarding company the paperwork, payroll or offer-letter entity, and is the placed-from company the payroll entity? Do per-location opt-ins matter? Default: onboarding = paperwork entity, placed-from = payroll entity; opt-ins dropped.
+25. **Legal entities on the candidate and per-location opt-ins.** (Placement side decided from the schema, D9.) Is `User.onboardingCompanyId` the candidate's offer-letter, E-Verify or 1099 entity in design terms, and do per-location opt-ins matter? Default: a NEW `candidate.onboarding_entity_id`; opt-ins dropped.
 26. **Changes to CrewNex itself:** a `crewnex_export` role (`BYPASSRLS`, column-level grants, login only in the window), the `crewnex_export_identity()` function, and a marketing write-freeze flag at C1f. Default: yes, as small CrewNex PRs when C1a.2 runs against real data and when C1f starts.
 27. **Acceptable-use policy gate and issue reporting in Eureka?** Default: not ported; decide with C2.9.
 28. **Actual CrewNex vendor costs** (Vendors.md business columns are TODO). Default: list prices in section 7.
