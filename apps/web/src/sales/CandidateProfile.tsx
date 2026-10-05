@@ -6,6 +6,7 @@ import { CandidateResumes } from "./CandidateResumes";
 import { DocumentsSection } from "../documents/DocumentsSection";
 import { CandidateTimeline } from "./CandidateTimeline";
 import { CandidateWorkAuthorization } from "../workauth/CandidateWorkAuthorization";
+import { CandidateTraining } from "../training/CandidateTraining";
 import { EditProfileDialog } from "./EditProfileDialog";
 import { salesError } from "./errors";
 import { DUPLICATE_WARNING, LogSubmissionDialog } from "./LogSubmissionDialog";
@@ -159,6 +160,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
         {caps.has("document:read") && <CandidateResumes candidateId={c.id} />}
         {caps.has("document:read") && <DocumentsSection owner={{ kind: "candidate", id: c.id }} title="Paperwork documents" />}
         {caps.has("visa:read") && <CandidateWorkAuthorization candidateId={c.id} />}
+        {caps.has("training:read") && <CandidateTraining candidateId={c.id} />}
 
         <CandidateTimeline id={c.id} />
       </div>

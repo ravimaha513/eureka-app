@@ -3,7 +3,7 @@ import type { Permission } from "@eureka/shared";
 export interface NavItem {
   key: string;
   label: string;
-  section: "Workspace" | "Operations" | "Insights" | "Admin";
+  section: "Workspace" | "Operations" | "Training" | "Insights" | "Admin";
   /** Shown when the user holds ANY of these capabilities (presentation only; the API decides). */
   anyOf: Permission[];
 }
@@ -18,6 +18,9 @@ export const NAV: NavItem[] = [
   { key: "paperwork", label: "Paperwork & BGC", section: "Operations", anyOf: ["document:read", "bgc:update"] },
   { key: "employees", label: "Employees", section: "Operations", anyOf: ["employee:read"] },
   { key: "payments", label: "Payments", section: "Operations", anyOf: ["invoice:read"] },
+  // training
+  { key: "training", label: "Training Batches", section: "Training", anyOf: ["training:read"] },
+  { key: "courses", label: "Courses", section: "Training", anyOf: ["training:manage"] },
   { key: "performance", label: "Performance", section: "Insights", anyOf: ["performance:read"] },
   { key: "reports", label: "Reports", section: "Insights", anyOf: ["report:read"] },
   { key: "access", label: "Users & Access", section: "Admin", anyOf: ["access:manage"] },
