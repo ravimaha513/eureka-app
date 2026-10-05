@@ -27,7 +27,7 @@ locals {
       # Migration tasks only (Workstream=crewnex), not Eureka's running cost.
       name     = "${var.project}-crewnex-migration-tasks"
       limit    = var.budget_crewnex_migration_usd
-      filter   = "user:Workstream$${var.migration_workstream}"
+      filter   = format("user:Workstream$%s", var.migration_workstream)
       forecast = false
       # Only once Workstream is an active cost-allocation tag (it is billed
       # only after the first migration task runs); before that it reads $0.
