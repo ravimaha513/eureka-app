@@ -571,8 +571,8 @@ cutover, 20 GB of documents/resumes/contracts.
 | C2 general | **+$0–12** | API task to 1 GB if exports or the file copy need it (~+$3.5); `db.t4g.small` (+~$12) only if `CPUCreditBalance` keeps falling (guardrail alarm). |
 | C3 (A) keep CrewNex LMS | +$0 on AWS | CrewNex keeps Supabase, Vercel, R2. |
 | C3 (B) port LMS, video stays on R2 + Worker | **+$15–30** | **Cheapest.** Consultants sign in: second API task (+~$11), `db.t4g.small` (+~$12); R2 ~$3 (213 GB × $0.015) + Workers paid plan $5 stay on Cloudflare. |
-| C3 (B) port LMS, video on S3 behind the **same** distribution under flat-rate Pro | **~$4–20** | S3 213 GB ≈ $5; transfer inside Pro's 50 TB allowance; risk: 10M requests a month shared with the app (Range requests per viewing minute) and a sustained overage degrades every user of the distribution, not just video. |
-| C3 (B) video on pay-as-you-go CloudFront | **$250–2,000** | CrewNex videos are untranscoded (~1.3 GB per object, 2–5 Mbit/s): 800k min ≈ 12–30 TB a month at ~$0.06–0.085/GB in the US, more in India. **Never** (guardrail). Measure real egress from R2 analytics before C3. |
+| C3 (B) port LMS, video on S3 behind the **same** distribution under flat-rate Pro | **~$4–20** | S3 213 GB ≈ $3.75 after the plan's 50 GB S3 credit; transfer inside Pro's 50 TB allowance; risk: 10M requests a month shared with the app (Range requests per viewing minute) and a sustained overage degrades every user of the distribution, not just video. |
+| C3 (B) video on pay-as-you-go CloudFront | **$250–2,000** | CrewNex videos are untranscoded (~1.3 GB per object, 2–5 Mbit/s): 800k min ≈ 12–30 TB a month at ~$0.06–0.085/GB. The distribution is `PriceClass_100` (`infra/modules/stack/edge.tf:219`), so viewers in India are served from North American/European edges at those rates (and with more latency). **Never** (guardrail). Measure real egress from R2 analytics before C3. |
 
 CrewNex costs retired (list prices; actual plans are TODO in CrewNex `docs/Vendors.md`, Q28):
 
@@ -592,19 +592,27 @@ C1 and C2 retire little (two Supabase projects and Vercel seats); the bill drops
 
 ### Cost guardrails (C1a.0, first increment)
 
-The production account is shared with spokenly (`infra/live/production/env.hcl`, account `637423353261`), so an
-account-wide budget would trip on spokenly's spend. Budgets are **tag-scoped**: provider default tags already set
-`Project = "Eureka"` (`infra/terragrunt.hcl:32-38`); C1a.0 adds `Workstream = "crewnex"` to every resource the
-consolidation creates and activates both as cost-allocation tags (tags apply only from activation onward, and
-some spend is untaggable, which the anomaly monitor covers).
+The production account is shared with spokenly (`infra/live/production/env.hcl`, account `637423353261`), so
+account-wide budgets and per-service anomaly monitors would fire on spokenly's spend. Everything is **tag-scoped**:
+provider default tags already set `Project = "Eureka"` (`infra/terragrunt.hcl:32-38`); C1a.0 adds
+`Workstream = "crewnex"` to the resources the consolidation creates.
+
+Tag activation is a sequence, not one apply: a cost-allocation tag can be activated only after the key has appeared
+on **billed** usage, so `aws_ce_cost_allocation_tag` fails on a fresh key; activation takes up to 24 hours and is
+not retroactive. Order: (1) deploy the tagged resources; (2) wait for the key to show in Billing; (3) apply the
+activation and the tag-filtered budgets and monitor. If the account is a member of an AWS Organization, activation,
+Budgets on linked accounts and Cost Explorer settings may need the payer account (Q35).
 
 | Guardrail | Setting |
 |---|---|
-| AWS Budget, `Project=Eureka` | $40/month; alerts at 50 %, 80 %, 100 % actual and 100 % forecast |
-| AWS Budget, `Workstream=crewnex` | $15/month, same alerts |
-| Cost Anomaly Detection | Per-service monitor, alert at $10 impact |
-| Log retention | 7–14 days on every new task log group (exporter, import) |
-| CloudWatch alarms | RDS `CPUCreditBalance` (low) and `FreeableMemory` (low) during dry runs and after cutover |
+| Budget `Project=Eureka` | `cost_filter { name = "TagKeyValue", values = ["user:Project$Eureka"] }`; **$40/month** until C1f, **~$60** from C1f (baseline ~$30 + C1f $15–22 + worker ~$6); alerts at 50 %, 80 %, 100 % actual and 100 % forecast |
+| Budget for **untagged** spend | `values = ["user:Project$"]` (no `Project` tag): ~$10/month. Catches SES, some data transfer, support/tax and anything else that carries no tag, including spokenly's until spokenly tags itself `Project=spokenly` (ask; until then this budget is noisy and the threshold is set from the first month's actuals) |
+| Budget `Workstream=crewnex` | $15/month; covers the **migration tasks only** (exporter, import, rehearsal stack), not the steady-state cost of running Eureka |
+| Anomaly detection | `CUSTOM` monitor with a Tags selector `Project=Eureka`; subscription threshold `ANOMALY_TOTAL_IMPACT_ABSOLUTE >= 10` (not a `DIMENSIONAL`/`SERVICE` monitor, which would see spokenly) |
+| RDS alarms | `CPUCreditBalance < 50` and `FreeableMemory < 128 MB` for 15 minutes → `aws_sns_topic` with an email subscription (confirming the subscription is a hand step) |
+| CloudFront | Alarm on `BytesDownloaded` above ~1 TB/month (video or a scrape on the app distribution); a monthly check that the distribution is still on the Pro plan |
+| Log retention | The new exporter and import log groups set **7–14 days explicitly**; the existing groups use `var.log_retention_days` = 30 (`env.hcl:32`), which must not be inherited |
+| Monthly review | Cost Explorer grouped by `Project` with "No tag key" visible, once a month |
 | Rules | No task in a private subnet (it would need a NAT, $33/month each); delete pre-cutover manual RDS snapshots and the export SSM secret at C1f.4; video is **never** served on pay-as-you-go CloudFront; CloudFront Pro enrolled before cutover |
 
 ## 8. Risks and invariants
@@ -690,3 +698,4 @@ Ask, don't guess (HANDOFF). Each has the default this plan uses until answered.
 32. **Owner for consultants whose recruiter left.** Default (D6): the current Team Lead acts and owns; `recruiter_id` NULL. Alternative: a system import actor with an audited `on_behalf_of`.
 33. **Location Manager and Location Admin lose consultant creation and stage moves** (Eureka location roles have no `candidate:create` or status transition). Accept, or add location-scoped grants to the catalog? Default: accept until C1f; consultant creation stays in CrewNex anyway (D7).
 34. **Interview Support loses interview editing** (`interview_coach` has no `interview:update`). Accept, or a catalog change? Default: accept; they keep CrewNex until C2.3.
+35. **AWS Organizations:** is account `637423353261` a member of an Organization? If so, cost-allocation tag activation, Budgets and Cost Explorer settings may need the payer account. Default: assume standalone; C1a.0's apply finds out.

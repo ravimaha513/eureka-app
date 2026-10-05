@@ -220,7 +220,7 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   expiry notices may name the candidate (today: ids and dates only).
 
 - CrewNex consolidation: `docs/crewnex-consolidation.md` is the design of record (Eureka as system of record,
-  strangler migration of the CrewNex app through the import pipeline); its 34 open questions (section 9) gate the first real-data dry run; every C1 increment can be built now on fixtures.
+  strangler migration of the CrewNex app through the import pipeline); its 35 open questions (section 9) gate the first real-data dry run; every C1 increment can be built now on fixtures.
 
 ## Waiting on Ravi (not code)
 
