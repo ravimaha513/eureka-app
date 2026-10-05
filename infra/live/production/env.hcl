@@ -36,6 +36,7 @@ locals {
   # with spokenly, so everything is tag-scoped and lives in this env only.
   alert_emails                = [] # TODO(Ravi): who receives budget, anomaly and alarm email
   cost_budgets_enabled        = true
+  manage_cost_allocation_tags = false # step 3 of the runbook: activates Project (fails before it is billed)
   cost_allocation_tags_active = false # step 3 of the runbook: true once Project is active in Billing
   budget_monthly_usd          = 40    # raise to ~60 at C1f (CloudFront Pro + worker)
 }

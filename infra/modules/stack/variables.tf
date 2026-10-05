@@ -143,3 +143,31 @@ variable "alarm_cloudfront_monthly_gb" {
   type        = number
   default     = 1000
 }
+variable "manage_cost_allocation_tags" {
+  description = "This stack activates cost_allocation_tag_keys (aws_ce_cost_allocation_tag). Off until the keys have appeared on BILLED usage (about 24 hours after the first tagged apply): activating an unseen key fails. Leave off if an Organization payer account activates tags instead."
+  type        = bool
+  default     = false
+  validation {
+    condition     = !var.manage_cost_allocation_tags || var.cost_budgets_enabled
+    error_message = "Activate cost-allocation tags only from the environment that owns the budgets (production): activation is account-wide."
+  }
+}
+variable "cost_allocation_tag_keys" {
+  description = "Tag keys to activate when manage_cost_allocation_tags is on. Add Workstream only after the first Workstream=crewnex task has been billed."
+  type        = list(string)
+  default     = ["Project"]
+}
+variable "migration_workstream" {
+  description = "Value of the Workstream tag carried by the CrewNex migration resources (local.migration_tags); the crewnex-migration budget filters on it."
+  type        = string
+  default     = "crewnex"
+}
+variable "migration_log_retention_days" {
+  description = "Retention for the CrewNex exporter and import task log groups. Set explicitly, never var.log_retention_days (30 in production)."
+  type        = number
+  default     = 14
+  validation {
+    condition     = contains([7, 14], var.migration_log_retention_days)
+    error_message = "migration_log_retention_days must be 7 or 14."
+  }
+}

@@ -23,3 +23,7 @@ output "alerts_topic_arn" {
   description = "SNS topic for the cost and RDS alarms; each email subscription must be confirmed from the inbox."
   value       = aws_sns_topic.alerts.arn
 }
+output "migration_tags" {
+  description = "Tags for CrewNex migration resources (Workstream), merged over the provider default tags."
+  value       = local.migration_tags
+}

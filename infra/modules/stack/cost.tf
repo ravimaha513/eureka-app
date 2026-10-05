@@ -43,6 +43,7 @@ locals {
 
 resource "aws_budgets_budget" "cost" {
   for_each     = local.budgets
+  depends_on   = [aws_ce_cost_allocation_tag.active]
   name         = each.value.name
   budget_type  = "COST"
   limit_amount = format("%.2f", each.value.limit)
@@ -120,4 +121,32 @@ resource "aws_ce_anomaly_subscription" "eureka" {
       address = subscriber.value
     }
   }
+}
+
+# ---------------- Tag plumbing ----------------
+# Provider default_tags put Project=Eureka on everything. The CrewNex migration
+# resources (exporter and import task definitions, their log groups, a rehearsal
+# stack) add local.migration_tags so the crewnex-migration budget sees them:
+#
+#   tags = local.migration_tags                     # task definition, log group
+#   retention_in_days = var.migration_log_retention_days
+#
+# and every `aws ecs run-task` of them passes `--propagate-tags TASK_DEFINITION`
+# (the caller then needs ecs:TagResource): a standalone Fargate task carries no
+# tags otherwise, and its cost lands in the untagged budget instead.
+locals {
+  migration_tags = { Workstream = var.migration_workstream }
+}
+
+# ---------------- Cost-allocation tag activation (opt-in, step 3) ----------------
+# Account-wide, so it lives only where the budgets do. Activation fails for a
+# key that has not yet appeared on billed usage, takes up to 24 hours to show in
+# Cost Explorer and is not retroactive. Destroying this resource DEACTIVATES the
+# key for the whole account, spokenly included. In an AWS Organization the payer
+# account may have to activate instead (Q35): then leave this off and set
+# cost_allocation_tags_active once the payer has done it.
+resource "aws_ce_cost_allocation_tag" "active" {
+  for_each = var.manage_cost_allocation_tags ? toset(var.cost_allocation_tag_keys) : toset([])
+  tag_key  = each.value
+  status   = "Active"
 }
