@@ -61,7 +61,7 @@ archived where noted).
 | `User` staff roles | `app_user` + `user_role` (existing) | C1b | Eureka users sign in with Google Workspace (A6.1, linked by `sub`); CrewNex uses username or email + argon2. Staff need a Workspace account in the hosted domain. Role assignments are not imported (section 3). |
 | `User.offshoreLeadId`, `offshoreManagerId`, `offshoreDirectorId` | `reporting_line` (existing) | C1b | Effective-dated; closure rebuilt by trigger. |
 | Offshore Team Lead + recruiters with `offshoreLeadId` | `team` (lead) + `team_member` (existing) | C1b | One team per Team Lead. |
-| `User.offshoreTeamLeadId`, `offshoreRecruiterId` (on the consultant) | `candidate.team_id`, `candidate.recruiter_id` (existing) | C1b | CrewNex Trap B (recruiter on another lead's desk) must be refused at import: `recruiter_id` must be a member of `team_id`. |
+| `User.offshoreTeamLeadId`, `offshoreRecruiterId` (on the consultant) | `candidate.team_id`, `candidate.recruiter_id` (existing) | C1b | Team from the lead, owner per the owner rule (section 3). Trap B is already refused by `candidate_team_invariant` (0006). |
 | `User.coordinatorId`, `managerId`, `locationManagerId` | none | Drop | Location-chain links; Eureka location roles scope by `location_id` (Q5). |
 | `User.trainerUserId`, `otterTeamUserId` | none | C3 | LMS reviewers. |
 | `User.immigrationUserId` | none | Drop | Eureka Immigration is org-scoped (Q6). |
@@ -148,6 +148,28 @@ assignments are never imported.** The exporter produces a roster (name, work ema
 role, proposed team and manager); an org admin assigns roles in Users & Access, with the second approver that
 restricted roles require (A6.2). Importing them would bypass that control.
 
+**Ordering gate before C1b (D6).** Sign-in, email linking and the dev path all require `app_user.status = 'active'`
+(`apps/api/src/modules/identity/auth.controller.ts:81`, `:88`, `:110`), and the import loader acts only as an
+**active** Sales user (`docs/import.md` "What the commit does"). So before any consultant row can load:
+
+1. Staff are created **active** from the roster (C1b.1), each with a Workspace email in the hosted domain.
+2. Org admins assign roles in Users & Access (second approver for restricted roles); teams and reporting lines exist.
+3. Only then does a consultant batch dry-run clean.
+
+Owner rule (who the loader acts as, and who becomes `recruiter_id` / the submission's actor snapshot):
+
+| CrewNex | Eureka owner |
+|---|---|
+| Consultant's `offshoreRecruiterId` is active and a member of the Team Lead's team | that recruiter |
+| No recruiter, or recruiter deactivated/deleted/departed | the consultant's **current Team Lead** (`teamLeadEmail`); `recruiter_id` NULL. Default (Q32); alternative: a system import actor recorded as acting `on_behalf_of` the departed recruiter, audited, which keeps the historical submitter but adds a non-human Sales actor to RLS. |
+| Team Lead inactive or missing | review (`no_active_owner`) |
+
+`candidate.team_id` comes from `teamLeadEmail` (the lead's team), never from the owner's team, so a consultant
+whose recruiter left stays on their lead's desk.
+
+Role defaults (D8): **no role is granted by default where the Eureka role is wider than the CrewNex one**; such
+users get an account and no role until Ravi answers.
+
 | CrewNex role | Eureka role | Scope change | Status |
 |---|---|---|---|
 | CEO | `ceo` | Same breadth; Eureka CEO is read-only on Sales data and sees no DOB or restricted documents (B4.2). CrewNex CEO writes everything. | Mapped; narrowing accepted unless Q3 says otherwise |
@@ -155,15 +177,15 @@ restricted roles require (A6.2). Importing them would bypass that control.
 | OFFSHORE_MANAGER | `manager` | Office desk → hierarchy. | Mapped |
 | OFFSHORE_TEAM_LEAD | `lead` | Same: the lead's team. | Mapped |
 | OFFSHORE_RECRUITER | `recruiter` | Eureka recruiter sees the whole team's candidates (CrewNex: own consultants) but only own submissions/interviews/placements. | Mapped; widening of candidate reads noted |
-| LOCATION_MANAGER | `location_incharge` | Location. | Mapped |
-| LOCATION_ADMIN | `location_ops_admin` | Location. | Mapped |
-| COORDINATOR | `location_ops_admin` (default) | Own consultants → whole location (widening). | **Q5** |
+| LOCATION_MANAGER | `location_incharge` | Location. **Loses** consultant creation and stage moves (Eureka location roles hold no `candidate:create` and no status transition; CrewNex `/users/new` and `canSetMarketingStatus` give them both). | Mapped; loss is **Q33** |
+| LOCATION_ADMIN | `location_ops_admin` | Location. Same loss. | Mapped; **Q33** |
+| COORDINATOR | **none** (default) | `location_ops_admin` would widen own consultants → whole location. | **Q5** |
 | CONSULTANT | none (candidate record) | No sign-in. | **Q2, Q3** |
-| HR | `hr` | Onboarding-company consultants → org. Adds DOB and restricted documents (Eureka HR holds `candidate.dob:read`, `document.restricted:read`). | **Q6** |
-| ASSOCIATE_HR | `associate_hr` | Company → org. | **Q6** |
-| ACCOUNTS | `accounts` | Company → org; gains `rate:read`, restricted documents. | **Q6** |
-| IMMIGRATION | `immigration` | Assigned consultants → org; gains `visa:update`. | **Q6** |
-| INTERVIEW_SUPPORT | `interview_coach` (approximation) | Technology → coached teams. | **Q7** |
+| HR | **none** until Q6 (candidate: `hr`) | `hr` would widen onboarding-company consultants → org and add DOB and restricted documents (`candidate.dob:read`, `document.restricted:read`). | **Q6** |
+| ASSOCIATE_HR | **none** until Q6 (candidate: `associate_hr`) | Company → org. | **Q6** |
+| ACCOUNTS | **none** until Q6 (candidate: `accounts`) | Company → org; adds `rate:read`, restricted documents. | **Q6** |
+| IMMIGRATION | **none** until Q6 (candidate: `immigration`) | Assigned consultants → org; adds `visa:update`. | **Q6** |
+| INTERVIEW_SUPPORT | **none** until Q7 (candidate: `interview_coach`) | Technology → coached teams, and **loses** interview editing: `interview_coach` holds no `interview:update`, while CrewNex Interview Support edits time, stage, link and outcome (`updateInterviewAction`). | **Q7**, **Q34** |
 | TECH_SUPPORT | none | Every interview, tech check only. | **Q8** gap |
 | CONTRACTS | none | Company contracts. | **Q8** gap (C2.1 `contract:review`) |
 | RESUME_WRITER (Resume Team) | none | Linked Team Leads' consultants. | **Q8** gap (C2.6) |
@@ -195,7 +217,15 @@ Coordinator ─coordinatorId─▶ Consultant        dropped (Q5)
 CrewNex's chain-break traps map as follows. **Trap A** (lead whose manager is gone hides the desk from everyone
 above): in Eureka the lead simply has no reporting line and the manager's hierarchy scope stops at them; the same
 invisibility. C1f reconciliation lists every lead with no manager line. **Trap B** (recruiter on another lead's
-desk): refused at import (C1b test) and later by a trigger on `candidate` (C1b.4).
+desk): already refused by the existing trigger `candidate_team_invariant` (`db/migrations/0006_guards.sql:59-71`:
+`recruiter_id` must be a current member or the lead of `team_id`); the exporter flags such rows so they reach
+review instead of failing at commit. No new trigger is needed.
+
+**Director offices vs one reporting line.** A CrewNex Director scopes by `coveredOffices` (possibly both offices);
+in Eureka a Director sees only the Managers who report to them. Reconciliation item (C1f.4): every Manager whose
+office is not in their Director's `coveredOffices`, every covered office with Managers reporting to a different
+Director, and every Director covering an office through `coveredOffices` alone. Each is a scope difference to
+resolve by a reporting line or accept.
 
 ## 4. Status and state mapping
 
@@ -274,7 +304,7 @@ Historical side effects are handled by the replay rules in 4.6.
 | DRIVERS_LICENSE | `drivers_license` | restricted |
 | PASSPORT, STATE_ID, I20 | `passport`, `state_id`, `i20` (NEW types) | restricted (Q12) |
 | IDENTITY (legacy coarse) | review | restricted until classified |
-| CERTIFICATION, NDA, OTHER | `other` | internal |
+| CERTIFICATION, NDA, OTHER | `other` | **restricted until classified** (D8): an "other" upload in CrewNex can be anything, including identity papers; reclassifying down is a later, reviewed step |
 | RESUME, CONTRACT (retired in CrewNex) | `resume` / `contract` tables | not documents |
 
 ### 4.6 Historical replay (D5)
@@ -528,7 +558,7 @@ CrewNex `CLAUDE.md` traps the migration must not regress, and the Eureka mechani
 | Enum added through a two-branch ternary; guards as allowlists | Exporter enum maps are exhaustive `Record`s and stop on an unknown value; mapping statuses are allowlists (unknown → review); CHECK constraints in Eureka. | C1a.2, C1a.4 |
 | `endPlacement()` is the one project-end write path and resets readiness | `assignment.end_date` through the employee definer functions; readiness reset waits for C2.5. | C1e.2 |
 | One open placement per consultant | One open pre-join placement per candidate (partial unique); joined placements → assignments. | C1e |
-| Office changes only through `assignment.ts`; Trap A/B | Team moves through `team:move_member` definers; Trap B trigger (C1b.4); Trap A reported at reconciliation. | C1b, C1f.1 |
+| Office changes only through `assignment.ts`; Trap A/B | Team moves through `team:move_member` definers; Trap B by the existing `candidate_team_invariant` (0006); Trap A and Director coverage reported at reconciliation. | C1b, C1f.4 |
 | Soft delete fires no FK action; severing children | Eureka has no user delete; deactivation revokes sessions; reporting lines end by `valid` range. | C1b.2 |
 | Single-session consultants | No consultant sign-in in C1–C2. | C3 |
 | ET (America/New_York) for every timestamp; `datetime-local` has no zone | UTC storage; user zone + EST for interviews (AS-05); exporter writes UTC instants explicitly, never relying on the import default `America/Chicago`. | C1a.4 |
@@ -560,9 +590,9 @@ Ask, don't guess (HANDOFF). Each has the default this plan uses until answered.
 2. **Do consultants become Eureka users?** Default: no, through C2 (design A1 non-goal; consultants are not Workspace users). They keep signing in to CrewNex for training.
 3. **Consultant self-entry of submissions and interviews after C1f.** CrewNex lets consultants log and edit their own. Default: recruiters enter them in Eureka; consultants lose self-entry and keep a read-only CrewNex view until C3.
 4. **Offshore Director → `assoc_director` or `offshore_manager`?** And who holds `documents_team` / `bu_head`. Default: `assoc_director` (hierarchy scope matches the chain; `offshore_manager` is org-wide read-only).
-5. **Coordinators.** Default: `location_ops_admin` (widens from own consultants to the whole location); alternative: no Eureka role.
-6. **HR, Associate HR, Accounts, Immigration widen from per-company / per-consultant to org scope**, and HR/Accounts gain DOB/restricted documents/rates per Eureka's grants. Default: accept Eureka's grants (per-company scope would be a third axis).
-7. **Interview Support's technology scope.** Default: `interview_coach` with coach assignments to the teams whose consultants are in their technologies, reviewed by hand; a technology scope only if this proves wrong.
+5. **Coordinators.** Default (D8): account, no role. `location_ops_admin` would widen from own consultants to the whole location.
+6. **HR, Associate HR, Accounts, Immigration widen from per-company / per-consultant to org scope**, and HR/Accounts gain DOB/restricted documents/rates per Eureka's grants. Default (D8): accounts, no roles, until answered (per-company scope would be a third axis).
+7. **Interview Support's technology scope.** Default (D8): account, no role. Candidate mapping: `interview_coach` with coach assignments to the teams whose consultants are in their technologies.
 8. **Tech Support, Contracts, Resume Team: new Eureka roles?** Default: no role until their port (C2.3, C2.1, C2.6); they keep CrewNex until then.
 9. **Personal email and phone visible to offshore recruiters?** Default (D4): matched, not loaded (identity-only columns, C1b.4) until answered; the candidate feedback email, which needs `personal_email`, does not reach CrewNex-sourced candidates meanwhile.
 10. **Visa type/expiry for Leads and Managers** (CrewNex shows it; Eureka: HR and Immigration only). Default: Eureka's narrower rule.
@@ -587,3 +617,6 @@ Ask, don't guess (HANDOFF). Each has the default this plan uses until answered.
 29. **Marketing email / Vitel number holder history** (CrewNex keeps old and new values in audit). Default: not carried; add a holder-history table if "who held this number in June" must stay answerable.
 30. **LMS direction (C3).** Default: (A) keep CrewNex as LMS-only, revisit after C1f with measured usage.
 31. **Who creates consultants and ends training after C1f?** Default (D7): CrewNex, with a one-way feed of new consultants and readiness-gate events into Eureka; Eureka refuses a manual `in_training → active` on CrewNex-sourced candidates. Alternative: Eureka creates candidates and CrewNex learns of them, which needs a feed the other way.
+32. **Owner for consultants whose recruiter left.** Default (D6): the current Team Lead acts and owns; `recruiter_id` NULL. Alternative: a system import actor with an audited `on_behalf_of`.
+33. **Location Manager and Location Admin lose consultant creation and stage moves** (Eureka location roles have no `candidate:create` or status transition). Accept, or add location-scoped grants to the catalog? Default: accept until C1f; consultant creation stays in CrewNex anyway (D7).
+34. **Interview Support loses interview editing** (`interview_coach` has no `interview:update`). Accept, or a catalog change? Default: accept; they keep CrewNex until C2.3.
