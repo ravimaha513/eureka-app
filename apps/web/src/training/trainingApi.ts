@@ -155,6 +155,9 @@ const MESSAGES: Record<string, string> = {
   module_in_use: "Students have completed this module, so it can't be deleted.",
   invalid_order: "The list changed meanwhile. Refresh and try again.",
   invalid_transition: "That status change isn't allowed from the batch's current status.",
+  course_shared: "Another location's batch uses this course, so its modules' timing, order and archiving can't change. Copy the course instead.",
+  limit_reached: "A limit was reached (at most 1000 modules per course or courses per batch).",
+  conflict: "Someone changed this at the same moment. Refresh and try again.",
   location_required: "Choose the location that owns the course.",
 };
 

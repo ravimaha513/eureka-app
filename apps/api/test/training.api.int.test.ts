@@ -117,6 +117,59 @@ describe("course library (TR-4)", () => {
   });
 });
 
+describe("review fixes (TR-4)", () => {
+  const mk = async (title: string, modules = 2) =>
+    (await call("locD", "POST", "/api/v1/training/courses", { title, modules: Array.from({ length: modules }, (_, i) => ({ title: `M${i}`, durationMinutes: 30 })) })).json().id as string;
+
+  it("rejects links with user info and keeps '@' in paths", async () => {
+    for (const bad of ["https://user@example.com/x", "https://user:pw@example.com", "https://@example.com"]) {
+      const r = await call("locD", "POST", "/api/v1/training/courses", { title: "L", modules: [{ title: "M", durationMinutes: 5, resources: [bad] }] });
+      expect(r.statusCode, bad).toBe(422);
+    }
+    const ok = await call("locD", "POST", "/api/v1/training/courses", { title: "L", modules: [{ title: "M", durationMinutes: 5, resources: ["https://example.com/a@b"] }] });
+    expect(ok.statusCode, ok.body).toBe(201);
+  });
+
+  it("concurrent module adds all succeed with distinct positions; the 1001st module is 422, never 500", async () => {
+    const id = await mk("Concurrent", 0);
+    const rs = await Promise.all(Array.from({ length: 6 }, (_, i) => call("locD", "POST", `/api/v1/training/courses/${id}/modules`, { title: `P${i}`, durationMinutes: 5 })));
+    expect(rs.map((r) => r.statusCode)).toEqual([201, 201, 201, 201, 201, 201]);
+    expect(new Set(rs.map((r) => r.json().position)).size).toBe(6);
+    await db.admin.query(`INSERT INTO eureka.course_module (course_id, position, title, duration_minutes)
+      SELECT $1, g, 'bulk', 1 FROM generate_series(7, 1000) g`, [id]);
+    const over = await call("locD", "POST", `/api/v1/training/courses/${id}/modules`, { title: "Too many", durationMinutes: 5 });
+    expect([over.statusCode, over.json().detail]).toEqual([422, "limit_reached"]);
+  });
+
+  it("concurrent course assignments to one batch get distinct positions", async () => {
+    const b = (await call("locD", "POST", "/api/v1/training/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2070-02-01" })).json().id as string;
+    const ids = await Promise.all([mk("Par A", 1), mk("Par B", 1), mk("Par C", 1), mk("Par D", 1)]);
+    const rs = await Promise.all(ids.map((c) => call("locD", "POST", `/api/v1/training/batches/${b}/courses`, { courseId: c })));
+    expect(rs.map((r) => r.statusCode)).toEqual([201, 201, 201, 201]);
+    const pos = (await db.admin.query(`SELECT position FROM eureka.batch_course WHERE batch_id = $1 ORDER BY 1`, [b])).rows.map((r) => r.position);
+    expect(pos).toEqual([1, 2, 3, 4]);
+  });
+
+  it("another location's batch freezes timing, order, adds, deletes and archiving: 409 course_shared; the count only includes visible batches", async () => {
+    const id = await mk("Frozen");
+    const austin = (await call("locA", "POST", "/api/v1/training/batches", { locationId: LOC.austin, technologyId: TECH_ID, startDate: "2070-03-01" })).json().id as string;
+    expect((await call("locA", "POST", `/api/v1/training/batches/${austin}/courses`, { courseId: id })).statusCode).toBe(201);
+    const course = (await call("locD", "GET", `/api/v1/training/courses/${id}`)).json();
+    const [a, b] = course.modules as { id: string; rowVersion: number }[];
+    const code = async (r: Awaited<ReturnType<typeof call>>) => [r.statusCode, r.json().detail];
+    expect(await code(await call("locD", "PATCH", `/api/v1/training/courses/${id}/modules/${a!.id}`, { durationMinutes: 90 }, { "if-match": String(a!.rowVersion) }))).toEqual([409, "course_shared"]);
+    expect(await code(await call("locD", "DELETE", `/api/v1/training/courses/${id}/modules/${b!.id}`))).toEqual([409, "course_shared"]);
+    expect(await code(await call("locD", "PUT", `/api/v1/training/courses/${id}/modules/order`, { moduleIds: [b!.id, a!.id] }))).toEqual([409, "course_shared"]);
+    expect(await code(await call("locD", "POST", `/api/v1/training/courses/${id}/modules`, { title: "More", durationMinutes: 5 }))).toEqual([409, "course_shared"]);
+    expect(await code(await call("locD", "PATCH", `/api/v1/training/courses/${id}`, { archived: true }, { "if-match": String(course.rowVersion) }))).toEqual([409, "course_shared"]);
+    // Titles still change.
+    expect((await call("locD", "PATCH", `/api/v1/training/courses/${id}/modules/${a!.id}`, { title: "Renamed" }, { "if-match": String(a!.rowVersion) })).statusCode).toBe(200);
+    // The batches count: Dallas does not see the Austin batch; Austin does; Sales see none.
+    const count = async (k: keyof typeof U) => (await call(k, "GET", "/api/v1/training/courses")).json().items.find((c: { id: string }) => c.id === id)?.batches;
+    expect([await count("locD"), await count("locA"), await count("r1a")]).toEqual([0, 1, 0]);
+  });
+});
+
 describe("training batches, students and progress (TR-5..TR-11)", () => {
   let batchId: string; let courseId: string; let modules: string[]; let rowVersion: number;
   let s1: FixtureCandidate; let s2: FixtureCandidate;

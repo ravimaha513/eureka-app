@@ -15,6 +15,7 @@ const CODES: Record<string, (code: string) => HttpException> = {
   location_not_in_scope: (c) => new ForbiddenException(c),
   batch_exists: (c) => new ConflictException(c),
   batch_has_students: (c) => new ConflictException(c),
+  course_shared: (c) => new ConflictException(c),
   stale: (c) => new HttpException(c, HttpStatus.PRECONDITION_FAILED),
   invalid_batch: unprocessable,
   invalid_dates: unprocessable,
@@ -34,6 +35,9 @@ export function mapTrainingError(err: unknown): never {
   const e = err as { message?: string; code?: string };
   const make = e.message !== undefined && e.code !== undefined ? CODES[e.message] : undefined;
   if (make) throw make(e.message!);
+  // Table limits that a request can reach (position CHECKs, lost races on UNIQUE): never a 500.
+  if (e.code === "23514") throw new UnprocessableEntityException("limit_reached");
+  if (e.code === "23505") throw new ConflictException("conflict");
   throw err;
 }
 
