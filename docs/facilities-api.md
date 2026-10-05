@@ -30,6 +30,11 @@ Product decisions (2026-10-05): a **company** is one of the group's own legal en
 | FAC-15 | Exports (CSV, the Hot List `toCsv`: formula-leading cells prefixed with `'`, BOM, CRLF): read permission, at most 5,000 rows (`x-export-rows`, `x-export-truncated`), 10 per user per 10 minutes, audited (`company.exported`, `facility.exported`, `bill.exported`: row count and filters; the search text is not recorded). No notes, owner contact, account numbers, usernames or passwords. |
 | FAC-16 | Rule 5: audit rows carry ids, codes, dates, statuses and changed field names only — never names, addresses, owner contact, rent or bill amounts, account numbers, usernames, passwords, notes or void reasons (the audit redaction list covers these keys too). Nothing in this module writes `outbox_event`. |
 
+Jobs integration (`docs/jobs-portal-api.md` "Companies"): internal job openings reference `eureka.company` (FK, `ON DELETE RESTRICT`). Job
+readers, application reviewers and the applicant portal receive only a company's **name**, through `authz.job_company_names` /
+`authz.portal_job_company_names` for jobs they can already read; HR (`job:manage`, org) lists id and name of active companies through
+`authz.company_options()` for the job form. None of this widens company RLS or exposes address, incharges, utilities, bills or status.
+
 ## Endpoints
 
 Lists take `?q=&status=&locationId=&limit=(1-200, default 50)&cursor=` and return `{ items, nextCursor }` (name order; opaque cursor).
