@@ -12,8 +12,9 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   default plan, nested loops only and index scans off. `RULE3_EXHAUSTIVE=1 pnpm -r test` adds nested loops off,
   which is slow (hash/merge joins inside every authz call); run it after changing an RLS policy or an authz function.
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0055**; 0040 and 0049 are unused) and must apply as a
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0054** (0060-0062 are jobs-portal); 0040 and 0049 are unused) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0083**; 0040, 0049, 0055-0059, 0063-0064,
+  0066-0069, 0071-0074 and 0076-0079 are unused or reserved by their feature blocks; **0090-0099 are reserved for the
+  CrewNex consolidation**, `docs/crewnex-consolidation.md`, in flight in PRs #13/#14) and must apply as a
   non-superuser (Amazon RDS master): CI checks this.
 - Commit small and atomic; get an independent review of every security-relevant change.
 
