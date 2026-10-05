@@ -15,7 +15,7 @@ import {
 } from "../documents/documents.service.js";
 import {
   EXPORTS_PER_WINDOW, EXPORT_ROW_CAP, EXPORT_WINDOW_MS, KINDS, covers, decodeCursor, encodeCursor, mapDbError, monthStartBefore,
-  monthsBetween, needle, requireVersion, todayIn, type OwnerKind,
+  monthEndOf, monthsBetween, needle, requireVersion, todayIn, type OwnerKind,
 } from "./facilities.common.js";
 import type {
   BillCreate, BillExportQuery, BillListQuery, BillStatus, BillUpdate, SummaryQuery, UtilityType,
@@ -59,15 +59,18 @@ const SELECT = `SELECT b.id, b.utility_id, u.utility_type, u.service_provider,
     b.due_date::text AS due_date, b.paid_on::text AS paid_on,
     CASE WHEN b.paid_on IS NOT NULL THEN 'paid'
          WHEN b.due_date < (now() AT TIME ZONE l.timezone)::date THEN 'overdue' ELSE 'due' END AS status,
-    (b.voided_at IS NOT NULL) AS voided, b.invoice_document_id, fo.status AS invoice_status, fo.content_type AS invoice_content_type,
+    (b.voided_at IS NOT NULL) AS voided, inv.id AS invoice_document_id, inv.status AS invoice_status, inv.content_type AS invoice_content_type,
     b.row_version
   FROM eureka.utility_bill b
   JOIN eureka.utility u ON u.id = b.utility_id
   LEFT JOIN eureka.company c ON c.id = u.company_id
   LEFT JOIN eureka.facility f ON f.id = u.facility_id
   JOIN eureka.location l ON l.id = coalesce(c.location_id, f.location_id)
-  LEFT JOIN eureka.document d ON d.id = b.invoice_document_id
-  LEFT JOIN eureka.file_object fo ON fo.id = d.file_id`;
+  -- The current invoice: the newest clean upload, else the newest upload (to show its scan state).
+  LEFT JOIN LATERAL (
+    SELECT d.id, fo.status, fo.content_type FROM eureka.document d JOIN eureka.file_object fo ON fo.id = d.file_id
+     WHERE d.bill_id = b.id
+     ORDER BY (fo.status = 'clean') DESC, d.created_at DESC, d.id DESC LIMIT 1) inv ON true`;
 
 /** Download name of an invoice: the billing start and a short id, never an uploaded file name. */
 const invoiceName = (r: Pick<BillRow, "billing_start" | "invoice_document_id" | "invoice_content_type">) =>
@@ -284,13 +287,14 @@ export class BillsService {
   /**
    * KPI and chart data over non-voided bills by billing_start, for every
    * company (or facility) in the caller's scope. Amounts are strings with 2
-   * decimals. Default period: the 12 calendar months ending with the current
-   * month in `tz` (default UTC). averagePerMonth = totalAmount / months in the
+   * decimals. Default period: the 12 whole calendar months ending with the
+   * current month in `tz` (default UTC), up to its last day. averagePerMonth = totalAmount / months in the
    * period (inclusive calendar months).
    */
   async summary(user: AuthedUser, kind: OwnerKind, q: SummaryQuery) {
     const today = todayIn(q.tz ?? "UTC");
-    const to = q.to ?? (q.from && q.from > today ? q.from : today);
+    // Without `to`, the period ends with the last day of the current month (or of from's month, if later).
+    const to = q.to ?? monthEndOf(q.from && q.from > today ? q.from : today);
     const from = q.from ?? monthStartBefore(to, 11);
     const months = monthsBetween(from, to);
     if (months.length > SUMMARY_MAX_MONTHS) throw new UnprocessableEntityException(`the period can span at most ${SUMMARY_MAX_MONTHS} months`);

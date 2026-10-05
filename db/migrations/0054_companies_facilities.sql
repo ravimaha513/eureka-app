@@ -175,8 +175,6 @@ CREATE TABLE eureka.utility_bill (
   voided_at           timestamptz,
   voided_by           uuid REFERENCES eureka.app_user(id),
   void_reason         text CHECK (char_length(void_reason) BETWEEN 1 AND 500),
-  -- The current invoice (a document with bill_id = this bill); FK added below.
-  invoice_document_id uuid,
   row_version         integer NOT NULL DEFAULT 1 CHECK (row_version >= 1),
   created_by          uuid NOT NULL REFERENCES eureka.app_user(id),
   created_at          timestamptz NOT NULL DEFAULT now(),
@@ -193,9 +191,10 @@ ALTER TABLE eureka.document
   ALTER COLUMN candidate_id DROP NOT NULL,
   ADD COLUMN bill_id uuid REFERENCES eureka.utility_bill(id),
   ADD CONSTRAINT document_owner CHECK (num_nonnulls(candidate_id, bill_id) = 1 AND (bill_id IS NULL OR placement_id IS NULL));
+-- The current invoice of a bill is resolved, never stored: its newest clean
+-- document (else its newest upload, to show the scan state), so an abandoned
+-- or blocked upload never hides an earlier clean invoice.
 CREATE INDEX document_bill ON eureka.document (bill_id, created_at DESC) WHERE bill_id IS NOT NULL;
-ALTER TABLE eureka.utility_bill
-  ADD CONSTRAINT utility_bill_invoice FOREIGN KEY (invoice_document_id) REFERENCES eureka.document(id);
 
 -- Field class utility_password (field_key and the rotation log).
 ALTER TABLE eureka.field_key DROP CONSTRAINT field_key_field_class_check,
@@ -238,7 +237,6 @@ BEGIN
       NEW.voided_at := NULL;
       NEW.voided_by := NULL;
       NEW.void_reason := NULL;
-      NEW.invoice_document_id := NULL;
     END IF;
     RETURN NEW;
   END IF;
@@ -282,17 +280,8 @@ BEGIN
       NEW.voided_at := NULL;
       NEW.voided_by := NULL;
     END IF;
-    -- Attaching an invoice is not an edit of the bill's fields (the edit form keeps its If-Match).
-    IF (NEW.utility_id, NEW.payment_method, NEW.amount, NEW.billing_start, NEW.billing_end, NEW.due_date, NEW.paid_on, NEW.void_reason)
-       IS DISTINCT FROM
-       (OLD.utility_id, OLD.payment_method, OLD.amount, OLD.billing_start, OLD.billing_end, OLD.due_date, OLD.paid_on, OLD.void_reason) THEN
-      NEW.row_version := OLD.row_version + 1;
-    ELSE
-      NEW.row_version := OLD.row_version;
-    END IF;
-  ELSE
-    NEW.row_version := OLD.row_version + 1;
   END IF;
+  NEW.row_version := OLD.row_version + 1;
   NEW.updated_by := actor;
   NEW.updated_at := pg_catalog.now();
   RETURN NEW;
@@ -511,7 +500,7 @@ GRANT UPDATE (end_date, ended_by, ended_at) ON eureka.company_employee TO authz_
 GRANT UPDATE (utility_type, service_provider, account_number, website_url, username, password_enc, password_key_id, password_mac,
   status, notes, row_version, updated_by, updated_at) ON eureka.utility TO authz_definer;
 GRANT UPDATE (utility_id, payment_method, amount, billing_start, billing_end, due_date, paid_on, voided_at, voided_by, void_reason,
-  invoice_document_id, row_version, updated_by, updated_at) ON eureka.utility_bill TO authz_definer;
+  row_version, updated_by, updated_at) ON eureka.utility_bill TO authz_definer;
 GRANT SELECT (actor_id, action, at) ON eureka.audit_event TO authz_definer;
 -- 0045 grants employee and 0011 person reads to the definer; repeated so this migration stands alone.
 GRANT SELECT ON eureka.employee, eureka.person, eureka.candidate TO authz_definer;
@@ -560,6 +549,35 @@ BEGIN
   END LOOP;
   IF p_manage IS NOT NULL AND NOT coalesce(authz.location_allows(p_manage, loc), false) THEN
     RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN loc;
+END $$;
+
+-- Locks the owner row (FOR SHARE) and returns its location, so a concurrent
+-- company_update/facility_update cannot move it to another location while an
+-- incharge or employee bound to the old location is added. NULL when absent.
+CREATE FUNCTION authz.facilities_lock_owner(p_kind text, p_owner uuid) RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE loc uuid;
+BEGIN
+  IF p_kind = 'company' THEN
+    SELECT c.location_id INTO loc FROM eureka.company c WHERE c.id = p_owner FOR SHARE;
+  ELSIF p_kind = 'facility' THEN
+    SELECT f.location_id INTO loc FROM eureka.facility f WHERE f.id = p_owner FOR SHARE;
+  END IF;
+  RETURN loc;
+END $$;
+
+-- The owner row locked, then the scope checks re-run against it; returns the locked location.
+CREATE FUNCTION authz.facilities_scope_locked(p_kind text, p_owner uuid, p_manage text) RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE loc uuid;
+BEGIN
+  -- 404/403 before any lock is taken, then again under the lock.
+  PERFORM authz.facilities_scope(p_kind, p_owner, NULL, p_manage);
+  loc := authz.facilities_lock_owner(p_kind, p_owner);
+  IF loc IS NULL OR loc IS DISTINCT FROM authz.facilities_scope(p_kind, p_owner, NULL, p_manage) THEN
+    RAISE EXCEPTION 'not_found' USING ERRCODE = 'no_data_found';
   END IF;
   RETURN loc;
 END $$;
@@ -702,7 +720,7 @@ CREATE FUNCTION authz.incharge_add(p_kind text, p_owner uuid, p_user uuid) RETUR
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE loc uuid;
 BEGIN
-  loc := authz.facilities_scope(p_kind, p_owner, NULL, p_kind || ':manage');
+  loc := authz.facilities_scope_locked(p_kind, p_owner, p_kind || ':manage');
   IF NOT coalesce(authz.facilities_location_user(loc, p_user), false) THEN
     RAISE EXCEPTION 'invalid_incharge' USING ERRCODE = 'check_violation';
   END IF;
@@ -740,7 +758,7 @@ CREATE FUNCTION authz.company_employee_add(p_company uuid, p_person uuid, p_star
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE loc uuid; v_id uuid;
 BEGIN
-  loc := authz.facilities_scope('company', p_company, NULL, 'company:manage');
+  loc := authz.facilities_scope_locked('company', p_company, 'company:manage');
   IF p_person IS NULL OR NOT EXISTS (
        SELECT 1 FROM eureka.employee e JOIN eureka.candidate c ON c.id = e.candidate_id
         WHERE e.person_id = p_person AND e.status IS DISTINCT FROM 'exited' AND c.location_id = loc) THEN
@@ -1012,7 +1030,7 @@ BEGIN
 END $$;
 
 -- Invoice upload (0043 pipeline): a pending internal document of the bill with
--- its file, made the bill's current invoice. bill:manage; at most three
+-- its file; it becomes the current invoice once it scans clean. bill:manage; at most three
 -- uploads of the bill waiting for a scan.
 CREATE FUNCTION authz.bill_invoice_upload(p_bill uuid, p_content_type text, p_size integer)
 RETURNS TABLE (document_id uuid, file_id uuid, upload_expires_at timestamptz)
@@ -1040,11 +1058,10 @@ BEGIN
   INSERT INTO eureka.document AS d (candidate_id, placement_id, bill_id, doc_type, classification, file_id, created_by)
   VALUES (NULL, NULL, p_bill, 'other', 'internal', f_id, authz.current_user_id())
   RETURNING d.id INTO d_id;
-  UPDATE eureka.utility_bill b SET invoice_document_id = d_id WHERE b.id = p_bill;
   RETURN QUERY SELECT d_id, f_id, f_exp;
 END $$;
 
--- Authorizes one download of the bill's current invoice (bill:read) and logs
+-- Authorizes one download of the bill's current invoice (the newest clean one; bill:read) and logs
 -- it (document_access + audit, same transaction). 'none' without an invoice,
 -- 'not_available' while the file is not clean.
 CREATE FUNCTION authz.bill_invoice_download(p_bill uuid)
@@ -1055,9 +1072,11 @@ BEGIN
   PERFORM authz.bill_scope(p_bill, NULL);
   SELECT x.id, x.file_id, f.status, f.content_type INTO d
     FROM eureka.utility_bill b
-    JOIN eureka.document x ON x.id = b.invoice_document_id AND x.bill_id = b.id
+    JOIN eureka.document x ON x.bill_id = b.id
     JOIN eureka.file_object f ON f.id = x.file_id
-   WHERE b.id = p_bill AND b.voided_at IS NULL;
+   WHERE b.id = p_bill AND b.voided_at IS NULL
+   ORDER BY (f.status = 'clean') DESC, x.created_at DESC, x.id DESC
+   LIMIT 1;
   IF NOT FOUND THEN
     RETURN QUERY SELECT 'none'::text, NULL::uuid, NULL::uuid, NULL::text, NULL::uuid;
     RETURN;
@@ -1151,6 +1170,8 @@ REVOKE ALL ON FUNCTION authz.location_allows(text, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.facilities_owner_location(text, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.facilities_scope(text, uuid, text[], text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.facilities_location_user(uuid, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION authz.facilities_lock_owner(text, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION authz.facilities_scope_locked(text, uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.facilities_target_location(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.company_create(uuid, text, text, text, text, text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.company_update(uuid, integer, uuid, text, text, text, text, text, text, text, text) FROM PUBLIC;
@@ -1196,6 +1217,7 @@ GRANT EXECUTE ON FUNCTION authz.bill_invoice_upload(uuid, text, integer) TO eure
 GRANT EXECUTE ON FUNCTION authz.bill_invoice_download(uuid) TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.field_rotation_batch(text, uuid, uuid, integer) TO eureka_worker;
 GRANT EXECUTE ON FUNCTION authz.field_rotation_apply(text, uuid, bytea, bytea, uuid) TO eureka_worker;
--- location_allows, facilities_owner_location, facilities_scope, facilities_location_user,
+-- location_allows, facilities_owner_location, facilities_scope, facilities_lock_owner,
+-- facilities_scope_locked, facilities_location_user,
 -- facilities_target_location, utility_check_password, utility_owner and bill_scope are
 -- called from definer functions only.

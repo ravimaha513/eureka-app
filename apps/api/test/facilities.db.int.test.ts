@@ -162,8 +162,8 @@ describe("writes: definer functions only, permission and location re-checked", (
       expect(r.created_by).toBe(U.locD);
       expect(new Date(r.created_at).getFullYear()).toBeGreaterThan(2001);
       const b = (await c.query(`INSERT INTO eureka.utility_bill (utility_id, payment_method, amount, billing_start, billing_end, due_date,
-                                  void_reason, voided_by, voided_at, invoice_document_id, created_by, updated_by)
-                                VALUES ($1, 'ach', 5, '2025-01-01', '2025-01-02', '2025-01-03', 'x', $2, now(), NULL, $2, $2)
+                                  void_reason, voided_by, voided_at, created_by, updated_by)
+                                VALUES ($1, 'ach', 5, '2025-01-01', '2025-01-02', '2025-01-03', 'x', $2, now(), $2, $2)
                                 RETURNING voided_at, void_reason`, [ids.utility[0], U.hr])).rows[0];
       expect(b).toEqual({ voided_at: null, void_reason: null });
       await c.query("SAVEPOINT s");
@@ -204,11 +204,42 @@ describe("writes: definer functions only, permission and location re-checked", (
   });
 });
 
+describe("concurrency: the owner's location is locked while an incharge or employee is added", () => {
+  it("an incharge_add racing a location move waits for it and is checked against the new location", async () => {
+    const both = (await db.admin.query<{ id: string }>(
+      `INSERT INTO eureka.app_user (email, display_name) VALUES ('opsDA@eureka.example', 'opsDA') RETURNING id`)).rows[0]!.id;
+    for (const loc of [LOC.dallas, LOC.austin]) {
+      await db.admin.query(`INSERT INTO eureka.user_role (user_id, role_key, location_id) VALUES ($1, 'location_ops_admin', $2)`, [both, loc]);
+    }
+    const co = (await as<string>(both, `SELECT authz.company_create($1, 'Moving Co', NULL, NULL, NULL, NULL, NULL, NULL) AS id`, [LOC.dallas]))[0]!.id!;
+    const a = await db.app.connect();
+    try {
+      await a.query("BEGIN");
+      await a.query("SELECT set_config('eureka.user_id', $1, true)", [both]);
+      // A moves the company to Austin and holds the row lock until it commits.
+      await a.query(`SELECT authz.company_update($1, 1, $2, 'Moving Co', NULL, NULL, NULL, NULL, NULL, 'active', NULL)`, [co, LOC.austin]);
+      let settled = false;
+      // B adds a Dallas-only user as incharge meanwhile.
+      const b = as(both, `SELECT authz.incharge_add('company', $1, $2)`, [co, U.locD]).then(() => "added", (e: Error) => e.message)
+        .finally(() => { settled = true; });
+      await new Promise((r) => setTimeout(r, 300));
+      expect(settled).toBe(false); // waiting on the owner row
+      await a.query("COMMIT");
+      expect(await b).toMatch(/invalid_incharge/);
+    } finally {
+      a.release();
+    }
+    expect((await db.admin.query(`SELECT location_id FROM eureka.company WHERE id = $1`, [co])).rows[0].location_id).toBe(LOC.austin);
+    expect((await db.admin.query(`SELECT count(*)::int AS n FROM eureka.company_incharge WHERE company_id = $1`, [co])).rows[0].n).toBe(0);
+  });
+});
+
 describe("EXECUTE grants (rule 2)", () => {
   const appFns = ["company_create", "company_update", "facility_create", "facility_update", "incharge_add", "incharge_remove",
     "company_employee_add", "company_employee_end", "company_employees", "company_employee_options", "utility_create", "utility_update",
     "utility_password_reveal", "bill_create", "bill_update", "bill_void", "bill_invoice_upload", "bill_invoice_download"];
-  const internal = ["location_allows", "facilities_owner_location", "facilities_scope", "facilities_location_user",
+  const internal = ["location_allows", "facilities_owner_location", "facilities_scope", "facilities_lock_owner", "facilities_scope_locked",
+    "facilities_location_user",
     "facilities_target_location", "utility_check_password", "utility_owner", "bill_scope"];
   it("app functions: app only; helpers: nobody; no PUBLIC; pinned search_path; owned by authz_definer", async () => {
     const rows = (await db.admin.query<{ name: string; app: boolean; worker: boolean; pub: boolean; cfg: string[] | null; owner: string; definer: boolean }>(

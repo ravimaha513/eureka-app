@@ -100,6 +100,12 @@ export function monthStartBefore(day: string, back: number): string {
   return `${y}-${String(m).padStart(2, "0")}-01`;
 }
 
+/** The last day (YYYY-MM-DD) of the month of `day`. */
+export function monthEndOf(day: string): string {
+  const y = Number(day.slice(0, 4)), m = Number(day.slice(5, 7));
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
 /** Substring search value for strpos(lower(...), $n) (no LIKE wildcards to escape). */
 export const needle = (q: string | undefined) => (q ?? "").trim().toLowerCase();
 
