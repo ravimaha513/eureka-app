@@ -75,7 +75,7 @@ export function NotificationBell({ onOpen, canOpen, pollMs = UNREAD_POLL_MS }: {
         <Bell size={18} strokeWidth={1.8} aria-hidden="true" />
         {n > 0 && <span className="bell-count" aria-hidden="true">{countLabel(n, capped)}</span>}
       </button>
-      <span className="sr-only" role="status" aria-live="polite">{announce}</span>
+      <span className="sr-only" aria-live="polite">{announce}</span>
       {open && (
         <InboxPanel id={panelId} headingRef={heading} unread={n}
           onClose={() => close()}

@@ -85,7 +85,7 @@ test("org admin: create a user, grant and revoke roles, second approver, deactiv
   // A location-bound role asks for a location.
   await row.getByRole("button", { name: `Grant role to ${a.name}` }).click();
   dlg = page.getByRole("dialog", { name: `Grant a role to ${a.name}` });
-  await dlg.getByLabel("Role").selectOption({ label: "Location Ops Admin" });
+  await dlg.getByLabel("Role").selectOption({ label: "Location Incharge" });
   await expect(dlg.getByLabel("Location")).toBeVisible();
   await expect(dlg.getByRole("button", { name: "Grant role" })).toBeDisabled();
   await dlg.getByRole("button", { name: "Cancel" }).click();
