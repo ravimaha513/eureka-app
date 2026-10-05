@@ -229,7 +229,7 @@ function ModuleDialog({ course, module, onClose, onSaved }: {
         if (!title.trim()) err.title = "Enter a title.";
         if (!(Number.isInteger(n) && n >= 1 && n <= 10000)) err.durationMinutes = "Use whole minutes from 1 to 10000.";
         if (resources.length > 10) err.resources = "Add at most 10 links.";
-        else if (resources.some((u) => !/^https:\/\/\S+$/.test(u))) err.resources = "Each link must start with https://.";
+        else if (resources.some((u) => !/^https:\/\/[^\s@/?#]+([/?#]\S*)?$/.test(u))) err.resources = "Each link must start with https:// and have no user name.";
         setErrors(err); setFormError("");
         if (Object.keys(err).length) { failed(); return; }
         setBusy(true);

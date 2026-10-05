@@ -61,9 +61,12 @@ describe("course catalog (TR-4)", () => {
   it("validates titles, durations and https resource links", async () => {
     const add = (urls: string[]) => q(U.locD,
       `INSERT INTO eureka.course_module (course_id, position, title, duration_minutes, resource_urls) VALUES ($1, 50, 'R', 5, $2)`, [course, urls]);
-    for (const bad of [["http://example.com"], ["javascript:alert(1)"], ["https://exa mple.com"], ["https://a\nhttps://b"]]) {
+    for (const bad of [["http://example.com"], ["javascript:alert(1)"], ["https://exa mple.com"], ["https://a\nhttps://b"],
+      ["https://user@example.com/x"], ["https://user:pw@example.com"], ["https://@example.com"], ["https://example.com@evil.example"]]) {
       await expect(add(bad)).rejects.toThrow(/check constraint/);
     }
+    // '@' after the authority (path, query) is fine.
+    await add(["https://example.com/a@b", "https://example.com?u=a@b"]);
     await expect(add(Array.from({ length: 11 }, (_, i) => `https://e.com/${i}`))).rejects.toThrow(/check constraint/);
     await expect(q(U.locD, `INSERT INTO eureka.course_module (course_id, position, title, duration_minutes) VALUES ($1, 51, 'Z', 0)`, [course]))
       .rejects.toThrow(/check constraint/);
@@ -95,6 +98,9 @@ describe("batches (TR-5..TR-7)", () => {
     await expect(upd(U.locD, 1, U.r1a)).rejects.toThrow(/invalid_trainer/);
     await expect(upd(U.locD, 1, U.coach, "2031-03-02", "2031-03-01")).rejects.toThrow(/invalid_dates/);
     await expect(upd(U.locA, 1, U.coach)).rejects.toThrow(/not_permitted/);
+    // Sales planning rights (batch_manager) reach create and status only, never the details (TR-1).
+    await expect(upd(U.l1, 1, U.coach)).rejects.toThrow(/not_permitted/);
+    await expect(upd(U.m1, 1, U.coach)).rejects.toThrow(/not_permitted/);
     await expect(upd(U.coach, 1, U.coach)).rejects.toThrow(/not_permitted/);
     expect((await upd(U.locD, 1, U.coach))[0]!.v).toBe(2);
     const [b] = await q(U.locD, `SELECT name, trainer_id, start_date::text, start_month::text, end_date::text, cover_color, cover_icon FROM eureka.batch WHERE id = $1`, [batch]);
@@ -196,6 +202,51 @@ describe("students and progress (TR-8..TR-10)", () => {
   });
 });
 
+describe("set_batch_student needs a readable candidate (TR-8)", () => {
+  it("refuses a candidate the caller cannot read, with the same answer as an ineligible one", async () => {
+    await db.admin.query(`DELETE FROM eureka.role_permission WHERE role_key = 'location_ops_admin' AND permission = 'candidate:read'`);
+    try {
+      await expect(q(U.locD, `SELECT authz.set_batch_student($1, $2, true)`, [batch, outsider.id])).rejects.toThrow(/candidate_not_eligible/);
+    } finally {
+      await db.admin.query(`INSERT INTO eureka.role_permission (role_key, permission, scope) VALUES ('location_ops_admin', 'candidate:read', 'location')`);
+    }
+    await q(U.locD, `SELECT authz.set_batch_student($1, $2, true)`, [batch, outsider.id]);
+    await q(U.locD, `SELECT authz.set_batch_student($1, $2, false)`, [batch, outsider.id]);
+  });
+});
+
+describe("a course used by another location's batch is frozen for its owner (TR-4)", () => {
+  let shared: string; let m1: string; let m2: string; let austinBatch: string;
+  it("the owner can still retitle and add links; durations, order, deletes, adds and archiving are refused (409 course_shared)", async () => {
+    shared = (await q<{ id: string }>(U.locD, `INSERT INTO eureka.course (location_id, title) VALUES ($1, 'Shared') RETURNING id`, [LOC.dallas]))[0]!.id;
+    [m1, m2] = (await q<{ id: string }>(U.locD,
+      `INSERT INTO eureka.course_module (course_id, position, title, duration_minutes) VALUES ($1, 1, 'A', 30), ($1, 2, 'B', 30) RETURNING id`, [shared])).map((r) => r.id) as [string, string];
+    // Used only by a Dallas batch: still editable by Dallas.
+    await q(U.locD, `INSERT INTO eureka.batch_course (batch_id, course_id, position) VALUES ($1, $2, 3)`, [batch, shared]);
+    await q(U.locD, `UPDATE eureka.course_module SET duration_minutes = 45 WHERE id = $1`, [m1]);
+    // An Austin batch picks it up.
+    austinBatch = (await q<{ id: string }>(U.locA, `SELECT authz.create_batch($1, $2, '2031-05-01', 5) AS id`, [LOC.austin, TECH_ID]))[0]!.id;
+    await q(U.locA, `INSERT INTO eureka.batch_course (batch_id, course_id, position) VALUES ($1, $2, 1)`, [austinBatch, shared]);
+    const refused = (sql: string, params: unknown[] = []) => expect(q(U.locD, sql, params)).rejects.toThrow(/course_shared/);
+    await refused(`UPDATE eureka.course_module SET duration_minutes = 99 WHERE id = $1`, [m1]);
+    await refused(`UPDATE eureka.course_module SET position = 5 WHERE id = $1`, [m1]);
+    await refused(`DELETE FROM eureka.course_module WHERE id = $1`, [m2]);
+    await refused(`INSERT INTO eureka.course_module (course_id, position, title, duration_minutes) VALUES ($1, 3, 'C', 10)`, [shared]);
+    await refused(`UPDATE eureka.course SET archived = true WHERE id = $1`, [shared]);
+    expect(await q(U.locD, `UPDATE eureka.course_module SET title = 'A2', resource_urls = ARRAY['https://example.com/x'] WHERE id = $1 RETURNING id`, [m1])).toHaveLength(1);
+    expect(await q(U.locD, `UPDATE eureka.course SET title = 'Shared 2', description = 'd' WHERE id = $1 RETURNING id`, [shared])).toHaveLength(1);
+    // The same duration value (no change) is not an edit.
+    expect(await q(U.locD, `UPDATE eureka.course_module SET duration_minutes = 45 WHERE id = $1 RETURNING id`, [m1])).toHaveLength(1);
+  });
+
+  it("a deleted course's modules (cascade) and unused courses stay freely editable", async () => {
+    const [c] = await q<{ id: string }>(U.locD, `INSERT INTO eureka.course (location_id, title) VALUES ($1, 'Unused') RETURNING id`, [LOC.dallas]);
+    await q(U.locD, `INSERT INTO eureka.course_module (course_id, position, title, duration_minutes) VALUES ($1, 1, 'X', 10)`, [c!.id]);
+    await q(U.locD, `UPDATE eureka.course SET archived = true WHERE id = $1`, [c!.id]);
+    await q(U.locD, `DELETE FROM eureka.course WHERE id = $1`, [c!.id]);
+  });
+});
+
 describe("deleting (TR-7, TR-4)", () => {
   it("a module or course with completions is kept (foreign key)", async () => {
     await expect(q(U.locD, `DELETE FROM eureka.course_module WHERE id = $1`, [moduleA])).rejects.toThrow(/foreign key/);
@@ -205,6 +256,8 @@ describe("deleting (TR-7, TR-4)", () => {
   it("a batch with students cannot be deleted; without them it goes with its courses and progress", async () => {
     await expect(q(U.locD, `SELECT authz.delete_batch($1)`, [batch])).rejects.toThrow(/batch_has_students/);
     await expect(q(U.coach, `SELECT authz.delete_batch($1)`, [batch])).rejects.toThrow(/not_permitted/);
+    await expect(q(U.l1, `SELECT authz.delete_batch($1)`, [batch])).rejects.toThrow(/not_permitted/);
+    await expect(q(U.m1, `SELECT authz.delete_batch($1)`, [batch])).rejects.toThrow(/not_permitted/);
     await q(U.locD, `SELECT authz.set_batch_student($1, $2, false)`, [batch, s1.id]);
     await q(U.locD, `SELECT authz.set_batch_student($1, $2, false)`, [batch, s2.id]);
     await q(U.locD, `SELECT authz.delete_batch($1)`, [batch]);

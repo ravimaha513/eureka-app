@@ -88,7 +88,9 @@ CREATE TABLE eureka.course_module (
     cardinality(resource_urls) <= 10
     AND array_position(resource_urls, NULL) IS NULL
     AND (cardinality(resource_urls) = 0
-         OR array_to_string(resource_urls, E'\x01') ~ '^https://[^[:space:][:cntrl:]]+(\x01https://[^[:space:][:cntrl:]]+)*$')
+         -- Authority without '@' (no user info), then an optional path, query or fragment.
+         OR array_to_string(resource_urls, E'\x01') ~
+            '^https://[^[:space:][:cntrl:]@/?#]+([/?#][^[:space:][:cntrl:]]*)?(\x01https://[^[:space:][:cntrl:]@/?#]+([/?#][^[:space:][:cntrl:]]*)?)*$')
     AND char_length(array_to_string(resource_urls, '')) <= 20000),
   created_at       timestamptz NOT NULL DEFAULT now(),
   updated_at       timestamptz NOT NULL DEFAULT now(),
@@ -143,6 +145,12 @@ BEGIN
      OR NEW.created_by IS DISTINCT FROM OLD.created_by OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
     RAISE EXCEPTION 'column is immutable' USING ERRCODE = 'insufficient_privilege';
   END IF;
+  -- TR-4: archiving blocks other locations' batches from adding the course; refused while any
+  -- batch outside the editor's training locations uses it.
+  IF NEW.archived AND NOT OLD.archived AND current_user = 'eureka_app'
+     AND coalesce(authz.course_used_outside(OLD.id), true) THEN
+    RAISE EXCEPTION 'course_shared' USING ERRCODE = 'check_violation';
+  END IF;
   NEW.updated_at := pg_catalog.now();
   NEW.row_version := OLD.row_version + 1;
   RETURN NEW;
@@ -154,6 +162,18 @@ CREATE TRIGGER course_guard BEFORE INSERT OR UPDATE ON eureka.course
 CREATE FUNCTION eureka.course_module_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
+  -- TR-4: durations feed every student's progress live, so adding, re-timing, reordering or
+  -- deleting modules of a course used by a batch outside the editor's training locations is
+  -- refused (title and link edits stay allowed). Checked for the app role only.
+  IF current_user = 'eureka_app' AND (
+       TG_OP IN ('INSERT', 'DELETE')
+       OR NEW.duration_minutes IS DISTINCT FROM OLD.duration_minutes
+       OR NEW.position IS DISTINCT FROM OLD.position) THEN
+    IF coalesce(authz.course_used_outside(CASE WHEN TG_OP = 'DELETE' THEN OLD.course_id ELSE NEW.course_id END), true) THEN
+      RAISE EXCEPTION 'course_shared' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
   IF TG_OP = 'INSERT' THEN
     NEW.created_at := pg_catalog.now();
     NEW.updated_at := pg_catalog.now();
@@ -173,7 +193,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER course_module_guard BEFORE INSERT OR UPDATE ON eureka.course_module
+CREATE TRIGGER course_module_guard BEFORE INSERT OR UPDATE OR DELETE ON eureka.course_module
   FOR EACH ROW EXECUTE FUNCTION eureka.course_module_guard();
 
 -- batch_course: who added it and when are the server's; only the position
@@ -360,6 +380,27 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
   END
 $$;
 
+-- Locations of a training:manage grant only (every location for an org grant): the
+-- authority for editing and deleting batches (TR-1). Sales planning rights reach only
+-- create_batch and set_batch_status, as before 0065.
+CREATE FUNCTION authz.training_manage_location_ids() RETURNS uuid[]
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+  SELECT CASE
+    WHEN authz.has_org('training:manage') THEN (SELECT coalesce(pg_catalog.array_agg(l.id), '{}') FROM eureka.location l)
+    ELSE authz.location_ids('training:manage')
+  END
+$$;
+
+-- True when a batch outside the caller's training:manage locations uses the course
+-- (TR-4). The caller's own locations are the only ones they may re-time.
+CREATE FUNCTION authz.course_used_outside(p_course uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM eureka.batch_course bc JOIN eureka.batch b ON b.id = bc.batch_id
+    WHERE bc.course_id = p_course
+      AND NOT (b.location_id = ANY (authz.training_manage_location_ids())))
+$$;
+
 -- Batches the caller sees on the Training Batches screen, with the number of
 -- students they may see there: every student when the batch is covered at
 -- batch level, else the students they own under training:read.
@@ -465,7 +506,7 @@ BEGIN
      OR NOT coalesce(authz.has_perm('candidate:read') OR authz.has_perm('training:read'), false) THEN
     RAISE EXCEPTION 'batch_not_found' USING ERRCODE = 'no_data_found';
   END IF;
-  IF NOT coalesce(b.location_id = ANY (authz.batch_manage_location_ids()), false) THEN
+  IF NOT coalesce(b.location_id = ANY (authz.training_manage_location_ids()), false) THEN
     RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
   END IF;
   IF p_version IS NULL OR p_version IS DISTINCT FROM b.row_version THEN
@@ -511,7 +552,7 @@ BEGIN
      OR NOT coalesce(authz.has_perm('candidate:read') OR authz.has_perm('training:read'), false) THEN
     RAISE EXCEPTION 'batch_not_found' USING ERRCODE = 'no_data_found';
   END IF;
-  IF NOT coalesce(b.location_id = ANY (authz.batch_manage_location_ids()), false) THEN
+  IF NOT coalesce(b.location_id = ANY (authz.training_manage_location_ids()), false) THEN
     RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
   END IF;
   -- set_batch_student holds FOR SHARE on the batch row, so it waits for this lock; a
@@ -542,8 +583,9 @@ BEGIN
     RAISE EXCEPTION 'invalid_change' USING ERRCODE = 'check_violation';
   END IF;
   SELECT x.id, x.batch_id, x.location_id INTO c FROM eureka.candidate x WHERE x.id = p_candidate FOR UPDATE;
-  -- One answer for "no such candidate" and "not at this location".
-  IF NOT FOUND OR c.location_id IS DISTINCT FROM b.location_id THEN
+  -- One answer for "no such candidate", "not readable by the caller" and "not at this location".
+  IF NOT FOUND OR c.location_id IS DISTINCT FROM b.location_id
+     OR NOT coalesce(authz.candidate_visible(p_candidate, 'candidate:read'), false) THEN
     RAISE EXCEPTION 'candidate_not_eligible' USING ERRCODE = 'check_violation';
   END IF;
   IF p_member THEN
@@ -712,6 +754,8 @@ REVOKE ALL ON FUNCTION eureka.module_progress_guard() FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION authz.training_batch_ids(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.batch_manage_location_ids() FROM PUBLIC;
+REVOKE ALL ON FUNCTION authz.training_manage_location_ids() FROM PUBLIC;
+REVOKE ALL ON FUNCTION authz.course_used_outside(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.training_batches() FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.training_batch_students(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION authz.update_batch(uuid, integer, text, uuid, date, date, integer, text, text) FROM PUBLIC;
@@ -722,6 +766,8 @@ REVOKE ALL ON FUNCTION authz.set_module_progress(uuid, uuid, uuid, boolean) FROM
 -- batch_manage_location_ids is internal to the definer functions.
 GRANT EXECUTE ON FUNCTION authz.training_batch_ids(text) TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.training_batches() TO eureka_app;
+-- Called by the course and module guard triggers, which run as the app role.
+GRANT EXECUTE ON FUNCTION authz.course_used_outside(uuid) TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.training_batch_students(uuid) TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.update_batch(uuid, integer, text, uuid, date, date, integer, text, text) TO eureka_app;
 GRANT EXECUTE ON FUNCTION authz.delete_batch(uuid) TO eureka_app;

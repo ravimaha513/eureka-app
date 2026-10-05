@@ -7,8 +7,9 @@ const day = z.string().date().refine((d) => d >= "2000-01-01" && d <= "2100-12-3
 const line = (max: number) => z.string().trim().min(1).max(max).regex(/^[^\p{Cc}]+$/u, "no control characters");
 /** Multi-line text: newlines allowed, other control characters refused. */
 const text = (max: number) => z.string().trim().max(max).regex(/^[^\x00-\x09\x0b-\x1f\x7f]*$/, "no control characters");
+/** https only, no spaces or control characters, and no user info (`user@host`) in the authority. */
 const https = z.string().trim().max(2000).url()
-  .refine((u) => /^https:\/\/[^\s\p{Cc}]+$/u.test(u), "Use an https:// link without spaces");
+  .refine((u) => /^https:\/\/[^\s\p{Cc}@/?#]+([/?#][^\s\p{Cc}]*)?$/u.test(u), "Use an https:// link without spaces or user info");
 
 export const BATCH_STATUSES = ["planned", "in_training", "completed", "cancelled"] as const;
 export const coverColor = z.enum(TRAINING_COVER_COLORS);

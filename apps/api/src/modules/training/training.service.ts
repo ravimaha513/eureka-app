@@ -257,6 +257,7 @@ export class TrainingService {
       if (!(await c.query(`SELECT 1 FROM eureka.course WHERE id = $1`, [courseId])).rowCount) {
         throw new UnprocessableEntityException("invalid_course");
       }
+      await c.query(`SELECT pg_advisory_xact_lock(hashtextextended('batch_course:' || $1::text, 0))`, [id]);
       await c.query(
         `INSERT INTO eureka.batch_course (batch_id, course_id, position)
          SELECT $1, $2, coalesce(max(position), 0) + 1 FROM eureka.batch_course WHERE batch_id = $1`, [id, courseId])
@@ -285,7 +286,7 @@ export class TrainingService {
       if (cur.length !== courseIds.length || !courseIds.every((x) => cur.includes(x))) throw new UnprocessableEntityException("invalid_order");
       await c.query(
         `UPDATE eureka.batch_course bc SET position = o.ord FROM unnest($2::uuid[]) WITH ORDINALITY AS o(id, ord)
-         WHERE bc.batch_id = $1 AND bc.course_id = o.id`, [id, courseIds]);
+         WHERE bc.batch_id = $1 AND bc.course_id = o.id`, [id, courseIds]).catch(mapTrainingError);
       await this.audit.record(c, { actorId: user.id, action: "training.batch_courses_reordered", entityType: "batch", entityId: id, changes: { count: courseIds.length } });
       return { batchId: id, courseIds };
     });
@@ -474,7 +475,8 @@ export class TrainingService {
               co.row_version,
               (SELECT count(*)::int FROM eureka.course_module m WHERE m.course_id = co.id) AS modules,
               (SELECT coalesce(sum(m.duration_minutes), 0)::int FROM eureka.course_module m WHERE m.course_id = co.id) AS minutes,
-              (SELECT count(*)::int FROM eureka.batch_course bc WHERE bc.course_id = co.id) AS batches
+              (SELECT count(*)::int FROM eureka.batch_course bc
+               WHERE bc.course_id = co.id AND bc.batch_id IN (SELECT v.batch_id FROM authz.training_batches() v)) AS batches
        FROM eureka.course co JOIN eureka.location l ON l.id = co.location_id
        WHERE ($1 OR NOT co.archived)
        ORDER BY co.archived, lower(co.title), co.id
@@ -563,7 +565,7 @@ export class TrainingService {
       const params: unknown[] = [id, expected];
       const sets = Object.entries(body).map(([k, v]) => { params.push(v); return `${map[k]} = $${params.length}`; });
       const r = await c.query<{ row_version: number }>(
-        `UPDATE eureka.course SET ${sets.join(", ")} WHERE id = $1 AND row_version = $2 RETURNING row_version`, params);
+        `UPDATE eureka.course SET ${sets.join(", ")} WHERE id = $1 AND row_version = $2 RETURNING row_version`, params).catch(mapTrainingError);
       if (!r.rowCount) throw new HttpException("stale", HttpStatus.PRECONDITION_FAILED);
       await this.audit.record(c, { actorId: user.id, action: "training.course_updated", entityType: "course", entityId: id, changes: { fields: Object.keys(body).sort() } });
       return { id, rowVersion: r.rows[0]!.row_version };
@@ -581,10 +583,11 @@ export class TrainingService {
   async addModule(user: AuthedUser, courseId: string, body: CreateModule) {
     return this.db.withUser(user.id, async (c) => {
       await this.loadCourseForWrite(c, user, courseId);
+      await c.query(`SELECT pg_advisory_xact_lock(hashtextextended('course_module:' || $1::text, 0))`, [courseId]);
       const r = (await c.query<{ id: string; position: number }>(
         `INSERT INTO eureka.course_module (course_id, position, title, duration_minutes, resource_urls)
          SELECT $1, coalesce(max(position), 0) + 1, $2, $3, $4 FROM eureka.course_module WHERE course_id = $1
-         RETURNING id, position`, [courseId, body.title, body.durationMinutes, body.resources ?? []])).rows[0]!;
+         RETURNING id, position`, [courseId, body.title, body.durationMinutes, body.resources ?? []]).catch(mapTrainingError)).rows[0]!;
       await this.audit.record(c, { actorId: user.id, action: "training.module_created", entityType: "course", entityId: courseId, changes: { moduleId: r.id } });
       return { id: r.id, position: r.position, rowVersion: 1 };
     });
@@ -601,7 +604,7 @@ export class TrainingService {
       const params: unknown[] = [moduleId, courseId, expected];
       const sets = Object.entries(body).map(([k, v]) => { params.push(v); return `${map[k]} = $${params.length}`; });
       const r = await c.query<{ row_version: number }>(
-        `UPDATE eureka.course_module SET ${sets.join(", ")} WHERE id = $1 AND course_id = $2 AND row_version = $3 RETURNING row_version`, params);
+        `UPDATE eureka.course_module SET ${sets.join(", ")} WHERE id = $1 AND course_id = $2 AND row_version = $3 RETURNING row_version`, params).catch(mapTrainingError);
       if (!r.rowCount) throw new HttpException("stale", HttpStatus.PRECONDITION_FAILED);
       await this.audit.record(c, {
         actorId: user.id, action: "training.module_updated", entityType: "course", entityId: courseId, changes: { moduleId, fields: Object.keys(body).sort() },
@@ -626,7 +629,7 @@ export class TrainingService {
       if (cur.length !== moduleIds.length || !moduleIds.every((x) => cur.includes(x))) throw new UnprocessableEntityException("invalid_order");
       await c.query(
         `UPDATE eureka.course_module m SET position = o.ord FROM unnest($2::uuid[]) WITH ORDINALITY AS o(id, ord)
-         WHERE m.course_id = $1 AND m.id = o.id`, [courseId, moduleIds]);
+         WHERE m.course_id = $1 AND m.id = o.id`, [courseId, moduleIds]).catch(mapTrainingError);
       await this.audit.record(c, { actorId: user.id, action: "training.modules_reordered", entityType: "course", entityId: courseId, changes: { count: moduleIds.length } });
       return { courseId, moduleIds };
     });

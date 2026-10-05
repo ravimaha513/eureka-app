@@ -187,7 +187,7 @@ describe("course library", () => {
     fireEvent.change(within(dlg).getByRole("spinbutton", { name: "Duration (minutes)" }), { target: { value: "90" } });
     fireEvent.change(within(dlg).getByRole("textbox", { name: /Resource links/ }), { target: { value: "http://example.com" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Add module" }));
-    expect(await within(dlg).findByText("Each link must start with https://.")).toBeInTheDocument();
+    expect(await within(dlg).findByText("Each link must start with https:// and have no user name.")).toBeInTheDocument();
     fireEvent.change(within(dlg).getByRole("textbox", { name: /Resource links/ }), { target: { value: "https://example.com/joins" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Add module" }));
     await waitFor(() => expect(api.writes().at(-1)?.body).toEqual({ title: "Joins", durationMinutes: 90, resources: ["https://example.com/joins"] }));
