@@ -329,6 +329,34 @@ describe("crewnex batches: source ids (C1a.2, D3)", () => {
       .toMatchObject({ state: "skipped", reasons: ["already_imported"], personKey: "ledger:cand-1" });
   });
 
+  it("an interview or placement row without a consultant id goes to review and is never matched by contact details", () => {
+    const r = resolveCn([sales(2, { "Source Id": "cn_1" }),
+      interview(2, { "Source Id": "iv_1" }), // same email and name as the sales row
+      placement(2, { "Source Id": "pl_1", "Consultant Id": " " })]);
+    expect(r["interviews 2"]).toMatchObject({ state: "review", reasons: ["missing_consultant_source_id"], personKey: null });
+    expect(r["placements 2"]).toMatchObject({ state: "review", reasons: ["missing_consultant_source_id"], personKey: null });
+  });
+
+  it("a link decision cannot attach a row to a consultant other than the one its id names", () => {
+    const s1 = sales(2, { "Source Id": "cn_1" });
+    const s2 = sales(3, { "Source Id": "cn_2", "First Name": "Bina", "Marketing Email": "", Phone: "214-555-0102" });
+    const iv = interview(2, { "Source Id": "iv_1", "Consultant Id": "cn_1" });
+    const r = resolveCn([s1, s2, iv], { decisions: new Map([[`interviews:${cnKey(iv)}`, dec("link", cnKey(s2))]]) });
+    expect(r["interviews 2"]).toMatchObject({ state: "review", reasons: ["invalid_link"] });
+    const same = resolveCn([s1, s2, iv], { decisions: new Map([[`interviews:${cnKey(iv)}`, dec("link", cnKey(s1))]]) });
+    expect(same["interviews 2"]).toMatchObject({ state: "clean", personKey: cnKey(s1) });
+  });
+
+  it("a duplicated source id stays in review even when that id was loaded before", () => {
+    const ledger = emptyLedger();
+    ledger.links.set(`sales:${sourceRowKey("sales", "cn_1", h)}`, "cand-1");
+    const r = resolveCn([sales(2, { "Source Id": "cn_1" }), sales(3, { "Source Id": "cn_1", Phone: "214-555-0199" })], { ledger });
+    expect(r["sales 2"]).toMatchObject({ state: "review", reasons: ["duplicate_source_id"] });
+    expect(r["sales 3"]).toMatchObject({ state: "review", reasons: ["duplicate_source_id"] });
+    // One row with that id is the ordinary ledger skip.
+    expect(resolveCn([sales(2, { "Source Id": "cn_1" })], { ledger })["sales 2"]).toMatchObject({ state: "skipped", reasons: ["already_imported"] });
+  });
+
   it("a consultant id decides the person alone: unknown ids go to review even when the email matches", () => {
     const r = resolveCn([sales(2, { "Source Id": "cn_1" }),
       interview(2, { "Source Id": "iv_1", "Consultant Id": "cn_2" }),

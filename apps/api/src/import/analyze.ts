@@ -327,8 +327,8 @@ export function normalizeRow(row: RawRow, cfg: MappingConfig, refs: Refs, h: Hma
   const cells = redactCells(row, cfg, h, today);
   const n = new RowNormalizer(cells, cols);
   // CrewNex batches (D3): the row's own id is required; the consultant id of
-  // an interview or placement row is optional and, when given, decides its
-  // person. Sheet batches never read either column.
+  // an interview or placement row is required too and alone decides its
+  // person (never email, phone or name). Sheet batches never read either column.
   const crewnex = source === "crewnex";
   let sourceId: string | null = null;
   let personSource: string | null = null;
@@ -341,6 +341,7 @@ export function normalizeRow(row: RawRow, cfg: MappingConfig, refs: Refs, h: Hma
     else {
       const p = sourceIdCell(cells, cols, "consultantSourceId");
       if (!p.ok) n.reasons.push("invalid_consultant_source_id");
+      else if (p.value === null) n.reasons.push("missing_consultant_source_id");
       else personSource = p.value;
     }
   }
@@ -498,7 +499,11 @@ export function resolveBatch(input: ResolveInput): StagedRow[] {
   for (const r of out) {
     const k = dkey(r.sheet, r.rowKey);
     if (keyedBySource(r)) {
-      if ((sourceKeyCount.get(k) ?? 0) > 1 && !ledger.links.has(k)) r.reasons.push("duplicate_source_id");
+      if ((sourceKeyCount.get(k) ?? 0) > 1) {
+        // Even when the id was loaded before: the export is faulty, so neither row is silently skipped.
+        if (ledger.links.has(k)) { setFinal(r, "review", ["duplicate_source_id"]); continue; }
+        r.reasons.push("duplicate_source_id");
+      }
     } else if (seen.has(k)) { setFinal(r, "rejected", ["duplicate_row"]); continue; }
     seen.add(k);
     const loaded = ledger.links.get(k);
@@ -562,8 +567,14 @@ export function resolveBatch(input: ResolveInput): StagedRow[] {
     const dec = decisions.get(dkey(r.sheet, r.rowKey));
     if (dec?.action === "link") {
       const target = dec.linkRowKey ? salesByKey.get(dec.linkRowKey) : undefined;
-      if (target?.personKey) r.personKey = target.personKey;
+      // A CrewNex consultant id is the person (D3): a link may not attach the row to anyone else.
+      const own = crewnex ? (r.norm as InterviewNorm | PlacementNorm).consultantSourceId : undefined;
+      const idClash = typeof own === "string" && (target?.norm as SalesNorm | undefined)?.sourceId !== own;
+      if (target?.personKey && !idClash) r.personKey = target.personKey;
       else r.reasons.push("invalid_link");
+    } else if (crewnex && !r.identity.source) {
+      // No usable consultant id: the row is already in review; no contact-detail fallback.
+      r.personKey = null;
     } else {
       const m = matchPerson(r.identity, strongIndex, nameIndex, h);
       r.personKey = m.personKey;

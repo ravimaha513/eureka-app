@@ -53,7 +53,7 @@ const SalesColumns = z.object({
   marketingStartDate: header.optional(),
 }).strict();
 
-/** CrewNex id of the consultant an interview or placement row belongs to (crewnex batches only). */
+/** CrewNex id of the consultant an interview or placement row belongs to: required in crewnex batches (stage checks), ignored in sheet batches. */
 const personColumns = { consultantSourceId: header.optional() };
 
 const InterviewColumns = z.object({

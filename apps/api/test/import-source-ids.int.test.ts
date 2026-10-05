@@ -159,6 +159,15 @@ describe("crewnex row keys (C1a.2)", () => {
     writeFileSync(noCol, `${SALES_HEADER}\nNo,Column,,,214-555-0194,,Java,Dallas,r1a@eureka.example,Active,,,\n`);
     await expect(stage(imp, { sales: noCol }, MAPPING_CN, { hmac, ticket: await ticket(), source: "crewnex" }))
       .rejects.toThrow(/missing column\(s\) "Source Id"/);
+    // Interview and placement exports must name the consultant's id too (mapping and column).
+    const ivNoConsultant = join(TMP, "iv-no-consultant.csv");
+    writeFileSync(ivNoConsultant, `${IV_HEADER},Source Id\nX Y,,,,r1a@eureka.example,Northwind Financial,,Java Developer,L1,2026-09-01,10:00 AM,,60,CST,Completed,,iv_x\n`);
+    await expect(stage(imp, { interviews: ivNoConsultant }, MAPPING_CN, { hmac, ticket: await ticket(), source: "crewnex" }))
+      .rejects.toThrow(/missing column\(s\) "Consultant Id"/);
+    const noMap = JSON.parse(MAPPING_CN);
+    delete noMap.sheets.interviews.columns.consultantSourceId;
+    await expect(stage(imp, { interviews: ivNoConsultant }, JSON.stringify(noMap), { hmac, ticket: await ticket(), source: "crewnex" }))
+      .rejects.toThrow(/needs sheets\.interviews\.columns\.consultantSourceId/);
   });
 });
 

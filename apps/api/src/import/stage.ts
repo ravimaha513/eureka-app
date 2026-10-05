@@ -112,10 +112,11 @@ export async function stage(
     const nameCols = cols.fullName && present.has(cols.fullName.toLowerCase()) ? [] : ["firstName", "lastName"];
     // A CrewNex batch keys every row by its CrewNex id (C1a.2, D3): the column
     // must be mapped and exported; a blank cell sends that row to review.
-    if (source === "crewnex" && !cols.sourceId) {
-      throw new Error(`${sheet}: a crewnex batch needs sheets.${sheet}.columns.sourceId in the mapping`);
+    // Interview and placement rows name their consultant's CrewNex id the same way.
+    const sourceCols = source !== "crewnex" ? [] : sheet === "sales" ? ["sourceId"] : ["sourceId", "consultantSourceId"];
+    for (const f of sourceCols) {
+      if (!cols[f]) throw new Error(`${sheet}: a crewnex batch needs sheets.${sheet}.columns.${f} in the mapping`);
     }
-    const sourceCols = source === "crewnex" ? ["sourceId"] : [];
     const missing = [...REQUIRED[sheet], ...nameCols, ...sourceCols].map((f) => cols[f]).filter((h): h is string => !!h && !present.has(h.toLowerCase()));
     if (missing.length) throw new Error(`${sheet}: missing column(s) ${missing.map((m) => `"${m}"`).join(", ")} (see the mapping file)`);
     const mapped = new Set(Object.values(cols).filter((h): h is string => !!h).map((h) => h.toLowerCase()));
