@@ -60,16 +60,17 @@ describe("catalog integrity", () => {
     expect(Object.keys(GRANTS.org_admin).sort()).toEqual(["access:manage", "audit:read"]);
   });
 
-  it("restricted permissions are held only by HR, Accounts and Immigration", () => {
+  it("restricted permissions are held only by HR, Accounts and Immigration, and utility passwords by Location Ops Admin", () => {
     for (const role of ROLES) {
       const holds = RESTRICTED_PERMISSIONS.filter((p) => GRANTS[role][p]);
-      if (holds.length) expect(["hr", "accounts", "immigration"]).toContain(role);
+      if (role === "location_ops_admin") expect(holds).toEqual(["utility.secret:read"]);
+      else if (holds.length) expect(["hr", "accounts", "immigration"]).toContain(role);
     }
   });
 
   it("restricted roles (second approver): org_admin, restricted-permission holders, org-wide sensitive holders", () => {
     expect(ROLES.filter(isRestrictedRole).sort()).toEqual(
-      ["accounts", "associate_hr", "bu_head", "ceo", "documents_team", "hr", "immigration", "offshore_manager", "org_admin"]);
+      ["accounts", "associate_hr", "bu_head", "ceo", "documents_team", "hr", "immigration", "location_ops_admin", "offshore_manager", "org_admin"]);
     for (const role of ROLES) {
       const holdsRestricted = RESTRICTED_PERMISSIONS.some((p) => GRANTS[role][p]);
       const orgSensitive = ORG_SENSITIVE_PERMISSIONS.some((p) => GRANTS[role][p] === "org");

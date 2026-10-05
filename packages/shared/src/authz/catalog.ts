@@ -119,6 +119,16 @@ export const PERMISSIONS = [
   // vendors and org
   "vendor.preferred:create",
   "vendor.preferred:read",
+  // own companies and facilities (guest houses), their utilities and bills
+  "company:read",
+  "company:manage",
+  "facility:read",
+  "facility:manage",
+  "utility:read",
+  "utility:manage",
+  "utility.secret:read",
+  "bill:read",
+  "bill:manage",
   "team:move_member",
   "designation:change",
   // administration
@@ -133,6 +143,7 @@ export const RESTRICTED_PERMISSIONS: readonly Permission[] = [
   "candidate.dob:read",
   "visa:read",
   "visa:update",
+  "utility.secret:read",
 ];
 
 type Grants = Partial<Record<Permission, Scope>>;
@@ -256,6 +267,17 @@ export const GRANTS: Record<Role, Grants> = {
     "report:read": "location",
   },
   location_ops_admin: {
+    // Companies and facilities of their location, with utilities and bills (utility
+    // portal passwords: restricted, step-up on every reveal).
+    "company:read": "location",
+    "company:manage": "location",
+    "facility:read": "location",
+    "facility:manage": "location",
+    "utility:read": "location",
+    "utility:manage": "location",
+    "utility.secret:read": "location",
+    "bill:read": "location",
+    "bill:manage": "location",
     "candidate:read": "location",
     "candidate.phone:read": "location",
     "candidate.rating:update": "location",
