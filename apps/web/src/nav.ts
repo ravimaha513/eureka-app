@@ -18,6 +18,8 @@ export const NAV: NavItem[] = [
   { key: "paperwork", label: "Paperwork & BGC", section: "Operations", anyOf: ["document:read", "bgc:update"] },
   { key: "employees", label: "Employees", section: "Operations", anyOf: ["employee:read"] },
   { key: "payments", label: "Payments", section: "Operations", anyOf: ["invoice:read"] },
+  { key: "companies", label: "Companies", section: "Operations", anyOf: ["company:read"] },
+  { key: "facilities", label: "Facilities", section: "Operations", anyOf: ["facility:read"] },
   { key: "performance", label: "Performance", section: "Insights", anyOf: ["performance:read"] },
   { key: "reports", label: "Reports", section: "Insights", anyOf: ["report:read"] },
   { key: "access", label: "Users & Access", section: "Admin", anyOf: ["access:manage"] },
