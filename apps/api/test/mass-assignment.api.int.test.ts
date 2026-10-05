@@ -765,11 +765,60 @@ const CASES: RejectCase[] = [
     },
     forbidden: { kind: "internal_opening", ownerId: U.l2, teamId: T.t3, postedAt: PAST, row_version: 9 },
   },
+  // jobs-portal applicant auth (migration 0061): verification, status and ids are the server's
+  {
+    route: "POST /api/portal/auth/sign-up", actor: null,
+    prepare: async () => ({
+      url: "/api/portal/auth/sign-up", headers: { "x-eureka-portal": "1" },
+      body: { firstName: "Ma", lastName: "Applicant", email: `ma-${++n}@example.com`, phone: "+1 469 555 0177" },
+      state: () => rows(`SELECT (SELECT count(*) FROM eureka.applicant)::int AS a, (SELECT count(*) FROM eureka.applicant_login_link)::int AS l`),
+    }),
+    forbidden: { emailVerified: true, emailVerifiedAt: PAST, status: "active", applicantId: FOREIGN_ID, dob: "1990-01-01", role: "hr" },
+  },
+  {
+    route: "POST /api/portal/auth/request-link", actor: null,
+    prepare: async () => ({
+      url: "/api/portal/auth/request-link", headers: { "x-eureka-portal": "1" }, body: { email: "ma-link@example.com" },
+      state: () => rows(`SELECT count(*)::int AS l FROM eureka.applicant_login_link`),
+    }),
+    forbidden: { applicantId: FOREIGN_ID, linkId: FOREIGN_ID, expiresAt: "2099-01-01T00:00:00Z", ttlMinutes: 600 },
+  },
+  {
+    route: "POST /api/portal/auth/verify", actor: null,
+    prepare: async () => ({
+      url: "/api/portal/auth/verify", headers: { "x-eureka-portal": "1" }, body: { token: `${FOREIGN_ID}.${"a".repeat(43)}` },
+      state: () => rows(`SELECT count(*)::int AS s FROM eureka.applicant_session`),
+    }),
+    forbidden: { applicantId: FOREIGN_ID, sessionHours: 999, emailVerifiedAt: PAST },
+  },
 ];
 
 /** Endpoints that read no body: what they change comes from the URL and the session only. */
 interface IgnoreCase { route: string; run: () => Promise<void> }
 const IGNORED: IgnoreCase[] = [
+  // jobs-portal: sign-out ends the caller's own applicant session, whatever the body names
+  {
+    route: "POST /api/portal/auth/sign-out",
+    run: async () => {
+      const signIn = async (email: string) => {
+        await app.inject({ method: "POST", url: "/api/portal/auth/sign-up", headers: { "x-eureka-portal": "1" },
+          payload: { firstName: "Out", lastName: "Applicant", email, phone: "+1 469 555 0178" } });
+        const mail = (await app.inject({ method: "GET", url: `/api/portal/dev/mailbox?to=${encodeURIComponent(email)}` })).json().items[0];
+        const token = /#token=([^\s]+)/.exec(mail.text)![1]!;
+        const v = await app.inject({ method: "POST", url: "/api/portal/auth/verify", headers: { "x-eureka-portal": "1" }, payload: { token } });
+        const cookie = String(v.headers["set-cookie"]).split(";")[0]!;
+        const me = (await app.inject({ method: "GET", url: "/api/portal/me", headers: { cookie } })).json();
+        return { cookie, csrf: me.csrfToken as string, id: me.id as string };
+      };
+      const a = await signIn("ma-out-a@example.com");
+      const b = await signIn("ma-out-b@example.com");
+      const res = await app.inject({ method: "POST", url: "/api/portal/auth/sign-out", headers: { cookie: a.cookie, "x-csrf-token": a.csrf },
+        payload: { applicantId: b.id, sessionId: b.cookie, ...SERVER_MANAGED } });
+      expect(res.statusCode, res.body).toBe(204);
+      expect((await app.inject({ method: "GET", url: "/api/portal/me", headers: { cookie: a.cookie } })).statusCode).toBe(401);
+      expect((await app.inject({ method: "GET", url: "/api/portal/me", headers: { cookie: b.cookie } })).statusCode).toBe(200);
+    },
+  },
   {
     route: "POST /api/v1/notifications/:id/read",
     run: async () => {

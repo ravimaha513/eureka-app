@@ -13,6 +13,8 @@ locals {
   domain_name       = "eureka-staging.spokenly.click"
   hosted_zone_name  = "spokenly.click"
   google_hosted_domain = "aceintegrator.com"
+  # jobs-portal: SES sender of applicant sign-in links and application notices (required by the API).
+  portal_from_email = "careers@eureka-staging.spokenly.click"
 
   vpc_cidr             = "10.41.0.0/16"
   public_subnet_cidrs  = ["10.41.1.0/24", "10.41.2.0/24"]

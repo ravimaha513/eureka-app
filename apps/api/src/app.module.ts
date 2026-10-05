@@ -47,6 +47,9 @@ import { FIELD_CRYPTO, createFieldCrypto } from "./platform/crypto/config.js";
 import { WorkAuthorizationController } from "./modules/work-authorization/work-authorization.controller.js";
 import { WorkAuthorizationService } from "./modules/work-authorization/work-authorization.service.js";
 import { JobsController, JobsService } from "./modules/jobs/jobs.controller.js";
+import { PortalAuthController, PortalAuthService, PortalDevMailboxController, PortalMeController } from "./modules/portal/portal-auth.controller.js";
+import { PortalSessionService } from "./platform/portal-session.service.js";
+import { MAIL_PORT, createMailPort } from "./platform/mail.js";
 
 @Controller("api")
 class HealthController {
@@ -72,7 +75,7 @@ export class AppModule {
         ResumesController, NotificationsController, DocumentsController, StepUpController,
         EmployeesController, AssignmentsController, ReportsController, WorkAuthorizationController,
         // jobs-portal
-        JobsController,
+        JobsController, PortalAuthController, PortalMeController, PortalDevMailboxController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
@@ -82,7 +85,7 @@ export class AppModule {
         ResumesService, NotificationsService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
         WorkAuthorizationService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
         // jobs-portal
-        JobsService,
+        JobsService, PortalSessionService, PortalAuthService, { provide: MAIL_PORT, useFactory: () => createMailPort(config) },
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],

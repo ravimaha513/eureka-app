@@ -60,7 +60,7 @@ describe("Jobs page", () => {
     wrap(<JobsPage me={meFor("lead")} />);
     fireEvent.click(await screen.findByRole("button", { name: /Add job/ }));
     const dlg = await screen.findByRole("dialog", { name: "Create job" });
-    const client = within(dlg).getByRole("combobox", { name: "Client", exact: true });
+    const client = within(dlg).getByRole("combobox", { name: "Client" });
     await waitFor(() => expect(client).not.toBeDisabled());
     fireEvent.click(within(dlg).getByRole("button", { name: "Create job" }));
     expect(await within(dlg).findByText("Enter the job title.")).toBeInTheDocument();
@@ -137,7 +137,7 @@ describe("Log submission job picker", () => {
     api.routes["POST /api/v1/submissions"] = () => ({ status: 201, body: { id: "s1", duplicateWarning: false } });
     const onLogged = vi.fn();
     wrap(<LogSubmissionDialog candidate={{ id: "c1", name: "Asha" }} onClose={() => undefined} onLogged={onLogged} />);
-    const picker = await screen.findByRole("combobox", { name: "Job (optional)", exact: true });
+    const picker = await screen.findByRole("combobox", { name: "Job (optional)" });
     fireEvent.change(picker, { target: { value: "j1" } });
     expect(screen.getByLabelText("Job title")).toHaveValue("Java Developer");
     fireEvent.click(screen.getByRole("button", { name: "Log submission" }));
