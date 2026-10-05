@@ -134,6 +134,7 @@ export function mapJobError(err: unknown): never {
   const make = e.message !== undefined && e.code !== undefined ? CODES[e.message] : undefined;
   if (make) throw make();
   if (e.code === "23503" && e.constraint === "job_client_id_fkey") throw new UnprocessableEntityException("invalid_client");
+  if (e.code === "23503" && e.constraint === "job_company_id_fkey") throw new UnprocessableEntityException("invalid_company");
   if (e.code === "23503" && e.constraint === "job_hiring_manager_id_fkey") throw new UnprocessableEntityException("invalid_hiring_manager");
   if (e.code === "23514" && e.constraint === "job_kind_ref") throw new UnprocessableEntityException("invalid_job_reference");
   if (e.code === "23514" && e.constraint === "job_portal") throw new UnprocessableEntityException("portal_internal_only");
