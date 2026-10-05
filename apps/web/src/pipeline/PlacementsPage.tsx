@@ -3,6 +3,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { ROLE_LABELS, type Role } from "@eureka/shared";
 import type { Me } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { DocumentsSection } from "../documents/DocumentsSection";
 import { Drawer, Field, fmtDate } from "../sales/ui";
 import { pipelineError } from "./errors";
 import {
@@ -22,10 +23,23 @@ const EXIT_TEXT: Record<string, string> = {
 /** "offer_letter" → "Offer letter", "i9" → "I9" (document types are snake_case keys). */
 export const docTypeLabel = (t: string) => { const s = t.replace(/_/g, " "); return s.charAt(0).toUpperCase() + s.slice(1); };
 
+/** "2 of 3 done (1 required open, 1 overdue)": verified or waived items count as done. */
+function ChecklistProgress({ items }: { items: NonNullable<Placement["checklist"]> }) {
+  const done = items.filter((c) => c.status === "verified" || c.status === "waived").length;
+  const requiredOpen = items.filter((c) => c.required && (c.status === "pending" || c.status === "received")).length;
+  const overdue = items.filter((c) => c.overdue).length;
+  const extra = [requiredOpen ? `${requiredOpen} required open` : "", overdue ? `${overdue} overdue` : ""].filter(Boolean).join(", ");
+  return (
+    <p className="muted">
+      <progress max={items.length} value={done} aria-label="Paperwork done" /> {done} of {items.length} done{extra && ` (${extra})`}
+    </p>
+  );
+}
+
 const where = (p: Pick<Placement, "projectCity" | "projectState">) => [p.projectCity, p.projectState].filter(Boolean).join(", ");
 
 /** Placements list (GET /api/v1/placements) with a detail drawer for contacts, assignment and status changes. */
-export function PlacementsPage({ initialOpenId = null }: { me?: Pick<Me, "capabilities">; initialOpenId?: string | null }) {
+export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "capabilities">; initialOpenId?: string | null }) {
   const id = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [status, setStatusRaw] = useState("");
@@ -91,7 +105,7 @@ export function PlacementsPage({ initialOpenId = null }: { me?: Pick<Me, "capabi
           {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
             <p className="empty error" role="alert">{pipelineError(q.error, "placement")} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
           ) : (
-            <table aria-label="Placements" aria-busy={q.isFetching || undefined}>
+            <div className="tablewrap"><table aria-label="Placements" aria-busy={q.isFetching || undefined}>
               <thead><tr>
                 <th>Candidate</th><th>Client / vendor</th><th>Type</th><th>Tentative start</th><th>Status</th><th>Recruiter</th>
                 {showRate && <th>Rate</th>}
@@ -116,7 +130,7 @@ export function PlacementsPage({ initialOpenId = null }: { me?: Pick<Me, "capabi
                   <tr><td colSpan={showRate ? 8 : 7} className="empty">{hasFilters ? "No placements match these filters." : "No placements yet. Create one from a selected submission."}</td></tr>
                 )}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       )}
@@ -130,13 +144,14 @@ export function PlacementsPage({ initialOpenId = null }: { me?: Pick<Me, "capabi
         </nav>
       </div>
 
-      {openId && <PlacementDrawer id={openId} initial={items.find((p) => p.id === openId) ?? null} onClose={close} onNotice={setNotice} />}
+      {openId && <PlacementDrawer id={openId} initial={items.find((p) => p.id === openId) ?? null} onClose={close} onNotice={setNotice}
+        canReadDocuments={Boolean(me?.capabilities.includes("document:read"))} />}
     </>
   );
 }
 
-function PlacementDrawer({ id, initial, onClose, onNotice }: {
-  id: string; initial: Placement | null; onClose: () => void; onNotice: (m: string) => void;
+function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = false }: {
+  id: string; initial: Placement | null; onClose: () => void; onNotice: (m: string) => void; canReadDocuments?: boolean;
 }) {
   const qc = useQueryClient();
   const hid = useId();
@@ -208,7 +223,7 @@ function PlacementDrawer({ id, initial, onClose, onNotice }: {
             <section className="manageblock" aria-labelledby={`${hid}-c`}>
               <h3 id={`${hid}-c`}>Contacts</h3>
               {!full ? <p className="muted">Loading contacts…</p> : !p.contacts?.length ? <p className="muted">No contacts recorded.</p> : (
-                <table className="mini" aria-labelledby={`${hid}-c`}>
+                <div className="tablewrap"><table className="mini" aria-labelledby={`${hid}-c`}>
                   <thead><tr><th>Kind</th><th>Name</th><th>Email</th><th>Phone</th></tr></thead>
                   <tbody>
                     {p.contacts.map((c, i) => (
@@ -220,7 +235,7 @@ function PlacementDrawer({ id, initial, onClose, onNotice }: {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               )}
             </section>
 
@@ -230,20 +245,32 @@ function PlacementDrawer({ id, initial, onClose, onNotice }: {
                 {!full ? <p className="muted">Loading checklist…</p> : !p.checklist?.length ? (
                   <p className="muted">No paperwork checklist is set up for {PLACEMENT_TYPE_LABELS[p.placementType] ?? p.placementType} placements.</p>
                 ) : (
-                  <table className="mini" aria-labelledby={`${hid}-k`}>
-                    <thead><tr><th>Document</th><th>Owner</th><th>Required</th><th>Status</th></tr></thead>
-                    <tbody>
-                      {p.checklist.map((c) => (
-                        <tr key={c.docType}>
-                          <td>{docTypeLabel(c.docType)}</td>
-                          <td>{ROLE_LABELS[c.ownerRole as Role] ?? pipelineLabel(c.ownerRole)}</td>
-                          <td>{c.required ? "Required" : "Optional"}</td>
-                          <td>{pipelineLabel(c.status)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <>
+                    <ChecklistProgress items={p.checklist} />
+                    <div className="tablewrap"><table className="mini" aria-labelledby={`${hid}-k`}>
+                      <thead><tr><th>Document</th><th>Owner</th><th>Required</th><th>Status</th><th>Due</th></tr></thead>
+                      <tbody>
+                        {p.checklist.map((c) => (
+                          <tr key={c.docType}>
+                            <td>{docTypeLabel(c.docType)}</td>
+                            <td>{ROLE_LABELS[c.ownerRole as Role] ?? pipelineLabel(c.ownerRole)}</td>
+                            <td>{c.required ? "Required" : "Optional"}</td>
+                            <td>{pipelineLabel(c.status)}</td>
+                            <td>{c.dueOn ? fmtDate(c.dueOn) : "—"}{c.overdue && <> <span className="badge overdue">Overdue</span></>}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table></div>
+                  </>
                 )}
+              </section>
+            )}
+
+            {full && p.bgc && (
+              <section className="manageblock" aria-labelledby={`${hid}-b`}>
+                <h3 id={`${hid}-b`}>Background check</h3>
+                <p><span className={`badge bgc-${p.bgc.status}`}>{p.bgc.status === "not_started" ? "Not started" : pipelineLabel(p.bgc.status)}</span>
+                  {" "}<span className="muted">Recorded by HR on Paperwork &amp; BGC.</span></p>
               </section>
             )}
 
@@ -260,6 +287,8 @@ function PlacementDrawer({ id, initial, onClose, onNotice }: {
                 </dl>
               )}
             </section>
+
+            {canReadDocuments && <DocumentsSection owner={{ kind: "placement", id }} title="Placement documents" />}
           </>
         )}
       </Drawer>

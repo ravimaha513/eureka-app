@@ -90,7 +90,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
           {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
             <p className="empty error" role="alert">{pipelineError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
           ) : (
-            <table aria-label="Submissions" aria-busy={q.isFetching || undefined}>
+            <div className="tablewrap"><table aria-label="Submissions" aria-busy={q.isFetching || undefined}>
               <thead><tr>
                 <th>Candidate</th><th>Job / client</th><th>Status</th><th>Submitted</th><th>Recruiter</th>
                 {showRate && <th>Rate</th>}
@@ -115,7 +115,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
                   <tr><td colSpan={showRate ? 7 : 6} className="empty">{hasFilters ? "No submissions match these filters." : "No submissions yet. Log one from a candidate profile."}</td></tr>
                 )}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       )}

@@ -11,7 +11,11 @@ import {
 import {
   PLACEABLE_CANDIDATE_STATUSES,
   TERMINAL_SUBMISSION_STATUSES,
+  bgcTransitionTargets,
   candidateTransitionTargets,
+  checklistItemTransitionTargets,
+  type BgcStatus,
+  type ChecklistItemStatus,
   placementTransitionTargets,
   submissionTransitionTargets,
   type CandidateStatus,
@@ -100,4 +104,76 @@ export const BATCH_MANAGER_SCOPES = ["team", "hierarchy", "org"] as const;
 
 export function canCreateBatch(user: UserAccess): boolean {
   return resolveScopeFor(user, "candidate:create", BATCH_MANAGER_SCOPES) !== null;
+}
+
+/**
+ * Paperwork and BGC (migration 0044, docs/paperwork-api.md). A paperwork
+ * record is covered for a permission through the placement's actor snapshot
+ * or its owned candidate (never the all-teams rule); mirrors
+ * authz.placement_covered. `candidate` is the candidate as the caller sees it
+ * (null when they cannot read it).
+ */
+export interface PaperworkRef {
+  recruiterId: string;
+  teamId: string | null;
+  locationId: string | null;
+  candidate: CandidateRef | null;
+}
+
+export function paperworkCovered(user: UserAccess, perm: Parameters<typeof resolveScope>[1], r: PaperworkRef): boolean {
+  const scope = resolveScope(user, perm);
+  if (!scope) return false;
+  return ownsActivity(scope, r) || (r.candidate !== null && ownsCandidate(scope, r.candidate));
+}
+
+export interface ChecklistItemActions {
+  /** Status targets this caller may set now. */
+  transition: ChecklistItemStatus[];
+  /** Notes and the document link (document:upload or document:verify). */
+  editNotes: boolean;
+  /** Owner role, assignee and due date (document:verify). */
+  assign: boolean;
+}
+
+/** `placementStatus` is null when the caller cannot read the placement (assumed open; the server checks). */
+export function checklistItemActions(
+  user: UserAccess, r: PaperworkRef, status: string, placementStatus: string | null,
+): ChecklistItemActions {
+  if (placementStatus === "backout") return { transition: [], editNotes: false, assign: false };
+  const upload = paperworkCovered(user, "document:upload", r);
+  const verify = paperworkCovered(user, "document:verify", r);
+  return {
+    transition: checklistItemTransitionTargets(status).filter((to) => (to === "received" ? upload || verify : verify)),
+    editNotes: upload || verify,
+    assign: verify,
+  };
+}
+
+export interface BgcActions {
+  update: boolean;
+  transition: BgcStatus[];
+  /**
+   * Record `failed` and move the placement to bgc_failed in the same request.
+   * Needs bgc:update and the placement rights authz.transition_placement checks.
+   */
+  failPlacement: boolean;
+}
+
+export function bgcActions(user: UserAccess, r: PaperworkRef, status: string, placementStatus: string | null): BgcActions {
+  const update = placementStatus !== "backout" && paperworkCovered(user, "bgc:update", r);
+  const canFail = status === "failed" || bgcTransitionTargets(status).includes("failed");
+  return {
+    update,
+    transition: update ? bgcTransitionTargets(status) : [],
+    failPlacement: update && canFail && placementStatus !== null
+      && placementTransitions(user, r, placementStatus).includes("bgc_failed"),
+  };
+}
+
+/** Template versions: readable with document:read at org scope; published with document:verify at org scope (PW-10). */
+export function checklistTemplateAccess(user: UserAccess): { read: boolean; publish: boolean } {
+  return {
+    read: resolveScopeFor(user, "document:read", ["org"]) !== null,
+    publish: resolveScopeFor(user, "document:verify", ["org"]) !== null,
+  };
 }

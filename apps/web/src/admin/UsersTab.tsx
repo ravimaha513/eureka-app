@@ -66,7 +66,7 @@ export function UsersTab() {
 
       <div className="card">
         {q.isLoading ? <p className="empty">Loading…</p> : q.error ? <p className="empty error" role="alert">{friendlyError(q.error)}</p> : (
-          <table aria-label="Users" aria-busy={q.isFetching || undefined}>
+          <div className="tablewrap"><table aria-label="Users" aria-busy={q.isFetching || undefined}>
             <thead><tr><th>User</th><th>Designation</th><th>Status</th><th>Roles</th><th>Teams</th><th>Manager</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {q.data!.items.map((u) => {
@@ -108,7 +108,7 @@ export function UsersTab() {
               })}
               {q.data!.items.length === 0 && <tr><td colSpan={7} className="empty">No users match.</td></tr>}
             </tbody>
-          </table>
+          </table></div>
         )}
       </div>
       <nav className="pager" aria-label="Users pages">

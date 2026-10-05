@@ -11,7 +11,20 @@
 import type pg from "pg";
 
 const uid = (n: number) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
-const U = { r1a: uid(9), r1b: uid(10), r2a: uid(11), r3a: uid(12), coach: uid(13), locD: uid(14), locA: uid(15) };
+const U = { r1a: uid(9), r1b: uid(10), r2a: uid(11), r3a: uid(12), coach: uid(13), locD: uid(14), locA: uid(15), hr: uid(16) };
+/** Fictional sample checklists for local development only (not product content). */
+const SAMPLE_TEMPLATES: Record<string, { doc_type: string; owner_role: string; required?: boolean }[]> = {
+  w2: [
+    { doc_type: "sample_form_a", owner_role: "hr" },
+    { doc_type: "sample_form_b", owner_role: "immigration" },
+    { doc_type: "sample_form_c", owner_role: "accounts", required: false },
+  ],
+  c2c: [
+    { doc_type: "sample_form_a", owner_role: "hr" },
+    { doc_type: "sample_form_d", owner_role: "accounts" },
+  ],
+  "1099": [{ doc_type: "sample_form_e", owner_role: "accounts" }],
+};
 const NORTHWIND = uid(601);
 const CLIENTS: [string, string][] = [
   [uid(602), "Contoso Health"], [uid(603), "Fabrikam Retail"], [uid(604), "Tailspin Airlines"], [uid(605), "Woodgrove Bank"],
@@ -55,6 +68,17 @@ export async function seedDevPipeline(admin: pg.Pool): Promise<DevPipelineResult
 
   for (const [id, name] of CLIENTS) {
     await admin.query("INSERT INTO eureka.client (id, name) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING", [id, name]);
+  }
+
+  // Development only: clearly fictional sample paperwork templates (the real
+  // content per placement type is an open product question; none ships).
+  // Published by the dev HR user through the same definer function as the app.
+  for (const [type, items] of Object.entries(SAMPLE_TEMPLATES)) {
+    await asUser(admin, U.hr, async (c) => {
+      const cur = (await c.query<{ v: number }>(
+        `SELECT coalesce(max(version), 0)::int AS v FROM authz.checklist_templates() WHERE kind = 'paperwork' AND placement_type = $1`, [type])).rows[0]!.v;
+      if (cur === 0) await c.query(`SELECT authz.publish_checklist_template('paperwork', $1, $2::jsonb, 0)`, [type, JSON.stringify(items)]);
+    });
   }
   const clients = [NORTHWIND, ...CLIENTS.map(([id]) => id)];
 
@@ -139,6 +163,31 @@ export async function seedDevPipeline(admin: pg.Pool): Promise<DevPipelineResult
           await asUser(admin, rid, (c) => c.query("SELECT authz.transition_placement($1,$2,$3)",
             [placementId, to, to === "backout" ? "Candidate declined the offer" : null]));
         }
+        // Some paperwork progress for the Paperwork & BGC screen (HR, through the definer functions).
+        if (!steps2.includes("backout")) {
+          await asUser(admin, U.hr, async (c) => {
+            const items = (await c.query<{ id: string; owner_role: string }>(
+              `SELECT id, owner_role FROM eureka.checklist_item WHERE placement_id = $1 ORDER BY position`, [placementId])).rows;
+            if (items[0]) {
+              await c.query(`SELECT authz.update_checklist_item($1, $2::jsonb, NULL)`, [items[0].id, JSON.stringify({
+                status: "received", dueOn: daysAgo(3).toISOString().slice(0, 10),
+                // Assignees must hold the item's owner role.
+                ...(items[0].owner_role === "hr" ? { assigneeId: U.hr } : {}),
+              })]);
+            }
+            if (items[1]) {
+              await c.query(`SELECT authz.update_checklist_item($1, $2::jsonb, NULL)`, [items[1].id,
+                JSON.stringify({ dueOn: daysAgo(-7).toISOString().slice(0, 10) })]);
+            }
+            if (steps2.includes("bgc")) {
+              await c.query(`SELECT authz.update_bgc($1, $2::jsonb, NULL)`, [placementId,
+                JSON.stringify({ status: "initiated", bgcCompany: "Fictional Checks LLC", employmentYears: 7, addressYears: 7 })]);
+            }
+            if (steps2.includes("joined")) {
+              await c.query(`SELECT authz.update_bgc($1, '{"status":"cleared"}', NULL)`, [placementId]);
+            }
+          });
+        }
       }
     }
   }
@@ -153,12 +202,31 @@ export async function seedDevPipeline(admin: pg.Pool): Promise<DevPipelineResult
     }
     await c.query(`UPDATE eureka.placement p SET created_at = s.status_changed_at + interval '1 hour'
                      FROM eureka.submission s WHERE s.id = p.submission_id`);
+    // Joined placements opened their assignment (and the employee record, migration 0045) today:
+    // start them a week after the placement was created, so the Employees screen shows real dates.
+    await c.query(`UPDATE eureka.assignment a SET start_date = least(current_date - 1, (p.created_at + interval '7 days')::date)
+                     FROM eureka.placement p WHERE p.id = a.placement_id`);
+    await c.query(`UPDATE eureka.employee e SET employee_since = a.start_date, status_since = a.start_date
+                     FROM eureka.assignment a WHERE a.person_id = e.person_id`);
+    await c.query(`UPDATE eureka.employment_event ev SET effective_on = a.start_date
+                     FROM eureka.assignment a WHERE a.id = ev.assignment_id AND ev.kind = 'started'`);
     await c.query("COMMIT");
   } catch (err) {
     await c.query("ROLLBACK").catch(() => undefined);
     throw err;
   } finally {
     c.release();
+  }
+
+  // Employees (dev only): HR plans the end of the first joined assignment (ending soon) and records a
+  // project exit on the second (the employee and candidate move to the bench), through the definer functions.
+  const joined = (await admin.query<{ id: string }>(
+    `SELECT a.id FROM eureka.assignment a ORDER BY a.start_date, a.id`)).rows;
+  if (joined[0]) {
+    await asUser(admin, U.hr, (c2) => c2.query("SELECT * FROM authz.set_assignment_end_date($1, current_date + 20)", [joined[0]!.id]));
+  }
+  if (joined[1]) {
+    await asUser(admin, U.hr, (c2) => c2.query("SELECT * FROM authz.end_assignment($1, current_date - 1, 'completed')", [joined[1]!.id]));
   }
   return out;
 }

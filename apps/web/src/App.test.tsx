@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { capabilities, ROLES, type Role } from "@eureka/shared";
@@ -42,6 +42,37 @@ describe("role-aware navigation", () => {
     expect(within(nav).getByRole("button", { name: "Users & Access" })).toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: "Hot List" })).toBeInTheDocument();
     expect(within(nav).queryByRole("button", { name: "Payments" })).not.toBeInTheDocument();
+  });
+});
+
+describe("mobile menu", () => {
+  it("toggles the sidebar drawer, closes on navigation and on Escape with focus back on the button", () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    wrap(<Shell me={meFor("org_admin")} onSignOut={() => undefined} />);
+    const menu = screen.getByRole("button", { name: "Menu" });
+    const nav = screen.getByRole("complementary", { name: "Main navigation" });
+    expect(menu).toHaveAttribute("aria-controls", nav.id);
+    expect(menu).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(menu);
+    expect(menu).toHaveAttribute("aria-expanded", "true");
+    expect(nav).toHaveClass("open");
+    fireEvent.click(within(nav).getByRole("button", { name: "Users & Access" }));
+    expect(menu).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(menu);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(menu).toHaveAttribute("aria-expanded", "false");
+    expect(menu).toHaveFocus();
+  });
+});
+
+describe("notification bell in the shell", () => {
+  it("every role gets the bell in the top bar, outside the sidebar", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => new Response(JSON.stringify(
+      String(input).startsWith("/api/v1/notifications/unread-count") ? { unread: 4, capped: false } : { items: [] }), { status: 200 }));
+    wrap(<Shell me={meFor("recruiter")} onSignOut={() => undefined} />);
+    expect(await screen.findByRole("button", { name: "Notifications, 4 unread" })).toBeInTheDocument();
+    const nav = screen.getByRole("complementary", { name: "Main navigation" });
+    expect(within(nav).queryByRole("button", { name: /Notifications/ })).not.toBeInTheDocument();
   });
 });
 

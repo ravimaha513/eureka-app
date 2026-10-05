@@ -52,7 +52,7 @@ export function ApprovalsTab() {
       {error && <p className="error banner" role="alert">{error}</p>}
       <div className="card">
         {q.isLoading ? <p className="empty">Loading…</p> : q.error ? <p className="empty error" role="alert">{friendlyError(q.error)}</p> : (
-          <table aria-label="Role requests">
+          <div className="tablewrap"><table aria-label="Role requests">
             <thead><tr><th>Person</th><th>Role</th><th>Requested by</th><th>Requested</th>{status === "pending" ? <th><span className="sr-only">Actions</span></th> : <th>Decided</th>}</tr></thead>
             <tbody>
               {q.data!.items.map((r) => {
@@ -81,7 +81,7 @@ export function ApprovalsTab() {
               })}
               {q.data!.items.length === 0 && <tr><td colSpan={5} className="empty">No {status} requests.</td></tr>}
             </tbody>
-          </table>
+          </table></div>
         )}
       </div>
     </>

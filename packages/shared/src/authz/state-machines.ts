@@ -97,3 +97,55 @@ export const PLACEMENT_REASON_REQUIRED: ReadonlySet<string> = new Set(["backout"
 
 /** Candidate statuses from which a placement may be created (PL-5 moves them to confirmation). */
 export const PLACEABLE_CANDIDATE_STATUSES: ReadonlySet<string> = new Set(["active", "full_of_interviews"]);
+
+// ---------- paperwork checklist items (migration 0044, docs/paperwork-api.md PW-2) ----------
+
+export const CHECKLIST_ITEM_STATUSES = ["pending", "received", "verified", "waived"] as const;
+export type ChecklistItemStatus = (typeof CHECKLIST_ITEM_STATUSES)[number];
+
+/** Items still needing work (counted as outstanding; overdue when past their due date). */
+export const OUTSTANDING_CHECKLIST_STATUSES: ReadonlySet<string> = new Set(["pending", "received"]);
+
+const CHECKLIST_EDGES: Partial<Record<string, readonly ChecklistItemStatus[]>> = {
+  pending: ["received", "waived"],
+  // back to pending = returned (e.g. illegible or wrong document)
+  received: ["verified", "waived", "pending"],
+  // back to pending = reopened
+  verified: ["pending"],
+  waived: ["pending"],
+};
+
+export function checklistItemTransitionAllowed(from: string, to: string): boolean {
+  return CHECKLIST_EDGES[from]?.includes(to as ChecklistItemStatus) ?? false;
+}
+
+export function checklistItemTransitionTargets(from: string): ChecklistItemStatus[] {
+  return [...(CHECKLIST_EDGES[from] ?? [])];
+}
+
+/** Waiving, returning and reopening need a non-blank reason (reason_required). */
+export const CHECKLIST_REASON_REQUIRED: ReadonlySet<string> = new Set(["waived", "pending"]);
+
+// ---------- background checks (migration 0044, PW-7; design B2.4 `bgc`) ----------
+
+export const BGC_STATUSES = ["not_started", "initiated", "in_progress", "cleared", "failed"] as const;
+export type BgcStatus = (typeof BGC_STATUSES)[number];
+
+const BGC_EDGES: Partial<Record<string, readonly BgcStatus[]>> = {
+  not_started: ["initiated"],
+  initiated: ["in_progress", "cleared", "failed"],
+  in_progress: ["cleared", "failed"],
+  // FR-PLC-06: a cleared check can still fail after the fact; failed is final.
+  cleared: ["failed"],
+};
+
+export function bgcTransitionAllowed(from: string, to: string): boolean {
+  return BGC_EDGES[from]?.includes(to as BgcStatus) ?? false;
+}
+
+export function bgcTransitionTargets(from: string): BgcStatus[] {
+  return [...(BGC_EDGES[from] ?? [])];
+}
+
+/** Recording a failed check needs a non-blank reason. */
+export const BGC_REASON_REQUIRED: ReadonlySet<string> = new Set(["failed"]);

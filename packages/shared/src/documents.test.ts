@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { RESUME_MAX_BYTES, isResumeContentType, resumeAccess } from "./documents.js";
+import {
+  DOCUMENT_CONTENT_TYPE_LIST, DOCUMENT_MAX_BYTES, DOCUMENT_TYPES, DOCUMENT_TYPE_LIST, RESUME_MAX_BYTES,
+  documentAccess, isDocumentContentType, isDocumentType, isResumeContentType, resumeAccess,
+} from "./documents.js";
 import type { CandidateRef, UserAccess } from "./authz/engine.js";
 
 const user = (roles: UserAccess["roles"], extra: Partial<UserAccess> = {}): UserAccess => ({
@@ -44,5 +47,54 @@ describe("resumeAccess (document:read / document:upload over the candidate)", ()
     expect(resumeAccess(user([{ role: "accounts" }]), cand({ recruiterId: "x" }))).toEqual({ read: true, upload: false });
     expect(resumeAccess(user([{ role: "ceo" }]), cand())).toEqual({ read: false, upload: false });
     expect(resumeAccess(user([{ role: "location_incharge", locationId: "dallas" }]), cand())).toEqual({ read: false, upload: false });
+  });
+});
+
+describe("paperwork document types and upload rules", () => {
+  it("allows PDF, DOCX, PNG and JPEG, up to 15 MB", () => {
+    expect([...DOCUMENT_CONTENT_TYPE_LIST].sort()).toEqual([
+      "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/jpeg", "image/png"]);
+    expect(isDocumentContentType("image/gif")).toBe(false);
+    expect(isDocumentContentType("text/html")).toBe(false);
+    expect(isDocumentContentType("constructor")).toBe(false);
+    expect(DOCUMENT_MAX_BYTES).toBe(15_728_640);
+  });
+
+  it("I-9, driving license and work-authorization copies are restricted (design A6.3)", () => {
+    const restricted = DOCUMENT_TYPE_LIST.filter((t) => DOCUMENT_TYPES[t].classification === "restricted").sort();
+    expect(restricted).toEqual(["drivers_license", "i9", "work_authorization"]);
+    for (const t of DOCUMENT_TYPE_LIST) expect(t).toMatch(/^[a-z][a-z0-9_]{1,39}$/);
+    expect(isDocumentType("i9")).toBe(true);
+    expect(isDocumentType("hasOwnProperty")).toBe(false);
+  });
+});
+
+describe("documentAccess (B4.4: document:read scope; restricted needs document.restricted:read)", () => {
+  const none = { read: false, upload: false, readRestricted: false, uploadRestricted: false };
+  const other = cand({ recruiterId: "x", teamId: "t9" });
+
+  it("only HR, Accounts and Immigration see restricted documents; Accounts cannot upload", () => {
+    expect(documentAccess(user([{ role: "hr" }]), other)).toEqual({ read: true, upload: true, readRestricted: true, uploadRestricted: true });
+    expect(documentAccess(user([{ role: "immigration" }]), other)).toEqual({ read: true, upload: true, readRestricted: true, uploadRestricted: true });
+    expect(documentAccess(user([{ role: "accounts" }]), other)).toEqual({ read: true, upload: false, readRestricted: true, uploadRestricted: false });
+  });
+
+  it("Documents Team and Associate HR handle internal documents only", () => {
+    for (const role of ["documents_team", "associate_hr"] as const) {
+      expect(documentAccess(user([{ role }]), other)).toEqual({ read: true, upload: true, readRestricted: false, uploadRestricted: false });
+    }
+  });
+
+  it("Sales: own/team scope, never restricted, never through Open to all teams", () => {
+    expect(documentAccess(user([{ role: "recruiter" }]), cand())).toEqual({ read: true, upload: true, readRestricted: false, uploadRestricted: false });
+    expect(documentAccess(user([{ role: "recruiter" }]), cand({ recruiterId: "x" }))).toEqual(none);
+    expect(documentAccess(user([{ role: "lead" }]), cand({ recruiterId: "x", teamId: "t9", visibility: "all_teams" }))).toEqual(none);
+  });
+
+  it("CEO, BU head, location roles, coaches and org admins see no documents", () => {
+    for (const roles of [[{ role: "ceo" }], [{ role: "bu_head" }], [{ role: "org_admin" }], [{ role: "interview_coach" }],
+      [{ role: "location_incharge", locationId: "dallas" }]] as UserAccess["roles"][]) {
+      expect(documentAccess(user(roles), cand())).toEqual(none);
+    }
   });
 });

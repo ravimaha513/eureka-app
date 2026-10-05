@@ -30,9 +30,26 @@ export interface DocumentStore {
   verdict(key: string, signal?: AbortSignal): Promise<ScanVerdict>;
   /** The bytes of one version; throws when it is larger than maxBytes. */
   read(key: string, versionId: string, maxBytes: number, signal?: AbortSignal): Promise<Buffer>;
-  putClean(key: string, body: Buffer, sha256: Buffer, contentType: string, signal?: AbortSignal): Promise<void>;
+  /**
+   * Create-only write of a scanned file to clean/ or restricted/. A
+   * restricted/ object is encrypted with the restricted KMS key (`kmsKeyId`,
+   * required there) and no S3 bucket key, so the KMS encryption context is
+   * the object's own ARN (what the IAM conditions match on).
+   */
+  putClean(key: string, body: Buffer, sha256: Buffer, contentType: string, signal?: AbortSignal, opts?: { kmsKeyId?: string }): Promise<void>;
   /** Permanently removes one quarantine version (infected files, files promoted to clean/). */
   deleteVersion(key: string, versionId: string, signal?: AbortSignal): Promise<void>;
+}
+
+/** User metadata (x-amz-meta-sha256) holding the hex SHA-256 of a restricted object. */
+export const SHA256_META = "sha256";
+
+/** Promotion writes clean/ or restricted/ only; restricted/ needs the restricted key. Returns whether it is restricted. */
+function promotionTarget(key: string, kmsKeyId: string | undefined): boolean {
+  if (key.startsWith("clean/")) return false;
+  if (!key.startsWith("restricted/")) throw new Error("promotion writes clean/ or restricted/ only");
+  if (!kmsKeyId) throw new Error("restricted/ objects need the restricted KMS key");
+  return true;
 }
 
 /** The tag GuardDuty Malware Protection for S3 writes on each scanned object. */
@@ -42,11 +59,12 @@ export class ObjectTooLargeError extends Error {}
 
 /**
  * S3 (infra/modules/stack/app.tf, worker role): ListBucketVersions limited to
- * quarantine/resumes/ (a missing object is then "no versions" instead of an
- * ambiguous 403), Get(Object|ObjectVersion)(Tagging) and DeleteObjectVersion
- * on quarantine/resumes/*, PutObject (create-only) and GetObject (HeadObject
- * checksum after a 412) on clean/resumes/*. Encryption is the
- * bucket default (SSE-KMS, data key).
+ * quarantine/resumes/ and quarantine/documents/ (a missing object is then "no
+ * versions" instead of an ambiguous 403), Get(Object|ObjectVersion)(Tagging)
+ * and DeleteObjectVersion there, PutObject (create-only) and GetObject
+ * (HeadObject checksum after a 412) on clean/resumes/*, clean/documents/* and
+ * restricted/documents/*. Encryption is the bucket default (SSE-KMS, data
+ * key), except restricted/ (the restricted key, set per object).
  */
 export class S3DocumentStore implements DocumentStore {
   readonly kind = "s3" as const;
@@ -79,21 +97,38 @@ export class S3DocumentStore implements DocumentStore {
     return Buffer.concat(chunks);
   }
 
-  async putClean(key: string, body: Buffer, sha256: Buffer, contentType: string, signal?: AbortSignal): Promise<void> {
-    if (!key.startsWith("clean/")) throw new Error("promotion writes clean/ only");
+  async putClean(key: string, body: Buffer, sha256: Buffer, contentType: string, signal?: AbortSignal, opts: { kmsKeyId?: string } = {}): Promise<void> {
+    const restricted = promotionTarget(key, opts.kmsKeyId);
     const checksum = sha256.toString("base64");
     try {
       // Create-only: a clean object is never overwritten (a retry finds its own bytes, compared below).
       await this.s3.send(new PutObjectCommand({
         Bucket: this.bucket, Key: key, Body: body, ContentType: contentType, ContentLength: body.length,
         ChecksumSHA256: checksum, IfNoneMatch: "*",
+        ...(restricted ? {
+          ServerSideEncryption: "aws:kms" as const, SSEKMSKeyId: opts.kmsKeyId, BucketKeyEnabled: false,
+          // Compared after a 412 with a plain HEAD (see below); the hex digest of the bytes.
+          Metadata: { [SHA256_META]: sha256.toString("hex") },
+        } : {}),
       }), { abortSignal: signal });
       return;
     } catch (err) {
       const e = err as { name?: string; $metadata?: { httpStatusCode?: number } } | null;
       if (e?.name !== "PreconditionFailed" && e?.$metadata?.httpStatusCode !== 412) throw err;
     }
-    // HeadObject (s3:GetObject on clean/resumes/*, metadata only).
+    if (restricted) {
+      // A HEAD with ChecksumMode on an SSE-KMS object needs kms:Decrypt, which the
+      // worker does not hold for the restricted key (by design). A plain HEAD
+      // returns user metadata and the key id without decrypting: compare our
+      // SHA-256 metadata, the size and the restricted key.
+      const head = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }), { abortSignal: signal });
+      if (head.Metadata?.[SHA256_META] !== sha256.toString("hex") || head.ContentLength !== body.length
+        || head.ServerSideEncryption !== "aws:kms" || head.SSEKMSKeyId !== opts.kmsKeyId) {
+        throw new CleanObjectConflictError(`${key} already exists with different content or key`);
+      }
+      return;
+    }
+    // HeadObject (s3:GetObject on clean/*, metadata only; data key decrypt via S3 is granted).
     const head = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key, ChecksumMode: "ENABLED" }), { abortSignal: signal });
     if (head.ChecksumSHA256 !== checksum || head.ContentLength !== body.length) {
       throw new CleanObjectConflictError(`${key} already exists with different content`);
@@ -141,8 +176,8 @@ export class LocalDocumentStore implements DocumentStore {
     return body;
   }
 
-  async putClean(key: string, body: Buffer, sha256: Buffer): Promise<void> {
-    if (!key.startsWith("clean/")) throw new Error("promotion writes clean/ only");
+  async putClean(key: string, body: Buffer, sha256: Buffer, _contentType?: string, _signal?: AbortSignal, opts: { kmsKeyId?: string } = {}): Promise<void> {
+    promotionTarget(key, opts.kmsKeyId);
     const path = localPath(this.root, key);
     const tmp = await writeTempBeside(path, body);
     try {

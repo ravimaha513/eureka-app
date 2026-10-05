@@ -9,7 +9,7 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - `pnpm -r typecheck` and `pnpm -r test` must pass before every commit (integration tests need
   PostgreSQL 16 at `TEST_PG_ADMIN_URL`, default `postgres://postgres:postgres@127.0.0.1:5432`).
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0040**) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0054**; 0040 and 0049 are unused) and must apply as a
   non-superuser (Amazon RDS master): CI checks this.
 - Commit small and atomic; get an independent review of every security-relevant change.
 
@@ -68,6 +68,64 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   download links; `document:read`/`document:upload` over the candidate. Profile section in the web app.
   Without AWS: `LOCAL_STORAGE_DIR` (API serves a directory) and a fake scanner (EICAR = infected);
   `pnpm local` now runs the worker too.
+- Paperwork progress and BGC (Phase 3, migration 0044, contract `docs/paperwork-api.md`): checklist items move
+  `pending → received → verified` / `waived` (reason) / back to `pending` (returned or reopened, reason) with owner role,
+  assignee (must hold the owner role), due date, notes and a document link, only through `authz.update_checklist_item`
+  (receive/notes need `document:upload` or `document:verify`; everything else `document:verify`), with history rows.
+  One BGC record per placement (`not_started → initiated → in_progress → cleared | failed`, `cleared → failed` after the
+  fact) through `authz.update_bgc` (`bgc:update`, HR); `failPlacement` moves the placement to `bgc_failed` by calling
+  `authz.transition_placement`, so its rules are not duplicated. Paperwork/BGC visibility is `document:read` over the
+  placement (B4.4); items stay readable wherever the placement is. Templates are append-only versions (publish:
+  `document:verify` at org scope); placements keep the version they copied. "Paperwork & BGC" screen (work queue,
+  drawer, templates tab) and checklist progress + BGC status in the placement drawer. No template content ships; the dev
+  seed publishes fictional `sample_form_*` templates.
+  Document link (with 0043): `checklist_item.document_id REFERENCES eureka.document(id)`; `authz.update_checklist_item`
+  accepts only a document of the item's candidate filed on no placement or on this placement, whose file is not blocked
+  (`pending`/`clean`) and which the caller can read under the download rules (restricted documents only with
+  `document.restricted:read`); anything else is 422 `invalid_document`. The item dialog has a document picker (the
+  candidate's documents) and the drawer embeds the documents section for uploads.
+  Item notes and reasons have no app column privilege: they are read through `authz.checklist_item_texts`
+  (document:read over the placement), because items themselves stay readable to every `placement:read` holder.
+  Overdue reminder (migration 0052): the daily worker job `paperwork-overdue` (07:30 New York) emits one
+  `checklist.item_overdue` per outstanding item past its due date, once per item and due date (re-armed when the due
+  date changes), through `authz.emit_paperwork_overdue` (the worker's only new grant); recipients per `docs/notifications.md`.
+- Notifications (migration 0046, `docs/notifications.md`): in-app inbox (`notification`, own rows only, written by the
+  worker; bell and panel in the web top bar, unread count polled every 60 s), outbox delivery generalised to typed
+  events with recipients resolved in the database and email and/or inbox channels (placement emails unchanged; the
+  inbox channel runs even with `OUTBOX_MAIL_MODE=disabled`), bench-time job (FR-NTF-05, off until
+  `NOTIFY_BENCH_DAYS` is set; type `employee.bench_time`), inbox prune. Delivered producers: 0042
+  `work_authorization.expiring`, 0045 `employee.benched` (project exit), `employee.exited`, `assignment.ending_soon`;
+  `candidate.assigned` and `checklist.item_overdue` await their producers. The registry, not a payload's `notify`,
+  decides recipients (shapes and rules in `docs/notifications.md`; `authz.notification_emit_once` for once-only reminders).
+- Paperwork and restricted documents with step-up (FR-PPR-01 to 03, migration 0043, design B2.4 "Built in
+  migration 0043"): typed documents on a candidate or placement (`document`, `file_object`, type keys in
+  `authz.document_type` = `DOCUMENT_TYPES`), the resume scan pipeline generalised (`document-scan`), restricted
+  files under `restricted/documents/` with the restricted KMS key, opened only by HR, Accounts and Immigration
+  after a step-up of the session (Google `max_age=0`/`auth_time`, or the dev step-up behind `AUTH_MODE=dev` and
+  the `dev_step_up` database switch), every opening in `document_access` and the audit export. Web: documents
+  on the candidate profile and placement drawer, "Confirm it's you", access log. Add
+  `/api/auth/step-up/callback` to the Google OAuth client's redirect URIs (infra/README.md).
+- Field encryption and work authorization (FR-VIS-01 to 03, migration 0042, `docs/work-authorization-api.md`):
+  AES-256-GCM envelope encryption with KMS data keys per field class (`eureka.field_key`, AAD = table, column,
+  row id), local key provider for development (refused in production), blind index helper (separate KMS HMAC
+  key `bidx`, `BIDX_KMS_KEY_ARN`), monthly `key-rotation` worker job. Work authorization records per person
+  (number encrypted, masked; audited reveal needs the shared step-up of migration 0043), RLS read = `visa:read` over the
+  candidate (HR, Immigration), writes through definer functions (`visa:update`, Immigration), `If-Match` on PATCH.
+  Daily `visa-expiry` job inserts `work_authorization.expiring` outbox rows (90/60/30, ids and dates only);
+  delivery and inbox belong to the notification jobs. Profile section in the web app. IAM: the task roles may use
+  the restricted key directly only with the field encryption context (purpose `field`, the field classes each role
+  needs, no other context keys); the restricted key's policy denies decrypt/data keys to every principal but the
+  API and worker task roles and an optional break-glass role (`restricted_break_glass_role_arn`, default empty).
+  The key-rotation worker can decrypt every value of the classes it rotates, by design (infra/README.md
+  "Known risks"); it cannot forge one unnoticed (integrity MAC, 0047). Add `dob` to `api_field_classes` /
+  `rotated_field_classes` in `infra/modules/stack/kms.tf` when DOB is written.
+  Review follow-ups (migration 0047): rotation keys only for the current UTC month, an integrity MAC per number
+  (blind index key, which the worker lacks) checked on every reveal, a rotation log with alerts, provider/key and
+  header-version checks, reveal limits counted in the database (20/minute, 200/day). 0047 validates
+  `number_mac` against existing rows: a local database holding numbers from before it needs a reseed.
+  Left: DOB is not read or written anywhere (OD-04); when it is, encrypt with class `dob`, set `dob_bidx` with
+  `dobBlindIndex`, add `dob` to the rotation job (definer functions like `work_auth_number`) and use the index in
+  the duplicate check.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 - First-admin bootstrap (migrations 0037, 0039): `dist/db/bootstrap.js` as a one-off migrate task creates two
   `org_admin` users for hosted-domain emails; break-glass only: refuses while an active `org_admin` exists
@@ -115,6 +173,20 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
 - Does a pre-join `bgc_failed` count as an earlier placement for first-placement detection?
 - Paperwork checklist content per placement type (documents, owner role, required), candidate `eligibility`
   fields, marketing locations and office: see `docs/phase2-status.md`.
+- Paperwork and BGC (migration 0044; conservative defaults built, see `docs/paperwork-api.md`):
+  - Who manages templates? Built: `document:verify` at org scope (HR, Immigration, Documents Team), no new permission.
+    A dedicated permission (e.g. HR only) would be a catalog change.
+  - Should items carry a default due date (e.g. N days after placement creation) in the template? Built: none, set by hand.
+  - Item state machine: may a verifier jump `pending → verified` without "received"? May Accounts (no
+    `document:upload`) update the items it owns? May recruiters mark items received (built: yes, `document:upload` own)?
+  - BGC: the brief named statuses `requested/in_progress/clear/consider/failed`; design B2.4 says
+    `not_started/initiated/in_progress/cleared/failed` (built). Is a vendor "consider" (needs adjudication) state needed?
+    Allowed list for `education_level` (built: free text ≤ 60), is `bgc_company` a fixed vendor list or `legal_entity`?
+    Can a failed check be re-run (built: `failed` is final)?
+  - Should `bgc → ready` require a cleared BGC, and should HR recording `failed` move the placement to `bgc_failed`
+    automatically? Built: neither (no gating; HR lacks `placement.bgc_status:update`, so a Manager/AD marks the placement;
+    one request does both only for a user holding both rights).
+  - Paperwork after `bgc_failed`/`joined`: built as still editable (closing out); only `backout` placements are frozen.
 - Placement emails: should Associate HR (and the Lead/Manager, design C flow 3) also receive them, and may
   they name the candidate or client? Today: `hr`, `accounts`, `immigration` only, ids and statuses only.
 - Sheet import (`docs/import.md`): status and row-colour mapping (SRS Q6); may historical
@@ -125,6 +197,27 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   candidates only, not a teammate's, and Open-to-all-teams viewers, location roles, coaches and the
   CEO see none. Is that right for marketing (other teams submitting an open candidate need the resume)?
   How long are superseded versions kept (OD-03)? Should the uploader get an email when a file is blocked?
+
+- Notifications (`docs/notifications.md`): FR-NTF-02 (what is a candidate "response", N, message to the candidate),
+  the bench threshold (OD-05) and the "POC" recipient of FR-NTF-05, whether Associate HR is an "admin team" for
+  project exit, recipients/channels of `assignment.ending_soon` (not in the design), per-user preferences (none in
+  the design), and whether placement events should also reach the inbox.
+- Documents (migration 0043): which paperwork document types exist besides the restricted I-9, driving
+  license and work-authorization copies (today also `offer_letter`, `other`), and which are restricted (BGC
+  reports? SSN cards? offer letters with rates?). May the Documents Team and Associate HR upload restricted
+  documents they cannot open (today: no, upload needs `document.restricted:read`)? Should HR, Accounts and
+  Immigration see each other's openings in the access log (today: yes, for restricted documents they can read;
+  org admins see everything)? Should a recruiter see internal paperwork of their own candidates (today: yes,
+  `document:read` own)? Retention of documents and of the access log (OD-03; I-9 federal minimum).
+- Step-up: the Phase 0 spike must confirm Google honours `max_age=0`/`prompt=login` and returns `auth_time`;
+  if not, the WebAuthn fallback and the 15-minute idle timeout for restricted roles (design A6.1) are needed.
+  Should approving restricted role grants also require step-up (A6.1 lists it; not built)?
+- Work authorization (migration 0042): who may see the records? Design B4.4 says `document:read` scope over the
+  candidate (would include Documents Team, Associate HR, Accounts and Sales over their own candidates); built
+  conservatively as `visa:read` only (HR, Immigration), number reveal also `visa:read`. Confirm the type list
+  (placeholder: H-1B, H-4 EAD, L-1, L-2 EAD, F-1 OPT/STEM OPT/CPT, EAD, green card, TN, O-1, other), whether
+  `valid_to` is required for some types, whether an "expired" notice (day 0) is wanted, and whether the
+  expiry notices may name the candidate (today: ids and dates only).
 
 ## Waiting on Ravi (not code)
 

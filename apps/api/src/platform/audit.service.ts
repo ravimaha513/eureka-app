@@ -2,13 +2,15 @@ import { Injectable } from "@nestjs/common";
 import type pg from "pg";
 
 /**
- * Keys whose values never reach audit_event (rule 5: no phones, emails or
- * rates), in both API (camelCase) and column (snake_case) spelling.
+ * Keys whose values never reach audit_event (rule 5: no phones, emails,
+ * rates or encrypted fields), in both API (camelCase) and column (snake_case) spelling.
  */
 export const REDACT: ReadonlySet<string> = new Set([
   "phone", "phone_e164", "phoneE164", "vitelNumber", "vitel_number",
   "email", "personalEmail", "personal_email", "marketingEmail", "marketing_email",
   "dob", "dob_enc", "rate",
+  // Encrypted fields (work authorization number, migration 0042): never the value or its ciphertext.
+  "number", "numberEnc", "number_enc", "workAuthNumber",
 ]);
 
 /** The audit form of a change set: redacted keys keep their name, not their value. */

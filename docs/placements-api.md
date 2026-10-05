@@ -112,3 +112,8 @@ placement was created, in template order. Readable wherever the placement is; do
 only. `status` is always `pending` until Phase 3 tracks documents. No template content ships yet (open
 question in `docs/phase2-status.md`), so `checklist` is `[]` until one is added; a later template change never
 rewrites existing placements.
+
+Migration 0044 (`docs/paperwork-api.md`): each checklist entry adds `{ id, dueOn, overdue }` and `status` is one of
+`pending`, `received`, `verified`, `waived`; notes, reasons and history are on `/paperwork` (`document:read`). Where
+`document:read` covers the placement the detail also carries `bgc: { status }` (`not_started` until HR records it);
+the key is omitted otherwise.

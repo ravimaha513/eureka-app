@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { checkFieldCrypto, fieldCryptoEnv } from "../platform/crypto/config.js";
 
 /**
  * Worker configuration. Deliberately separate from the API config: the worker
@@ -44,6 +45,14 @@ const WorkerConfigSchema = z
     // Backlog cut-off: unpublished events created before this instant are marked
     // published without sending (set it when first enabling delivery).
     OUTBOX_DELIVER_SINCE: z.string().datetime({ offset: true }).optional(),
+    // In-app inbox rows are deleted after this many days (the database refuses fewer than 30).
+    NOTIFICATION_RETENTION_DAYS: z.coerce.number().int().min(30).max(3650).default(180),
+    // FR-NTF-05 bench-time: notify once a candidate has been on bench this many days.
+    // The threshold is an open product decision (design OD-05): unset, the job is off.
+    NOTIFY_BENCH_DAYS: z.coerce.number().int().min(1).max(365).optional(),
+    // Only candidates that crossed the bench threshold within this many days are notified
+    // (no flood on first enable; a worker down longer than this misses those crossings).
+    NOTIFY_BENCH_WINDOW_DAYS: z.coerce.number().int().min(1).max(365).default(7),
     // Resume scan-and-promote (resume-scan job): the documents bucket in AWS, or
     // the API's local document directory with the fake scanner (development).
     // Neither: the job is off and uploads stay pending.
@@ -55,8 +64,28 @@ const WorkerConfigSchema = z
     RESUME_UPLOAD_GRACE_MINUTES: z.coerce.number().int().min(1).max(120).default(10),
     // More object versions than this under one quarantine key (a replayed presigned POST) logs an alert.
     RESUME_MAX_KEY_VERSIONS: z.coerce.number().int().min(1).max(100).default(3),
+    // document-scan: restricted files (I-9, driving license, work authorization) are
+    // promoted to restricted/ under this KMS key (the documents bucket's data key is never used for them).
+    // Unset with DOCUMENTS_BUCKET: document-scan is off and uploaded documents stay pending.
+    RESTRICTED_KMS_KEY_ARN: z.string().regex(/^arn:aws[a-z-]*:kms:[a-z0-9-]+:\d{12}:key\/[A-Za-z0-9-]+$/).optional(),
+    // Field encryption (key-rotation job): FIELD_KMS_KEY_ARN in AWS, the local
+    // provider otherwise (refused in production). The worker never computes blind indexes.
+    FIELD_KMS_KEY_ARN: fieldCryptoEnv.FIELD_KMS_KEY_ARN,
+    FIELD_LOCAL_KEY: fieldCryptoEnv.FIELD_LOCAL_KEY,
+    // Rows re-encrypted per database round trip by the monthly key-rotation job.
+    KEY_ROTATION_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(100),
+    // Work authorization expiry notices (visa-expiry job): days before valid_to, comma-separated.
+    WORK_AUTH_EXPIRY_NOTICE_DAYS: z.string().default("90,60,30").transform((v, ctx) => {
+      const days = v.split(",").map((d) => d.trim()).filter((d) => d !== "").map(Number);
+      if (days.length < 1 || days.length > 10 || days.some((d) => !Number.isInteger(d) || d < 1 || d > 365) || new Set(days).size !== days.length) {
+        ctx.addIssue({ code: "custom", message: "WORK_AUTH_EXPIRY_NOTICE_DAYS must be 1-10 distinct whole days between 1 and 365" });
+        return z.NEVER;
+      }
+      return days.sort((a, b) => b - a);
+    }),
   })
   .superRefine((c, ctx) => {
+    checkFieldCrypto(c, ctx, { bidx: false });
     if (c.FEEDBACK_MAIL_MODE !== "disabled") {
       if (!c.FEEDBACK_PUBLIC_ORIGIN || !c.FEEDBACK_TOKEN_KEY) ctx.addIssue({ code: "custom", message: "Feedback requires FEEDBACK_PUBLIC_ORIGIN and FEEDBACK_TOKEN_KEY" });
       if (c.FEEDBACK_PUBLIC_ORIGIN) {

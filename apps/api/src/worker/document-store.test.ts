@@ -105,5 +105,47 @@ describe("S3DocumentStore: reads, deletes and promotion use the scanned version"
     });
     await expect(new S3DocumentStore(other.client, "b").putClean(CLEAN, body, sha, "application/pdf")).rejects.toBeInstanceOf(CleanObjectConflictError);
     await expect(new S3DocumentStore(fresh.client, "b").putClean(KEY, body, sha, "application/pdf")).rejects.toThrow(/clean/);
+    // Clean objects use the bucket default encryption (no SSE headers).
+    expect(fresh.calls[0]!.input).not.toHaveProperty("SSEKMSKeyId");
+  });
+
+  it("restricted/ objects are written with the restricted KMS key and no bucket key; refused without the key", async () => {
+    const RESTRICTED = "restricted/documents/0b9f0f3e-6a43-4c55-9b54-1f2d3c4b5a69";
+    const KMS = "arn:aws:kms:us-east-2:123456789012:key/restricted";
+    const body = Buffer.from("%PDF-1.7 i9");
+    const sha = createHash("sha256").update(body).digest();
+    const s3 = mockS3({ PutObjectCommand: () => ({}) });
+    await new S3DocumentStore(s3.client, "b").putClean(RESTRICTED, body, sha, "application/pdf", undefined, { kmsKeyId: KMS });
+    expect(s3.calls[0]).toMatchObject({ cmd: PutObjectCommand.name, input: {
+      Key: RESTRICTED, IfNoneMatch: "*", ServerSideEncryption: "aws:kms", SSEKMSKeyId: KMS, BucketKeyEnabled: false,
+      Metadata: { sha256: sha.toString("hex") } } });
+    await expect(new S3DocumentStore(s3.client, "b").putClean(RESTRICTED, body, sha, "application/pdf")).rejects.toThrow(/restricted KMS key/);
+    await expect(new S3DocumentStore(s3.client, "b").putClean("public/x", body, sha, "application/pdf", undefined, { kmsKeyId: KMS })).rejects.toThrow(/clean\/ or restricted\//);
+    expect(s3.calls).toHaveLength(1);
+  });
+
+  it("restricted/ after a 412: a plain HEAD (no checksum mode, so no kms:Decrypt) compares metadata, size and key", async () => {
+    const RESTRICTED = "restricted/documents/0b9f0f3e-6a43-4c55-9b54-1f2d3c4b5a69";
+    const KMS = "arn:aws:kms:us-east-2:123456789012:key/restricted";
+    const body = Buffer.from("%PDF-1.7 i9");
+    const sha = createHash("sha256").update(body).digest();
+    const precondition = Object.assign(new Error("precondition"), { name: "PreconditionFailed", $metadata: { httpStatusCode: 412 } });
+    const head = (h: Record<string, unknown>) => mockS3({ PutObjectCommand: () => { throw precondition; }, HeadObjectCommand: () => h });
+    const ours = { Metadata: { sha256: sha.toString("hex") }, ContentLength: body.length, ServerSideEncryption: "aws:kms", SSEKMSKeyId: KMS };
+
+    const same = head(ours);
+    await new S3DocumentStore(same.client, "b").putClean(RESTRICTED, body, sha, "application/pdf", undefined, { kmsKeyId: KMS });
+    expect(same.calls[1]).toEqual({ cmd: HeadObjectCommand.name, input: { Bucket: "b", Key: RESTRICTED } });
+
+    for (const other of [
+      { ...ours, Metadata: { sha256: "0".repeat(64) } },
+      { ...ours, Metadata: {} },
+      { ...ours, ContentLength: body.length + 1 },
+      { ...ours, SSEKMSKeyId: "arn:aws:kms:us-east-2:123456789012:key/data" },
+      { ...ours, ServerSideEncryption: "AES256" },
+    ]) {
+      await expect(new S3DocumentStore(head(other).client, "b").putClean(RESTRICTED, body, sha, "application/pdf", undefined, { kmsKeyId: KMS }))
+        .rejects.toBeInstanceOf(CleanObjectConflictError);
+    }
   });
 });

@@ -1,5 +1,5 @@
 import { inflateRawSync, inflateSync } from "node:zlib";
-import type { ResumeContentType } from "@eureka/shared";
+import type { DocumentContentType, ResumeContentType } from "@eureka/shared";
 
 /**
  * Content checks after the malware scan (design A6.5): the bytes must be the
@@ -13,11 +13,88 @@ import type { ResumeContentType } from "@eureka/shared";
 export type ContentProblem = "BAD_CONTENT" | "ACTIVE_CONTENT";
 
 export function inspectResume(body: Buffer, contentType: ResumeContentType): ContentProblem | null {
+  return inspectDocument(body, contentType);
+}
+
+/**
+ * Paperwork and compliance documents (same checks; PNG and JPEG are also
+ * allowed, design A6.5): the image must be exactly one well-formed PNG or
+ * JPEG with nothing appended (no polyglot tail).
+ */
+export function inspectDocument(body: Buffer, contentType: DocumentContentType): ContentProblem | null {
   try {
-    return contentType === "application/pdf" ? inspectPdf(body) : inspectDocx(body);
+    switch (contentType) {
+      case "application/pdf": return inspectPdf(body);
+      case "application/vnd.openxmlformats-officedocument.wordprocessingml.document": return inspectDocx(body);
+      case "image/png": return inspectPng(body);
+      case "image/jpeg": return inspectJpeg(body);
+      default: return "BAD_CONTENT";
+    }
   } catch {
     return "BAD_CONTENT";
   }
+}
+
+// ---------------------------------------------------------------- images
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** Chunk walk: IHDR first, IEND last and exactly at the end of the file. */
+function inspectPng(buf: Buffer): ContentProblem | null {
+  if (buf.length < 8 + 25 + 12 || !buf.subarray(0, 8).equals(PNG_SIGNATURE)) return "BAD_CONTENT";
+  let p = 8;
+  let first = true;
+  let sawData = false;
+  while (p + 12 <= buf.length) {
+    const len = buf.readUInt32BE(p);
+    const type = buf.subarray(p + 4, p + 8).toString("latin1");
+    if (!/^[A-Za-z]{4}$/.test(type) || len > 0x7fffffff || p + 12 + len > buf.length) return "BAD_CONTENT";
+    if (first && (type !== "IHDR" || len !== 13)) return "BAD_CONTENT";
+    if (first && (buf.readUInt32BE(p + 8) === 0 || buf.readUInt32BE(p + 12) === 0)) return "BAD_CONTENT";
+    first = false;
+    if (type === "IDAT") sawData = true;
+    p += 12 + len;
+    if (type === "IEND") return len === 0 && p === buf.length && sawData ? null : "BAD_CONTENT";
+  }
+  return "BAD_CONTENT";
+}
+
+/**
+ * Full marker walk: segments before the first scan (a frame header is
+ * required), then the entropy-coded data of each scan, where only byte
+ * stuffing (FF 00), fill bytes, restart markers (RST0-7) and further marker
+ * segments (DHT, DQT, DRI, another SOS of a progressive image, APPn, COM) may
+ * follow an FF byte. The first EOI ends the image and must be the last two
+ * bytes: nothing may be appended (no polyglot tail), and a second SOI is refused.
+ */
+function inspectJpeg(buf: Buffer): ContentProblem | null {
+  const n = buf.length;
+  if (n < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return "BAD_CONTENT";
+  let p = 2;
+  let frame = false;
+  let scans = 0;
+  let inScan = false;
+  while (p < n) {
+    if (inScan && buf[p] !== 0xff) { p++; continue; } // entropy-coded byte
+    if (buf[p] !== 0xff || p + 1 >= n) return "BAD_CONTENT";
+    let m = buf[p + 1]!;
+    while (m === 0xff) { p++; if (p + 1 >= n) return "BAD_CONTENT"; m = buf[p + 1]!; } // fill bytes
+    if (inScan && m === 0x00) { p += 2; continue; } // stuffed FF data byte
+    if ((m >= 0xd0 && m <= 0xd7) || m === 0x01) { p += 2; continue; } // RSTn, TEM: no length
+    if (m === 0xd9) return frame && scans > 0 && p + 2 === n ? null : "BAD_CONTENT"; // EOI, last
+    if (m === 0xd8 || m === 0x00 || (m >= 0x02 && m <= 0xbf)) return "BAD_CONTENT"; // SOI again, reserved
+    if (p + 4 > n) return "BAD_CONTENT";
+    const len = buf.readUInt16BE(p + 2);
+    if (len < 2 || p + 2 + len > n) return "BAD_CONTENT";
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) frame = true;
+    p += 2 + len;
+    if (m === 0xda) {
+      if (!frame) return "BAD_CONTENT";
+      scans++;
+      inScan = true;
+    }
+  }
+  return "BAD_CONTENT"; // no EOI
 }
 
 // ---------------------------------------------------------------- DOCX (ZIP)
