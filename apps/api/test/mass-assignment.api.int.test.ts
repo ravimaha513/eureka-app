@@ -891,7 +891,7 @@ const CASES: RejectCase[] = [
       return {
         url: `/api/v1/bills/${b}/invoice`, body: { fileName: "invoice.pdf", contentType: PDF, size: 1234 },
         state: () => rows(`SELECT (SELECT count(*) FROM eureka.document)::int AS d, (SELECT count(*) FROM eureka.file_object)::int AS f,
-                                  (SELECT invoice_document_id FROM eureka.utility_bill WHERE id = $1) AS i`, [b]),
+                                  (SELECT row_version FROM eureka.utility_bill WHERE id = $1) AS v`, [b]),
       };
     },
     forbidden: (({ fileName: _f, ...rest }) => ({ ...rest, billId: FOREIGN_ID, docType: "i9" }))(DOCUMENT_FORBIDDEN),

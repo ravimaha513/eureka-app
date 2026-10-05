@@ -12,6 +12,7 @@ import { DEFAULT_SCAN_OPTIONS } from "../src/worker/jobs/scan-pipeline.js";
 import { silentLogger } from "../src/worker/log.js";
 import { JobRunner } from "../src/worker/runner.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
+import { EICAR_TEST_STRING } from "../src/platform/storage/local-files.js";
 import { LOC, U, seedFixtures, toUserAccess } from "./fixtures.js";
 import { joinedEmployee } from "./employee-seed.js";
 
@@ -468,9 +469,18 @@ describe("bills", () => {
     expect((await call("opsF" as Key, "GET", "/api/v1/companies/bills-summary?from=2025-06-01&to=2025-01-01")).statusCode).toBe(422);
     expect((await call("opsF" as Key, "GET", "/api/v1/companies/bills-summary?tz=Mars/Base")).statusCode).toBe(422);
     expect((await call("opsF" as Key, "GET", "/api/v1/companies/bills-summary?from=2010-01-01&to=2025-01-01")).statusCode).toBe(422);
-    // Default period: 12 months ending this month in tz.
-    const def = await s("opsF", "tz=America/Chicago");
+    // Default period: the 12 whole months ending with the current month in tz, including bills later this month.
+    const today = new Date().toISOString().slice(0, 10);
+    const [y, m] = [Number(today.slice(0, 4)), Number(today.slice(5, 7))];
+    const lastDay = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+    const late = await add(c1.id, w.id, "60.00", lastDay);
+    const def = await s("opsF", "tz=UTC");
     expect(def.byMonth).toHaveLength(12);
+    expect((def as unknown as { to: string }).to).toBe(lastDay);
+    expect(def.byMonth[11]).toEqual({ month: lastDay.slice(0, 7), amount: "60.00", count: 1 });
+    expect(def.totalAmount).toBe("60.00");
+    expect(def.averagePerMonth).toBe("5.00");
+    await ok("opsF" as Key, "POST", `/api/v1/bills/${late.id}/void`, { reason: "test only" });
     // Dallas admin sees none of Fort Worth's owners.
     const d = await ok<{ byOwner: { id: string }[] }>("locD", "GET", "/api/v1/companies/bills-summary?from=2025-01-01&to=2025-06-30");
     expect(d.byOwner.map((o) => o.id)).not.toContain(c1.id);
@@ -504,6 +514,39 @@ describe("bills", () => {
     expect(String(got.headers["content-disposition"])).not.toContain("Landlord");
     expect(await auditSince(head)).toEqual([expect.objectContaining({ action: "bill.invoice_downloaded", entity_id: b.id })]);
     expect((await db.admin.query(`SELECT count(*)::int AS n FROM eureka.document_access WHERE document_id = $1`, [start.id])).rows[0].n).toBe(1);
+    // A later upload that is abandoned (pending) or blocked (infected) never hides the clean invoice.
+    const send = async (body: Buffer, upload = true) => {
+      const t = await ok<{ id: string; upload: { url: string; fields: Record<string, string> } }>(
+        "locD", "POST", `/api/v1/bills/${b.id}/invoice`, { contentType: "application/pdf", size: body.length }, 201);
+      if (upload) {
+        const ps: Buffer[] = [];
+        for (const [k, v] of Object.entries(t.upload.fields)) ps.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
+        ps.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="x.pdf"\r\nContent-Type: application/pdf\r\n\r\n`), body, Buffer.from(`\r\n--${boundary}--\r\n`));
+        const r = await app.inject({ method: "POST", url: t.upload.url, payload: Buffer.concat(ps), headers: { "content-type": `multipart/form-data; boundary=${boundary}` } });
+        expect(r.statusCode, r.body).toBe(204);
+        await new JobRunner(db.worker, [documentScanJob(new LocalDocumentStore(docs), DEFAULT_SCAN_OPTIONS)], silentLogger).tick();
+      }
+      return t.id;
+    };
+    const stillClean = async () => {
+      const item = (await ok<{ items: { id: string; invoice: { documentId: string; status: string } }[] }>("locD", "GET", `/api/v1/companies/${c.id}/bills`))
+        .items.find((x) => x.id === b.id)!;
+      expect(item.invoice).toMatchObject({ documentId: start.id, status: "clean" });
+      const again = await ok<{ url: string }>("locD", "GET", `/api/v1/bills/${b.id}/invoice`);
+      expect((await app.inject({ method: "GET", url: again.url })).rawPayload.equals(file)).toBe(true);
+    };
+    await send(Buffer.from("%PDF-1.7\n% never uploaded\n%%EOF\n"), false);
+    await stillClean();
+    const infected = await send(Buffer.from(`%PDF-1.7\n${EICAR_TEST_STRING}\n%%EOF\n`));
+    expect((await db.admin.query(`SELECT f.status FROM eureka.document d JOIN eureka.file_object f ON f.id = d.file_id WHERE d.id = $1`, [infected])).rows[0].status)
+      .toBe("infected");
+    await stillClean();
+    // A bill whose only upload is pending shows that state (and 409 on download).
+    const b2 = await bill(c.id, water.id, "43.00", "2025-06");
+    await ok("locD", "POST", `/api/v1/bills/${b2.id}/invoice`, { contentType: "application/pdf", size: 10 }, 201);
+    expect((await ok<{ items: { id: string; invoice: { status: string } }[] }>("locD", "GET", `/api/v1/companies/${c.id}/bills`))
+      .items.find((x) => x.id === b2.id)!.invoice.status).toBe("pending");
+    expect((await call("locD", "GET", `/api/v1/bills/${b2.id}/invoice`)).statusCode).toBe(409);
     // Other location and other roles.
     expect((await call("opsA", "GET", `/api/v1/bills/${b.id}/invoice`)).statusCode).toBe(404);
     expect((await call("opsA", "POST", `/api/v1/bills/${b.id}/invoice`, { contentType: "application/pdf", size: 10 })).statusCode).toBe(404);
