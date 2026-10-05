@@ -176,6 +176,10 @@ export async function rule3Probe(
   try {
     await c.query("BEGIN");
     await c.query("SET LOCAL track_functions = 'all'");
+    // A disabled plan type adds disable_cost to the estimate, which crosses the
+    // JIT thresholds: compiling the policies' expression trees then took ~3 s a
+    // statement under "index scans off" and changes nothing a probe measures.
+    await c.query("SET LOCAL jit = off");
     await c.query("SELECT set_config('eureka.user_id', $1, true)", [userId]);
     for (const s of opts.planner ?? []) await c.query(s);
     for (const s of opts.setup ?? []) await c.query(s);
