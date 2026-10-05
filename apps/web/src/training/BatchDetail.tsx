@@ -238,13 +238,19 @@ function StudentsPanel({ batch, onNotice }: { batch: BatchDetail; onNotice: (s: 
   const manage = batch.actions.manage;
   const items = q.data?.items ?? [];
 
+  // The box shows the new state at once; it falls back to the server's answer after the refetch (or an error).
+  const [pending, setPending] = useState<Record<string, boolean>>({});
   const toggle = async (s: Student, moduleId: string, title: string, completed: boolean) => {
+    const key = `${s.candidateId}:${moduleId}`;
     setError("");
+    setPending((p) => ({ ...p, [key]: completed }));
     try {
       await trainingApi.setModule(batch.id, s.candidateId, moduleId, completed);
       onNotice(`${title} marked ${completed ? "complete" : "not complete"} for ${s.name}.`);
       await qc.invalidateQueries({ queryKey: ["training", "students", batch.id] });
-    } catch (e) { setError(trainingError(e)); }
+    } catch (e) { setError(trainingError(e)); } finally {
+      setPending((p) => { const n = { ...p }; delete n[key]; return n; });
+    }
   };
 
   return (
@@ -298,7 +304,7 @@ function StudentsPanel({ batch, onNotice }: { batch: BatchDetail; onNotice: (s: 
                                 return (
                                   <li key={m.id}>
                                     <label className="check">
-                                      <input type="checkbox" checked={Boolean(d)} disabled={!batch.actions.updateProgress}
+                                      <input type="checkbox" checked={pending[`${s.candidateId}:${m.id}`] ?? Boolean(d)} disabled={!batch.actions.updateProgress}
                                         onChange={(e) => void toggle(s, m.id, m.title, e.target.checked)} />
                                       {" "}{m.title} <span className="muted">({fmtMinutes(m.durationMinutes)})</span>
                                     </label>

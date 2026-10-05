@@ -134,6 +134,17 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   Optional `--demo-data` loads a fictional org (`@demo.invalid`, cannot sign in) only where `EUREKA_ENVIRONMENT`
   is `staging`/`local` and the stack has no real users or candidates.
   Runbook: infra/README.md "First admin (bootstrap)".
+- Training (Phase 3c, migration 0065, contract `docs/training-api.md` TR-1..TR-13): extends the 0026 batches
+  (name, trainer, start/end date, cover, row version) instead of duplicating them; a student is a candidate whose
+  `batch_id` points at the batch. Course catalog (`course`, ordered `course_module` with durations and https links;
+  org-wide read, edited by `training:manage` at the owning location), ordered `batch_course`, and
+  `module_progress` (who/when, written only by `authz.set_module_progress`). Batch-level coverage
+  (`authz.training_batch_ids`): org, location, or **coached = the batch's trainer**; Sales read progress of
+  candidates they own (`training:read` own/team/hierarchy). Students are added by training managers through
+  `authz.set_batch_student` (the candidate column guard now lets only definer code change `batch_id` without
+  `candidate:update`). Progress is weighted by module duration (TR-9). Screens: Training Batches (cards, detail
+  with View Courses / View Students), Courses, and a Training card on the candidate profile. New permissions
+  `training:read`, `training:manage`, `training.progress:update` (grants in the doc). No notifications.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
@@ -218,6 +229,10 @@ Updated 2026-09-30. Read this first, then `docs/design.md`, `docs/implementation
   (placeholder: H-1B, H-4 EAD, L-1, L-2 EAD, F-1 OPT/STEM OPT/CPT, EAD, green card, TN, O-1, other), whether
   `valid_to` is required for some types, whether an "expired" notice (day 0) is wanted, and whether the
   expiry notices may name the candidate (today: ids and dates only).
+
+- Training (migration 0065): course ownership (owning location vs central), whether trainers may manage students
+  and courses, HR access to progress, one batch per candidate, corrections in completed batches, which candidate
+  statuses may join, and a batch-start reminder: `docs/training-api.md` "Open product questions".
 
 ## Waiting on Ravi (not code)
 
