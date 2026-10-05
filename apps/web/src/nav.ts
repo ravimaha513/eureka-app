@@ -17,6 +17,8 @@ export const NAV: NavItem[] = [
   { key: "placements", label: "Placements", section: "Workspace", anyOf: ["placement:read"] },
   { key: "paperwork", label: "Paperwork & BGC", section: "Operations", anyOf: ["document:read", "bgc:update"] },
   { key: "employees", label: "Employees", section: "Operations", anyOf: ["employee:read"] },
+  // datahub
+  { key: "datahub", label: "DataHub", section: "Operations", anyOf: ["datahub:read"] },
   { key: "payments", label: "Payments", section: "Operations", anyOf: ["invoice:read"] },
   { key: "companies", label: "Companies", section: "Operations", anyOf: ["company:read"] },
   { key: "facilities", label: "Facilities", section: "Operations", anyOf: ["facility:read"] },

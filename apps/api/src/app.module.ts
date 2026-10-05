@@ -50,6 +50,8 @@ import {
   BillsController, BillsService, CompaniesController, CompanyEmployeeOptionsController, CompanyEmployeesController, FacilitiesController,
   OwnersService, UtilitiesController, UtilitiesService,
 } from "./modules/facilities/facilities.controller.js";
+import { DatahubController } from "./modules/datahub/datahub.controller.js";
+import { DatahubService } from "./modules/datahub/datahub.service.js";
 
 @Controller("api")
 class HealthController {
@@ -76,6 +78,7 @@ export class AppModule {
         EmployeesController, AssignmentsController, ReportsController, WorkAuthorizationController,
         CompaniesController, FacilitiesController, CompanyEmployeesController, CompanyEmployeeOptionsController,
         UtilitiesController, BillsController,
+        DatahubController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
@@ -84,6 +87,7 @@ export class AppModule {
         PaperworkService,
         ResumesService, NotificationsService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
         WorkAuthorizationService, OwnersService, UtilitiesService, BillsService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
+        DatahubService,
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],

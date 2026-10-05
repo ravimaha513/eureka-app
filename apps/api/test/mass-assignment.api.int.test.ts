@@ -262,6 +262,12 @@ const DOCUMENT_FORBIDDEN: Record<string, unknown> = {
   fileName: "../../etc/passwd", scannedAt: PAST, uploadExpiresAt: "2099-01-01T00:00:00Z", verifiedBy: U.hr, expiresOn: "2099-01-01",
 };
 
+/** Fields a DataHub folder write never takes from the client (migration 0075). */
+const DATAHUB_FOLDER_FORBIDDEN: Record<string, unknown> = {
+  deletedAt: PAST, deletedBy: U.hr, row_version: 9, fileCount: 9, memberCount: 9, isMember: true, actions: { manage: true },
+  ownerId: U.r1b, classification: "restricted", folderId: FOREIGN_ID,
+};
+
 const CASES: RejectCase[] = [
   // resumes (FR-CAN-07, migration 0036): status, scan result, version, digest, uploader and key are the server's
   {
@@ -896,6 +902,40 @@ const CASES: RejectCase[] = [
     },
     forbidden: (({ fileName: _f, ...rest }) => ({ ...rest, billId: FOREIGN_ID, docType: "i9" }))(DOCUMENT_FORBIDDEN),
   },
+  // datahub (docs/datahub-api.md, migration 0075): owner, location of a subfolder, row version, status, file and key are the server's
+  {
+    route: "POST /api/v1/datahub/folders", actor: "hr",
+    prepare: async () => ({
+      url: "/api/v1/datahub/folders", body: { name: `MA folder ${++n}`, level: "internal" },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.datahub_folder`),
+    }),
+    forbidden: DATAHUB_FOLDER_FORBIDDEN,
+  },
+  {
+    route: "PATCH /api/v1/datahub/folders/:id", actor: "hr",
+    prepare: async () => {
+      const f = await ok("hr", "POST", "/api/v1/datahub/folders", { name: `MA patch ${++n}`, level: "internal" });
+      return {
+        url: `/api/v1/datahub/folders/${f.id}`, body: { description: "Changed" }, headers: { "if-match": "1" },
+        state: () => rows(`SELECT * FROM eureka.datahub_folder WHERE id = $1`, [f.id]),
+      };
+    },
+    forbidden: DATAHUB_FOLDER_FORBIDDEN,
+  },
+  {
+    route: "POST /api/v1/datahub/folders/:id/files", actor: "hr",
+    prepare: async () => {
+      const f = await ok("hr", "POST", "/api/v1/datahub/folders", { name: `MA files ${++n}`, level: "internal" });
+      return {
+        url: `/api/v1/datahub/folders/${f.id}/files`, body: { name: "Policy.pdf", contentType: PDF, size: 1234 },
+        state: () => rows(`SELECT (SELECT count(*)::int FROM eureka.datahub_file_version) AS v, (SELECT count(*)::int FROM eureka.file_object) AS f`),
+      };
+    },
+    forbidden: {
+      ...DOCUMENT_FORBIDDEN, folderId: FOREIGN_ID, fileObjectId: FOREIGN_ID, version: 7, versionId: FOREIGN_ID, latestVersion: 7,
+      level: "internal", deletedAt: PAST,
+    },
+  },
 ];
 
 /** Endpoints that read no body: what they change comes from the URL and the session only. */
@@ -1148,6 +1188,42 @@ const IGNORED: IgnoreCase[] = [
       const audit = await rows(`SELECT actor_id, entity_id, changes FROM eureka.audit_event WHERE action = 'utility.password_revealed' ORDER BY seq DESC LIMIT 1`);
       expect(audit).toEqual([{ actor_id: U.locD, entity_id: a.id, changes: { ownerKind: "company", ownerId: o, stepUpGrantId: expect.any(String) } }]);
       expect(audit[0]!.changes.stepUpGrantId).not.toBe(FOREIGN_ID);
+    },
+  },
+  {
+    // Membership comes from the URL (folder, user) and the session; nothing in the body counts.
+    route: "PUT /api/v1/datahub/folders/:id/members/:userId",
+    run: async () => {
+      const f = await ok("hr", "POST", "/api/v1/datahub/folders", { name: `MA members ${++n}`, level: "restricted" });
+      const res = await call("hr", "PUT", `/api/v1/datahub/folders/${f.id}/members/${U.r1a}`,
+        { ...SERVER_MANAGED, userId: U.r2a, folderId: FOREIGN_ID, addedBy: U.admin, addedAt: PAST });
+      expect(res.statusCode, res.body).toBe(204);
+      const m = await rows(`SELECT folder_id, user_id, added_by FROM eureka.datahub_folder_member WHERE folder_id = $1`, [f.id]);
+      expect(m).toEqual([{ folder_id: f.id, user_id: U.r1a, added_by: U.hr }]);
+    },
+  },
+  {
+    route: "POST /api/v1/datahub/versions/:id/download",
+    run: async () => {
+      const f = await ok("hr", "POST", "/api/v1/datahub/folders", { name: `MA download ${++n}`, level: "internal" });
+      const file = pdf("datahub download");
+      const r = await ok("hr", "POST", `/api/v1/datahub/folders/${f.id}/files`, { name: "Policy.pdf", contentType: PDF, size: file.length });
+      const up = await app.inject({ method: "POST", url: r.upload.url, ...form(r.upload.fields, file) });
+      expect(up.statusCode, up.body).toBe(204);
+      await new JobRunner(db.worker, [documentScanJob(new LocalDocumentStore(docs), DEFAULT_SCAN_OPTIONS)], silentLogger).tick();
+      const res = await call("hr", "POST", `/api/v1/datahub/versions/${r.versionId}/download`, {
+        ...SERVER_MANAGED, key: `restricted/documents/${FOREIGN_ID}`, fileObjectId: FOREIGN_ID, classification: "restricted",
+        fileName: "payload.html", contentType: "text/html", expiresSeconds: 86_400, stepUpGrantId: FOREIGN_ID, level: "restricted",
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      const { url, expiresAt } = res.json() as { url: string; expiresAt: string };
+      expect(Date.parse(expiresAt) - Date.now()).toBeLessThanOrEqual(60_000);
+      const got = await app.inject({ method: "GET", url });
+      expect(got.rawPayload.equals(file)).toBe(true);
+      expect(got.headers["content-type"]).toBe(PDF);
+      expect(String(got.headers["content-disposition"])).toBe('attachment; filename="Policy-v1.pdf"');
+      const log = await rows(`SELECT user_id, level, step_up_grant_id FROM eureka.datahub_access WHERE version_id = $1`, [r.versionId]);
+      expect(log).toEqual([{ user_id: U.hr, level: "internal", step_up_grant_id: null }]);
     },
   },
 ];

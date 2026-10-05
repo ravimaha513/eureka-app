@@ -8,6 +8,7 @@ import { migrate } from "./migrate.js";
 import { seedFixtures } from "../../test/fixtures.js";
 import { seedDevPipeline } from "./dev-pipeline.js";
 import { seedDevFacilities } from "./dev-facilities.js";
+import { seedDevDatahub } from "./dev-datahub.js";
 
 if (process.env.NODE_ENV === "production") throw new Error("seed-dev must not run in production");
 const url = process.env.MIGRATION_DATABASE_URL;
@@ -41,6 +42,11 @@ if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-
     console.log(`seeded facilities: ${f.companies} companies, ${f.facilities} facilities, ${f.utilities} utilities, ${f.bills} bills, ${f.employees} company employees` +
       " (sign in as locD@eureka.example or opsA@eureka.example)");
   }
+}
+// Fictional DataHub folders (skipped when folders already exist).
+if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-0000-0000-000000000016'")).rowCount) {
+  const n = await seedDevDatahub(admin);
+  if (n) console.log(`seeded DataHub: ${n} folders`);
 }
 // Development step-up ("Confirm it's you" without Google) needs this database switch as well as
 // AUTH_MODE=dev in the API (migration 0043); no migration sets it, so other environments refuse it.

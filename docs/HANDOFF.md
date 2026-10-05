@@ -136,6 +136,15 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   classes updated in `kms.tf`), bills with derived status, void instead of delete, invoices on the 0043 document
   pipeline (`document.bill_id` owner kind), summaries by month/type/owner, CSV exports. 404 outside the location.
   Dev seed `dev-facilities.ts` (dev-only Austin ops admin `opsA@eureka.example`, password `dev-only-password`).
+- DataHub (Phase 3c, migration 0075, contract `docs/datahub-api.md`): organisation folders (Internal = all staff,
+  Confidential = chosen catalog roles, Restricted = named members with step-up on every download), one level of subfolders,
+  versioned files (same name = next version) on the 0043 pipeline (`file_object`, presigned POST into
+  `quarantine/documents/`, the unchanged `document-scan` job, restricted folders under `restricted/` and the restricted KMS
+  key), soft deletes, an access log of every download for folder managers, name search over readable folders. Permissions:
+  `datahub:read` (every role but `org_admin`, own scope: nav only) and `datahub:manage` (HR and Accounts org, Location Ops
+  Admin location; in `RESTRICTED_PERMISSIONS` because a manager can add themself to a restricted folder). Managers of a
+  restricted folder who are not members see its settings, members and log, not its files. Audit: ids, levels, counts.
+  Screen "DataHub" (Operations); dev seed `apps/api/src/db/dev-datahub.ts`. Open questions in `docs/datahub-api.md`.
 - AWS infra (~$30/month) and OIDC deploy workflow, never applied (see infra/README.md).
 - First-admin bootstrap (migrations 0037, 0039): `dist/db/bootstrap.js` as a one-off migrate task creates two
   `org_admin` users for hosted-domain emails; break-glass only: refuses while an active `org_admin` exists

@@ -60,12 +60,21 @@ describe("catalog integrity", () => {
     expect(Object.keys(GRANTS.org_admin).sort()).toEqual(["access:manage", "audit:read"]);
   });
 
-  it("restricted permissions are held only by HR, Accounts and Immigration, and utility passwords by Location Ops Admin", () => {
+  it("restricted permissions are held only by HR, Accounts and Immigration, and utility passwords and DataHub management by Location Ops Admin", () => {
     for (const role of ROLES) {
       const holds = RESTRICTED_PERMISSIONS.filter((p) => GRANTS[role][p]);
-      if (role === "location_ops_admin") expect(holds).toEqual(["utility.secret:read"]);
+      if (role === "location_ops_admin") expect(holds).toEqual(["utility.secret:read", "datahub:manage"]);
       else if (holds.length) expect(["hr", "accounts", "immigration"]).toContain(role);
     }
+  });
+
+  it("DataHub: every staff role reads (own scope, for the nav); HR and Accounts manage org-wide, Location Ops Admin its location; org_admin neither", () => {
+    for (const role of ROLES) {
+      expect(GRANTS[role]["datahub:read"], role).toBe(role === "org_admin" ? undefined : "own");
+    }
+    expect(ROLES.filter((r) => GRANTS[r]["datahub:manage"]).map((r) => [r, GRANTS[r]["datahub:manage"]]))
+      .toEqual([["location_ops_admin", "location"], ["hr", "org"], ["accounts", "org"]]);
+    expect(RESTRICTED_PERMISSIONS).toContain("datahub:manage");
   });
 
   it("restricted roles (second approver): org_admin, restricted-permission holders, org-wide sensitive holders", () => {

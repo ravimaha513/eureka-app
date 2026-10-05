@@ -134,6 +134,9 @@ export const PERMISSIONS = [
   // administration
   "access:manage",
   "audit:read",
+  // datahub
+  "datahub:read",
+  "datahub:manage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -144,6 +147,8 @@ export const RESTRICTED_PERMISSIONS: readonly Permission[] = [
   "visa:read",
   "visa:update",
   "utility.secret:read",
+  // datahub: a manager can name themself a member of any Restricted folder they manage (docs/datahub-api.md DH-3).
+  "datahub:manage",
 ];
 
 type Grants = Partial<Record<Permission, Scope>>;
@@ -190,6 +195,8 @@ export const GRANTS: Record<Role, Grants> = {
     "document:read": "own",
     "document:upload": "own",
     "vendor.preferred:create": "own",
+    // datahub
+    "datahub:read": "own",
   },
   lead: {
     ...salesLine("team", "team"),
@@ -198,6 +205,8 @@ export const GRANTS: Record<Role, Grants> = {
     "report:export": "team",
     "vendor.preferred:create": "own",
     "vendor.preferred:read": "team",
+    // datahub
+    "datahub:read": "own",
   },
   manager: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -209,6 +218,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     "designation:change": "hierarchy",
+    // datahub
+    "datahub:read": "own",
   },
   assoc_director: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -220,6 +231,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     "designation:change": "hierarchy",
+    // datahub
+    "datahub:read": "own",
   },
   offshore_manager: {
     "candidate:read": "org",
@@ -237,6 +250,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "org",
     "team:move_member": "org",
     "designation:change": "org",
+    // datahub
+    "datahub:read": "own",
   },
   ceo: {
     "candidate:read": "org",
@@ -252,6 +267,8 @@ export const GRANTS: Record<Role, Grants> = {
     "report:read": "org",
     "report:export": "org",
     "vendor.preferred:read": "org",
+    // datahub
+    "datahub:read": "own",
   },
   location_incharge: {
     "candidate:read": "location",
@@ -265,6 +282,8 @@ export const GRANTS: Record<Role, Grants> = {
     "placement:read": "location",
     "performance:read": "location",
     "report:read": "location",
+    // datahub
+    "datahub:read": "own",
   },
   location_ops_admin: {
     // Companies and facilities of their location, with utilities and bills (utility
@@ -288,6 +307,9 @@ export const GRANTS: Record<Role, Grants> = {
     "interview.feedback:create": "location",
     "placement:read": "location",
     "report:read": "location",
+    // datahub
+    "datahub:read": "own",
+    "datahub:manage": "location",
   },
   hr: {
     "assignment:read": "org",
@@ -304,6 +326,9 @@ export const GRANTS: Record<Role, Grants> = {
     "bgc:update": "org",
     "visa:read": "org",
     "report:read": "org",
+    // datahub
+    "datahub:read": "own",
+    "datahub:manage": "org",
   },
   associate_hr: {
     "assignment:read": "org",
@@ -314,6 +339,8 @@ export const GRANTS: Record<Role, Grants> = {
     "assignment:update": "org",
     "document:read": "org",
     "document:upload": "org",
+    // datahub
+    "datahub:read": "own",
   },
   accounts: {
     "assignment:read": "org",
@@ -327,6 +354,9 @@ export const GRANTS: Record<Role, Grants> = {
     "document:read": "org",
     "document.restricted:read": "org",
     "report:read": "org",
+    // datahub
+    "datahub:read": "own",
+    "datahub:manage": "org",
   },
   immigration: {
     "assignment:read": "org",
@@ -340,24 +370,32 @@ export const GRANTS: Record<Role, Grants> = {
     "document.restricted:read": "org",
     "visa:read": "org",
     "visa:update": "org",
+    // datahub
+    "datahub:read": "own",
   },
   interview_coach: {
     "candidate:read": "coached",
     "hotlist:read": "coached",
     "interview:read": "coached",
     "interview.feedback:create": "coached",
+    // datahub
+    "datahub:read": "own",
   },
   documents_team: {
     "candidate:read": "org",
     "document:read": "org",
     "document:upload": "org",
     "document:verify": "org",
+    // datahub
+    "datahub:read": "own",
   },
   bu_head: {
     "assignment:read": "org",
     "employee:read": "org",
     "placement:read": "org",
     "report:read": "org",
+    // datahub
+    "datahub:read": "own",
   },
   org_admin: {
     "access:manage": "org",
