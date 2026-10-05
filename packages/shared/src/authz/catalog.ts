@@ -134,6 +134,10 @@ export const PERMISSIONS = [
   // administration
   "access:manage",
   "audit:read",
+  // training
+  "training:read",
+  "training:manage",
+  "training.progress:update",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -190,6 +194,8 @@ export const GRANTS: Record<Role, Grants> = {
     "document:read": "own",
     "document:upload": "own",
     "vendor.preferred:create": "own",
+    // training
+    "training:read": "own",
   },
   lead: {
     ...salesLine("team", "team"),
@@ -198,6 +204,8 @@ export const GRANTS: Record<Role, Grants> = {
     "report:export": "team",
     "vendor.preferred:create": "own",
     "vendor.preferred:read": "team",
+    // training
+    "training:read": "team",
   },
   manager: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -209,6 +217,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     "designation:change": "hierarchy",
+    // training
+    "training:read": "hierarchy",
   },
   assoc_director: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -220,6 +230,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     "designation:change": "hierarchy",
+    // training
+    "training:read": "hierarchy",
   },
   offshore_manager: {
     "candidate:read": "org",
@@ -237,6 +249,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "org",
     "team:move_member": "org",
     "designation:change": "org",
+    // training
+    "training:read": "org",
   },
   ceo: {
     "candidate:read": "org",
@@ -252,6 +266,8 @@ export const GRANTS: Record<Role, Grants> = {
     "report:read": "org",
     "report:export": "org",
     "vendor.preferred:read": "org",
+    // training
+    "training:read": "org",
   },
   location_incharge: {
     "candidate:read": "location",
@@ -265,6 +281,10 @@ export const GRANTS: Record<Role, Grants> = {
     "placement:read": "location",
     "performance:read": "location",
     "report:read": "location",
+    // training
+    "training:read": "location",
+    "training:manage": "location",
+    "training.progress:update": "location",
   },
   location_ops_admin: {
     // Companies and facilities of their location, with utilities and bills (utility
@@ -288,6 +308,10 @@ export const GRANTS: Record<Role, Grants> = {
     "interview.feedback:create": "location",
     "placement:read": "location",
     "report:read": "location",
+    // training
+    "training:read": "location",
+    "training:manage": "location",
+    "training.progress:update": "location",
   },
   hr: {
     "assignment:read": "org",
@@ -346,6 +370,9 @@ export const GRANTS: Record<Role, Grants> = {
     "hotlist:read": "coached",
     "interview:read": "coached",
     "interview.feedback:create": "coached",
+    // training: batches where they are the trainer (and progress of coached teams' candidates)
+    "training:read": "coached",
+    "training.progress:update": "coached",
   },
   documents_team: {
     "candidate:read": "org",

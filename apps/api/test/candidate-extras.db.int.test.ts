@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { activityVisible, can, candidateVisible, canCreateBatch, resolveScope, type CandidateRef, type Permission } from "@eureka/shared";
+import { activityVisible, can, candidateVisible, canPlanBatch, resolveScope, type CandidateRef, type Permission } from "@eureka/shared";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, T, TECH_ID, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 import { seedPipeline } from "./pipeline-seed.js";
@@ -58,11 +58,13 @@ describe("batches", () => {
     expect(await createBatch(U.m1, LOC.austin, "2026-12-01", null)).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it.each(users)("authz.create_batch for %s matches the engine (canCreateBatch)", async (key) => {
+  it.each(users)("authz.create_batch for %s matches the engine (canPlanBatch)", async (key) => {
     const month = `${2030 + users.indexOf(key)}-03-01`; // one batch per user, no collisions
+    // Training managers (migration 0065) plan at their own location only.
+    const loc = key === "locD" ? LOC.dallas : LOC.austin;
     const run = asUser(db.app, U[key], (c) =>
-      c.query(`SELECT authz.create_batch($1, $2, $3::date, 10)`, [LOC.austin, TECH_ID, month]));
-    if (canCreateBatch(toUserAccess(key))) await expect(run).resolves.toBeDefined();
+      c.query(`SELECT authz.create_batch($1, $2, $3::date, 10)`, [loc, TECH_ID, month]));
+    if (canPlanBatch(toUserAccess(key))) await expect(run).resolves.toBeDefined();
     else await expect(run).rejects.toThrow(/not_permitted/);
   });
 
