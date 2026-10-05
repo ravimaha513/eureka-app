@@ -23,7 +23,7 @@ beforeEach(() => {
   api = mockApi({
     "GET /api/v1/jobs": () => ({ body: { items: [J1, J2], nextCursor: null } }),
     "GET /api/v1/jobs/j1": () => ({ body: J1 }),
-    "GET /api/v1/jobs/options": () => ({ body: { kinds: ["client_requirement"], clients: [{ id: "cl1", name: "Northwind Financial" }], companies: [], staff: [{ id: "u2", name: "Smith Jason" }] } }),
+    "GET /api/v1/jobs/options": () => ({ body: { kinds: ["client_requirement"], clients: [{ id: "cl1", name: "Northwind Financial" }], staff: [{ id: "u2", name: "Smith Jason" }] } }),
     "POST /api/v1/jobs": () => ({ status: 201, body: { id: "j9", rowVersion: 1 } }),
     "PATCH /api/v1/jobs/j1": () => ({ body: { ...J1, rowVersion: 4 } }),
   });
@@ -76,6 +76,28 @@ describe("Jobs page", () => {
     expect(w.body).toMatchObject({ kind: "client_requirement", title: "Spring Developer", clientId: "cl1", skills: ["Spring"], publishedToPortal: false, companyId: null });
     expect(w.headers["idempotency-key"]).toMatch(/^job-/);
     expect(await screen.findByText("Job created.")).toBeInTheDocument();
+  });
+
+  it("HR picks a company (id and name from the company options) for an internal opening", async () => {
+    api.routes["GET /api/v1/jobs/options"] = () => ({ body: { kinds: ["internal_opening"], clients: [], staff: [] } });
+    api.routes["GET /api/v1/jobs/company-options"] = () => ({ body: { companies: [{ id: "co1", name: "Eureka Info Tech" }, { id: "co2", name: "Endeavour Technology" }] } });
+    wrap(<JobsPage me={meFor("hr")} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Add job/ }));
+    const dlg = await screen.findByRole("dialog", { name: "Create job" });
+    const company = await within(dlg).findByRole("combobox", { name: "Company (optional)" });
+    await waitFor(() => expect(within(company).getByRole("option", { name: "Endeavour Technology" })).toBeInTheDocument());
+    fireEvent.change(within(dlg).getByLabelText("Job title"), { target: { value: "HR Generalist" } });
+    fireEvent.change(company, { target: { value: "co2" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create job" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.body).toMatchObject({ kind: "internal_opening", companyId: "co2", clientId: null });
+  });
+
+  it("does not ask for company options when the caller can only create client requirements", async () => {
+    wrap(<JobsPage me={meFor("lead")} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Add job/ }));
+    await screen.findByRole("dialog", { name: "Create job" });
+    expect(api.gets("/api/v1/jobs/company-options")).toHaveLength(0);
   });
 
   it("edits with If-Match and explains a stale version", async () => {
