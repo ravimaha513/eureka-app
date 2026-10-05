@@ -35,9 +35,85 @@ const DEV_USERS = [
   ["locD", "Location Ops Admin (Dallas)"], ["coach", "Interview Coach"], ["hr", "HR"], ["ceo", "CEO"], ["admin", "Org Admin"],
 ] as const;
 
+/** Username and password sign-in (staging and local test environments; the server offers it via /api/auth/methods). */
+function PasswordForm({ onSignedIn, onError }: { onSignedIn: () => void; onError: (m: string) => void }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <form onSubmit={async (e) => {
+      e.preventDefault();
+      setBusy(true); onError("");
+      try {
+        await api("/api/auth/password-login", { method: "POST", body: JSON.stringify({ email: email.trim(), password }) });
+        onSignedIn();
+      } catch (er) {
+        onError(er instanceof ApiError && er.status === 429
+          ? "Too many attempts. Wait a few minutes and try again."
+          : er instanceof ApiError && er.status === 401 ? "Invalid email or password." : (er as Error).message);
+      } finally { setBusy(false); }
+    }}>
+      <p className="sub">Sign in with your email and password.</p>
+      <div className="field"><label htmlFor="pw-email">Email</label>
+        <input id="pw-email" type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+      <div className="field"><label htmlFor="pw-pass">Password</label>
+        <input id="pw-pass" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></div>
+      <button type="submit" className="btn primary block" disabled={busy}>Sign in</button>
+    </form>
+  );
+}
+
+/** Shown instead of the app while a temporary (admin-set) password is still in use. */
+export function ChangePassword({ onDone, onSignOut }: { onDone: () => void; onSignOut: () => void }) {
+  const [cur, setCur] = useState("");
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const message = (e: unknown) => {
+    const d = e instanceof ApiError ? e.detail : undefined;
+    if (d === "current_password_incorrect") return "The current password is incorrect.";
+    if (d === "password_weak") return "Use 10 to 72 characters with at least one letter and one number.";
+    if (d === "password_unchanged") return "Choose a password different from the current one.";
+    if (d === "account_locked") return "Too many attempts. Wait a few minutes and try again.";
+    return e instanceof Error ? e.message : "Could not change the password.";
+  };
+  return (
+    <div className="loginpage"><main className="loginpanel"><div className="loginbox">
+      <h1>Choose a new password</h1>
+      <p className="sub">Your password was set by an administrator. Choose your own to continue.</p>
+      <form onSubmit={async (e) => {
+        e.preventDefault();
+        if (next !== again) { setErr("The new passwords do not match."); return; }
+        setBusy(true); setErr("");
+        try {
+          await api("/api/auth/password/change", { method: "POST", body: JSON.stringify({ currentPassword: cur, newPassword: next }) });
+          onDone();
+        } catch (er) { setErr(message(er)); } finally { setBusy(false); }
+      }}>
+        <div className="field"><label htmlFor="cp-cur">Current password</label>
+          <input id="cp-cur" type="password" autoComplete="current-password" required value={cur} onChange={(e) => setCur(e.target.value)} /></div>
+        <div className="field"><label htmlFor="cp-new">New password</label>
+          <input id="cp-new" type="password" autoComplete="new-password" required minLength={10} value={next} onChange={(e) => setNext(e.target.value)} /></div>
+        <div className="field"><label htmlFor="cp-again">Repeat new password</label>
+          <input id="cp-again" type="password" autoComplete="new-password" required value={again} onChange={(e) => setAgain(e.target.value)} /></div>
+        <button type="submit" className="btn primary block" disabled={busy}>Change password</button>
+        <button type="button" className="btn ghost block" onClick={onSignOut}>Sign out</button>
+      </form>
+      {err && <p className="error" role="alert">{err}</p>}
+    </div></main></div>
+  );
+}
+
 export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedIn: () => void; devMode?: boolean }) {
   const [who, setWho] = useState<string>(DEV_USERS[0][0]);
   const [err, setErr] = useState("");
+  const methods = useQuery({
+    queryKey: ["auth-methods"],
+    queryFn: () => api<{ password: boolean; google: boolean; dev: boolean }>("/api/auth/methods").catch(() => null),
+    staleTime: Infinity,
+  });
+  const passwordLogin = methods.data?.password === true;
   const [theme, setTheme] = useTheme();
   return (
     <div className="loginpage">
@@ -81,9 +157,10 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
             </button>
           </div>
           <h1>Hi, welcome back!</h1>
+          {passwordLogin && <PasswordForm onSignedIn={onSignedIn} onError={setErr} />}
           {devMode ? (
             <>
-              <p className="sub">Development sign-in with fictional users.</p>
+              <p className="sub">{passwordLogin ? "Or, for development: sign in as a fictional user." : "Development sign-in with fictional users."}</p>
               <div className="field">
                 <label htmlFor="who">Sign in as</label>
                 <select id="who" value={who} onChange={(e) => setWho(e.target.value)}>
@@ -97,9 +174,9 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
                 } catch (e) { setErr((e as Error).message); }
               }}>Sign in</button>
             </>
-          ) : (
+          ) : methods.data?.google === false ? null : (
             <>
-              <p className="sub">Sign in with your company Google account.</p>
+              <p className="sub">{passwordLogin ? "Or sign in with your company Google account." : "Sign in with your company Google account."}</p>
               <a className="btn primary block googlebtn" href="/api/auth/login">
                 <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="#fff" d="M21.35 11.1H12v2.9h5.35c-.25 1.5-1.7 4.4-5.35 4.4-3.2 0-5.85-2.65-5.85-5.9S8.8 6.6 12 6.6c1.85 0 3.05.8 3.75 1.45l2.55-2.45C16.7 4.1 14.55 3.1 12 3.1 7.05 3.1 3.1 7.05 3.1 12s3.95 8.9 8.9 8.9c5.15 0 8.55-3.6 8.55-8.7 0-.6-.05-1.05-.2-1.1z" /></svg>
                 Sign in with Google
@@ -114,8 +191,21 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
   );
 }
 
+const PLANNED: Record<string, string> = {
+  payments: "Vendor invoices, payments and automatic delay alerts for Accounts.",
+  performance: "Recruiter performance against targets, with alerts for managers.",
+};
+
 function Placeholder({ item }: { item: NavItem }) {
-  return <div><h1>{item.label}</h1><p className="sub">Planned in a later phase (see implementation plan).</p></div>;
+  return (
+    <div>
+      <h1>{item.label}</h1>
+      <div className="card empty" role="status">
+        <b>Coming soon</b>
+        <p className="sub">{PLANNED[item.key] ?? "This area is planned for a later phase."}</p>
+      </div>
+    </div>
+  );
 }
 
 export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
@@ -272,10 +362,12 @@ export default function App() {
   });
   if (me.isLoading) return <p className="empty">Loading…</p>;
   if (!me.data) return <Login onSignedIn={() => qc.invalidateQueries()} />;
-  return <Shell me={me.data} onSignOut={async () => {
+  const signOut = async () => {
     // A 401 here means the session is already gone; either way the client must return to the sign-in screen.
     try { await api("/api/auth/logout", { method: "POST" }); } catch { /* already signed out */ }
     qc.clear();
     await qc.invalidateQueries();
-  }} />;
+  };
+  if (me.data.mustChangePassword) return <ChangePassword onDone={() => qc.invalidateQueries()} onSignOut={signOut} />;
+  return <Shell me={me.data} onSignOut={signOut} />;
 }

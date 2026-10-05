@@ -18,6 +18,22 @@ variable "google_hosted_domain" {
   default     = ""
 }
 
+variable "auth_test_emails" {
+  description = "Staging only: comma-separated exact emails outside the hosted domain allowed to sign in (test users). Must be empty in production."
+  type        = string
+  default     = ""
+}
+
+variable "password_login" {
+  description = "Staging only: \"on\" enables username and password sign-in for test users. Must be \"off\" in production."
+  type        = string
+  default     = "off"
+  validation {
+    condition     = contains(["on", "off"], var.password_login)
+    error_message = "password_login must be on or off."
+  }
+}
+
 variable "vpc_cidr" { type = string }
 variable "public_subnet_cidrs" { type = list(string) }
 variable "private_subnet_cidrs" { type = list(string) }

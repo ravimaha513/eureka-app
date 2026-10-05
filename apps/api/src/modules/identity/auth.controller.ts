@@ -4,7 +4,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AuditService } from "../../platform/audit.service.js";
 import { clientInfo } from "../../platform/client-info.js";
-import { CurrentUser, Public, type AuthedUser } from "../../platform/auth.guard.js";
+import { AllowPasswordChange, CurrentUser, Public, type AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { OidcService } from "../../platform/oidc.service.js";
@@ -114,6 +114,7 @@ export class AuthController {
   }
 
   @Post("logout")
+  @AllowPasswordChange()
   @HttpCode(204)
   async logout(@CurrentUser() user: AuthedUser, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
     await this.sessions.revoke(user.sessionHash);

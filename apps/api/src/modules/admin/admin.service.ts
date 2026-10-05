@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable, UnprocessableEntityException } from "@nestjs/common";
+import { ForbiddenException, Inject, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import type pg from "pg";
 import { z } from "zod";
 import {
@@ -11,7 +11,7 @@ import {
 } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
-import { CONFIG, type AppConfig } from "../../platform/config.js";
+import { CONFIG, parseEmailList, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { mapAdminError } from "./admin.errors.js";
 import type { BulkCreateUsers, CreateRoleRequest, CreateTeam, CreateUser, MoveMember, UserListQuery } from "./admin.schemas.js";
@@ -159,16 +159,35 @@ export class AdminService {
     });
   }
 
-  async createUser(user: AuthedUser, body: CreateUser) {
+  /**
+   * Whether an email may belong to a user: in the Google hosted domain, or on
+   * the staging test list, or any email when password sign-in is on (staging
+   * and local only; the config refuses it elsewhere).
+   */
+  private emailAllowed(email: string): boolean {
     const domain = this.config.GOOGLE_HOSTED_DOMAIN?.trim().toLowerCase();
-    if (domain && !body.email.toLowerCase().endsWith(`@${domain}`)) {
-      throw new UnprocessableEntityException("email_domain");
+    if (!domain || this.config.PASSWORD_LOGIN === "on") return true;
+    const e = email.trim().toLowerCase();
+    return e.endsWith(`@${domain}`) || parseEmailList(this.config.AUTH_TEST_EMAILS).includes(e);
+  }
+
+  /** An org admin sets a temporary password for a user (staging/local); the user must change it at first sign-in. */
+  async setPassword(user: AuthedUser, id: string, password: string): Promise<void> {
+    if (this.config.PASSWORD_LOGIN !== "on") throw new NotFoundException();
+    await this.tx(user, async (c) => { await c.query(`SELECT authz.admin_set_password($1, $2)`, [id, password]); });
+  }
+
+  async createUser(user: AuthedUser, body: CreateUser) {
+    if (!this.emailAllowed(body.email)) throw new UnprocessableEntityException("email_domain");
+    if (body.temporaryPassword !== undefined && this.config.PASSWORD_LOGIN !== "on") {
+      throw new UnprocessableEntityException("password_login_disabled");
     }
     return this.tx(user, async (c) => {
       const { rows } = await c.query<{ id: string }>(
         `SELECT authz.admin_create_user($1, $2, $3, $4) AS id`,
         [body.email, body.displayName, body.designation ?? null, body.primaryLocationId ?? null]);
       const id = rows[0]!.id;
+      if (body.temporaryPassword !== undefined) await c.query(`SELECT authz.admin_set_password($1, $2)`, [id, body.temporaryPassword]);
       await this.audit.record(c, {
         actorId: user.id, action: "admin.user.created", entityType: "app_user", entityId: id,
         changes: { email: body.email, displayName: body.displayName, designation: body.designation, primaryLocationId: body.primaryLocationId },
@@ -185,7 +204,6 @@ export class AdminService {
    * event as the single create.
    */
   async bulkCreateUsers(user: AuthedUser, body: BulkCreateUsers) {
-    const domain = this.config.GOOGLE_HOSTED_DOMAIN?.trim().toLowerCase();
     type Row = { row: number; email: string; displayName: string; status: "ok" | "error"; error?: string; id?: string };
     try {
       return await this.tx(user, async (c) => {
@@ -202,7 +220,7 @@ export class AdminService {
           results.push(res);
           const fail = (code: string) => { res.status = "error"; res.error = code; };
           if (!EMAIL.safeParse(email).success) { fail("invalid_email"); continue; }
-          if (domain && !email.toLowerCase().endsWith(`@${domain}`)) { fail("email_domain"); continue; }
+          if (!this.emailAllowed(email)) { fail("email_domain"); continue; }
           if (!displayName) { fail("name_required"); continue; }
           if (seen.has(email.toLowerCase())) { fail("duplicate_in_file"); continue; }
           seen.add(email.toLowerCase());

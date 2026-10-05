@@ -16,6 +16,8 @@ const COOKIE_PATH = "/api/auth/step-up";
 export const ReturnPath = z.string().max(201).regex(/^\/[A-Za-z0-9/_.?=&%-]{0,200}$/).refine((p) => !p.startsWith("//"), "same-origin path only");
 export const StartStepUp = z.object({ returnTo: ReturnPath }).strict();
 
+const StepUpPassword = z.object({ password: z.string().min(1).max(200) }).strict();
+
 const sha256 = (s: string) => createHash("sha256").update(s).digest();
 
 /**
@@ -66,11 +68,13 @@ export class StepUpController {
   async status(@CurrentUser() user: AuthedUser) {
     const g = await this.db.withUser(user.id, async (c) => (await c.query<{ method: string; expires_at: Date }>(
       `SELECT method, expires_at FROM authz.step_up_current($1)`, [user.sessionHash])).rows[0]);
+    const hasPassword = this.config.PASSWORD_LOGIN === "on" && await this.db.withUser(user.id, async (c) =>
+      (await c.query<{ h: boolean }>(`SELECT authz.password_has_credential() AS h`)).rows[0]!.h);
     return {
       active: Boolean(g),
       expiresAt: g?.expires_at.toISOString() ?? null,
       method: g?.method ?? null,
-      mode: this.config.AUTH_MODE === "dev" && this.config.NODE_ENV !== "production" ? "dev" : "google",
+      mode: hasPassword ? "password" : this.config.AUTH_MODE === "dev" && this.config.NODE_ENV !== "production" ? "dev" : "google",
       ttlMinutes: this.config.STEP_UP_TTL_MINUTES,
     };
   }
@@ -148,6 +152,20 @@ export class StepUpController {
     if (typeof code !== "string" || !code) throw new StepUpCancelled(); // error=access_denied or no code
     const idToken = await this.oidc.exchange(code, saved.verifier, this.redirectUri());
     return this.oidc.verifyStepUp(idToken, saved.nonce);
+  }
+
+  /** Step-up by re-entering the password (staging/local, migration 0083); the database verifies it. */
+  @Post("password")
+  @HttpCode(200)
+  async password(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
+    if (this.config.PASSWORD_LOGIN !== "on") throw new NotFoundException();
+    const { password } = StepUpPassword.parse(body);
+    const r = await this.db.withUser(user.id, async (c) => (await c.query<{ outcome: string; expires_at: Date | null }>(
+      `SELECT outcome, expires_at FROM authz.step_up_password($1, $2, $3, $4, $5)`,
+      [user.sessionHash, password, this.config.STEP_UP_TTL_MINUTES, this.config.PASSWORD_MAX_FAILURES, this.config.PASSWORD_LOCK_MINUTES])).rows[0]!);
+    if (r.outcome === "locked") throw new HttpException("account_locked", HttpStatus.TOO_MANY_REQUESTS);
+    if (r.outcome !== "ok" || !r.expires_at) throw new ForbiddenException("password_incorrect");
+    return { active: true, expiresAt: r.expires_at.toISOString(), method: "password" };
   }
 
   /** Development identity provider's step-up; unreachable unless AUTH_MODE=dev (never in production). */

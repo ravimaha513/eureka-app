@@ -49,7 +49,7 @@ cleanup() { say "Stopping"; for p in "${pids[@]}"; do kill "$p" 2>/dev/null || t
 trap cleanup EXIT INT TERM
 
 say "Starting API on http://localhost:$API_PORT"
-( cd apps/api && NODE_ENV=development AUTH_MODE=dev SESSION_SECRET="local-dev-session-secret-local-dev-session" \
+( cd apps/api && NODE_ENV=development AUTH_MODE=dev PASSWORD_LOGIN=on EUREKA_ENVIRONMENT=local SESSION_SECRET="local-dev-session-secret-local-dev-session" \
     DATABASE_URL="$APP_URL" PORT="$API_PORT" LOCAL_STORAGE_DIR="$LOCAL_DIR/documents" pnpm dev ) &
 pids+=($!)
 

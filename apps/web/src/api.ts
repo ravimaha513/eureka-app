@@ -5,6 +5,8 @@ export interface Me {
   roles: { key: string; label: string; locationId: string | null }[];
   capabilities: string[];
   csrfToken: string;
+  /** Staging/local password sign-in: an admin-set password must be changed before anything else. */
+  mustChangePassword?: boolean;
 }
 
 export interface Candidate {

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
-import { CONFIG, type AppConfig } from "./config.js";
+import { CONFIG, parseEmailList, type AppConfig } from "./config.js";
 
 const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
@@ -96,19 +96,25 @@ export class OidcService {
       clockTolerance: 60,
     });
     if (payload.nonce !== expectedNonce) throw new Error("nonce mismatch");
-    if (payload.hd !== this.config.GOOGLE_HOSTED_DOMAIN) throw new Error("account is not in the company domain");
     if (payload.email_verified !== true || typeof payload.email !== "string") throw new Error("email not verified");
     if (typeof payload.sub !== "string") throw new Error("missing sub");
-    // Users are linked by email (design A6.1), so the email itself must be in
-    // the company domain too, not only the hd claim.
-    const domain = (this.config.GOOGLE_HOSTED_DOMAIN ?? "").trim().toLowerCase();
-    const parts = payload.email.toLowerCase().split("@");
-    if (!domain || parts.length !== 2 || !parts[0] || parts[1] !== domain) {
-      throw new Error("email is not in the company domain");
+    const email = payload.email.toLowerCase();
+    // Staging test users (AUTH_TEST_EMAILS, refused outside staging/local by the
+    // config): an exact, verified email; no hd claim or domain needed.
+    const testUser = parseEmailList(this.config.AUTH_TEST_EMAILS).includes(email);
+    if (!testUser) {
+      if (payload.hd !== this.config.GOOGLE_HOSTED_DOMAIN) throw new Error("account is not in the company domain");
+      // Users are linked by email (design A6.1), so the email itself must be in
+      // the company domain too, not only the hd claim.
+      const domain = (this.config.GOOGLE_HOSTED_DOMAIN ?? "").trim().toLowerCase();
+      const parts = email.split("@");
+      if (!domain || parts.length !== 2 || !parts[0] || parts[1] !== domain) {
+        throw new Error("email is not in the company domain");
+      }
     }
     const authTime = typeof payload.auth_time === "number" ? payload.auth_time : payload.iat ?? Date.now() / 1000;
     return {
-      identity: { sub: payload.sub, email: payload.email.toLowerCase(), authTime: new Date(authTime * 1000) },
+      identity: { sub: payload.sub, email, authTime: new Date(authTime * 1000) },
       authTimeClaim: payload.auth_time,
     };
   }

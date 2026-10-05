@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { Phone as PhoneIcon, Users as UsersIcon } from "lucide-react";
 import { Person } from "../shell/ui";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "../api";
 import { adminApi, type AdminUser, type BulkReport, type UserRole } from "./adminApi";
 import { CSV_TEMPLATE, csvToRows, type BulkRow } from "./csv";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "./Dialog";
@@ -16,6 +17,7 @@ type Modal =
   | { kind: "grant"; user: AdminUser }
   | { kind: "manager"; user: AdminUser }
   | { kind: "deactivate"; user: AdminUser }
+  | { kind: "password"; user: AdminUser }
   | { kind: "reactivate"; user: AdminUser }
   | { kind: "revoke"; user: AdminUser; role: UserRole };
 
@@ -33,6 +35,7 @@ export function UsersTab() {
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const page = cursors.length - 1;
   const [modal, setModal] = useState<Modal | null>(null);
+  const passwordLogin = usePasswordLogin();
 
   useEffect(() => {
     const t = setTimeout(() => { setSearch(searchInput.trim()); setCursors([null]); }, 250);
@@ -119,6 +122,7 @@ export function UsersTab() {
                       {self ? <span className="muted">Your own account: ask another admin.</span> : (
                         <>
                           {u.status === "active" && <button className="btn sm" aria-label={`Grant role to ${u.displayName}`} onClick={() => setModal({ kind: "grant", user: u })}>Grant role</button>}
+                          {passwordLogin && u.status === "active" && <button className="btn sm" aria-label={`Set password for ${u.displayName}`} onClick={() => setModal({ kind: "password", user: u })}>Set password</button>}
                           <button className="btn sm" aria-label={`Set manager for ${u.displayName}`} onClick={() => setModal({ kind: "manager", user: u })}>Manager</button>
                           {u.status === "active"
                             ? <button className="btn sm danger" aria-label={`Deactivate ${u.displayName}`} onClick={() => setModal({ kind: "deactivate", user: u })}>Deactivate</button>
@@ -141,9 +145,11 @@ export function UsersTab() {
           onClick={() => q.data?.nextCursor && setCursors((c) => [...c, q.data!.nextCursor])}>Next</button>
       </nav>
 
-      {modal?.kind === "create" && <CreateUserDialog onClose={close} onDone={(name) => done(`Created ${name}.`)} />}
+      {modal?.kind === "create" && <CreateUserDialog passwordLogin={passwordLogin} onClose={close} onDone={(name) => done(`Created ${name}.`)} />}
       {modal?.kind === "bulk" && <BulkImportDialog onClose={close} onDone={(n) => done(`Created ${n} users.`)} />}
       {modal?.kind === "grant" && <GrantRoleDialog user={modal.user} onClose={close} onDone={done} />}
+      {modal?.kind === "password" && <SetPasswordDialog user={modal.user} onClose={close}
+        onDone={() => done(`Temporary password set for ${modal.user.displayName}. They must change it at first sign-in.`)} />}
       {modal?.kind === "manager" && <ManagerDialog user={modal.user} onClose={close} onDone={done} />}
       {modal?.kind === "deactivate" && (
         <ConfirmDialog title={`Deactivate ${modal.user.displayName}?`} confirmLabel="Deactivate" danger formatError={fmt}
@@ -171,9 +177,34 @@ export function UsersTab() {
   );
 }
 
-function CreateUserDialog({ onClose, onDone }: { onClose: () => void; onDone: (name: string) => void }) {
+/** Whether the server offers password sign-in (staging/local); then admins can set temporary passwords. */
+function usePasswordLogin(): boolean {
+  const m = useQuery({
+    queryKey: ["auth-methods"],
+    queryFn: () => api<{ password: boolean }>("/api/auth/methods").catch(() => null),
+    staleTime: Infinity,
+  });
+  return m.data?.password === true;
+}
+
+function SetPasswordDialog({ user, onClose, onDone }: { user: AdminUser; onClose: () => void; onDone: () => void }) {
+  const [pw, setPw] = useState("");
+  const { busy, error, run } = useSubmit((e) => friendlyError(e));
+  return (
+    <Dialog title={`Set password for ${user.displayName}`} onClose={onClose}>
+      <form onSubmit={(e) => { e.preventDefault(); void run(async () => { await adminApi.setPassword(user.id, pw); onDone(); }); }}>
+        <div className="field"><label htmlFor="sp-pw">Temporary password</label>
+          <input id="sp-pw" type="text" autoComplete="off" required minLength={10} maxLength={72} data-autofocus value={pw} onChange={(e) => setPw(e.target.value)} /></div>
+        <p className="hint">10 to 72 characters with a letter and a number. Share it with them yourself; they must change it at first sign-in, and it signs them out everywhere. Not available for users with restricted roles.</p>
+        <DialogActions onCancel={onClose} submitLabel="Set password" busy={busy} error={error} />
+      </form>
+    </Dialog>
+  );
+}
+
+function CreateUserDialog({ onClose, onDone, passwordLogin }: { onClose: () => void; onDone: (name: string) => void; passwordLogin: boolean }) {
   const meta = useMeta();
-  const [f, setF] = useState({ email: "", displayName: "", designation: "", primaryLocationId: "" });
+  const [f, setF] = useState({ email: "", displayName: "", designation: "", primaryLocationId: "", temporaryPassword: "" });
   const { busy, error, run } = useSubmit((e) => friendlyError(e, "createUser"));
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
   return (
@@ -185,6 +216,7 @@ function CreateUserDialog({ onClose, onDone }: { onClose: () => void; onDone: (n
             email: f.email.trim(), displayName: f.displayName.trim(),
             ...(f.designation.trim() ? { designation: f.designation.trim() } : {}),
             ...(f.primaryLocationId ? { primaryLocationId: f.primaryLocationId } : {}),
+            ...(passwordLogin && f.temporaryPassword ? { temporaryPassword: f.temporaryPassword } : {}),
           });
           onDone(f.displayName.trim());
         });
@@ -200,6 +232,10 @@ function CreateUserDialog({ onClose, onDone }: { onClose: () => void; onDone: (n
             <option value="">None</option>
             {meta.data?.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select></div>
+        {passwordLogin && (
+          <div className="field"><label htmlFor="nu-pw">Temporary password <span className="muted">(optional; they change it at first sign-in)</span></label>
+            <input id="nu-pw" type="text" autoComplete="off" minLength={10} maxLength={72} value={f.temporaryPassword} onChange={set("temporaryPassword")} /></div>
+        )}
         <p className="hint">New users have no roles. Grant roles after creating them.</p>
         <DialogActions onCancel={onClose} submitLabel="Create user" busy={busy} error={error} />
       </form>

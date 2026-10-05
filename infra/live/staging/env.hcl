@@ -13,6 +13,10 @@ locals {
   domain_name       = "eureka-staging.spokenly.click"
   hosted_zone_name  = "spokenly.click"
   google_hosted_domain = "aceintegrator.com"
+  # Staging test users: exact emails (comma-separated) outside the domain that may sign in. Staging only.
+  auth_test_emails = ""
+  # Username + password sign-in for test users (migration 0083). Staging only; production stays off.
+  password_login = "on"
   # jobs-portal: SES sender of applicant sign-in links and application notices (required by the API).
   portal_from_email = "careers@eureka-staging.spokenly.click"
 

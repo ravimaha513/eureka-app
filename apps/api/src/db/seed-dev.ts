@@ -15,6 +15,7 @@ import { seedDevChat } from "./dev-chat.js";
 import { seedDevApplications, seedDevJobs } from "./dev-jobs.js";
 
 if (process.env.NODE_ENV === "production") throw new Error("seed-dev must not run in production");
+process.env.EUREKA_ENVIRONMENT ??= "local"; // switches password sign-in on in the database (migration 0083)
 const url = process.env.MIGRATION_DATABASE_URL;
 if (!url) throw new Error("MIGRATION_DATABASE_URL is required");
 
@@ -67,6 +68,15 @@ if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-
 if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-0000-0000-000000000016'")).rowCount) {
   const j = await seedDevJobs(admin);
   if (j.jobs) console.log(`seeded ${j.jobs} jobs, ${await seedDevApplications(admin, j.ids)} applications`);
+}
+// Local sign-in with a password: every fictional user gets DEV_PASSWORD, no forced change (local only).
+if (process.env.EUREKA_ENVIRONMENT === "local") {
+  const pw = process.env.DEV_PASSWORD ?? "Eureka-dev-1";
+  const users = await admin.query<{ id: string }>(
+    `SELECT u.id FROM eureka.app_user u WHERE u.email::text LIKE '%@eureka.example'
+       AND NOT EXISTS (SELECT 1 FROM authz.user_credential c WHERE c.user_id = u.id)`);
+  for (const u of users.rows) await admin.query(`SELECT authz.password_store($1, $2, false)`, [u.id, pw]);
+  if (users.rowCount) console.log(`gave ${users.rowCount} fictional users the local password (DEV_PASSWORD, default "Eureka-dev-1")`);
 }
 // Development step-up ("Confirm it's you" without Google) needs this database switch as well as
 // AUTH_MODE=dev in the API (migration 0043); no migration sets it, so other environments refuse it.

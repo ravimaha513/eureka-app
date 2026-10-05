@@ -1,4 +1,5 @@
 import {
+  Inject,
   type CanActivate,
   type ExecutionContext,
   ForbiddenException,
@@ -11,6 +12,7 @@ import { Reflector } from "@nestjs/core";
 import type { FastifyRequest } from "fastify";
 import { can, type Permission, type UserAccess } from "@eureka/shared";
 import { AccessService } from "./access.service.js";
+import { CONFIG, type AppConfig } from "./config.js";
 import { DbService } from "./db.service.js";
 import { SESSION_COOKIE, SessionService } from "./session.service.js";
 import { PORTAL_HEADER, PortalSessionService } from "./portal-session.service.js";
@@ -55,6 +57,10 @@ export const CurrentApplicant = createParamDecorator((_: unknown, ctx: Execution
   if (!req.applicant) throw new UnauthorizedException();
   return req.applicant;
 });
+/** Routes a user with a temporary password may still call (me, logout, change password). */
+export const ALLOW_PASSWORD_CHANGE = "eureka:allow-password-change";
+export const AllowPasswordChange = () => SetMetadata(ALLOW_PASSWORD_CHANGE, true);
+
 /** Coarse RBAC check before the handler; data scope is applied in queries and RLS. */
 export const RequirePermission = (p: Permission) => SetMetadata(REQUIRED_PERMISSION, p);
 
@@ -74,6 +80,7 @@ export class AuthGuard implements CanActivate {
     private readonly db: DbService,
     private readonly accessService: AccessService,
     private readonly portalSessions: PortalSessionService,
+    @Inject(CONFIG) private readonly config: AppConfig,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -98,6 +105,13 @@ export class AuthGuard implements CanActivate {
     // Access facts are loaded per request from current rows (no time-based cache).
     const access = await this.db.withUser(session.userId, (c) => this.accessService.load(c, session.userId));
     req.user = { id: session.userId, access, sessionHash: session.idHash, authTime: session.authTime };
+
+    // A temporary (admin-set) password must be changed before anything else (migration 0083).
+    if (this.config.PASSWORD_LOGIN === "on" && !this.reflector.getAllAndOverride<boolean>(ALLOW_PASSWORD_CHANGE, targets)) {
+      const must = await this.db.withUser(session.userId, async (c) =>
+        (await c.query<{ m: boolean }>(`SELECT authz.password_must_change() AS m`)).rows[0]!.m);
+      if (must) throw new ForbiddenException("password_change_required");
+    }
 
     const needed = this.reflector.getAllAndOverride<Permission | undefined>(REQUIRED_PERMISSION, targets);
     if (needed && !can(access, needed)) throw new ForbiddenException("Not permitted");

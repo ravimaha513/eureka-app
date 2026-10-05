@@ -71,6 +71,15 @@ export async function seedCatalog(client: pg.Client | pg.PoolClient, opts: { pro
     // The development step-up switch (migration 0043) never survives a production deploy,
     // whoever set it: the API refuses AUTH_MODE=dev there too, this is the database side.
     if (opts.production) await client.query(`DELETE FROM authz.policy_setting WHERE key = 'dev_step_up'`);
+    // Password sign-in (migration 0083) exists only where EUREKA_ENVIRONMENT says staging or local;
+    // every other environment, production included, has it switched off in the database too.
+    const passwordEnv = process.env.EUREKA_ENVIRONMENT;
+    if (passwordEnv === "staging" || passwordEnv === "local") {
+      await client.query(`INSERT INTO authz.policy_setting (key, value) VALUES ('password_login', 'on')
+        ON CONFLICT (key) DO UPDATE SET value = 'on'`);
+    } else {
+      await client.query(`DELETE FROM authz.policy_setting WHERE key = 'password_login'`);
+    }
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");

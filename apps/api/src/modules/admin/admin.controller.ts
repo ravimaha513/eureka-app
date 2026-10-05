@@ -13,6 +13,7 @@ import {
   SetLead,
   SetManager,
   UserListQuery,
+  SetPassword,
 } from "./admin.schemas.js";
 import { AdminService } from "./admin.service.js";
 
@@ -48,6 +49,12 @@ export class AdminController {
   @HttpCode(200)
   bulkCreateUsers(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.bulkCreateUsers(user, BulkCreateUsers.parse(body));
+  }
+
+  @Post("users/:id/password")
+  @HttpCode(204)
+  async setPassword(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
+    await this.svc.setPassword(user, id, SetPassword.parse(body).password);
   }
 
   @Post("users/:id/deactivate")
