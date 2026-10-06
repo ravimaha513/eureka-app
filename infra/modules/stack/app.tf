@@ -664,56 +664,80 @@ resource "aws_ecs_task_definition" "worker" {
   # key-rotation job, and the same key's ARN as RESTRICTED_KMS_KEY_ARN to name it
   # on restricted/ writes (document-scan; usable there only through S3).
   # See apps/api/src/worker/config.ts.
-  container_definitions = jsonencode([merge(local.container_base, {
-    name    = "worker"
-    command = ["node", "dist/worker.js"]
-    environment = concat([
-      { name = "NODE_ENV", value = "production" },
-      { name = "NODE_EXTRA_CA_CERTS", value = "/app/certs/rds-global-bundle.pem" },
-      { name = "AWS_REGION", value = var.aws_region },
-      { name = "AUDIT_BUCKET", value = aws_s3_bucket.b["audit"].id },
-      { name = "DOCUMENTS_BUCKET", value = aws_s3_bucket.b["documents"].id },
-      { name = "FIELD_KMS_KEY_ARN", value = aws_kms_key.restricted.arn },
-      # document-scan writes restricted/documents/ under this key (an id, not a secret).
-      { name = "RESTRICTED_KMS_KEY_ARN", value = aws_kms_key.restricted.arn },
-      { name = "FEEDBACK_MAIL_MODE", value = var.feedback_from_email != "" ? "ses" : "disabled" },
-      { name = "DB_POOL_MAX", value = "3" },
-      { name = "SHUTDOWN_GRACE_SECONDS", value = "20" },
-      { name = "HEARTBEAT_FILE", value = "/tmp/worker-heartbeat" },
-      ], var.feedback_from_email != "" ? [
-      { name = "FEEDBACK_FROM_EMAIL", value = var.feedback_from_email },
-      { name = "FEEDBACK_PUBLIC_ORIGIN", value = local.public_base_url },
-      ] : [], [
-      { name = "OUTBOX_MAIL_MODE", value = var.outbox_from_email != "" ? "ses" : "disabled" },
-      ], var.outbox_from_email != "" ? [
-      { name = "OUTBOX_FROM_EMAIL", value = var.outbox_from_email },
-      { name = "APP_PUBLIC_ORIGIN", value = local.public_base_url },
-      ] : [], var.outbox_deliver_since != "" ? [
-      { name = "OUTBOX_DELIVER_SINCE", value = var.outbox_deliver_since },
-    ] : [])
-    secrets = concat([
-      { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.generated["db/worker/url"].arn },
-      ], var.feedback_from_email != "" ? [
-      { name = "FEEDBACK_TOKEN_KEY", valueFrom = aws_ssm_parameter.generated["worker/feedback_token_key"].arn },
-    ] : [])
-    # SIGTERM gives the running job up to 20 s (SHUTDOWN_GRACE_SECONDS).
-    stopTimeout = 30
-    # Liveness: the scheduler touches the heartbeat file every tick (60 s).
-    healthCheck = {
-      command     = ["CMD", "node", "-e", "const s=require('fs').statSync('/tmp/worker-heartbeat');process.exit(Date.now()-s.mtimeMs<300000?0:1)"]
-      interval    = 60
-      timeout     = 5
-      retries     = 3
-      startPeriod = 60
-    }
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        awslogs-group         = aws_cloudwatch_log_group.app["worker"].name
-        awslogs-region        = var.aws_region
-        awslogs-stream-prefix = "worker"
+  container_definitions = jsonencode([
+    # Fargate mounts the empty ephemeral "tmp" volume root-owned and 0755, whatever
+    # the image says about /tmp, so the non-root worker (uid 10001) cannot write its
+    # heartbeat file: the health check fails and ECS recycles the task every few
+    # minutes. This one-shot root container opens the volume up first. Root is
+    # needed only for the chmod; the root filesystem stays read-only.
+    {
+      name                   = "tmp-perms"
+      image                  = local.image
+      essential              = false
+      user                   = "0"
+      readonlyRootFilesystem = true
+      command                = ["chmod", "1777", "/tmp"]
+      mountPoints            = [{ sourceVolume = "tmp", containerPath = "/tmp", readOnly = false }]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.app["worker"].name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "tmp-perms"
+        }
       }
-    }
+    },
+    merge(local.container_base, {
+      name      = "worker"
+      command   = ["node", "dist/worker.js"]
+      dependsOn = [{ containerName = "tmp-perms", condition = "SUCCESS" }]
+      environment = concat([
+        { name = "NODE_ENV", value = "production" },
+        { name = "NODE_EXTRA_CA_CERTS", value = "/app/certs/rds-global-bundle.pem" },
+        { name = "AWS_REGION", value = var.aws_region },
+        { name = "AUDIT_BUCKET", value = aws_s3_bucket.b["audit"].id },
+        { name = "DOCUMENTS_BUCKET", value = aws_s3_bucket.b["documents"].id },
+        { name = "FIELD_KMS_KEY_ARN", value = aws_kms_key.restricted.arn },
+        # document-scan writes restricted/documents/ under this key (an id, not a secret).
+        { name = "RESTRICTED_KMS_KEY_ARN", value = aws_kms_key.restricted.arn },
+        { name = "FEEDBACK_MAIL_MODE", value = var.feedback_from_email != "" ? "ses" : "disabled" },
+        { name = "DB_POOL_MAX", value = "3" },
+        { name = "SHUTDOWN_GRACE_SECONDS", value = "20" },
+        { name = "HEARTBEAT_FILE", value = "/tmp/worker-heartbeat" },
+        ], var.feedback_from_email != "" ? [
+        { name = "FEEDBACK_FROM_EMAIL", value = var.feedback_from_email },
+        { name = "FEEDBACK_PUBLIC_ORIGIN", value = local.public_base_url },
+        ] : [], [
+        { name = "OUTBOX_MAIL_MODE", value = var.outbox_from_email != "" ? "ses" : "disabled" },
+        ], var.outbox_from_email != "" ? [
+        { name = "OUTBOX_FROM_EMAIL", value = var.outbox_from_email },
+        { name = "APP_PUBLIC_ORIGIN", value = local.public_base_url },
+        ] : [], var.outbox_deliver_since != "" ? [
+        { name = "OUTBOX_DELIVER_SINCE", value = var.outbox_deliver_since },
+      ] : [])
+      secrets = concat([
+        { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.generated["db/worker/url"].arn },
+        ], var.feedback_from_email != "" ? [
+        { name = "FEEDBACK_TOKEN_KEY", valueFrom = aws_ssm_parameter.generated["worker/feedback_token_key"].arn },
+      ] : [])
+      # SIGTERM gives the running job up to 20 s (SHUTDOWN_GRACE_SECONDS).
+      stopTimeout = 30
+      # Liveness: the scheduler touches the heartbeat file every tick (60 s).
+      healthCheck = {
+        command     = ["CMD", "node", "-e", "const s=require('fs').statSync('/tmp/worker-heartbeat');process.exit(Date.now()-s.mtimeMs<300000?0:1)"]
+        interval    = 60
+        timeout     = 5
+        retries     = 3
+        startPeriod = 60
+      }
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.app["worker"].name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "worker"
+        }
+      }
   })])
 }
 
