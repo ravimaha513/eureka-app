@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import type pg from "pg";
 import { parseCsv } from "./csv.js";
+import { xlsxToCsv } from "./xlsx.js";
 import { parseMapping, SHEETS, type MappingConfig, type Sheet } from "./mapping.js";
 import {
   normalizeRow, redactCells, resolveBatch, rowKeyOf, sha256, todayIso, type Decision, type Hmac, type Ledger,
@@ -22,6 +23,11 @@ const REQUIRED: Record<Sheet, string[]> = {
   interviews: ["client", "jobTitle", "date", "startTime", "callStatus"],
   placements: ["client", "jobTitle", "placementType", "workMode", "tentativeStart", "status"],
 };
+
+/** CSV text of a sheet file: .xlsx (first sheet) is converted, anything else is read as CSV. */
+export async function loadSheetText(path: string): Promise<string> {
+  return path.toLowerCase().endsWith(".xlsx") ? xlsxToCsv(readFileSync(path)) : readFileSync(path, "utf8");
+}
 
 export interface StageFiles { sales?: string; interviews?: string; placements?: string }
 
@@ -85,7 +91,7 @@ export async function stage(
   const cfg = parseMapping(JSON.parse(mappingText));
   const given = SHEETS.filter((s) => files[s]);
   if (given.length === 0) throw new Error("Give at least one of --sales, --interviews, --placements");
-  const texts = Object.fromEntries(given.map((s) => [s, readFileSync(files[s]!, "utf8")])) as Partial<Record<Sheet, string>>;
+  const texts = Object.fromEntries(await Promise.all(given.map(async (s) => [s, await loadSheetText(files[s]!)] as const))) as Partial<Record<Sheet, string>>;
   const raws: RawRow[] = [];
   const meta: Record<string, unknown> = {};
   const today = todayIso();

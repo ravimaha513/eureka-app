@@ -11,25 +11,31 @@
  *   commit     --batch ID [--commit]   (dry run unless --commit)
  *   report     --batch ID
  *   purge      --batch ID | --expired
+ *   propose-mapping --file x.xlsx|x.csv [--sheet NAME] [--kind sales|interviews|placements] [--mapping base.json] [--out m.json]
+ *              (no database; needs ANTHROPIC_API_KEY. The LLM only proposes; review the output, then use it as --mapping.)
  * Review decisions and approval are API calls by signed-in org admins
  * (POST /api/v1/imports/...). Add --json for machine-readable output.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import pg from "pg";
 import { makeHmac } from "./analyze.js";
 import { commitBatch } from "./commit.js";
-import { DEFAULT_MAPPING_PATH } from "./mapping.js";
+import { DEFAULT_MAPPING_PATH, SHEETS, type Sheet } from "./mapping.js";
 import { formatReport, reconcile } from "./report.js";
 import { listReview, purgeBatch, purgeExpired } from "./review.js";
+import { applyProposal, AnthropicClient, proposeMapping, type LlmClient } from "./llm-mapper.js";
+import { parseCsv } from "./csv.js";
 import { recompute, stage } from "./stage.js";
+import { readWorkbook } from "./xlsx.js";
 
-const USAGE = `usage: cli.ts <stage|reanalyse|review|commit|report|purge> [options]  (see docs/import.md)`;
+const USAGE = `usage: cli.ts <stage|reanalyse|review|commit|report|purge|propose-mapping> [options]  (see docs/import.md)`;
 
 export async function run(
   argv: string[], pool: pg.Pool, out: (s: string) => void = console.log, env: NodeJS.ProcessEnv = process.env,
+  llm?: LlmClient,
 ): Promise<void> {
   const [command, ...rest] = argv;
   const { values: v } = parseArgs({
@@ -39,6 +45,7 @@ export async function run(
       mapping: { type: "string" }, ticket: { type: "string" }, batch: { type: "string" },
       commit: { type: "boolean", default: false }, expired: { type: "boolean", default: false },
       json: { type: "boolean", default: false },
+      file: { type: "string" }, sheet: { type: "string" }, kind: { type: "string" }, out: { type: "string" },
     },
     strict: true,
   });
@@ -48,6 +55,10 @@ export async function run(
     return x;
   };
   const print = (obj: unknown, text: string) => out(v.json ? JSON.stringify(obj, null, 2) : text);
+  if (command === "propose-mapping") {
+    await proposeMappingCommand(v, print, llm ?? new AnthropicClient({ apiKey: env.ANTHROPIC_API_KEY ?? "", model: env.IMPORT_LLM_MODEL }));
+    return;
+  }
   const hmac = () => makeHmac(env.IMPORT_HMAC_KEY ?? "");
   // Least privilege: never run the import as the owner, a superuser or the API role.
   const who = (await pool.query<{ u: string }>("SELECT current_user AS u")).rows[0]?.u;
@@ -102,6 +113,46 @@ export async function run(
     default:
       throw new Error(USAGE);
   }
+}
+
+async function proposeMappingCommand(
+  v: { file?: string; sheet?: string; kind?: string; mapping?: string; out?: string },
+  print: (obj: unknown, text: string) => void, llm: LlmClient,
+): Promise<void> {
+  if (!v.file) throw new Error(`--file is required for propose-mapping\n${USAGE}`);
+  if (v.kind !== undefined && !(SHEETS as readonly string[]).includes(v.kind)) throw new Error(`--kind must be one of ${SHEETS.join(", ")}`);
+  const kind = v.kind as Sheet | undefined;
+  // The header may sit below title rows here: only staging needs it on row 1.
+  const raw = readFileSync(v.file);
+  let table: { headers: string[]; rows: string[][] };
+  if (v.file.toLowerCase().endsWith(".xlsx")) {
+    const sheets = await readWorkbook(raw);
+    const s = v.sheet ? sheets.find((x) => x.name === v.sheet) : sheets[0];
+    if (!s) throw new Error(`No sheet "${v.sheet}" (has: ${sheets.map((x) => x.name).join(", ")})`);
+    table = s;
+  } else {
+    const t = parseCsv(raw.toString("utf8"));
+    table = { headers: t.headers, rows: t.rows.map((r) => t.headers.map((h) => r.cells[h] ?? "")) };
+  }
+  const proposal = await proposeMapping(llm, table, { kind });
+  let merged: unknown;
+  let problem: string | undefined;
+  try {
+    merged = applyProposal(JSON.parse(readFileSync(v.mapping ?? DEFAULT_MAPPING_PATH, "utf8")), proposal);
+  } catch (e) {
+    problem = (e as Error).message;
+  }
+  if (v.out && merged) writeFileSync(v.out, JSON.stringify(merged, null, 2) + "\n");
+  const lines = [
+    `Sheet kind: ${proposal.kind} (${Math.round(proposal.kindConfidence * 100)}%)`,
+    ...Object.entries(proposal.columns).map(([f, h]) => `  ${f.padEnd(22)} <- "${h}"  (${Math.round(proposal.confidence[f]! * 100)}%)`),
+    proposal.missing.length ? `Missing (map by hand): ${proposal.missing.join(", ")}` : "",
+    proposal.unmapped.length ? `Ignored columns: ${proposal.unmapped.map((h) => `"${h}"`).join(", ")}` : "",
+    ...proposal.rejected.map((r) => `Dropped model answer ${r.field} -> ${JSON.stringify(r.header)}: ${r.reason}`),
+    ...proposal.notes.map((n) => `Note: ${n}`),
+    problem ? `Not a usable mapping yet: ${problem}` : v.out ? `Wrote ${v.out}. Review it; status and row-colour labels are NOT proposed and still come from the base mapping.` : "",
+  ].filter(Boolean);
+  print({ proposal, usable: !problem, problem }, lines.join("\n"));
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolvePath(process.argv[1])) {

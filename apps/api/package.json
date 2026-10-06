@@ -27,6 +27,7 @@
     "fastify": "^4.28.1",
     "jose": "^5.10.0",
     "pg": "^8.23.0",
+    "read-excel-file": "^9.3.10",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "zod": "^3.25.76"
