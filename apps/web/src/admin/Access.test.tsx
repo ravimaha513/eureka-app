@@ -270,6 +270,20 @@ describe("Users tab", () => {
     await waitFor(() => expect(status()).toHaveTextContent(/waiting for a second approver/));
   });
 
+  it("single-admin mode: a restricted role is granted at once, with no second-approver warning", async () => {
+    routes["GET /api/v1/admin/meta"] = () => ({ body: { ...META, singleAdminMode: true } });
+    routes["POST /api/v1/admin/role-requests"] = () => ({ status: 201, body: { id: "rq7", status: "applied" } });
+    renderPage();
+    fireEvent.click(within(await row("Priya Rao")).getByRole("button", { name: "Grant role to Priya Rao" }));
+    const dlg = await screen.findByRole("dialog", { name: "Grant a role to Priya Rao" });
+    fireEvent.change(await within(dlg).findByLabelText("Role"), { target: { value: "hr" } });
+    expect(within(dlg).getByText(/Single-admin mode is on/)).toBeInTheDocument();
+    expect(within(dlg).queryByText(/needs a second approver/)).not.toBeInTheDocument();
+    fireEvent.click(within(dlg).getByRole("button", { name: "Grant role" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(status()).toHaveTextContent(/Granted HR to Priya Rao/));
+  });
+
   it("grant role sends locationId and reports an applied grant", async () => {
     routes["POST /api/v1/admin/role-requests"] = () => ({ status: 201, body: { id: "rq8", status: "applied" } });
     renderPage();
