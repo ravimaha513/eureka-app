@@ -46,6 +46,21 @@ the CSRF header, as the e2e tests do).
 7. **report** at any point; **purge** any batch, and `purge --expired` for batches older than
    `import_config.purge_days` (default 30), whatever their status.
 
+## Excel files and LLM column mapping
+
+`stage` accepts `.xlsx` as well as CSV (first sheet; converted to CSV text, so hashes and row numbers
+work as before; the header must be on row 1, otherwise staging says which row it is on). Because every
+team keeps a different template, `cli.ts propose-mapping --file x.xlsx [--sheet S] [--kind sales] [--out m.json]`
+asks an LLM (`ANTHROPIC_API_KEY`, `IMPORT_LLM_MODEL`, default `claude-sonnet-5-5`) which header is which field.
+It needs no database. Rules (`apps/api/src/import/llm-mapper.ts`):
+
+- The model gets headers and at most 5 shape-masked samples per column ("Asha Rao" -> "Aaaa Aaa"), never rows.
+  Real values go only for small repeated vocabularies with nothing email-, phone- or id-like (statuses, technologies).
+- Day/month order is detected locally from all rows. Status and row-colour meanings are not proposed (SRS Q6).
+- Its answer is checked against the real headers and field list; invented fields/headers and reused headers are dropped and reported.
+- Output is an ordinary mapping JSON passed through `parseMapping`; an admin reviews it, then `stage --mapping m.json`.
+  Review, digest and second-person approval are unchanged. Run it where the files may be (the ECS task), not on a laptop.
+
 ## Where it runs
 
 As a one-off ECS task in the VPC (the API image, command

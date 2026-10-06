@@ -28,7 +28,7 @@ const nameColumns = {
   fullName: header.optional(),
 };
 
-const SalesColumns = z.object({
+export const SalesColumns = z.object({
   ...nameColumns,
   personalEmail: header.optional(),
   marketingEmail: header.optional(),
@@ -44,7 +44,7 @@ const SalesColumns = z.object({
   marketingStartDate: header.optional(),
 }).strict();
 
-const InterviewColumns = z.object({
+export const InterviewColumns = z.object({
   ...nameColumns,
   email: header.optional(),
   phone: header.optional(),
@@ -63,7 +63,7 @@ const InterviewColumns = z.object({
   rowColor: header.optional(),
 }).strict();
 
-const PlacementColumns = z.object({
+export const PlacementColumns = z.object({
   ...nameColumns,
   email: header.optional(),
   phone: header.optional(),
