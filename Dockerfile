@@ -41,6 +41,11 @@ ENV NODE_ENV=production \
     NODE_EXTRA_CA_CERTS=/app/certs/rds-global-bundle.pem
 WORKDIR /app
 RUN groupadd --system --gid 10001 eureka && useradd --system --uid 10001 --gid eureka --no-create-home eureka
+# ECS mounts an empty ephemeral volume over /tmp (read-only root fs). Fargate
+# initialises it with this directory's ownership, so make it writable by the
+# runtime user; otherwise the worker heartbeat (/tmp/worker-heartbeat) fails
+# with EACCES, the container health check fails and ECS recycles the task.
+RUN chown eureka:eureka /tmp && chmod 1777 /tmp
 COPY --from=deps  /app/node_modules                 node_modules
 COPY --from=deps  /app/packages/shared/node_modules packages/shared/node_modules
 COPY --from=deps  /app/apps/api/node_modules        apps/api/node_modules
