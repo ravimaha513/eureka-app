@@ -127,6 +127,10 @@ describe("metadata and listings", () => {
     expect(r.locations).toEqual([{ id: LOC.austin, name: "Austin" }, { id: LOC.dallas, name: "Dallas" }]);
   });
 
+  it("meta reports single-admin mode (off by default)", async () => {
+    expect((await call("admin", "GET", "/api/v1/admin/meta")).json().singleAdminMode).toBe(false);
+  });
+
   it("users carry manager, roles and teams", async () => {
     const r = await call("admin", "GET", "/api/v1/admin/users?limit=200");
     expect(r.statusCode).toBe(200);
