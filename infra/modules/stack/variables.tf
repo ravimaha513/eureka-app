@@ -24,6 +24,16 @@ variable "auth_test_emails" {
   default     = ""
 }
 
+variable "single_admin_mode" {
+  description = "\"on\" lets a single administrator grant restricted roles without a second approver (AD-3 off). For a small internal company; \"off\" restores the two-person rule."
+  type        = string
+  default     = "off"
+  validation {
+    condition     = contains(["on", "off"], var.single_admin_mode)
+    error_message = "single_admin_mode must be on or off."
+  }
+}
+
 variable "password_login" {
   description = "Staging only: \"on\" enables username and password sign-in for test users. Must be \"off\" in production."
   type        = string

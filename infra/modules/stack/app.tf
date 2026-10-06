@@ -744,6 +744,8 @@ resource "aws_ecs_task_definition" "migrate" {
       { name = "GOOGLE_HOSTED_DOMAIN", value = var.google_hosted_domain },
       # Positive allow-list for bootstrap --demo-data (only "staging" may load fictional data).
       { name = "EUREKA_ENVIRONMENT", value = var.environment },
+      # Migration 0084: "on" lets one admin grant restricted roles without a second approver (written to the database on every migrate run).
+      { name = "SINGLE_ADMIN_MODE", value = var.single_admin_mode },
     ]
     secrets = [
       { name = "DB_MASTER_USERNAME", valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:username::" },

@@ -80,6 +80,10 @@ export async function seedCatalog(client: pg.Client | pg.PoolClient, opts: { pro
     } else {
       await client.query(`DELETE FROM authz.policy_setting WHERE key = 'password_login'`);
     }
+    // Single-admin mode (migration 0084): off unless SINGLE_ADMIN_MODE=on. Written on every run so a
+    // deploy can restore the second-approver rule (AD-3).
+    await client.query(`INSERT INTO authz.policy_setting (key, value) VALUES ('single_admin_mode', $1)
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [process.env.SINGLE_ADMIN_MODE === "on" ? "on" : "off"]);
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK");

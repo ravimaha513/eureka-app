@@ -93,6 +93,43 @@ describe("definer functions refuse callers without access:manage", () => {
   });
 });
 
+describe("single-admin mode (migration 0084)", () => {
+  const request = (actor: string, user: string, role: string) =>
+    asUser(db.app, actor, async (c) =>
+      (await c.query<{ request_id: string; request_status: string }>(`SELECT * FROM authz.request_role($1, $2, NULL)`, [user, role])).rows[0]!, true);
+  const approve = (actor: string, id: string) =>
+    asUser(db.app, actor, async (c) => (await c.query(`SELECT authz.approve_role_request($1) AS s`, [id])).rows[0].s, true);
+  const setMode = (v: "on" | "off") =>
+    db.admin.query(`INSERT INTO authz.policy_setting (key, value) VALUES ('single_admin_mode', $1)
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [v]);
+  const holds = async (user: string, role: string) =>
+    (await db.admin.query(`SELECT count(*)::int n FROM eureka.user_role WHERE user_id = $1 AND role_key = $2 AND valid @> now()`, [user, role])).rows[0].n > 0;
+
+  it("off by default: a restricted role stays pending", async () => {
+    const r = await request(U.admin, U.r1b, "accounts");
+    expect(r.request_status).toBe("pending_approval");
+    expect(await holds(U.r1b, "accounts")).toBe(false);
+  });
+
+  it("on: a restricted role applies at once and the requester can approve a pending request", async () => {
+    const pending = (await db.admin.query(`SELECT id FROM eureka.role_request WHERE user_id = $1 AND role_key = 'accounts' AND status = 'pending'`, [U.r1b])).rows[0].id;
+    await setMode("on");
+    try {
+      expect(await approve(U.admin, pending)).toBe("approved");
+      expect(await holds(U.r1b, "accounts")).toBe(true);
+      const direct = await request(U.admin, U.r3a, "hr");
+      expect(direct.request_status).toBe("applied");
+      expect(await holds(U.r3a, "hr")).toBe(true);
+      const { rows } = await db.admin.query(`SELECT created_by, approved_by FROM eureka.user_role WHERE user_id = $1 AND role_key = 'hr'`, [U.r3a]);
+      expect(rows[0]).toEqual({ created_by: U.admin, approved_by: null });
+      // Still no self-grant, and the grantee never approves.
+      await expect(request(U.admin, U.admin, "hr")).rejects.toThrow(/self_change/);
+    } finally {
+      await setMode("off");
+    }
+  });
+});
+
 describe("self-change (AD-2)", () => {
   it.each([
     [`SELECT authz.admin_set_user_status($1, false)`, [U.admin]],
