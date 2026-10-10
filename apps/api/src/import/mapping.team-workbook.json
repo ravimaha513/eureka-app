@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "defaults": {
+    "dateOrder": "MDY",
+    "twoDigitYearPivot": 30,
+    "timeZone": "America/Chicago",
+    "interviewMinutes": 60,
+    "phoneRegion": "US",
+    "interviewTime": "10:00"
+  },
+  "sheets": {
+    "sales": {
+      "columns": {
+        "fullName": "Candidate Name",
+        "personRef": "Candidate Ref",
+        "phone": "Phone",
+        "technology": "Technology",
+        "owner": "Recruiter",
+        "status": "Status"
+      },
+      "locationFromOwner": true
+    },
+    "submissions": {
+      "columns": {
+        "fullName": "Candidate Name",
+        "personRef": "Candidate Ref",
+        "owner": "Recruiter",
+        "client": "Client",
+        "vendor": "Vendor",
+        "jobTitle": "Job Title",
+        "rate": "Rate",
+        "date": "Date"
+      }
+    },
+    "interviews": {
+      "columns": {
+        "fullName": "Candidate Name",
+        "personRef": "Candidate Ref",
+        "owner": "Recruiter",
+        "client": "Client",
+        "clientInferred": "Client Inferred",
+        "vendor": "Vendor",
+        "jobTitle": "Job Title",
+        "round": "Interview Type",
+        "date": "Date",
+        "callStatus": "Call Status"
+      }
+    },
+    "placements": {
+      "columns": {
+        "fullName": "Candidate Name",
+        "personRef": "Candidate Ref",
+        "phone": "Phone",
+        "owner": "Recruiter",
+        "client": "Client",
+        "vendor": "Vendor",
+        "implementationPartner": "Implementation Partner",
+        "jobTitle": "Job Title",
+        "placementType": "Placement Type",
+        "rate": "Rate",
+        "workMode": "Work Mode",
+        "tentativeStart": "Tentative Start",
+        "status": "Status"
+      }
+    }
+  },
+  "statuses": {
+    "sales": {
+      "_note": "Written by the team-workbook adapter: every candidate in a team log is being marketed.",
+      "Active": { "status": "active" },
+      "Active/All Teams": { "status": "active", "visibility": "all_teams" }
+    },
+    "interviews": {
+      "_note": "Written by the adapter from the interview date.",
+      "Scheduled": "scheduled",
+      "Completed": "completed"
+    },
+    "placements": {
+      "_note": "Written by the adapter from the BGV status and joining date.",
+      "Confirmed": "confirmed",
+      "BGC": "bgc",
+      "Ready": "ready",
+      "Joined": "joined",
+      "BGC Failed": "bgc_failed"
+    }
+  },
+  "rowColors": {},
+  "owners": {
+    "_note": "Recruiter name as typed in the sheet -> Eureka user email. Needed only for names that are not exactly one active user's display name (spelling variants, initials)."
+  },
+  "references": {
+    "create": { "clients": true, "vendors": true, "partners": true },
+    "ignore": ["confidential", "n/a", "na", "-", "tbd", "not disclosed"]
+  },
+  "technologies": {
+    "Java": "Java",
+    "Core Java": "Java",
+    "Java Full Stack": "Java",
+    "Python": "Python",
+    ".NET": ".NET",
+    "Dot Net": ".NET",
+    "DevOps": "DevOps",
+    "Data Engineer": "Data Engineering",
+    "Data Engineering": "Data Engineering",
+    "BA": "Business Analyst",
+    "Business Analyst": "Business Analyst",
+    "Salesforce": "Salesforce",
+    "QA": "QA Automation",
+    "Data Scientist": "Data Science",
+    "Data Science": "Data Science"
+  },
+  "timeZones": {
+    "EST": "America/New_York",
+    "CST": "America/Chicago",
+    "PST": "America/Los_Angeles"
+  },
+  "placements": {
+    "commit": false,
+    "defaultBackoutReason": "Backout recorded in the placement sheet (import)"
+  }
+}

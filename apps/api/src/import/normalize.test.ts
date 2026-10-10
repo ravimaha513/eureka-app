@@ -135,6 +135,7 @@ describe("labels, colours and enums", () => {
     expect(v(parseRate("$65/hr"))).toBe(65);
     expect(v(parseRate("80 per hour"))).toBe(80);
     expect(v(parseRate("72.50"))).toBe(72.5);
+    for (const [cell, n] of [["60hr", 60], ["60/Hr", 60], ["$70/", 70], ["70/", 70]] as const) expect(v(parseRate(cell)), cell).toBe(n);
     expect(v(parseRate(""))).toBe(null);
     for (const bad of ["$120k", "0", "1500", "65/day", "sixty"]) expect(v(parseRate(bad)), bad).toBe("!invalid_rate");
   });

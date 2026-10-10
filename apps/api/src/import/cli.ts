@@ -5,7 +5,11 @@
  *   IMPORT_HMAC_KEY=<at least 32 characters, from Secrets Manager>
  *   pnpm --filter @eureka/api exec tsx src/import/cli.ts <command> [options]
  *
- *   stage      --sales a.csv --interviews b.csv --placements c.csv --ticket T [--mapping m.json]
+ *   stage      --sales a.csv [--submissions s.csv] --interviews b.csv --placements c.csv --ticket T [--mapping m.json]
+ *   stage      --workbook team.xlsx --ticket T [--mapping m.json] [--as-of YYYY-MM-DD]
+ *              (a team workbook: "<Team> Submissions/Interviews/Placements" tabs; default mapping
+ *              mapping.team-workbook.json; see team-workbook.ts)
+ *   workbook   --file team.xlsx [--as-of YYYY-MM-DD]   (no database: how the tabs would be read)
  *   reanalyse  --batch ID              (after review decisions made in the API)
  *   review     --batch ID
  *   commit     --batch ID [--commit]   (dry run unless --commit)
@@ -17,7 +21,7 @@
  * (POST /api/v1/imports/...). Add --json for machine-readable output.
  */
 import { readFileSync, writeFileSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { basename, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import pg from "pg";
@@ -28,20 +32,28 @@ import { formatReport, reconcile } from "./report.js";
 import { listReview, purgeBatch, purgeExpired } from "./review.js";
 import { applyProposal, AnthropicClient, proposeMapping, type LlmClient } from "./llm-mapper.js";
 import { parseCsv } from "./csv.js";
-import { recompute, stage } from "./stage.js";
+import { recompute, stage, stageTexts } from "./stage.js";
+import { teamWorkbook, workbookTexts, type TeamWorkbook } from "./team-workbook.js";
+import { todayIso } from "./analyze.js";
 import { readWorkbook } from "./xlsx.js";
 
-const USAGE = `usage: cli.ts <stage|reanalyse|review|commit|report|purge|propose-mapping> [options]  (see docs/import.md)`;
+export const TEAM_WORKBOOK_MAPPING_PATH = DEFAULT_MAPPING_PATH.replace(/mapping\.default\.json$/, "mapping.team-workbook.json");
+
+const USAGE = `usage: cli.ts <stage|reanalyse|review|commit|report|purge|propose-mapping|workbook> [options]  (see docs/import.md)`;
+
+/** Commands that need no database (no IMPORT_DATABASE_URL). */
+export const OFFLINE_COMMANDS = new Set(["workbook", "propose-mapping"]);
 
 export async function run(
-  argv: string[], pool: pg.Pool, out: (s: string) => void = console.log, env: NodeJS.ProcessEnv = process.env,
+  argv: string[], pool: pg.Pool | null, out: (s: string) => void = console.log, env: NodeJS.ProcessEnv = process.env,
   llm?: LlmClient,
 ): Promise<void> {
   const [command, ...rest] = argv;
   const { values: v } = parseArgs({
     args: rest,
     options: {
-      sales: { type: "string" }, interviews: { type: "string" }, placements: { type: "string" },
+      sales: { type: "string" }, submissions: { type: "string" }, interviews: { type: "string" }, placements: { type: "string" },
+      workbook: { type: "string" }, "as-of": { type: "string" },
       mapping: { type: "string" }, ticket: { type: "string" }, batch: { type: "string" },
       commit: { type: "boolean", default: false }, expired: { type: "boolean", default: false },
       json: { type: "boolean", default: false },
@@ -55,10 +67,19 @@ export async function run(
     return x;
   };
   const print = (obj: unknown, text: string) => out(v.json ? JSON.stringify(obj, null, 2) : text);
+  const asOf = v["as-of"] ?? todayIso();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf)) throw new Error("--as-of must be YYYY-MM-DD");
+  if (command === "workbook") {
+    if (!v.file) throw new Error(`--file is required for workbook\n${USAGE}`);
+    const wb = teamWorkbook(await readWorkbook(readFileSync(v.file)), { asOf });
+    print(workbookSummary(wb), formatWorkbook(wb));
+    return;
+  }
   if (command === "propose-mapping") {
     await proposeMappingCommand(v, print, llm ?? new AnthropicClient({ apiKey: env.ANTHROPIC_API_KEY ?? "", model: env.IMPORT_LLM_MODEL }));
     return;
   }
+  if (!pool) throw new Error("IMPORT_DATABASE_URL is required (a login for the eureka_import role; see docs/import.md)");
   const hmac = () => makeHmac(env.IMPORT_HMAC_KEY ?? "");
   // Least privilege: never run the import as the owner, a superuser or the API role.
   const who = (await pool.query<{ u: string }>("SELECT current_user AS u")).rows[0]?.u;
@@ -66,9 +87,17 @@ export async function run(
 
   switch (command) {
     case "stage": {
-      const mappingText = readFileSync(v.mapping ?? DEFAULT_MAPPING_PATH, "utf8");
-      const r = await stage(pool, { sales: v.sales, interviews: v.interviews, placements: v.placements }, mappingText,
-        { ticket: v.ticket, hmac: hmac() });
+      let r;
+      if (v.workbook) {
+        if (v.sales || v.submissions || v.interviews || v.placements) throw new Error("--workbook replaces the per-sheet files");
+        const mappingText = readFileSync(v.mapping ?? TEAM_WORKBOOK_MAPPING_PATH, "utf8");
+        const wb = teamWorkbook(await readWorkbook(readFileSync(v.workbook)), { asOf });
+        r = await stageTexts(pool, workbookTexts(wb, basename(v.workbook), asOf), mappingText, { ticket: v.ticket, hmac: hmac() });
+      } else {
+        const mappingText = readFileSync(v.mapping ?? DEFAULT_MAPPING_PATH, "utf8");
+        r = await stage(pool, { sales: v.sales, submissions: v.submissions, interviews: v.interviews, placements: v.placements }, mappingText,
+          { ticket: v.ticket, hmac: hmac() });
+      }
       const rep = await reconcile(pool, r.batchId);
       print({ ...r, report: rep }, `${r.created ? "Staged new" : "Re-analysed open"} batch ${r.batchId} (nothing loaded)\n\n${formatReport(rep)}`);
       return;
@@ -115,6 +144,27 @@ export async function run(
   }
 }
 
+/** Counts and tab names only: no candidate data. */
+function workbookSummary(wb: TeamWorkbook) {
+  return {
+    tabs: wb.tabs.map((t) => ({ tab: t.name, kind: t.kind, team: t.team, rows: t.rows, classifiedBy: t.by, sourceRange: t.source?.range })),
+    ignored: wb.ignored,
+    generated: Object.fromEntries(Object.entries(wb.sheets).map(([k, s]) => [k, s.rows.length])),
+    ...wb.stats,
+  };
+}
+
+function formatWorkbook(wb: TeamWorkbook): string {
+  const s = workbookSummary(wb);
+  return [
+    ...s.tabs.map((t) => `  ${t.tab.padEnd(28)} ${t.kind.padEnd(12)} team ${t.team.padEnd(12)} ${String(t.rows).padStart(5)} rows  (${t.classifiedBy}${t.sourceRange ? `: IMPORTRANGE ${t.sourceRange}` : ""})`),
+    s.ignored.length ? `Ignored tabs: ${s.ignored.join(", ")}` : "",
+    `Generated: ${Object.entries(s.generated).map(([k, n]) => `${n} ${k === "sales" ? "people" : k}`).join(", ")}`,
+    `Candidates: ${s.candidates} (${s.multiTeamCandidates} submitted by more than one team: open to all teams)`,
+    `Interviews: client inferred for ${s.interviewsWithInferredClient} (need approval); ${s.interviewsWithoutClient} without a client wait in review`,
+  ].filter(Boolean).join("\n");
+}
+
 async function proposeMappingCommand(
   v: { file?: string; sheet?: string; kind?: string; mapping?: string; out?: string },
   print: (obj: unknown, text: string) => void, llm: LlmClient,
@@ -157,17 +207,17 @@ async function proposeMappingCommand(
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolvePath(process.argv[1])) {
   const url = process.env.IMPORT_DATABASE_URL;
-  if (!url) {
+  if (!url && !OFFLINE_COMMANDS.has(process.argv[2] ?? "")) {
     console.error("IMPORT_DATABASE_URL is required (a login for the eureka_import role; see docs/import.md)");
     process.exit(2);
   }
-  const pool = new pg.Pool({ connectionString: url, max: 2 });
+  const pool = url ? new pg.Pool({ connectionString: url, max: 2 }) : null;
   try {
     await run(process.argv.slice(2), pool);
   } catch (err) {
     console.error((err as Error).message);
     process.exitCode = 1;
   } finally {
-    await pool.end();
+    await pool?.end();
   }
 }

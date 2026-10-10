@@ -30,7 +30,7 @@ export async function listReview(pool: pg.Pool, batchId: string): Promise<Review
                AND s.row_key = r.person_key AND s.id <> r.id ORDER BY s.row_no LIMIT 1) AS suggested
      FROM eureka.import_row r
      WHERE r.batch_id = $1 AND (r.state IN ('review', 'held') OR r.commit_error IS NOT NULL)
-     ORDER BY array_position(ARRAY['sales','interviews','placements'], r.sheet), r.row_no`, [batchId])).rows;
+     ORDER BY array_position(ARRAY['sales','submissions','interviews','placements'], r.sheet), r.row_no`, [batchId])).rows;
   return rows.map((r) => ({
     id: r.id, sheet: r.sheet, rowNo: r.row_no, state: r.state, reasons: r.reasons, salesRow: r.suggested,
     approvable: r.state === "review" && r.reasons.length > 0 && r.reasons.every(approvable), commitError: r.commit_error,

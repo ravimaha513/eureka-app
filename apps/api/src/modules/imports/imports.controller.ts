@@ -23,7 +23,7 @@ import { DbService } from "../../platform/db.service.js";
  *                                              the preview's digest ({ "digest": "..." })
  */
 export const Decision = z.object({
-  sheet: z.enum(["sales", "interviews", "placements"]),
+  sheet: z.enum(["sales", "submissions", "interviews", "placements"]),
   rowNo: z.number().int().min(2).max(1_000_000),
   action: z.enum(["approve", "reject", "link"]),
   salesRowNo: z.number().int().min(2).max(1_000_000).optional(),

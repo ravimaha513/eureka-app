@@ -16,14 +16,14 @@
  * Status and row-colour meanings are NOT proposed (SRS Q6: nothing is guessed).
  */
 import { z } from "zod";
-import { InterviewColumns, PlacementColumns, SalesColumns, SHEETS, parseMapping, type Sheet } from "./mapping.js";
+import { InterviewColumns, PlacementColumns, SalesColumns, SHEETS, SubmissionColumns, parseMapping, type Sheet } from "./mapping.js";
 
 const SAMPLES = 5;
 const RAW_MAX_DISTINCT = 12;
 const RAW_MIN_REPEAT = 3;
 const CELL_MAX = 24;
 
-const SCHEMAS = { sales: SalesColumns, interviews: InterviewColumns, placements: PlacementColumns } as const;
+const SCHEMAS = { sales: SalesColumns, submissions: SubmissionColumns, interviews: InterviewColumns, placements: PlacementColumns } as const;
 
 /** What each canonical field means, for the model. Keys must equal the mapping schema's (tested). */
 export const FIELD_DOCS: Record<Sheet, Record<string, string>> = {
@@ -33,13 +33,21 @@ export const FIELD_DOCS: Record<Sheet, Record<string, string>> = {
     dob: "Date of birth", technology: "Primary technology / skill / stack", location: "Marketing or current location",
     owner: "Email of the recruiter (or lead) who owns the row", status: "Marketing status text", rowColor: "Row colour label column",
     priority: "Priority", marketingStartDate: "Date marketing started",
+    personRef: "Stable id of the candidate within the source (not a name)",
+  },
+  submissions: {
+    firstName: "Candidate first name", lastName: "Candidate last name", fullName: "Candidate full name", email: "Candidate email",
+    phone: "Candidate phone", dob: "Date of birth", owner: "Recruiter email or name", client: "End client", vendor: "Vendor",
+    jobTitle: "Job title / role", rate: "Submitted hourly rate", date: "Submission date",
+    personRef: "Stable id of the candidate within the source (not a name)",
   },
   interviews: {
     firstName: "Candidate first name", lastName: "Candidate last name", fullName: "Candidate full name", email: "Candidate email",
     phone: "Candidate phone", dob: "Date of birth", owner: "Recruiter email", client: "End client", vendor: "Vendor / prime vendor",
     jobTitle: "Job title / role", round: "Interview round", date: "Interview date", startTime: "Interview start time",
     endTime: "Interview end time", durationMinutes: "Duration in minutes", timeZone: "Time zone", callStatus: "Interview/call status",
-    rowColor: "Row colour label column",
+    rowColor: "Row colour label column", clientInferred: "Marker that the client was inferred, not in the sheet",
+    personRef: "Stable id of the candidate within the source (not a name)",
   },
   placements: {
     firstName: "Candidate first name", lastName: "Candidate last name", fullName: "Candidate full name", email: "Candidate email",
@@ -47,12 +55,16 @@ export const FIELD_DOCS: Record<Sheet, Record<string, string>> = {
     implementationPartner: "Implementation partner", jobTitle: "Job title / role", placementType: "Placement type (C2C, W2, FTE...)",
     rate: "Pay / bill rate", workMode: "Remote / hybrid / onsite", projectCity: "Project city", projectState: "Project state",
     tentativeStart: "Tentative or actual start date", status: "Placement status", statusReason: "Reason for status",
-    rowColor: "Row colour label column",
+    rowColor: "Row colour label column", personRef: "Stable id of the candidate within the source (not a name)",
   },
 };
 
+/** Optional in the schema only because a mapping option can stand in (locationFromOwner, interviewTime). */
+const USUALLY_REQUIRED = new Set(["sales.location", "interviews.startTime"]);
+
 export function requiredFields(kind: Sheet): string[] {
-  return Object.entries(SCHEMAS[kind].shape).filter(([, s]) => !s.isOptional()).map(([k]) => k);
+  return Object.entries(SCHEMAS[kind].shape)
+    .filter(([k, s]) => !s.isOptional() || USUALLY_REQUIRED.has(`${kind}.${k}`)).map(([k]) => k);
 }
 
 export interface ColumnProfile {

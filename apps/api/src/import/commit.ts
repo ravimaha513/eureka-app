@@ -38,7 +38,7 @@ export async function commitBatch(pool: pg.Pool, batchId: string, opts: { dryRun
   }
   const rows = (await pool.query<{ id: string; sheet: Sheet; row_no: number; row_key: string; person_key: string | null }>(
     `SELECT id, sheet, row_no, row_key, person_key FROM eureka.import_row
-     WHERE batch_id = $1 AND state = 'clean' ORDER BY array_position(ARRAY['sales','interviews','placements'], sheet), row_no`,
+     WHERE batch_id = $1 AND state = 'clean' ORDER BY array_position(ARRAY['sales','submissions','interviews','placements'], sheet), row_no`,
     [batchId])).rows;
   // One call per person: the clean sales row, or the first row of new activity for an earlier-imported person.
   const people = new Map<string, { anchor: string; rows: typeof rows }>();

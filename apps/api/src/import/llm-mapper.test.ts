@@ -3,7 +3,7 @@ import {
   AnthropicClient, applyProposal, detectDateOrder, FIELD_DOCS, profileColumns, proposeMapping, requiredFields, shapeMask,
   type LlmClient, type MappingProposal,
 } from "./llm-mapper.js";
-import { InterviewColumns, loadMapping, PlacementColumns, SalesColumns } from "./mapping.js";
+import { InterviewColumns, loadMapping, PlacementColumns, SalesColumns, SubmissionColumns } from "./mapping.js";
 
 const fake = (answer: unknown, seen: { user?: string } = {}): LlmClient => ({
   async callTool(req) { seen.user = req.user; return answer; },
@@ -21,6 +21,7 @@ describe("field catalog", () => {
     expect(Object.keys(FIELD_DOCS.sales).sort()).toEqual(Object.keys(SalesColumns.shape).sort());
     expect(Object.keys(FIELD_DOCS.interviews).sort()).toEqual(Object.keys(InterviewColumns.shape).sort());
     expect(Object.keys(FIELD_DOCS.placements).sort()).toEqual(Object.keys(PlacementColumns.shape).sort());
+    expect(Object.keys(FIELD_DOCS.submissions).sort()).toEqual(Object.keys(SubmissionColumns.shape).sort());
     expect(requiredFields("sales").sort()).toEqual(["location", "owner", "status", "technology"]);
   });
 });

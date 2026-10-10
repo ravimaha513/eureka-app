@@ -279,7 +279,8 @@ export function lookupLabel<T>(map: Record<string, T | null>, raw: string | null
 export function parseRate(s: string | null | undefined): Norm<number | null> {
   const v = clean(s).toLowerCase();
   if (!v) return ok(null);
-  const m = v.match(/^\$?\s*(\d{1,4}(?:\.\d{1,2})?)\s*(?:usd)?\s*(?:\/\s*(?:hr|hour|h)|per\s+hour|ph|an hour)?$/);
+  // "$65/hr", "65 per hour", and the shorthands seen in sheets: "60hr", "70/" (a unit left off).
+  const m = v.match(/^\$?\s*(\d{1,4}(?:\.\d{1,2})?)\s*(?:usd)?\s*(?:\/?\s*(?:hr|hour|h)|\/|per\s+hour|ph|an hour)?$/);
   if (!m) return fail("invalid_rate");
   const n = Number(m[1]);
   if (!(n > 0 && n <= 1000)) return fail("invalid_rate");

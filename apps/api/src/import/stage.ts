@@ -11,25 +11,34 @@ import { basename } from "node:path";
 import type pg from "pg";
 import { parseCsv } from "./csv.js";
 import { xlsxToCsv } from "./xlsx.js";
-import { parseMapping, SHEETS, type MappingConfig, type Sheet } from "./mapping.js";
+import { labelKey } from "./normalize.js";
+import { parseMapping, sheetConfig, SHEETS, type MappingConfig, type Sheet } from "./mapping.js";
 import {
   normalizeRow, redactCells, resolveBatch, rowKeyOf, sha256, todayIso, type Decision, type Hmac, type Ledger,
   type RawRow, type Refs, type StagedRow,
 } from "./analyze.js";
 
 /** Columns each sheet must have (the rest are optional). */
-const REQUIRED: Record<Sheet, string[]> = {
-  sales: ["technology", "location", "owner", "status"],
-  interviews: ["client", "jobTitle", "date", "startTime", "callStatus"],
-  placements: ["client", "jobTitle", "placementType", "workMode", "tentativeStart", "status"],
-};
+function requiredColumns(sheet: Sheet, cfg: MappingConfig): string[] {
+  switch (sheet) {
+    case "sales": return ["technology", "owner", "status", ...(cfg.sheets.sales.locationFromOwner ? [] : ["location"])];
+    case "submissions": return ["client", "jobTitle", "date"];
+    case "interviews": return ["client", "jobTitle", "date", "callStatus", ...(cfg.defaults.interviewTime ? [] : ["startTime"])];
+    case "placements": return ["client", "jobTitle", "placementType", "workMode", "tentativeStart", "status"];
+  }
+}
+
+/** Sheet order for analysis, review lists and commits (people first). */
+export const SHEET_ORDER_SQL = `ARRAY['sales','submissions','interviews','placements']`;
 
 /** CSV text of a sheet file: .xlsx (first sheet) is converted, anything else is read as CSV. */
 export async function loadSheetText(path: string): Promise<string> {
   return path.toLowerCase().endsWith(".xlsx") ? xlsxToCsv(readFileSync(path)) : readFileSync(path, "utf8");
 }
 
-export interface StageFiles { sales?: string; interviews?: string; placements?: string }
+export interface StageFiles { sales?: string; submissions?: string; interviews?: string; placements?: string }
+/** Sheets already read (e.g. by the team-workbook adapter): a label for the report and the CSV text. */
+export type StageTexts = Partial<Record<Sheet, { file: string; text: string; source?: unknown }>>;
 
 export async function withTx<T>(pool: pg.Pool, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
   const c = await pool.connect();
@@ -50,12 +59,17 @@ async function loadRefs(c: pg.PoolClient): Promise<Refs> {
   const map = async (table: string) => new Map(
     (await c.query<{ id: string; name: string }>(`SELECT id, name FROM eureka.${table}`)).rows
       .map((r) => [r.name.trim().toLowerCase(), r.id] as const));
-  const users = new Map((await c.query<{ id: string; email: string; status: string }>(
-    `SELECT id, email::text AS email, status FROM eureka.app_user`)).rows
-    .map((u) => [u.email.toLowerCase(), { id: u.id, active: u.status === "active" }] as const));
+  const rows = (await c.query<{ id: string; email: string; status: string; display_name: string | null; primary_location_id: string | null }>(
+    `SELECT id, email::text AS email, status, display_name, primary_location_id FROM eureka.app_user`)).rows;
+  const users = new Map(rows.map((u) => [u.email.toLowerCase(), { id: u.id, active: u.status === "active", locationId: u.primary_location_id }] as const));
+  const userNames = new Map<string, { id: string; active: boolean; locationId: string | null }[]>();
+  for (const u of rows) {
+    const k = labelKey(u.display_name);
+    if (k) userNames.set(k, [...(userNames.get(k) ?? []), { id: u.id, active: u.status === "active", locationId: u.primary_location_id }]);
+  }
   return {
     technologies: await map("technology"), locations: await map("location"), clients: await map("client"),
-    vendors: await map("vendor"), partners: await map("implementation_partner"), users,
+    vendors: await map("vendor"), partners: await map("implementation_partner"), users, userNames,
   };
 }
 
@@ -88,10 +102,21 @@ export interface StageResult { batchId: string; created: boolean }
 export async function stage(
   pool: pg.Pool, files: StageFiles, mappingText: string, opts: { ticket?: string; hmac: Hmac },
 ): Promise<StageResult> {
-  const cfg = parseMapping(JSON.parse(mappingText));
   const given = SHEETS.filter((s) => files[s]);
-  if (given.length === 0) throw new Error("Give at least one of --sales, --interviews, --placements");
-  const texts = Object.fromEntries(await Promise.all(given.map(async (s) => [s, await loadSheetText(files[s]!)] as const))) as Partial<Record<Sheet, string>>;
+  if (given.length === 0) throw new Error("Give at least one of --sales, --submissions, --interviews, --placements, or --workbook");
+  const texts: StageTexts = Object.fromEntries(await Promise.all(given.map(async (s) =>
+    [s, { file: basename(files[s]!), text: await loadSheetText(files[s]!) }] as const)));
+  return stageTexts(pool, texts, mappingText, opts);
+}
+
+/** Stages sheets already read as CSV text; see stage(). */
+export async function stageTexts(
+  pool: pg.Pool, input: StageTexts, mappingText: string, opts: { ticket?: string; hmac: Hmac },
+): Promise<StageResult> {
+  const cfg = parseMapping(JSON.parse(mappingText));
+  const given = SHEETS.filter((s) => input[s]);
+  if (given.length === 0) throw new Error("Nothing to stage");
+  const texts = Object.fromEntries(given.map((s) => [s, input[s]!.text])) as Partial<Record<Sheet, string>>;
   const raws: RawRow[] = [];
   const meta: Record<string, unknown> = {};
   const today = todayIso();
@@ -99,14 +124,14 @@ export async function stage(
     const text = texts[sheet];
     if (text === undefined) continue;
     const table = parseCsv(text);
-    const cols = cfg.sheets[sheet].columns as Record<string, string | undefined>;
+    const cols = sheetConfig(cfg, sheet).columns;
     const present = new Set(table.headers.map((h) => h.toLowerCase()));
     const nameCols = cols.fullName && present.has(cols.fullName.toLowerCase()) ? [] : ["firstName", "lastName"];
-    const missing = [...REQUIRED[sheet], ...nameCols].map((f) => cols[f]).filter((h): h is string => !!h && !present.has(h.toLowerCase()));
+    const missing = [...requiredColumns(sheet, cfg), ...nameCols].map((f) => cols[f]).filter((h): h is string => !!h && !present.has(h.toLowerCase()));
     if (missing.length) throw new Error(`${sheet}: missing column(s) ${missing.map((m) => `"${m}"`).join(", ")} (see the mapping file)`);
     const mapped = new Set(Object.values(cols).filter((h): h is string => !!h).map((h) => h.toLowerCase()));
     meta[sheet] = {
-      file: basename(files[sheet]!), sha256: sha256(text), rows: table.rows.length,
+      file: input[sheet]!.file, ...(input[sheet]!.source ? { source: input[sheet]!.source } : {}), sha256: sha256(text), rows: table.rows.length,
       unmappedColumns: table.headers.filter((h) => h && !mapped.has(h.toLowerCase())),
     };
     for (const row of table.rows) {
@@ -164,7 +189,7 @@ async function recomputeIn(c: pg.PoolClient, batchId: string, hmac: Hmac): Promi
   const cfg = parseMapping(b.files.mapping);
   const rows = (await c.query<{ id: string; sheet: Sheet; row_no: number; row_key: string; raw: Record<string, string>; state: string }>(
     `SELECT id, sheet, row_no, row_key, raw, state FROM eureka.import_row WHERE batch_id = $1
-     ORDER BY array_position(ARRAY['sales','interviews','placements'], sheet), row_no`, [batchId])).rows;
+     ORDER BY array_position(${SHEET_ORDER_SQL}, sheet), row_no`, [batchId])).rows;
   const refs = await loadRefs(c);
   const normalized = rows.map((r) => normalizeRow({ sheet: r.sheet, rowNo: r.row_no, cells: r.raw, rowKey: r.row_key }, cfg, refs, hmac));
   // Live duplicates: the database reads the stored row itself (yes/no answer).

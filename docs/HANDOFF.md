@@ -207,6 +207,11 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 4. **Dashboards:** manager, lead and location views with activity counts and "needs attention".
 5. **Sheet migration:** built (see Built). Left: the SRS Q6 status/row-colour mapping, a decision
    on loading historical placements (`placements.commit`), weekly dry runs on real exports.
+   Team workbooks (migration 0086, `docs/import.md` "Team workbooks"): `cli stage --workbook` loads a
+   manager's Submissions/Interviews/Placements tabs (recruiter names, no emails, new clients and vendors,
+   dated submissions). Left: interview fields the app has no place for (outcome Selected/Hold/Rejected,
+   support person, feedback, rejection reason per round), marketing and E-Verify company (`legal_entity`),
+   placement type and work mode in the sheets, and whether "Confidential" clients should load as a client.
 6. **Launch checks:** tooling is in place, nothing has been run against AWS yet.
    k6: `loadtest/` + `db:seed-load` (50k fictional candidates; minted sessions for stacks
    without dev sign-in). ZAP: manual `zap-baseline` workflow + `.zap/rules.tsv`. Restore drill:

@@ -1,8 +1,8 @@
 # Sheet migration: CSV import
 
 Design B9. Code in `apps/api/src/import/` (CLI) and `apps/api/src/modules/imports/` (API),
-schema in `db/migrations/0028_import_staging.sql`, `0033_import_hardening.sql` and `0041_import_review.sql`, fictional
-fixtures in `apps/api/test/fixtures/import/`.
+schema in `db/migrations/0028_import_staging.sql`, `0033_import_hardening.sql`, `0041_import_review.sql` and
+`0086_import_team_workbook.sql`, fictional fixtures in `apps/api/test/fixtures/import/`.
 
 ## Who does what
 
@@ -61,6 +61,49 @@ It needs no database. Rules (`apps/api/src/import/llm-mapper.ts`):
 - Output is an ordinary mapping JSON passed through `parseMapping`; an admin reviews it, then `stage --mapping m.json`.
   Review, digest and second-person approval are unchanged. Run it where the files may be (the ECS task), not on a laptop.
 
+## Team workbooks
+
+Recruiting managers keep one Google Sheets workbook with a `Submissions`, `Interviews` and `Placements` tab
+per team lead ("Rohit Submissions", ...), usually `IMPORTRANGE` copies of each team's own sheet. Download it
+as `.xlsx` and stage it whole:
+
+```sh
+cli workbook --file team.xlsx [--as-of 2026-10-10]          # no database: how the tabs are read, counts only
+cli stage --workbook team.xlsx --ticket <ticket> [--mapping m.json] [--as-of 2026-10-10]
+```
+
+Reading (`xlsx.ts`): cells hold the formulas' cached results (Google's export wraps every cell in
+`IFERROR(__xludf.DUMMYFUNCTION("IMPORTRANGE(...)"), <value>)`); error results (`#VALUE!`, `#N/A`) are blank. Each
+tab's `IMPORTRANGE` range (`Submissions!A:I`) says what it holds; a tab without one (pasted values) is classified
+by its name, then by its headers. Other tabs are ignored and listed.
+
+The adapter (`team-workbook.ts`) writes the importer's four sheets, so review, digest, sign-off and the loader are
+unchanged. Everything it derives is in the generated rows (with `Source Tab` and `Source Row`):
+
+| Generated | Rule |
+|---|---|
+| People (`sales`) | One row per candidate name across all tabs (`Candidate Ref` = the name's letters, matched like an email). Owner: the recruiter with the most submissions. `Active/All Teams` when more than one team submitted the candidate. Phone from the placement tab. Location: the owner's primary location (`sheets.sales.locationFromOwner`) |
+| Submissions | One per row, `submitted_at` = noon of the row's date (mapping time zone), with its rate. Job title = technology (the tabs have none). "Implementer / End client" gives the end client |
+| Interviews | The tabs have no client. If the candidate was submitted to exactly one client in the 30 days before, that client is filled in and marked `Client Inferred` (reason `inferred_client`, approvable); otherwise `missing:client` (review until the sheet gets a Client column). Call status: Scheduled after `--as-of`, else Completed. Time: `defaults.interviewTime` |
+| Placements | Status from BGV status and joining date (Done/Cleared and joined by `--as-of`: Joined; cleared: Ready; ongoing: BGC; not cleared/failed: BGC Failed). Placement type and work mode are not in the tabs, so placements wait in review (`missing:placementType`, `missing:workMode`); `placements.commit` stays off |
+
+The default mapping for workbooks is `mapping.team-workbook.json`:
+
+- `owners`: recruiter names as typed -> user email, for spelling variants. A name that is exactly one active user's
+  display name needs no entry. Owners resolve the same way in the analysis and in the database
+  (`authz.import_owner`): email, then `owners`, then a unique display name; otherwise `unknown_owner` /
+  `ambiguous_owner`.
+- `references.create`: clients, vendors and implementation partners not in the lists are added by the loader
+  (case-insensitively: "Fabrikam" and "fabrikam" are one vendor). The preview lists every new name
+  (`newReferences`); verification refuses a new name the batch's mapping does not allow. `references.ignore`
+  ("confidential", "not disclosed", ...) counts as blank, so those submissions wait as `missing:client`.
+- `technologies`: aliases to the technology list. The list itself is reference data: a technology the org does not
+  have (`unknown_technology`) holds the candidate and all their rows until it is added or aliased.
+
+Re-staging a later download: people are recognised by `Candidate Ref` (`person_already_imported`), loaded rows by
+their row key, and a submission row whose cells changed by its natural key (candidate, client, job title, vendor,
+date), so nothing loads twice. Staging depends on `--as-of`; pass the same date to re-analyse an open batch.
+
 ## Where it runs
 
 As a one-off ECS task in the VPC (the API image, command
@@ -87,7 +130,8 @@ SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'eureka_i
 
 ```sh
 cli() { pnpm --filter @eureka/api exec tsx src/import/cli.ts "$@"; }
-cli stage --sales sales.csv --interviews interviews.csv --placements placements.csv --ticket <ticket> [--mapping m.json]
+cli stage --sales sales.csv [--submissions submissions.csv] --interviews interviews.csv --placements placements.csv --ticket <ticket> [--mapping m.json]
+cli stage --workbook team.xlsx --ticket <ticket> [--as-of YYYY-MM-DD]   # see "Team workbooks"
 cli review    --batch <id>
 cli reanalyse --batch <id>          # after decisions made in the API
 cli commit    --batch <id>          # dry run
@@ -143,7 +187,7 @@ Field reasons are `<code>:<field>`, for example `ambiguous_date:dob` or `unknown
 fields (phone, emails, DOB, priority, marketing start date, vendor, implementation partner,
 rate, project city or state, status reason; the value is dropped) and `probable_duplicate`,
 `possible_duplicate_name`, `matches_existing_candidate`, `matches_imported_person`,
-`name_only_match`, `name_dob_match` (the suggestion is accepted). The decision records the
+`name_only_match`, `name_dob_match`, `inferred_client` (the suggestion is accepted). The decision records the
 reasons it accepted; re-analysis clears only those, so a new problem stays in review. Everything
 else needs the sheet, the mapping or the reference lists fixed and a new stage. **link** attaches
 an interview or placement row to a sales row (or marks a sales row as a duplicate of it);
@@ -180,8 +224,11 @@ only; `review` shows the error and the rows stay clean for the next run. The bat
 `committed` when no clean rows remain. Imported interviews that had already ended when loaded
 never trigger the candidate feedback email.
 
-Not loaded: DOB, historical submission dates (the database sets them), interview clearing and
-consent (location admin fields), placement contacts, `bench` (no app path yet).
+Not loaded: DOB, historical dates of submissions created from interview or placement rows (a
+`submissions` sheet row keeps its date), interview clearing and consent (location admin fields),
+placement contacts, `bench` (no app path yet). From team workbooks also not loaded yet (kept in
+staging): interview type beyond the round name, support person, client and candidate feedback,
+rejection reason, BGV status, marketing and E-Verify companies (no fields for them yet).
 
 ## Roles and safeguards
 

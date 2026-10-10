@@ -25,6 +25,7 @@
     "@nestjs/core": "^10.4.22",
     "@nestjs/platform-fastify": "^10.4.22",
     "fastify": "^4.28.1",
+    "fflate": "0.8.3",
     "jose": "^5.10.0",
     "pg": "^8.23.0",
     "read-excel-file": "^9.3.10",

@@ -8,7 +8,7 @@
  */
 import { createHash, createHmac } from "node:crypto";
 import { OPEN_PLACEMENT_STATUSES, type CandidateStatus, type PlacementStatus } from "@eureka/shared";
-import type { CallStatus, MappingConfig, SalesTarget, Sheet } from "./mapping.js";
+import { sheetConfig, type CallStatus, type MappingConfig, type SalesTarget, type Sheet } from "./mapping.js";
 import {
   clean, labelKey, lookupLabel, nameKey, normalizeColor, normalizeEmail, normalizeName, normalizePhone,
   normalizePlacementType, normalizeState, normalizeText, normalizeWorkMode, parseDate, parseRate, parseTime,
@@ -27,9 +27,12 @@ export interface Refs {
   clients: Map<string, string>;
   vendors: Map<string, string>;
   partners: Map<string, string>;
-  /** lower-case email -> user */
-  users: Map<string, { id: string; active: boolean }>;
+  /** lower-case email -> user (locationId: the user's primary location) */
+  users: Map<string, RefUser>;
+  /** labelKey(display name) -> users with that name (owner cells that hold a name) */
+  userNames?: Map<string, RefUser[]>;
 }
+export interface RefUser { id: string; active: boolean; locationId?: string | null }
 
 export interface Ledger {
   /** `${sheet}:${rowKey}` of every loaded source row -> the entity it created */
@@ -41,31 +44,44 @@ export interface Ledger {
 /** approvedReasons: the reasons the reviewer accepted (only these are cleared). */
 export interface Decision { action: "approve" | "reject" | "link"; linkRowKey: string | null; approvedReasons: string[] | null }
 
-/** dob is the keyed hash of the date (see dobToken), never the date. */
-export interface Identity { emails: string[]; phone: string | null; nameKey: string | null; dob: string | null }
+/** dob is the keyed hash of the date (see dobToken), never the date. refs: person-ref cells (labelKey). */
+export interface Identity { emails: string[]; phone: string | null; nameKey: string | null; dob: string | null; refs?: string[] }
 
 export interface SalesNorm {
   firstName: string | null; lastName: string | null; personalEmail: string | null; marketingEmail: string | null;
-  phone: string | null; dob: string | null; technologyId: string | null; locationId: string | null;
+  phone: string | null; dob: string | null; technologyId: string | null; locationId: string | null; personRef: string | null;
   /** Keyed identity hashes recorded in the ledger when the person is loaded. */
   identities: string[];
   ownerId: string | null; status: CandidateStatus | null; visibility: "team" | "all_teams";
   priority: "P1" | "P2" | "P3" | null; marketingStartDate: string | null;
 }
+/**
+ * clientName/vendorName/partnerName: a name not in the reference list, kept only when the mapping
+ * lets the loader create it (references.create); the id is then null.
+ */
+export interface SubmissionNorm {
+  firstName: string | null; lastName: string | null; email: string | null; phone: string | null; dob: string | null;
+  personRef: string | null; ownerId: string | null; clientId: string | null; clientName: string | null;
+  vendorId: string | null; vendorName: string | null; jobTitle: string | null; rate: number | null;
+  /** Submission date; the loader stores noon of that day in timeZone as submitted_at. */
+  submittedOn: string | null; timeZone: string;
+}
 export interface InterviewNorm {
   firstName: string | null; lastName: string | null; email: string | null; phone: string | null; dob: string | null;
-  ownerId: string | null; clientId: string | null; vendorId: string | null; jobTitle: string | null; round: string;
+  personRef: string | null; ownerId: string | null; clientId: string | null; clientName: string | null;
+  vendorId: string | null; vendorName: string | null; jobTitle: string | null; round: string;
   /** Local wall-clock start "YYYY-MM-DDTHH:MM" in timeZone; the database converts it. */
   startLocal: string | null; minutes: number; timeZone: string; callStatus: CallStatus | null;
 }
 export interface PlacementNorm {
   firstName: string | null; lastName: string | null; email: string | null; phone: string | null; dob: string | null;
-  ownerId: string | null; clientId: string | null; vendorId: string | null; partnerId: string | null;
+  personRef: string | null; ownerId: string | null; clientId: string | null; clientName: string | null;
+  vendorId: string | null; vendorName: string | null; partnerId: string | null; partnerName: string | null;
   jobTitle: string | null; placementType: "c2c" | "w2" | "1099" | null; rate: number | null;
   workMode: "onsite" | "remote" | "hybrid" | null; projectCity: string | null; projectState: string | null;
   tentativeStart: string | null; status: PlacementStatus | null; statusReason: string | null;
 }
-export type AnyNorm = SalesNorm | InterviewNorm | PlacementNorm;
+export type AnyNorm = SalesNorm | SubmissionNorm | InterviewNorm | PlacementNorm;
 
 export interface NormalizedRow {
   sheet: Sheet;
@@ -101,14 +117,17 @@ export function rowKeyOf(sheet: Sheet, cells: Record<string, string>, h: Hmac): 
   return h(`row:${sheet}\u0000${JSON.stringify(entries)}`);
 }
 
-export interface IdentityHashes { emails: string[]; phone: string | null; nameDob: string | null; strong: string[]; name: string | null }
+export interface IdentityHashes {
+  emails: string[]; phone: string | null; nameDob: string | null; refs: string[]; strong: string[]; name: string | null;
+}
 export function identityHashes(id: Identity, h: Hmac): IdentityHashes {
   const emails = id.emails.map((e) => h(`email:${e}`));
   const phone = id.phone ? h(`phone:${id.phone}`) : null;
   const nameDob = id.nameKey && id.dob ? h(`namedob:${id.nameKey}|${id.dob}`) : null;
+  const refs = (id.refs ?? []).map((r) => h(`ref:${r}`));
   return {
-    emails, phone, nameDob,
-    strong: [...emails, ...(phone ? [phone] : []), ...(nameDob ? [nameDob] : [])],
+    emails, phone, nameDob, refs,
+    strong: [...refs, ...emails, ...(phone ? [phone] : []), ...(nameDob ? [nameDob] : [])],
     name: id.nameKey ? h(`name:${id.nameKey}`) : null,
   };
 }
@@ -131,8 +150,8 @@ export const todayIso = () => new Date().toISOString().slice(0, 10);
 
 /** The cells as stored: DOB replaced by its token. */
 export function redactCells(row: RawRow, cfg: MappingConfig, h: Hmac, today = todayIso()): Record<string, string> {
-  const sheetCfg = cfg.sheets[row.sheet];
-  const header = (sheetCfg.columns as Record<string, string | undefined>).dob;
+  const sheetCfg = sheetConfig(cfg, row.sheet);
+  const header = sheetCfg.columns.dob;
   if (!header) return row.cells;
   const out = { ...row.cells };
   for (const k of Object.keys(out)) {
@@ -155,7 +174,7 @@ export const DROPPABLE_FIELDS = new Set([
 /** Row-level reasons a reviewer may approve. Must match authz.import_reason_approvable (0033). */
 export const APPROVABLE_REASONS = new Set([
   "probable_duplicate", "possible_duplicate_name", "matches_existing_candidate", "name_only_match",
-  "name_dob_match", "matches_imported_person",
+  "name_dob_match", "matches_imported_person", "inferred_client",
 ]);
 /** Reasons that put a dependent row on hold rather than in review (not the row's own fault). */
 const HOLD_REASONS = new Set(["candidate_not_loadable", "placements_commit_disabled"]);
@@ -166,8 +185,9 @@ export function approvable(reason: string): boolean {
   return field !== undefined && DROPPABLE_FIELDS.has(field);
 }
 
-const NORM_FIELD: Record<string, string> = {
-  vendor: "vendorId", implementationPartner: "partnerId",
+/** Norm fields a dropped field clears (default: the field itself). */
+const NORM_FIELDS: Record<string, string[]> = {
+  vendor: ["vendorId", "vendorName"], implementationPartner: ["partnerId", "partnerName"],
 };
 
 // ---------------------------------------------------------------------------
@@ -198,11 +218,27 @@ class RowNormalizer {
   }
 
   ref(field: string, map: Map<string, string>, unknown: string, requiredField: boolean): string | null {
+    return this.refOrName(field, map, unknown, requiredField, null).id;
+  }
+
+  /**
+   * A reference list entry by name. Unknown names go to review, or (create) are kept as a
+   * name for the loader to add. Names on the mapping's ignore list count as blank.
+   */
+  refOrName(field: string, map: Map<string, string>, unknown: string, requiredField: boolean,
+    refs: MappingConfig["references"] | null, create = false): { id: string | null; name: string | null } {
     const v = clean(this.cell(field));
-    if (!v) return requiredField ? this.required(field, null) : null;
+    if (!v || refs?.ignore.some((x) => labelKey(x) === labelKey(v))) {
+      return { id: requiredField ? this.required(field, null) : null, name: null };
+    }
     const id = map.get(v.toLowerCase());
-    if (!id) this.reasons.push(`${unknown}:${field}`);
-    return id ?? null;
+    if (id) return { id, name: null };
+    if (create) {
+      const name = this.take(field, normalizeText(v, 200));
+      return { id: null, name };
+    }
+    this.reasons.push(`${unknown}:${field}`);
+    return { id: null, name: null };
   }
 
   names(): { first: string | null; last: string | null } {
@@ -216,13 +252,31 @@ class RowNormalizer {
     return { first, last };
   }
 
-  owner(refs: Refs, requiredField: boolean): string | null {
-    const v = clean(this.cell("owner")).toLowerCase();
-    if (!v) return requiredField ? this.required("owner", null) : null;
-    const u = refs.users.get(v);
+  /** The owner's user, resolved as authz.import_owner (0086) does: email, then the owners list, then a unique display name. */
+  ownerUser(refs: Refs, cfg: MappingConfig, requiredField: boolean): RefUser | null {
+    const raw = clean(this.cell("owner"));
+    if (!raw) { if (requiredField) this.required("owner", null); return null; }
+    let u: RefUser | undefined;
+    if (raw.includes("@")) {
+      u = refs.users.get(raw.toLowerCase());
+    } else {
+      const alias = cfg.owners[labelKey(raw)];
+      if (alias) {
+        u = refs.users.get(alias.toLowerCase());
+      } else {
+        const named = refs.userNames?.get(labelKey(raw)) ?? [];
+        const active = named.filter((x) => x.active);
+        if (active.length > 1) { this.reasons.push("ambiguous_owner:owner"); return null; }
+        u = active[0] ?? named[0];
+      }
+    }
     if (!u) { this.reasons.push("unknown_owner:owner"); return null; }
     if (!u.active) { this.reasons.push("inactive_owner:owner"); return null; }
-    return u.id;
+    return u;
+  }
+
+  owner(refs: Refs, cfg: MappingConfig, requiredField: boolean): string | null {
+    return this.ownerUser(refs, cfg, requiredField)?.id ?? null;
   }
 
   /** Status from the text column and the optional row colour (SRS Q6: never guessed). */
@@ -259,17 +313,19 @@ function technologyId(n: RowNormalizer, cfg: MappingConfig, refs: Refs): string 
   return id ?? null;
 }
 
-function identityOf(first: string | null, last: string | null, emails: (string | null)[], phone: string | null, dob: string | null): Identity {
+function identityOf(first: string | null, last: string | null, emails: (string | null)[], phone: string | null, dob: string | null,
+  personRef: string | null = null): Identity {
   return {
     emails: [...new Set(emails.filter((e): e is string => !!e))],
     phone,
     nameKey: first && last ? nameKey(first, last) : null,
     dob,
+    refs: personRef ? [personRef] : [],
   };
 }
 
 export function normalizeRow(row: RawRow, cfg: MappingConfig, refs: Refs, h: Hmac, today = todayIso()): NormalizedRow {
-  const sheetCfg = cfg.sheets[row.sheet];
+  const sheetCfg = sheetConfig(cfg, row.sheet);
   const cols = sheetCfg.columns as Cols;
   const pivot = cfg.defaults.twoDigitYearPivot;
   const dateOf = (field: string): Norm<string | null> => parseDate(n.cell(field), sheetCfg.dateOrders[field] ?? cfg.defaults.dateOrder, pivot);
@@ -282,6 +338,10 @@ export function normalizeRow(row: RawRow, cfg: MappingConfig, refs: Refs, h: Hma
   const dob = token.startsWith(DOB_TOKEN)
     ? (token.startsWith(`${DOB_TOKEN}!`) ? n.take<string>("dob", { ok: false, reason: token.slice(DOB_TOKEN.length + 1) }) : token.slice(DOB_TOKEN.length))
     : null;
+  const personRef = labelKey(n.cell("personRef")).slice(0, 200) || null;
+  const create = cfg.references.create;
+  const client = () => n.refOrName("client", refs.clients, "unknown_client", true, cfg.references, create.clients);
+  const vendor = () => n.refOrName("vendor", refs.vendors, "unknown_vendor", false, cfg.references, create.vendors);
   let norm: AnyNorm;
   let identity: Identity;
   let statusKey: string;
@@ -297,22 +357,49 @@ export function normalizeRow(row: RawRow, cfg: MappingConfig, refs: Refs, h: Hma
       if (pr === "P1" || pr === "P2" || pr === "P3") priority = pr;
       else n.reasons.push("invalid_priority:priority");
     }
+    const owner = n.ownerUser(refs, cfg, true);
+    // Without a location cell, the owner's primary location when the mapping allows it.
+    const fromOwner = cfg.sheets.sales.locationFromOwner && !clean(n.cell("location"));
+    const locationId = fromOwner
+      ? (owner ? n.required("location", owner.locationId ?? null) : null)
+      : n.ref("location", refs.locations, "unknown_location", true);
     norm = {
       firstName: first, lastName: last, personalEmail, marketingEmail, phone, dob,
       technologyId: technologyId(n, cfg, refs),
-      locationId: n.ref("location", refs.locations, "unknown_location", true),
-      ownerId: n.owner(refs, true),
+      locationId, personRef,
+      ownerId: owner?.id ?? null,
       status: target?.status ?? null, visibility: target?.visibility ?? "team", priority,
       marketingStartDate: n.take("marketingStartDate", dateOf("marketingStartDate")),
       identities: [],
     } satisfies SalesNorm;
-    identity = identityOf(first, last, [marketingEmail, personalEmail], phone, dob);
+    identity = identityOf(first, last, [marketingEmail, personalEmail], phone, dob, personRef);
     (norm as SalesNorm).identities = identityHashes(identity, h).strong;
     statusKey = labelKey(n.cell("status")) || "(blank)";
+  } else if (row.sheet === "submissions") {
+    const email = n.take("email", normalizeEmail(n.cell("email")));
+    const submittedOn = n.required("date", n.take("date", dateOf("date")));
+    if (submittedOn && submittedOn > today) n.reasons.push("future_date:date");
+    const c = client();
+    const v = vendor();
+    norm = {
+      firstName: first, lastName: last, email, phone, dob, personRef,
+      ownerId: n.owner(refs, cfg, false),
+      clientId: c.id, clientName: c.name, vendorId: v.id, vendorName: v.name,
+      jobTitle: n.required("jobTitle", n.take("jobTitle", normalizeText(n.cell("jobTitle"), 200))),
+      rate: n.take("rate", parseRate(n.cell("rate"))),
+      submittedOn: submittedOn && submittedOn <= today ? submittedOn : null,
+      timeZone: cfg.defaults.timeZone,
+    } satisfies SubmissionNorm;
+    identity = identityOf(first, last, [email], phone, dob, personRef);
+    statusKey = "(blank)";
   } else if (row.sheet === "interviews") {
     const email = n.take("email", normalizeEmail(n.cell("email")));
     const date = n.required("date", n.take("date", dateOf("date")));
-    const start = n.required("startTime", n.take("startTime", parseTime(n.cell("startTime"))));
+    // A sheet that records only the date: the mapping's default time (defaults.interviewTime).
+    const timeCell = clean(n.cell("startTime"));
+    const start = !timeCell && cfg.defaults.interviewTime
+      ? cfg.defaults.interviewTime
+      : n.required("startTime", n.take("startTime", parseTime(n.cell("startTime"))));
     let minutes = cfg.defaults.interviewMinutes;
     const end = n.take("endTime", parseTime(n.cell("endTime")));
     const dur = clean(n.cell("durationMinutes"));
@@ -335,27 +422,30 @@ export function normalizeRow(row: RawRow, cfg: MappingConfig, refs: Refs, h: Hma
       else n.reasons.push("unknown_time_zone:timeZone");
     }
     const round = n.take("round", normalizeText(n.cell("round"), 40)) ?? "Not recorded";
+    const c = client();
+    const v = vendor();
+    if ((c.id || c.name) && clean(n.cell("clientInferred"))) n.reasons.push("inferred_client");
     norm = {
-      firstName: first, lastName: last, email, phone, dob,
-      ownerId: n.owner(refs, false),
-      clientId: n.ref("client", refs.clients, "unknown_client", true),
-      vendorId: n.ref("vendor", refs.vendors, "unknown_vendor", false),
+      firstName: first, lastName: last, email, phone, dob, personRef,
+      ownerId: n.owner(refs, cfg, false),
+      clientId: c.id, clientName: c.name, vendorId: v.id, vendorName: v.name,
       jobTitle: n.required("jobTitle", n.take("jobTitle", normalizeText(n.cell("jobTitle"), 200))),
       round,
       startLocal: date && start ? `${date}T${start}` : null,
       minutes, timeZone,
       callStatus: n.status<CallStatus>(cfg.statuses.interviews, cfg.rowColors.interviews, (a, b) => a === b),
     } satisfies InterviewNorm;
-    identity = identityOf(first, last, [email], phone, dob);
+    identity = identityOf(first, last, [email], phone, dob, personRef);
     statusKey = labelKey(n.cell("callStatus")) || "(blank)";
   } else {
     const email = n.take("email", normalizeEmail(n.cell("email")));
+    const c = client();
+    const v = vendor();
+    const p = n.refOrName("implementationPartner", refs.partners, "unknown_partner", false, cfg.references, create.partners);
     norm = {
-      firstName: first, lastName: last, email, phone, dob,
-      ownerId: n.owner(refs, false),
-      clientId: n.ref("client", refs.clients, "unknown_client", true),
-      vendorId: n.ref("vendor", refs.vendors, "unknown_vendor", false),
-      partnerId: n.ref("implementationPartner", refs.partners, "unknown_partner", false),
+      firstName: first, lastName: last, email, phone, dob, personRef,
+      ownerId: n.owner(refs, cfg, false),
+      clientId: c.id, clientName: c.name, vendorId: v.id, vendorName: v.name, partnerId: p.id, partnerName: p.name,
       jobTitle: n.required("jobTitle", n.take("jobTitle", normalizeText(n.cell("jobTitle"), 200))),
       placementType: n.required("placementType", n.take("placementType", normalizePlacementType(n.cell("placementType")))),
       rate: n.take("rate", parseRate(n.cell("rate"))),
@@ -366,7 +456,7 @@ export function normalizeRow(row: RawRow, cfg: MappingConfig, refs: Refs, h: Hma
       status: n.status<PlacementStatus>(cfg.statuses.placements, cfg.rowColors.placements, (a, b) => a === b),
       statusReason: n.take("statusReason", normalizeText(n.cell("statusReason"), 500)),
     } satisfies PlacementNorm;
-    identity = identityOf(first, last, [email], phone, dob);
+    identity = identityOf(first, last, [email], phone, dob, personRef);
     statusKey = labelKey(n.cell("status")) || "(blank)";
   }
   return { sheet: row.sheet, rowNo: row.rowNo, rowKey, raw: cells, norm, statusKey, reasons: [...new Set(n.reasons)], identity };
@@ -388,7 +478,7 @@ export interface ResolveInput {
 const dkey = (sheet: Sheet, rowKey: string) => `${sheet}:${rowKey}`;
 
 function salesIdentity(n: SalesNorm): Identity {
-  return identityOf(n.firstName, n.lastName, [n.marketingEmail, n.personalEmail], n.phone, n.dob);
+  return identityOf(n.firstName, n.lastName, [n.marketingEmail, n.personalEmail], n.phone, n.dob, n.personRef);
 }
 
 export function resolveBatch(input: ResolveInput): StagedRow[] {
@@ -446,9 +536,9 @@ export function resolveBatch(input: ResolveInput): StagedRow[] {
     if (dec?.action === "link") { r.personKey = dec.linkRowKey; setFinal(r, "rejected", ["merged_into_row"]); continue; }
     approve(r);
     const ids = identityHashes(r.identity, h);
-    // Email or phone of a person loaded earlier: the same person (skipped).
+    // Person ref, email or phone of a person loaded earlier: the same person (skipped).
     // Name + DOB alone is not proof: review.
-    const byContact = [...ids.emails, ...(ids.phone ? [ids.phone] : [])].map((x) => strongIndex.get(x));
+    const byContact = [...ids.refs, ...ids.emails, ...(ids.phone ? [ids.phone] : [])].map((x) => strongIndex.get(x));
     const ledgerHit = byContact.find((p) => p?.startsWith("ledger:"));
     if (ledgerHit) { r.personKey = ledgerHit; setFinal(r, "skipped", ["person_already_imported"]); addName(ids.name, ledgerHit); continue; }
     const ledgerDob = ids.nameDob ? strongIndex.get(ids.nameDob) : undefined;
@@ -534,8 +624,8 @@ export function resolveBatch(input: ResolveInput): StagedRow[] {
     const parentOk = pk.startsWith("ledger:") || (parent !== undefined && !parent.final && parent.reasons.length === 0);
     if (!parentOk) { r.state = "held"; r.reasons = ["candidate_not_loadable"]; continue; }
     if (r.sheet === "placements" && !input.placementsCommit) { r.state = "held"; r.reasons = ["placements_commit_disabled"]; continue; }
-    if ((r.norm as InterviewNorm | PlacementNorm).ownerId === null) {
-      (r.norm as InterviewNorm | PlacementNorm).ownerId = ownerOf.get(pk) ?? null;
+    if ((r.norm as SubmissionNorm | InterviewNorm | PlacementNorm).ownerId === null) {
+      (r.norm as SubmissionNorm | InterviewNorm | PlacementNorm).ownerId = ownerOf.get(pk) ?? null;
     }
     r.state = "clean";
   }
@@ -552,7 +642,7 @@ function applyApproval(r: { reasons: string[]; norm: AnyNorm }, accepted: string
   for (const reason of r.reasons) {
     if (!ok.has(reason)) { keep.push(reason); continue; }
     const field = reason.split(":")[1];
-    if (field) (r.norm as unknown as Record<string, unknown>)[NORM_FIELD[field] ?? field] = null;
+    if (field) for (const f of NORM_FIELDS[field] ?? [field]) (r.norm as unknown as Record<string, unknown>)[f] = null;
   }
   r.reasons = keep;
 }
@@ -566,14 +656,15 @@ export function matchPerson(id: Identity, strongIndex: Map<string, string>, name
   { personKey: string | null; reason: string | null } {
   const ids = identityHashes(id, h);
   const hit = (hashes: string[]) => new Set(hashes.map((x) => strongIndex.get(x)).filter((p): p is string => !!p));
+  const byRef = hit(ids.refs);
   const byEmail = hit(ids.emails);
   const byPhone = hit(ids.phone ? [ids.phone] : []);
   const byNameDob = hit(ids.nameDob ? [ids.nameDob] : []);
-  for (const tier of [byEmail, byPhone]) {
+  for (const tier of [byRef, byEmail, byPhone]) {
     if (tier.size > 1) return { personKey: null, reason: "ambiguous_match" };
     if (tier.size === 1) {
       const p = [...tier][0]!;
-      const conflict = [byEmail, byPhone].some((t) => t.size > 0 && !t.has(p));
+      const conflict = [byRef, byEmail, byPhone].some((t) => t.size > 0 && !t.has(p));
       return conflict ? { personKey: null, reason: "conflicting_match" } : { personKey: p, reason: null };
     }
   }

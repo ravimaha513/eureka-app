@@ -56,6 +56,9 @@ importers:
       fastify:
         specifier: ^4.28.1
         version: 4.28.1
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
       jose:
         specifier: ^5.10.0
         version: 5.10.0
