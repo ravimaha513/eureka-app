@@ -19,12 +19,16 @@ const SHEETS: WorkbookSheet[] = [
     ["2026-08-20", "Ben  Cole", "Python", "60hr", "fabrikam", "Proseware - 3/12", "Mira Shah", "Rohit Das", "Sam Lee"],
   ] },
   { name: "Rohit Interviews", headerRow: 1, headers: IV_H, source: src("Interviews"), rows: [
-    // Ben was submitted to one client in the 30 days before: inferred.
+    // Sam submitted Ben to one client 5 days before: inferred.
     ["2026-08-25", "Ben Cole", "Sam Lee", "Mira Shah", "Rohit Das", "Python", "Other Resource", "L1", "Selected", "Good", ""],
     // Asha was submitted to two clients: no client.
     ["2026-08-10", "Asha Verma", "Priya Nair", "Mira Shah", "Rohit Das", "Java", "Jason", "L2", "Hold", "", ""],
     // After the as-of date: scheduled.
     ["2026-10-20", "Ben Cole", "Sam Lee", "Mira Shah", "Rohit Das", "Python", "Self", "Final Round", "", "", ""],
+    // Another recruiter's interview: Sam's submission does not count.
+    ["2026-08-25", "Ben Cole", "Priya Nair", "Mira Shah", "Rohit Das", "Python", "Self", "L2", "", "", ""],
+    // Sam's submission was 8 days before: too old.
+    ["2026-08-28", "Ben Cole", "Sam Lee", "Mira Shah", "Rohit Das", "Python", "Self", "L2", "", "", ""],
   ] },
   { name: "Anjali Submissions", headerRow: 1, headers: SUB_H, source: src("Submissions"), rows: [
     ["2026-08-05", "ASHA VERMA", "Java", "66", "tailspin", "Fourth Coffee", "Mira Shah", "Anjali Rao", "Kiran Rao"],
@@ -80,7 +84,7 @@ describe("teamWorkbook", () => {
     expect(asha.slice(0, 7)).toEqual(["Asha Verma", personRef("Asha Verma"), "214-555-0101", "Java", "Priya Nair", "Active/All Teams", "Anjali, Rohit"]);
     expect(people[personRef("Ben Cole")]!.slice(4, 6)).toEqual(["Sam Lee", "Active"]);
     expect(people[personRef("Cy Dunn")]!.slice(4, 6)).toEqual(["Kiran Rao", "Active"]);
-    expect(wb.stats).toEqual({ candidates: 3, multiTeamCandidates: 1, interviewsWithInferredClient: 1, interviewsWithoutClient: 2 });
+    expect(wb.stats).toEqual({ candidates: 3, multiTeamCandidates: 1, interviewsWithInferredClient: 1, interviewsWithoutClient: 4 });
   });
 
   it("submissions: end client, job title from technology, source tab and row", () => {
@@ -88,13 +92,14 @@ describe("teamWorkbook", () => {
       "northwind staffing", "Northwind Financial", "Contoso / Northwind Financial", "Priya Nair", "Rohit Das", "Mira Shah", "Rohit Submissions", "2"]);
   });
 
-  it("interviews: client inferred only from a single recent client, scheduled after the as-of date", () => {
-    const [ben, asha, later] = wb.sheets.interviews.rows;
+  it("interviews: client inferred only from the recruiter's single client in the week before, scheduled after the as-of date", () => {
+    const [ben, asha, later, otherRecruiter, tooOld] = wb.sheets.interviews.rows;
     const col = (h: string) => wb.sheets.interviews.headers.indexOf(h);
     expect([ben![col("Client")], ben![col("Vendor")], ben![col("Call Status")]]).toEqual(["Proseware - 3/12", "fabrikam", "Completed"]);
-    expect(ben![col("Client Inferred")]).toMatch(/only this client/);
+    expect(ben![col("Client Inferred")]).toMatch(/only to this client in the 7 days before/);
     expect([asha![col("Client")], asha![col("Client Inferred")]]).toEqual(["", ""]);
     expect(later![col("Call Status")]).toBe("Scheduled");
+    expect([otherRecruiter![col("Client")], tooOld![col("Client")]]).toEqual(["", ""]);
   });
 
   it("placements: split client, joined status, a dash is no joining date", () => {

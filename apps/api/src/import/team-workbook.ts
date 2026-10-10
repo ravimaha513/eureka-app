@@ -18,10 +18,10 @@
  *   - job title = the technology (the tabs record no job title)
  *   - "Implementer / End client" clients are split: the end client is the
  *     client, the implementer the implementation partner
- *   - interviews have no client: when the candidate was submitted to exactly
- *     one client in the 30 days before, that client is filled in and the row
- *     is marked "Client Inferred" (approval needed); otherwise the row waits
- *     in review (missing:client)
+ *   - interviews have no client: when the interview's recruiter submitted the
+ *     candidate to exactly one client in the 7 days before, that client is
+ *     filled in and the row is marked "Client Inferred" (approval needed);
+ *     otherwise the row waits in review (missing:client)
  *   - interview call status: Scheduled when dated after `asOf`, else Completed
  *   - placement status from the BGV status and joining date
  * Every generated row names its source tab and row ("Source Tab", "Source Row").
@@ -31,6 +31,9 @@ import type { Sheet } from "./mapping.js";
 import { sheetToCsv, type SheetSource, type WorkbookSheet } from "./xlsx.js";
 
 type Kind = "submissions" | "interviews" | "placements";
+
+/** Interview client inference window: the interview's recruiter's submissions this many days before. */
+export const INFER_DAYS = 7;
 const KINDS: Kind[] = ["submissions", "interviews", "placements"];
 
 /** Input headers (labelKey) per field, including the spellings seen in real sheets. */
@@ -217,7 +220,7 @@ export function teamWorkbook(sheets: WorkbookSheet[], opts: { asOf: string }): T
   }
 
   // Submissions, and per person the clients they were submitted to (for interviews).
-  const submittedTo = new Map<string, { date: string; client: string; vendor: string; job: string }[]>();
+  const submittedTo = new Map<string, { date: string; client: string; vendor: string; job: string; recruiter: string }[]>();
   for (const r of rows.submissions) {
     const { client } = splitClient(r.get("client"));
     const tech = r.get("technology");
@@ -225,7 +228,10 @@ export function teamWorkbook(sheets: WorkbookSheet[], opts: { asOf: string }): T
       r.get("vendor"), client, r.get("client"), r.get("recruiter"), r.get("lead"), r.get("manager"), ...src(r)]);
     const d = isoOf(r.get("date"));
     const ref = personRef(r.get("candidate"));
-    if (d && client) submittedTo.set(ref, [...(submittedTo.get(ref) ?? []), { date: d, client, vendor: r.get("vendor"), job: tech }]);
+    if (d && client) {
+      submittedTo.set(ref, [...(submittedTo.get(ref) ?? []),
+        { date: d, client, vendor: r.get("vendor"), job: tech, recruiter: personRef(r.get("recruiter")) }]);
+    }
   }
 
   let inferred = 0;
@@ -238,8 +244,10 @@ export function teamWorkbook(sheets: WorkbookSheet[], opts: { asOf: string }): T
     let job = r.get("technology");
     let marker = "";
     if (!client && d) {
-      const from = new Date(Date.parse(`${d}T00:00:00Z`) - 30 * 86_400_000).toISOString().slice(0, 10);
-      const recent = (submittedTo.get(ref) ?? []).filter((x) => x.date >= from && x.date <= d);
+      // The interview's own recruiter's submissions of the candidate in the week before.
+      const from = new Date(Date.parse(`${d}T00:00:00Z`) - INFER_DAYS * 86_400_000).toISOString().slice(0, 10);
+      const recruiter = personRef(r.get("recruiter"));
+      const recent = (submittedTo.get(ref) ?? []).filter((x) => x.date >= from && x.date <= d && recruiter && x.recruiter === recruiter);
       const clients = [...new Set(recent.map((x) => labelKey(x.client)))];
       if (clients.length === 1) {
         const hits = recent.filter((x) => labelKey(x.client) === clients[0]);
@@ -247,7 +255,8 @@ export function teamWorkbook(sheets: WorkbookSheet[], opts: { asOf: string }): T
         const vendors = [...new Set(hits.map((x) => labelKey(x.vendor)))];
         vendor = vendors.length === 1 ? hits[hits.length - 1]!.vendor : "";
         job = hits[hits.length - 1]!.job || job;
-        marker = `submitted to only this client in the 30 days before (${hits.length} submission${hits.length > 1 ? "s" : ""})`;
+        marker = `the recruiter submitted the candidate only to this client in the ${INFER_DAYS} days before`
+          + ` (${hits.length} submission${hits.length > 1 ? "s" : ""})`;
         inferred++;
       }
     }
