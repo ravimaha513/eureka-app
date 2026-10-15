@@ -438,6 +438,9 @@ unless `apply` is ticked. Per environment it:
    of failing on resources that exist or are gone.
 
 Run it twice: first without `apply` and read the inventory, then with.
+Done on 2026-10-15 (state archived as `live/production/retired-20261015T185510Z.tfstate`;
+KMS key `64493e7f-…` deletes itself on 2026-10-20), so the next production
+deploy starts from an empty state.
 
 ## Turning on the worker
 
