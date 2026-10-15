@@ -109,13 +109,12 @@ jobs:
           echo "- Log groups /eureka/production/*: $(aws logs describe-log-groups --log-group-name-prefix /eureka/production/ --query 'logGroups[].[logGroupName,storedBytes]' --output text | tr '\t' '=' | tr '\n' ' ')"
           echo "- RDS log group: $(aws logs describe-log-groups --log-group-name-prefix /aws/rds/instance/eureka-production/ --query 'logGroups[].logGroupName' --output text || echo absent)"
           echo "- IAM roles eureka-production-*: $(aws iam list-roles --query "Roles[?starts_with(RoleName,'eureka-production-')].RoleName" --output text)"
-          echo "- IAM policies eureka-production-*: $(aws iam list-policies --scope Local --query "Policies[?starts_with(PolicyName,'eureka-production-')].PolicyName" --output text)"
           echo "- RDS parameter group eureka-production-pg16: $(aws rds describe-db-parameter-groups --db-parameter-group-name eureka-production-pg16 --query 'DBParameterGroups[0].DBParameterGroupName' --output text 2>/dev/null || echo absent)"
           echo "- RDS subnet groups eureka-production*: $(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName,'eureka-production')].DBSubnetGroupName" --output text)"
           echo "- SSM parameters /eureka/production/*: $(aws ssm get-parameters-by-path --path /eureka/production --recursive --query 'Parameters[].Name' --output text)"
           echo "- Secrets eureka/production*: $(aws secretsmanager list-secrets --filters Key=name,Values=eureka/production --query 'SecretList[].Name' --output text)"
-          echo "- KMS aliases alias/eureka-production*:"
-          for KEY in $(aws kms list-aliases --query "Aliases[?starts_with(AliasName,'alias/eureka-production')].TargetKeyId" --output text); do
+          echo "- KMS keys tagged production (aliases are gone):"
+          for KEY in $(grep -o 'arn:aws:kms:[^ ]*' "$RUNNER_TEMP/tagged.txt"); do
             aws kms describe-key --key-id "$KEY" --query 'KeyMetadata.{id:KeyId,state:KeyState,deletion:DeletionDate}' --output text
           done
           echo "- State objects live/production/*: "
@@ -152,7 +151,7 @@ jobs:
             echo "report only (tick apply to delete). Would:"
             echo "- delete ECR repository eureka-production-api with its images"
             echo "- delete log groups /eureka/production/* and /aws/rds/instance/eureka-production/*"
-            echo "- delete IAM roles eureka-production-* (after detaching policies) and customer policies eureka-production-*"
+            echo "- delete IAM roles eureka-production-* (after detaching and deleting their policies; the stack has no customer-managed policies)"
             echo "- delete RDS parameter group eureka-production-pg16 and subnet groups eureka-production*"
             echo "- delete SSM parameters /eureka/production/*"
             echo "- copy s3://$BUCKET/live/production/terraform.tfstate to live/production/retired-$STAMP.tfstate, then delete the original"
@@ -179,12 +178,6 @@ jobs:
             done
             aws iam delete-role --role-name "$ROLE" && echo "deleted role $ROLE"
           done
-          for ARN in $(aws iam list-policies --scope Local --query "Policies[?starts_with(PolicyName,'eureka-production-')].Arn" --output text); do
-            for V in $(aws iam list-policy-versions --policy-arn "$ARN" --query 'Versions[?!IsDefaultVersion].VersionId' --output text); do
-              aws iam delete-policy-version --policy-arn "$ARN" --version-id "$V"
-            done
-            aws iam delete-policy --policy-arn "$ARN" && echo "deleted policy $ARN"
-          done
           echo "### RDS"
           aws rds delete-db-parameter-group --db-parameter-group-name eureka-production-pg16 2>/dev/null && echo "deleted parameter group" || echo "parameter group absent"
           for SG in $(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName,'eureka-production')].DBSubnetGroupName" --output text); do
@@ -205,7 +198,8 @@ jobs:
           fi
           aws s3api delete-object --bucket "$BUCKET" --key live/production/terraform.tfstate.tflock > /dev/null 2>&1 || true
           echo "### KMS (report only)"
-          for KEY in $(aws kms list-aliases --query "Aliases[?starts_with(AliasName,'alias/eureka-production')].TargetKeyId" --output text); do
+          for KEY in $(aws resourcegroupstaggingapi get-resources --resource-type-filters kms:key \
+              --tag-filters Key=Project,Values=Eureka Key=Environment,Values=production --query 'ResourceTagMappingList[].ResourceARN' --output text); do
             aws kms describe-key --key-id "$KEY" --query 'KeyMetadata.{id:KeyId,state:KeyState,deletion:DeletionDate}' --output text
           done
           echo "done"

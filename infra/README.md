@@ -429,7 +429,7 @@ unless `apply` is ticked. Per environment it:
    live production stack exists (RDS instance, tagged VPC, ECS services, API
    Gateway, CloudFront), and with `apply` deletes the ECR repository and its
    images, `/eureka/production/*` log groups, `eureka-production-*` IAM roles
-   and policies, the RDS parameter and subnet groups and `/eureka/production/*`
+   (with their inline and attached policies), the RDS parameter and subnet groups and `/eureka/production/*`
    SSM parameters, then copies `live/production/terraform.tfstate` to
    `live/production/retired-<timestamp>.tfstate` and deletes the original
    (the bucket is versioned; older versions remain). KMS keys are reported
