@@ -2,7 +2,10 @@
 # KMS-encrypted, master password managed by RDS in Secrets Manager.
 
 resource "aws_db_subnet_group" "main" {
-  name       = local.name
+  # The name carries the VPC id: a subnet group cannot be moved to another VPC
+  # (ModifyDBSubnetGroup refuses), so a recreated VPC must get a new group
+  # instead of an in-place update that fails at apply time.
+  name       = "${local.name}-${aws_vpc.main.id}"
   subnet_ids = aws_subnet.private[*].id
 }
 

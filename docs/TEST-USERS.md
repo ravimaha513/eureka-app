@@ -46,6 +46,11 @@ No shared passwords exist. To create a test user:
    EUREKA_ENVIRONMENT=staging EUREKA_NEW_PASSWORD='<temporary>' node dist/db/set-password.js --email hr@example.com
    ```
 
+   From GitHub (no AWS credentials needed): Actions → ops-task → environment `staging`, command
+   `node dist/db/set-password.js --email hr@example.com`, secret_env `EUREKA_NEW_PASSWORD=<temporary>`
+   (infra/README.md, "Operations tasks"). The value is masked in the Actions log but visible in CloudTrail,
+   so use a temporary password only.
+
    Locally: `EUREKA_ENVIRONMENT=local MIGRATION_DATABASE_URL=... pnpm --filter @eureka/api exec tsx src/db/set-password.ts --email hr@eureka.example`
    (prints a generated password once when run in a terminal).
 
