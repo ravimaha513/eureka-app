@@ -278,7 +278,9 @@ client values in SSM (step 4 of the one-time setup).
   (staging has `single_admin_mode = "on"`, so one `--admin` plus `--single-admin` is accepted there)
 
 The run prints the exit code (0 created or unchanged, 2 bad arguments,
-3 refused) and the task's log line. The same from a terminal:
+3 refused) and the task's log line. Staging was bootstrapped this way on
+2026-10-15 with a single admin (`--single-admin`, ops-task run 38789874874);
+a second admin, if ever needed, goes through Users & Access. The same from a terminal:
 
 ```sh
 gh workflow run ops-task.yml -f environment=staging \
