@@ -2,6 +2,8 @@ name: infra-audit
 # Read-only audit of the AWS account from the deploy role: resource inventory,
 # CloudTrail delete/write events, Cost Explorer, and a Terraform plan (no apply).
 on:
+  push:
+    branches: [chore/infra-audit]
   workflow_dispatch:
     inputs:
       environment:
@@ -27,11 +29,11 @@ jobs:
   audit:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: ${{ inputs.environment }}
+    environment: ${{ inputs.environment || 'staging' }}
     env:
-      ENVIRONMENT: ${{ inputs.environment }}
-      AWS_REGION: ${{ inputs.environment == 'production' && 'us-east-1' || 'us-east-2' }}
-      SINCE: ${{ inputs.since }}
+      ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+      AWS_REGION: ${{ (inputs.environment || 'staging') == 'production' && 'us-east-1' || 'us-east-2' }}
+      SINCE: ${{ inputs.since || '2026-10-09T00:00:00Z' }}
       OUT: ${{ github.workspace }}/audit-out
     steps:
       - uses: actions/checkout@v4
@@ -142,7 +144,7 @@ jobs:
 
       - name: Terraform state and plan (read-only)
         shell: bash
-        working-directory: infra/live/${{ inputs.environment }}
+        working-directory: infra/live/${{ inputs.environment || 'staging' }}
         run: |
           set +e
           terragrunt init -input=false -lock=false > /dev/null 2>&1
@@ -156,6 +158,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: infra-audit-${{ inputs.environment }}
+          name: infra-audit-${{ inputs.environment || 'staging' }}
           path: audit-out
           retention-days: 7
