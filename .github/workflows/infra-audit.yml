@@ -2,8 +2,6 @@ name: infra-audit
 # Read-only audit of the AWS account from the deploy role: resource inventory,
 # CloudTrail delete/write events, Cost Explorer, and a Terraform plan (no apply).
 on:
-  push:
-    branches: [chore/infra-audit]
   workflow_dispatch:
     inputs:
       environment:
