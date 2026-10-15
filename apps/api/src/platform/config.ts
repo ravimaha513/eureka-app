@@ -61,12 +61,26 @@ const ConfigSchema = z
     // "ses" sends from PORTAL_FROM_EMAIL. Production requires ses and a sender.
     PORTAL_MAIL_MODE: z.enum(["dev", "ses"]).default("dev"),
     PORTAL_FROM_EMAIL: z.string().email().optional(),
+    // interview-alerts: the support team's Google Calendar (docs/alerts-calendar-birthdays.md CA).
+    // "google" needs the OAuth client (GOOGLE_CLIENT_ID/SECRET, redirect /api/v1/calendar/support/callback)
+    // and CALENDAR_TOKEN_KEY (64 hex: AES-256-GCM key for the stored refresh token); "dev" is an
+    // in-memory calendar (never in production); "disabled" hides the feature.
+    // Unset: "dev" outside production, "disabled" in production (see the transform below).
+    CALENDAR_MODE: z.enum(["disabled", "dev", "google"]).optional(),
+    CALENDAR_TOKEN_KEY: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
     // Applicant sessions (separate from staff sessions).
     PORTAL_SESSION_IDLE_MINUTES: z.coerce.number().int().min(5).max(240).default(60),
     PORTAL_SESSION_HOURS: z.coerce.number().int().min(1).max(24).default(12),
   })
   .superRefine((c, ctx) => {
     checkFieldCrypto(c, ctx, { bidx: true });
+    if (c.NODE_ENV === "production" && c.CALENDAR_MODE === "dev") {
+      ctx.addIssue({ code: "custom", message: "CALENDAR_MODE=dev (in-memory calendar) is not allowed in production" });
+    }
+    if (c.CALENDAR_MODE === "google" && (!c.GOOGLE_CLIENT_ID || !c.GOOGLE_CLIENT_SECRET || !c.CALENDAR_TOKEN_KEY)) {
+      ctx.addIssue({ code: "custom", message: "CALENDAR_MODE=google requires GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and CALENDAR_TOKEN_KEY" });
+    }
+    if (c.CALENDAR_MODE === undefined) c.CALENDAR_MODE = c.NODE_ENV === "production" ? "disabled" : "dev";
     // Design A6.1: the development identity provider can never run in production.
     if (c.NODE_ENV === "production" && c.AUTH_MODE === "dev") {
       ctx.addIssue({ code: "custom", message: "AUTH_MODE=dev is not allowed in production" });
@@ -126,14 +140,15 @@ export function parseEmailList(v: string | undefined): string[] {
   return (v ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
 }
 
-export type AppConfig = z.infer<typeof ConfigSchema>;
+export type AppConfig = Omit<z.infer<typeof ConfigSchema>, "CALENDAR_MODE"> & { CALENDAR_MODE: "disabled" | "dev" | "google" };
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
   const parsed = ConfigSchema.safeParse(env);
   if (!parsed.success) {
     throw new Error(`Invalid configuration: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
   }
-  return parsed.data;
+  // CALENDAR_MODE is filled in by the superRefine above (never undefined after a successful parse).
+  return parsed.data as AppConfig;
 }
 
 export const CONFIG = Symbol("CONFIG");

@@ -375,6 +375,28 @@ function chatCases(): RejectCase[] {
 
 
 const CASES: RejectCase[] = [
+  // interview-alerts (migration 0086): a contract's placement, client, creator and times are the server's
+  {
+    route: "POST /api/v1/placements/:id/contracts", actor: "l1",
+    prepare: async () => {
+      const cand = await newCandidate(db, { teamId: T.t1, recruiterId: U.r1a, locationId: LOC.dallas });
+      const placement = (await createPlacement(db, U.r1a, await selectedSubmission(db, U.r1a, cand.id))).id;
+      return {
+        url: `/api/v1/placements/${placement}/contracts`, body: { kind: "po", title: "MA contract" },
+        state: () => rows(`SELECT count(*)::int AS n FROM eureka.contract`),
+      };
+    },
+    forbidden: { placementId: FOREIGN_ID, clientId: FOREIGN_ID, candidateId: FOREIGN_ID, createdBy: U.acct, createdAt: PAST, id: FOREIGN_ID },
+  },
+  // interview-alerts (migration 0087): the user comes from the URL; a birthday is month and day only
+  {
+    route: "PUT /api/v1/staff/:id/birthday", actor: "hr",
+    prepare: async () => ({
+      url: `/api/v1/staff/${U.l2}/birthday`, body: { birthday: { month: 5, day: 6 } },
+      state: () => rows(`SELECT user_id, birth_month, birth_day FROM eureka.staff_profile ORDER BY user_id`),
+    }),
+    forbidden: { userId: U.ceo, year: 1990, phoneE164: "+14695550199", bio: "x", rowVersion: 9 },
+  },
   // interviews-settings (migration 0081): the owner, version and times of a staff profile are the server's;
   // name, email and designation are not editable in Settings
   {
@@ -1344,7 +1366,57 @@ async function portalApplication(): Promise<string> {
 
 /** Endpoints that read no body: what they change comes from the URL and the session only. */
 interface IgnoreCase { route: string; run: () => Promise<void> }
+
+/** interview-alerts (migration 0088): connects the support calendar as l1 through the dev provider's round trip. */
+async function connectSupportCalendar() {
+  const s = await login("l1");
+  const start = await call(null, "GET", "/api/v1/calendar/support/connect?calendarId=support@eureka.example", undefined, {}, s);
+  expect(start.statusCode).toBe(302);
+  const u = new URL(String(start.headers.location));
+  const stateCookie = String(start.headers["set-cookie"]).split(";")[0]!;
+  const done = await app.inject({ method: "GET", url: `${u.pathname}${u.search}`, headers: { cookie: `${s.cookie}; ${stateCookie}` } });
+  expect(done.statusCode, done.body).toBe(302);
+}
+const calendarState = () => rows(`SELECT
+  (SELECT coalesce(json_agg(json_build_object('k', k.key, 'c', k.calendar_id, 'e', k.account_email::text, 'b', k.connected_by) ORDER BY k.key), '[]') FROM eureka.calendar_connection k) AS connections,
+  (SELECT coalesce(json_agg(json_build_object('i', b.interview_id, 'c', b.calendar_id, 's', b.status, 'by', b.created_by, 'r', b.released_by) ORDER BY b.created_at), '[]') FROM eureka.calendar_block b) AS blocks`);
+const CALENDAR_FORBIDDEN: Record<string, unknown> = {
+  ...SERVER_MANAGED, calendarId: "ceo@eureka.example", accountEmail: "ceo@eureka.example", tokenEnc: "AAAA", refreshToken: "x", provider: "google",
+  connectedBy: U.ceo, interviewId: FOREIGN_ID, externalId: "evil", status: "released", createdBy: U.ceo, releasedBy: U.ceo, releasedAt: PAST,
+  startsAt: PAST, endsAt: PAST,
+};
+
 const IGNORED: IgnoreCase[] = [
+  // interview-alerts (migration 0088): block, release and disconnect take no body; the interview comes from the URL,
+  // the slot from the interview, the actor from the session
+  {
+    route: "POST /api/v1/interviews/:id/calendar-block",
+    run: async () => {
+      await connectSupportCalendar();
+      const cand = await newCandidate(db, { teamId: T.t1, recruiterId: U.r1a, locationId: LOC.dallas });
+      const sub = await selectedSubmission(db, U.r1a, cand.id, "interview_requested");
+      const iv = await ok("r1a", "POST", "/api/v1/interviews", { submissionId: sub, round: "MA", startsAt: "2032-02-02T15:00:00Z", durationMin: 30 });
+      const before = await calendarState();
+      const r = await call("l1", "POST", `/api/v1/interviews/${iv.id}/calendar-block`, CALENDAR_FORBIDDEN);
+      expect(r.statusCode, r.body).toBe(201);
+      const after = await calendarState();
+      expect(after[0]!.connections).toEqual(before[0]!.connections);
+      expect(after[0]!.blocks).toEqual([...(before[0]!.blocks as unknown[]), { i: iv.id, c: "support@eureka.example", s: "active", by: U.l1, r: null }]);
+      const rel = await call("l1", "POST", `/api/v1/interviews/${iv.id}/calendar-block/release`, CALENDAR_FORBIDDEN);
+      expect(rel.statusCode, rel.body).toBe(200);
+      expect(((await calendarState())[0]!.blocks as { i: string; s: string; r: string | null }[]).find((b) => b.i === iv.id)).toEqual({ i: iv.id, c: "support@eureka.example", s: "released", by: U.l1, r: U.l1 });
+    },
+  },
+  { route: "POST /api/v1/interviews/:id/calendar-block/release", run: async () => undefined /* covered with the block case above */ },
+  {
+    route: "POST /api/v1/calendar/support/disconnect",
+    run: async () => {
+      await connectSupportCalendar();
+      const r = await call("l1", "POST", "/api/v1/calendar/support/disconnect", CALENDAR_FORBIDDEN);
+      expect(r.statusCode, r.body).toBe(200);
+      expect((await calendarState())[0]!.connections).toEqual([]);
+    },
+  },
   // interviews-settings (ST-7): the session comes from the URL, its owner from the caller's session
   {
     route: "POST /api/v1/settings/sessions/:id/revoke",

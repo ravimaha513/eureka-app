@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { NOTIFICATION_PREFERENCE_TYPES, PHONE_PROBLEM_MESSAGES, normalizePhoneE164, phoneProblem } from "@eureka/shared";
+import { BirthdayValue } from "../staff/birthdays.schemas.js";
 
 /** docs/interviews-settings-api.md ST-2: the only profile fields a staff member edits. */
 export const ProfileUpdate = z
@@ -13,6 +14,8 @@ export const ProfileUpdate = z
     bio: z.string().max(500).nullable()
       .refine((v) => v === null || !/[\u0001-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(v), "remove control characters")
       .transform((v) => (v === null || v.trim() === "" ? null : v.trim())),
+    /** interview-alerts BD-1: month and day; omitted = unchanged, null = cleared. */
+    birthday: BirthdayValue.optional(),
   })
   .strict();
 export type ProfileUpdate = z.infer<typeof ProfileUpdate>;

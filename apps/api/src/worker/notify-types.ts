@@ -15,10 +15,15 @@
  * the event before anyone is notified (the runner retries with backoff and alerts).
  */
 
+import { CONTRACT_KIND_LABELS, CONTRACT_KINDS, INTERVIEW_TYPE_LABELS } from "@eureka/shared";
+
 export interface OutboxEvent { id: string; type: string; aggregate_id: string; payload: Record<string, unknown> }
 
-/** What a recipient can open from the inbox (the web app has a screen for each). */
-export interface EntityRef { type: "placement" | "candidate" | "conversation" | "application"; id: string }
+/** What a recipient can open from the inbox (the web app has a screen for each; `digest` opens nothing). */
+export interface EntityRef { type: "placement" | "candidate" | "conversation" | "application" | "interview" | "digest"; id: string }
+
+/** The worker's database handle (a pool or a client) for the detail reads. */
+export interface Queryable { query<R extends Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: R[] }> }
 
 export interface Rendered {
   subject: string;
@@ -35,6 +40,14 @@ export interface EventSpec {
   email: boolean;
   inApp: boolean;
   render(ev: OutboxEvent): Rendered;
+  /**
+   * Detail lines read from the database at delivery time through a worker-executable
+   * SECURITY DEFINER function (the payload itself stays ids-only). Appended to the
+   * email after the message; appended to the inbox body only when `detailsInInbox`
+   * is set (never for candidate contact details). A failure retries the event.
+   */
+  details?(ev: OutboxEvent, db: Queryable): Promise<string[]>;
+  detailsInInbox?: boolean;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -103,6 +116,24 @@ function checkNotify(p: Record<string, unknown>, allowed: readonly string[]): vo
 }
 
 const ADMIN_TEAMS_BU_CEO = ["hr", "accounts", "immigration", "bu_head", "ceo"] as const;
+
+function uuidList(p: Record<string, unknown>, key: string, max: number): string[] {
+  const v = p[key];
+  if (!Array.isArray(v) || v.length < 1 || v.length > max || v.some((x) => typeof x !== "string" || !UUID.test(x))) {
+    throw new Error(`outbox event payload has an invalid ${key}`);
+  }
+  return v as string[];
+}
+
+/** "Mon, 20 Oct 2026, 10:00 – 11:00 EDT" in the zone the business runs on, plus the UTC instant for offshore readers. */
+export function formatSlot(startsAt: Date, endsAt: Date, timeZone = "America/New_York"): string {
+  const day = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", day: "numeric", month: "short", year: "numeric" }).format(startsAt);
+  const time = (d: Date) => new Intl.DateTimeFormat("en-US", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
+  const zone = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" }).formatToParts(startsAt).find((x) => x.type === "timeZoneName")?.value ?? timeZone;
+  return `${day}, ${time(startsAt)} – ${time(endsAt)} ${zone} (${startsAt.toISOString().slice(0, 16).replace("T", " ")} UTC)`;
+}
+
+const CHANGE_WORDS = { created: "requested", rescheduled: "rescheduled", cancelled: "cancelled" } as const;
 
 export const EVENT_SPECS: Record<string, EventSpec> = {
   // Placements (PL-7, migrations 0022-0024): unchanged, email only.
@@ -343,6 +374,118 @@ EVENT_SPECS["application.received"] = {
   },
 };
 
+// interview-alerts (migration 0089): an interview was created, moved or cancelled. The interview
+// coordinators (support) get the full details by email (owner decision 2026-10-15, including the
+// candidate's email address) read at send time through authz.interview_notice_details; the payload
+// and the inbox row carry ids only.
+EVENT_SPECS["interview.requested"] = {
+  email: true, inApp: true,
+  render: (ev) => {
+    const interviewId = uuid(ev.payload, "interviewId");
+    if (aggregate(ev) !== interviewId) throw new Error("outbox event payload has an invalid interviewId");
+    uuid(ev.payload, "submissionId");
+    uuid(ev.payload, "candidateId");
+    const change = oneOf(ev.payload, "change", ["created", "rescheduled", "cancelled"] as const);
+    date(ev.payload, "startsOn"); // validated, never shown
+    checkNotify(ev.payload, ["interview_coordinator"]);
+    const word = CHANGE_WORDS[change];
+    return {
+      subject: `Eureka: interview ${word}`,
+      message: `An interview was ${word}. The details for coordination follow.`,
+      refLabel: "Interview reference", refId: interviewId,
+      inbox: {
+        title: `Interview ${word}`,
+        body: `An interview was ${word}. Open the interview for the details.`,
+        entity: { type: "interview", id: interviewId },
+      },
+    };
+  },
+  details: async (ev, db) => {
+    const r = (await db.query<{
+      change: string; call_status: string; round: string; interview_type: string | null; starts_at: Date; ends_at: Date;
+      meeting_url: string | null; candidate_name: string; candidate_email: string | null; technology: string | null;
+      client_name: string | null; job_title: string | null; recruiter_name: string | null; coach_name: string | null;
+      team_name: string | null; location_name: string | null; panel_names: string[] | null;
+    }>("SELECT * FROM authz.interview_notice_details($1)", [ev.id])).rows[0];
+    if (!r) throw new Error("interview details are not available; retry pending");
+    const dash = (v: string | null | undefined) => (v && v.trim() ? v : "—");
+    return [
+      `Candidate: ${dash(r.candidate_name)}`,
+      `Candidate email: ${dash(r.candidate_email)}`,
+      `Technology: ${dash(r.technology)}`,
+      `Client: ${dash(r.client_name)}`,
+      `Position: ${dash(r.job_title)}`,
+      `Round: ${dash(r.round)}`,
+      `Interview type: ${r.interview_type ? INTERVIEW_TYPE_LABELS[r.interview_type as keyof typeof INTERVIEW_TYPE_LABELS] ?? r.interview_type : "—"}`,
+      `Slot: ${formatSlot(new Date(r.starts_at), new Date(r.ends_at))}`,
+      `Meeting link: ${dash(r.meeting_url)}`,
+      `Recruiter: ${dash(r.recruiter_name)}`,
+      `Coach: ${dash(r.coach_name)}`,
+      `Panel: ${r.panel_names?.length ? r.panel_names.join(", ") : "—"}`,
+      `Team: ${dash(r.team_name)}`,
+      `Location: ${dash(r.location_name)}`,
+      `Call status: ${dash(r.call_status)}`,
+    ];
+  },
+};
+
+// interview-alerts (migration 0086): a contract (MSA, PO, SOW) was added to a placement, so Accounts
+// can invoice and HR / Associate HR can find the closure documents on the placement.
+EVENT_SPECS["contract.created"] = {
+  email: true, inApp: true,
+  render: (ev) => {
+    const contractId = uuid(ev.payload, "contractId");
+    if (aggregate(ev) !== contractId) throw new Error("outbox event payload has an invalid contractId");
+    const placementId = uuid(ev.payload, "placementId");
+    uuid(ev.payload, "candidateId");
+    const kind = oneOf(ev.payload, "kind", CONTRACT_KINDS);
+    const n = int(ev.payload, "contractCount", 1, 1000);
+    checkNotify(ev.payload, ["hr", "associate_hr", "accounts"]);
+    const label = CONTRACT_KIND_LABELS[kind];
+    return {
+      subject: `Eureka: new contract (${label}) added to a placement`,
+      message: `A contract (${label}) was added to a placement in Eureka (${plural(n, "contract")} on this placement). ` +
+        "Invoicing can start; the MSA, PO and other closure documents are on the placement.",
+      refLabel: "Placement reference", refId: placementId,
+      inbox: {
+        title: `New contract: ${label}`,
+        body: `A contract (${label}) was added to a placement. Open the placement for the invoicing details and the closure documents.`,
+        entity: { type: "placement", id: placementId },
+      },
+    };
+  },
+};
+
+// interview-alerts (migration 0087): the CEO's morning digest of staff birthdays. Staff display names
+// (not candidate data) are read at delivery time through authz.birthday_names, for the email and the inbox.
+EVENT_SPECS["staff.birthdays_today"] = {
+  email: true, inApp: true, detailsInInbox: true,
+  render: (ev) => {
+    date(ev.payload, "day");
+    const ids = uuidList(ev.payload, "userIds", 100000);
+    const n = int(ev.payload, "count", 1, 100000);
+    if (n !== ids.length) throw new Error("outbox event payload has an invalid count");
+    if (!UUID.test(ev.id)) throw new Error("outbox event has an invalid id");
+    checkNotify(ev.payload, ["ceo"]);
+    return {
+      subject: `Eureka: ${plural(n, "staff birthday")} today`,
+      message: `${n} staff ${n === 1 ? "member has" : "members have"} a birthday today.`,
+      refLabel: "Digest reference", refId: ev.id,
+      inbox: {
+        title: `${plural(n, "staff birthday")} today`,
+        body: `${n} staff ${n === 1 ? "member has" : "members have"} a birthday today.`,
+        entity: { type: "digest", id: ev.id },
+      },
+    };
+  },
+  details: async (ev, db) => {
+    const names = (await db.query<{ display_name: string }>("SELECT display_name FROM authz.birthday_names($1)", [ev.id])).rows
+      .map((r) => r.display_name);
+    if (names.length === 0) throw new Error("birthday names are not available; retry pending");
+    return [`Birthdays today: ${names.join(", ")}.`];
+  },
+};
+
 export const DELIVERED_TYPES = Object.keys(EVENT_SPECS);
 export const EMAIL_TYPES = DELIVERED_TYPES.filter((t) => EVENT_SPECS[t]!.email);
 export const INBOX_TYPES = DELIVERED_TYPES.filter((t) => EVENT_SPECS[t]!.inApp);
@@ -358,7 +501,7 @@ const GROUP_LABELS: Record<string, string> = { hr: "HR", accounts: "Accounts", i
 const OTHER_LABELS: Record<string, string> = {
   ceo: "the CEO", bu_head: "a BU Head", recruiter: "the recruiter", lead: "the team lead",
   manager: "the team lead's manager", documents_team: "the assigned Documents Team member", chat: "a chat member",
-  hiring_manager: "the job's hiring manager",
+  hiring_manager: "the job's hiring manager", interview_coordinator: "an interview coordinator", associate_hr: "a member of Associate HR",
 };
 
 export function whyLine(reasons: readonly string[]): string {
@@ -372,10 +515,17 @@ export function whyLine(reasons: readonly string[]): string {
   return `You receive this email as ${parts.join(" and ")}.`;
 }
 
-/** Subject and body of the email for one recipient. */
-export function renderEmail(ev: OutboxEvent, origin: string, reasons: readonly string[]): { subject: string; text: string } {
+/** Subject and body of the email for one recipient; `details` are the spec's detail lines (see EventSpec.details). */
+export function renderEmail(ev: OutboxEvent, origin: string, reasons: readonly string[], details: readonly string[] = []): { subject: string; text: string } {
   const r = specOf(ev.type).render(ev);
   if (!UUID.test(r.refId)) throw new Error("outbox event has an invalid reference");
   const footer = `${r.refLabel}: ${r.refId}\n\nSign in to Eureka for the details: ${origin}/\n${whyLine(reasons)}\n`;
-  return { subject: r.subject, text: `${r.message}\n${footer}` };
+  const extra = details.length ? `\n${details.join("\n")}\n` : "";
+  return { subject: r.subject, text: `${r.message}\n${extra}${footer}` };
+}
+
+/** The inbox body with the spec's detail lines appended (only for specs with detailsInInbox), within the 600-character bound. */
+export function inboxBodyWith(body: string, details: readonly string[]): string {
+  const text = details.length ? `${body} ${details.join(" ")}` : body;
+  return text.length <= 600 ? text : `${text.slice(0, 599)}…`;
 }

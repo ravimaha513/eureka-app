@@ -24,6 +24,9 @@ const base = (): Record<string, Handler> => ({
   "GET /api/v1/placements": () => ({ body: { items: [P1, P2], nextCursor: null } }),
   "GET /api/v1/placements/p1": () => ({ body: FULL_P1 }),
   "GET /api/v1/placements/p2": () => ({ body: FULL_P2 }),
+  // interview-alerts: the drawer's Contracts section.
+  "GET /api/v1/placements/p1/contracts": () => ({ body: { items: [], canAdd: false } }),
+  "GET /api/v1/placements/p2/contracts": () => ({ body: { items: [], canAdd: false } }),
 });
 beforeEach(() => { api = mockApi(base()); });
 afterEach(() => vi.restoreAllMocks());

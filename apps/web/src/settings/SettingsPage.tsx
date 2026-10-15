@@ -5,6 +5,8 @@ import type { Me } from "../api";
 import { ConfirmDialog } from "../admin/Dialog";
 import { Field, useFocusAfterFailure } from "../sales/ui";
 import { Avatar } from "../shell/ui";
+import { isValidBirthday, type Birthday } from "@eureka/shared";
+import { BirthdayFields } from "../staff/BirthdayFields";
 import { DEVICE_LABELS, settingsApi, settingsError, settingsKeys, type Preference, type Profile, type SessionRow } from "./settingsApi";
 
 type Tab = "profile" | "notifications" | "security";
@@ -74,9 +76,15 @@ function ProfileForm({ p, fallbackName }: { p: Profile; fallbackName: string }) 
   const focusFailure = useFocusAfterFailure(formRef);
   const [phone, setPhone] = useState(p.phone ?? "");
   const [bio, setBio] = useState(p.bio ?? "");
+  const [birthday, setBirthday] = useState<Birthday | null>(p.birthday ?? null);
   const [saved, setSaved] = useState("");
+  const birthdayInvalid = birthday !== null && !isValidBirthday(birthday);
   const save = useMutation({
-    mutationFn: () => settingsApi.saveProfile(p.rowVersion, { phone: phone.trim() || null, bio: bio.trim() || null }),
+    // The birthday travels only when it changed (omitted = unchanged on the server).
+    mutationFn: () => settingsApi.saveProfile(p.rowVersion, {
+      phone: phone.trim() || null, bio: bio.trim() || null,
+      ...(JSON.stringify(birthday) !== JSON.stringify(p.birthday ?? null) ? { birthday } : {}),
+    }),
     onSuccess: (next) => { qc.setQueryData(settingsKeys.profile, next); setSaved("Profile saved."); },
     onError: () => focusFailure(),
   });
@@ -97,9 +105,15 @@ function ProfileForm({ p, fallbackName }: { p: Profile; fallbackName: string }) 
       <Field label="Short bio" hint={`${bio.length}/500 characters. Keep it to work: no personal details.`}>
         {(a) => <textarea {...a} rows={4} maxLength={500} value={bio} onChange={(e) => setBio(e.target.value)} />}
       </Field>
+      <div className="field">
+        <span className="label" id="bd-label" style={{ fontWeight: 600, fontSize: 13 }}>Birthday</span>
+        <BirthdayFields idPrefix="profile-bd" value={birthday} onChange={setBirthday} />
+        <small className="hint fieldhint">Month and day only. HR and the CEO's morning birthday digest use it.{birthday && <> <button type="button" className="linkbtn" onClick={() => setBirthday(null)}>Clear</button></>}</small>
+        {birthdayInvalid && <small className="error fielderr">That is not a calendar day.</small>}
+      </div>
       {err && <p className="error formerr" role="alert" tabIndex={-1}>{err}</p>}
       <p role="status" className="livemsg">{saved}</p>
-      <div className="actions left"><button type="submit" className="btn primary" disabled={save.isPending} aria-busy={save.isPending || undefined}>{save.isPending ? "Saving…" : "Save profile"}</button></div>
+      <div className="actions left"><button type="submit" className="btn primary" disabled={save.isPending || birthdayInvalid} aria-busy={save.isPending || undefined}>{save.isPending ? "Saving…" : "Save profile"}</button></div>
       <p className="hint">Education, skills, certifications and resumes are kept on candidate profiles, not on staff accounts.</p>
     </form>
   );
