@@ -210,7 +210,9 @@ The workflow, per environment:
    security group rules, database ingress, execution role policies); on the
    first run this creates the network and database. Run it in the "jobs"
    security group and fail the deploy if it exits non-zero.
-4. Full `terragrunt apply` with `image_tag = <sha>`; wait for the API service to be stable.
+4. Full `terragrunt apply` with `image_tag = <sha>`; cap the RDS-created log
+   group `/aws/rds/instance/eureka-<env>/postgresql` at `log_retention_days`
+   (RDS creates it without retention); wait for the API service to be stable.
 5. Build the web app, sync to S3 (hashed assets immutable, `index.html` no-cache), invalidate CloudFront.
 6. Smoke test `GET /api/health`.
 
@@ -265,11 +267,29 @@ What it does and refuses (database function `authz.bootstrap_admins`, migrations
   like a user an admin creates; later sign-ins match by `sub`.
 
 Prerequisites: a deploy of a commit that contains `dist/db/bootstrap.js` and
-migration 0037 (the deploy's migrate step applies it), real Google OAuth
-client values in SSM (step 4 of the one-time setup), and admin AWS
-credentials with `jq` and `terragrunt`.
+migration 0037 (the deploy's migrate step applies it) and real Google OAuth
+client values in SSM (step 4 of the one-time setup).
 
-### Staging (`https://eureka-staging.spokenly.click`)
+**Preferred: the `ops-task` workflow** (no AWS credentials needed; see
+"Operations tasks" below). Actions → ops-task → Run workflow:
+
+- environment: `staging`
+- command: `node dist/db/bootstrap.js --admin "First Admin <admin1@aceintegrator.com>" --admin "Second Admin <admin2@aceintegrator.com>"`
+  (staging has `single_admin_mode = "on"`, so one `--admin` plus `--single-admin` is accepted there)
+
+The run prints the exit code (0 created or unchanged, 2 bad arguments,
+3 refused) and the task's log line. The same from a terminal:
+
+```sh
+gh workflow run ops-task.yml -f environment=staging \
+  -f command='node dist/db/bootstrap.js --admin "First Admin <admin1@aceintegrator.com>" --admin "Second Admin <admin2@aceintegrator.com>"'
+gh run watch "$(gh run list --workflow ops-task.yml -L1 --json databaseId -q '.[0].databaseId')"
+```
+
+### Staging by hand (`https://eureka-staging.spokenly.click`)
+
+Only with admin AWS credentials, `jq` and `terragrunt`; the workflow above
+runs exactly these commands.
 
 ```sh
 ENV=staging; export AWS_REGION=us-east-2
@@ -300,7 +320,8 @@ to the container override (staging only; never set `EUREKA_ENVIRONMENT` by hand 
 
 ### Production (later)
 
-The same commands with `ENV=production; export AWS_REGION=us-east-1`, and
+The `ops-task` workflow with environment `production` (or the same commands
+with `ENV=production; export AWS_REGION=us-east-1`), and
 **never** `--demo-data` (it refuses there anyway: the migrate task's
 `EUREKA_ENVIRONMENT` is `production`, not on the allow-list). Do it right after the first successful production deploy
 and record it in the operations log.
@@ -336,6 +357,87 @@ So load it in the bootstrap run, before creating users; a re-run adds nothing. T
 to show it, create a business account for the presenter in Users & Access and
 give it, for example, Location Incharge for "Demo Dallas" (24 candidates), or
 Associate Director and make the demo managers report to it (all 32).
+
+## Operations tasks (`ops-task` workflow)
+
+`.github/workflows/ops-task.yml` (Run workflow only) is how one-off
+`dist/db/*.js` commands run against an environment now that no AWS
+credentials exist outside GitHub Actions. It assumes the environment's OIDC
+deploy role, reads the cluster, migrate task family, public subnets and jobs
+security group from `terragrunt output -json` (like `deploy.yml`), starts one
+Fargate task on the **migrate task definition** with a command override,
+waits for it (up to 30 minutes), prints the container exit code and the
+task's `/eureka/<env>/migrate` log lines, and fails unless the exit code is 0.
+The migrate task definition has the RDS master credentials,
+`APP_DB_PASSWORD`, `GOOGLE_HOSTED_DOMAIN`, `EUREKA_ENVIRONMENT` and
+`SINGLE_ADMIN_MODE`, so these scripts need no further configuration.
+
+Inputs:
+
+| Input | Meaning |
+|---|---|
+| `environment` | `staging` (us-east-2) or `production` (us-east-1); the job runs in that GitHub environment, so production's required reviewers apply |
+| `command` | the container command, one shell-quoted line (split with `shlex`, so `"First Admin <a@aceintegrator.com>"` stays one argument) |
+| `env` | extra environment variables, `KEY=value`, one per line; printed in the log |
+| `secret_env` | the same, but every value is masked in the log (`::add-mask::`); for `EUREKA_NEW_PASSWORD` |
+
+Commands:
+
+| Task | `command` | Notes |
+|---|---|---|
+| First admins | `node dist/db/bootstrap.js --admin "Name <a@aceintegrator.com>" --admin b@aceintegrator.com` | "First admin (bootstrap)" above; exit 3 while an active admin exists |
+| Lock-out recovery | `node dist/db/bootstrap.js --admin ... --admin ... --recover` | only when no active `org_admin` is left |
+| Demo data (staging) | `node dist/db/bootstrap.js --admin ... --admin ... --demo-data` | refused on production by the script |
+| Password for a restricted-role test user (staging) | `node dist/db/set-password.js --email hr@example.com` | `secret_env`: `EUREKA_NEW_PASSWORD=<temporary>` (10–72 characters, a letter and a number); docs/TEST-USERS.md |
+| Restore check | `node dist/db/restore-check.js` | see "Restore drill" |
+| Migrations only | `node dist/db/migrate.js` | normally part of a deploy |
+
+What to know:
+
+- Overriding `EUREKA_ENVIRONMENT` is refused for production (the script
+  checks it); on staging it is already `staging` in the task definition, so
+  `set-password.js` needs only the password.
+- The command and plain `env` values are visible in the run log, in ECS
+  `describe-tasks` while the task exists, and in CloudTrail's `RunTask`
+  event. **So are `secret_env` values** (CloudTrail and ECS do not mask
+  container overrides); GitHub masks them in the log only. Use a temporary
+  password (the default: the user must change it at first sign-in) and never
+  a real one. Dispatch inputs are not shown in the run's UI, but anyone who
+  can read CloudTrail in the account can read them.
+- One task per environment at a time (`concurrency: ops-task-<env>`), and it
+  does not wait for a running deploy; do not run it during a deploy's
+  migrate step.
+- The task uses the **currently registered** migrate task definition, so the
+  image is the last deployed one. Deploy first if the script you need is newer.
+- Cost: one 0.25 vCPU Fargate task plus a public IPv4 for a few minutes
+  (cents), and about a minute of Actions time for Terraform/Terragrunt to
+  read the outputs.
+
+## Housekeeping (`infra-housekeeping` workflow)
+
+`.github/workflows/infra-housekeeping.yml` (Run workflow only) is report-only
+unless `apply` is ticked. Per environment it:
+
+1. Sets retention on `/aws/rds/instance/eureka-<env>/postgresql` to the
+   environment's `log_retention_days` (staging 7, production 30). RDS creates
+   that group without retention (staging had 49 MB unbounded before this);
+   `deploy.yml` now does the same at the end of every deploy, so this is for
+   a stack that exists without a recent deploy.
+2. **Production only, with `remove_production_remnants`:** inventories what the
+   never-finished production deploys of 2026-10-06 left behind after the root
+   user deleted the stack on 2026-10-13, refuses if anything that looks like a
+   live production stack exists (RDS instance, tagged VPC, ECS services, API
+   Gateway, CloudFront), and with `apply` deletes the ECR repository and its
+   images, `/eureka/production/*` log groups, `eureka-production-*` IAM roles
+   and policies, the RDS parameter and subnet groups and `/eureka/production/*`
+   SSM parameters, then copies `live/production/terraform.tfstate` to
+   `live/production/retired-<timestamp>.tfstate` and deletes the original
+   (the bucket is versioned; older versions remain). KMS keys are reported
+   only: the one the root user disabled is already scheduled for deletion.
+   After this, the next production deploy starts from an empty state instead
+   of failing on resources that exist or are gone.
+
+Run it twice: first without `apply` and read the inventory, then with.
 
 ## Turning on the worker
 

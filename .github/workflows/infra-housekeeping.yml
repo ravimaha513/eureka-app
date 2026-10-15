@@ -1,0 +1,211 @@
+name: infra-housekeeping
+# Small account-hygiene jobs run with the OIDC deploy role of an environment.
+# Report-only unless `apply` is ticked. Runbook: infra/README.md,
+# "Housekeeping (infra-housekeeping workflow)".
+#
+# 1. RDS log group retention: RDS creates /aws/rds/instance/<db>/postgresql
+#    itself with no retention; cap it at the environment's log_retention_days.
+# 2. Production remnants (production only, needs `remove_production_remnants`
+#    and `apply`): the production deploys of 2026-10-06 never finished and the
+#    root user deleted most of the stack on 2026-10-13. What is left (ECR
+#    repository, log groups, ECS execution role, RDS parameter group, SSM
+#    parameters, the Terraform state file) costs a little and would make the
+#    next production apply fail on "already exists". This deletes them after
+#    checking that nothing that looks like a live production stack exists, and
+#    archives the state file under a dated key before removing it (the bucket
+#    is versioned, so nothing is lost).
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment whose deploy role to assume
+        type: choice
+        options: [staging, production]
+        default: staging
+      apply:
+        description: Make the changes (unticked = report only)
+        type: boolean
+        default: false
+      remove_production_remnants:
+        description: "Production only: delete the leftovers of the never-finished production deploy and archive its state file"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  housekeeping:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+      AWS_REGION: ${{ inputs.environment == 'production' && 'us-east-1' || 'us-east-2' }}
+      APPLY: ${{ inputs.apply && 'true' || 'false' }}
+      REMOVE_REMNANTS: ${{ inputs.remove_production_remnants && 'true' || 'false' }}
+    steps:
+      - name: Check the AWS account is configured
+        env:
+          ACCOUNT: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          if [ -z "$ACCOUNT" ]; then
+            echo "::error::AWS_ACCOUNT_ID is not set for the $ENVIRONMENT environment or the repository (see infra/README.md, One-time setup)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/eureka-github-deploy-${{ env.ENVIRONMENT }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: eureka-housekeeping-${{ github.run_id }}
+
+      - name: RDS log group retention
+        run: |
+          set -euo pipefail
+          GROUP="/aws/rds/instance/eureka-$ENVIRONMENT/postgresql"
+          WANT=$(sed -nE 's/^\s*log_retention_days\s*=\s*([0-9]+).*/\1/p' "infra/live/$ENVIRONMENT/env.hcl")
+          CURRENT=$(aws logs describe-log-groups --log-group-name-prefix "$GROUP" \
+            --query "logGroups[?logGroupName=='$GROUP'] | [0].retentionInDays" --output text)
+          BYTES=$(aws logs describe-log-groups --log-group-name-prefix "$GROUP" \
+            --query "logGroups[?logGroupName=='$GROUP'] | [0].storedBytes" --output text)
+          if [ "$BYTES" = "None" ]; then
+            echo "$GROUP: does not exist (no RDS instance, or no log exports yet); nothing to do"
+            exit 0
+          fi
+          echo "$GROUP: retention=$CURRENT days, stored=$BYTES bytes, wanted=$WANT days"
+          if [ "$CURRENT" = "$WANT" ]; then
+            echo "already set"
+          elif [ "$APPLY" = "true" ]; then
+            aws logs put-retention-policy --log-group-name "$GROUP" --retention-in-days "$WANT"
+            echo "retention set to $WANT days"
+          else
+            echo "would set retention to $WANT days (tick apply)"
+          fi
+
+      - name: Production remnants, inventory
+        if: env.ENVIRONMENT == 'production'
+        id: inventory
+        env:
+          ACCOUNT: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          set -uo pipefail
+          BUCKET="eureka-terraform-state-$ACCOUNT"
+          echo "### Tagged resources (Project=Eureka, Environment=production) in $AWS_REGION"
+          aws resourcegroupstaggingapi get-resources \
+            --tag-filters Key=Project,Values=Eureka Key=Environment,Values=production \
+            --query 'ResourceTagMappingList[].ResourceARN' --output text | tr '\t' '\n' | sort | tee "$RUNNER_TEMP/tagged.txt"
+          echo
+          echo "### Named leftovers"
+          echo "- ECR eureka-production-api: $(aws ecr describe-images --repository-name eureka-production-api --query 'length(imageDetails)' --output text 2>/dev/null || echo absent) image(s)"
+          echo "- ECS cluster eureka-production: $(aws ecs describe-clusters --clusters eureka-production --query 'clusters[0].status' --output text 2>/dev/null || echo absent)"
+          echo "- Log groups /eureka/production/*: $(aws logs describe-log-groups --log-group-name-prefix /eureka/production/ --query 'logGroups[].[logGroupName,storedBytes]' --output text | tr '\t' '=' | tr '\n' ' ')"
+          echo "- RDS log group: $(aws logs describe-log-groups --log-group-name-prefix /aws/rds/instance/eureka-production/ --query 'logGroups[].logGroupName' --output text || echo absent)"
+          echo "- IAM roles eureka-production-*: $(aws iam list-roles --query "Roles[?starts_with(RoleName,'eureka-production-')].RoleName" --output text)"
+          echo "- IAM policies eureka-production-*: $(aws iam list-policies --scope Local --query "Policies[?starts_with(PolicyName,'eureka-production-')].PolicyName" --output text)"
+          echo "- RDS parameter group eureka-production-pg16: $(aws rds describe-db-parameter-groups --db-parameter-group-name eureka-production-pg16 --query 'DBParameterGroups[0].DBParameterGroupName' --output text 2>/dev/null || echo absent)"
+          echo "- RDS subnet groups eureka-production*: $(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName,'eureka-production')].DBSubnetGroupName" --output text)"
+          echo "- SSM parameters /eureka/production/*: $(aws ssm get-parameters-by-path --path /eureka/production --recursive --query 'Parameters[].Name' --output text)"
+          echo "- Secrets eureka/production*: $(aws secretsmanager list-secrets --filters Key=name,Values=eureka/production --query 'SecretList[].Name' --output text)"
+          echo "- KMS aliases alias/eureka-production*:"
+          for KEY in $(aws kms list-aliases --query "Aliases[?starts_with(AliasName,'alias/eureka-production')].TargetKeyId" --output text); do
+            aws kms describe-key --key-id "$KEY" --query 'KeyMetadata.{id:KeyId,state:KeyState,deletion:DeletionDate}' --output text
+          done
+          echo "- State objects live/production/*: "
+          aws s3api list-object-versions --bucket "$BUCKET" --prefix live/production/ \
+            --query '{versions:Versions[].{key:Key,modified:LastModified,size:Size,latest:IsLatest},deletes:DeleteMarkers[].{key:Key,modified:LastModified,latest:IsLatest}}' --output json
+          echo
+          echo "### Live-stack check (any of these present = production is deployed, deletion refused)"
+          RDS=$(aws rds describe-db-instances --query "DBInstances[?starts_with(DBInstanceIdentifier,'eureka-production')].DBInstanceIdentifier" --output text)
+          VPC=$(aws ec2 describe-vpcs --filters Name=tag:Project,Values=Eureka Name=tag:Environment,Values=production --query 'Vpcs[].VpcId' --output text)
+          SVC=$(aws ecs list-services --cluster eureka-production --query 'serviceArns' --output text 2>/dev/null)
+          API=$(aws apigatewayv2 get-apis --query "Items[?starts_with(Name,'eureka-production')].ApiId" --output text)
+          CF=$(aws cloudfront list-distributions --query "DistributionList.Items[?contains(Comment,'production') && contains(Comment,'ureka')].Id" --output text 2>/dev/null)
+          echo "rds=[$RDS] vpc=[$VPC] ecs-services=[$SVC] apigw=[$API] cloudfront=[$CF]"
+          if [ -n "$RDS$VPC$SVC$API$CF" ]; then
+            echo "live=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::production has live resources; the remnant cleanup will refuse to run"
+          else
+            echo "live=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Production remnants, delete
+        if: env.ENVIRONMENT == 'production' && env.REMOVE_REMNANTS == 'true'
+        env:
+          ACCOUNT: ${{ vars.AWS_ACCOUNT_ID }}
+          LIVE: ${{ steps.inventory.outputs.live }}
+        run: |
+          set -euo pipefail
+          if [ "$LIVE" = "true" ]; then
+            echo "::error::refusing: production has live resources (see the inventory step)"; exit 1
+          fi
+          BUCKET="eureka-terraform-state-$ACCOUNT"
+          STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+          if [ "$APPLY" != "true" ]; then
+            echo "report only (tick apply to delete). Would:"
+            echo "- delete ECR repository eureka-production-api with its images"
+            echo "- delete log groups /eureka/production/* and /aws/rds/instance/eureka-production/*"
+            echo "- delete IAM roles eureka-production-* (after detaching policies) and customer policies eureka-production-*"
+            echo "- delete RDS parameter group eureka-production-pg16 and subnet groups eureka-production*"
+            echo "- delete SSM parameters /eureka/production/*"
+            echo "- copy s3://$BUCKET/live/production/terraform.tfstate to live/production/retired-$STAMP.tfstate, then delete the original"
+            echo "- leave KMS keys alone (pending deletion already; a still-enabled key is reported, not touched)"
+            exit 0
+          fi
+          echo "### ECR"
+          aws ecr delete-repository --repository-name eureka-production-api --force --query 'repository.repositoryName' --output text 2>/dev/null || echo "absent"
+          echo "### Log groups"
+          for G in $(aws logs describe-log-groups --log-group-name-prefix /eureka/production/ --query 'logGroups[].logGroupName' --output text) \
+                   $(aws logs describe-log-groups --log-group-name-prefix /aws/rds/instance/eureka-production/ --query 'logGroups[].logGroupName' --output text); do
+            aws logs delete-log-group --log-group-name "$G" && echo "deleted $G"
+          done
+          echo "### IAM"
+          for ROLE in $(aws iam list-roles --query "Roles[?starts_with(RoleName,'eureka-production-')].RoleName" --output text); do
+            for P in $(aws iam list-attached-role-policies --role-name "$ROLE" --query 'AttachedPolicies[].PolicyArn' --output text); do
+              aws iam detach-role-policy --role-name "$ROLE" --policy-arn "$P"
+            done
+            for P in $(aws iam list-role-policies --role-name "$ROLE" --query 'PolicyNames' --output text); do
+              aws iam delete-role-policy --role-name "$ROLE" --policy-name "$P"
+            done
+            for IP in $(aws iam list-instance-profiles-for-role --role-name "$ROLE" --query 'InstanceProfiles[].InstanceProfileName' --output text); do
+              aws iam remove-role-from-instance-profile --instance-profile-name "$IP" --role-name "$ROLE"
+            done
+            aws iam delete-role --role-name "$ROLE" && echo "deleted role $ROLE"
+          done
+          for ARN in $(aws iam list-policies --scope Local --query "Policies[?starts_with(PolicyName,'eureka-production-')].Arn" --output text); do
+            for V in $(aws iam list-policy-versions --policy-arn "$ARN" --query 'Versions[?!IsDefaultVersion].VersionId' --output text); do
+              aws iam delete-policy-version --policy-arn "$ARN" --version-id "$V"
+            done
+            aws iam delete-policy --policy-arn "$ARN" && echo "deleted policy $ARN"
+          done
+          echo "### RDS"
+          aws rds delete-db-parameter-group --db-parameter-group-name eureka-production-pg16 2>/dev/null && echo "deleted parameter group" || echo "parameter group absent"
+          for SG in $(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName,'eureka-production')].DBSubnetGroupName" --output text); do
+            aws rds delete-db-subnet-group --db-subnet-group-name "$SG" && echo "deleted subnet group $SG"
+          done
+          echo "### SSM"
+          for NAME in $(aws ssm get-parameters-by-path --path /eureka/production --recursive --query 'Parameters[].Name' --output text); do
+            aws ssm delete-parameter --name "$NAME" && echo "deleted $NAME"
+          done
+          echo "### Terraform state"
+          if aws s3api head-object --bucket "$BUCKET" --key live/production/terraform.tfstate > /dev/null 2>&1; then
+            aws s3api copy-object --bucket "$BUCKET" --copy-source "$BUCKET/live/production/terraform.tfstate" \
+              --key "live/production/retired-$STAMP.tfstate" --query 'CopyObjectResult.LastModified' --output text
+            aws s3api delete-object --bucket "$BUCKET" --key live/production/terraform.tfstate --query 'VersionId' --output text
+            echo "state archived as live/production/retired-$STAMP.tfstate and removed (older versions stay in the versioned bucket)"
+          else
+            echo "no state file"
+          fi
+          aws s3api delete-object --bucket "$BUCKET" --key live/production/terraform.tfstate.tflock > /dev/null 2>&1 || true
+          echo "### KMS (report only)"
+          for KEY in $(aws kms list-aliases --query "Aliases[?starts_with(AliasName,'alias/eureka-production')].TargetKeyId" --output text); do
+            aws kms describe-key --key-id "$KEY" --query 'KeyMetadata.{id:KeyId,state:KeyState,deletion:DeletionDate}' --output text
+          done
+          echo "done"
