@@ -1,0 +1,161 @@
+name: infra-audit
+# Read-only audit of the AWS account from the deploy role: resource inventory,
+# CloudTrail delete/write events, Cost Explorer, and a Terraform plan (no apply).
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment whose deploy role to assume
+        type: choice
+        options: [staging, production]
+        default: staging
+      since:
+        description: CloudTrail lookup start (RFC 3339)
+        default: "2026-10-09T00:00:00Z"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_VERSION: 1.10.5
+  TG_VERSION: 0.77.22
+  TG_NON_INTERACTIVE: "true"
+  TF_VAR_image_tag: e6cb118da4f33af84f2b0349a56f31fbf4bb609c
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+      AWS_REGION: ${{ inputs.environment == 'production' && 'us-east-1' || 'us-east-2' }}
+      SINCE: ${{ inputs.since }}
+      OUT: ${{ github.workspace }}/audit-out
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/eureka-github-deploy-${{ env.ENVIRONMENT }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: eureka-audit-${{ github.run_id }}
+
+      - name: Inventory
+        shell: bash
+        run: |
+          set +e
+          mkdir -p "$OUT"
+          aws sts get-caller-identity | tee "$OUT/identity.json"
+          run() { local name=$1; shift; echo "### $name"; "$@" 2>&1 | tee "$OUT/$name.json" | head -c 20000; echo; }
+          for R in us-east-2 us-east-1; do
+            export AWS_REGION=$R AWS_DEFAULT_REGION=$R
+            echo "================ REGION $R ================"
+            run "tagged-$R" aws resourcegroupstaggingapi get-resources --query 'ResourceTagMappingList[].{arn:ResourceARN,env:Tags[?Key==`Environment`]|[0].Value,proj:Tags[?Key==`Project`]|[0].Value}' --output json
+            run "vpcs-$R" aws ec2 describe-vpcs --query 'Vpcs[].{id:VpcId,cidr:CidrBlock,default:IsDefault,name:Tags[?Key==`Name`]|[0].Value}' --output json
+            run "nat-$R" aws ec2 describe-nat-gateways --query 'NatGateways[].{id:NatGatewayId,state:State,vpc:VpcId}' --output json
+            run "eips-$R" aws ec2 describe-addresses --query 'Addresses[].{ip:PublicIp,assoc:AssociationId,alloc:AllocationId}' --output json
+            run "vpce-$R" aws ec2 describe-vpc-endpoints --query 'VpcEndpoints[].{id:VpcEndpointId,type:VpcEndpointType,svc:ServiceName,vpc:VpcId}' --output json
+            run "igw-$R" aws ec2 describe-internet-gateways --query 'InternetGateways[].{id:InternetGatewayId,att:Attachments[].VpcId}' --output json
+            run "ec2-$R" aws ec2 describe-instances --query 'Reservations[].Instances[].{id:InstanceId,state:State.Name,type:InstanceType}' --output json
+            run "flowlogs-$R" aws ec2 describe-flow-logs --query 'FlowLogs[].{id:FlowLogId,res:ResourceId,dest:LogDestination}' --output json
+            run "elbv2-$R" aws elbv2 describe-load-balancers --query 'LoadBalancers[].{name:LoadBalancerName,type:Type}' --output json
+            run "ecs-clusters-$R" aws ecs describe-clusters --clusters $(aws ecs list-clusters --query 'clusterArns' --output text) --query 'clusters[].{name:clusterName,status:status,running:runningTasksCount,services:activeServicesCount}' --output json
+            for C in $(aws ecs list-clusters --query 'clusterArns' --output text); do
+              run "ecs-services-$R" aws ecs describe-services --cluster "$C" --services $(aws ecs list-services --cluster "$C" --query 'serviceArns' --output text) --query 'services[].{name:serviceName,status:status,desired:desiredCount,running:runningCount,td:taskDefinition}' --output json
+              run "ecs-tasks-$R" aws ecs list-tasks --cluster "$C" --output json
+            done
+            run "rds-$R" aws rds describe-db-instances --query 'DBInstances[].{id:DBInstanceIdentifier,class:DBInstanceClass,status:DBInstanceStatus,multiaz:MultiAZ,storage:AllocatedStorage,created:InstanceCreateTime}' --output json
+            run "rds-snapshots-$R" aws rds describe-db-snapshots --query 'DBSnapshots[].{id:DBSnapshotIdentifier,db:DBInstanceIdentifier,type:SnapshotType,created:SnapshotCreateTime,status:Status}' --output json
+            run "rds-retained-backups-$R" aws rds describe-db-instance-automated-backups --query 'DBInstanceAutomatedBackups[].{db:DBInstanceIdentifier,status:Status,earliest:RestoreWindow.EarliestTime,latest:RestoreWindow.LatestTime}' --output json
+            run "apigw-$R" aws apigatewayv2 get-apis --query 'Items[].{id:ApiId,name:Name,endpoint:ApiEndpoint,created:CreatedDate}' --output json
+            run "apigw-vpclinks-$R" aws apigatewayv2 get-vpc-links --query 'Items[].{id:VpcLinkId,name:Name,status:VpcLinkStatus}' --output json
+            run "cloudmap-$R" aws servicediscovery list-namespaces --query 'Namespaces[].{id:Id,name:Name,type:Type}' --output json
+            run "ecr-$R" aws ecr describe-repositories --query 'repositories[].{name:repositoryName,created:createdAt}' --output json
+            for repo in $(aws ecr describe-repositories --query 'repositories[].repositoryName' --output text); do
+              run "ecr-images-$repo-$R" aws ecr describe-images --repository-name "$repo" --query 'sort_by(imageDetails,&imagePushedAt)[].{tags:imageTags,pushed:imagePushedAt,mb:to_string(imageSizeInBytes)}' --output json
+            done
+            run "kms-$R" aws kms list-aliases --query 'Aliases[?starts_with(AliasName,`alias/eureka`)].{alias:AliasName,key:TargetKeyId}' --output json
+            run "logs-$R" aws logs describe-log-groups --query 'logGroups[].{name:logGroupName,retention:retentionInDays,bytes:storedBytes}' --output json
+            run "ssm-$R" aws ssm get-parameters-by-path --path /eureka --recursive --query 'Parameters[].{name:Name,modified:LastModifiedDate}' --output json
+            run "secrets-$R" aws secretsmanager list-secrets --query 'SecretList[].{name:Name,created:CreatedDate,deleted:DeletedDate}' --output json
+            run "guardduty-mpp-$R" aws guardduty list-malware-protection-plans --output json
+            run "autoscaling-$R" aws application-autoscaling describe-scalable-targets --service-namespace ecs --query 'ScalableTargets[].{res:ResourceId,min:MinCapacity,max:MaxCapacity}' --output json
+            run "alarms-$R" aws cloudwatch describe-alarms --query 'MetricAlarms[].{name:AlarmName,state:StateValue}' --output json
+            run "sgs-$R" aws ec2 describe-security-groups --query 'SecurityGroups[].{id:GroupId,name:GroupName,vpc:VpcId}' --output json
+            run "ses-identities-$R" aws ses list-identities --output json
+          done
+          export AWS_REGION=us-east-1 AWS_DEFAULT_REGION=us-east-1
+          echo "================ GLOBAL ================"
+          run "s3-buckets" aws s3api list-buckets --query 'Buckets[].{name:Name,created:CreationDate}' --output json
+          run "cloudfront" aws cloudfront list-distributions --query 'DistributionList.Items[].{id:Id,domain:DomainName,aliases:Aliases.Items,enabled:Enabled,status:Status,origins:Origins.Items[].DomainName,waf:WebACLId}' --output json
+          run "cloudfront-plan" aws cloudfront list-distributions --query 'DistributionList.Items[].{id:Id,comment:Comment}' --output json
+          run "waf-cloudfront" aws wafv2 list-web-acls --scope CLOUDFRONT --query 'WebACLs[].{name:Name,id:Id}' --output json
+          run "acm-us-east-1" aws acm list-certificates --query 'CertificateSummaryList[].{domain:DomainName,status:Status,inuse:InUse}' --output json
+          run "route53-zones" aws route53 list-hosted-zones --query 'HostedZones[].{id:Id,name:Name,records:ResourceRecordSetCount}' --output json
+          for Z in $(aws route53 list-hosted-zones --query 'HostedZones[].Id' --output text); do
+            run "route53-eureka-records-$(basename $Z)" aws route53 list-resource-record-sets --hosted-zone-id "$Z" --query 'ResourceRecordSets[?contains(Name,`eureka`)].{name:Name,type:Type,alias:AliasTarget.DNSName,values:ResourceRecords[].Value}' --output json
+          done
+          run "iam-users" aws iam list-users --query 'Users[].{name:UserName,created:CreateDate,lastused:PasswordLastUsed}' --output json
+          run "iam-roles-eureka" aws iam list-roles --query 'Roles[?starts_with(RoleName,`eureka`)].{name:RoleName,created:CreateDate}' --output json
+          run "iam-access-keys-eureka_tx_adm" aws iam list-access-keys --user-name eureka_tx_adm --output json
+          run "s3-state-objects" aws s3api list-object-versions --bucket "eureka-terraform-state-$(jq -r .Account "$OUT/identity.json")" --query '{versions:Versions[].{key:Key,modified:LastModified,size:Size,latest:IsLatest},deletes:DeleteMarkers[].{key:Key,modified:LastModified}}' --output json
+
+      - name: CloudTrail
+        shell: bash
+        run: |
+          set +e
+          for R in us-east-2 us-east-1; do
+            aws cloudtrail lookup-events --region "$R" --start-time "$SINCE" --max-items 10000 \
+              --query 'Events[].{t:EventTime,u:Username,e:EventName,s:EventSource,ro:ReadOnly,r:Resources[].ResourceName,err:ErrorCode}' --output json > "$OUT/cloudtrail-$R.json"
+            echo "### $R: $(jq length "$OUT/cloudtrail-$R.json") events since $SINCE"
+            echo "--- destructive events"
+            jq -r '.[] | select(.e|test("^(Delete|Terminate|Disable|Remove|Deregister|Detach|Stop|Release|Disassociate|Cancel|Reject)")) | "\(.t)\t\(.u)\t\(.s)\t\(.e)\t\(.r|join(","))\t\(.err//"")"' "$OUT/cloudtrail-$R.json" | sort | tee "$OUT/cloudtrail-destructive-$R.tsv"
+            echo "--- write events by user x event"
+            jq -r '.[] | select(.ro=="false") | "\(.u)\t\(.e)"' "$OUT/cloudtrail-$R.json" | sort | uniq -c | sort -rn | head -80
+            echo "--- distinct users"
+            jq -r '.[].u' "$OUT/cloudtrail-$R.json" | sort | uniq -c | sort -rn
+          done
+
+      - name: Cost Explorer
+        shell: bash
+        run: |
+          set +e
+          export AWS_REGION=us-east-1
+          aws ce get-cost-and-usage --time-period Start=2026-09-01,End=2026-10-16 --granularity MONTHLY --metrics UnblendedCost \
+            --group-by Type=DIMENSION,Key=SERVICE --output json > "$OUT/cost-monthly-by-service.json"
+          jq -r '.ResultsByTime[] | .TimePeriod.Start as $m | .Groups[] | select((.Metrics.UnblendedCost.Amount|tonumber) > 0.01) | "\($m)\t\(.Metrics.UnblendedCost.Amount|tonumber|.*100|round/100)\t\(.Keys[0])"' "$OUT/cost-monthly-by-service.json" | sort -k1,1 -k2,2rn
+          aws ce get-cost-and-usage --time-period Start=2026-10-01,End=2026-10-16 --granularity DAILY --metrics UnblendedCost --output json > "$OUT/cost-daily.json"
+          jq -r '.ResultsByTime[] | "\(.TimePeriod.Start)\t\(.Metrics.UnblendedCost.Amount|tonumber|.*100|round/100)"' "$OUT/cost-daily.json"
+          aws ce get-cost-and-usage --time-period Start=2026-10-01,End=2026-10-16 --granularity MONTHLY --metrics UnblendedCost \
+            --group-by Type=TAG,Key=Environment --output json > "$OUT/cost-by-env.json"
+          jq -r '.ResultsByTime[].Groups[] | "\(.Keys[0])\t\(.Metrics.UnblendedCost.Amount|tonumber|.*100|round/100)"' "$OUT/cost-by-env.json"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Install Terragrunt
+        run: |
+          curl -fsSL -o /usr/local/bin/terragrunt "https://github.com/gruntwork-io/terragrunt/releases/download/v${TG_VERSION}/terragrunt_linux_amd64"
+          chmod +x /usr/local/bin/terragrunt
+
+      - name: Terraform state and plan (read-only)
+        shell: bash
+        working-directory: infra/live/${{ inputs.environment }}
+        run: |
+          set +e
+          terragrunt init -input=false -lock=false > /dev/null 2>&1
+          echo "### state list"
+          terragrunt state list 2>&1 | tee "$OUT/state-list.txt"
+          echo "### plan"
+          terragrunt plan -input=false -lock=false -no-color -detailed-exitcode -out=/dev/null 2>&1 | tee "$OUT/plan.txt" | grep -vE '^\s*(\+|-|~|#)?\s*$' | head -c 60000
+          echo "plan exit (pipe): ${PIPESTATUS[0]}"
+          grep -E '^Plan:|No changes|will be (created|destroyed|replaced|updated)|must be replaced' "$OUT/plan.txt" | sort | uniq -c | sort -rn | head -80
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: infra-audit-${{ inputs.environment }}
+          path: audit-out
+          retention-days: 7
