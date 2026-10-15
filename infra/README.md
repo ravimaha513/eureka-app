@@ -167,8 +167,11 @@ it is on a flat-rate plan.
 
 4. **Google OAuth client** (Google Cloud console → APIs & Services → Credentials):
    - Type: Web application.
-   - Authorized redirect URIs: `https://<app host>/api/auth/callback` (sign-in) and
-     `https://<app host>/api/auth/step-up/callback` (step-up before restricted documents, migration 0043).
+   - Authorized redirect URIs: `https://<app host>/api/auth/callback` (sign-in),
+     `https://<app host>/api/auth/step-up/callback` (step-up before restricted documents, migration 0043) and,
+     with `calendar_mode = "google"`, `https://<app host>/api/v1/calendar/support/callback` (the support
+     calendar connection, `docs/alerts-calendar-birthdays.md`; Google refuses the connect with
+     `redirect_uri_mismatch` until it is added).
    - Terraform creates `/eureka/<env>/app/google_client_{id,secret}` with the
      placeholder value `set-me` and never overwrites them afterwards. The API
      refuses to start while either value is still `set-me` (config check), so
@@ -484,7 +487,14 @@ worker. They stay off (`OUTBOX_MAIL_MODE=disabled`, events kept unpublished) unt
 must be a verified SES identity and is the only sender the worker's IAM policy
 allows. On first enable also set `outbox_deliver_since` (RFC 3339, e.g. the deploy
 time) so older events are marked published instead of all being emailed at once.
-Staging runs the worker with both senders empty, so it sends no email.
+Staging sets `outbox_from_email` to the portal sender (`careers@eureka-staging.spokenly.click`,
+2026-10-15) so the interview-alerts notifications reach staff by email; `feedback_from_email`
+stays empty. SES must be out of the sandbox (or every recipient verified) for those sends to be
+accepted; rejected sends retry with backoff and alert in the worker log.
+
+The support calendar (`calendar_mode = "google"`) adds `CALENDAR_MODE` and the generated
+`CALENDAR_TOKEN_KEY` (`/eureka/<env>/app/calendar_token_key`) to the API task; rotating that key
+needs a reconnect of the calendar in the app.
 
 To turn it on, set `worker_desired_count = 1` in `infra/live/<env>/env.hcl` and
 deploy (one task is enough; more are safe but idle). The worker needs

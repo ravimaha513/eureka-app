@@ -123,6 +123,11 @@ resource "random_id" "feedback_token_key" {
   byte_length = 32
 }
 
+# interview-alerts: AES-256-GCM key for the stored support-calendar refresh token (API only).
+resource "random_id" "calendar_token_key" {
+  byte_length = 32
+}
+
 locals {
   ssm_prefix = "/eureka/${var.environment}"
   generated_params = {
@@ -133,6 +138,7 @@ locals {
     "app/session_secret"        = random_password.session_secret.result
     "app/origin_secret"         = random_password.origin_secret.result
     "worker/feedback_token_key" = random_id.feedback_token_key.hex
+    "app/calendar_token_key"    = random_id.calendar_token_key.hex
   }
 }
 

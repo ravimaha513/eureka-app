@@ -207,7 +207,8 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   calendar: one shared Google Calendar connection (`eureka.calendar_connection`, refresh token AES-GCM under
   `CALENDAR_TOKEN_KEY`; `CALENDAR_MODE` dev/google/disabled) made by a `calendar:block` holder (leads, managers, ADs,
   coordinators); block / release the support calendar for an interview's slot from the interview drawer
-  (`eureka.calendar_block`). Terraform does not set the calendar variables yet. Tests: `apps/api/test/alerts.int.test.ts`.
+  (`eureka.calendar_block`). Terraform: `calendar_mode` (staging: google) and the generated `CALENDAR_TOKEN_KEY`;
+  staging sends outbox mail from the portal sender since 2026-10-15. Tests: `apps/api/test/alerts.int.test.ts`.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
