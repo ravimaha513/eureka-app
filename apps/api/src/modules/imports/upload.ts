@@ -172,6 +172,7 @@ export class ImportUploadController {
   @Post()
   @HttpCode(201)
   upload(@CurrentUser() user: AuthedUser, @Req() req: FastifyRequest, @Query("asOf") asOf?: string) {
+    if (!this.svc.enabled) throw new NotFoundException("Import upload is not enabled here");
     const body = req.body;
     if (req.headers["content-type"]?.split(";")[0]?.trim() !== XLSX_TYPE || !Buffer.isBuffer(body) || body.length === 0) {
       throw new BadRequestException(`Send the workbook itself as the body, with Content-Type ${XLSX_TYPE}`);

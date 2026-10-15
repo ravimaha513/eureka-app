@@ -1645,6 +1645,18 @@ const IGNORED: IgnoreCase[] = [
       expect(await rows(`SELECT * FROM eureka.resume ORDER BY id`)).toEqual(before);
     },
   },
+  // Workbook upload (staging/local, IMPORT_UPLOAD=on; import-upload.int.test.ts covers it switched on): the
+  // body is the raw .xlsx or nothing, the batch comes from the URL. Off here, so they change nothing at all.
+  ...["POST /api/v1/import-workbooks", "POST /api/v1/import-workbooks/:id/reanalyse", "POST /api/v1/import-workbooks/:id/load"].map((route) => ({
+    route,
+    run: async () => {
+      const before = await rows(`SELECT id, status, approved_by FROM eureka.import_batch ORDER BY id`);
+      const r = await call("admin", "POST", route.replace(":id", FOREIGN_ID).replace(/^POST /, ""),
+        { ...SERVER_MANAGED, status: "approved", operatorId: U.admin2, approvedBy: U.admin2, digest: "0".repeat(64) });
+      expect(r.statusCode, r.body).toBe(404);
+      expect(await rows(`SELECT id, status, approved_by FROM eureka.import_batch ORDER BY id`)).toEqual(before);
+    },
+  })),
   {
     route: "POST /api/v1/imports/tickets",
     run: async () => {
