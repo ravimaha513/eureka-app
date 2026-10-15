@@ -70,14 +70,14 @@ const SIGNATURE: Record<Kind, string[]> = {
 const OUT_HEADERS: Record<Sheet, string[]> = {
   sales: ["Candidate Name", "Candidate Ref", "Phone", "Technology", "Recruiter", "Status", "Teams", "Source Tab", "Source Row"],
   submissions: ["Date", "Candidate Name", "Candidate Ref", "Technology", "Job Title", "Rate", "Vendor", "Client",
-    "Client As Typed", "Recruiter", "Team Lead", "Manager", "Source Tab", "Source Row"],
+    "Client As Typed", "Recruiter", "Team Lead", "Manager", "Source Tab", "Source Row", "Recruiter As Typed"],
   interviews: ["Date", "Candidate Name", "Candidate Ref", "Technology", "Job Title", "Interview Type", "Call Status",
     "Client", "Client Inferred", "Vendor", "Support Name", "Feedback From Client", "Feedback From Candidate",
-    "Reason For Rejection", "Recruiter", "Team Lead", "Manager", "Source Tab", "Source Row"],
+    "Reason For Rejection", "Recruiter", "Team Lead", "Manager", "Source Tab", "Source Row", "Recruiter As Typed"],
   placements: ["Date", "Candidate Name", "Candidate Ref", "Phone", "Technology", "Job Title", "Rate", "Vendor", "Client",
     "Implementation Partner", "Client As Typed", "Placement Type", "Work Mode", "Tentative Start", "Status", "BGV Status",
     "Placement Date", "Joining Date", "Marketing Company", "Everify Company", "Recruiter", "Team Lead", "Manager",
-    "Source Tab", "Source Row"],
+    "Source Tab", "Source Row", "Recruiter As Typed"],
 };
 
 export interface TeamTab { name: string; kind: Kind; team: string; rows: number; source?: SheetSource; by: "source" | "name" | "headers" }
@@ -163,7 +163,57 @@ const mostCommon = (xs: string[]): string => {
   return [...n.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
 };
 
-interface Row { tab: TeamTab; rowNo: number; get: (f: string) => string }
+interface Row { tab: TeamTab; rowNo: number; get: (f: string) => string; typed: (f: string) => string }
+
+function levenshtein(a: string, b: string): number {
+  const d = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = d[0]!;
+    d[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cur = d[j]!;
+      d[j] = Math.min(d[j]! + 1, d[j - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+  }
+  return d[b.length]!;
+}
+
+/**
+ * One spelling per person for names typed by hand (recruiters): the same words in another order
+ * ("Aakula Uday Kumar" / "Uday Kumar Aakula") or, for names of 10+ letters, at most two letters
+ * apart ("Chapalamudugu" / "Chapalamadugu") are one person, named by the most frequent spelling.
+ */
+export function canonicalNames(names: string[]): Map<string, string> {
+  const words = (n: string) => clean(n).toLowerCase().split(" ").map((w) => w.replace(/[^\p{L}]+/gu, "")).filter(Boolean);
+  // Spellings that differ only in case count together, shown as their most frequent casing.
+  const count = new Map<string, number>();
+  const casing = new Map<string, Map<string, number>>();
+  for (const n of names.map(clean).filter(Boolean)) {
+    const k = n.toLowerCase();
+    count.set(k, (count.get(k) ?? 0) + 1);
+    const c = casing.get(k) ?? new Map<string, number>();
+    c.set(n, (c.get(n) ?? 0) + 1);
+    casing.set(k, c);
+  }
+  const lower = (n: string) => (n === n.toLowerCase() ? 1 : 0);
+  const shown = (k: string) => [...casing.get(k)!.entries()]
+    .sort((a, b) => b[1] - a[1] || lower(a[0]) - lower(b[0]) || a[0].localeCompare(b[0]))[0]![0];
+  const byFreq = [...count.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([k]) => k);
+  const out = new Map<string, string>();
+  const canon: { name: string; sorted: string; joined: string }[] = [];
+  for (const k of byFreq) {
+    const w = words(k);
+    const sorted = [...w].sort().join(" ");
+    const joined = w.join("");
+    const hit = canon.find((c) => c.sorted === sorted
+      || (joined.length >= 10 && c.joined.length >= 10 && levenshtein(c.joined, joined) <= 2));
+    const name = hit ? hit.name : shown(k);
+    if (!hit) canon.push({ name, sorted, joined });
+    for (const typed of casing.get(k)!.keys()) out.set(typed, name);
+  }
+  return out;
+}
 
 export function teamWorkbook(sheets: WorkbookSheet[], opts: { asOf: string }): TeamWorkbook {
   const tabs: TeamTab[] = [];
@@ -177,13 +227,20 @@ export function teamWorkbook(sheets: WorkbookSheet[], opts: { asOf: string }): T
     const team = clean(s.name.replace(kindWord, "")) || mostCommon(s.rows.map((r) => clean(r[idx.get("lead") ?? -1] ?? "")));
     const tab: TeamTab = { name: s.name, kind: c.kind, team, rows: 0, by: c.by, ...(s.source ? { source: s.source } : {}) };
     s.rows.forEach((r, i) => {
-      const get = (f: string) => clean(r[idx.get(f) ?? -1] ?? "");
-      if (!get("candidate")) return;
+      const typed = (f: string) => clean(r[idx.get(f) ?? -1] ?? "");
+      if (!typed("candidate")) return;
       tab.rows++;
-      rows[c.kind].push({ tab, rowNo: s.headerRow + i + 1, get });
+      rows[c.kind].push({ tab, rowNo: s.headerRow + i + 1, typed, get: typed });
     });
     tabs.push(tab);
   }
+
+  // Recruiter names: one spelling per person across the workbook (the typed one is kept too).
+  const recruiters = canonicalNames(KINDS.flatMap((k) => rows[k].map((r) => r.typed("recruiter"))));
+  for (const k of KINDS) {
+    for (const r of rows[k]) r.get = (f) => (f === "recruiter" ? recruiters.get(r.typed(f)) ?? r.typed(f) : r.typed(f));
+  }
+  const asTyped = (r: Row) => (r.get("recruiter") === r.typed("recruiter") ? "" : r.typed("recruiter"));
 
   // People: every candidate name across the tabs.
   interface Person { ref: string; names: string[]; techs: string[]; teams: Set<string>; subsBy: string[]; otherBy: string[]; phone: string; first: Row }
@@ -225,7 +282,7 @@ export function teamWorkbook(sheets: WorkbookSheet[], opts: { asOf: string }): T
     const { client } = splitClient(r.get("client"));
     const tech = r.get("technology");
     out.submissions.rows.push([r.get("date"), r.get("candidate"), personRef(r.get("candidate")), tech, tech, r.get("rate"),
-      r.get("vendor"), client, r.get("client"), r.get("recruiter"), r.get("lead"), r.get("manager"), ...src(r)]);
+      r.get("vendor"), client, r.get("client"), r.get("recruiter"), r.get("lead"), r.get("manager"), ...src(r), asTyped(r)]);
     const d = isoOf(r.get("date"));
     const ref = personRef(r.get("candidate"));
     if (d && client) {
@@ -263,7 +320,7 @@ export function teamWorkbook(sheets: WorkbookSheet[], opts: { asOf: string }): T
     if (!client) noClient++;
     out.interviews.rows.push([r.get("date"), r.get("candidate"), ref, r.get("technology"), job, r.get("interviewType"),
       d && d > opts.asOf ? "Scheduled" : "Completed", client, marker, vendor, r.get("support"), r.get("clientFeedback"),
-      r.get("candidateFeedback"), r.get("rejection"), r.get("recruiter"), r.get("lead"), r.get("manager"), ...src(r)]);
+      r.get("candidateFeedback"), r.get("rejection"), r.get("recruiter"), r.get("lead"), r.get("manager"), ...src(r), asTyped(r)]);
   }
 
   for (const r of rows.placements) {
@@ -273,7 +330,7 @@ export function teamWorkbook(sheets: WorkbookSheet[], opts: { asOf: string }): T
     out.placements.rows.push([r.get("date"), r.get("candidate"), personRef(r.get("candidate")), r.get("phone"), tech, tech,
       r.get("rate"), r.get("vendor"), client, partner, r.get("client"), "", "", joining ? r.get("joiningDate") : "",
       placementStatus(r.get("bgv"), joining, opts.asOf), r.get("bgv"), r.get("placementDate"), r.get("joiningDate"),
-      r.get("marketingCompany"), r.get("everifyCompany"), r.get("recruiter"), r.get("lead"), r.get("manager"), ...src(r)]);
+      r.get("marketingCompany"), r.get("everifyCompany"), r.get("recruiter"), r.get("lead"), r.get("manager"), ...src(r), asTyped(r)]);
   }
 
   return {

@@ -555,6 +555,8 @@ locals {
     { name = "AUTH_TEST_EMAILS", value = var.auth_test_emails },
     # Staging only: username + password sign-in for test users (migration 0083); the API refuses "on" elsewhere.
     { name = "PASSWORD_LOGIN", value = var.password_login },
+    # Staging only: the sheet-import upload page (docs/import.md); the API refuses "on" elsewhere.
+    { name = "IMPORT_UPLOAD", value = var.import_upload },
     { name = "NODE_EXTRA_CA_CERTS", value = "/app/certs/rds-global-bundle.pem" },
     { name = "AWS_REGION", value = var.aws_region },
     { name = "DOCUMENTS_BUCKET", value = aws_s3_bucket.b["documents"].id },
@@ -603,6 +605,10 @@ resource "aws_ecs_task_definition" "api" {
       error_message = "password_login must be off in production."
     }
     precondition {
+      condition     = !local.is_prod || var.import_upload == "off"
+      error_message = "import_upload must be off in production (the import runs in a migration window there)."
+    }
+    precondition {
       condition     = trimspace(var.google_hosted_domain) != ""
       error_message = "google_hosted_domain is empty: set it to the company Google Workspace domain in infra/live/<env>/env.hcl before deploying the API."
     }
@@ -627,7 +633,10 @@ resource "aws_ecs_task_definition" "api" {
     secrets = concat(local.app_secrets, [
       { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.generated["db/app/url"].arn },
       { name = "ORIGIN_VERIFY_SECRET", valueFrom = aws_ssm_parameter.generated["app/origin_secret"].arn },
-    ])
+      ], var.import_upload == "on" ? [
+      { name = "IMPORT_DATABASE_URL", valueFrom = aws_ssm_parameter.generated["db/import/url"].arn },
+      { name = "IMPORT_HMAC_KEY", valueFrom = aws_ssm_parameter.generated["import/hmac_key"].arn },
+    ] : [])
     healthCheck = {
       # The runtime image has no curl/wget; use Node's fetch.
       command  = ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
@@ -770,13 +779,17 @@ resource "aws_ecs_task_definition" "migrate" {
       { name = "EUREKA_ENVIRONMENT", value = var.environment },
       # Migration 0084: "on" lets one admin grant restricted roles without a second approver (written to the database on every migrate run).
       { name = "SINGLE_ADMIN_MODE", value = var.single_admin_mode },
+      # Staging: with the upload page on, the migrate run gives eureka_import a login (else NOLOGIN).
+      { name = "IMPORT_UPLOAD", value = var.import_upload },
     ]
-    secrets = [
+    secrets = concat([
       { name = "DB_MASTER_USERNAME", valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:username::" },
       { name = "DB_MASTER_PASSWORD", valueFrom = "${aws_db_instance.main.master_user_secret[0].secret_arn}:password::" },
       { name = "APP_DB_PASSWORD", valueFrom = aws_ssm_parameter.generated["db/app/password"].arn },
       { name = "WORKER_DB_PASSWORD", valueFrom = aws_ssm_parameter.generated["db/worker/password"].arn },
-    ]
+      ], var.import_upload == "on" ? [
+      { name = "IMPORT_DB_PASSWORD", valueFrom = aws_ssm_parameter.generated["db/import/password"].arn },
+    ] : [])
     logConfiguration = {
       logDriver = "awslogs"
       options = {

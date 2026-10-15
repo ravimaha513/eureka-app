@@ -123,6 +123,15 @@ resource "random_id" "feedback_token_key" {
   byte_length = 32
 }
 
+# Sheet-import upload page (staging only, var.import_upload): the eureka_import
+# login and the keyed-hash secret of import row and identity keys. Keep the
+# HMAC key for as long as imported data is kept: re-runs recognise rows by it.
+resource "random_password" "import" {
+  for_each = var.import_upload == "on" ? toset(["db", "hmac"]) : toset([])
+  length   = 48
+  special  = false
+}
+
 locals {
   ssm_prefix = "/eureka/${var.environment}"
   generated_params = {
@@ -134,10 +143,15 @@ locals {
     "app/origin_secret"         = random_password.origin_secret.result
     "worker/feedback_token_key" = random_id.feedback_token_key.hex
   }
+  import_params = var.import_upload == "on" ? {
+    "db/import/password" = random_password.import["db"].result
+    "db/import/url"      = "postgres://eureka_import:${random_password.import["db"].result}@${aws_db_instance.main.address}:5432/eureka?sslmode=verify-full"
+    "import/hmac_key"    = random_password.import["hmac"].result
+  } : {}
 }
 
 resource "aws_ssm_parameter" "generated" {
-  for_each = local.generated_params
+  for_each = merge(local.generated_params, local.import_params)
   name     = "${local.ssm_prefix}/${each.key}"
   type     = "SecureString"
   tier     = "Standard"

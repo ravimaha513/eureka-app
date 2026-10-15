@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseCsv } from "./csv.js";
-import { personRef, placementStatus, splitClient, teamWorkbook, workbookTexts } from "./team-workbook.js";
+import { canonicalNames, personRef, placementStatus, splitClient, teamWorkbook, workbookTexts } from "./team-workbook.js";
 import type { WorkbookSheet } from "./xlsx.js";
 
 const SUB_H = ["Date", "Candidate Name", "Technology", "Rate", "Vendor", "Client", "Manager", "Team Lead", "Recruiter Name"];
@@ -59,6 +59,16 @@ describe("team workbook helpers", () => {
     expect(placementStatus("", null, "2026-10-10")).toBe("Confirmed");
   });
 
+  it("merges hand-typed spellings of one name: word order, case, spacing, a letter or two", () => {
+    const m = canonicalNames(["Uday Kumar Aakula", "Uday Kumar Aakula", "Aakula Uday Kumar", "Priya  Ramaswamy",
+      "Priya Ramaswami", "priya ramaswamy", "Sam Lee", "Sam Lea"]);
+    expect(m.get("Aakula Uday Kumar")).toBe("Uday Kumar Aakula");
+    expect(m.get("Priya Ramaswami")).toBe("Priya Ramaswamy");
+    expect(m.get("priya ramaswamy")).toBe("Priya Ramaswamy");
+    // Short names need an exact match: "Sam Lea" may be someone else.
+    expect(m.get("Sam Lea")).toBe("Sam Lea");
+  });
+
   it("keys a person by the letters of the name, whatever the case and spacing", () => {
     expect(personRef("ASHA  Verma")).toBe(personRef("asha verma"));
     expect(personRef(" ")).toBe("");
@@ -89,7 +99,7 @@ describe("teamWorkbook", () => {
 
   it("submissions: end client, job title from technology, source tab and row", () => {
     expect(wb.sheets.submissions.rows[0]).toEqual(["2026-08-03", "Asha Verma", personRef("Asha Verma"), "Java", "Java", "65",
-      "northwind staffing", "Northwind Financial", "Contoso / Northwind Financial", "Priya Nair", "Rohit Das", "Mira Shah", "Rohit Submissions", "2"]);
+      "northwind staffing", "Northwind Financial", "Contoso / Northwind Financial", "Priya Nair", "Rohit Das", "Mira Shah", "Rohit Submissions", "2", ""]);
   });
 
   it("interviews: client inferred only from the recruiter's single client in the week before, scheduled after the as-of date", () => {

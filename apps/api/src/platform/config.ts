@@ -64,6 +64,12 @@ const ConfigSchema = z
     // Applicant sessions (separate from staff sessions).
     PORTAL_SESSION_IDLE_MINUTES: z.coerce.number().int().min(5).max(240).default(60),
     PORTAL_SESSION_HOURS: z.coerce.number().int().min(1).max(24).default(12),
+    // Sheet import from the admin UI (docs/import.md "Upload page"): staging and local only. The API then
+    // also holds a connection as eureka_import (staging + analysis + load, never the API role) and the
+    // keyed-hash secret. Production keeps the CLI-only migration window.
+    IMPORT_UPLOAD: z.enum(["on", "off"]).default("off"),
+    IMPORT_DATABASE_URL: z.string().url().optional(),
+    IMPORT_HMAC_KEY: z.string().optional(),
   })
   .superRefine((c, ctx) => {
     checkFieldCrypto(c, ctx, { bidx: true });
@@ -81,6 +87,14 @@ const ConfigSchema = z
     }
     if (c.PASSWORD_LOGIN === "on" && c.EUREKA_ENVIRONMENT !== "staging" && c.EUREKA_ENVIRONMENT !== "local") {
       ctx.addIssue({ code: "custom", message: "PASSWORD_LOGIN=on is only allowed when EUREKA_ENVIRONMENT is staging or local" });
+    }
+    if (c.IMPORT_UPLOAD === "on") {
+      if (c.EUREKA_ENVIRONMENT !== "staging" && c.EUREKA_ENVIRONMENT !== "local") {
+        ctx.addIssue({ code: "custom", message: "IMPORT_UPLOAD=on is only allowed when EUREKA_ENVIRONMENT is staging or local" });
+      }
+      if (!c.IMPORT_DATABASE_URL || !c.IMPORT_HMAC_KEY || c.IMPORT_HMAC_KEY.length < 32) {
+        ctx.addIssue({ code: "custom", message: "IMPORT_UPLOAD=on needs IMPORT_DATABASE_URL and IMPORT_HMAC_KEY (at least 32 characters)" });
+      }
     }
     if (c.ORIGIN_VERIFY_SECRET !== undefined) {
       const secrets = parseSecretList(c.ORIGIN_VERIFY_SECRET);

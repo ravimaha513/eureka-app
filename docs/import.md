@@ -104,6 +104,32 @@ Re-staging a later download: people are recognised by `Candidate Ref` (`person_a
 their row key, and a submission row whose cells changed by its natural key (candidate, client, job title, vendor,
 date), so nothing loads twice. Staging depends on `--as-of`; pass the same date to re-analyse an open batch.
 
+## Upload page (staging)
+
+Staging has no AWS credentials outside GitHub Actions, so the CLI cannot run there by hand. With
+`import_upload = "on"` (`infra/live/staging/env.hcl`; Terraform refuses it in production, and so does the API
+unless `EUREKA_ENVIRONMENT` is staging or local) an org admin runs a team-workbook import from
+**Users & Access → Imports**:
+
+1. Upload the `.xlsx` (sent as the raw file, at most 10 MB) with its "data as of" date. The API stages it as
+   `eureka_import` (a separate connection; in staging the migrate run gives that role a login, password
+   `/eureka/staging/db/import/password`, HMAC key `/eureka/staging/import/hmac_key`, both generated). The
+   admin's own ticket makes them the operator. Nothing is written to live tables.
+2. Staging starts empty, so run once per new team (Actions → ops-task, staging):
+   `node dist/db/staging-team.js --batch <batch id> [--location "Head office"] [--viewer someone@example.com]`.
+   From the batch's cells it adds the location, the technologies, and placeholder staff (`@staff.invalid`,
+   no sign-in): the manager, a lead and team per tab ("Rohit Submissions" -> team Rohit), each recruiter in
+   the team they logged most rows for. `--viewer` gives an existing non-admin account Associate Director
+   over them (a CEO account already sees everything). Re-running adds nothing twice.
+3. **Re-analyse**, **Approve N suggested rows** (inferred interview clients), **Review what would load…**
+   (counts, new clients and vendors, verification problems), **Approve batch**. In single-admin mode (0087)
+   the admin who uploaded may approve; otherwise a second org admin must.
+4. **Load into the app** runs in the background (the page polls; API Gateway allows 30 s per request).
+   A load interrupted by a restart leaves its remaining clean rows; press Load again.
+
+API: `GET/POST /api/v1/import-workbooks`, `GET /api/v1/import-workbooks/:id`, `POST .../:id/reanalyse`,
+`POST .../:id/load` (org admins); decisions, preview and approval stay `/api/v1/imports/...`.
+
 ## Where it runs
 
 As a one-off ECS task in the VPC (the API image, command

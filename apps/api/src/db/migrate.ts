@@ -115,9 +115,28 @@ export async function setRolePasswords(adminUrl: string, env: NodeJS.ProcessEnv 
       const lit = (await client.query<{ q: string }>("SELECT quote_literal($1) AS q", [pw])).rows[0]!.q;
       await client.query(`ALTER ROLE ${role} PASSWORD ${lit}`);
     }
+    await setImportLogin(client, env);
   } finally {
     await client.end();
   }
+}
+
+/**
+ * The upload page (IMPORT_UPLOAD=on, staging and local only) connects as eureka_import, so there
+ * the role keeps a login with the password from IMPORT_DB_PASSWORD; with the page off it goes back
+ * to NOLOGIN. Other environments are never touched: production opens a migration window by hand
+ * (docs/import.md), and a deploy must not end or open it.
+ */
+export async function setImportLogin(client: pg.Client, env: NodeJS.ProcessEnv = process.env): Promise<"login" | "nologin" | "untouched"> {
+  if (env.EUREKA_ENVIRONMENT !== "staging" && env.EUREKA_ENVIRONMENT !== "local") return "untouched";
+  if (env.IMPORT_UPLOAD === "on" && env.IMPORT_DB_PASSWORD) {
+    if (env.IMPORT_DB_PASSWORD.length < 32) throw new Error("IMPORT_DB_PASSWORD must be at least 32 characters");
+    const lit = (await client.query<{ q: string }>("SELECT quote_literal($1) AS q", [env.IMPORT_DB_PASSWORD])).rows[0]!.q;
+    await client.query(`ALTER ROLE eureka_import LOGIN PASSWORD ${lit}`);
+    return "login";
+  }
+  await client.query(`ALTER ROLE eureka_import NOLOGIN PASSWORD NULL`);
+  return "nologin";
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

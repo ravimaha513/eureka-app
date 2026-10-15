@@ -44,6 +44,16 @@ variable "password_login" {
   }
 }
 
+variable "import_upload" {
+  description = "Staging only: \"on\" adds the sheet-import upload page (docs/import.md \"Upload page\"). The API then connects as eureka_import (which keeps a login) with a keyed-hash secret. Must be \"off\" in production."
+  type        = string
+  default     = "off"
+  validation {
+    condition     = contains(["on", "off"], var.import_upload)
+    error_message = "import_upload must be on or off."
+  }
+}
+
 variable "vpc_cidr" { type = string }
 variable "public_subnet_cidrs" { type = list(string) }
 variable "private_subnet_cidrs" { type = list(string) }

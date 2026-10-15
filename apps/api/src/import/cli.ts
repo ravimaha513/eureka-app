@@ -27,7 +27,7 @@ import { parseArgs } from "node:util";
 import pg from "pg";
 import { makeHmac } from "./analyze.js";
 import { commitBatch } from "./commit.js";
-import { DEFAULT_MAPPING_PATH, SHEETS, type Sheet } from "./mapping.js";
+import { DEFAULT_MAPPING_PATH, SHEETS, TEAM_WORKBOOK_MAPPING_PATH, type Sheet } from "./mapping.js";
 import { formatReport, reconcile } from "./report.js";
 import { listReview, purgeBatch, purgeExpired } from "./review.js";
 import { applyProposal, AnthropicClient, proposeMapping, type LlmClient } from "./llm-mapper.js";
@@ -37,7 +37,7 @@ import { teamWorkbook, workbookTexts, type TeamWorkbook } from "./team-workbook.
 import { todayIso } from "./analyze.js";
 import { readWorkbook } from "./xlsx.js";
 
-export const TEAM_WORKBOOK_MAPPING_PATH = DEFAULT_MAPPING_PATH.replace(/mapping\.default\.json$/, "mapping.team-workbook.json");
+export { TEAM_WORKBOOK_MAPPING_PATH };
 
 const USAGE = `usage: cli.ts <stage|reanalyse|review|commit|report|purge|propose-mapping|workbook> [options]  (see docs/import.md)`;
 

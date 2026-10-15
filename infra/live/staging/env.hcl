@@ -19,6 +19,8 @@ locals {
   password_login = "on"
   # Migration 0084: one administrator can grant restricted roles without a second approver. Set "off" to restore AD-3.
   single_admin_mode = "on"
+  # Sheet-import upload page (docs/import.md "Upload page"); staging only, production stays off.
+  import_upload = "on"
   # jobs-portal: SES sender of applicant sign-in links and application notices (required by the API).
   portal_from_email = "careers@eureka-staging.spokenly.click"
 

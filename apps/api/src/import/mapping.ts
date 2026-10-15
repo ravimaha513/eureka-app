@@ -208,6 +208,8 @@ export function sheetConfig(cfg: MappingConfig, sheet: Sheet) {
 }
 
 export const DEFAULT_MAPPING_PATH = join(dirname(fileURLToPath(import.meta.url)), "mapping.default.json");
+/** Mapping for team workbooks (team-workbook.ts; docs/import.md "Team workbooks"). */
+export const TEAM_WORKBOOK_MAPPING_PATH = join(dirname(fileURLToPath(import.meta.url)), "mapping.team-workbook.json");
 
 export function parseMapping(json: unknown): MappingConfig {
   const r = MappingConfig.safeParse(json);

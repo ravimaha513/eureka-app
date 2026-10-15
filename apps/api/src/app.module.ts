@@ -33,6 +33,8 @@ import { DashboardController, DashboardService } from "./modules/dashboard/dashb
 import { HotlistController } from "./modules/hotlist/hotlist.controller.js";
 import { HotlistService } from "./modules/hotlist/hotlist.service.js";
 import { ImportsController, ImportsService } from "./modules/imports/imports.controller.js";
+import { ImportUploadController, ImportUploadService, XLSX_TYPE } from "./modules/imports/upload.js";
+import { XLSX_LIMITS } from "./import/xlsx.js";
 import { assertImportRoleIsolated } from "./platform/role-isolation.js";
 import { ResumesController } from "./modules/resumes/resumes.controller.js";
 import { ResumesService } from "./modules/resumes/resumes.service.js";
@@ -85,7 +87,7 @@ export class AppModule {
       module: AppModule,
       controllers: [
         FeedbackController, HealthController, AuthController, PasswordController, MeController, CandidatesController, SubmissionsController, InterviewsController,
-        AdminController, TeamsController, PlacementsController, LookupsController, DashboardController, HotlistController, ImportsController,
+        AdminController, TeamsController, PlacementsController, LookupsController, DashboardController, HotlistController, ImportsController, ImportUploadController,
         PaperworkController,
         ResumesController, NotificationsController, DocumentsController, StepUpController,
         EmployeesController, AssignmentsController, ReportsController, WorkAuthorizationController,
@@ -103,7 +105,7 @@ export class AppModule {
       providers: [
         { provide: CONFIG, useValue: config },
         DbService, SessionService, AccessService, AuditService, OidcService, SettingsService,
-        CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
+        CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService, ImportUploadService,
         PaperworkService,
         ResumesService, NotificationsService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
         WorkAuthorizationService, OwnersService, UtilitiesService, BillsService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
@@ -136,6 +138,11 @@ export async function createApp(config: AppConfig): Promise<NestFastifyApplicati
   await app.register(cookie as never);
   const fastify = app.getHttpAdapter().getInstance();
   if (config.ORIGIN_VERIFY_SECRET) fastify.addHook("onRequest", originGuard(config.ORIGIN_VERIFY_SECRET));
+  // Workbook uploads (staging/local, IMPORT_UPLOAD=on): the raw .xlsx, with its own size limit.
+  if (config.IMPORT_UPLOAD === "on") {
+    fastify.addContentTypeParser(XLSX_TYPE, { parseAs: "buffer", bodyLimit: XLSX_LIMITS.bytes },
+      (_req: unknown, body: Buffer, done: (err: Error | null, body?: Buffer) => void) => done(null, body));
+  }
   // Local document driver (development, tests): the API stands in for the bucket.
   if (storage instanceof LocalDocumentStorage) await registerLocalStorageRoutes(fastify, storage);
   fastify.addHook("onSend", async (_req, reply) => {
