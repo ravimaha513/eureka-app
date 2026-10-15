@@ -34,6 +34,7 @@ import { FieldCipher } from "./platform/crypto/field-crypto.js";
 import { createKeyProvider } from "./platform/crypto/config.js";
 import { keyRotationJob } from "./worker/jobs/key-rotation.js";
 import { visaExpiryJob } from "./worker/jobs/visa-expiry.js";
+import { birthdayDigestJob } from "./worker/jobs/birthdays.js";
 
 const log = createLogger({ service: "worker" });
 const config = loadWorkerConfig();
@@ -73,6 +74,8 @@ const jobs = [
   paperworkOverdueJob(),
   // jobs-portal: applicants who never confirmed their mailbox, after 30 days (ids and counts only in the log).
   portalPruneJob(30),
+  // interview-alerts (migration 0087): the CEO's morning staff-birthday digest into the outbox.
+  birthdayDigestJob(),
 ];
 {
   // Without a mail mode only the in-app channel is delivered; emailing events stay unpublished.

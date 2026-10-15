@@ -9,7 +9,7 @@ export interface InboxItem {
   type: string;
   title: string;
   body: string;
-  entity: { type: "placement" | "candidate" | "conversation" | "application"; id: string };
+  entity: { type: "placement" | "candidate" | "conversation" | "application" | "interview" | "digest"; id: string };
   createdAt: string;
   readAt: string | null;
 }

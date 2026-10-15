@@ -4,6 +4,7 @@ import { ROLE_LABELS, type Role } from "@eureka/shared";
 import type { Me } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
 import { DocumentsSection } from "../documents/DocumentsSection";
+import { ContractsSection } from "./ContractsSection";
 import { Drawer, Field, fmtDate } from "../sales/ui";
 import { pipelineError } from "./errors";
 import {
@@ -287,6 +288,8 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
                 </dl>
               )}
             </section>
+
+            {full && <ContractsSection placementId={id} />}
 
             {canReadDocuments && <DocumentsSection owner={{ kind: "placement", id }} title="Placement documents" />}
           </>

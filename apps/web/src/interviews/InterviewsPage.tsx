@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarPlus } from "lucide-react";
 import {
@@ -10,6 +10,7 @@ import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
 import { useLookups } from "../lookups";
 import { Drawer } from "../sales/ui";
 import { Avatar } from "../shell/ui";
+import { SupportCalendarBlock, SupportCalendarCard } from "../calendar/SupportCalendar";
 
 const STATUSES = ["scheduled", "in_progress", "completed", "rescheduled", "cancelled", "no_invite"];
 const label = (s: string) => s.replaceAll("_", " ");
@@ -282,6 +283,7 @@ export function InterviewDrawer({ item, displayZone, onClose }: { item: Intervie
         </dl>
         {i.callStatus === "scheduled" && <a className="btn sm calbtn" href={`/api/v1/interviews/${encodeURIComponent(i.id)}/calendar.ics`} download><CalendarPlus size={15} aria-hidden="true" /> Add to calendar (.ics)</a>}
       </section>
+      <SupportCalendarBlock interviewId={item.id} scheduled={i.callStatus === "scheduled"} />
       <section aria-labelledby={`${item.id}-rev`} className="reviewers">
         <h2 id={`${item.id}-rev`} className="sectiontitle">Reviewers</h2>
         {f.isPending && <p>Loading feedback…</p>}{f.isError && <p role="alert">Could not load feedback.</p>}
@@ -303,7 +305,7 @@ export function InterviewDrawer({ item, displayZone, onClose }: { item: Intervie
   );
 }
 
-export function InterviewsPage({ me }: { me: Me }) {
+export function InterviewsPage({ me, initialOpenId = null }: { me: Me; initialOpenId?: string | null }) {
   const [displayZone, setDisplayZone] = useState(zone);
   const [clientFilter, setClientFilter] = useState<Named | null>(null);
   const qc = useQueryClient(); const [from, setFrom] = useState(localInput(new Date().toISOString()).slice(0, 10)); const [to, setTo] = useState(""); const [status, setStatus] = useState(""); const [cleared, setCleared] = useState(""); const [locationId, setLocationId] = useState("");
@@ -316,6 +318,9 @@ export function InterviewsPage({ me }: { me: Me }) {
     return api<Page<Interview>>(`/api/v1/interviews?${p}`);
   }, getNextPageParam: p => p.nextCursor || undefined });
   const done = () => { setSchedule(false); setEdit(null); setNotice("Interview saved."); void qc.invalidateQueries({ queryKey: ["interviews"] }); void qc.invalidateQueries({ queryKey: ["interview"] }); };
+  // interview-alerts: opened from an inbox entry: load that interview and show its details.
+  const initial = useQuery({ queryKey: ["interview", initialOpenId], queryFn: () => api<InterviewDetail>(`/api/v1/interviews/${encodeURIComponent(initialOpenId!)}`), enabled: initialOpenId !== null });
+  useEffect(() => { if (initial.data) setDetails(initial.data); }, [initial.data]);
   const items = q.data?.pages.flatMap(p => p.items) ?? [];
   return <section className="panel"><div className="pagehead"><div><h1>Interviews</h1><p className="sub">Schedule, clear and review interviews. Board times in {displayZone}. Date filters and scheduling use {zone}.</p></div>{me.capabilities.includes("interview:create") && <button className="btn primary push" onClick={() => setSchedule(true)}>Schedule interview</button>}</div>
     <div className="toolbar"><Field title="Display timezone"><select value={displayZone} onChange={e => setDisplayZone(e.target.value)}><option value={zone}>{zone} (local)</option>{zone !== "America/New_York" && <option value="America/New_York">America/New_York (EST/EDT)</option>}</select></Field><Field title="From date"><input type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field title="Through date"><input type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>
@@ -325,6 +330,8 @@ export function InterviewsPage({ me }: { me: Me }) {
       <button className="btn" onClick={() => { setFrom(localInput(new Date().toISOString()).slice(0,10)); setTo(localInput(new Date().toISOString()).slice(0,10)); }}>Today</button>
       <button className="btn" onClick={() => { setFrom(""); setTo(""); setStatus(""); setCleared(""); setLocationId(""); setClientFilter(null); }}>Reset filters</button>
     </div>
+    {me.capabilities.includes("calendar:block") && <SupportCalendarCard />}
+    {initialOpenId && initial.isError && <p role="alert">That interview is no longer available to you.</p>}
     {clientFilter && <p className="hint">Client history: {clientFilter.name} <button className="btn" onClick={() => setClientFilter(null)}>Clear client filter</button></p>}
     {notice && <p role="status" className="livemsg">{notice}</p>}{invalidRange && <p role="alert">Through date must be on or after From date.</p>}
     {!invalidRange && q.isPending && <p>Loading interviews…</p>}{q.isError && <p role="alert">Could not load interviews. <button className="btn" onClick={() => void q.refetch()}>Retry</button></p>}

@@ -4,7 +4,7 @@ import { MailRejected, type MailTransport } from "../feedback-mail.js";
 import type { Logger } from "../log.js";
 import { DEFAULT_RUNNER_OPTIONS, type JobDefinition } from "../runner.js";
 import { IDEMPOTENCY_CLEANUP_SCHEDULE, OUTBOX_PRUNE_SCHEDULE, dueMaintenanceKeys } from "../schedule.js";
-import { DELIVERED_TYPES, EMAIL_TYPES, INBOX_TYPES, renderEmail, specOf, type EventSpec, type OutboxEvent } from "../notify-types.js";
+import { DELIVERED_TYPES, EMAIL_TYPES, INBOX_TYPES, inboxBodyWith, renderEmail, specOf, type EventSpec, type OutboxEvent } from "../notify-types.js";
 
 /**
  * Outbox delivery (design A7, B6, PL-7; migrations 0024, 0029, 0046). Each
@@ -139,10 +139,12 @@ async function prepare(
           `SELECT user_id FROM eureka.notification_preference WHERE type = $1 AND NOT in_app AND user_id = ANY ($2::uuid[])`,
           [ev.type, users])).rows.map((r) => r.user_id);
         const inbox = users.filter((u) => !muted.includes(u));
+        // Detail lines in the inbox only where the spec says so (staff names in a digest; never candidate contacts).
+        const body = spec.detailsInInbox && spec.details ? inboxBodyWith(box.body, await spec.details(ev, c)) : box.body;
         await c.query(
           `INSERT INTO eureka.notification (recipient_id, event_id, type, entity_type, entity_id, title, body)
            SELECT u, $2, $3, $4, $5, $6, $7 FROM unnest($1::uuid[]) AS u`,
-          [inbox, id, ev.type, box.entity.type, box.entity.id, box.title, box.body]);
+          [inbox, id, ev.type, box.entity.type, box.entity.id, box.title, body]);
         await c.query("INSERT INTO eureka.inbox_fanout (event_id, recipients) VALUES ($1, $2)", [id, users.length]);
         inApp = inbox.length;
       }
@@ -231,6 +233,8 @@ export async function deliverEvent(
 
   const pending = await pool.query<{ user_id: string }>(
     `SELECT user_id FROM eureka.outbox_delivery WHERE event_id = $1 AND status = 'pending' ORDER BY user_id`, [id]);
+  // Detail lines (EventSpec.details) are read once per run, before any send; a failure here retries the event.
+  const details = pending.rows.length && spec.details ? await spec.details(ev, pool) : [];
   let rejected = 0;
   for (const { user_id: userId } of pending.rows) {
     ctx.signal.throwIfAborted();
@@ -248,7 +252,7 @@ export async function deliverEvent(
         [id, userId]);
       continue;
     }
-    const { subject, text } = renderEmail(ev, origin, recipient.reasons);
+    const { subject, text } = renderEmail(ev, origin, recipient.reasons, details);
 
     // The dedupe marker: committed before the provider call.
     const claimed = await pool.query<{ rejections: number }>(

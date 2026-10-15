@@ -12,3 +12,5 @@ export * from "./interviews.js";
 export * from "./notifications.js";
 export * from "./chat.js";
 export * from "./jobs.js";
+export * from "./contracts.js";
+export * from "./birthdays.js";

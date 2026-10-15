@@ -33,6 +33,8 @@ export const NAV: NavItem[] = [
   { key: "performance", label: "Performance", section: "Insights", anyOf: ["performance:read"] },
   { key: "reports", label: "Reports", section: "Insights", anyOf: ["report:read"] },
   { key: "access", label: "Users & Access", section: "Admin", anyOf: ["access:manage"] },
+  // interview-alerts: HR keeps the staff birthdays the CEO's morning digest is built from.
+  { key: "birthdays", label: "Staff birthdays", section: "Admin", anyOf: ["staff.birthday:manage"] },
   // chat
   { key: "chat", label: "Chat", section: "Other", anyOf: ["chat:use"] },
 ];

@@ -1,10 +1,13 @@
 /** Typed client for Settings & Preferences (docs/interviews-settings-api.md ST-1..ST-9). */
+import type { Birthday } from "@eureka/shared";
 import { ApiError, api } from "../api";
 
 export interface SignIn { provider: "google" | "dev"; domain: string | null }
 export interface Profile {
   displayName: string; email: string; designation: string | null; location: string | null;
   phone: string | null; bio: string | null; rowVersion: number; signIn: SignIn;
+  /** interview-alerts BD-1: month and day only. */
+  birthday: Birthday | null;
 }
 export interface Preference { type: string; label: string; description: string; mandatory: boolean; inApp: boolean }
 export interface SessionRow {
@@ -16,7 +19,7 @@ const json = (b: unknown) => ({ body: JSON.stringify(b) });
 
 export const settingsApi = {
   profile: () => api<Profile>("/api/v1/settings/profile"),
-  saveProfile: (rowVersion: number, b: { phone: string | null; bio: string | null }) =>
+  saveProfile: (rowVersion: number, b: { phone: string | null; bio: string | null; birthday?: Birthday | null }) =>
     api<Profile>("/api/v1/settings/profile", { method: "PUT", headers: { "if-match": `"${rowVersion}"` }, ...json(b) }),
   preferences: () => api<{ items: Preference[] }>("/api/v1/settings/notifications"),
   setPreference: (type: string, inApp: boolean) =>

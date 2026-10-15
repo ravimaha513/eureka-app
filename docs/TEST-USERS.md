@@ -23,6 +23,7 @@ Sign in with the email and that password. These accounts exist only in your loca
 | `lead` | `l1@eureka.example`, `l2@eureka.example`, `l3@eureka.example` |
 | `recruiter` | `r1a@eureka.example`, `r1b@eureka.example`, `r2a@eureka.example`, `r3a@eureka.example` |
 | `interview_coach` | `coach@eureka.example` |
+| `interview_coordinator` | `coord@eureka.example` (support; gets the interview alerts, can block the support calendar) |
 | `location_ops_admin` | `locD@eureka.example` (Dallas), `opsA@eureka.example` (Austin) |
 | `location_incharge` | `locA@eureka.example` |
 | `hr` | `hr@eureka.example` |
