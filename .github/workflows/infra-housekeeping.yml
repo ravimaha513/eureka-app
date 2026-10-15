@@ -16,6 +16,8 @@ name: infra-housekeeping
 #    is versioned, so nothing is lost).
 
 on:
+  push: # TEMP: registers the workflow so it can be dispatched from this branch; removed before merge
+    branches: [claude/kind-moore-a5a5fa]
   workflow_dispatch:
     inputs:
       environment:
@@ -38,6 +40,7 @@ permissions:
 
 jobs:
   housekeeping:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: ${{ inputs.environment }}

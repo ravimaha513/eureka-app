@@ -14,6 +14,8 @@ name: ops-task
 # GOOGLE_HOSTED_DOMAIN and EUREKA_ENVIRONMENT, and runs in the "jobs" security group.
 
 on:
+  push: # TEMP: registers the workflow so it can be dispatched from this branch; removed before merge
+    branches: [claude/kind-moore-a5a5fa]
   workflow_dispatch:
     inputs:
       environment:
@@ -45,6 +47,7 @@ env:
 
 jobs:
   run:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: ${{ inputs.environment }}
