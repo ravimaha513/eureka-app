@@ -161,6 +161,16 @@ jobs:
           terragrunt apply -auto-approve -input=false
           terragrunt output -json > /tmp/out.json
 
+      # RDS creates /aws/rds/instance/<db>/postgresql itself, with no retention;
+      # cap it at log_retention_days like the app log groups (idempotent).
+      - name: RDS log group retention
+        run: |
+          GROUP="/aws/rds/instance/eureka-$ENVIRONMENT/postgresql"
+          WANT=$(sed -nE 's/^\s*log_retention_days\s*=\s*([0-9]+).*/\1/p' "infra/live/$ENVIRONMENT/env.hcl")
+          if [ "$(aws logs describe-log-groups --log-group-name-prefix "$GROUP" --query "length(logGroups[?logGroupName=='$GROUP'])")" != "0" ]; then
+            aws logs put-retention-policy --log-group-name "$GROUP" --retention-in-days "$WANT"
+          fi
+
       - name: Wait for API service to stabilise
         run: |
           aws ecs wait services-stable \

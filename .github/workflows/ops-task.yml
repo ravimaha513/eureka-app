@@ -1,0 +1,213 @@
+name: ops-task
+# One-off operations task for an environment, run from GitHub Actions with the
+# OIDC deploy role (no AWS credentials exist on anyone's machine). It starts a
+# Fargate task on the environment's `migrate` task definition with a command
+# override, waits for it, and prints the exit code and the task's CloudWatch
+# log lines. Runbook: infra/README.md, "Operations tasks (ops-task workflow)".
+#
+# Examples for the `command` input (one line, shell quoting):
+#   node dist/db/bootstrap.js --admin "First Admin <a@aceintegrator.com>" --admin b@aceintegrator.com
+#   node dist/db/set-password.js --email hr@example.com      (secret_env: EUREKA_NEW_PASSWORD=<temporary>)
+#   node dist/db/restore-check.js
+#
+# The migrate task definition carries the RDS master credentials, APP_DB_PASSWORD,
+# GOOGLE_HOSTED_DOMAIN and EUREKA_ENVIRONMENT, and runs in the "jobs" security group.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        default: staging
+      command:
+        description: 'Command for the migrate container, shell-quoted (e.g. node dist/db/bootstrap.js --admin "Name <a@aceintegrator.com>" --admin b@aceintegrator.com)'
+        type: string
+        required: true
+      env:
+        description: Extra environment variables, KEY=value, one per line (printed in the log)
+        type: string
+        default: ""
+      secret_env:
+        description: Secret environment variables, KEY=value, one per line (values masked in the log, e.g. EUREKA_NEW_PASSWORD=...)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_VERSION: 1.10.5
+  TG_VERSION: 0.77.22
+  TG_NON_INTERACTIVE: "true"
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: ops-task-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+      AWS_REGION: ${{ inputs.environment == 'production' && 'us-east-1' || 'us-east-2' }}
+    steps:
+      # Inputs are read through `env:` only: a value interpolated into a `run:`
+      # script is printed with the script in the log, and could inject shell.
+      - name: Mask secret values
+        env:
+          SECRET_ENV: ${{ inputs.secret_env }}
+        run: |
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            value=${line#*=}
+            [ -n "$value" ] && echo "::add-mask::$value"
+          done <<< "$SECRET_ENV"
+
+      - name: Check the AWS account is configured
+        env:
+          ACCOUNT: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          if [ -z "$ACCOUNT" ]; then
+            echo "::error::AWS_ACCOUNT_ID is not set for the $ENVIRONMENT environment or the repository (see infra/README.md, One-time setup)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Build the container override
+        env:
+          COMMAND: ${{ inputs.command }}
+          ENV_EXTRA: ${{ inputs.env }}
+          SECRET_ENV: ${{ inputs.secret_env }}
+        run: |
+          python3 - "$ENVIRONMENT" "$COMMAND" "$ENV_EXTRA" "$SECRET_ENV" > "$RUNNER_TEMP/overrides.json" <<'PY'
+          import json, shlex, sys
+          environment, command, plain, secret = sys.argv[1:5]
+          argv = shlex.split(command)
+          if not argv:
+              sys.exit("command is empty")
+          env = []
+          for blob in (plain, secret):
+              for line in blob.splitlines():
+                  line = line.strip()
+                  if not line:
+                      continue
+                  if "=" not in line:
+                      sys.exit(f"env entry without '=': {line[:40]}")
+                  key, value = line.split("=", 1)
+                  env.append({"name": key.strip(), "value": value})
+          names = [e["name"] for e in env]
+          if environment == "production" and "EUREKA_ENVIRONMENT" in names:
+              sys.exit("refused: never override EUREKA_ENVIRONMENT on production (infra/README.md)")
+          if len(names) != len(set(names)):
+              sys.exit("duplicate environment variable")
+          override = {"name": "migrate", "command": argv}
+          if env:
+              override["environment"] = env
+          print(json.dumps({"containerOverrides": [override]}))
+          print("command:", json.dumps(argv), file=sys.stderr)
+          print("environment variables:", ", ".join(names) or "(none)", file=sys.stderr)
+          PY
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/eureka-github-deploy-${{ env.ENVIRONMENT }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: eureka-ops-${{ github.run_id }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Install Terragrunt
+        run: |
+          curl -fsSL -o /usr/local/bin/terragrunt \
+            "https://github.com/gruntwork-io/terragrunt/releases/download/v${TG_VERSION}/terragrunt_linux_amd64"
+          chmod +x /usr/local/bin/terragrunt
+
+      # Same source of truth as deploy.yml: cluster, task family, public subnets
+      # and the jobs security group come from the stack's outputs (remote state).
+      - name: Read stack outputs
+        id: out
+        working-directory: infra/live/${{ env.ENVIRONMENT }}
+        run: |
+          terragrunt output -json > "$RUNNER_TEMP/out.json"
+          {
+            echo "cluster=$(jq -r .ecs_cluster.value "$RUNNER_TEMP/out.json")"
+            echo "migrate_td=$(jq -r .migrate_task_definition.value "$RUNNER_TEMP/out.json")"
+            echo "subnets=$(jq -r '.public_subnet_ids.value | join(",")' "$RUNNER_TEMP/out.json")"
+            echo "sg=$(jq -r .jobs_security_group_id.value "$RUNNER_TEMP/out.json")"
+          } | tee -a "$GITHUB_OUTPUT"
+
+      - name: Run the task and wait
+        id: task
+        env:
+          CLUSTER: ${{ steps.out.outputs.cluster }}
+          TASK_DEF: ${{ steps.out.outputs.migrate_td }}
+          SUBNETS: ${{ steps.out.outputs.subnets }}
+          SG: ${{ steps.out.outputs.sg }}
+        run: |
+          set -euo pipefail
+          TASK=$(aws ecs run-task \
+            --cluster "$CLUSTER" \
+            --task-definition "$TASK_DEF" \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=ENABLED}" \
+            --overrides "file://$RUNNER_TEMP/overrides.json" \
+            --started-by "ops-${{ github.run_id }}" \
+            --query 'tasks[0].taskArn' --output text)
+          if [ -z "$TASK" ] || [ "$TASK" = "None" ]; then
+            echo "::error::run-task returned no task (capacity or network problem)"; exit 1
+          fi
+          echo "task: $TASK"
+          echo "task_id=${TASK##*/}" >> "$GITHUB_OUTPUT"
+          # `aws ecs wait` gives up after 10 minutes; allow three rounds.
+          for i in 1 2 3; do
+            if aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK"; then break; fi
+            [ "$i" = 3 ] && { echo "::error::task still running after 30 minutes"; exit 1; }
+          done
+          aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK" \
+            --query 'tasks[0].{stoppedReason:stoppedReason,stopCode:stopCode,container:containers[0].{exitCode:exitCode,reason:reason,lastStatus:lastStatus}}' \
+            --output json | tee "$RUNNER_TEMP/task.json"
+          CODE=$(jq -r '.container.exitCode // "none"' "$RUNNER_TEMP/task.json")
+          echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Task log
+        if: always() && steps.task.outputs.task_id != ''
+        env:
+          TASK_ID: ${{ steps.task.outputs.task_id }}
+          EXIT_CODE: ${{ steps.task.outputs.exit_code }}
+        run: |
+          STREAM="migrate/migrate/$TASK_ID"
+          GROUP="/eureka/$ENVIRONMENT/migrate"
+          # Log lines can arrive a few seconds after the task stops.
+          for i in $(seq 1 6); do
+            aws logs get-log-events --log-group-name "$GROUP" --log-stream-name "$STREAM" \
+              --start-from-head --query 'events[].message' --output text > "$RUNNER_TEMP/log.txt" 2>/dev/null || true
+            [ -s "$RUNNER_TEMP/log.txt" ] && break
+            sleep 5
+          done
+          echo "::group::$GROUP $STREAM"
+          cat "$RUNNER_TEMP/log.txt"
+          echo "::endgroup::"
+          {
+            echo "## ops-task on $ENVIRONMENT"
+            echo
+            echo "- task: \`$TASK_ID\`"
+            echo "- exit code: **${EXIT_CODE:-unknown}** (bootstrap: 0 done or unchanged, 2 bad arguments, 3 refused by a safety check)"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/log.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Result
+        env:
+          EXIT_CODE: ${{ steps.task.outputs.exit_code }}
+        run: |
+          echo "exit code: $EXIT_CODE"
+          test "$EXIT_CODE" = "0"
