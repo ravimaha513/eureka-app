@@ -75,7 +75,9 @@ detail. The payload / inbox rule is unchanged; the producers' no-personal-data t
 | `CALENDAR_TOKEN_KEY` | 64 hex characters; required with `google` (AES-256-GCM key for the stored refresh token). Keep it with the other API secrets; rotating it needs a reconnect. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | the existing OAuth client (add the callback redirect URI) |
 
-Terraform does not set these yet (the stack has never been applied); add them with the other API secrets.
+Terraform: `calendar_mode` in `infra/live/<env>/env.hcl` (`google` on staging since 2026-10-15) sets `CALENDAR_MODE`
+and injects the generated `CALENDAR_TOKEN_KEY` (`/eureka/<env>/app/calendar_token_key`); the Google OAuth client needs the
+callback redirect URI added by hand (infra/README.md "Google OAuth client").
 
 ### Endpoints
 

@@ -87,6 +87,15 @@ variable "portal_from_email" {
     error_message = "portal_from_email must be empty or an email address."
   }
 }
+variable "calendar_mode" {
+  description = "Support calendar (interview-alerts, docs/alerts-calendar-birthdays.md): \"google\" lets calendar:block holders connect the support team's Google Calendar through the OAuth client (add the redirect URI <app>/api/v1/calendar/support/callback); \"disabled\" hides the feature."
+  type        = string
+  default     = "disabled"
+  validation {
+    condition     = contains(["disabled", "google"], var.calendar_mode)
+    error_message = "calendar_mode must be disabled or google (the in-memory dev mode is for local development only)."
+  }
+}
 variable "outbox_deliver_since" {
   description = "RFC 3339 cut-off: unpublished placement events created before it are marked published without email. Set when first enabling outbox mail."
   type        = string
