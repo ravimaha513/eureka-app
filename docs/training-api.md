@@ -11,7 +11,7 @@ View Students, per-student, per-course and per-module progress.
 
 | Permission | Granted to (scope) | Why |
 |---|---|---|
-| `training:read` | Location Incharge, Location Ops Admin (location); Interview Coach (coached); Recruiter (own), Lead (team), Manager and AD (hierarchy), Offshore Manager and CEO (org) | Location roles run training at their location; coaches train; Sales follow the progress of candidates they already own; leadership reads all. |
+| `training:read` | Location Incharge, Location Ops Admin (location); Interview Coach (coached); Recruiter (own), Lead (team), Manager and AD (hierarchy), CEO (org) | Location roles run training at their location; coaches train; Sales follow the progress of candidates they already own; leadership reads all. |
 | `training:manage` | Location Incharge, Location Ops Admin (location) | Course library, batches (create, edit, status, delete), courses of a batch, students. |
 | `training.progress:update` | Location Incharge, Location Ops Admin (location); Interview Coach (coached) | Marking modules complete. |
 

@@ -17,7 +17,7 @@ Migrations `0060_jobs.sql`, `0061_applicant_portal.sql`, `0062_applications.sql`
 
 | Permission | Roles and scope |
 |---|---|
-| `job:read` | recruiter `team`; lead `team`; manager, associate director `hierarchy`; offshore manager, CEO `org`; HR `org` |
+| `job:read` | recruiter `team`; lead `team`; manager, associate director `hierarchy`; CEO `org`; HR `org` |
 | `job:manage` | lead `team`; manager, associate director `hierarchy`; HR `org` |
 | `applicant:read`, `application:read`, `application:manage` | HR `org` |
 | `applicant.phone:read` | HR `org` (org-sensitive: HR was already a restricted role) |

@@ -566,6 +566,14 @@ const CASES: RejectCase[] = [
     forbidden: { members: [U.r1a], status: "active" },
   },
   {
+    route: "POST /api/v1/admin/locations", actor: "admin",
+    prepare: async () => ({
+      url: "/api/v1/admin/locations", body: { name: "MA Office", kind: "office" },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.location`),
+    }),
+    forbidden: { id: LOC.austin, status: "inactive" },
+  },
+  {
     route: "PUT /api/v1/admin/teams/:id/lead", actor: "admin",
     prepare: async () => ({
       url: `/api/v1/admin/teams/${T.t2}/lead`, body: { leadId: U.l1 },

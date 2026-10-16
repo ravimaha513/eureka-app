@@ -47,7 +47,7 @@ async function lookups(key: Key) {
 
 /** Pinned matrix (who sees what), independent of the engine so a grant change is a visible test change. */
 const SEES_COACHES = new Set<Key>(["ad", "m1", "m2", "l1", "l2", "l3", "r1a", "r1b", "r2a", "r3a", "locD", "locA"]);
-const SEES_PARTIES = new Set<Key>([...SEES_COACHES, "ceo", "om", "hr", "acct"]);
+const SEES_PARTIES = new Set<Key>([...SEES_COACHES, "ceo", "hr", "acct"]);
 
 const anyOf = (key: Key, perms: Permission[]) => perms.some((p) => can(toUserAccess(key), p));
 

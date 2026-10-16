@@ -3,6 +3,7 @@ import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/
 import {
   AddMember,
   BulkCreateUsers,
+  CreateLocation,
   CreateRoleRequest,
   CreateTeam,
   CreateUser,
@@ -108,6 +109,13 @@ export class AdminController {
   @HttpCode(200)
   reject(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.svc.decide(user, id, "reject");
+  }
+
+  // ---------- locations ----------
+
+  @Post("locations")
+  createLocation(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
+    return this.svc.createLocation(user, CreateLocation.parse(body));
   }
 
   // ---------- teams ----------

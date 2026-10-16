@@ -227,7 +227,6 @@ const EXPECTED: Record<string, { groupBy: string; totals: Record<string, number>
   m1: { groupBy: "team", totals: all(6, 4, 2, 3, 1, 3) },
   m2: { groupBy: "team", totals: all(2, 1, 1, 1, 1, 2) },
   ad: { groupBy: "team", totals: all(7, 4, 3, 3, 2, 5) },
-  om: { groupBy: "location", totals: all(7, 4, 3, 3, 2, 5) },
   ceo: { groupBy: "location", totals: all(7, 4, 3, 3, 2, 5) },
   locD: { groupBy: "location", totals: all(4, 2, 1, 1, 2, 3) },
   locA: { groupBy: "location", totals: all(3, 2, 2, 2, 0, 2) },

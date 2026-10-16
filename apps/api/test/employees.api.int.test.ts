@@ -254,7 +254,7 @@ const PLAN: [key: string, actor: string, team: string, start: string, end: strin
 const EXPECTED: Partial<Record<Key, [number, number] | 403>> = {
   r1a: [1, 0], r1b: [0, 1], r2a: [1, 1], r3a: [1, 0],
   l1: [2, 2], l2: [1, 1], l3: [1, 0], m1: [3, 3], m2: [1, 0],
-  ad: [4, 3], om: [4, 3], ceo: [4, 3], hr: [4, 3], acct: [4, 3], bu: [4, 3],
+  ad: [4, 3], ceo: [4, 3], hr: [4, 3], acct: [4, 3], bu: [4, 3],
   locD: [0, 0], locA: [0, 0], coach: 403, admin: 403, admin2: 403, imm: 403, ahr: 403, docs: 403,
 };
 
@@ -340,7 +340,7 @@ describe("joinings/exits report", () => {
 
   it("rate-limits exports per user", async () => {
     const codes: number[] = [];
-    for (let i = 0; i < 6; i++) codes.push((await call("om", "POST", "/api/v1/reports/joinings-exits/export", PERIOD)).statusCode);
+    for (let i = 0; i < 6; i++) codes.push((await call("ceo", "POST", "/api/v1/reports/joinings-exits/export", PERIOD)).statusCode);
     expect(codes.slice(0, 5)).toEqual([200, 200, 200, 200, 200]);
     expect(codes[5]).toBe(429);
   });

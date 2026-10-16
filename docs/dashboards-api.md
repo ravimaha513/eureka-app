@@ -8,7 +8,7 @@ implementation plan Phase 2, design B7). Code: `apps/api/src/modules/dashboard`;
 ## Access
 
 - Requires `report:read` (403 otherwise). Holders: Recruiter (own), Lead (team), Manager and
-  Associate Director (hierarchy), Offshore Manager, CEO, HR, Accounts and BU Head (org), Location
+  Associate Director (hierarchy), CEO, HR, Accounts and BU Head (org), Location
   Incharge and Location Ops Admin (location). No new permission was added.
 - The web nav shows Dashboard to `report:read` holders only (it used to also list `performance:read`;
   every holder of that also holds `report:read`). The default landing page is unchanged.

@@ -6,7 +6,7 @@ import type { Role, UserAccess, CandidateRef } from "@eureka/shared";
  * (toUserAccess) is derived from these definitions, NOT from the database,
  * so the differential tests compare two independent implementations.
  *
- * Hierarchy: ceo <- om <- ad <- m1 <- l1 <- {r1a, r1b}
+ * Hierarchy: ceo <- ad <- m1 <- l1 <- {r1a, r1b}
  *                                  m1 <- l2 <- {r2a}
  *                           ad <- m2 <- l3 <- {r3a}
  */
@@ -16,7 +16,7 @@ type UserDef = { id: string; roles: { role: Role; location?: keyof typeof LOC }[
 const uid = (n: number) => `00000000-0000-0000-0000-${n.toString().padStart(12, "0")}`;
 
 export const U = {
-  ceo: uid(1), om: uid(2), ad: uid(3), m1: uid(4), m2: uid(5),
+  ceo: uid(1), ad: uid(3), m1: uid(4), m2: uid(5),
   l1: uid(6), l2: uid(7), l3: uid(8), r1a: uid(9), r1b: uid(10), r2a: uid(11), r3a: uid(12),
   coach: uid(13), locD: uid(14), locA: uid(15), hr: uid(16), acct: uid(17), admin: uid(18), imm: uid(19),
   // Second org admin: role requests for restricted roles need a second approver (admin-api.md AD-3).
@@ -25,8 +25,7 @@ export const U = {
 
 export const USERS: Record<keyof typeof U, UserDef> = {
   ceo: { id: U.ceo, roles: [{ role: "ceo" }] },
-  om: { id: U.om, roles: [{ role: "offshore_manager" }], manager: U.ceo },
-  ad: { id: U.ad, roles: [{ role: "assoc_director" }], manager: U.om },
+  ad: { id: U.ad, roles: [{ role: "assoc_director" }], manager: U.ceo },
   m1: { id: U.m1, roles: [{ role: "manager" }], manager: U.ad },
   m2: { id: U.m2, roles: [{ role: "manager" }], manager: U.ad },
   l1: { id: U.l1, roles: [{ role: "lead" }], manager: U.m1 },

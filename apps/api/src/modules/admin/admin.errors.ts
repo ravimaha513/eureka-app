@@ -53,5 +53,6 @@ export function mapAdminError(err: unknown): never {
   // Concurrent inserts hitting the membership exclusion constraint.
   if (e.code === "23P01") throw new ConflictException("already_member");
   if (e.code === "23505" && e.constraint === "app_user_email_key") throw new ConflictException("email_exists");
+  if (e.code === "23505" && e.constraint === "location_name_key") throw new ConflictException("location_exists");
   throw err;
 }

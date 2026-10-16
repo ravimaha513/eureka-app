@@ -26,7 +26,6 @@ export const ROLES = [
   "lead",
   "manager",
   "assoc_director",
-  "offshore_manager",
   "ceo",
   "location_incharge",
   "location_ops_admin",
@@ -47,7 +46,6 @@ export const ROLE_LABELS: Record<Role, string> = {
   lead: "Lead (Sales)",
   manager: "Manager (Sales)",
   assoc_director: "Associate Director",
-  offshore_manager: "Offshore Office Manager",
   ceo: "CEO",
   location_incharge: "Location Incharge",
   location_ops_admin: "Location Ops Admin",
@@ -68,7 +66,6 @@ export const SALES_ROLES: readonly Role[] = [
   "lead",
   "manager",
   "assoc_director",
-  "offshore_manager",
   "ceo",
 ];
 
@@ -286,31 +283,6 @@ export const GRANTS: Record<Role, Grants> = {
     // jobs-portal
     "job:read": "hierarchy",
     "job:manage": "hierarchy",
-  },
-  offshore_manager: {
-    "candidate:read": "org",
-    "candidate:assign": "org",
-    "assignment:read": "org",
-    "candidate.phone:read": "org",
-    "hotlist:read": "org",
-    "submission:read": "org",
-    "interview:read": "org",
-    "placement:read": "org",
-    "rate:read": "org",
-    "performance:read": "org",
-    "report:read": "org",
-    "report:export": "org",
-    "vendor.preferred:read": "org",
-    "team:move_member": "org",
-    "designation:change": "org",
-    // datahub
-    "datahub:read": "own",
-    // training
-    "training:read": "org",
-    // chat
-    "chat:use": "own",
-    // jobs-portal
-    "job:read": "org",
   },
   ceo: {
     "candidate:read": "org",

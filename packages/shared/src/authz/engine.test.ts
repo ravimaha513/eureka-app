@@ -87,7 +87,7 @@ describe("catalog integrity", () => {
 
   it("restricted roles (second approver): org_admin, restricted-permission holders, org-wide sensitive holders", () => {
     expect(ROLES.filter(isRestrictedRole).sort()).toEqual(
-      ["accounts", "associate_hr", "bu_head", "ceo", "documents_team", "hr", "immigration", "location_ops_admin", "offshore_manager", "org_admin"]);
+      ["accounts", "associate_hr", "bu_head", "ceo", "documents_team", "hr", "immigration", "location_ops_admin", "org_admin"]);
     for (const role of ROLES) {
       const holdsRestricted = RESTRICTED_PERMISSIONS.some((p) => GRANTS[role][p]);
       const orgSensitive = ORG_SENSITIVE_PERMISSIONS.some((p) => GRANTS[role][p] === "org");
@@ -112,7 +112,7 @@ describe("catalog integrity", () => {
   });
 
   it("no Sales role can read DOB or restricted documents", () => {
-    for (const role of ["recruiter", "lead", "manager", "assoc_director", "offshore_manager", "ceo"] as const) {
+    for (const role of ["recruiter", "lead", "manager", "assoc_director", "ceo"] as const) {
       expect(GRANTS[role]["candidate.dob:read"]).toBeUndefined();
       expect(GRANTS[role]["document.restricted:read"]).toBeUndefined();
     }
