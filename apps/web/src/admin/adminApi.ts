@@ -5,6 +5,8 @@ export interface Ref { id: string; displayName: string }
 export interface Place { id: string; name: string }
 
 export interface RoleMeta { key: string; label: string; restricted: boolean; locationBound: boolean }
+export const LOCATION_KINDS = ["training", "gh", "office", "remote"] as const;
+export type LocationKind = (typeof LOCATION_KINDS)[number];
 export interface AdminMeta { roles: RoleMeta[]; locations: Place[]; singleAdminMode?: boolean }
 
 export interface UserRole { key: string; label: string; locationId: string | null; locationName: string | null }
@@ -80,6 +82,9 @@ export const adminApi = {
   reject: (id: string) => api<{ status: "rejected" }>(`/api/v1/admin/role-requests/${enc(id)}/reject`, { method: "POST" }),
   revokeRole: (userId: string, role: string, locationId: string | null) =>
     api<void>(`/api/v1/admin/users/${enc(userId)}/roles/${enc(role)}${locationId ? `?locationId=${enc(locationId)}` : ""}`, { method: "DELETE" }),
+
+  createLocation: (b: { name: string; kind: LocationKind; state?: string; timezone?: string }) =>
+    api<{ id: string }>("/api/v1/admin/locations", { method: "POST", ...json(b) }),
 
   teams: () => api<{ items: Team[] }>("/api/v1/admin/teams"),
   createTeam: (b: { name: string; leadId: string; locationId?: string }) =>

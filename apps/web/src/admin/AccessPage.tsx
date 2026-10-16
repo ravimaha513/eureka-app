@@ -4,11 +4,13 @@ import { AccessContext } from "./shared";
 import { UsersTab } from "./UsersTab";
 import { ApprovalsTab } from "./ApprovalsTab";
 import { TeamsTab } from "./TeamsTab";
+import { LocationsTab } from "./LocationsTab";
 
 const TABS = [
   { key: "users", label: "Users" },
   { key: "approvals", label: "Approvals" },
   { key: "teams", label: "Teams" },
+  { key: "locations", label: "Locations" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
@@ -49,7 +51,7 @@ export function AccessPage({ me, initialTab = "users" }: { me: Me; initialTab?: 
       </div>
       <div className="livemsg" role="status" aria-live="polite">{message}</div>
       <section role="tabpanel" id={`access-panel-${tab}`} aria-labelledby={`access-tab-${tab}`} className="panel">
-        {tab === "users" ? <UsersTab /> : tab === "approvals" ? <ApprovalsTab /> : <TeamsTab />}
+        {tab === "users" ? <UsersTab /> : tab === "approvals" ? <ApprovalsTab /> : tab === "teams" ? <TeamsTab /> : <LocationsTab />}
       </section>
     </AccessContext.Provider>
   );
