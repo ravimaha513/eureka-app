@@ -92,7 +92,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-const renderPage = (tab?: "users" | "approvals" | "teams", me: Me = ME) =>
+const renderPage = (tab?: "users" | "approvals" | "teams" | "locations", me: Me = ME) =>
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <AccessPage me={me} initialTab={tab} />
@@ -481,6 +481,36 @@ describe("Teams tab", () => {
     fireEvent.click(within(dlg).getByRole("button", { name: "Change lead" }));
     await waitFor(() => expect(status()).toHaveTextContent("Priya Rao now leads Team Anjali."));
     expect(lastWrite()).toMatchObject({ method: "PUT", path: "/api/v1/admin/teams/t2/lead", body: { leadId: "u-priya" } });
+  });
+});
+
+describe("Locations tab", () => {
+  it("lists locations and creates one with kind, state and time zone", async () => {
+    routes["POST /api/v1/admin/locations"] = () => ({ status: 201, body: { id: "loc-new" } });
+    renderPage("locations");
+    expect(within(await screen.findByRole("list", { name: "Locations" })).getByText("Dallas")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "New location" }));
+    const dlg = await screen.findByRole("dialog", { name: "New location" });
+    fireEvent.change(within(dlg).getByLabelText("Location name"), { target: { value: "Houston" } });
+    fireEvent.change(within(dlg).getByLabelText("Kind"), { target: { value: "office" } });
+    fireEvent.change(within(dlg).getByLabelText(/State/), { target: { value: "TX" } });
+    fireEvent.change(within(dlg).getByLabelText(/Time zone/), { target: { value: "America/Chicago" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create location" }));
+    await waitFor(() => expect(status()).toHaveTextContent("Created Houston."));
+    expect(lastWrite()).toMatchObject({ method: "POST", path: "/api/v1/admin/locations",
+      body: { name: "Houston", kind: "office", state: "TX", timezone: "America/Chicago" } });
+  });
+
+  it("shows the duplicate-name error inside the dialog", async () => {
+    routes["POST /api/v1/admin/locations"] = () => problem(409, "location_exists");
+    renderPage("locations");
+    fireEvent.click(await screen.findByRole("button", { name: "New location" }));
+    const dlg = await screen.findByRole("dialog", { name: "New location" });
+    fireEvent.change(within(dlg).getByLabelText("Location name"), { target: { value: "Dallas" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create location" }));
+    expect(await within(dlg).findByRole("alert")).toHaveTextContent(ERROR_MESSAGES.location_exists!);
+    expect(lastWrite().body).toEqual({ name: "Dallas", kind: "office" });
   });
 });
 
