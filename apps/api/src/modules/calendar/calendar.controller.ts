@@ -1,15 +1,17 @@
-import { Controller, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req, Res } from "@nestjs/common";
+import { Controller, ForbiddenException, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req, Res } from "@nestjs/common";
+import { can } from "@eureka/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { CALENDAR_PROVIDER, DevCalendarProvider, type CalendarProvider } from "./calendar.provider.js";
-import { CallbackQuery, ConnectQuery } from "./calendar.schemas.js";
+import { BusyQuery, CallbackQuery, ConnectQuery } from "./calendar.schemas.js";
 import { CALENDAR_STATE_COOKIE, CalendarService } from "./calendar.service.js";
 
 /**
  * The support calendar connection (docs/alerts-calendar-birthdays.md CA-1..CA-3):
  * status, the OAuth round trip (top-level navigation, so the session cookie
- * travels with it) and disconnect. calendar:block holders only.
+ * travels with it) and disconnect. calendar:block holders only, except the
+ * free/busy read (CA-7), open to interview:create holders too.
  */
 @Controller("api/v1/calendar/support")
 export class CalendarController {
@@ -51,6 +53,20 @@ export class CalendarController {
   @RequirePermission("calendar:block")
   disconnect(@CurrentUser() user: AuthedUser) {
     return this.svc.disconnect(user);
+  }
+
+  /**
+   * CA-7: busy periods of the support calendar in a window of up to 31 days, for
+   * calendar:block or interview:create holders (a scheduling aid; it never blocks
+   * a save). Intervals only; nothing cached, nothing audited. The permission is
+   * checked here because RequirePermission takes one permission.
+   */
+  @Get("busy")
+  busy(@CurrentUser() user: AuthedUser, @Query() query: unknown) {
+    if (!can(user.access, "calendar:block") && !can(user.access, "interview:create")) throw new ForbiddenException("Not permitted");
+    if (this.config.CALENDAR_MODE === "disabled") return { connected: false, available: false, busy: [] };
+    const { from, to } = BusyQuery.parse(query);
+    return this.svc.busy(user, from, to);
   }
 
   /** Development only (dev provider): the events the fake calendar holds, for checking a block by hand. */

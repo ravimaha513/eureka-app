@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
+import { BadGatewayException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import type pg from "pg";
 import { INTERVIEW_TYPE_LABELS, activityVisible, resolveScope } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
@@ -7,12 +7,14 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { decryptToken, encryptToken } from "../../worker/feedback-mail.js";
-import { CALENDAR_PROVIDER, type CalendarProvider } from "./calendar.provider.js";
+import { CALENDAR_PROVIDER, type BusyInterval, type CalendarProvider } from "./calendar.provider.js";
 
 export const CALENDAR_STATE_COOKIE = "eureka_calendar";
 const KEY = "support";
 
-interface ConnectionRow { provider: string; calendar_id: string; account_email: string; token_enc: string; connected_at: Date; connected_by: string; connected_by_name: string | null }
+interface ConnectionRow { provider: string; calendar_id: string; account_email: string; token_enc: string; scopes: string; connected_at: Date; connected_by: string; connected_by_name: string | null }
+/** The definer function's row for the free/busy read (migration 0090): no account, no who-connected. */
+interface FreeBusyConnectionRow { provider: string; calendar_id: string; token_enc: string; scopes: string }
 interface InterviewRow {
   id: string; round: string; starts_at: Date; ends_at: Date; call_status: string; interview_type: string | null; meeting_url: string | null;
   recruiter_id: string; team_id: string | null; location_id: string | null; c_recruiter: string | null; c_team: string | null; c_location: string | null;
@@ -22,12 +24,14 @@ interface BlockRow { id: string; calendar_id: string; external_id: string; start
 
 /**
  * The support team's shared calendar (interview-alerts package, migration 0088;
- * docs/alerts-calendar-birthdays.md CA-1..CA-6). One connection for the
+ * docs/alerts-calendar-birthdays.md CA-1..CA-7). One connection for the
  * organisation, made by a calendar:block holder who signs in with the Google
  * account that owns (or may write to) the support calendar. Sales leads and
  * coordinators then block the calendar for an interview's slot and release it
- * again. The refresh token is stored AES-256-GCM encrypted under
- * CALENDAR_TOKEN_KEY (dev mode: a key derived from the session secret).
+ * again, and anyone who schedules interviews may ask whether the calendar is
+ * busy for a slot (intervals only, CA-7). The refresh token is stored
+ * AES-256-GCM encrypted under CALENDAR_TOKEN_KEY (dev mode: a key derived
+ * from the session secret).
  */
 @Injectable()
 export class CalendarService {
@@ -67,7 +71,7 @@ export class CalendarService {
 
   private async connection(c: pg.PoolClient): Promise<ConnectionRow | null> {
     const { rows } = await c.query<ConnectionRow>(
-      `SELECT k.provider, k.calendar_id, k.account_email::text AS account_email, k.token_enc, k.connected_at, k.connected_by, u.display_name AS connected_by_name
+      `SELECT k.provider, k.calendar_id, k.account_email::text AS account_email, k.token_enc, k.scopes, k.connected_at, k.connected_by, u.display_name AS connected_by_name
          FROM eureka.calendar_connection k LEFT JOIN eureka.app_user u ON u.id = k.connected_by WHERE k.key = $1`, [KEY]);
     return rows[0] ?? null;
   }
@@ -75,6 +79,8 @@ export class CalendarService {
     return {
       mode: this.mode,
       connected: k !== null,
+      /** False for a connection made before the free/busy scope (CA-7): the card offers a reconnect. */
+      freeBusy: k !== null && this.provider.freeBusyGranted(k.scopes),
       calendarId: k?.calendar_id ?? null,
       accountEmail: k?.account_email ?? null,
       connectedAt: k?.connected_at ?? null,
@@ -91,14 +97,14 @@ export class CalendarService {
   }
 
   async complete(user: AuthedUser, code: string, calendarId: string) {
-    const { refreshToken, email } = await this.provider.exchange(code, this.redirectUri());
+    const { refreshToken, email, scopes } = await this.provider.exchange(code, this.redirectUri());
     const tokenEnc = encryptToken(refreshToken, this.tokenKey);
     return this.db.withUser(user.id, async (c) => {
       await c.query(
-        `INSERT INTO eureka.calendar_connection (key, provider, calendar_id, account_email, token_enc) VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO eureka.calendar_connection (key, provider, calendar_id, account_email, token_enc, scopes) VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (key) DO UPDATE SET provider = EXCLUDED.provider, calendar_id = EXCLUDED.calendar_id,
-           account_email = EXCLUDED.account_email, token_enc = EXCLUDED.token_enc`,
-        [KEY, this.provider.kind, calendarId, email, tokenEnc]);
+           account_email = EXCLUDED.account_email, token_enc = EXCLUDED.token_enc, scopes = EXCLUDED.scopes`,
+        [KEY, this.provider.kind, calendarId, email, tokenEnc, scopes]);
       // The account and calendar addresses are redacted by the audit service; the fact of a connection is kept.
       await this.audit.record(c, { actorId: user.id, action: "calendar.connected", entityType: "calendar_connection", changes: { provider: this.provider.kind } });
       return this.presentConnection(await this.connection(c));
@@ -111,6 +117,28 @@ export class CalendarService {
       if (n) await this.audit.record(c, { actorId: user.id, action: "calendar.disconnected", entityType: "calendar_connection", changes: {} });
       return this.presentConnection(null);
     });
+  }
+
+  /**
+   * CA-7: the support calendar's busy periods in [from, to) for whoever schedules
+   * or blocks interviews. The row comes through the definer function (the table's
+   * policies stay calendar:block only), the provider is asked outside the
+   * transaction, and only intervals come back: no titles, no attendees, no
+   * account. Nothing is cached and nothing is audited (a read).
+   */
+  async busy(user: AuthedUser, from: Date, to: Date): Promise<{ connected: boolean; available: boolean; busy: { startsAt: string; endsAt: string }[] }> {
+    const k = await this.db.withUser(user.id, async (c) =>
+      (await c.query<FreeBusyConnectionRow>(`SELECT provider, calendar_id, token_enc, scopes FROM authz.calendar_freebusy_connection()`)).rows[0] ?? null);
+    if (!k) return { connected: false, available: false, busy: [] };
+    if (!this.provider.freeBusyGranted(k.scopes)) return { connected: true, available: false, busy: [] };
+    let intervals: BusyInterval[];
+    try {
+      intervals = await this.provider.freeBusy(decryptToken(k.token_enc, this.tokenKey), k.calendar_id, from, to);
+    } catch {
+      // The provider's message is not forwarded (it can name the calendar); the client shows a generic line.
+      throw new BadGatewayException("calendar_unavailable");
+    }
+    return { connected: true, available: true, busy: intervals.map((b) => ({ startsAt: b.startsAt.toISOString(), endsAt: b.endsAt.toISOString() })) };
   }
 
   /** The interview under the caller's RLS (404), then the calendar:block scope over its actor snapshot (403). */

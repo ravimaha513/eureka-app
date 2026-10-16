@@ -1,7 +1,7 @@
 # Interview alerts, contracts, support calendar and staff birthdays: API contract
 
 Package **interview-alerts** (2026-10-15, owner request). Built in migrations `0086_contracts.sql`,
-`0087_staff_birthdays.sql`, `0088_calendar.sql` and `0089_interview_alerts.sql`;
+`0087_staff_birthdays.sql`, `0088_calendar.sql`, `0089_interview_alerts.sql` and `0090_calendar_freebusy.sql`;
 `apps/api/src/modules/{contracts,calendar,staff}`, the settings profile (`identity/settings.*`), the worker's
 `notify-types.ts` (three event types and the delivery-time detail hook), `worker/jobs/birthdays.ts`; web: Interviews
 (support calendar card, block / release in the drawer, opened from the inbox), Placements (Contracts section), Settings
@@ -62,10 +62,11 @@ detail. The payload / inbox rule is unchanged; the producers' no-personal-data t
 |---|---|
 | CA-1 One shared connection per organisation (`eureka.calendar_connection`, key `support`): provider (`google` or `dev`), the calendar id (`primary` or an address such as `support@company.com`), the Google account that authorised it, and the refresh token as AES-256-GCM ciphertext under `CALENDAR_TOKEN_KEY` (64 hex; dev mode derives a key from the session secret). The key is never in the database; the worker never reads the table. | guard trigger (server-set `connected_by`, times), RLS `has_perm('calendar:block')` |
 | CA-2 `calendar:block` is granted to Sales leads (`lead` team, `manager` / `assoc_director` hierarchy) and to interview coordinators (org). Any holder may connect or disconnect (the connection is shared) and sees its status; nobody else sees that a connection exists. | catalog, RLS, `RequirePermission` |
-| CA-3 Connecting is a top-level Google sign-in (OAuth 2.0 code flow with `access_type=offline`, `prompt=consent`, scopes `openid email calendar.events`) started at `GET /calendar/support/connect?calendarId=`; a signed, 10-minute state cookie bound to the caller's user id is checked at `GET /calendar/support/callback` (403 `calendar_state_expired` / `calendar_state_mismatch`); the browser returns to the app. The Google OAuth client needs the redirect URI `<PUBLIC_BASE_URL>/api/v1/calendar/support/callback`. | `CalendarService.signState / readState`, `GoogleCalendarProvider` |
+| CA-3 Connecting is a top-level Google sign-in (OAuth 2.0 code flow with `access_type=offline`, `prompt=consent`, scopes `openid email calendar.events calendar.freebusy`; the scopes Google granted are stored with the connection) started at `GET /calendar/support/connect?calendarId=`; a signed, 10-minute state cookie bound to the caller's user id is checked at `GET /calendar/support/callback` (403 `calendar_state_expired` / `calendar_state_mismatch`); the browser returns to the app. The Google OAuth client needs the redirect URI `<PUBLIC_BASE_URL>/api/v1/calendar/support/callback`. | `CalendarService.signState / readState`, `GoogleCalendarProvider` |
 | CA-4 **Block**: `POST /interviews/:id/calendar-block` creates a busy event on the connected calendar for the interview's slot (summary "Interview: round – candidate", description with candidate, client, position, round, type, meeting link, recruiter) and records one active `calendar_block` per interview. The interview must be visible (404), `calendar:block` must cover its actor snapshot (403), the interview must be `scheduled` (422 `interview_not_scheduled`), not already blocked (409 `already_blocked`), and a connection must exist (422 `calendar_not_connected`). If the database refuses the row after the event was created, the event is removed again. | API scope check (`activityVisible`), RLS insert policy (`has_perm` + interview readable), partial unique index |
 | CA-5 **Release**: `POST /interviews/:id/calendar-block/release` removes the event (an event already gone counts as removed; a connection replaced since the block cannot reach it: the record is still released, audited `reachable: false`) and marks the row `released` (`released_by/at` server-set; nothing else about a block ever changes). 404 `no_active_block`. | guard trigger |
 | CA-6 `GET /interviews/:id/calendar-block` (readers of the interview) → `{ block, canBlock, connected }`; the drawer shows the block to every reader and the buttons to `calendar:block` holders. Audit: `calendar.connected { provider }`, `calendar.disconnected`, `calendar.blocked`, `calendar.released { reachable }`; account and calendar addresses are redacted. | |
+| CA-7 **Free/busy (read-only scheduling aid)**: `GET /calendar/support/busy?from=&to=` (instants, `to` after `from`, at most 31 days; 422 otherwise) for holders of `calendar:block` **or** `interview:create` (403 otherwise) → `{ connected, available, busy: [{ startsAt, endsAt }] }`. Intervals only: no titles, attendees, account or calendar address leave the server (rule 5); nothing is cached, nothing is audited (a read). `available` is false while the connection lacks a free/busy scope (`calendar.freebusy`, or `calendar`, `calendar.readonly`, `calendar.events.freebusy`): `calendar.events` alone does not cover Google's `freebusy.query`, so a connection made before migration 0090 (`scopes = ''`) needs a reconnect, which the card offers; blocking keeps working meanwhile. The connection row reaches the read through `authz.calendar_freebusy_connection()` (definer; the table's policies stay `calendar:block` only). The Schedule and Edit dialogs query the day holding the chosen slot once the slot and duration are set and show "Support calendar is busy 10:00–11:00" / "Support calendar is free for this slot" under the slot (the interview's own block is not counted); the drawer's Support calendar section shows the same for the interview's slot. The check never blocks a save. | API permission check (`can`), `BusyQuery`, definer function, `DevCalendarProvider.freeBusy` in tests |
 
 ### Configuration
 
@@ -81,10 +82,11 @@ callback redirect URI added by hand (infra/README.md "Google OAuth client").
 
 ### Endpoints
 
-- `GET /api/v1/calendar/support` → `{ mode, connected, calendarId, accountEmail, connectedAt, connectedBy }`
+- `GET /api/v1/calendar/support` → `{ mode, connected, freeBusy, calendarId, accountEmail, connectedAt, connectedBy }` (`freeBusy`: the connection can answer CA-7; false → reconnect)
 - `GET /api/v1/calendar/support/connect?calendarId=primary` → 302 to Google (dev: straight to the callback)
 - `GET /api/v1/calendar/support/callback?code&state` → 302 to the app
 - `POST /api/v1/calendar/support/disconnect` → the status
+- `GET /api/v1/calendar/support/busy?from=&to=` (`calendar:block` or `interview:create`) → `{ connected, available, busy: [{ startsAt, endsAt }] }`
 - `GET /api/v1/calendar/support/dev/events` (dev provider, never in production): the fake calendar's events
 - `GET|POST /api/v1/interviews/:id/calendar-block`, `POST .../calendar-block/release` → `{ block, canBlock, connected }`
 

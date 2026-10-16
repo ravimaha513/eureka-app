@@ -393,3 +393,75 @@ describe("support calendar (CA-1..CA-6, dev provider)", () => {
     for (const t of ["interview.requested", "contract.created", "staff.birthdays_today"]) expect(EVENT_SPECS[t]).toMatchObject({ email: true, inApp: true });
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+
+describe("support calendar free/busy (CA-7, dev provider)", () => {
+  const provider = () => app.get<DevCalendarProvider>(CALENDAR_PROVIDER);
+  /** The UTC day holding the instant, as the window the dialogs ask for. */
+  const day = (iso: string) => {
+    const d = new Date(iso);
+    const from = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    return { from: from.toISOString(), to: new Date(+from + 86_400_000).toISOString() };
+  };
+  const busyUrl = (from: string, to: string) => `/api/v1/calendar/support/busy?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  const auditCount = async () => (await db.admin.query<{ n: number }>("SELECT count(*)::int AS n FROM eureka.audit_event")).rows[0]!.n;
+  /** The dev OAuth round trip as l1 (the connection was removed by the previous describe). */
+  async function connect() {
+    const start = await call("l1", "GET", "/api/v1/calendar/support/connect?calendarId=support@eureka.example");
+    expect(start.statusCode).toBe(302);
+    const location = new URL(String(start.headers.location));
+    const stateCookie = String(start.headers["set-cookie"]).split(";")[0]!;
+    const done = await app.inject({ method: "GET", url: `${location.pathname}${location.search}`, headers: { cookie: `${(await login("l1")).cookie}; ${stateCookie}` } });
+    expect(done.statusCode, done.body).toBe(302);
+  }
+
+  it("whoever schedules or blocks interviews reads intervals only; a block makes the slot busy; nothing is audited", async () => {
+    const startsAt = slot();
+    const w = day(startsAt);
+    expect((await call("r1a", "GET", busyUrl(w.from, w.to))).json()).toEqual({ connected: false, available: false, busy: [] });
+    await connect();
+    // interview:read alone (coach) or no interview permission (HR) is refused; a recruiter (interview:create own) and a coordinator are not.
+    expect((await call("coach", "GET", busyUrl(w.from, w.to))).statusCode).toBe(403);
+    expect((await call("hr", "GET", busyUrl(w.from, w.to))).statusCode).toBe(403);
+    expect((await call("r1a", "GET", busyUrl(w.from, w.to))).json()).toEqual({ connected: true, available: true, busy: [] });
+    expect((await call("coord", "GET", busyUrl(w.from, w.to))).json()).toEqual({ connected: true, available: true, busy: [] });
+    // The recruiter still cannot read the connection table itself (CA-2): the definer function is the only path.
+    expect(await asUser(db.app, U.r1a, async (c) => (await c.query("SELECT count(*)::int AS n FROM eureka.calendar_connection")).rows[0]!.n)).toBe(0);
+
+    const res = await call("r1a", "POST", "/api/v1/interviews", { submissionId: r1aInterview().submissionId, round: "Busy me", startsAt, durationMin: 60 });
+    expect(res.statusCode, res.body).toBe(201);
+    const id = res.json().id as string;
+    expect((await call("l1", "POST", `/api/v1/interviews/${id}/calendar-block`)).statusCode).toBe(201);
+    expect(provider().events.size).toBe(1);
+    const before = await auditCount();
+    const busy = await call("r1a", "GET", busyUrl(w.from, w.to));
+    expect(busy.statusCode, busy.body).toBe(200);
+    expect(busy.json()).toEqual({ connected: true, available: true, busy: [{ startsAt, endsAt: new Date(Date.parse(startsAt) + 3_600_000).toISOString() }] });
+    // Intervals only (rule 5): no summary, description, candidate or client.
+    expect(busy.body).not.toMatch(/Busy me|Northwind|summary|description|support@/);
+    // Another day: free. Reads leave no audit row.
+    expect((await call("r1a", "GET", busyUrl(w.to, new Date(Date.parse(w.to) + 86_400_000).toISOString()))).json().busy).toEqual([]);
+    expect(await auditCount()).toBe(before);
+
+    // The window: `to` after `from`, at most 31 days, both required.
+    expect((await call("r1a", "GET", busyUrl(w.to, w.from))).statusCode).toBe(422);
+    expect((await call("r1a", "GET", busyUrl(w.from, new Date(Date.parse(w.from) + 32 * 86_400_000).toISOString()))).statusCode).toBe(422);
+    expect((await call("r1a", "GET", "/api/v1/calendar/support/busy")).statusCode).toBe(422);
+    expect((await call("r1a", "GET", busyUrl(w.from, new Date(Date.parse(w.from) + 31 * 86_400_000).toISOString()))).statusCode).toBe(200);
+
+    expect((await call("l1", "POST", `/api/v1/interviews/${id}/calendar-block/release`)).statusCode).toBe(200);
+    expect((await call("r1a", "GET", busyUrl(w.from, w.to))).json().busy).toEqual([]);
+  });
+
+  it("a connection made before the free/busy scope answers available: false until it is reconnected", async () => {
+    await asUser(db.app, U.l1, (c) => c.query("UPDATE eureka.calendar_connection SET scopes = '' WHERE key = 'support'"), true);
+    expect((await call("l1", "GET", "/api/v1/calendar/support")).json()).toMatchObject({ connected: true, freeBusy: false });
+    const w = day(slot());
+    expect((await call("r1a", "GET", busyUrl(w.from, w.to))).json()).toEqual({ connected: true, available: false, busy: [] });
+    await connect();
+    expect((await call("l1", "GET", "/api/v1/calendar/support")).json()).toMatchObject({ connected: true, freeBusy: true });
+    expect((await db.admin.query<{ s: string }>("SELECT scopes AS s FROM eureka.calendar_connection")).rows[0]!.s).toContain("auth/calendar.freebusy");
+    expect((await call("r1a", "GET", busyUrl(w.from, w.to))).json()).toEqual({ connected: true, available: true, busy: [] });
+  });
+});

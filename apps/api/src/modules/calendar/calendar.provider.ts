@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 
 /**
- * The support calendar port (interview-alerts package, docs/alerts-calendar-birthdays.md CA-1..CA-6).
+ * The support calendar port (interview-alerts package, docs/alerts-calendar-birthdays.md CA-1..CA-7).
  *
- *   google: Google Calendar through OAuth 2.0 (offline access, scope
- *           calendar.events + openid email) and the Calendar v3 REST API, with
- *           Node's fetch. The refresh token is the only credential kept (encrypted
- *           by the service); access tokens live in memory for one call.
+ *   google: Google Calendar through OAuth 2.0 (offline access, scopes
+ *           calendar.events + calendar.freebusy + openid email) and the Calendar
+ *           v3 REST API, with Node's fetch. The refresh token is the only
+ *           credential kept (encrypted by the service); access tokens live in
+ *           memory for one call.
  *   dev:    an in-memory calendar for development and tests: "connecting" needs
  *           no Google account and events are kept in a map (the API's dev-only
  *           inspection route lists them).
@@ -14,23 +15,45 @@ import { randomUUID } from "node:crypto";
  * Provider error messages never carry response bodies (they can name the account).
  */
 export interface CalendarEventInput { summary: string; description: string; startsAt: Date; endsAt: Date }
+/** A busy period: the interval only (CA-7). Titles and attendees never leave the provider. */
+export interface BusyInterval { startsAt: Date; endsAt: Date }
 export interface CalendarProvider {
   readonly kind: "google" | "dev";
   /** Where the browser goes to authorise; the callback returns to `redirectUri` with `code` and `state`. */
   authUrl(redirectUri: string, state: string): string;
-  /** Exchanges the authorisation code for the refresh token and the authorising account's email. */
-  exchange(code: string, redirectUri: string): Promise<{ refreshToken: string; email: string }>;
+  /** Exchanges the authorisation code for the refresh token, the authorising account's email and the scopes granted. */
+  exchange(code: string, redirectUri: string): Promise<{ refreshToken: string; email: string; scopes: string }>;
+  /** Whether a connection made with these granted scopes can answer freeBusy (older connections need a reconnect). */
+  freeBusyGranted(scopes: string): boolean;
   /** Creates a busy event on `calendarId`; returns the provider's event id. */
   createEvent(refreshToken: string, calendarId: string, ev: CalendarEventInput): Promise<string>;
   /** Removes the event; an event already gone counts as removed. */
   deleteEvent(refreshToken: string, calendarId: string, eventId: string): Promise<void>;
+  /** The busy periods of `calendarId` between `from` and `to` (read-only; intervals only). */
+  freeBusy(refreshToken: string, calendarId: string, from: Date, to: Date): Promise<BusyInterval[]>;
 }
 export const CALENDAR_PROVIDER = Symbol("CALENDAR_PROVIDER");
 
 const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
 const GOOGLE_CALENDAR = "https://www.googleapis.com/calendar/v3";
-const SCOPE = "openid email https://www.googleapis.com/auth/calendar.events";
+/**
+ * calendar.events writes the blocks; it does NOT cover freebusy.query (Google
+ * accepts calendar, calendar.readonly, calendar.freebusy or
+ * calendar.events.freebusy there), so calendar.freebusy is added: it reads
+ * busy periods only, never titles or attendees, which keeps rule 5 at the
+ * provider boundary. A connection granted before this scope existed has none
+ * of the four and must be reconnected (CA-7).
+ */
+const FREEBUSY_SCOPES = [
+  "https://www.googleapis.com/auth/calendar.freebusy",
+  "https://www.googleapis.com/auth/calendar.events.freebusy",
+  "https://www.googleapis.com/auth/calendar.readonly",
+  "https://www.googleapis.com/auth/calendar",
+];
+export const SCOPE = "openid email https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.freebusy";
+
+const grantedFreeBusy = (scopes: string) => scopes.split(/\s+/).some((s) => FREEBUSY_SCOPES.includes(s));
 
 export class GoogleCalendarProvider implements CalendarProvider {
   readonly kind = "google" as const;
@@ -65,8 +88,12 @@ export class GoogleCalendarProvider implements CalendarProvider {
     let email = "";
     try { email = payload ? String((JSON.parse(Buffer.from(payload, "base64url").toString()) as { email?: unknown }).email ?? "") : ""; } catch { email = ""; }
     if (!email) throw new Error("calendar authorisation returned no account email");
-    return { refreshToken, email: email.toLowerCase() };
+    // The scopes the user actually granted (the consent screen lets them untick some).
+    const scopes = typeof t.scope === "string" ? t.scope.trim() : "";
+    return { refreshToken, email: email.toLowerCase(), scopes };
   }
+
+  freeBusyGranted(scopes: string): boolean { return grantedFreeBusy(scopes); }
 
   private async accessToken(refreshToken: string): Promise<string> {
     const t = await this.token({ refresh_token: refreshToken, grant_type: "refresh_token" });
@@ -97,6 +124,29 @@ export class GoogleCalendarProvider implements CalendarProvider {
     });
     if (!res.ok && res.status !== 404 && res.status !== 410) throw new Error(`calendar event removal failed (${res.status})`);
   }
+
+  /** POST /freeBusy: the merged busy periods of one calendar; no event fields are requested or returned. */
+  async freeBusy(refreshToken: string, calendarId: string, from: Date, to: Date): Promise<BusyInterval[]> {
+    const access = await this.accessToken(refreshToken);
+    const res = await this.fetchImpl(`${GOOGLE_CALENDAR}/freeBusy`, {
+      method: "POST", headers: { authorization: `Bearer ${access}`, "content-type": "application/json" },
+      body: JSON.stringify({ timeMin: from.toISOString(), timeMax: to.toISOString(), items: [{ id: calendarId }] }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new Error(`calendar free/busy query failed (${res.status})`);
+    const body = (await res.json()) as { calendars?: Record<string, { busy?: { start?: unknown; end?: unknown }[]; errors?: unknown[] }> };
+    const cal = body.calendars?.[calendarId] ?? Object.values(body.calendars ?? {})[0];
+    if (!cal) throw new Error("calendar free/busy query returned no calendar");
+    if (cal.errors?.length) throw new Error("calendar free/busy query refused for the calendar");
+    const out: BusyInterval[] = [];
+    for (const b of cal.busy ?? []) {
+      const startsAt = typeof b.start === "string" ? new Date(b.start) : null;
+      const endsAt = typeof b.end === "string" ? new Date(b.end) : null;
+      if (!startsAt || !endsAt || Number.isNaN(+startsAt) || Number.isNaN(+endsAt) || endsAt <= startsAt) continue;
+      out.push({ startsAt, endsAt });
+    }
+    return out.sort((a, b) => +a.startsAt - +b.startsAt);
+  }
 }
 
 export interface DevCalendarEvent extends CalendarEventInput { id: string; calendarId: string }
@@ -116,8 +166,9 @@ export class DevCalendarProvider implements CalendarProvider {
   }
   async exchange(code: string) {
     if (code !== "dev") throw new Error("calendar token request failed (400)");
-    return { refreshToken: `dev-refresh-${randomUUID()}`, email: "support@eureka.example" };
+    return { refreshToken: `dev-refresh-${randomUUID()}`, email: "support@eureka.example", scopes: SCOPE };
   }
+  freeBusyGranted(scopes: string): boolean { return grantedFreeBusy(scopes); }
   async createEvent(_token: string, calendarId: string, ev: CalendarEventInput): Promise<string> {
     if (this.failNext) { const e = this.failNext; this.failNext = null; throw e; }
     const id = `dev-${randomUUID()}`;
@@ -126,5 +177,12 @@ export class DevCalendarProvider implements CalendarProvider {
   }
   async deleteEvent(_token: string, _calendarId: string, eventId: string): Promise<void> {
     this.events.delete(eventId);
+  }
+  /** The fake calendar's events that overlap the window, as intervals (never the summary or description). */
+  async freeBusy(_token: string, calendarId: string, from: Date, to: Date): Promise<BusyInterval[]> {
+    return [...this.events.values()]
+      .filter((e) => e.calendarId === calendarId && e.startsAt < to && e.endsAt > from)
+      .map((e) => ({ startsAt: e.startsAt, endsAt: e.endsAt }))
+      .sort((a, b) => +a.startsAt - +b.startsAt);
   }
 }
