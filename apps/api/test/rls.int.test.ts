@@ -288,7 +288,7 @@ describe("write-side guards (design B4.7, B4.8)", () => {
   });
 
   it("recruiter/team invariant: recruiter must belong to the team", async () => {
-    await expect(asUser(db.app, U.om, (c) =>
+    await expect(asUser(db.app, U.ad, (c) =>
       c.query(`UPDATE eureka.candidate SET team_id=$2, recruiter_id=$3 WHERE id=$1`, [ownR1a().id, T.t3, U.r1a])))
       .rejects.toThrow(/not a member/);
   });

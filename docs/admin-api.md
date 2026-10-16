@@ -10,7 +10,7 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 |---|---|
 | AD-1 | Everything under `/api/v1/admin/*` requires `access:manage` (org scope; only `org_admin` holds it). `org_admin` still has no data permissions. |
 | AD-2 | Nobody can change their own roles, status or reporting line (403 `self_change`). |
-| AD-3 | Granting a **restricted role** needs a second approver: another `access:manage` holder who is neither the grantee nor the requester, while the grantee is active and the requester is still an admin. Restricted roles: `org_admin`, every role holding a permission in `RESTRICTED_PERMISSIONS` (HR, Accounts, Immigration), and every role holding an org-wide sensitive permission (`ORG_SENSITIVE_PERMISSIONS`: rates, invoices, employees, phones, assignment, team moves, documents), which today adds CEO, BU Head, Offshore Manager, Associate HR and Documents Team. Other roles apply immediately. |
+| AD-3 | Granting a **restricted role** needs a second approver: another `access:manage` holder who is neither the grantee nor the requester, while the grantee is active and the requester is still an admin. Restricted roles: `org_admin`, every role holding a permission in `RESTRICTED_PERMISSIONS` (HR, Accounts, Immigration), and every role holding an org-wide sensitive permission (`ORG_SENSITIVE_PERMISSIONS`: rates, invoices, employees, phones, assignment, team moves, documents), which today adds CEO, BU Head, Associate HR and Documents Team. Other roles apply immediately. |
 | AD-3a | Separation of duties: an `org_admin` holds no business role, and a user with a business role cannot be made `org_admin` (422 `separation_of_duties`). Use a separate admin account. |
 | AD-3b | **Single-admin mode** (migration 0084): when `SINGLE_ADMIN_MODE=on` is set for the migrate task (Terraform `single_admin_mode`, default `off`), restricted roles apply immediately and the requester may approve a pending request (recorded as `applied`). Self-change, grantee approval, org_admin/data-role separation and audit stay. Stored in `authz.policy_setting single_admin_mode`. |
 | AD-4 | Revoking a role, or deactivating a user, is immediate and needs no approval. Least privilege: removing access is never slowed down. |
@@ -25,6 +25,9 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 ### Metadata
 `GET /api/v1/admin/meta` returns
 `{ roles: [{ key, label, restricted, locationBound }], locations: [{ id, name }] }`
+
+### Locations
+- `POST /api/v1/admin/locations` with `{ name, kind, state?, timezone? }` returns 201 `{ id }`. `kind` is one of `training`, `gh`, `office`, `remote`; `timezone` is an IANA name (default `America/New_York`). Only `org_admin` (`access:manage`, org scope) can create one. The write goes through `authz.admin_create_location` (migration 0091) and is audited as `admin.location.created`. A duplicate name is 409 `location_exists`. Locations cannot be edited or deleted here yet.
 
 ### Users
 - `GET /api/v1/admin/users?search=&status=active|inactive&cursor=&limit=` (default 50, max 200) returns

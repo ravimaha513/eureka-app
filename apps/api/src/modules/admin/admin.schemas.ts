@@ -66,6 +66,30 @@ export const CreateTeam = z
   .strict();
 export type CreateTeam = z.infer<typeof CreateTeam>;
 
+export const LOCATION_KINDS = ["training", "gh", "office", "remote"] as const;
+
+export const CreateLocation = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    kind: z.enum(LOCATION_KINDS),
+    state: z.string().trim().min(1).max(60).optional(),
+    timezone: z
+      .string()
+      .trim()
+      .max(64)
+      .refine((tz) => {
+        try {
+          new Intl.DateTimeFormat("en-US", { timeZone: tz });
+          return true;
+        } catch {
+          return false;
+        }
+      }, "invalid_timezone")
+      .optional(),
+  })
+  .strict();
+export type CreateLocation = z.infer<typeof CreateLocation>;
+
 export const SetLead = z.object({ leadId: uuid }).strict();
 export const AddMember = z.object({ userId: uuid }).strict();
 

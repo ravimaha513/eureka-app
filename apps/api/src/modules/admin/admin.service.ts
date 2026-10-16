@@ -14,7 +14,7 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, parseEmailList, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { mapAdminError } from "./admin.errors.js";
-import type { BulkCreateUsers, CreateRoleRequest, CreateTeam, CreateUser, MoveMember, UserListQuery } from "./admin.schemas.js";
+import type { BulkCreateUsers, CreateLocation, CreateRoleRequest, CreateTeam, CreateUser, MoveMember, UserListQuery } from "./admin.schemas.js";
 
 const EMAIL = z.string().email();
 
@@ -399,6 +399,16 @@ export class AdminService {
         [body.name, body.leadId, body.locationId ?? null]);
       const id = rows[0]!.id;
       await this.audit.record(c, { actorId: user.id, action: "admin.team.created", entityType: "team", entityId: id, changes: body });
+      return { id };
+    });
+  }
+
+  async createLocation(user: AuthedUser, body: CreateLocation) {
+    return this.tx(user, async (c) => {
+      const { rows } = await c.query<{ id: string }>(`SELECT authz.admin_create_location($1, $2, $3, $4) AS id`,
+        [body.name, body.kind, body.state ?? null, body.timezone ?? null]);
+      const id = rows[0]!.id;
+      await this.audit.record(c, { actorId: user.id, action: "admin.location.created", entityType: "location", entityId: id, changes: body });
       return { id };
     });
   }

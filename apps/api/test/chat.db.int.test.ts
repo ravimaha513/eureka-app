@@ -354,7 +354,7 @@ describe("database limits (CH-12) and presence scope (CH-7)", () => {
     await expect(group(U.coach, "Cap 20", [U.locD])).rejects.toThrow(/rate_limited/);
 
     // Members added: 200 per hour (add and remove the same person repeatedly).
-    const g = await group(U.ceo, "Churn", [U.om]);
+    const g = await group(U.ceo, "Churn", [U.m1]);
     for (let i = 0; i < 200; i++) {
       await as(U.ceo, (q) => q(`SELECT authz.chat_add_members($1, $2::uuid[])`, [g, [U.ad]]));
       await as(U.ceo, (q) => q(`SELECT authz.chat_remove_member($1, $2)`, [g, U.ad]));

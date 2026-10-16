@@ -29,7 +29,6 @@ const USERS: Record<string, UserAccess> = {
   assoc_director: u("AD", [{ role: "assoc_director" }], { subordinateUserIds: ["M", "L1", "L2", "R1", "R1b", "R2"], subtreeTeamIds: ["T1", "T2"] }),
   location_admin: u("LA", [{ role: "location_ops_admin", locationId: D }]),
   hr: u("H", [{ role: "hr" }]),
-  offshore_manager: u("OM", [{ role: "offshore_manager" }]),
 };
 
 // Record positions relative to recruiter R1.
@@ -66,7 +65,6 @@ const GOLDEN: Row[] = [
   ["lead", "view", "otherTeamAllTeams", true, "4.3 FR-HOT-05"],
   ["location_admin", "view", "own", true, "4 Location Incharge: own location"],
   ["location_admin", "view", "otherTeam", false, "4 Location Incharge: own location"],
-  ["offshore_manager", "view", "outsideHierarchy", true, "4 Offshore manager: all teams"],
   // SRS 5 "Submission Entry": Recruiter any Hotlist candidate; Lead/Manager/AD any candidate (D-01)
   ["recruiter", "logActivity", "teammate", true, "5 Submission Entry"],
   ["recruiter", "logActivity", "otherTeamAllTeams", true, "5 Submission Entry"],
@@ -123,10 +121,6 @@ describe("SRS 5 status rows", () => {
 
   it("Lead can create a candidate for their team (judge N4b)", () => {
     expect(resolveScope(USERS.lead!, "candidate:create")!.teamIds.has("T1")).toBe(true);
-  });
-
-  it("Offshore manager can reassign across hierarchies (FR-EMP-05, FR-ORG-03, judge N4c)", () => {
-    expect(resolveScope(USERS.offshore_manager!, "candidate:assign")!.all).toBe(true);
   });
 
   it("Location roles can update technical rating only in their location", () => {

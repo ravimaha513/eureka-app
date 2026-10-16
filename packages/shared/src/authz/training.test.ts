@@ -32,7 +32,7 @@ describe("training grants (catalog)", () => {
     expect(holders("training:manage")).toEqual({ location_incharge: "location", location_ops_admin: "location" });
     expect(holders("training.progress:update")).toEqual({ location_incharge: "location", location_ops_admin: "location", interview_coach: "coached" });
     expect(holders("training:read")).toEqual({
-      recruiter: "own", lead: "team", manager: "hierarchy", assoc_director: "hierarchy", offshore_manager: "org", ceo: "org",
+      recruiter: "own", lead: "team", manager: "hierarchy", assoc_director: "hierarchy", ceo: "org",
       location_incharge: "location", location_ops_admin: "location", interview_coach: "coached",
     });
   });

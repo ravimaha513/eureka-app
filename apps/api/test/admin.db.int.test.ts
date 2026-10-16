@@ -52,7 +52,7 @@ describe("privileges", () => {
     await asUser(db.app, U.admin, (c) => c.query(`SELECT * FROM authz.request_role($1, 'recruiter', NULL)`, [U.coach]), true);
     const admin = await asUser(db.app, U.admin, async (c) => (await c.query(`SELECT count(*)::int n FROM eureka.role_request`)).rows[0].n);
     expect(admin).toBeGreaterThan(0);
-    for (const u of [U.r1a, U.ceo, U.hr, U.om]) {
+    for (const u of [U.r1a, U.ceo, U.hr]) {
       const n = await asUser(db.app, u, async (c) => (await c.query(`SELECT count(*)::int n FROM eureka.role_request`)).rows[0].n);
       expect(n, u).toBe(0);
     }
@@ -73,8 +73,8 @@ describe("definer functions refuse callers without access:manage", () => {
     [`SELECT authz.admin_set_team_lead($1, $2)`, [T.t1, U.l2]],
     [`SELECT authz.admin_add_team_member($1, $2)`, [T.t1, U.hr]],
   ];
-  // Every non-admin fixture user, including the org-scoped CEO and offshore manager.
-  const actors = [U.r1a, U.l1, U.m1, U.om, U.ceo, U.hr, U.locD, "00000000-0000-0000-0000-00000000dead"];
+  // Non-admin fixture users, including the org-scoped CEO and the top of the Sales hierarchy.
+  const actors = [U.r1a, U.l1, U.m1, U.ad, U.ceo, U.hr, U.locD, "00000000-0000-0000-0000-00000000dead"];
   it.each(calls)("%s", async (sql, params) => {
     for (const actor of actors) {
       await expect(asUser(db.app, actor, (c) => c.query(sql, params)), actor).rejects.toThrow(/not_permitted/);
@@ -266,7 +266,7 @@ describe("reporting lines and teams (AD-9)", () => {
   it("changing a manager rebuilds the closure", async () => {
     await asUser(db.app, U.admin, (c) => c.query(`SELECT authz.admin_set_manager($1, $2)`, [U.l2, U.m2]), true);
     const { rows } = await db.admin.query(`SELECT ancestor_id FROM eureka.reporting_closure WHERE descendant_id = $1 ORDER BY depth`, [U.r2a]);
-    expect(rows.map((r) => r.ancestor_id)).toEqual([U.l2, U.m2, U.ad, U.om, U.ceo]);
+    expect(rows.map((r) => r.ancestor_id)).toEqual([U.l2, U.m2, U.ad, U.ceo]);
     await asUser(db.app, U.admin, (c) => c.query(`SELECT authz.admin_set_manager($1, $2)`, [U.l2, U.m1]), true);
   });
 
@@ -302,9 +302,9 @@ describe("move member (OD-07, AD-8)", () => {
     expect(teams.rows).toEqual([{ team_id: T.t2 }]);
   });
 
-  it("an org-scoped holder can move anyone; the chosen recruiter must be active in the old team", async () => {
-    await expect(move(U.om, U.r1b, T.t1, T.t3, U.r1a)).rejects.toThrow(/invalid_reassign_target/);
-    const r = await move(U.om, U.r2a, T.t2, T.t3, U.r1a);
+  it("a holder whose hierarchy covers both teams can move anyone; the chosen recruiter must be active in the old team", async () => {
+    await expect(move(U.ad, U.r1b, T.t1, T.t3, U.r1a)).rejects.toThrow(/invalid_reassign_target/);
+    const r = await move(U.ad, U.r2a, T.t2, T.t3, U.r1a);
     expect(r.reassigned_to).toBe(U.r1a);
   });
 });

@@ -17,7 +17,6 @@ Sign in with the email and that password. These accounts exist only in your loca
 | Role | Email |
 |---|---|
 | `ceo` | `ceo@eureka.example` |
-| `offshore_manager` | `om@eureka.example` |
 | `assoc_director` | `ad@eureka.example` |
 | `manager` | `m1@eureka.example`, `m2@eureka.example` |
 | `lead` | `l1@eureka.example`, `l2@eureka.example`, `l3@eureka.example` |

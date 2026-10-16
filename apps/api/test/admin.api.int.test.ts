@@ -76,6 +76,7 @@ const ADMIN_ENDPOINTS: { method: Method; url: string; body?: unknown; adminStatu
   { method: "POST", url: `/api/v1/admin/role-requests/${NIL}/approve`, adminStatus: 404 },
   { method: "POST", url: `/api/v1/admin/role-requests/${NIL}/reject`, adminStatus: 404 },
   { method: "DELETE", url: `/api/v1/admin/users/${U.r1a}/roles/bogus`, adminStatus: 422 },
+  { method: "POST", url: "/api/v1/admin/locations", body: {}, adminStatus: 422 },
   { method: "GET", url: "/api/v1/admin/teams", adminStatus: 200 },
   { method: "POST", url: "/api/v1/admin/teams", body: {}, adminStatus: 422 },
   { method: "PUT", url: `/api/v1/admin/teams/${T.t1}/lead`, body: {}, adminStatus: 422 },
@@ -165,6 +166,27 @@ describe("metadata and listings", () => {
       id: T.t1, name: "Team Rohit", location: null, lead: { id: U.l1, displayName: "l1" },
       members: [{ id: U.r1a, displayName: "r1a" }, { id: U.r1b, displayName: "r1b" }],
     });
+  });
+});
+
+describe("locations", () => {
+  it("org_admin creates a location, audited; duplicate names are 409, bad kind or timezone 422", async () => {
+    const r = await call("admin", "POST", "/api/v1/admin/locations",
+      { name: "Houston", kind: "office", state: "TX", timezone: "America/Chicago" });
+    expect(r.statusCode).toBe(201);
+    const { id } = r.json();
+    const row = (await db.admin.query(`SELECT name, kind, state, timezone FROM eureka.location WHERE id = $1`, [id])).rows[0];
+    expect(row).toEqual({ name: "Houston", kind: "office", state: "TX", timezone: "America/Chicago" });
+    expect((await audits("admin.location.created")).at(-1)).toMatchObject({ actor_id: U.admin, entity_id: id });
+
+    expect((await call("admin", "POST", "/api/v1/admin/locations", { name: "Houston", kind: "office" })).statusCode).toBe(409);
+    expect((await call("admin", "POST", "/api/v1/admin/locations", { name: "Nowhere", kind: "warehouse" })).statusCode).toBe(422);
+    expect((await call("admin", "POST", "/api/v1/admin/locations", { name: "Nowhere", kind: "remote", timezone: "Mars/Olympus" })).statusCode).toBe(422);
+  });
+
+  it("is refused to every other role", async () => {
+    expect((await call("m1", "POST", "/api/v1/admin/locations", { name: "Sneaky", kind: "remote" })).statusCode).toBe(403);
+    expect((await call("r1b", "POST", "/api/v1/admin/locations", { name: "Sneaky", kind: "remote" })).statusCode).toBe(403);
   });
 });
 
