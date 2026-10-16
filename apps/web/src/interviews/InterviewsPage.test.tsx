@@ -7,10 +7,12 @@ const me: Me = { id: "u", email: "a@example.com", displayName: "Recruiter", role
 const row: Interview = { id: "i1", submissionId: "s1", candidate: { id: "c", name: "Alex Doe" }, recruiter: { id: "u", name: "Recruiter" }, team: null, location: null, client: null, round: "Technical", startsAt: "2026-10-01T14:00:00Z", endsAt: "2026-10-01T15:00:00Z", coach: null, inviteReceived: false, callStatus: "scheduled", cleared: false, consentCaptured: false, otterUrl: "https://example.com/secret", recordingUrl: null, systemName: null, editableFields: ["cleared", "consentCaptured", "systemName", "callStatus"], feedbackKinds: ["location"] };
 const json = (value: unknown) => new Response(JSON.stringify(value));
 const lookups = (locations: { id: string; name: string }[]) => ({ technologies: [], clients: [], vendors: [], implementationPartners: [], coaches: [], locations });
-function setup(item = row, capabilities = me.capabilities, locations = [{ id: "dal", name: "Dallas" }], feedbackItems: unknown[] = []) {
+function setup(item = row, capabilities = me.capabilities, locations = [{ id: "dal", name: "Dallas" }], feedbackItems: unknown[] = [], busy: { startsAt: string; endsAt: string }[] = [], block: unknown = null) {
  const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
    const path = String(url);
    if (path.includes("/lookups")) return json(lookups(locations));
+   if (path.includes("/calendar/support/busy")) return json({ connected: true, available: true, busy });
+   if (path.includes("/calendar-block")) return json({ block, canBlock: block !== null, connected: true });
    if (path.includes("/feedback")) return json({ items: feedbackItems });
    if (path.includes("/coaches")) return json({ items: [{ id: "coach", name: "Coach One" }] });
    if (path.includes("/panel-options")) return json({ items: [{ id: "p1", name: "Ajith Trainer" }, { id: "p2", name: "Pawan Incharge" }] });
@@ -142,6 +144,40 @@ describe("interview board", () => {
    fireEvent.click(within(dialog).getByRole("button", { name: "Add feedback" }));
    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/v1/interviews/i1/feedback", expect.objectContaining({ method: "POST",
      body: JSON.stringify({ kind: "coach", scorecard: { technicalSkills: 4, communication: 5, problemSolving: 3, attitude: 4 } }) })));
+ });
+ it("shows the support calendar's busy periods under the slot and never blocks the save (CA-7)", async () => {
+   const fetch = setup(row, me.capabilities, undefined, [], [{ startsAt: new Date("2026-10-01T10:30").toISOString(), endsAt: new Date("2026-10-01T11:00").toISOString() }]);
+   fireEvent.click(screen.getByRole("button", { name: "Schedule interview" }));
+   await screen.findByRole("option", { name: "Alex Doe · Acme · Engineer" });
+   expect(fetch.mock.calls.some(([u]) => String(u).includes("/calendar/support/busy"))).toBe(false);
+   fireEvent.change(screen.getByLabelText("Interview slot"), { target: { value: "2026-10-01T10:00" } });
+   expect(await screen.findByText(/Support calendar is busy/)).toBeInTheDocument();
+   // The day holding the slot is queried: local midnight to the next.
+   const req = fetch.mock.calls.find(([u]) => String(u).includes("/calendar/support/busy"))!;
+   const params = new URL(String(req[0]), "http://x").searchParams;
+   expect(params.get("from")).toBe(new Date(2026, 9, 1).toISOString());
+   expect(params.get("to")).toBe(new Date(2026, 9, 2).toISOString());
+   // A later slot on the same day is free without another request.
+   fireEvent.change(screen.getByLabelText("Interview slot"), { target: { value: "2026-10-01T14:00" } });
+   expect(await screen.findByText("Support calendar is free for this slot.")).toBeInTheDocument();
+   expect(fetch.mock.calls.filter(([u]) => String(u).includes("/calendar/support/busy"))).toHaveLength(1);
+   // Busy or not, the interview can be created.
+   fireEvent.change(screen.getByLabelText("Interview slot"), { target: { value: "2026-10-01T10:00" } });
+   fireEvent.change(screen.getByLabelText("Submission"), { target: { value: "s1" } });
+   fireEvent.change(screen.getByLabelText("Round"), { target: { value: "Technical" } });
+   fireEvent.click(screen.getByRole("button", { name: "Create interview" }));
+   await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/v1/interviews", expect.objectContaining({ method: "POST" })));
+ });
+ it("the edit dialog leaves the interview's own block out of the busy line", async () => {
+   const own = { startsAt: "2026-10-01T14:00:00Z", endsAt: "2026-10-01T15:00:00Z" };
+   setup({ ...row, editableFields: ["startsAt", "durationMin"], durationMin: 60 }, me.capabilities, undefined, [], [own],
+     { id: "b", calendarId: "support@x", ...own, createdAt: "2026-09-30T00:00:00Z", createdBy: { id: "u", name: "Lead" } });
+   await screen.findByText("Alex Doe");
+   fireEvent.click(screen.getByRole("button", { name: "Edit interview" }));
+   const dialog = screen.getByRole("dialog");
+   expect(await within(dialog).findByText("No other bookings on the support calendar during this slot.")).toBeInTheDocument();
+   fireEvent.change(within(dialog).getByLabelText("Interview slot"), { target: { value: "2026-10-01T09:00" } });
+   expect(await within(dialog).findByText("Support calendar is free for this slot.")).toBeInTheDocument();
  });
  it("offers no scorecard for location feedback", async () => {
    setup();

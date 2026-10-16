@@ -10,7 +10,7 @@ import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
 import { useLookups } from "../lookups";
 import { Drawer } from "../sales/ui";
 import { Avatar } from "../shell/ui";
-import { SupportCalendarBlock, SupportCalendarCard } from "../calendar/SupportCalendar";
+import { SupportCalendarBlock, SupportCalendarBusy, SupportCalendarCard } from "../calendar/SupportCalendar";
 
 const STATUSES = ["scheduled", "in_progress", "completed", "rescheduled", "cancelled", "no_invite"];
 const label = (s: string) => s.replaceAll("_", " ");
@@ -160,6 +160,7 @@ function Schedule({ onClose, onDone }: { onClose: () => void; onDone: () => void
       <Field title="Interview slot"><input required type="datetime-local" value={v.start} onChange={e => set("start", e.target.value)} /></Field>
       <DurationSelect value={v.duration} onChange={(d) => set("duration", d)} />
     </div>
+    <SupportCalendarBusy start={v.start} durationMin={v.duration} />
     <Field title="Meeting link"><input type="url" maxLength={500} value={v.link} onChange={e => set("link", e.target.value)} placeholder="Paste the https meeting link" /></Field>
     <Coaches value={v.coach} onChange={(c) => set("coach", c)} />
     <label className="check"><input type="checkbox" checked={v.invite} onChange={e => set("invite", e.target.checked)} /> Invite received</label>
@@ -185,6 +186,9 @@ function Edit({ item, onClose, onDone }: { item: Interview; onClose: () => void;
   const useDuration = can("durationMin") && Number(initial.durationMin) >= 15 && Number(initial.durationMin) <= 240;
   const title: Record<string, string> = { round: "Round", startsAt: "Interview slot", endsAt: "End", inviteReceived: "Invite received", callStatus: "Call status", cleared: "Cleared", consentCaptured: "Consent captured", systemName: "System name", otterUrl: "Otter URL", recordingUrl: "Recording URL", meetingUrl: "Meeting link" };
   const order = ["interviewType", "round", "startsAt", "durationMin", "endsAt", "meetingUrl", "coachId", "inviteReceived", "callStatus", "cleared", "consentCaptured", "systemName", "otterUrl", "recordingUrl"];
+  // CA-7: the support calendar's state for the slot being edited, under the duration (or the end time).
+  const editDuration = useDuration ? Number(values.durationMin) : Math.round((Date.parse(String(values.endsAt)) - Date.parse(String(values.startsAt))) / 60_000);
+  const busyLine = can("startsAt") ? <SupportCalendarBusy key="busy" start={String(values.startsAt)} durationMin={editDuration} interviewId={item.id} /> : null;
   return <Dialog title={`Edit interview · ${item.candidate.name}`} onClose={onClose}><form onSubmit={e => { e.preventDefault(); void submit.run(async () => {
     const body: Record<string, unknown> = {};
     for (const k of order) {
@@ -207,11 +211,12 @@ function Edit({ item, onClose, onDone }: { item: Interview; onClose: () => void;
     {order.filter(can).map(k => {
       if (k === "interviewType") return <TypeRadios key={k} value={String(values[k])} onChange={(t) => set(k, t)} />;
       if (k === "round") return <RoundInput key={k} value={String(values[k])} onChange={(r) => set(k, r)} />;
-      if (k === "durationMin") return useDuration ? <DurationSelect key={k} value={Number(values[k])} onChange={(d) => set(k, d)} /> : null;
+      if (k === "durationMin") return useDuration ? [<DurationSelect key={k} value={Number(values[k])} onChange={(d) => set(k, d)} />, busyLine] : null;
       if (k === "endsAt" && useDuration) return null;
       if (k === "coachId") return <Coaches key={k} value={String(values[k])} onChange={v => set(k, v)} />;
       if (typeof values[k] === "boolean") return <div className="field" key={k}><label><input type="checkbox" checked={Boolean(values[k])} onChange={e => set(k, e.target.checked)} /> {title[k]}</label></div>;
-      return <Field key={k} title={title[k] ?? k}>{k === "callStatus" ? <select value={String(values[k])} onChange={e => set(k, e.target.value)}>{STATUSES.map(s => <option key={s} value={s}>{label(s)}</option>)}</select> : <input type={k.endsWith("At") ? "datetime-local" : k.endsWith("Url") ? "url" : "text"} required={["round", "startsAt", "endsAt"].includes(k)} maxLength={k === "round" ? 40 : k === "systemName" ? 80 : 500} value={String(values[k])} onChange={e => set(k, e.target.value)} />}</Field>;
+      const field = <Field key={k} title={title[k] ?? k}>{k === "callStatus" ? <select value={String(values[k])} onChange={e => set(k, e.target.value)}>{STATUSES.map(s => <option key={s} value={s}>{label(s)}</option>)}</select> : <input type={k.endsWith("At") ? "datetime-local" : k.endsWith("Url") ? "url" : "text"} required={["round", "startsAt", "endsAt"].includes(k)} maxLength={k === "round" ? 40 : k === "systemName" ? 80 : 500} value={String(values[k])} onChange={e => set(k, e.target.value)} />}</Field>;
+      return k === "endsAt" ? [field, busyLine] : field;
     })}
     {can("panelIds") && (detail.isPending ? <p role="status">Loading panel…</p> : detail.isError ? <p role="alert">Could not load the panel.</p>
       : <PanelPicker panel={curPanel} lead={curLead} onPanel={(ids) => { setPanel(ids); if (!ids.includes(curLead)) setLead(""); }} onLead={(id) => setLead(id)} />)}
@@ -283,7 +288,7 @@ export function InterviewDrawer({ item, displayZone, onClose }: { item: Intervie
         </dl>
         {i.callStatus === "scheduled" && <a className="btn sm calbtn" href={`/api/v1/interviews/${encodeURIComponent(i.id)}/calendar.ics`} download><CalendarPlus size={15} aria-hidden="true" /> Add to calendar (.ics)</a>}
       </section>
-      <SupportCalendarBlock interviewId={item.id} scheduled={i.callStatus === "scheduled"} />
+      <SupportCalendarBlock interviewId={item.id} scheduled={i.callStatus === "scheduled"} startsAt={i.startsAt} endsAt={i.endsAt} />
       <section aria-labelledby={`${item.id}-rev`} className="reviewers">
         <h2 id={`${item.id}-rev`} className="sectiontitle">Reviewers</h2>
         {f.isPending && <p>Loading feedback…</p>}{f.isError && <p role="alert">Could not load feedback.</p>}

@@ -495,6 +495,11 @@ accepted; rejected sends retry with backoff and alert in the worker log.
 The support calendar (`calendar_mode = "google"`) adds `CALENDAR_MODE` and the generated
 `CALENDAR_TOKEN_KEY` (`/eureka/<env>/app/calendar_token_key`) to the API task; rotating that key
 needs a reconnect of the calendar in the app.
+The connect asks Google for `calendar.events` (the blocks) and `calendar.freebusy` (the read-only
+free/busy check in scheduling, migration 0090; `calendar.events` alone does not cover Google's
+`freebusy.query`). Both are listed as non-sensitive scopes, so the OAuth consent screen needs no
+verification review for them; a calendar connected before 2026-10-16 shows a "Reconnect" button on the
+Interviews page until it is reconnected with the new scope (blocking keeps working meanwhile).
 
 To turn it on, set `worker_desired_count = 1` in `infra/live/<env>/env.hcl` and
 deploy (one task is enough; more are safe but idle). The worker needs
