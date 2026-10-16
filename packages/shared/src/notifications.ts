@@ -21,6 +21,10 @@ export const NOTIFICATION_PREFERENCE_TYPES: readonly NotificationTypeInfo[] = [
   { type: "employee.bench_time", label: "Bench-time reminder", description: "A candidate has been on the bench for the configured number of days.", mandatory: false },
   { type: "candidate.assigned", label: "Candidate assigned to a team", description: "A candidate moved to a team you lead.", mandatory: false },
   { type: "application.received", label: "New job application", description: "An applicant applied to a job you manage or to an HR-managed opening.", mandatory: false },
+  // interview-alerts package (migrations 0086-0089)
+  { type: "interview.requested", label: "Interview requested", description: "An interview was scheduled, rescheduled or cancelled (interview coordinators).", mandatory: false },
+  { type: "contract.created", label: "New contract", description: "A contract (MSA, PO, SOW) was added to a placement, so invoicing and the closure documents can start.", mandatory: false },
+  { type: "staff.birthdays_today", label: "Staff birthdays", description: "The morning list of staff birthdays (CEO).", mandatory: false },
   { type: "chat.direct_message", label: "New direct message", description: "Someone wrote to you in Chat and you have not looked at the conversation for 10 minutes.", mandatory: false },
 ];
 

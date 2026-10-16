@@ -56,9 +56,13 @@ export class AdminService {
   // ---------- metadata ----------
 
   async meta(user: AuthedUser) {
-    const locations = await this.tx(user, async (c) =>
-      (await c.query<{ id: string; name: string }>(`SELECT id, name FROM eureka.location ORDER BY name`)).rows);
+    const { locations, singleAdminMode } = await this.tx(user, async (c) => ({
+      locations: (await c.query<{ id: string; name: string }>(`SELECT id, name FROM eureka.location ORDER BY name`)).rows,
+      // Migration 0084/0085: one admin may grant restricted roles without a second approver.
+      singleAdminMode: (await c.query<{ on: boolean }>(`SELECT authz.single_admin_mode() AS "on"`)).rows[0]!.on,
+    }));
     return {
+      singleAdminMode,
       roles: ROLES.map((key) => ({
         key,
         label: ROLE_LABELS[key],

@@ -5,7 +5,7 @@ export interface Ref { id: string; displayName: string }
 export interface Place { id: string; name: string }
 
 export interface RoleMeta { key: string; label: string; restricted: boolean; locationBound: boolean }
-export interface AdminMeta { roles: RoleMeta[]; locations: Place[] }
+export interface AdminMeta { roles: RoleMeta[]; locations: Place[]; singleAdminMode?: boolean }
 
 export interface UserRole { key: string; label: string; locationId: string | null; locationName: string | null }
 export interface AdminUser {

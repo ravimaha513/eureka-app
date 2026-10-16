@@ -21,6 +21,14 @@ locals {
   single_admin_mode = "on"
   # jobs-portal: SES sender of applicant sign-in links and application notices (required by the API).
   portal_from_email = "careers@eureka-staging.spokenly.click"
+  # interview-alerts (2026-10-15): staff notifications by email (coordinator, contract and birthday
+  # alerts, placement events) from the portal's verified identity; events older than the cut-off
+  # are published without email. Needs SES out of the sandbox (or every recipient verified).
+  outbox_from_email    = "careers@eureka-staging.spokenly.click"
+  outbox_deliver_since = "2026-10-15T23:30:00Z"
+  # Support calendar: Google OAuth client with the redirect URI
+  # https://eureka-staging.spokenly.click/api/v1/calendar/support/callback added by hand.
+  calendar_mode = "google"
 
   vpc_cidr             = "10.41.0.0/16"
   public_subnet_cidrs  = ["10.41.1.0/24", "10.41.2.0/24"]
@@ -30,7 +38,7 @@ locals {
   db_multi_az              = false
   db_allocated_storage     = 20
   db_backup_retention_days = 7
-  db_deletion_protection   = false
+  db_deletion_protection   = true # one console click deleted the DB on 2026-10-13; keep it on even for staging
 
   api_cpu           = 256
   api_memory        = 512

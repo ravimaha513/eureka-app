@@ -22,6 +22,7 @@ Sign in with the email and that password. These accounts exist only in your loca
 | `lead` | `l1@eureka.example`, `l2@eureka.example`, `l3@eureka.example` |
 | `recruiter` | `r1a@eureka.example`, `r1b@eureka.example`, `r2a@eureka.example`, `r3a@eureka.example` |
 | `interview_coach` | `coach@eureka.example` |
+| `interview_coordinator` | `coord@eureka.example` (support; gets the interview alerts, can block the support calendar) |
 | `location_ops_admin` | `locD@eureka.example` (Dallas), `opsA@eureka.example` (Austin) |
 | `location_incharge` | `locA@eureka.example` |
 | `hr` | `hr@eureka.example` |
@@ -44,6 +45,11 @@ No shared passwords exist. To create a test user:
    ```bash
    EUREKA_ENVIRONMENT=staging EUREKA_NEW_PASSWORD='<temporary>' node dist/db/set-password.js --email hr@example.com
    ```
+
+   From GitHub (no AWS credentials needed): Actions → ops-task → environment `staging`, command
+   `node dist/db/set-password.js --email hr@example.com`, secret_env `EUREKA_NEW_PASSWORD=<temporary>`
+   (infra/README.md, "Operations tasks"). The value is masked in the Actions log but visible in CloudTrail,
+   so use a temporary password only.
 
    Locally: `EUREKA_ENVIRONMENT=local MIGRATION_DATABASE_URL=... pnpm --filter @eureka/api exec tsx src/db/set-password.ts --email hr@eureka.example`
    (prints a generated password once when run in a terminal).

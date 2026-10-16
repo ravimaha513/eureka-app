@@ -17,6 +17,8 @@ export const REDACT: ReadonlySet<string> = new Set([
   "accountNumber", "account_number", "username",
   "ownerName", "owner_name", "ownerEmail", "owner_email", "ownerPhone", "owner_phone",
   "voidReason", "void_reason",
+  // interview-alerts: contract free text, calendar tokens and the support account / calendar address.
+  "notes", "title", "reference", "refreshToken", "refresh_token", "tokenEnc", "token_enc", "accountEmail", "account_email", "calendarId", "calendar_id",
   // Staff profile free text and interview meeting links (interviews-settings): only "set"/flags are audited.
   "bio", "meeting_url",
 ]);

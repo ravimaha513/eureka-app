@@ -195,6 +195,21 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   needs `portal_from_email` in `env.hcl` (verified SES identity) or the API refuses to start. `company_id` has no FK until the companies migration is integrated.
   Notification registry gained `application.received` and inbox entity `application` (0062 replaces the two resolver functions: later replacements must carry the branch over).
 
+- Interview alerts, contracts, support calendar and staff birthdays (package interview-alerts, 2026-10-15, migrations
+  0086-0089, contract `docs/alerts-calendar-birthdays.md`): role `interview_coordinator` (support) gets every interview
+  creation / slot move / cancellation by email **with the interview details and the candidate's email** (owner decision; the
+  outbox and inbox rows stay ids-only, details read at send time through `authz.interview_notice_details`) and an inbox
+  entry that opens the interview. Contracts (`eureka.contract`: kind MSA/PO/SOW/other, title, reference, dates, notes) on a
+  placement, added by Sales over the placement or Accounts through `authz.create_contract`, with the new placement document
+  types `msa`, `purchase_order`, `sow`; `contract.created` to HR, Associate HR and Accounts. Staff birthdays (month and day
+  on `staff_profile`; own in Settings, anyone's by HR with the new `staff.birthday:manage` on the "Staff birthdays" screen)
+  and the worker job `birthday-digest` (08:00 New York) → `staff.birthdays_today` to the CEO with the names. Support
+  calendar: one shared Google Calendar connection (`eureka.calendar_connection`, refresh token AES-GCM under
+  `CALENDAR_TOKEN_KEY`; `CALENDAR_MODE` dev/google/disabled) made by a `calendar:block` holder (leads, managers, ADs,
+  coordinators); block / release the support calendar for an interview's slot from the interview drawer
+  (`eureka.calendar_block`). Terraform: `calendar_mode` (staging: google) and the generated `CALENDAR_TOKEN_KEY`;
+  staging sends outbox mail from the portal sender since 2026-10-15. Tests: `apps/api/test/alerts.int.test.ts`.
+
 ## Next tasks (Phase 2 to MVP), in suggested order
 
 1. **(Done, see Built.) Outbox delivery job (worker):** grant the worker SELECT and UPDATE(published_at) on
@@ -285,6 +300,10 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Training (migration 0065): course ownership (owning location vs central), whether trainers may manage students
   and courses, HR access to progress, one batch per candidate, corrections in completed batches, which candidate
   statuses may join, and a batch-start reminder: `docs/training-api.md` "Open product questions".
+- Interview alerts, contracts, calendar, birthdays (`docs/alerts-calendar-birthdays.md` "Assumptions and open product
+  questions"): coordinators as a role vs a list; candidate phone in the coordinators' email; who counts as the "offshore
+  team" for the digest (today: every staff member with a birthday on file); HR on the digest; one shared calendar
+  connection vs per-lead connections; contract edits.
 - Interviews and Settings (`docs/interviews-settings-api.md` "Deviations and open product questions"): should panel
   members get read access to the interviews they sit on? May location admins add scorecards? Which notification types
   are mandatory (built: work-authorization expiry, overdue paperwork)? Who besides HR and Org Admin may see staff work

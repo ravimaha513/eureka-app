@@ -23,6 +23,7 @@ import { ChatNavBadge, ChatPage } from "./chat/ChatPage";
 import { JobsPage } from "./jobs/JobsPage";
 import { ApplicationsPage } from "./jobs/ApplicationsPage";
 import { ApplicantsPage } from "./jobs/ApplicantsPage";
+import { BirthdaysPage } from "./staff/BirthdaysPage";
 import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sparkles, Sun } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
@@ -235,9 +236,14 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const candidateScreen = has("candidates") ? "candidates" : has("hotlist") ? "hotlist" : null;
   // A chat conversation to open when switching to Chat (from a direct-message notification).
   const [chatId, setChatId] = useState<string | null>(null);
+  // interview-alerts: an interview to open on the Interviews board (from an interview-requested notification).
+  const [interviewId, setInterviewId] = useState<string | null>(null);
   const canOpenEntity = (e: InboxItem["entity"]) =>
-    (e.type === "placement" ? has("placements") : e.type === "conversation" ? has("chat") : e.type === "application" ? has("applications") : candidateScreen !== null);
+    (e.type === "placement" ? has("placements") : e.type === "conversation" ? has("chat") : e.type === "application" ? has("applications")
+      : e.type === "interview" ? has("interviews") : e.type === "digest" ? false : candidateScreen !== null);
   const openEntity = (e: InboxItem["entity"]) => {
+    if (e.type === "digest") return;
+    if (e.type === "interview") { setProfileId(null); setInterviewId(e.id); setActive("interviews"); return; }
     if (e.type === "application") { setProfileId(null); setApplicationId(e.id); setActive("applications"); return; }
     if (e.type === "placement") { setProfileId(null); openPlacement(e.id); return; }
     if (e.type === "conversation") { setProfileId(null); setChatId(e.id); setActive("chat"); return; }
@@ -319,9 +325,10 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             )
             : current.key === "submissions" ? <SubmissionsPage me={me} onOpenPlacement={items.some((i) => i.key === "placements") ? openPlacement : undefined} />
             : current.key === "placements" ? <PlacementsPage key={placementId ?? "list"} me={me} initialOpenId={placementId} />
-            : current.key === "interviews" ? <InterviewsPage me={me} />
+            : current.key === "interviews" ? <InterviewsPage key={interviewId ?? "board"} me={me} initialOpenId={interviewId} />
             : current.key === "paperwork" ? <PaperworkPage me={me} />
             : current.key === "access" ? <AccessPage me={me} />
+            : current.key === "birthdays" ? <BirthdaysPage />
             : current.key === "employees" ? <EmployeesPage me={me} />
             : current.key === "reports" ? <ReportsPage me={me} />
             : current.key === "companies" ? <CompaniesPage key="companies" me={me} />

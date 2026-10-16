@@ -30,6 +30,12 @@ Code: `apps/api/src/worker/notify-types.ts` (types, templates), `apps/api/src/wo
    events always have). An event with no recipient stays unpublished and alerts (retried with backoff).
 4. A type that is not in `EVENT_SPECS` is never delivered (and so never pruned): add the spec in the same
    change that starts emitting the type.
+5. **Detail lines (interview-alerts, 0089):** a spec may name a `details(event, db)` reader that calls a
+   worker-executable SECURITY DEFINER function at delivery time (`authz.interview_notice_details`,
+   `authz.birthday_names`). The lines go into the email after the message and, only when the spec sets
+   `detailsInInbox` (staff names in the birthday digest), into the inbox body. The payload stays ids-only;
+   a failing read retries the event like a malformed payload. `interview.requested` is the one type whose
+   email names a person and a contact detail (the candidate's email), by owner decision.
 
 Deviation from design B2.5: there is no separate `notification_delivery` table. Email deliveries are the existing
 `outbox_delivery` rows (per event and user); inbox rows are `notification` (per event and user, with
@@ -64,6 +70,9 @@ among `hr`, `accounts`, `immigration`.
 | `candidate.assigned` | FR-NTF-10, FR-EMP-05 (team assigned) | not emitted yet (team reassignment) | `candidateId`, `teamId` (the new team), optional `fromTeamId` | the lead of the candidate's current team (only while it equals `teamId`; otherwise nobody, the event alerts) and that lead's manager | `lead`, `manager` | email + inbox | candidate |
 | `checklist.item_overdue` | FR-NTF-04 (paperwork pending), FR-NTF-03 / FR-VIS-04 (documents pending) | 0052 job `paperwork-overdue` (`authz.emit_paperwork_overdue`): outstanding (pending/received) items past `due_on` on placements not backed out, once per item and due date | `checklistItemId`, `placementId`, `daysOverdue` (0..3650), optional `assigneeId` | the placement's recruiter, the lead of its team snapshot, that lead's manager; plus `assigneeId` when that user holds `documents_team` and is the item's current assignee (checked by the resolver, 0052) | `recruiter`, `lead`, `manager`, `documents_team` | email + inbox | placement |
 | `chat.direct_message` | internal chat (docs/chat-api.md CH-8) | 0070 `authz.chat_send`: a direct message whose recipient has not viewed the chat for 10 minutes and was not notified since their last view; never when muted, never for groups | `conversationId` (= aggregate id), `recipientId` | `recipientId` while a current member of that direct conversation | none | inbox | conversation (opens Chat) |
+| `interview.requested` | interview-alerts IA-2..IA-4 (`docs/alerts-calendar-birthdays.md`) | 0089 trigger `interview_notice` (created, slot moved, cancelled; never for interviews already in the past) | `interviewId` (= aggregate id), `submissionId`, `candidateId`, `change` (`created`/`rescheduled`/`cancelled`), `startsOn`, `notify` | `interview_coordinator` | `interview_coordinator` | email + inbox; **the email carries the interview details read at send time, candidate email included** (owner decision 2026-10-15; `authz.interview_notice_details`) | interview |
+| `contract.created` | interview-alerts CT-4 | 0086 `authz.create_contract` | `contractId` (= aggregate id), `placementId`, `candidateId`, `kind` (msa/po/sow/other), `contractCount` (1..1000), `notify` | `hr`, `associate_hr`, `accounts` | those three | email + inbox | placement |
+| `staff.birthdays_today` | interview-alerts BD-3, BD-4 | 0087 `authz.emit_birthdays` (job `birthday-digest`) | `day`, `userIds` (staff), `count`, `notify` | `ceo` | `ceo` | email + inbox; staff display names read at send time (`authz.birthday_names`) into both | — (`digest`: opens nothing) |
 | `application.received` | jobs-portal JP-31 | 0062 `authz.application_apply` (an applicant applied) | `applicationId`, `jobId`, `notify` | `hr` and the job's current hiring manager (reason `hiring_manager`, only while the payload's job is the application's job) | `hiring_manager`, `hr` | inbox only | application |
 
 `employee.benched` (0045) is the move to the bench at project exit; `employee.bench_time` (0046) is the reminder
@@ -95,6 +104,7 @@ definer function (like `authz.emit_bench_time(day, threshold)`) to `eureka_worke
 | `outbox-delivery` | every tick | event id, or `inbox:<id>` (mail disabled) | above |
 | `paperwork-overdue` | daily 07:30 America/New_York | the New York date | Always on. One `checklist.item_overdue` per checklist item and due date (ledger key `<item>:<due date>`; a new due date re-arms it); the database refuses a future day |
 | `bench-time` | daily 07:45 America/New_York | the New York date | Only when `NOTIFY_BENCH_DAYS` is set (threshold is OD-05, open). One `employee.bench_time` per candidate and bench period (ledger key `candidate:bench_since`, whatever the threshold; a changed threshold does not re-notify), only for candidates whose N-th bench day falls within the last `NOTIFY_BENCH_WINDOW_DAYS` (default 7) days, so a first enable does not notify the whole bench; a worker down longer than the window misses those crossings. The database refuses a future day (0051) |
+| `birthday-digest` | daily 08:00 America/New_York | the New York date | interview-alerts (0087). One `staff.birthdays_today` per day with at least one staff birthday (ledger key = the date); 29 February counts on 28 February in non-leap years; the database refuses a future day |
 | `notification-prune` | daily 04:30 America/New_York | UTC date (maintenance) | Deletes inbox rows older than `NOTIFICATION_RETENTION_DAYS` (default 180); the database refuses fewer than 30 days |
 
 All are covered by time-travel tests on a fixed clock (`apps/api/test/notifications.int.test.ts`).
@@ -147,4 +157,7 @@ placement or candidate when the user has that screen.
   default. Lead/Manager? Email?
 - **Placement events:** still email-only to HR, Accounts, Immigration (HANDOFF open question unchanged). Adding the
   inbox channel is a one-line change in `EVENT_SPECS` once decided.
+- **interview-alerts (2026-10-15):** should HR also get the birthday digest; should the coordinators' email carry the
+  candidate's phone as well; should a rescheduled interview re-block the support calendar by itself
+  (`docs/alerts-calendar-birthdays.md` "Assumptions and open product questions").
 - **Retention:** inbox rows 180 days by default; the reminder ledger is kept (small); align both with AS-13.

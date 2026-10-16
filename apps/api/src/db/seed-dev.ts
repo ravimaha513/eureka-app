@@ -31,6 +31,10 @@ if (rows[0].n === 0) {
     priority = (ARRAY['P1','P2','P3'])[1 + floor(random() * 3)::int]`);
   await c.query("RESET session_replication_role");
   c.release();
+  // interview-alerts: a support user holding the coordinator role (interview alerts, support calendar).
+  await admin.query(`INSERT INTO eureka.app_user (id, email, display_name) VALUES ('00000000-0000-0000-0000-000000000021', 'coord@eureka.example', 'coord')
+    ON CONFLICT DO NOTHING`);
+  await admin.query(`INSERT INTO eureka.user_role (user_id, role_key) VALUES ('00000000-0000-0000-0000-000000000021', 'interview_coordinator')`);
   console.log(`seeded ${candidates.length} fictional candidates; sign in as e.g. r1a@eureka.example, l1@eureka.example, m1@eureka.example, locD@eureka.example`);
 } else {
   console.log("database already has users; skipping fixtures");

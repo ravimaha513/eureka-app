@@ -65,6 +65,13 @@ import { PortalSessionService } from "./platform/portal-session.service.js";
 import { MAIL_PORT, createMailPort } from "./platform/mail.js";
 import { ApplicantsController, ApplicationInterviewsController, ApplicationsController, ApplicationsService } from "./modules/applications/applications.controller.js";
 import { PortalJobsController, PortalJobsService } from "./modules/portal/portal-jobs.controller.js";
+// interview-alerts
+import { ContractsController } from "./modules/contracts/contracts.controller.js";
+import { ContractsService } from "./modules/contracts/contracts.service.js";
+import { CalendarController, InterviewCalendarController } from "./modules/calendar/calendar.controller.js";
+import { CalendarService } from "./modules/calendar/calendar.service.js";
+import { CALENDAR_PROVIDER, DevCalendarProvider, GoogleCalendarProvider } from "./modules/calendar/calendar.provider.js";
+import { StaffBirthdaysController, StaffBirthdaysService } from "./modules/staff/birthdays.controller.js";
 
 @Controller("api")
 class HealthController {
@@ -99,6 +106,8 @@ export class AppModule {
         // jobs-portal
         JobsController, PortalAuthController, PortalMeController, PortalDevMailboxController,
         ApplicationsController, ApplicationInterviewsController, ApplicantsController, PortalJobsController,
+        // interview-alerts
+        ContractsController, CalendarController, InterviewCalendarController, StaffBirthdaysController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
@@ -115,6 +124,10 @@ export class AppModule {
         // jobs-portal
         JobsService, PortalSessionService, PortalAuthService, { provide: MAIL_PORT, useFactory: () => createMailPort(config) },
         ApplicationsService, PortalJobsService,
+        // interview-alerts
+        ContractsService, CalendarService, StaffBirthdaysService,
+        { provide: CALENDAR_PROVIDER, useFactory: () => config.CALENDAR_MODE === "google"
+          ? new GoogleCalendarProvider(config.GOOGLE_CLIENT_ID!, config.GOOGLE_CLIENT_SECRET!) : new DevCalendarProvider() },
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],

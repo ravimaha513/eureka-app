@@ -362,12 +362,15 @@ function GrantRoleDialog({ user, onClose, onDone }: { user: AdminUser; onClose: 
                   {meta.data!.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select></div>
             )}
-            {selected?.restricted && (
+            {selected?.restricted && meta.data!.singleAdminMode && (
+              <p id={noteId} className="note">This is a restricted role. Single-admin mode is on, so it is granted immediately and recorded in the audit log.</p>
+            )}
+            {selected?.restricted && !meta.data!.singleAdminMode && (
               <p id={noteId} className="note warn">This is a restricted role, so it <b>needs a second approver</b>: another admin who is neither you nor {user.displayName}. It stays pending until approved (requests expire after 7 days).</p>
             )}
           </>
         )}
-        <DialogActions onCancel={onClose} submitLabel={selected?.restricted ? "Request approval" : "Grant role"} busy={busy} error={error}
+        <DialogActions onCancel={onClose} submitLabel={selected?.restricted && !meta.data?.singleAdminMode ? "Request approval" : "Grant role"} busy={busy} error={error}
           disabled={!selected || (selected.locationBound && !locationId)} />
       </form>
     </Dialog>

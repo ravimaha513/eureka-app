@@ -2,7 +2,10 @@
 # KMS-encrypted, master password managed by RDS in Secrets Manager.
 
 resource "aws_db_subnet_group" "main" {
-  name       = local.name
+  # The name carries the VPC id: a subnet group cannot be moved to another VPC
+  # (ModifyDBSubnetGroup refuses), so a recreated VPC must get a new group
+  # instead of an in-place update that fails at apply time.
+  name       = "${local.name}-${aws_vpc.main.id}"
   subnet_ids = aws_subnet.private[*].id
 }
 
@@ -120,6 +123,11 @@ resource "random_id" "feedback_token_key" {
   byte_length = 32
 }
 
+# interview-alerts: AES-256-GCM key for the stored support-calendar refresh token (API only).
+resource "random_id" "calendar_token_key" {
+  byte_length = 32
+}
+
 locals {
   ssm_prefix = "/eureka/${var.environment}"
   generated_params = {
@@ -130,6 +138,7 @@ locals {
     "app/session_secret"        = random_password.session_secret.result
     "app/origin_secret"         = random_password.origin_secret.result
     "worker/feedback_token_key" = random_id.feedback_token_key.hex
+    "app/calendar_token_key"    = random_id.calendar_token_key.hex
   }
 }
 

@@ -79,6 +79,10 @@ export const DOCUMENT_TYPES = {
   drivers_license: { label: "Driving license", classification: "restricted" },
   work_authorization: { label: "Work authorization copy", classification: "restricted" },
   offer_letter: { label: "Offer letter", classification: "internal" },
+  // interview-alerts package (migration 0086): closure documents filed on the placement with its contract.
+  msa: { label: "Master services agreement (MSA)", classification: "internal" },
+  purchase_order: { label: "Purchase order (PO)", classification: "internal" },
+  sow: { label: "Statement of work (SOW)", classification: "internal" },
   other: { label: "Other document", classification: "internal" },
 } as const satisfies Record<string, { label: string; classification: DocumentClassification }>;
 export type DocumentType = keyof typeof DOCUMENT_TYPES;

@@ -406,14 +406,24 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
       ["chat.direct_message", { conversationId: chat, recipientId: U.hr }],
       // jobs-portal (0062): HR gets it even without a hiring manager.
       ["application.received", { applicationId: a, jobId: item }],
+      // interview-alerts (0086/0087): a contract on the placement; a birthday digest naming a staff member (hr), never a candidate.
+      ["contract.created", { contractId: item, placementId, candidateId, kind: "po", contractCount: 1 }],
+      ["staff.birthdays_today", { day: "2026-10-15", userIds: [U.hr], count: 1 }],
     ] as const;
-    expect(events.map(([t]) => t).sort()).toEqual(Object.keys(EVENT_SPECS).filter((t) => !t.startsWith("placement.")).sort());
+    // interview.requested is delivered with the interview's details (candidate email included, owner decision
+    // 2026-10-15; docs/notifications.md) read from a real interview row: covered by alerts.int.test.ts, not here.
+    const DETAILED = ["interview.requested"];
+    expect(events.map(([t]) => t).sort()).toEqual(Object.keys(EVENT_SPECS).filter((t) => !t.startsWith("placement.") && !DETAILED.includes(t)).sort());
+    const digestId = await newId(db);
+    const aggregateOf = (type: string): [string, string] =>
+      type === "chat.direct_message" ? ["chat_conversation", chat]
+        : type === "contract.created" ? ["contract", item]
+          : type === "staff.birthdays_today" ? ["birthday_digest", digestId] : ["candidate", candidateId];
     const secrets = [person, "Placed", "81.25", "Irving", "Petra", "petra@vendor.example", "4695550188", "Northwind",
       "2027-01-15", "2026-09-30", "2026-09-29", "2026-11-01", "2026-05-01", "terminated", "resigned", "r1a", "Team Rohit"];
     for (const [type, payload] of events) {
-      const ev = type === "chat.direct_message"
-        ? await emitEvent(db, type, "chat_conversation", chat, payload)
-        : await emitEvent(db, type, "candidate", candidateId, payload);
+      const [aggType, aggId] = aggregateOf(type);
+      const ev = await emitEvent(db, type, aggType, aggId, payload);
       const mail = new FakeMail();
       await deliverEvent(db.worker, EVENT_SPECS[type]!.email ? mail : null, EVENT_SPECS[type]!.email ? ORIGIN : null, ev, ctx());
       const texts = [

@@ -118,6 +118,8 @@ export const BENCH_TIME_SCHEDULE: DailySchedule = { hh: 7, mm: 45, timeZone: "Am
 export const NOTIFICATION_PRUNE_SCHEDULE: DailySchedule = { hh: 4, mm: 30, timeZone: "America/New_York" };
 /** paperwork-overdue (FR-NTF-04, migration 0052): 07:30 New York, before the US working day. */
 export const PAPERWORK_OVERDUE_SCHEDULE: DailySchedule = { hh: 7, mm: 30, timeZone: "America/New_York" };
+/** birthday-digest (interview-alerts, migration 0087): 08:00 New York, the CEO's morning list. */
+export const BIRTHDAY_DIGEST_SCHEDULE: DailySchedule = { hh: 8, mm: 0, timeZone: "America/New_York" };
 /** visa-expiry (design B6): daily notices, after the maintenance jobs; only the latest day (notices catch up by themselves). */
 export const VISA_EXPIRY_SCHEDULE: DailySchedule = { hh: 6, mm: 0, timeZone: "America/New_York" };
 

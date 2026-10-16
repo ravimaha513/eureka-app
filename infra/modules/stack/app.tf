@@ -620,6 +620,8 @@ resource "aws_ecs_task_definition" "api" {
       # jobs-portal: applicant email through SES from the one allowed sender.
       { name = "PORTAL_MAIL_MODE", value = "ses" },
       { name = "PORTAL_FROM_EMAIL", value = var.portal_from_email },
+      # interview-alerts: the support team's Google Calendar (google) or hidden (disabled).
+      { name = "CALENDAR_MODE", value = var.calendar_mode },
     ])
     # SIGTERM starts a 15 s drain (DRAIN_SECONDS) before the server closes;
     # allow for that plus in-flight requests before ECS sends SIGKILL.
@@ -627,7 +629,9 @@ resource "aws_ecs_task_definition" "api" {
     secrets = concat(local.app_secrets, [
       { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.generated["db/app/url"].arn },
       { name = "ORIGIN_VERIFY_SECRET", valueFrom = aws_ssm_parameter.generated["app/origin_secret"].arn },
-    ])
+      ], var.calendar_mode == "google" ? [
+      { name = "CALENDAR_TOKEN_KEY", valueFrom = aws_ssm_parameter.generated["app/calendar_token_key"].arn },
+    ] : [])
     healthCheck = {
       # The runtime image has no curl/wget; use Node's fetch.
       command  = ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]

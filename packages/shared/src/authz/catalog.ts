@@ -34,6 +34,7 @@ export const ROLES = [
   "accounts",
   "immigration",
   "interview_coach",
+  "interview_coordinator",
   "documents_team",
   "bu_head",
   "org_admin",
@@ -53,6 +54,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   accounts: "Accounts",
   immigration: "Immigration",
   interview_coach: "Interview Coach",
+  interview_coordinator: "Interview Coordinator (Support)",
   documents_team: "Documents Team",
   bu_head: "BU Head",
   org_admin: "Org Admin",
@@ -90,6 +92,8 @@ export const PERMISSIONS = [
   "interview:create",
   "interview:update",
   "interview.feedback:create",
+  /** Block the support team's shared Google Calendar for an interview (interview-alerts package). */
+  "calendar:block",
   // placements and compliance
   "placement:read",
   "placement:create",
@@ -141,6 +145,8 @@ export const PERMISSIONS = [
   // interviews-settings
   /** Staff contact details (phone, bio) entered in Settings; read by HR and in Users & Access. */
   "staff.contact:read",
+  /** Staff birthdays (month and day) entered for HR and the offshore team; the CEO's morning digest. */
+  "staff.birthday:manage",
   // chat
   "chat:use",
   // jobs-portal: jobs (client requirements, internal openings), applicants and their applications
@@ -224,6 +230,8 @@ export const GRANTS: Record<Role, Grants> = {
     "report:export": "team",
     "vendor.preferred:create": "own",
     "vendor.preferred:read": "team",
+    // interview-alerts: block the support calendar for the team's interviews
+    "calendar:block": "team",
     // datahub
     "datahub:read": "own",
     // training
@@ -236,6 +244,7 @@ export const GRANTS: Record<Role, Grants> = {
   },
   manager: {
     ...salesLine("hierarchy", "hierarchy"),
+    "calendar:block": "hierarchy",
     "candidate:assign": "hierarchy",
     "candidate.visibility:update": "hierarchy",
     "placement.bgc_status:update": "hierarchy",
@@ -256,6 +265,7 @@ export const GRANTS: Record<Role, Grants> = {
   },
   assoc_director: {
     ...salesLine("hierarchy", "hierarchy"),
+    "calendar:block": "hierarchy",
     "candidate:assign": "hierarchy",
     "candidate.visibility:update": "hierarchy",
     "placement.bgc_status:update": "hierarchy",
@@ -370,6 +380,8 @@ export const GRANTS: Record<Role, Grants> = {
     "datahub:manage": "org",
     // interviews-settings
     "staff.contact:read": "org",
+    // interview-alerts: staff birthdays for the CEO's morning digest
+    "staff.birthday:manage": "org",
     // chat
     "chat:use": "own",
     // jobs-portal
@@ -439,6 +451,18 @@ export const GRANTS: Record<Role, Grants> = {
     // training: batches where they are the trainer (and progress of coached teams' candidates)
     "training:read": "coached",
     "training.progress:update": "coached",
+    // chat
+    "chat:use": "own",
+  },
+  // interview-alerts: the support team that coordinates interviews. Reads every
+  // interview (and the candidates on them) to coordinate, blocks the support
+  // calendar; no Sales writes, no documents, no rates.
+  interview_coordinator: {
+    "candidate:read": "org",
+    "interview:read": "org",
+    "calendar:block": "org",
+    // datahub
+    "datahub:read": "own",
     // chat
     "chat:use": "own",
   },
