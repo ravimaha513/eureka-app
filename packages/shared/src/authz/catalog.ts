@@ -117,6 +117,8 @@ export const PERMISSIONS = [
   "report:read",
   "report:export",
   "performance:read",
+  /** Recruiter targets per period (docs/performance-api.md PF-4); set by managers and associate directors. */
+  "performance.target:manage",
   // vendors and org
   "vendor.preferred:create",
   "vendor.preferred:read",
@@ -253,6 +255,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     "designation:change": "hierarchy",
+    // performance: recruiter targets for the hierarchy
+    "performance.target:manage": "hierarchy",
     // datahub
     "datahub:read": "own",
     // training
@@ -274,6 +278,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     "designation:change": "hierarchy",
+    // performance: recruiter targets for the hierarchy
+    "performance.target:manage": "hierarchy",
     // datahub
     "datahub:read": "own",
     // training
