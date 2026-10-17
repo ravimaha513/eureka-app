@@ -5,6 +5,7 @@ import { ConfirmDialog } from "../admin/Dialog";
 import { CandidateResumes } from "./CandidateResumes";
 import { DocumentsSection } from "../documents/DocumentsSection";
 import { CandidateTimeline } from "./CandidateTimeline";
+import { NonResponseCard } from "../pipelinereport/NonResponseCard";
 import { CandidateWorkAuthorization } from "../workauth/CandidateWorkAuthorization";
 import { CandidateTraining } from "../training/CandidateTraining";
 import { EditProfileDialog } from "./EditProfileDialog";
@@ -162,6 +163,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
         {caps.has("visa:read") && <CandidateWorkAuthorization candidateId={c.id} />}
         {caps.has("training:read") && <CandidateTraining candidateId={c.id} />}
 
+        <NonResponseCard candidateId={c.id} />
         <CandidateTimeline id={c.id} />
       </div>
 

@@ -694,3 +694,9 @@ a.contactlink { color: var(--pri); }
   .settingsnav { flex-direction: row; flex-wrap: wrap; }
   .prefrow { flex-direction: column; align-items: flex-start; }
 }
+
+/* pipeline-vendors: pipeline report stages, assessment and responsiveness lists */
+.badge.st-not_started { background: var(--neutral-bg); color: var(--neutral-fg); }
+.badge.st-marketing, .badge.st-submitted, .badge.st-interviewing, .badge.st-assessment { background: var(--pri-50); color: var(--pri-700); }
+ul.plain { list-style: none; padding: 0; margin: 4px 0 8px; display: flex; flex-direction: column; gap: 6px; }
+form.stack { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }

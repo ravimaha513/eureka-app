@@ -32,6 +32,9 @@ export const NAV: NavItem[] = [
   { key: "courses", label: "Courses", section: "Training", anyOf: ["training:manage"] },
   { key: "performance", label: "Performance", section: "Insights", anyOf: ["performance:read"] },
   { key: "reports", label: "Reports", section: "Insights", anyOf: ["report:read"] },
+  // pipeline-vendors: GET /api/v1/reports/pipeline needs report:read (and candidate:read, checked by the API)
+  { key: "pipeline", label: "Candidate Pipeline", section: "Insights", anyOf: ["report:read"] },
+  { key: "vendors", label: "Preferred Vendors", section: "Workspace", anyOf: ["vendor.preferred:create", "vendor.preferred:read"] },
   { key: "access", label: "Users & Access", section: "Admin", anyOf: ["access:manage"] },
   // interview-alerts: HR keeps the staff birthdays the CEO's morning digest is built from.
   { key: "birthdays", label: "Staff birthdays", section: "Admin", anyOf: ["staff.birthday:manage"] },
