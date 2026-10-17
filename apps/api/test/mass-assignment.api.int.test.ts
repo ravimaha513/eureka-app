@@ -852,7 +852,27 @@ const CASES: RejectCase[] = [
     forbidden: {
       status: "joined", isFirstPlacement: false, recruiterId: U.r1b, teamId: T.t2, candidateId: FOREIGN_ID, personId: FOREIGN_ID,
       locationId: LOC.austin, clientId: FOREIGN_ID, vendorId: FOREIGN_ID, statusChangedAt: PAST, joinedAt: PAST, statusReason: "x",
+      // migration 0160: the technology is the candidate's, snapshotted by the database
+      technologyId: TECH_ID, technology: TECH_ID,
     },
+  },
+  // placements report export (migration 0160): only the list filters
+  {
+    route: "POST /api/v1/placements/export", actor: "l1",
+    prepare: async () => ({
+      url: "/api/v1/placements/export", body: {},
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.audit_event WHERE action = 'placement.export'`),
+    }),
+    forbidden: { cursor: "1.00000000-0000-4000-8000-0000000000ff", limit: 100000, cap: 1_000_000, rate: true, contacts: true, userId: U.hr },
+  },
+  // sales report export (migration 0160): only the dashboard query
+  {
+    route: "POST /api/v1/dashboard/export", actor: "l1",
+    prepare: async () => ({
+      url: "/api/v1/dashboard/export", body: {},
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.audit_event WHERE action = 'dashboard.export'`),
+    }),
+    forbidden: { limit: 100000, maxGroups: 1_000_000, recruiterId: U.r1b, teamId: T.t2, locationId: LOC.austin, scope: "org", userId: U.hr },
   },
   {
     route: "PATCH /api/v1/placements/:id/status", actor: "r1a",

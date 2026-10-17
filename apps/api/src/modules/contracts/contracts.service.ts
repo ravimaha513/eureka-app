@@ -1,6 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import type pg from "pg";
-import { ownsActivity, resolveScope, type UserAccess } from "@eureka/shared";
+import { CLOSED_BEFORE_JOIN_STATUSES, ownsActivity, resolveScope, type UserAccess } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
@@ -53,7 +53,7 @@ export class ContractsService {
           WHERE k.placement_id = $1 ORDER BY k.created_at DESC, k.id DESC`, [placementId]);
       return {
         items: rows.map(present),
-        canAdd: ContractsService.canAdd(user.access, p) && !["backout", "bgc_failed"].includes(p.status),
+        canAdd: ContractsService.canAdd(user.access, p) && !CLOSED_BEFORE_JOIN_STATUSES.has(p.status),
       };
     });
   }

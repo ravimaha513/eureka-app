@@ -20,11 +20,14 @@ const LOC = base({ userId: "LA", roles: [{ role: "location_incharge", locationId
 
 describe("placement state machine (PL-4)", () => {
   it("forward one step at a time; backout before joined; bgc_failed from any live state", () => {
-    expect(placementTransitionTargets("confirmed")).toEqual(["paperwork", "backout", "bgc_failed"]);
-    expect(placementTransitionTargets("ready")).toEqual(["joined", "backout", "bgc_failed"]);
+    expect(placementTransitionTargets("confirmed")).toEqual(["paperwork", "backout", "bgc_failed", "joining_issue"]);
+    expect(placementTransitionTargets("ready")).toEqual(["joined", "backout", "bgc_failed", "joining_issue"]);
     expect(placementTransitionTargets("joined")).toEqual(["bgc_failed"]);
     expect(placementTransitionTargets("backout")).toEqual([]);
     expect(placementTransitionTargets("bgc_failed")).toEqual([]);
+    // joining_issue (migration 0160): closes an open placement; never after joining; final.
+    expect(placementTransitionAllowed("joined", "joining_issue")).toBe(false);
+    expect(placementTransitionTargets("joining_issue")).toEqual([]);
     expect(placementTransitionAllowed("confirmed", "bgc")).toBe(false);
     expect(placementTransitionAllowed("paperwork", "confirmed")).toBe(false);
     for (const s of PLACEMENT_STATUSES) expect(placementTransitionAllowed(s, s)).toBe(false);
@@ -68,8 +71,8 @@ describe("action hints", () => {
   });
 
   it("placement transitions: bgc_failed only with placement.bgc_status:update", () => {
-    expect(placementTransitions(R1a, r1aAct, "confirmed")).toEqual(["paperwork", "backout"]);
-    expect(placementTransitions(L1, r1aAct, "confirmed")).toEqual(["paperwork", "backout"]);
+    expect(placementTransitions(R1a, r1aAct, "confirmed")).toEqual(["paperwork", "backout", "joining_issue"]);
+    expect(placementTransitions(L1, r1aAct, "confirmed")).toEqual(["paperwork", "backout", "joining_issue"]);
     expect(placementTransitions(M, r1aAct, "joined")).toEqual(["bgc_failed"]);
     expect(placementTransitions(HR, r1aAct, "confirmed")).toEqual([]);
   });

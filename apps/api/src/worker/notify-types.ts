@@ -95,6 +95,8 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 export const PLACEMENT_STATUS_LABELS: Record<string, string> = {
   confirmed: "Confirmed", paperwork: "Paperwork", bgc: "Background check", ready: "Ready to join",
   joined: "Joined", backout: "Backed out", bgc_failed: "Background check failed",
+  // sales-placements (migration 0160)
+  joining_issue: "Joining issue",
 };
 
 function statusLabel(v: unknown): string {

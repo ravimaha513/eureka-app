@@ -117,3 +117,22 @@ clauses match the service's SQL; change both together.
   (`/submissions`, `/interviews`, `/placements`, `/candidates`) over the same period.
 - RLS only: the same counts with no application predicate, as `eureka_app`.
 - Needs-attention rules, ordering, scope and omission per role.
+
+## Sales reports by manager, location sales view and export (migration 0160)
+
+- `groupBy` also takes **`manager`** and **`candidate`**.
+  - `manager`: each activity row's team snapshot maps to the nearest user at or above the team's lead in the **current**
+    reporting lines (`reporting_closure`, the lead included) who holds an active `manager` role; activity without a team maps
+    from its recruiter the same way. No such user: the `null` group ("No manager"). The team snapshot is kept, so work stays
+    with the team it was done in; only the team-to-manager mapping is current.
+  - `candidate` (the **location sales view**): one group per candidate with submissions, interviews and cleared calls (and the
+    other metrics). Names come from the candidate row under RLS (`null` when not readable).
+- Default grouping: a caller whose broadest `report:read` grant is **location** scope (Location Incharge, Location Ops Admin)
+  now gets `candidate`; org scope keeps `location`; others unchanged.
+- At most `MAX_GROUPS` (500) groups are returned (the most active ones, then by name); `groupsTruncated: true` says so; totals and
+  the series stay exact.
+- **`POST /api/v1/dashboard/export`** (`report:read` **and** `report:export`; body: the dashboard query `from`, `to`, `groupBy`,
+  `tz`, strict) returns CSV of the grouped counts with a final "Total" row, same scope, period and grouping rules as the page
+  (`x-export-rows` = groups, `x-export-truncated`). 5 exports per 10 minutes per user (separate from the page's limit), audited
+  `dashboard.export` with the grouping, period, metrics and row count (counts only). The page shows "Export CSV" to
+  `report:export` holders. Location roles hold no `report:export`, so the location sales view is on screen only.

@@ -117,3 +117,32 @@ Migration 0044 (`docs/paperwork-api.md`): each checklist entry adds `{ id, dueOn
 `pending`, `received`, `verified`, `waived`; notes, reasons and history are on `/paperwork` (`document:read`). Where
 `document:read` covers the placement the detail also carries `bgc: { status }` (`not_started` until HR records it);
 the key is omitted otherwise.
+
+## Sales/placements gaps (migration 0160, 2026-10-17)
+
+Eureka App 4 gap list, slice sales-placements. Code: `apps/api/src/modules/placements`, `packages/shared/src/authz/state-machines.ts`,
+`apps/web/src/pipeline`; tests: `apps/api/test/sales-placements.api.int.test.ts`.
+
+- **Status `joining_issue`** (next to `bgc_failed`): the candidate could not join because of an issue at joining. Reached from any
+  open state (`confirmed` … `ready`) with `placement:update` (no `placement.bgc_status:update` needed) and a required reason
+  (`reason_required`), never after `joined`; final. Side effects as a backout (PL-5): the candidate goes back to `active` when still
+  in `confirmation`; the submission is freed (`placement_active_submission` excludes it), so it can be placed again; a joining
+  issue before joining is not an earlier placement for first-placement detection (PL-3, like a backout). Outbox
+  `placement.state_changed` with `to: "joining_issue"` (label "Joining issue"); paperwork stays editable, as after `bgc_failed`.
+- **`reconfirmed`** ("existing consultant re-confirmed"): optional boolean on `POST /placements` (default `false`), entered by the
+  user, independent of the database-computed `isFirstPlacement` (historical placements may be missing from the system). Fixed
+  after creation. Audited (`placement.created` gains `reconfirmed`). `authz.create_placement` gained `p_reconfirmed boolean
+  DEFAULT false`, so the 9-argument calls (sheet import, seeds) are unchanged.
+- **`technology`**: the candidate's technology is snapshotted on the placement at creation (PL-2; existing rows back-filled), so
+  every `placement:read` holder (BU Head has no `candidate:read`) can filter and export by it, and a later change of the
+  candidate's technology does not move placed counts.
+- `Placement` adds `reconfirmed: boolean`, `technology: {id,name}|null` and `joinedAt` (list and detail).
+- **Report filters** on `GET /placements` (and the export): `vendorId`, `clientId` (end client), `technologyId`, `locationId`
+  (candidate location snapshot), with the existing `status`, `candidateId`, `recruiterId`, `from`, `to`; same scope as the list.
+- **`POST /api/v1/placements/export`** (`report:export` **and** `placement:read`; body: the filters above, strict; no paging)
+  returns CSV (`text/csv`, `x-export-rows`, `x-export-truncated`): candidate (or "(not visible)"), technology, status, type, work
+  mode, end client, vendor, implementation partner, recruiter, team, location, tentative start, joined on, first placement,
+  re-confirmed, created on. **No rates and no contacts** (conservative; rates follow PL-6 on screen only). Formula-injection-safe
+  cells, at most 5 000 rows, 5 exports per 10 minutes per user, audited `placement.export` with the row count, the cap and the
+  filter **names** only. Holders today: Lead (team), Manager and AD (hierarchy), CEO (org); location roles have no
+  `report:export`.

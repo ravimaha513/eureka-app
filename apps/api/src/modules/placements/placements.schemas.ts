@@ -29,6 +29,8 @@ export const CreatePlacement = z
     tentativeStart: z.string().date().refine((d) => d >= "2000-01-01" && d <= "2100-12-31", "out of range"),
     implementationPartnerId: uuid.optional(),
     contacts: z.array(Contact).max(10).optional(),
+    /** "Existing consultant re-confirmed" (migration 0160): entered by the user, fixed after creation. */
+    reconfirmed: z.boolean().optional(),
   })
   .strict();
 export type CreatePlacement = z.infer<typeof CreatePlacement>;
@@ -41,18 +43,34 @@ export const PlacementStatusChange = z
   .strict();
 export type PlacementStatusChange = z.infer<typeof PlacementStatusChange>;
 
+/** List and report filters (placements report, migration 0160: vendor, technology, end client, location). */
+const PlacementFilters = {
+  status: z.enum(PLACEMENT_STATUSES).optional(),
+  candidateId: uuid.optional(),
+  recruiterId: uuid.optional(),
+  vendorId: uuid.optional(),
+  /** The end client (placement.client_id). */
+  clientId: uuid.optional(),
+  /** Technology snapshot taken when the placement was created. */
+  technologyId: uuid.optional(),
+  /** Candidate location snapshot (placement.location_id). */
+  locationId: uuid.optional(),
+  from: QueryInstant.optional(),
+  to: QueryInstant.optional(),
+};
+
 export const PlacementListQuery = z
   .object({
-    status: z.enum(PLACEMENT_STATUSES).optional(),
-    candidateId: uuid.optional(),
-    recruiterId: uuid.optional(),
-    from: QueryInstant.optional(),
-    to: QueryInstant.optional(),
+    ...PlacementFilters,
     cursor: Cursor.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })
   .strict();
 export type PlacementListQuery = z.infer<typeof PlacementListQuery>;
+
+/** POST /placements/export body: the list filters, no paging. */
+export const PlacementExportQuery = z.object(PlacementFilters).strict();
+export type PlacementExportQuery = z.infer<typeof PlacementExportQuery>;
 
 /** Idempotency-Key header: printable ASCII, as the idempotency_key CHECK. */
 export const IdempotencyKey = z.string().regex(/^[\x21-\x7e]{1,200}$/);

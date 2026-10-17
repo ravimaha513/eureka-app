@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BGC_STATUSES, CHECKLIST_ITEM_STATUSES, PLACEMENT_STATUSES, ROLES } from "@eureka/shared";
+import { BGC_HISTORY_YEARS, BGC_STATUSES, CHECKLIST_ITEM_STATUSES, PLACEMENT_STATUSES, ROLES } from "@eureka/shared";
 import { Cursor } from "../submissions/pipeline.js";
 
 const uuid = z.string().uuid();
@@ -7,6 +7,7 @@ const day = z.string().date().refine((d) => d >= "2000-01-01" && d <= "2100-12-3
 const noControl = /^[^\p{Cc}]+$/u;
 /** Notes may span lines; other control characters are refused. */
 const notes = z.string().trim().max(1000).regex(/^[^\x00-\x09\x0b-\x1f\x7f]*$/, "no control characters");
+const historyYears = z.number().int().refine((n) => (BGC_HISTORY_YEARS as readonly number[]).includes(n), "one of 3, 5, 7 or 10 years");
 const reason = z.string().trim().max(500).regex(/^[^\x00-\x09\x0b-\x1f\x7f]*$/, "no control characters");
 
 /**
@@ -41,8 +42,9 @@ export const UpdateBgc = z
     completedOn: day.nullable().optional(),
     helpedBy: uuid.nullable().optional(),
     educationLevel: z.string().trim().min(1).max(60).regex(noControl, "no control characters").nullable().optional(),
-    employmentYears: z.number().int().min(0).max(50).nullable().optional(),
-    addressYears: z.number().int().min(0).max(50).nullable().optional(),
+    /** History checked, in years: one of BGC_HISTORY_YEARS (3, 5, 7, 10; migration 0160). */
+    employmentYears: historyYears.nullable().optional(),
+    addressYears: historyYears.nullable().optional(),
     notes: notes.nullable().optional(),
     /** Also move the placement to bgc_failed (authz.transition_placement rules apply). */
     failPlacement: z.boolean().optional(),

@@ -1,6 +1,6 @@
 import { useId, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { PLACEMENT_STATUSES, ROLES, ROLE_LABELS, type Role } from "@eureka/shared";
+import { BGC_HISTORY_YEARS, PLACEMENT_STATUSES, ROLES, ROLE_LABELS, type Role } from "@eureka/shared";
 import { ApiError, type Me } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
 import { Drawer, Field, fmtDate } from "../sales/ui";
@@ -301,8 +301,8 @@ function BgcSection({ hid, bgc, onEdit }: { hid: string; bgc: Bgc; onEdit: () =>
         <dt>Completed</dt><dd>{fmtDate(bgc.completedOn)}</dd>
         <dt>Helped by</dt><dd>{bgc.helpedBy?.name ?? "—"}</dd>
         <dt>Education level</dt><dd>{bgc.educationLevel ?? "—"}</dd>
-        <dt>Employment years</dt><dd>{bgc.employmentYears ?? "—"}</dd>
-        <dt>Address years</dt><dd>{bgc.addressYears ?? "—"}</dd>
+        <dt>Employment history</dt><dd>{yearsText(bgc.employmentYears)}</dd>
+        <dt>Address history</dt><dd>{yearsText(bgc.addressYears)}</dd>
         {bgc.notes && <><dt>Notes</dt><dd>{bgc.notes}</dd></>}
       </dl>
       {bgc.actions.update && <button type="button" className="btn sm" style={{ alignSelf: "flex-start" }} onClick={onEdit}>Update background check</button>}
@@ -435,6 +435,19 @@ function ItemDialog({ item, me, candidateId, placementId, onClose, onDone }: {
   );
 }
 
+/** "7 years" (BGC history depth; the API accepts 3, 5, 7 or 10 since migration 0160). */
+const yearsText = (n: number | null) => (n === null ? "—" : `${n} years`);
+
+/** Employment / address history depth: one of BGC_HISTORY_YEARS, or not recorded. */
+function YearsSelect({ value, onChange, ...p }: { id: string; "aria-invalid"?: true; "aria-describedby"?: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <select {...p} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Not recorded</option>
+      {BGC_HISTORY_YEARS.map((y) => <option key={y} value={String(y)}>{y} years</option>)}
+    </select>
+  );
+}
+
 function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string; bgc: Bgc; onClose: () => void; onDone: (m: string) => void }) {
   const [status, setStatus] = useState("");
   const [reason, setReason] = useState("");
@@ -505,8 +518,8 @@ function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string;
           <Field label="Education level">{(p) => <input {...p} maxLength={60} value={education} onChange={(e) => setEducation(e.target.value)} />}</Field>
           <Field label="Initiated on">{(p) => <input {...p} type="date" value={initiatedOn} onChange={(e) => setInitiated(e.target.value)} />}</Field>
           <Field label="Completed on">{(p) => <input {...p} type="date" value={completedOn} onChange={(e) => setCompleted(e.target.value)} />}</Field>
-          <Field label="Employment years">{(p) => <input {...p} type="number" min={0} max={50} value={employment} onChange={(e) => setEmployment(e.target.value)} />}</Field>
-          <Field label="Address years">{(p) => <input {...p} type="number" min={0} max={50} value={address} onChange={(e) => setAddress(e.target.value)} />}</Field>
+          <Field label="Employment history">{(p) => <YearsSelect {...p} value={employment} onChange={setEmployment} />}</Field>
+          <Field label="Address history">{(p) => <YearsSelect {...p} value={address} onChange={setAddress} />}</Field>
         </div>
         <Field label="Notes" hint="Up to 1000 characters. Avoid personal data.">
           {(p) => <textarea {...p} rows={3} maxLength={1000} value={notes} onChange={(e) => setNotes(e.target.value)} />}

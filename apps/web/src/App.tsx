@@ -347,6 +347,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "payments" ? <PaymentsPage me={me} />
             : current.key === "dashboard" ? (
               <DashboardPage firstName={me.displayName.split(" ")[0]} canOpen={(t) => items.some((i) => i.key === t)}
+                canExport={me.capabilities.includes("report:export")}
                 onOpen={(t, id) => { if (t === "placements") openPlacement(id); else setActive(t); }} />
             )
             : <Placeholder item={current} />}

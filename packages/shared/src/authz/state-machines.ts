@@ -68,7 +68,7 @@ export function submissionTransitionTargets(from: string): SubmissionStatus[] {
 
 // ---------- placement (migration 0022, PL-4) ----------
 
-export const PLACEMENT_STATUSES = ["confirmed", "paperwork", "bgc", "ready", "joined", "backout", "bgc_failed"] as const;
+export const PLACEMENT_STATUSES = ["confirmed", "paperwork", "bgc", "ready", "joined", "backout", "bgc_failed", "joining_issue"] as const;
 export type PlacementStatus = (typeof PLACEMENT_STATUSES)[number];
 
 /** Pre-join states: the placement is open and drives the candidate. */
@@ -83,7 +83,8 @@ const PLACEMENT_FORWARD: Partial<Record<string, PlacementStatus>> = {
 
 export function placementTransitionAllowed(from: string, to: string): boolean {
   if (PLACEMENT_FORWARD[from] === to) return true;
-  if (to === "backout") return OPEN_PLACEMENT_STATUSES.has(from);
+  // joining_issue (migration 0160): the candidate could not join; closes the placement like a backout.
+  if (to === "backout" || to === "joining_issue") return OPEN_PLACEMENT_STATUSES.has(from);
   if (to === "bgc_failed") return OPEN_PLACEMENT_STATUSES.has(from) || from === "joined";
   return false;
 }
@@ -93,7 +94,13 @@ export function placementTransitionTargets(from: string): PlacementStatus[] {
 }
 
 /** Transitions that need a non-blank reason (reason_required). */
-export const PLACEMENT_REASON_REQUIRED: ReadonlySet<string> = new Set(["backout", "bgc_failed"]);
+export const PLACEMENT_REASON_REQUIRED: ReadonlySet<string> = new Set(["backout", "bgc_failed", "joining_issue"]);
+
+/** Closed placements that never joined free the submission and the candidate (PL-1, PL-5). */
+export const CLOSED_BEFORE_JOIN_STATUSES: ReadonlySet<string> = new Set(["backout", "bgc_failed", "joining_issue"]);
+
+/** BGC employment and address history choices, in years (migration 0160). */
+export const BGC_HISTORY_YEARS = [3, 5, 7, 10] as const;
 
 /** Candidate statuses from which a placement may be created (PL-5 moves them to confirmation). */
 export const PLACEABLE_CANDIDATE_STATUSES: ReadonlySet<string> = new Set(["active", "full_of_interviews"]);
