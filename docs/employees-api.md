@@ -107,6 +107,61 @@ assignments that existed before it share one recording time, so they sort by eff
 - Ending-soon window (30 days) and recipients (`hr`, `accounts`); benched/exited recipients (admin teams, BU Head, CEO per
   B6). Should the recruiter, Lead and Manager also be told?
 - BU Head holds `employee:read` but not `candidate:read`: names are hidden from them. Should `employee:read` show names?
-- HR-owned employee fields from B2.4 (`payroll_entity_id`, `everify_date`, `onboarded_date`) and anything needing field
-  encryption (SSN, work-authorization numbers) are not built here: they wait for the onboarding checklist and the field
-  encryption work.
+- HR-owned employee fields from B2.4 (`payroll_entity_id`, `everify_date`, `onboarded_date`) are built in 0150 (below);
+  anything needing field encryption (SSN, work-authorization numbers) is not built here.
+
+## 0150: Eureka App 4 gaps (Employees bundle)
+
+Built in migration `0150_employees_gaps.sql`, this module, `packages/shared/src/authz/employment.ts` and the Employees
+and Reports screens. Conservative defaults for every ambiguity are listed under "Decisions" below.
+
+| Rule | Enforcement |
+|---|---|
+| EM-10 Employment facts per assignment (design B2.4): payroll company (one of the group's own companies, `eureka.company`, AS-09), E-Verify date, onboarded date and the employee's hourly pay rate, in `eureka.assignment_employment` (kept apart from `eureka.assignment` like `assignment_plan`). Readable wherever the assignment is; the app has no column privilege on `pay_rate`. | RLS `assignment_employment_read` (EXISTS by key under `assignment_read`), column grants, write guard (definer only, server stamps `updated_by`/`updated_at`, no delete/truncate) |
+| EM-11 Writes as every employment write (EM-4: `assignment:update` on the actor snapshot and `employee:read` at org scope: HR, Associate HR, Accounts), on open or ended assignments (history corrections). The pay rate also needs `rate:read` over the placement's actor snapshot (Accounts; the placement rate rule PL-6). | `authz.set_assignment_employment` (re-checks through `authz.assignment_for_update`, NULL-safe, refuses unknown keys), API pre-check |
+| EM-12 Pay rates are read only through `authz.assignment_pay_rates(person)`: `employee:read` at org scope, the assignment visible and `rate:read` over the actor snapshot (Accounts, CEO). Never on the list, in exports, audit or outbox rows. | definer read, field policy in the API |
+| EM-13 Payroll company names reach employee and report readers (who hold no `company:read`) through `authz.payroll_companies()` (id, name, status only). | definer read |
+| EM-14 Leaving a project: HR, Associate HR and Accounts put a benched employee's candidate (candidate `bench` or `active`) in a Sales team without `candidate:assign`. The recruiter is cleared (the new lead assigns one); `candidate.assigned` is recorded for the new lead and manager (FR-NTF-10). | `authz.assign_employee_team` (re-checks through `authz.employee_for_update`); the candidate column guard lets definer code change `team_id` only under `authz.employment_team_context`, a transaction-scoped marker only this function writes |
+| EM-15 Immigration holds `report:read` (org). It has `employee:read`/`assignment:read` but no placement scope, so its joinings/exits and active-employee rows come from `authz.employment_movements` (ids, dates, reason categories, payroll company: facts its employment history already shows); client and recruiter stay `null`. It cannot export (no `report:export`). Its Dashboard shows the candidate metric only. | definer read, `ReportsService.source()` |
+
+Endpoints (additions):
+
+- `GET /api/v1/employees?...&clientId=&clientMatch=any|current&vendorId=&payrollCompanyId=`: `clientId` now matches any
+  readable assignment of the employee (current or past) unless `clientMatch=current` (the old behaviour); `vendorId`
+  (placement vendor) and `payrollCompanyId` also match any readable assignment. Items add `lead` (the candidate's team's
+  lead) and `recruiter` (the candidate's recruiter), and `assignment` adds `vendor`, `payrollCompany`, `everifyDate`,
+  `onboardedDate`. The CSV export adds `Lead, Recruiter, Vendor, Payroll company, E-Verify date, Onboarded date`.
+- `GET /api/v1/employees/:id`: each of `assignments` adds `vendor`, `payrollCompany`, `everifyDate`, `onboardedDate`, and
+  `payRate` (number or null) only when the caller may see it (EM-12; the key is absent otherwise). `actions` adds
+  `assignTeam` and `editEmployment`.
+- `GET /api/v1/employees/payroll-companies` (`employee:read`, org) → `{ items: [{ id, name, status }] }`.
+- `GET /api/v1/employees/teams` (`assignment:update`, and `employee:read` at org) → `{ items: [{ id, name, lead: {id,name}, location }] }`.
+- `PATCH /api/v1/assignments/:id/employment` `{ payrollCompanyId?: uuid|null, everifyDate?: date|null, onboardedDate?: date|null,
+  payRate?: number|null }` (at least one; `assignment:update`) → `{ id, changed: [field], payrollCompany, everifyDate,
+  onboardedDate, payRate? }`. A new company must be active. Audit `assignment.employment_updated` `{ fields, payrollCompanyId? }`.
+- `POST /api/v1/employees/:id/assign-team` `{ teamId }` (`assignment:update`) → `{ id, candidateId, team: {id,name}, recruiter: null }`.
+  Audit `employee.team_assigned` `{ candidateId, fromTeamId, toTeamId }`.
+- `GET /api/v1/reports/joinings-exits`: items add `isFirstAssignment` (assignment no. 1 vs a later one), `technology` (the
+  candidate's), `payrollCompany`; `client` may be `null` (EM-15). `totals` adds `firstAssignments` and `laterAssignments`
+  (joinings); `byCompany: [{ company, joinings, firstAssignments, laterAssignments, exits }]` (payroll company, `null` = not set).
+  The CSV adds `Assignment` (First/Later), `Technology`, `Payroll company`.
+- `GET /api/v1/reports/active-employees?month=YYYY-MM&clientId=` (`report:read`) → `{ month, from, to, total, byClient:
+  [{ client, count }], byCompany: [{ company, count }] }`: distinct employees with an assignment running on any day of the
+  month (started on or before its last day, not ended before its first), over the same rows as joinings/exits (scope,
+  rate limit and timeout shared). For EM-15 callers a client filter matches nothing.
+
+New error codes (`detail`, 422): `invalid_field`, `invalid_company`, `invalid_date`, `invalid_rate`, `invalid_team`.
+
+Document types (0150): `everify` "E-Verify copy" and `form_1099` "Form 1099", both restricted (case results and tax forms
+carry SSN/TIN), so only HR, Accounts and Immigration open or upload them.
+
+### Decisions (0150, conservative defaults)
+
+- "Payroll company" is one of the group's own companies (0054 `eureka.company`); no separate legal-entity list.
+- E-Verify date, onboarded date and pay rate are per assignment (design B2.4), not per employee.
+- Pay rate is the employee's hourly pay, gated like billing rates (`rate:read`): Accounts and the CEO see it, HR does not.
+- "First vs later assignment" is the person's assignment number (1 vs > 1), alongside the existing `isFirstPlacement`.
+- Client search over past assignments is the default; `clientMatch=current` keeps the old filter.
+- Team assignment after a project clears the recruiter and is allowed while the employee is benched (candidate on bench or
+  back in marketing); HR cannot pick a recruiter.
+- Immigration's report omits clients and recruiters rather than widening its placement scope.
