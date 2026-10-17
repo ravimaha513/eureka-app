@@ -215,6 +215,16 @@ describe("Create placement", () => {
     fireEvent.change(within(dlg).getByLabelText("Tentative start date"), { target: { value: "2026-10-20" } });
   };
 
+  it("sends the existing-consultant re-confirmed flag only when ticked (migration 0160)", async () => {
+    api.routes["POST /api/v1/placements"] = () => ({ status: 201, body: { id: "p9", isFirstPlacement: false } });
+    const { dlg } = await openCreate();
+    fillRequired(dlg);
+    fireEvent.click(within(dlg).getByRole("checkbox", { name: "Existing consultant re-confirmed" }));
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create placement" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.body).toMatchObject({ reconfirmed: true, placementType: "w2" });
+  });
+
   it("validates, edits contacts, sends an Idempotency-Key and reports a first placement", async () => {
     api.routes["POST /api/v1/placements"] = () => ({ status: 201, body: { id: "p9", isFirstPlacement: true } });
     const { drawer, dlg } = await openCreate();
