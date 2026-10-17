@@ -394,6 +394,9 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
     const item = await newId(db);
     const chat = await asUser(db.app, U.r1a, async (c) => (await c.query<{ conversation_id: string }>(
       `SELECT conversation_id FROM authz.chat_open_direct($1)`, [U.hr])).rows[0]!.conversation_id, true);
+    // pipeline-vendors (0171): a real "not responding" flag on the candidate (its recruiter flags it).
+    const flagId = await asUser(db.app, U.r1a, async (c) => (await c.query<{ id: string }>(
+      `SELECT authz.nonresponse_flag($1, 'missed_interview') AS id`, [candidateId])).rows[0]!.id, true);
     const events = [
       ["work_authorization.expiring", PAYLOADS.workAuth(candidateId, a)],
       ["employee.benched", PAYLOADS.projectExit(a, placementId, candidateId)],
@@ -409,6 +412,7 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
       // interview-alerts (0086/0087): a contract on the placement; a birthday digest naming a staff member (hr), never a candidate.
       ["contract.created", { contractId: item, placementId, candidateId, kind: "po", contractCount: 1 }],
       ["staff.birthdays_today", { day: "2026-10-15", userIds: [U.hr], count: 1 }],
+      ["candidate.not_responding", { candidateId, flagId, stage: "hold" }],
     ] as const;
     // interview.requested is delivered with the interview's details (candidate email included, owner decision
     // 2026-10-15; docs/notifications.md) read from a real interview row: covered by alerts.int.test.ts, not here.
