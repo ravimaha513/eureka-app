@@ -47,7 +47,7 @@ export type DocumentsStatus = keyof typeof DOCUMENTS_STATUSES;
 export const DOCUMENTS_STATUS_LIST = Object.keys(DOCUMENTS_STATUSES) as DocumentsStatus[];
 
 /** Hot List "documents" filter: a status, or "none" for candidates with no status recorded. */
-export const DOCUMENTS_FILTERS = [...DOCUMENTS_STATUS_LIST, "none"] as const;
+export const DOCUMENTS_FILTERS = ["pending", "partial", "complete", "none"] as const satisfies readonly (DocumentsStatus | "none")[];
 /** Hot List "stay" filter: in a guest house (gh_location_id set) or remote. */
 export const STAY_FILTERS = ["guest_house", "remote"] as const;
 export type StayFilter = (typeof STAY_FILTERS)[number];
