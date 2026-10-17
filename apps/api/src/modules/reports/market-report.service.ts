@@ -143,7 +143,7 @@ export class MarketReportService {
       });
     });
     const { withPeriod, totals, groups } = built!;
-    const header = [GROUP_LABEL[q.groupBy], "Candidates", "In market", "Placed",
+    const header = [GROUP_LABEL[q.groupBy], "Candidates", "In market", "Placed (on project)",
       ...(withPeriod ? [`Placed ${q.placedFrom ?? "…"} to ${q.placedTo ?? "…"}`] : []),
       ...MARKET_REPORT_STATUSES.map(statusLabel)];
     const line = (name: string, g: MarketCounts) => [name, g.candidates, g.inMarket, g.placed,

@@ -213,7 +213,7 @@ describe("export", () => {
     expect(res.headers["content-disposition"]).toMatch(/market-by-technology-\d{4}-\d{2}-\d{2}\.csv/);
     expect(res.headers["x-export-rows"]).toBe("2");
     const lines = res.body.replace(/^﻿/, "").trim().split("\r\n");
-    expect(lines[0]).toBe("Technology,Candidates,In market,Placed,Placed 2030-03-01 to 2030-03-31,"
+    expect(lines[0]).toBe("Technology,Candidates,In market,Placed (on project),Placed 2030-03-01 to 2030-03-31,"
       + "In training,Active,On hold,Stopped,Full of interviews,Confirmation,Placed,Bench,Terminated");
     expect(lines.map((l) => l.split(",")[0])).toEqual(["Technology", "Java", "Python", "Total"]);
     const view = await report("ceo", "groupBy=technology&placedFrom=2030-03-01&placedTo=2030-03-31");
