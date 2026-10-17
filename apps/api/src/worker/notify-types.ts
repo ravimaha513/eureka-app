@@ -486,6 +486,51 @@ EVENT_SPECS["staff.birthdays_today"] = {
   },
 };
 
+// payments (gap L1, migration 0100). Never an amount, a date, a client or a name: open the placement.
+// FR-NTF-07 first-payment: the first payment recorded for a placement; recruiter, team lead, manager.
+EVENT_SPECS["payment.first_received"] = {
+  email: true, inApp: true,
+  render: (ev) => {
+    const placementId = uuid(ev.payload, "placementId");
+    if (aggregate(ev) !== placementId) throw new Error("outbox event payload has an invalid placementId");
+    uuid(ev.payload, "invoiceId");
+    uuid(ev.payload, "paymentId");
+    checkNotify(ev.payload, []);
+    return {
+      subject: "Eureka: first payment received for a placement",
+      message: "The first payment for a placement was recorded by Accounts in Eureka.",
+      refLabel: "Placement reference", refId: placementId,
+      inbox: {
+        title: "First payment received",
+        body: "Accounts recorded the first payment for a placement. Open the placement for the details.",
+        entity: { type: "placement", id: placementId },
+      },
+    };
+  },
+};
+// FR-NTF-08 payment-delay: an invoice is past its expected payment date and not fully received; recruiter
+// and team lead, to follow up with the vendor.
+EVENT_SPECS["payment.delayed"] = {
+  email: true, inApp: true,
+  render: (ev) => {
+    const invoiceId = uuid(ev.payload, "invoiceId");
+    if (aggregate(ev) !== invoiceId) throw new Error("outbox event payload has an invalid invoiceId");
+    const placementId = uuid(ev.payload, "placementId");
+    const days = int(ev.payload, "daysLate", 1, 3650);
+    checkNotify(ev.payload, []);
+    return {
+      subject: `Eureka: payment delayed by ${plural(days, "day")}`,
+      message: `A vendor payment for a placement is ${plural(days, "day")} past its expected date. Please follow up with the vendor.`,
+      refLabel: "Placement reference", refId: placementId,
+      inbox: {
+        title: `Payment delayed by ${plural(days, "day")}`,
+        body: "A vendor payment is past its expected date. Open the placement and follow up with the vendor.",
+        entity: { type: "placement", id: placementId },
+      },
+    };
+  },
+};
+
 export const DELIVERED_TYPES = Object.keys(EVENT_SPECS);
 export const EMAIL_TYPES = DELIVERED_TYPES.filter((t) => EVENT_SPECS[t]!.email);
 export const INBOX_TYPES = DELIVERED_TYPES.filter((t) => EVENT_SPECS[t]!.inApp);

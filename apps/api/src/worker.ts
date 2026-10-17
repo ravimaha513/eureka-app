@@ -30,6 +30,7 @@ import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob } from "./worker/jobs/resume
 import { documentScanJob } from "./worker/jobs/document-scan.js";
 import { assignmentEndingSoonJob } from "./worker/jobs/assignment-ending-soon.js";
 import { paperworkOverdueJob } from "./worker/jobs/paperwork-overdue.js";
+import { paymentDelayJob } from "./worker/jobs/payment-delay.js";
 import { FieldCipher } from "./platform/crypto/field-crypto.js";
 import { createKeyProvider } from "./platform/crypto/config.js";
 import { keyRotationJob } from "./worker/jobs/key-rotation.js";
@@ -72,6 +73,8 @@ const jobs = [
   visaExpiryJob(config.WORK_AUTH_EXPIRY_NOTICE_DAYS),
   // Paperwork items past their due date (FR-NTF-04, migration 0052), once per item and due date.
   paperworkOverdueJob(),
+  // payments (gap L1, migration 0100): invoices past their expected payment date, once per invoice and date.
+  paymentDelayJob(),
   // jobs-portal: applicants who never confirmed their mailbox, after 30 days (ids and counts only in the log).
   portalPruneJob(30),
   // interview-alerts (migration 0087): the CEO's morning staff-birthday digest into the outbox.
