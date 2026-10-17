@@ -38,6 +38,7 @@ export function CreatePlacementDialog({ submission, onClose, onCreated }: {
     placementType: "" as PlacementType | "", workMode: "" as WorkMode | "", projectCity: "", projectState: "", tentativeStart: "", rate: "",
   });
   const [contacts, setContacts] = useState<ContactRow[]>([]);
+  const [reconfirmed, setReconfirmed] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [contactErrors, setContactErrors] = useState<Record<number, ContactErrors>>({});
   const [formError, setFormError] = useState("");
@@ -108,6 +109,7 @@ export function CreatePlacementDialog({ submission, onClose, onCreated }: {
       placementType: v.placementType as PlacementType,
       workMode: v.workMode as WorkMode,
       tentativeStart: v.tentativeStart,
+      ...(reconfirmed ? { reconfirmed: true } : {}),
       ...(v.rate.trim() ? { rate: Number(v.rate) } : {}),
       ...(v.projectCity.trim() ? { projectCity: v.projectCity.trim() } : {}),
       ...(v.projectState.trim() ? { projectState: v.projectState.trim() } : {}),
@@ -173,6 +175,12 @@ export function CreatePlacementDialog({ submission, onClose, onCreated }: {
             {(p) => <input {...p} type="number" inputMode="decimal" min="0" max="1000" step="0.01" value={v.rate} onChange={set("rate")} autoComplete="off" />}
           </Field>
         </div>
+
+        <label className="check">
+          <input type="checkbox" checked={reconfirmed} onChange={(e) => setReconfirmed(e.target.checked)} />
+          {" "}Existing consultant re-confirmed
+        </label>
+        <p className="hint">Tick when this consultant already worked with us and is confirmed again. "First placement" is still worked out by the system.</p>
 
         <fieldset className="contacts">
           <legend>Contacts (optional)</legend>

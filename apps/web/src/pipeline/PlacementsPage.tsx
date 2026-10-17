@@ -1,25 +1,45 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ROLE_LABELS, type Role } from "@eureka/shared";
 import type { Me } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
 import { DocumentsSection } from "../documents/DocumentsSection";
 import { ContractsSection } from "./ContractsSection";
 import { Drawer, Field, fmtDate } from "../sales/ui";
+import { useLookups, type Named } from "../lookups";
 import { pipelineError } from "./errors";
 import {
-  CONTACT_KIND_LABELS, PLACEMENT_STATUSES, PLACEMENT_TYPE_LABELS, WORK_MODE_LABELS,
-  dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Placement,
+  CONTACT_KIND_LABELS, PLACEMENT_EXPORT_ROW_CAP, PLACEMENT_STATUSES, PLACEMENT_TYPE_LABELS, WORK_MODE_LABELS,
+  dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, saveBlob, type Placement, type PlacementFilters,
 } from "./pipelineApi";
 import { FirstPlacementBadge, PipelineStatus, StatusChips } from "./ui";
 
 const PAGE_SIZE = 50;
 /** Exits that need a confirmation and a reason (PL-4). */
-const EXITS = new Set(["backout", "bgc_failed"]);
+const EXITS = new Set(["backout", "bgc_failed", "joining_issue"]);
 const EXIT_TEXT: Record<string, string> = {
   backout: "The candidate backed out before joining. They return to Active marketing.",
   bgc_failed: "The background check failed. Before joining the candidate returns to Active; after joining the open assignment ends and they move to Bench.",
+  joining_issue: "The candidate could not join because of an issue at joining. They return to Active marketing, and the submission can be placed again.",
 };
+const EXIT_LABEL: Record<string, string> = { backout: "Mark backout", bgc_failed: "Mark BGC failed", joining_issue: "Mark joining issue" };
+
+/** One report filter over a lookup list; hidden when the server withholds the list (it returns []). */
+function LookupFilter({ id, label, items, value, onChange }: { id: string; label: string; items: Named[]; value: string; onChange: (v: string) => void }) {
+  if (!items.length) return null;
+  return (
+    <div className="field inline">
+      <label htmlFor={id}>{label}</label>
+      <select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">All</option>
+        {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+      </select>
+    </div>
+  );
+}
+
+/** Re-confirmed existing consultant (entered on placement entry). */
+const ReconfirmedBadge = () => <span className="badge">Re-confirmed</span>;
 
 /** "offer_letter" → "Offer letter", "i9" → "I9" (document types are snake_case keys). */
 export const docTypeLabel = (t: string) => { const s = t.replace(/_/g, " "); return s.charAt(0).toUpperCase() + s.slice(1); };
@@ -46,6 +66,18 @@ export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "ca
   const [status, setStatusRaw] = useState("");
   const [from, setFromRaw] = useState("");
   const [to, setToRaw] = useState("");
+  const [report, setReport] = useState<Required<Pick<PlacementFilters, "vendorId" | "clientId" | "technologyId" | "locationId">>>({
+    vendorId: "", clientId: "", technologyId: "", locationId: "",
+  });
+  const setReportKey = (k: keyof typeof report) => (v: string) => { setReport((r) => ({ ...r, [k]: v })); reset(); };
+  const lookups = useLookups();
+  const canExport = Boolean(me?.capabilities.includes("report:export"));
+  const exportRun = useMutation({
+    mutationFn: () => pipelineApi.exportPlacements({
+      status, from: from ? dayBoundary(from) : "", to: to ? dayBoundary(to, true) : "", ...report,
+    }),
+    onSuccess: (r) => saveBlob(r.blob, r.filename),
+  });
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const page = cursors.length - 1;
   const reset = () => setCursors([null]);
@@ -54,7 +86,7 @@ export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "ca
   const [notice, setNotice] = useState("");
 
   const filters = {
-    status, from: from ? dayBoundary(from) : "", to: to ? dayBoundary(to, true) : "", cursor: cursors[page] ?? "", limit: PAGE_SIZE,
+    status, from: from ? dayBoundary(from) : "", to: to ? dayBoundary(to, true) : "", ...report, cursor: cursors[page] ?? "", limit: PAGE_SIZE,
   };
   const q = useQuery({
     queryKey: [...pipelineKeys.placements, "list", filters],
@@ -64,7 +96,7 @@ export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "ca
   });
   const items = q.data?.items ?? [];
   const showRate = items.some((p) => "rate" in p);
-  const hasFilters = Boolean(status || from || to);
+  const hasFilters = Boolean(status || from || to || Object.values(report).some(Boolean));
   const n = items.length;
   const countMsg = q.isLoading || q.error || invalidRange ? ""
     : `${n} ${n === 1 ? "placement" : "placements"} on page ${page + 1}${q.data?.nextCursor ? ", more on the next page" : ""}.`;
@@ -94,8 +126,26 @@ export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "ca
             <input id={`${id}-to`} type="date" value={to} onChange={(e) => { setToRaw(e.target.value); reset(); }}
               aria-invalid={invalidRange || undefined} aria-describedby={invalidRange ? `${id}-range` : undefined} />
           </div>
-          {hasFilters && <button type="button" className="btn" onClick={() => { setStatusRaw(""); setFromRaw(""); setToRaw(""); reset(); }}>Clear filters</button>}
+          <LookupFilter id={`${id}-vendor`} label="Vendor" items={lookups.data?.vendors ?? []} value={report.vendorId} onChange={setReportKey("vendorId")} />
+          <LookupFilter id={`${id}-client`} label="End client" items={lookups.data?.clients ?? []} value={report.clientId} onChange={setReportKey("clientId")} />
+          <LookupFilter id={`${id}-tech`} label="Technology" items={lookups.data?.technologies ?? []} value={report.technologyId} onChange={setReportKey("technologyId")} />
+          <LookupFilter id={`${id}-loc`} label="Location" items={lookups.data?.locations ?? []} value={report.locationId} onChange={setReportKey("locationId")} />
+          {hasFilters && <button type="button" className="btn" onClick={() => {
+            setStatusRaw(""); setFromRaw(""); setToRaw(""); setReport({ vendorId: "", clientId: "", technologyId: "", locationId: "" }); reset();
+          }}>Clear filters</button>}
         </div>
+        {canExport && (
+          <div className="export">
+            <button type="button" className="btn" disabled={exportRun.isPending || invalidRange} onClick={() => exportRun.mutate()}>
+              {exportRun.isPending ? "Exporting…" : "Export CSV"}
+            </button>
+            <small className="hint">Exports placements matching these filters in your scope, up to {PLACEMENT_EXPORT_ROW_CAP.toLocaleString("en-US")} rows. No rates or contacts.</small>
+            <p role="status" aria-live="polite" className={exportRun.isError ? "error" : "muted"}>
+              {exportRun.isError ? pipelineError(exportRun.error, "generic")
+                : exportRun.data ? `Exported ${exportRun.data.rows} ${exportRun.data.rows === 1 ? "row" : "rows"}${exportRun.data.truncated ? " (limit reached; narrow the filters)" : ""}.` : ""}
+            </p>
+          </div>
+        )}
         {invalidRange && <p id={`${id}-range`} className="error" role="alert">“Created through” must be on or after “Created from”.</p>}
       </form>
 
@@ -115,7 +165,8 @@ export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "ca
               <tbody>
                 {items.map((p) => (
                   <tr key={p.id}>
-                    <td><b>{p.candidate.name}</b>{p.isFirstPlacement && <>{" "}<FirstPlacementBadge /></>}</td>
+                    <td><b>{p.candidate.name}</b>{p.isFirstPlacement && <>{" "}<FirstPlacementBadge /></>}{p.reconfirmed && <>{" "}<ReconfirmedBadge /></>}
+                      {p.technology && <span className="block">{p.technology.name}</span>}</td>
                     <td>{p.client.name}<span className="block">{p.vendor?.name ?? "No vendor"}</span></td>
                     <td>{PLACEMENT_TYPE_LABELS[p.placementType] ?? p.placementType}<span className="block">{WORK_MODE_LABELS[p.workMode] ?? p.workMode}{where(p) && ` · ${where(p)}`}</span></td>
                     <td>{fmtDate(p.tentativeStart)}</td>
@@ -185,15 +236,18 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
           <p className="error" role="alert">{pipelineError(q.error, "placement")}</p>
         ) : (
           <>
-            <p><PipelineStatus status={p.status} />{p.isFirstPlacement && <>{" "}<FirstPlacementBadge /></>}</p>
+            <p><PipelineStatus status={p.status} />{p.isFirstPlacement && <>{" "}<FirstPlacementBadge /></>}{p.reconfirmed && <>{" "}<ReconfirmedBadge /></>}</p>
             <dl className="facts">
               <dt>Candidate</dt><dd>{p.candidate.name}</dd>
+              <dt>Technology</dt><dd>{p.technology?.name ?? "—"}</dd>
+              <dt>Existing consultant re-confirmed</dt><dd>{p.reconfirmed ? "Yes" : "No"}</dd>
               <dt>Client</dt><dd>{p.client.name}</dd>
               <dt>Vendor</dt><dd>{p.vendor?.name ?? "None"}</dd>
               <dt>Type</dt><dd>{PLACEMENT_TYPE_LABELS[p.placementType] ?? p.placementType}</dd>
               <dt>Work mode</dt><dd>{WORK_MODE_LABELS[p.workMode] ?? p.workMode}</dd>
               <dt>Project location</dt><dd>{where(p) || "—"}</dd>
               <dt>Tentative start</dt><dd>{fmtDate(p.tentativeStart)}</dd>
+              {p.joinedAt && <><dt>Joined</dt><dd>{fmtDateTime(p.joinedAt)}</dd></>}
               {"rate" in p && <><dt>Rate</dt><dd>{fmtRate(p.rate)}</dd></>}
               <dt>Recruiter</dt><dd>{p.recruiter.name} · {p.team.name}</dd>
               <dt>Location</dt><dd>{p.location.name}</dd>
@@ -214,7 +268,7 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
                   ))}
                   {exits.map((t) => (
                     <button key={t} type="button" className="btn sm danger" disabled={busy !== null} onClick={() => setExit(t)}>
-                      {t === "backout" ? "Mark backout…" : "Mark BGC failed…"}
+                      {EXIT_LABEL[t] ?? pipelineLabel(t)}…
                     </button>
                   ))}
                 </div>
@@ -309,7 +363,7 @@ function ExitDialog({ placement, to, onClose, onDone }: { placement: Placement; 
   const [reason, setReason] = useState("");
   const [fieldErr, setFieldErr] = useState("");
   const submit = useSubmit((e) => pipelineError(e, "placement"));
-  const label = to === "backout" ? "Mark backout" : "Mark BGC failed";
+  const label = EXIT_LABEL[to] ?? `Mark ${pipelineLabel(to)}`;
   useEffect(() => setFieldErr(""), [reason]);
   return (
     <Dialog title={`${label} for ${placement.candidate.name}?`} onClose={onClose}>

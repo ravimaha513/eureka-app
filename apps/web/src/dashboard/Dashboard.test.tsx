@@ -179,3 +179,30 @@ describe("periodRange", () => {
     expect(new Date(r.from)).toEqual(new Date(2026, 8, 24));
   });
 });
+
+describe("Sales reports (migration 0160)", () => {
+  it("groups by manager or candidate and exports the grouped counts for report:export holders", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    api.routes["POST /api/v1/dashboard/export"] = () => ({ body: "csv" });
+    wrap(<DashboardPage canExport />);
+    await screen.findByRole("table", { name: "Activity by recruiter" });
+    const select = screen.getByLabelText("Group by");
+    expect(within(select).getByRole("option", { name: "Manager" })).toBeInTheDocument();
+    expect(within(select).getByRole("option", { name: "Candidate" })).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: "manager" } });
+    await waitFor(() => expect(lastQuery().get("groupBy")).toBe("manager"));
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.path).toBe("/api/v1/dashboard/export");
+    expect(api.writes()[0]!.body).toMatchObject({ groupBy: "recruiter" }); // the grouping shown (the mock answers recruiter)
+  });
+
+  it("offers no export without report:export and says when the groups are cut", async () => {
+    api.routes["GET /api/v1/dashboard"] = () => ({ body: { ...LEAD, groupsTruncated: true } });
+    wrap(<DashboardPage />);
+    await screen.findByRole("table", { name: "Activity by recruiter" });
+    expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
+    expect(screen.getByText(/most active; totals include everyone/)).toBeInTheDocument();
+  });
+});
