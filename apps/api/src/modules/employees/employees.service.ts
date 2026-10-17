@@ -454,6 +454,16 @@ export class EmployeesService {
     return { items: rows };
   }
 
+  /** 0150: teams with their lead, for the "assign a team" dialog (employment writers: employee:read at org scope). */
+  async teams(user: AuthedUser) {
+    this.requireEmployeeRead(user.access);
+    const rows = await this.db.withUser(user.id, async (c) => (await c.query<{ id: string; name: string; lead_id: string; lead_name: string | null; location_name: string | null }>(
+      `SELECT t.id, t.name, t.lead_id, u.display_name AS lead_name, l.name AS location_name
+       FROM eureka.team t LEFT JOIN eureka.app_user u ON u.id = t.lead_id LEFT JOIN eureka.location l ON l.id = t.location_id
+       ORDER BY lower(t.name), t.id`)).rows);
+    return { items: rows.map((r) => ({ id: r.id, name: r.name, lead: { id: r.lead_id, name: r.lead_name }, location: r.location_name })) };
+  }
+
   /**
    * 0150: payroll company, E-Verify date, onboarded date and pay rate of an
    * assignment (open or ended). Same rights as every employment write; the pay

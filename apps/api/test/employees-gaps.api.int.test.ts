@@ -297,6 +297,15 @@ describe("leaving a project: HR/Accounts assign a team", () => {
     expect((await call("ahr", "POST", `/api/v1/employees/${j.personId}/assign-team`, { teamId: T.t2 })).statusCode).toBe(200);
   });
 
+  it("lists teams with their lead for the employment writers only", async () => {
+    for (const k of ALL_KEYS) {
+      const res = await call(k, "GET", "/api/v1/employees/teams");
+      expect(res.statusCode, k).toBe(can(accessOf(k), "assignment:update") ? 200 : 403);
+    }
+    const items = (await call("hr", "GET", "/api/v1/employees/teams")).json().items;
+    expect(items.find((t: { id: string }) => t.id === T.t2)).toMatchObject({ lead: { id: U.l2, name: "l2" } });
+  });
+
   it("refuses employees on assignment, unknown teams, and callers without the employment grants", async () => {
     const j = await onAssignment();
     const on = await call("hr", "POST", `/api/v1/employees/${j.personId}/assign-team`, { teamId: T.t2 });

@@ -42,6 +42,13 @@ export class EmployeesController {
     return this.svc.payrollCompanies(user);
   }
 
+  /** 0150: Sales teams to choose from when an employee comes off a project (the employment writers only). */
+  @Get("teams")
+  @RequirePermission("assignment:update")
+  teams(@CurrentUser() user: AuthedUser) {
+    return this.svc.teams(user);
+  }
+
   @Get(":id")
   @RequirePermission("employee:read")
   get(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
