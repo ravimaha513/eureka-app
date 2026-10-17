@@ -74,6 +74,8 @@ among `hr`, `accounts`, `immigration`.
 | `contract.created` | interview-alerts CT-4 | 0086 `authz.create_contract` | `contractId` (= aggregate id), `placementId`, `candidateId`, `kind` (msa/po/sow/other), `contractCount` (1..1000), `notify` | `hr`, `associate_hr`, `accounts` | those three | email + inbox | placement |
 | `staff.birthdays_today` | interview-alerts BD-3, BD-4 | 0087 `authz.emit_birthdays` (job `birthday-digest`) | `day`, `userIds` (staff), `count`, `notify` | `ceo` | `ceo` | email + inbox; staff display names read at send time (`authz.birthday_names`) into both | — (`digest`: opens nothing) |
 | `application.received` | jobs-portal JP-31 | 0062 `authz.application_apply` (an applicant applied) | `applicationId`, `jobId`, `notify` | `hr` and the job's current hiring manager (reason `hiring_manager`, only while the payload's job is the application's job) | `hiring_manager`, `hr` | inbox only | application |
+| `payment.first_received` | FR-NTF-07, FR-PAY-05 (first-payment) | 0100 `authz.payment_record`: the first payment ever recorded for a placement (ledger job `first-payment`, key = placement id) | `placementId` (= aggregate id), `invoiceId`, `paymentId` | the placement's recruiter, its team's lead and that lead's manager (only while the payload's invoice belongs to the placement) | none | email + inbox | placement |
+| `payment.delayed` | FR-NTF-08, FR-PAY-06 (payment-delay) | 0100 job `payment-delay` (`authz.emit_payment_delays`): live invoices past their expected date and not fully received, once per invoice and expected date | `invoiceId` (= aggregate id), `placementId`, `daysLate` (1..3650) | the placement's recruiter and its team's lead (no manager; same invoice check) | none | email + inbox | placement |
 
 `employee.benched` (0045) is the move to the bench at project exit; `employee.bench_time` (0046) is the reminder
 once a candidate has been on the bench for N days. Emails and inbox rows never show the dates, reasons or codes
@@ -103,6 +105,7 @@ definer function (like `authz.emit_bench_time(day, threshold)`) to `eureka_worke
 |---|---|---|---|
 | `outbox-delivery` | every tick | event id, or `inbox:<id>` (mail disabled) | above |
 | `paperwork-overdue` | daily 07:30 America/New_York | the New York date | Always on. One `checklist.item_overdue` per checklist item and due date (ledger key `<item>:<due date>`; a new due date re-arms it); the database refuses a future day |
+| `payment-delay` | daily 07:15 America/New_York | the New York date | Always on (migration 0100, `docs/payments-api.md`). One `payment.delayed` per invoice and expected date (ledger key `<invoice>:<expected date>`; new terms or invoice date re-arm it); the database refuses a future day |
 | `bench-time` | daily 07:45 America/New_York | the New York date | Only when `NOTIFY_BENCH_DAYS` is set (threshold is OD-05, open). One `employee.bench_time` per candidate and bench period (ledger key `candidate:bench_since`, whatever the threshold; a changed threshold does not re-notify), only for candidates whose N-th bench day falls within the last `NOTIFY_BENCH_WINDOW_DAYS` (default 7) days, so a first enable does not notify the whole bench; a worker down longer than the window misses those crossings. The database refuses a future day (0051) |
 | `birthday-digest` | daily 08:00 America/New_York | the New York date | interview-alerts (0087). One `staff.birthdays_today` per day with at least one staff birthday (ledger key = the date); 29 February counts on 28 February in non-leap years; the database refuses a future day |
 | `notification-prune` | daily 04:30 America/New_York | UTC date (maintenance) | Deletes inbox rows older than `NOTIFICATION_RETENTION_DAYS` (default 180); the database refuses fewer than 30 days |
@@ -129,7 +132,7 @@ placement or candidate when the user has that screen.
 
 - `eureka_app`: SELECT own `notification` rows, UPDATE (`read_at`) own rows. Nothing on `inbox_fanout` or the ledger.
 - `eureka_worker` (0081): SELECT (`user_id`, `type`, `in_app`) on `notification_preference`.
-- `eureka_worker`: EXECUTE `authz.notification_recipients`, `authz.emit_bench_time`, `authz.emit_paperwork_overdue` (0052); `notification` SELECT of
+- `eureka_worker`: EXECUTE `authz.notification_recipients`, `authz.emit_bench_time`, `authz.emit_paperwork_overdue` (0052), `authz.emit_payment_delays` (0100); `notification` SELECT of
   the key columns only (never titles or bodies), INSERT during fan-out for named recipients, DELETE past 30 days;
   `inbox_fanout` SELECT/INSERT. An inbox row's `entity_type`/`entity_id` must equal `authz.notification_entity(event)`
   (derived from the type and payload, 0051). Residual: titles and bodies are rendered by the worker from the fixed

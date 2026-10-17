@@ -222,6 +222,8 @@ export const GRANTS: Record<Role, Grants> = {
     "chat:use": "own",
     // jobs-portal
     "job:read": "team",
+    // payments (gap L1, migration 0100): invoices of their placements; amounts still need rate:read
+    "invoice:read": "own",
   },
   lead: {
     ...salesLine("team", "team"),
@@ -241,6 +243,8 @@ export const GRANTS: Record<Role, Grants> = {
     // jobs-portal
     "job:read": "team",
     "job:manage": "team",
+    // payments (gap L1, migration 0100): invoices of their placements; amounts still need rate:read
+    "invoice:read": "team",
   },
   manager: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -262,6 +266,8 @@ export const GRANTS: Record<Role, Grants> = {
     // jobs-portal
     "job:read": "hierarchy",
     "job:manage": "hierarchy",
+    // payments (gap L1, migration 0100): invoices of their placements; amounts still need rate:read
+    "invoice:read": "hierarchy",
   },
   assoc_director: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -283,6 +289,8 @@ export const GRANTS: Record<Role, Grants> = {
     // jobs-portal
     "job:read": "hierarchy",
     "job:manage": "hierarchy",
+    // payments (gap L1, migration 0100): invoices of their placements; amounts still need rate:read
+    "invoice:read": "hierarchy",
   },
   ceo: {
     "candidate:read": "org",

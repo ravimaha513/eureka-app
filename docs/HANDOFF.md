@@ -209,6 +209,13 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   coordinators); block / release the support calendar for an interview's slot from the interview drawer
   (`eureka.calendar_block`). Terraform: `calendar_mode` (staging: google) and the generated `CALENDAR_TOKEN_KEY`;
   staging sends outbox mail from the portal sender since 2026-10-15. Tests: `apps/api/test/alerts.int.test.ts`.
+- Payments / incentive dashboard (gap L1, migration 0100, contract `docs/payments-api.md`): invoices per joined placement
+  (number, invoice date, terms, timesheet date, billing period, hours, amount, incentive part) and payments received, written by
+  Accounts (`invoice:update`) only through definer functions; Sales read by hierarchy (`invoice:read` recruiter own, lead team,
+  manager/AD hierarchy, CEO org) under RLS like placements, amounts only with `rate:read`. Placement data is joined, not copied;
+  expected date (generated), status pending/delayed/received/void and delay days come from the `invoice_status` view. Notifications
+  `payment.first_received` (recruiter, TL, manager) and `payment.delayed` (daily job `payment-delay`; recruiter, TL). Payments screen
+  (Operations). The notification resolver was replaced again in 0100: later replacements must carry the payment branches over.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

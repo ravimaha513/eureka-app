@@ -24,6 +24,7 @@ import { JobsPage } from "./jobs/JobsPage";
 import { ApplicationsPage } from "./jobs/ApplicationsPage";
 import { ApplicantsPage } from "./jobs/ApplicantsPage";
 import { BirthdaysPage } from "./staff/BirthdaysPage";
+import { PaymentsPage } from "./payments/PaymentsPage";
 import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sparkles, Sun } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
@@ -193,7 +194,6 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
 }
 
 const PLANNED: Record<string, string> = {
-  payments: "Vendor invoices, payments and automatic delay alerts for Accounts.",
   performance: "Recruiter performance against targets, with alerts for managers.",
 };
 
@@ -341,6 +341,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "jobs" ? <JobsPage me={me} />
             : current.key === "applications" ? <ApplicationsPage key={applicationId ?? "list"} me={me} initialOpenId={applicationId} />
             : current.key === "applicants" ? <ApplicantsPage />
+            : current.key === "payments" ? <PaymentsPage me={me} />
             : current.key === "dashboard" ? (
               <DashboardPage firstName={me.displayName.split(" ")[0]} canOpen={(t) => items.some((i) => i.key === t)}
                 onOpen={(t, id) => { if (t === "placements") openPlacement(id); else setActive(t); }} />
