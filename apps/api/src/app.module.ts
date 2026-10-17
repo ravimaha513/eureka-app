@@ -72,6 +72,7 @@ import { CalendarController, InterviewCalendarController } from "./modules/calen
 import { CalendarService } from "./modules/calendar/calendar.service.js";
 import { CALENDAR_PROVIDER, DevCalendarProvider, GoogleCalendarProvider } from "./modules/calendar/calendar.provider.js";
 import { StaffBirthdaysController, StaffBirthdaysService } from "./modules/staff/birthdays.controller.js";
+import { InterviewReportsController, InterviewReportsService } from "./modules/interview-reports/interview-reports.controller.js";
 
 @Controller("api")
 class HealthController {
@@ -108,6 +109,8 @@ export class AppModule {
         ApplicationsController, ApplicationInterviewsController, ApplicantsController, PortalJobsController,
         // interview-alerts
         ContractsController, CalendarController, InterviewCalendarController, StaffBirthdaysController,
+        // interview-reports
+        InterviewReportsController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
@@ -128,6 +131,8 @@ export class AppModule {
         ContractsService, CalendarService, StaffBirthdaysService,
         { provide: CALENDAR_PROVIDER, useFactory: () => config.CALENDAR_MODE === "google"
           ? new GoogleCalendarProvider(config.GOOGLE_CLIENT_ID!, config.GOOGLE_CLIENT_SECRET!) : new DevCalendarProvider() },
+        // interview-reports
+        InterviewReportsService,
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],
