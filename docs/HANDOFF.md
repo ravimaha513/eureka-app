@@ -209,6 +209,15 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   coordinators); block / release the support calendar for an interview's slot from the interview drawer
   (`eureka.calendar_block`). Terraform: `calendar_mode` (staging: google) and the generated `CALENDAR_TOKEN_KEY`;
   staging sends outbox mail from the portal sender since 2026-10-15. Tests: `apps/api/test/alerts.int.test.ts`.
+- Candidate pipeline, assessments, "not responding" and preferred vendors (gap list, migrations 0170-0172, contract
+  `docs/pipeline-vendors-api.md`): cross-candidate pipeline report `GET /api/v1/reports/pipeline` (owned candidates
+  narrowed to report:read, stages marketing → submitted → interviewing → assessment → confirmed → paperwork → joined,
+  filters, funnel; screen "Candidate Pipeline"); assessments ("gliders") per submission through definer functions;
+  Sales flag a candidate as not responding (`candidate.not_responding` to recruiter and lead, warning and final emails to
+  the candidate with the feedback mail transport, daily `candidate-nonresponse` hold stage after `NONRESPONSE_HOLD_DAYS`);
+  preferred vendors visible to the owner and their superiors (RLS over `vendor.preferred:read`, screen "Preferred
+  Vendors"). 0171 replaces `authz.notification_recipients` / `authz.notification_entity` (0089 + one branch): a later
+  migration replacing them must carry the `candidate.not_responding` branch over.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
