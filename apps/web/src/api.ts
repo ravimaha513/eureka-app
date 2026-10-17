@@ -27,6 +27,19 @@ export interface Candidate {
   marketingStartDate?: string | null;
   /** Open Hot List only: false when the profile belongs to a team outside the user's scope (it would 404). */
   canOpenProfile?: boolean;
+  /** Display label: "Active/Remote", "Active/All Teams", "N/A" (derived by the server). Absent on older servers. */
+  statusLabel?: string;
+  /** Guest house or remote; null when not recorded. */
+  stay?: "guest_house" | "remote" | null;
+  ghLocation?: { id?: string; name: string } | null;
+  /** The visa the candidate is marketed on (VISA_CATEGORIES key). */
+  visaCategory?: string | null;
+  /** Documents status summary (DOCUMENTS_STATUSES key). */
+  documentsStatus?: string | null;
+  /** A current uploaded resume or a resume link is on file. */
+  hasResume?: boolean;
+  /** When the candidate joined its current team (ISO). */
+  teamAssignedAt?: string;
 }
 
 /** One entry of an RFC 9457 validation problem's `errors` array (422). */
