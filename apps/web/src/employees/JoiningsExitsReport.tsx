@@ -1,23 +1,14 @@
 import { useId, useState } from "react";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, can, type Me } from "../api";
+import { saveBlob } from "../lib/download";
 import { fmtDate } from "../sales/ui";
 import { employeeKeys, employeesApi, employmentError, employmentLabel, localToday, shiftDays } from "./employeesApi";
 import { MarketReportPanel } from "./MarketReport";
 import { ActiveEmployeesReport } from "./ActiveEmployeesReport";
+import { QueryError } from "../ui/QueryError";
 
 const EXPORT_ROW_CAP = 50_000;
-
-export function download(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
 
 type ReportTab = "joinings" | "market";
 
@@ -50,7 +41,7 @@ export function ReportsPage({ me }: { me: Pick<Me, "capabilities"> }) {
         ))}
       </div>
       <div role="tabpanel" id={`${tabsId}-p-${tab}`} aria-labelledby={`${tabsId}-t-${tab}`}>
-        {tab === "market" ? <MarketReportPanel canExport={canExport} onDownload={download} /> : <JoiningsExitsPanel canExport={canExport} />}
+        {tab === "market" ? <MarketReportPanel canExport={canExport} onDownload={saveBlob} /> : <JoiningsExitsPanel canExport={canExport} />}
       </div>
     </>
   );
@@ -75,7 +66,7 @@ function JoiningsExitsPanel({ canExport }: { canExport: boolean }) {
   });
   const run = useMutation({
     mutationFn: () => employeesApi.exportJoiningsExits(from, to),
-    onSuccess: (r) => download(r.blob, r.filename),
+    onSuccess: (r) => saveBlob(r.blob, r.filename),
   });
   const d = q.data;
 
@@ -117,7 +108,7 @@ function JoiningsExitsPanel({ canExport }: { canExport: boolean }) {
       </form>
 
       {!invalid && (q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-        <p className="empty error" role="alert">{employmentError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+        <QueryError query={q} message={employmentError(q.error)} />
       ) : d ? (
         <section aria-labelledby={`${id}-je`} aria-busy={q.isFetching || undefined}>
           <h2 id={`${id}-je`}>Joinings and exits, {fmtDate(d.from)} – {fmtDate(d.to)}</h2>

@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, UserMinus } from "lucide-react";
-import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { employmentLabel } from "../employees/employeesApi";
 import { Person } from "../shell/ui";
 import { Field, fmtDate, useFocusAfterFailure } from "../sales/ui";

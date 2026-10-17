@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { CHAT_BODY_MAX, CHAT_FILTERS, CHAT_NAME_MAX, CHAT_POLL, chatFileName, type ChatFilter } from "@eureka/shared";
 import type { Me } from "../api";
-import { ConfirmDialog } from "../admin/Dialog";
+import { ConfirmDialog } from "../ui/Dialog";
 import { documentFileProblem, documentTypeOf } from "../documents/documentsApi";
 import { browser, postToStorage } from "../sales/resumesApi";
 import { Drawer } from "../sales/ui";

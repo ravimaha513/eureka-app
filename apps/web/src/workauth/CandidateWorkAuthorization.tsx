@@ -5,10 +5,10 @@ import {
   normalizeWorkAuthNumber, type WorkAuthStatus, type WorkAuthType,
 } from "@eureka/shared";
 import { ApiError } from "../api";
-import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { Field, fmtDate, useFocusAfterFailure } from "../sales/ui";
 import { workAuthApi, workAuthKeys, type WorkAuthInput, type WorkAuthorization } from "./workAuthApi";
-import { StepUpDialog } from "../documents/StepUpDialog";
+import { StepUpDialog } from "../ui/StepUpDialog";
 import { documentKeys, isStepUpRequired } from "../documents/documentsApi";
 
 /** A revealed number is hidden again after this long. */

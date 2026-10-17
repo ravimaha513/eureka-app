@@ -2,11 +2,11 @@ import { useId, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BGC_HISTORY_YEARS, PLACEMENT_STATUSES, ROLES, ROLE_LABELS, type Role } from "@eureka/shared";
 import { ApiError, type Me } from "../api";
-import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { Drawer, Field, fmtDate } from "../sales/ui";
 import { PLACEMENT_TYPE_LABELS, fmtDateTime, pipelineLabel, type PlacementType } from "../pipeline/pipelineApi";
 import { PipelineStatus } from "../pipeline/ui";
-import { docTypeLabel } from "../pipeline/PlacementsPage";
+import { docTypeLabel } from "../lib/format";
 import { DocumentsSection } from "../documents/DocumentsSection";
 import { documentKeys, documentsApi } from "../documents/documentsApi";
 import {
@@ -15,6 +15,8 @@ import {
   type Bgc, type BgcChange, type HistoryEntry, type ItemChange, type PaperworkItem, type QueueFilters, type QueueRow,
   type TemplateItem, type TemplateVersion,
 } from "./paperworkApi";
+import { Pager, useCursorPager } from "../ui/Pager";
+import { QueryError } from "../ui/QueryError";
 
 const PAGE_SIZE = 50;
 const roleLabel = (r: string) => ROLE_LABELS[r as Role] ?? paperworkLabel(r);
@@ -67,13 +69,12 @@ function WorkQueue({ me }: { me: Pick<Me, "id" | "roles" | "capabilities"> }) {
   const [bgcStatus, setBgcRaw] = useState("");
   const [placementStatus, setPlStatusRaw] = useState("");
   const [placementType, setTypeRaw] = useState("");
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const pager = useCursorPager();
+  const { page, reset } = pager;
   const [openId, setOpenId] = useState<string | null>(null);
-  const page = cursors.length - 1;
-  const reset = () => setCursors([null]);
   const set = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); reset(); };
 
-  const filters: QueueFilters = { view, ownerRole, mine, bgcStatus, placementStatus, placementType, cursor: cursors[page] ?? "", limit: PAGE_SIZE };
+  const filters: QueueFilters = { view, ownerRole, mine, bgcStatus, placementStatus, placementType, cursor: pager.cursor ?? "", limit: PAGE_SIZE };
   const q = useQuery({ queryKey: paperworkKeys.queue(filters), queryFn: () => paperworkApi.queue(filters), placeholderData: keepPreviousData });
   const rows = q.data?.items ?? [];
   const hasFilters = Boolean(ownerRole || mine || bgcStatus || placementStatus || placementType || view !== "outstanding");
@@ -127,7 +128,7 @@ function WorkQueue({ me }: { me: Pick<Me, "id" | "roles" | "capabilities"> }) {
 
       <div className="card tablewrap">
         {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-          <p className="empty error" role="alert">{paperworkError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+          <QueryError query={q} message={paperworkError(q.error)} />
         ) : (
           <div className="tablewrap"><table aria-label="Paperwork queue" aria-busy={q.isFetching || undefined}>
             <thead><tr><th>Candidate</th><th>Placement</th><th>Checklist</th><th>Next due</th><th>BGC</th><th><span className="sr-only">Actions</span></th></tr></thead>
@@ -142,12 +143,7 @@ function WorkQueue({ me }: { me: Pick<Me, "id" | "roles" | "capabilities"> }) {
       </div>
       <div className="listfoot">
         <p role="status" aria-live="polite" className="muted">{countMsg}</p>
-        <nav className="pager" aria-label="Paperwork pages">
-          <button type="button" className="btn sm" disabled={page === 0} onClick={() => setCursors((c) => (c.length > 1 ? c.slice(0, -1) : c))}>Previous</button>
-          <span>Page {page + 1}</span>
-          <button type="button" className="btn sm" disabled={!q.data?.nextCursor || q.isPlaceholderData}
-            onClick={() => { const nx = q.data?.nextCursor; if (nx) setCursors((c) => [...c, nx]); }}>Next</button>
-        </nav>
+        <Pager pager={pager} label="Paperwork pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
       </div>
       {openId && <PaperworkDrawer placementId={openId} me={me} onClose={() => setOpenId(null)} />}
     </>

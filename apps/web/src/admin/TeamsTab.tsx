@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { can } from "../api";
 import { adminApi, type MoveResult, type Ref, type Team } from "./adminApi";
-import { Dialog, DialogActions, useSubmit } from "./Dialog";
+import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { friendlyError } from "./errors";
 import { keys, useAccess, useMeta, usePeople } from "./shared";
 

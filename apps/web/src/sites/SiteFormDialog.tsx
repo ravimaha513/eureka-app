@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Bath, BedDouble, Building2, CalendarDays, Globe2, Mail, MapPin, Phone, Ruler, UserRound } from "lucide-react";
 import type { Me } from "../api";
-import { Dialog, useSubmit } from "../admin/Dialog";
+import { Dialog, useSubmit } from "../ui/Dialog";
 import { useLookups } from "../lookups";
 import { Field, useFocusAfterFailure } from "../sales/ui";
 import {

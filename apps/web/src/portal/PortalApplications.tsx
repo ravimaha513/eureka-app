@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { APPLICATION_STATUS_LABELS, APP_INTERVIEW_LABELS, isSafeHttpsUrl, jobLabel, type ApplicationStatus } from "@eureka/shared";
-import { ConfirmDialog } from "../admin/Dialog";
+import { ConfirmDialog } from "../ui/Dialog";
 import { Drawer, fmtDate } from "../sales/ui";
 import { portal, portalError, type PortalApplication } from "./portalApi";
 import "../jobs/jobs.css";

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { DOCUMENTS_STATUSES } from "@eureka/shared";
-import { Dialog, DialogActions } from "../admin/Dialog";
+import { Dialog, DialogActions } from "../ui/Dialog";
 import { ApiError } from "../api";
 import { fieldErrors, salesError } from "./errors";
 import { salesApi, type CandidateProfile, type ComplianceUpdate } from "./salesApi";

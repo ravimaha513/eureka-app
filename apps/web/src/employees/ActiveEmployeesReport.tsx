@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useLookups } from "../lookups";
 import { employeeKeys, employeesApi, employmentError, localToday } from "./employeesApi";
+import { QueryError } from "../ui/QueryError";
 
 /** "2026-10" → "October 2026". */
 const monthLabel = (m: string) => {
@@ -53,7 +54,7 @@ export function ActiveEmployeesReport() {
       </form>
 
       {valid && (q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-        <p className="empty error" role="alert">{employmentError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+        <QueryError query={q} message={employmentError(q.error)} />
       ) : d ? (
         <div aria-busy={q.isFetching || undefined}>
           <ul className="tiles">

@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, type Me } from "../api";
-import { ConfirmDialog } from "../admin/Dialog";
+import { ConfirmDialog } from "../ui/Dialog";
 import { CandidateResumes } from "./CandidateResumes";
 import { DocumentsSection } from "../documents/DocumentsSection";
 import { CandidateTimeline } from "./CandidateTimeline";

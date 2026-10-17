@@ -2,13 +2,13 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DOCUMENT_CONTENT_TYPES, DOCUMENT_TYPES, type DocumentType } from "@eureka/shared";
 import { ApiError } from "../api";
-import { Dialog } from "../admin/Dialog";
+import { Dialog } from "../ui/Dialog";
 import { browser, fmtBytes, postToStorage, resumeStatusText } from "../sales/resumesApi";
 import {
   documentFileProblem, documentKeys, documentTypeOf, documentsApi, isStepUpRequired, uploadableTypes,
   type DocumentItem, type DocumentOwner,
 } from "./documentsApi";
-import { StepUpDialog } from "./StepUpDialog";
+import { StepUpDialog } from "../ui/StepUpDialog";
 
 const fmt = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const ACCEPT = [".pdf", ".docx", ".png", ".jpg", ".jpeg", ...Object.keys(DOCUMENT_CONTENT_TYPES)].join(",");

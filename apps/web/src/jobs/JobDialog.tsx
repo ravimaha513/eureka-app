@@ -4,7 +4,7 @@ import {
   EMPLOYMENT_TYPES, EXPERIENCE_LEVELS, JOB_CATEGORIES, JOB_STATUSES, PAY_CURRENCIES, PAY_FREQUENCIES, RICH_LIMITS, WORK_MODES,
   jobLabel, richTextLength, type JobKind, type RichDoc,
 } from "@eureka/shared";
-import { Dialog, DialogActions } from "../admin/Dialog";
+import { Dialog, DialogActions } from "../ui/Dialog";
 import { Field, useFocusAfterFailure } from "../sales/ui";
 import { RichTextEditor } from "./RichText";
 import { jobError, jobKeys, jobsApi, type Job, type JobInput } from "./jobsApi";

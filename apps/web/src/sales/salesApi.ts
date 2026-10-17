@@ -1,5 +1,6 @@
 /** Typed client for the candidate, Hot List and submission API (apps/api/src/modules/candidates, submissions). */
-import { api, apiFetch, type Candidate } from "../api";
+import { api, type Candidate } from "../api";
+import { fetchCsv, type ExportResult } from "../lib/download";
 
 export interface CandidateProfile extends Candidate {
   marketingStartDate: string | null;
@@ -248,7 +249,7 @@ export const BULK_STATUS_OPTIONS = ["active", "on_hold", "full_of_interviews", "
 export type BulkError = "not_found" | "forbidden" | "invalid_transition" | "placement_open" | "failed";
 export interface BulkResponse { succeeded: number; failed: number; results: { id: string; ok: boolean; error?: BulkError }[] }
 
-export interface ExportResult { blob: Blob; filename: string; rows: number; truncated: boolean }
+export type { ExportResult };
 
 /** Only the filters the API accepts, with empty values dropped. */
 export function viewFilters(f: ListFilters): ViewFilters {
@@ -277,16 +278,7 @@ export const hotlistApi = {
   bulkVisibility: (ids: string[], visibility: Visibility) =>
     api<BulkResponse>("/api/v1/hotlist/bulk/visibility", { method: "POST", ...json({ ids, visibility }) }),
   /** CSV of the current view; the server caps, masks and audits it. */
-  exportCsv: async (filters: ViewFilters): Promise<ExportResult> => {
-    const res = await apiFetch("/api/v1/hotlist/export", { method: "POST", ...json(filters) });
-    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "hotlist.csv";
-    return {
-      blob: await res.blob(),
-      filename: name,
-      rows: Number(res.headers.get("x-export-rows") ?? 0),
-      truncated: res.headers.get("x-export-truncated") === "true",
-    };
-  },
+  exportCsv: (filters: ViewFilters): Promise<ExportResult> => fetchCsv("/api/v1/hotlist/export", filters, "hotlist.csv"),
 };
 
 export const salesKeys = {

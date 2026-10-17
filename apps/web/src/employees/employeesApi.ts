@@ -1,5 +1,6 @@
 /** Typed client for employees, the assignment lifecycle and the joinings/exits report (docs/employees-api.md). */
-import { ApiError, api, apiFetch } from "../api";
+import { ApiError, api } from "../api";
+import { fetchCsv, type ExportResult } from "../lib/download";
 
 export interface Named { id: string; name: string | null }
 
@@ -137,7 +138,7 @@ export interface EmploymentChanges {
   payRate?: number | null;
 }
 
-export interface ExportResult { blob: Blob; filename: string; rows: number; truncated: boolean }
+export type { ExportResult };
 
 const LABELS: Record<string, string> = {
   on_assignment: "On assignment", bgc_failed: "BGC failed", returned_to_market: "Returned to marketing",
@@ -168,14 +169,9 @@ export const employeesApi = {
     api<{ id: string; status: string }>(`/api/v1/employees/${enc(id)}/exit`, { method: "POST", ...json({ exitDate, reason }) }),
   returnToMarket: (id: string) =>
     api<{ id: string; candidateStatus: string }>(`/api/v1/employees/${enc(id)}/return-to-market`, { method: "POST", ...json({}) }),
-  exportEmployees: async (f: Omit<EmployeeFilters, "cursor" | "limit">): Promise<ExportResult> => {
+  exportEmployees: (f: Omit<EmployeeFilters, "cursor" | "limit">): Promise<ExportResult> => {
     const body = Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined && v !== null && v !== ""));
-    const res = await apiFetch("/api/v1/employees/export", { method: "POST", ...json(body) });
-    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "employees.csv";
-    return {
-      blob: await res.blob(), filename: name,
-      rows: Number(res.headers.get("x-export-rows") ?? 0), truncated: res.headers.get("x-export-truncated") === "true",
-    };
+    return fetchCsv("/api/v1/employees/export", body, "employees.csv");
   },
   payrollCompanies: () => api<{ items: PayrollCompany[] }>("/api/v1/employees/payroll-companies"),
   teams: () => api<{ items: AssignableTeam[] }>("/api/v1/employees/teams"),
@@ -186,14 +182,8 @@ export const employeesApi = {
   activeEmployees: (month: string, clientId?: string) =>
     api<ActiveEmployees>(`/api/v1/reports/active-employees?${qs({ month, clientId })}`),
   joiningsExits: (from: string, to: string) => api<JoiningsExits>(`/api/v1/reports/joinings-exits?${qs({ from, to })}`),
-  exportJoiningsExits: async (from: string, to: string): Promise<ExportResult> => {
-    const res = await apiFetch("/api/v1/reports/joinings-exits/export", { method: "POST", ...json({ from, to }) });
-    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "joinings-exits.csv";
-    return {
-      blob: await res.blob(), filename: name,
-      rows: Number(res.headers.get("x-export-rows") ?? 0), truncated: res.headers.get("x-export-truncated") === "true",
-    };
-  },
+  exportJoiningsExits: (from: string, to: string): Promise<ExportResult> =>
+    fetchCsv("/api/v1/reports/joinings-exits/export", { from, to }, "joinings-exits.csv"),
 };
 
 export const employeeKeys = {

@@ -1,8 +1,8 @@
 import { useId, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "../api";
-import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
-import { documentKeys, documentsApi, pageNav, returnPath } from "./documentsApi";
+import { Dialog, DialogActions, useSubmit } from "./Dialog";
+import { documentKeys, documentsApi, pageNav, returnPath } from "../documents/documentsApi";
 
 function stepUpError(e: unknown): string {
   if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";

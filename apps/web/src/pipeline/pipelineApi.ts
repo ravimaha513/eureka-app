@@ -2,7 +2,8 @@
  * Typed client for submissions (apps/api/src/modules/submissions), interviews
  * (create only) and placements (docs/placements-api.md).
  */
-import { api, apiFetch } from "../api";
+import { api } from "../api";
+import { fetchCsv } from "../lib/download";
 
 export interface Page<T> { items: T[]; nextCursor: string | null }
 export interface Ref { id: string; name: string }
@@ -121,30 +122,6 @@ export interface PlacementFilters {
 /** Rows in one placements CSV export (PLACEMENT_EXPORT_ROW_CAP in the API). */
 export const PLACEMENT_EXPORT_ROW_CAP = 5000;
 
-export interface ExportResult { blob: Blob; filename: string; rows: number; truncated: boolean }
-
-/** A CSV answer of an audited export endpoint (x-export-rows / x-export-truncated headers). */
-export async function postExport(path: string, body: object, fallbackName: string): Promise<ExportResult> {
-  const res = await apiFetch(path, { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } });
-  const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? fallbackName;
-  return {
-    blob: await res.blob(), filename: name,
-    rows: Number(res.headers.get("x-export-rows") ?? 0), truncated: res.headers.get("x-export-truncated") === "true",
-  };
-}
-
-/** Saves a downloaded blob under its file name. */
-export function saveBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
 export interface CreateInterview {
   submissionId: string; round: string; startsAt: string; endsAt: string; coachId?: string; inviteReceived?: boolean;
 }
@@ -180,7 +157,7 @@ export const pipelineApi = {
   placement: (id: string) => api<Placement>(`/api/v1/placements/${enc(id)}`),
   /** Placements report CSV: the list filters without paging; capped and audited by the server. */
   exportPlacements: (f: Omit<PlacementFilters, "cursor" | "limit">) =>
-    postExport("/api/v1/placements/export", Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined && v !== "")), "placements.csv"),
+    fetchCsv("/api/v1/placements/export", Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined && v !== "")), "placements.csv"),
   createPlacement: (b: CreatePlacement, idempotencyKey: string) =>
     api<{ id: string; isFirstPlacement: boolean }>("/api/v1/placements", {
       method: "POST", body: JSON.stringify(b), headers: { "Idempotency-Key": idempotencyKey },

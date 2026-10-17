@@ -2,17 +2,21 @@ import { useEffect, useId, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ROLE_LABELS, type Role } from "@eureka/shared";
 import { can, type Me } from "../api";
-import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { DocumentsSection } from "../documents/DocumentsSection";
+import { saveBlob } from "../lib/download";
+import { docTypeLabel } from "../lib/format";
 import { ContractsSection } from "./ContractsSection";
 import { Drawer, Field, fmtDate } from "../sales/ui";
 import { useLookups, type Named } from "../lookups";
 import { pipelineError } from "./errors";
 import {
   CONTACT_KIND_LABELS, PLACEMENT_EXPORT_ROW_CAP, PLACEMENT_STATUSES, PLACEMENT_TYPE_LABELS, WORK_MODE_LABELS,
-  dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, saveBlob, type Placement, type PlacementFilters,
+  dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Placement, type PlacementFilters,
 } from "./pipelineApi";
 import { FirstPlacementBadge, PipelineStatus, StatusChips } from "./ui";
+import { Pager, useCursorPager } from "../ui/Pager";
+import { QueryError } from "../ui/QueryError";
 
 const PAGE_SIZE = 50;
 /** Exits that need a confirmation and a reason (PL-4). */
@@ -40,9 +44,6 @@ function LookupFilter({ id, label, items, value, onChange }: { id: string; label
 
 /** Re-confirmed existing consultant (entered on placement entry). */
 const ReconfirmedBadge = () => <span className="badge">Re-confirmed</span>;
-
-/** "offer_letter" → "Offer letter", "i9" → "I9" (document types are snake_case keys). */
-export const docTypeLabel = (t: string) => { const s = t.replace(/_/g, " "); return s.charAt(0).toUpperCase() + s.slice(1); };
 
 /** "2 of 3 done (1 required open, 1 overdue)": verified or waived items count as done. */
 function ChecklistProgress({ items }: { items: NonNullable<Placement["checklist"]> }) {
@@ -78,15 +79,14 @@ export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "ca
     }),
     onSuccess: (r) => saveBlob(r.blob, r.filename),
   });
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
-  const page = cursors.length - 1;
-  const reset = () => setCursors([null]);
+  const pager = useCursorPager();
+  const { page, reset } = pager;
   const invalidRange = Boolean(from && to && from > to);
   const [openId, setOpenId] = useState<string | null>(initialOpenId);
   const [notice, setNotice] = useState("");
 
   const filters = {
-    status, from: from ? dayBoundary(from) : "", to: to ? dayBoundary(to, true) : "", ...report, cursor: cursors[page] ?? "", limit: PAGE_SIZE,
+    status, from: from ? dayBoundary(from) : "", to: to ? dayBoundary(to, true) : "", ...report, cursor: pager.cursor ?? "", limit: PAGE_SIZE,
   };
   const q = useQuery({
     queryKey: [...pipelineKeys.placements, "list", filters],
@@ -154,7 +154,7 @@ export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "ca
       {!invalidRange && (
         <div className="card tablewrap">
           {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-            <p className="empty error" role="alert">{pipelineError(q.error, "placement")} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+            <QueryError query={q} message={pipelineError(q.error, "placement")} />
           ) : (
             <div className="tablewrap"><table aria-label="Placements" aria-busy={q.isFetching || undefined}>
               <thead><tr>
@@ -188,12 +188,7 @@ export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "ca
       )}
       <div className="listfoot">
         <p role="status" aria-live="polite" className="muted">{countMsg}</p>
-        <nav className="pager" aria-label="Placement pages">
-          <button type="button" className="btn sm" disabled={page === 0} onClick={() => setCursors((c) => (c.length > 1 ? c.slice(0, -1) : c))}>Previous</button>
-          <span>Page {page + 1}</span>
-          <button type="button" className="btn sm" disabled={!q.data?.nextCursor || q.isPlaceholderData}
-            onClick={() => { const nx = q.data?.nextCursor; if (nx) setCursors((c) => [...c, nx]); }}>Next</button>
-        </nav>
+        <Pager pager={pager} label="Placement pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
       </div>
 
       {openId && <PlacementDrawer id={openId} initial={items.find((p) => p.id === openId) ?? null} onClose={close} onNotice={setNotice}

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, Eye, EyeOff, KeyRound, Link2, Pencil, Plus, UserRound, Hash, Building } from "lucide-react";
-import { Dialog, useSubmit } from "../admin/Dialog";
-import { StepUpDialog } from "../documents/StepUpDialog";
+import { Dialog, useSubmit } from "../ui/Dialog";
+import { StepUpDialog } from "../ui/StepUpDialog";
 import { documentKeys, isStepUpRequired } from "../documents/documentsApi";
 import { Field, useFocusAfterFailure } from "../sales/ui";
 import {

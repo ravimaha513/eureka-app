@@ -6,7 +6,7 @@ import {
   SCORECARD_LABELS, type InterviewType, type Scorecard,
 } from "@eureka/shared";
 import { api, can, type Me } from "../api";
-import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { useLookups } from "../lookups";
 import { Drawer } from "../sales/ui";
 import { Avatar } from "../shell/ui";

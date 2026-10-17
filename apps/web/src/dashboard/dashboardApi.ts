@@ -1,6 +1,6 @@
 /** Typed client for GET /api/v1/dashboard (docs/dashboards-api.md). */
 import { api } from "../api";
-import { postExport } from "../pipeline/pipelineApi";
+import { fetchCsv } from "../lib/download";
 
 export const METRICS = [
   "submissions", "interviewsScheduled", "interviewsCleared", "placementsCreated", "placementsJoined", "candidatesAdded",
@@ -84,7 +84,7 @@ export const dashboardApi = {
   },
   /** Sales report CSV (grouped counts and a total row); audited by the server, needs report:export. */
   exportCsv: (q: { from: string; to: string; groupBy?: GroupBy }) =>
-    postExport("/api/v1/dashboard/export", {
+    fetchCsv("/api/v1/dashboard/export", {
       from: q.from, to: q.to, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, ...(q.groupBy ? { groupBy: q.groupBy } : {}),
     }, "sales-report.csv"),
 };
