@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { can } from "../api";
 import { adminApi, type MoveResult, type Ref, type Team } from "./adminApi";
 import { Dialog, DialogActions, useSubmit } from "./Dialog";
 import { friendlyError } from "./errors";
@@ -17,7 +18,7 @@ export function TeamsTab() {
   const q = useQuery({ queryKey: keys.teams, queryFn: adminApi.teams });
   const [modal, setModal] = useState<Modal | null>(null);
   // Presentation only: the API checks team:move_member over both teams (AD-8).
-  const canMove = me.capabilities.includes("team:move_member");
+  const canMove = can(me, "team:move_member");
 
   const close = () => setModal(null);
   const refresh = () => {

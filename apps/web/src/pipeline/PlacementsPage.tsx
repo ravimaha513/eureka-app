@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ROLE_LABELS, type Role } from "@eureka/shared";
-import type { Me } from "../api";
+import { can, type Me } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
 import { DocumentsSection } from "../documents/DocumentsSection";
 import { ContractsSection } from "./ContractsSection";
@@ -71,7 +71,7 @@ export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "ca
   });
   const setReportKey = (k: keyof typeof report) => (v: string) => { setReport((r) => ({ ...r, [k]: v })); reset(); };
   const lookups = useLookups();
-  const canExport = Boolean(me?.capabilities.includes("report:export"));
+  const canExport = can(me, "report:export");
   const exportRun = useMutation({
     mutationFn: () => pipelineApi.exportPlacements({
       status, from: from ? dayBoundary(from) : "", to: to ? dayBoundary(to, true) : "", ...report,
@@ -197,7 +197,7 @@ export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "ca
       </div>
 
       {openId && <PlacementDrawer id={openId} initial={items.find((p) => p.id === openId) ?? null} onClose={close} onNotice={setNotice}
-        canReadDocuments={Boolean(me?.capabilities.includes("document:read"))} />}
+        canReadDocuments={can(me, "document:read")} />}
     </>
   );
 }

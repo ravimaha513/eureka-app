@@ -5,7 +5,7 @@ import {
   APPLICATION_STATUSES, APPLICATION_STATUS_LABELS, APP_INTERVIEW_LABELS, APP_INTERVIEW_ROUNDS, APP_INTERVIEW_TYPES, isSafeHttpsUrl,
   type ApplicationStatus,
 } from "@eureka/shared";
-import type { Me } from "../api";
+import { can, type Me } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
 import { useLookups } from "../lookups";
 import { Drawer, Field, fmtDate } from "../sales/ui";
@@ -47,10 +47,10 @@ export function ApplicationsPage({ me, initialOpenId }: { me: Pick<Me, "capabili
   const q = useQuery({ queryKey: [...applicationKeys.all, "list", filters], queryFn: () => applicationsApi.list(filters), placeholderData: keepPreviousData });
   const jobs = useQuery({
     queryKey: [...jobKeys.all, "list", { kind: "internal_opening", picker: true }],
-    queryFn: () => jobsApi.list({ kind: "internal_opening", limit: 200 }), enabled: me.capabilities.includes("job:read"), retry: false,
+    queryFn: () => jobsApi.list({ kind: "internal_opening", limit: 200 }), enabled: can(me, "job:read"), retry: false,
   });
   const items = q.data?.items ?? [];
-  const canExport = me.capabilities.includes("application:read");
+  const canExport = can(me, "application:read");
   const hasFilters = Boolean(status || jobId || search);
   const n = items.length;
 

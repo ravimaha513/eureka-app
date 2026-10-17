@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { capabilities, type Role } from "@eureka/shared";
+import { capabilities, type Permission, type Role } from "@eureka/shared";
 import { visibleNav } from "../nav";
 import { InterviewReportsPage } from "./InterviewReportsPage";
 import { InterviewsPage, type Interview } from "./InterviewsPage";
@@ -37,7 +37,7 @@ const daily = {
   ],
 };
 
-function setupReports(caps: string[]) {
+function setupReports(caps: Permission[]) {
   const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
     const path = String(url);
     if (path.includes("/daily/export")) return json("csv", { "content-disposition": `attachment; filename="interviews-daily-2026-10-01.csv"`, "x-export-rows": "2", "x-export-truncated": "false" });

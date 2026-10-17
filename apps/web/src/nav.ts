@@ -52,7 +52,7 @@ export const NAV: NavItem[] = [
  */
 export const SETTINGS_NAV: NavItem = { key: "settings", label: "Settings & Preferences", section: "Admin", anyOf: [] };
 
-export function visibleNav(capabilities: readonly string[]): NavItem[] {
+export function visibleNav(capabilities: readonly Permission[]): NavItem[] {
   const caps = new Set(capabilities);
   return NAV.filter((n) => n.anyOf.some((p) => caps.has(p)) && (n.allOf ?? []).every((p) => caps.has(p)));
 }

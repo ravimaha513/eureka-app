@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { JOB_KINDS, JOB_STATUSES, jobLabel } from "@eureka/shared";
-import type { Me } from "../api";
+import { can, type Me } from "../api";
 import { Drawer, fmtDate } from "../sales/ui";
 import { Person } from "../shell/ui";
 import { JobDialog } from "./JobDialog";
@@ -47,7 +47,7 @@ export function JobsPage({ me }: { me: Pick<Me, "capabilities" | "id"> }) {
   const filters = { kind, status, search, cursor: cursors[page] ?? "", limit: PAGE_SIZE };
   const q = useQuery({ queryKey: [...jobKeys.all, "list", filters], queryFn: () => jobsApi.list(filters), placeholderData: keepPreviousData });
   const items = q.data?.items ?? [];
-  const canCreate = me.capabilities.includes("job:manage");
+  const canCreate = can(me, "job:manage");
   const hasFilters = Boolean(kind || status || search);
   const n = items.length;
 

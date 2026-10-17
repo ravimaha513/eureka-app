@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { INTERVIEW_REPORT_GROUPS, type InterviewReportGroup } from "@eureka/shared";
-import { ApiError, api, apiFetch, type Me } from "../api";
+import { ApiError, api, apiFetch, can, type Me } from "../api";
 import { download } from "../employees/JoiningsExitsReport";
 import { CandidateFeedbackCell, dateBoundary } from "./InterviewsPage";
 
@@ -176,7 +176,7 @@ function DailyReportSection({ canExport }: { canExport: boolean }) {
 
 export function InterviewReportsPage({ me }: { me: Pick<Me, "capabilities"> }) {
   const [tab, setTab] = useState<"grouped" | "daily">("grouped");
-  const canExport = me.capabilities.includes("report:export");
+  const canExport = can(me, "report:export");
   return (
     <>
       <div>

@@ -3,7 +3,7 @@ import { Download, Mail, Phone } from "lucide-react";
 import { Person } from "../shell/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { download } from "./JoiningsExitsReport";
-import type { Me } from "../api";
+import { can, type Me } from "../api";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../admin/Dialog";
 import { useLookups } from "../lookups";
 import { StatusChips } from "../pipeline/ui";
@@ -82,7 +82,7 @@ export function EmployeesPage({ me }: { me?: Pick<Me, "capabilities"> }) {
   const clients = lookups.data?.clients ?? [];
   const vendors = lookups.data?.vendors ?? [];
   const companyList = companies.data?.items ?? [];
-  const canExport = me?.capabilities.includes("report:export") ?? false;
+  const canExport = can(me, "report:export");
   const exportRun = useMutation({
     mutationFn: () => employeesApi.exportEmployees(exportFilters),
     onSuccess: (r) => {

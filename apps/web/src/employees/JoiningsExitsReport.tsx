@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
-import { ApiError, type Me } from "../api";
+import { ApiError, can, type Me } from "../api";
 import { fmtDate } from "../sales/ui";
 import { employeeKeys, employeesApi, employmentError, employmentLabel, localToday, shiftDays } from "./employeesApi";
 import { MarketReportPanel } from "./MarketReport";
@@ -27,9 +27,9 @@ type ReportTab = "joinings" | "market";
  */
 export function ReportsPage({ me }: { me: Pick<Me, "capabilities"> }) {
   const tabsId = useId();
-  const canExport = me.capabilities.includes("report:export");
-  const hasMarket = me.capabilities.includes("report.market:read");
-  const hasJoinings = me.capabilities.includes("report:read");
+  const canExport = can(me, "report:export");
+  const hasMarket = can(me, "report.market:read");
+  const hasJoinings = can(me, "report:read");
   const [tab, setTab] = useState<ReportTab>(hasJoinings ? "joinings" : "market");
   if (!hasMarket) {
     return (

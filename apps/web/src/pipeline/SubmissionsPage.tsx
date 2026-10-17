@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Me } from "../api";
+import { can, type Me } from "../api";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../admin/Dialog";
 import { useLookupName } from "../lookups";
 import { salesApi } from "../sales/salesApi";
@@ -20,7 +20,7 @@ const CLOSING = new Set(["rejected", "withdrawn"]);
 /** Submissions list (GET /api/v1/submissions) with a detail drawer for status changes and next steps. */
 export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabilities">; onOpenPlacement?: (id: string) => void }) {
   const id = useId();
-  const canSearchCandidates = me.capabilities.includes("candidate:read");
+  const canSearchCandidates = can(me, "candidate:read");
   const [status, setStatusRaw] = useState("");
   const [from, setFromRaw] = useState("");
   const [to, setToRaw] = useState("");

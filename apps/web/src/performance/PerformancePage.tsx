@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Me } from "../api";
+import { can, type Me } from "../api";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../admin/Dialog";
 import { localToday, shiftDays } from "../employees/employeesApi";
 import { fmtDate } from "../sales/ui";
@@ -36,7 +36,7 @@ export function PerformancePage({ me }: { me: Pick<Me, "capabilities"> }) {
     | { kind: "target"; target?: Target } | { kind: "deleteTarget"; target: Target }
     | { kind: "designation"; person: Person } | { kind: "move"; person: Person } | null>(null);
   const [notice, setNotice] = useState("");
-  const canSetTargets = me.capabilities.includes("performance.target:manage");
+  const canSetTargets = can(me, "performance.target:manage");
 
   const summary = useQuery({
     queryKey: range ? performanceKeys.summary(range) : ["performance", "summary", "invalid"],

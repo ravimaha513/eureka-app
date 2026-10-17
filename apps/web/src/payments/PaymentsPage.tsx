@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { INVOICE_STATUSES, MAX_TERMS_DAYS, PAYMENT_TERMS_DAYS, expectedPaymentDate } from "@eureka/shared";
-import type { Me } from "../api";
+import { can, type Me } from "../api";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../admin/Dialog";
 import { localToday } from "../employees/employeesApi";
 import { Drawer, Field, fmtDate, useFocusAfterFailure } from "../sales/ui";
@@ -42,7 +42,7 @@ export function PaymentsPage({ me }: { me?: Pick<Me, "capabilities"> }) {
   const [notice, setNotice] = useState("");
   const page = cursors.length - 1;
   const reset = () => setCursors([null]);
-  const canEdit = me?.capabilities.includes("invoice:update") ?? false;
+  const canEdit = can(me, "invoice:update");
 
   useEffect(() => {
     const t = setTimeout(() => { setSearch(searchText.trim()); reset(); }, 300);

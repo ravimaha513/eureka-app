@@ -1,13 +1,22 @@
+import type { Permission } from "@eureka/shared";
+
 export interface Me {
   id: string;
   email: string;
   displayName: string;
   roles: { key: string; label: string; locationId: string | null }[];
-  capabilities: string[];
+  capabilities: Permission[];
   csrfToken: string;
   /** Staging/local password sign-in: an admin-set password must be changed before anything else. */
   mustChangePassword?: boolean;
 }
+
+/**
+ * Whether the signed-in user holds a capability (presentation only; the API decides).
+ * Typed so a misspelt permission fails the typecheck.
+ */
+export const can = (me: Pick<Me, "capabilities"> | null | undefined, p: Permission): boolean =>
+  me?.capabilities.includes(p) ?? false;
 
 export interface Candidate {
   id: string;

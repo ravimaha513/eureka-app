@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, api, setCsrf, type Me } from "./api";
+import { ApiError, api, can, setCsrf, type Me } from "./api";
 import { SETTINGS_NAV, visibleNav, type NavItem } from "./nav";
 import { SettingsPage } from "./settings/SettingsPage";
 import { AccessPage } from "./admin/AccessPage";
@@ -351,7 +351,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "vendors" ? <PreferredVendorsPage />
             : current.key === "dashboard" ? (
               <DashboardPage firstName={me.displayName.split(" ")[0]} canOpen={(t) => items.some((i) => i.key === t)}
-                canExport={me.capabilities.includes("report:export")}
+                canExport={can(me, "report:export")}
                 onOpen={(t, id) => { if (t === "placements") openPlacement(id); else setActive(t); }} />
             )
             : <Placeholder item={current} />}
