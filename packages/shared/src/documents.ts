@@ -69,7 +69,8 @@ export type DocumentClassification = (typeof DOCUMENT_CLASSIFICATIONS)[number];
  * Document types: stable keys that the paperwork checklist (`doc_type`) and
  * API clients reference. The classification belongs to the type and is copied
  * onto each document when it is created; a client never chooses it.
- * Restricted per design A6.3: I-9, driving license, work-authorization copies.
+ * Restricted per design A6.3: I-9, driving license, work-authorization copies;
+ * also E-Verify copies and Forms 1099 (0150).
  * The internal list is a placeholder until the paperwork checklist content is
  * decided (docs/phase2-status.md, open question). Adding a type is a
  * migration (INSERT INTO authz.document_type) plus an entry here.
@@ -84,6 +85,9 @@ export const DOCUMENT_TYPES = {
   purchase_order: { label: "Purchase order (PO)", classification: "internal" },
   sow: { label: "Statement of work (SOW)", classification: "internal" },
   other: { label: "Other document", classification: "internal" },
+  // migration 0150: E-Verify case results and 1099 tax forms carry SSN/TIN, so they are restricted.
+  everify: { label: "E-Verify copy", classification: "restricted" },
+  form_1099: { label: "Form 1099", classification: "restricted" },
 } as const satisfies Record<string, { label: string; classification: DocumentClassification }>;
 export type DocumentType = keyof typeof DOCUMENT_TYPES;
 export const DOCUMENT_TYPE_LIST = Object.keys(DOCUMENT_TYPES) as DocumentType[];

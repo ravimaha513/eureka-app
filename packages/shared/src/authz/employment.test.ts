@@ -26,15 +26,27 @@ describe("employment actions", () => {
   });
 
   it("follows the lifecycle: on assignment -> end/extend; bench -> exit/return to market", () => {
-    expect(employeeActions(as("hr"), actor, onAssignment)).toEqual({ endAssignment: true, setEndDate: true, exit: false, returnToMarket: false });
-    expect(employeeActions(as("hr"), actor, bench)).toEqual({ endAssignment: false, setEndDate: false, exit: true, returnToMarket: true });
-    expect(employeeActions(as("hr"), actor, { ...bench, status: "exited" })).toEqual(NO_EMPLOYEE_ACTIONS);
+    expect(employeeActions(as("hr"), actor, onAssignment)).toEqual({
+      endAssignment: true, setEndDate: true, exit: false, returnToMarket: false, assignTeam: false, editEmployment: true });
+    expect(employeeActions(as("hr"), actor, bench)).toEqual({
+      endAssignment: false, setEndDate: false, exit: true, returnToMarket: true, assignTeam: true, editEmployment: true });
+    // Exited: only corrections of the employment facts (payroll company, E-Verify, onboarded dates).
+    expect(employeeActions(as("hr"), actor, { ...bench, status: "exited" })).toEqual({ ...NO_EMPLOYEE_ACTIONS, editEmployment: true });
   });
 
   it("no return to market after a failed background check, or when the candidate already left the bench", () => {
     expect(employeeActions(as("accounts"), actor, { ...bench, lastEndReason: "bgc_failed" }).returnToMarket).toBe(false);
     expect(employeeActions(as("accounts"), actor, { ...bench, candidateStatus: "active" }).returnToMarket).toBe(false);
     expect(employeeActions(as("accounts"), actor, { ...bench, candidateStatus: null }).returnToMarket).toBe(false);
+  });
+
+  it("leaving a project (0150): HR/Accounts assign a team to a benched employee, also after returning to marketing", () => {
+    expect(employeeActions(as("accounts"), actor, { ...bench, candidateStatus: "active" }).assignTeam).toBe(true);
+    expect(employeeActions(as("associate_hr"), actor, { ...bench, lastEndReason: "bgc_failed" }).assignTeam).toBe(true);
+    expect(employeeActions(as("hr"), actor, { ...bench, candidateStatus: "placed" }).assignTeam).toBe(false);
+    expect(employeeActions(as("hr"), actor, onAssignment).assignTeam).toBe(false);
+    // Without candidate:assign: the employment grants alone decide.
+    for (const r of ["hr", "associate_hr", "accounts"] as Role[]) expect(GRANTS[r]["candidate:assign"], r).toBeUndefined();
   });
 
   it("read-only roles and an unreadable latest assignment get no actions", () => {
