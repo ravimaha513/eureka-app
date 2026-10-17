@@ -6,14 +6,16 @@
  */
 
 /**
- * Hot List visibility policy (OD-01, decided 2026-09-29): "everyone" means every
- * signed-in user sees every candidate in a Hot List status (list columns only),
- * with the phone masked unless they own the candidate. Candidate profiles, submissions,
- * interviews and placements stay scoped. Set to "team" to restore AS-07 (team
- * hierarchy plus Open-to-all-teams candidates). The migration runner copies this
- * value into authz.policy_setting, where authz.hotlist_page() reads it.
+ * Hot List visibility policy. "team" (Eureka App 4 spec, 2026-10-16; AS-07): a
+ * candidate assigned to a team is on the Hot List of that lead's sales team (its
+ * hierarchy upwards) and of the interview prep team (interview coaches of that
+ * team); candidates marked "Open to all teams" are on every Sales user's Hot List.
+ * Location roles keep their location and the CEO the organisation. "everyone"
+ * (OD-01, 2026-09-29 to 2026-10-16) lists every Hot List candidate to every
+ * signed-in user (list columns only, phones masked). The migration runner
+ * copies this value into authz.policy_setting, where authz.hotlist_page() reads it.
  */
-export const HOTLIST_VISIBILITY: "everyone" | "team" = "everyone";
+export const HOTLIST_VISIBILITY: "everyone" | "team" = "team";
 
 /** Statuses shown on the Hot List. */
 export const HOTLIST_STATUSES = ["active", "on_hold", "full_of_interviews", "confirmation", "bench", "stopped"] as const;
@@ -82,6 +84,8 @@ export const PERMISSIONS = [
   "candidate.rating:update",
   "candidate.phone:read",
   "candidate.dob:read",
+  /** E-Verify, offer letter and 1099 company links and the documents status summary (gap/candidates). */
+  "candidate.compliance:update",
   "hotlist:read",
   // marketing
   "submission:read",
@@ -117,6 +121,10 @@ export const PERMISSIONS = [
   "report:read",
   "report:export",
   "performance:read",
+  /** Recruiter targets per period (docs/performance-api.md PF-4); set by managers and associate directors. */
+  "performance.target:manage",
+  // market-reports: point-in-time candidate counts (in market, placed, per status) for planning batches
+  "report.market:read",
   // vendors and org
   "vendor.preferred:create",
   "vendor.preferred:read",
@@ -222,6 +230,8 @@ export const GRANTS: Record<Role, Grants> = {
     "chat:use": "own",
     // jobs-portal
     "job:read": "team",
+    // payments (gap L1, migration 0100): invoices of their placements; amounts still need rate:read
+    "invoice:read": "own",
   },
   lead: {
     ...salesLine("team", "team"),
@@ -232,6 +242,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "team",
     // interview-alerts: block the support calendar for the team's interviews
     "calendar:block": "team",
+    // market-reports
+    "report.market:read": "team",
     // datahub
     "datahub:read": "own",
     // training
@@ -241,6 +253,8 @@ export const GRANTS: Record<Role, Grants> = {
     // jobs-portal
     "job:read": "team",
     "job:manage": "team",
+    // payments (gap L1, migration 0100): invoices of their placements; amounts still need rate:read
+    "invoice:read": "team",
   },
   manager: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -253,6 +267,10 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     "designation:change": "hierarchy",
+    // performance: recruiter targets for the hierarchy
+    "performance.target:manage": "hierarchy",
+    // market-reports
+    "report.market:read": "hierarchy",
     // datahub
     "datahub:read": "own",
     // training
@@ -262,6 +280,8 @@ export const GRANTS: Record<Role, Grants> = {
     // jobs-portal
     "job:read": "hierarchy",
     "job:manage": "hierarchy",
+    // payments (gap L1, migration 0100): invoices of their placements; amounts still need rate:read
+    "invoice:read": "hierarchy",
   },
   assoc_director: {
     ...salesLine("hierarchy", "hierarchy"),
@@ -274,6 +294,10 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     "designation:change": "hierarchy",
+    // performance: recruiter targets for the hierarchy
+    "performance.target:manage": "hierarchy",
+    // market-reports
+    "report.market:read": "hierarchy",
     // datahub
     "datahub:read": "own",
     // training
@@ -283,6 +307,8 @@ export const GRANTS: Record<Role, Grants> = {
     // jobs-portal
     "job:read": "hierarchy",
     "job:manage": "hierarchy",
+    // payments (gap L1, migration 0100): invoices of their placements; amounts still need rate:read
+    "invoice:read": "hierarchy",
   },
   ceo: {
     "candidate:read": "org",
@@ -298,6 +324,8 @@ export const GRANTS: Record<Role, Grants> = {
     "report:read": "org",
     "report:export": "org",
     "vendor.preferred:read": "org",
+    // market-reports
+    "report.market:read": "org",
     // datahub
     "datahub:read": "own",
     // training
@@ -319,6 +347,8 @@ export const GRANTS: Record<Role, Grants> = {
     "placement:read": "location",
     "performance:read": "location",
     "report:read": "location",
+    // market-reports
+    "report.market:read": "location",
     // datahub
     "datahub:read": "own",
     // training
@@ -350,6 +380,8 @@ export const GRANTS: Record<Role, Grants> = {
     "interview.feedback:create": "location",
     "placement:read": "location",
     "report:read": "location",
+    // market-reports
+    "report.market:read": "location",
     // datahub
     "datahub:read": "own",
     "datahub:manage": "location",
@@ -363,6 +395,7 @@ export const GRANTS: Record<Role, Grants> = {
   hr: {
     "assignment:read": "org",
     "candidate:read": "org",
+    "candidate.compliance:update": "org",
     "candidate.phone:read": "org",
     "candidate.dob:read": "org",
     "placement:read": "org",
@@ -409,6 +442,7 @@ export const GRANTS: Record<Role, Grants> = {
   accounts: {
     "assignment:read": "org",
     "candidate:read": "org",
+    "candidate.compliance:update": "org",
     "placement:read": "org",
     "rate:read": "org",
     "employee:read": "org",
@@ -427,6 +461,7 @@ export const GRANTS: Record<Role, Grants> = {
   immigration: {
     "assignment:read": "org",
     "candidate:read": "org",
+    "candidate.compliance:update": "org",
     "candidate.phone:read": "org",
     "candidate.dob:read": "org",
     "employee:read": "org",
@@ -436,6 +471,8 @@ export const GRANTS: Record<Role, Grants> = {
     "document.restricted:read": "org",
     "visa:read": "org",
     "visa:update": "org",
+    // employees gaps (0150): joinings/exits and active-employee counts (no placement scope: client columns stay empty).
+    "report:read": "org",
     // datahub
     "datahub:read": "own",
     // chat
@@ -455,10 +492,11 @@ export const GRANTS: Record<Role, Grants> = {
     "chat:use": "own",
   },
   // interview-alerts: the support team that coordinates interviews. Reads every
-  // interview (and the candidates on them) to coordinate, blocks the support
-  // calendar; no Sales writes, no documents, no rates.
+  // interview to coordinate, blocks the support calendar; no Sales writes, no
+  // documents, no rates. No candidate:read (gap/candidates, team-scoped Hot List):
+  // the candidate's name on each interview comes from
+  // authz.interview_candidate_name (0141), not from the Candidates list.
   interview_coordinator: {
-    "candidate:read": "org",
     "interview:read": "org",
     "calendar:block": "org",
     // datahub
@@ -468,6 +506,7 @@ export const GRANTS: Record<Role, Grants> = {
   },
   documents_team: {
     "candidate:read": "org",
+    "candidate.compliance:update": "org",
     "document:read": "org",
     "document:upload": "org",
     "document:verify": "org",

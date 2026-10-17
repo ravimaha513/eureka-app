@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { HOTLIST_STATUSES } from "@eureka/shared";
+import { ExtraListFilters } from "../candidates/candidates.schemas.js";
 
 /** The Hot List filters a saved view or an export carries (same names as GET /hotlist). */
 export const HotlistFilters = z
@@ -8,6 +9,7 @@ export const HotlistFilters = z
     technology: z.string().trim().min(1).max(80).optional(),
     visibility: z.enum(["team", "all_teams"]).optional(),
     search: z.string().trim().min(1).max(80).optional(),
+    ...ExtraListFilters,
   })
   .strict();
 export type HotlistFilters = z.infer<typeof HotlistFilters>;

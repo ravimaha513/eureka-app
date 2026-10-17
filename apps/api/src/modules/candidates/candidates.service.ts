@@ -17,10 +17,12 @@ import {
   MARKETABLE_STATUSES,
   applyCandidateFieldPolicy,
   canCreateBatch,
+  marketingStatusLabel,
   candidateActions,
   candidateTransitionAllowed,
   ownsCandidate,
   resolveScope,
+  type CandidateCompanyLink,
   type CandidateRef,
   type EffectiveScope,
   type Permission,
@@ -34,6 +36,7 @@ import type {
   BatchListQuery,
   BatchStatus,
   CandidateListQuery,
+  ComplianceUpdate,
   CreateBatch,
   CreateCandidate,
   ProfileUpdate,
@@ -63,6 +66,40 @@ interface CandidateRow {
   batch_month: string | null;
   batch_technology: string | null;
   batch_location: string | null;
+  visa_category: string | null;
+  documents_status: string | null;
+  gh_remote: boolean;
+  gh_location_id: string | null;
+  gh_location_name: string | null;
+  team_assigned_at: Date;
+  /** A resume link is recorded (the link itself is owner-only, profileExtras). */
+  resume_link: boolean;
+}
+
+/** Guest house or remote (Hot List "stay"), from the two columns behind it. */
+const stayOf = (r: { gh_remote: boolean; gh_location_name: string | null }) =>
+  r.gh_remote ? "remote" : r.gh_location_name !== null ? "guest_house" : null;
+
+/**
+ * Hot List / Candidates list filters added for the Eureka App 4 spec, as
+ * parameterized predicates (the open Hot List applies the same in
+ * authz.hotlist_page). The resume filter reads authz.resume_candidate_ids once
+ * per statement (InitPlan feeding a hashed SubPlan, rule 3).
+ */
+export function extraFilterPredicates(q: CandidateListQuery, params: unknown[], alias = "c"): string[] {
+  const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
+  const where: string[] = [];
+  if (q.locationId) where.push(`${alias}.location_id = ${p(q.locationId)}`);
+  if (q.visa) where.push(`${alias}.visa_category = ${p(q.visa)}`);
+  if (q.documents === "none") where.push(`${alias}.documents_status IS NULL`);
+  else if (q.documents) where.push(`${alias}.documents_status = ${p(q.documents)}`);
+  if (q.resume) {
+    const has = `(${alias}.resume_url IS NOT NULL OR ${alias}.id IN (SELECT pg_catalog.unnest((SELECT authz.resume_candidate_ids()))))`;
+    where.push(q.resume === "yes" ? has : `NOT ${has}`);
+  }
+  if (q.stay === "remote") where.push(`${alias}.gh_remote`);
+  if (q.stay === "guest_house") where.push(`${alias}.gh_location_id IS NOT NULL`);
+  return where;
 }
 
 /** "Java · Dallas · Nov 2026" from a batch's technology, location and start month (YYYY-MM-DD). */
@@ -86,6 +123,25 @@ const BATCH_ERRORS: Record<string, () => HttpException> = {
   batch_not_found: () => new NotFoundException(),
   invalid_transition: () => new UnprocessableEntityException("invalid_transition"),
 };
+
+/** Profile write errors: batch codes (0026), an unknown guest house location (FK). */
+function mapProfileError(err: unknown): never {
+  const e = err as { code?: string; constraint?: string };
+  if (e.code === "23503" && e.constraint === "candidate_gh_location_id_fkey") throw new UnprocessableEntityException("invalid_location");
+  return mapBatchError(err);
+}
+
+/**
+ * Audit summary of a profile update (rule 5): links and marketing locations
+ * are free text, recorded as "changed" flags only; the rest are keys and ids.
+ */
+export function auditSafeProfile(body: ProfileUpdate): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...body };
+  for (const k of ["linkedinUrl", "resumeUrl", "marketingLocations", "marketingEmail", "vitelNumber"] as const) {
+    if (k in out) out[k] = true;
+  }
+  return out;
+}
 
 /** Maps the batch functions' and trigger's coded errors (migration 0026) to problem details. */
 function mapBatchError(err: unknown): never {
@@ -129,6 +185,10 @@ interface ProfileExtraRow {
   in_person_ok: boolean | null;
   marketing_email: string | null;
   vitel_number: string | null;
+  linkedin_url: string | null;
+  resume_url: string | null;
+  marketing_locations: string[] | null;
+  eligibility: string[] | null;
 }
 
 /**
@@ -141,9 +201,17 @@ interface ProfileExtraRow {
 export function profileExtras(access: UserAccess, ref: CandidateRef, r: ProfileExtraRow) {
   const phoneScope = resolveScope(access, "candidate.phone:read");
   const contact = phoneScope !== null && ownsCandidate(phoneScope, ref);
+  // LinkedIn and the resume link follow the uploaded-resume rule: owners of
+  // the candidate (candidate:read through ownership, team, hierarchy, location
+  // or org), never through Open to all teams.
+  const readScope = resolveScope(access, "candidate:read");
+  const owner = readScope !== null && ownsCandidate(readScope, ref);
   return {
     inPersonOk: r.in_person_ok,
+    eligibility: r.eligibility ?? [],
+    marketingLocations: r.marketing_locations ?? [],
     ...(contact ? { marketingEmail: r.marketing_email, vitelNumber: r.vitel_number } : {}),
+    ...(owner ? { linkedinUrl: r.linkedin_url, resumeUrl: r.resume_url } : {}),
   };
 }
 
@@ -166,6 +234,11 @@ interface HotlistRow {
   phone: string | null;
   phone_masked: boolean;
   readable: boolean;
+  visa_category: string | null;
+  documents_status: string | null;
+  gh_remote: boolean;
+  gh_location_name: string | null;
+  has_resume: boolean;
 }
 
 /**
@@ -216,7 +289,9 @@ export class CandidatesService implements OnModuleInit {
            c.team_id, tm.name AS team_name, c.recruiter_id, u.display_name AS recruiter_name,
            c.location_id, l.name AS location_name, c.visibility, c.marketing_status, c.priority,
            c.marketing_start_date::text, c.technical_rating, c.row_version,
-           c.batch_id, b.start_month::text AS batch_month, bt.name AS batch_technology, bl.name AS batch_location
+           c.batch_id, b.start_month::text AS batch_month, bt.name AS batch_technology, bl.name AS batch_location,
+           c.visa_category, c.documents_status, c.gh_remote, c.gh_location_id, gl.name AS gh_location_name,
+           c.team_assigned_at, (c.resume_url IS NOT NULL) AS resume_link
     FROM eureka.candidate c
     JOIN eureka.person p ON p.id = c.person_id
     JOIN eureka.technology t ON t.id = c.technology_id
@@ -225,9 +300,10 @@ export class CandidatesService implements OnModuleInit {
     LEFT JOIN eureka.app_user u ON u.id = c.recruiter_id
     LEFT JOIN eureka.batch b ON b.id = c.batch_id
     LEFT JOIN eureka.technology bt ON bt.id = b.technology_id
-    LEFT JOIN eureka.location bl ON bl.id = b.location_id`;
+    LEFT JOIN eureka.location bl ON bl.id = b.location_id
+    LEFT JOIN eureka.location gl ON gl.id = c.gh_location_id`;
 
-  present(access: UserAccess, r: CandidateRow) {
+  present(access: UserAccess, r: CandidateRow, hasResume?: boolean) {
     const ref = toRef(r);
     const fields = applyCandidateFieldPolicy(access, ref, {
       phone: r.phone_e164,
@@ -241,11 +317,18 @@ export class CandidatesService implements OnModuleInit {
       name: `${r.first_name} ${r.last_name}`,
       technology: r.technology,
       status: r.marketing_status,
+      statusLabel: marketingStatusLabel(r.marketing_status, r.visibility, r.gh_remote),
       visibility: r.visibility,
       priority: r.priority,
       team: { id: r.team_id, name: r.team_name },
+      teamAssignedAt: r.team_assigned_at.toISOString(),
       recruiter: r.recruiter_id ? { id: r.recruiter_id, name: r.recruiter_name } : null,
       location: { id: r.location_id, name: r.location_name },
+      ghLocation: r.gh_location_id && r.gh_location_name ? { id: r.gh_location_id, name: r.gh_location_name } : null,
+      stay: stayOf(r),
+      visaCategory: r.visa_category,
+      documentsStatus: r.documents_status,
+      ...(hasResume === undefined ? {} : { hasResume }),
       marketingStartDate: r.marketing_start_date,
       daysInMarket: days,
       technicalRating: r.technical_rating,
@@ -277,6 +360,7 @@ export class CandidatesService implements OnModuleInit {
     if (q.technology) { params.push(q.technology); where.push(`t.name = $${params.length}`); }
     if (q.visibility) { params.push(q.visibility); where.push(`c.visibility = $${params.length}`); }
     if (q.batchId) { params.push(q.batchId); where.push(`c.batch_id = $${params.length}`); }
+    where.push(...extraFilterPredicates(q, params));
     if (q.search) {
       params.push(`%${q.search.replace(/[%_\\]/g, "\\$&")}%`);
       where.push(`(p.first_name || ' ' || p.last_name) ILIKE $${params.length}`);
@@ -284,12 +368,38 @@ export class CandidatesService implements OnModuleInit {
     if (q.cursor) { params.push(q.cursor); where.push(`c.id > $${params.length}`); }
     params.push(q.limit + 1);
     const sql = `${this.baseSelect} WHERE ${where.join(" AND ")} ORDER BY c.id LIMIT $${params.length}`;
-    const rows = await this.db.withUser(user.id, async (c) => (await c.query<CandidateRow>(sql, params)).rows);
+    const { rows, withResume } = await this.db.withUser(user.id, async (c) => {
+      const r = (await c.query<CandidateRow>(sql, params)).rows;
+      const ids = r.slice(0, q.limit).map((x) => x.id);
+      const flags = (await c.query<{ ids: string[] }>(`SELECT authz.resume_flags($1::uuid[]) AS ids`, [ids])).rows[0]!.ids;
+      // Every Hot List page is audited, whichever policy serves it (anti-scraping).
+      if (perm === "hotlist:read") await this.auditHotlistPage(c, user, q, r);
+      return { rows: r, withResume: new Set(flags) };
+    });
     const page = rows.slice(0, q.limit);
     return {
-      items: page.map((r) => this.present(user.access, r)),
+      items: page.map((r) => ({
+        ...this.present(user.access, r, r.resume_link || withResume.has(r.id)),
+        // Rows here come from candidate:read's own scope (RLS), so every profile opens.
+        canOpenProfile: true,
+      })),
       nextCursor: rows.length > q.limit ? page[page.length - 1]!.id : null,
     };
+  }
+
+  /** Audit row of one Hot List page: who, filter summary (free text as a flag only, rule 5), row count and id range. */
+  private async auditHotlistPage(c: pg.PoolClient, user: AuthedUser, q: CandidateListQuery, r: { id: string }[]) {
+    const n = Math.min(r.length, q.limit);
+    await this.audit.record(c, {
+      actorId: user.id, action: "hotlist.read", entityType: "candidate",
+      changes: {
+        filters: {
+          status: q.status, technology: q.technology, visibility: q.visibility, search: q.search ? true : undefined,
+          locationId: q.locationId, visa: q.visa, documents: q.documents, resume: q.resume, stay: q.stay,
+        },
+        rows: n, firstId: r[0]?.id ?? null, lastId: r[n - 1]?.id ?? null,
+      },
+    });
   }
 
   /**
@@ -301,14 +411,12 @@ export class CandidatesService implements OnModuleInit {
     const search = q.search ? `%${q.search.replace(/[%_\\]/g, "\\$&")}%` : null;
     const rows = await this.db.withUser(user.id, async (c) => {
       const r = (await c.query<HotlistRow>(
-        `SELECT * FROM authz.hotlist_page($1, $2, $3, $4, $5, $6)`,
-        [q.status ?? null, q.technology ?? null, q.visibility ?? null, search, q.cursor ?? null, q.limit + 1],
+        `SELECT * FROM authz.hotlist_page($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [q.status ?? null, q.technology ?? null, q.visibility ?? null, search, q.cursor ?? null, q.limit + 1,
+          q.locationId ?? null, q.visa ?? null, q.documents ?? null, q.resume === undefined ? null : q.resume === "yes",
+          q.stay ?? null],
       )).rows;
-      await this.audit.record(c, {
-        actorId: user.id, action: "hotlist.read", entityType: "candidate",
-        changes: { filters: { status: q.status, technology: q.technology, visibility: q.visibility, search: q.search ? true : undefined }, rows: Math.min(r.length, q.limit),
-          firstId: r[0]?.id ?? null, lastId: r[Math.min(r.length, q.limit) - 1]?.id ?? null },
-      });
+      await this.auditHotlistPage(c, user, q, r);
       return r;
     });
     const page = rows.slice(0, q.limit);
@@ -322,11 +430,17 @@ export class CandidatesService implements OnModuleInit {
           name: `${r.first_name} ${r.last_name}`,
           technology: r.technology,
           status: r.marketing_status,
+          statusLabel: marketingStatusLabel(r.marketing_status, r.visibility, r.gh_remote),
           visibility: r.visibility,
           priority: r.priority,
           team: { id: r.team_id, name: r.team_name },
           recruiter: r.recruiter_id ? { id: r.recruiter_id, name: r.recruiter_name } : null,
           location: { id: r.location_id, name: r.location_name },
+          ghLocation: r.gh_location_name ? { name: r.gh_location_name } : null,
+          stay: stayOf(r),
+          visaCategory: r.visa_category,
+          documentsStatus: r.documents_status,
+          hasResume: r.has_resume,
           marketingStartDate: r.marketing_start_date,
           daysInMarket: days,
           technicalRating: r.technical_rating,
@@ -365,14 +479,35 @@ export class CandidatesService implements OnModuleInit {
         ? (await c.query<{ o: boolean }>(`SELECT authz.candidate_has_open_placement($1) AS o`, [id])).rows[0]!.o
         : false;
       // Profile-only fields (not on list rows), read under the same RLS.
-      const extra = r ? (await c.query<ProfileExtraRow>(
-        `SELECT in_person_ok, marketing_email::text, vitel_number FROM eureka.candidate WHERE id = $1`, [id])).rows[0] : undefined;
-      return r && extra ? { row: r, open, extra } : undefined;
+      const extra = r ? (await c.query<ProfileExtraRow & { confirmations: number }>(
+        `SELECT in_person_ok, marketing_email::text, vitel_number, linkedin_url, resume_url, marketing_locations, eligibility,
+                -- Times the candidate reached confirmation (candidate_event, readable with the candidate).
+                (SELECT count(*)::int FROM eureka.candidate_event e
+                  WHERE e.candidate_id = candidate.id AND e.type = 'candidate.status_changed' AND e.to_value = 'confirmation') AS confirmations
+         FROM eureka.candidate WHERE id = $1`, [id])).rows[0] : undefined;
+      // Linked company names (authz.candidate_companies re-checks ownership or candidate.compliance:update).
+      const companies = r ? (await c.query<{ link: CandidateCompanyLink; company_id: string; company_name: string }>(
+        `SELECT * FROM authz.candidate_companies($1)`, [id])).rows : [];
+      const uploaded = r ? (await c.query<{ ids: string[] }>(`SELECT authz.resume_flags(ARRAY[$1]::uuid[]) AS ids`, [id])).rows[0]!.ids : [];
+      return r && extra ? { row: r, open, extra, companies, hasResume: r.resume_link || uploaded.length > 0 } : undefined;
     });
     if (!found) throw new NotFoundException();
+    const ref = toRef(found.row);
+    const readScope = resolveScope(user.access, "candidate:read");
+    const complianceScope = resolveScope(user.access, "candidate.compliance:update");
+    const canCompliance = complianceScope !== null && ownsCandidate(complianceScope, ref);
+    const showCompanies = canCompliance || (readScope !== null && ownsCandidate(readScope, ref));
+    const link = (k: CandidateCompanyLink) => {
+      const x = found.companies.find((cmp) => cmp.link === k);
+      return x ? { id: x.company_id, name: x.company_name } : null;
+    };
     return {
-      ...this.present(user.access, found.row),
-      ...profileExtras(user.access, toRef(found.row), found.extra),
+      ...this.present(user.access, found.row, found.hasResume),
+      ...profileExtras(user.access, ref, found.extra),
+      confirmations: found.extra.confirmations,
+      /** Owners and compliance editors only (E-Verify, offer letter and 1099 companies). */
+      ...(showCompanies ? { companies: { everify: link("everify"), offerLetter: link("offerLetter"), form1099: link("form1099") } } : {}),
+      canEditCompliance: canCompliance,
       /** Hints for the UI (docs/placements-api.md); every write is checked again. */
       actions: candidateActions(user.access, toRef(found.row), found.open),
     };
@@ -384,17 +519,68 @@ export class CandidatesService implements OnModuleInit {
       const map: Record<string, string> = {
         priority: "priority", marketingEmail: "marketing_email", vitelNumber: "vitel_number",
         marketingStartDate: "marketing_start_date", inPersonOk: "in_person_ok", technologyId: "technology_id",
-        batchId: "batch_id",
+        batchId: "batch_id", marketingLocations: "marketing_locations", linkedinUrl: "linkedin_url",
+        resumeUrl: "resume_url", eligibility: "eligibility", visaCategory: "visa_category",
       };
-      const entries = Object.entries(body).filter(([k]) => k in map);
+      const empty = (v: unknown) => (Array.isArray(v) && v.length === 0 ? null : v); // one spelling of "none"
+      const entries: [string, unknown][] = Object.entries(body).filter(([k]) => k in map).map(([k, v]) => [map[k]!, empty(v)]);
+      if (body.ghLocation !== undefined) {
+        entries.push(["gh_location_id", body.ghLocation === "remote" ? null : body.ghLocation]);
+        entries.push(["gh_remote", body.ghLocation === "remote"]);
+      }
       if (entries.length) {
         const params: unknown[] = [id];
-        const sets = entries.map(([k, v]) => { params.push(v); return `${map[k]} = $${params.length}`; });
-        await c.query(`UPDATE eureka.candidate SET ${sets.join(", ")} WHERE id = $1`, params).catch(mapBatchError);
-        await this.audit.record(c, { actorId: user.id, action: "candidate.updated", entityType: "candidate", entityId: id, changes: body });
+        const sets = entries.map(([col, v]) => { params.push(v); return `${col} = $${params.length}`; });
+        await c.query(`UPDATE eureka.candidate SET ${sets.join(", ")} WHERE id = $1`, params).catch(mapProfileError);
+        await this.audit.record(c, {
+          actorId: user.id, action: "candidate.updated", entityType: "candidate", entityId: id, changes: auditSafeProfile(body),
+        });
       }
       return { id };
     });
+  }
+
+  /**
+   * Company links and documents status (candidate.compliance:update) through
+   * authz.set_candidate_compliance, which re-checks scope and that a changed
+   * link names an active company. Read-before-write: 404 if the candidate is
+   * not readable, 403 if readable but not covered.
+   */
+  async setCompliance(user: AuthedUser, id: string, body: ComplianceUpdate) {
+    return this.db.withUser(user.id, async (c) => {
+      await this.loadForWrite(c, user, id, "candidate.compliance:update");
+      const cur = (await c.query<{ e: string | null; o: string | null; f: string | null; d: string | null }>(
+        `SELECT everify_company_id AS e, offer_letter_company_id AS o, form1099_company_id AS f, documents_status AS d
+         FROM eureka.candidate WHERE id = $1`, [id])).rows[0]!;
+      const next = {
+        e: body.everifyCompanyId === undefined ? cur.e : body.everifyCompanyId,
+        o: body.offerLetterCompanyId === undefined ? cur.o : body.offerLetterCompanyId,
+        f: body.form1099CompanyId === undefined ? cur.f : body.form1099CompanyId,
+        d: body.documentsStatus === undefined ? cur.d : body.documentsStatus,
+      };
+      let rowVersion: number;
+      try {
+        rowVersion = (await c.query<{ v: number }>(`SELECT authz.set_candidate_compliance($1, $2, $3, $4, $5) AS v`,
+          [id, next.e, next.o, next.f, next.d])).rows[0]!.v;
+      } catch (err) {
+        if ((err as { message?: string }).message === "invalid_company") throw new UnprocessableEntityException("invalid_company");
+        throw err;
+      }
+      // Ids and the status key only: no names or free text (rule 5).
+      await this.audit.record(c, { actorId: user.id, action: "candidate.compliance", entityType: "candidate", entityId: id, changes: body });
+      return {
+        id, rowVersion,
+        everifyCompanyId: next.e, offerLetterCompanyId: next.o, form1099CompanyId: next.f, documentsStatus: next.d,
+      };
+    });
+  }
+
+  /** Active companies for the compliance picker; empty for callers without candidate.compliance:update. */
+  async complianceCompanies(user: AuthedUser) {
+    if (!resolveScope(user.access, "candidate.compliance:update")) throw new ForbiddenException();
+    const rows = await this.db.withUser(user.id, async (c) => (await c.query<{ id: string; name: string; location_name: string }>(
+      `SELECT * FROM authz.compliance_company_options()`)).rows);
+    return { items: rows.map((r) => ({ id: r.id, name: r.name, location: r.location_name })) };
   }
 
   async setVisibility(user: AuthedUser, id: string, visibility: "team" | "all_teams") {

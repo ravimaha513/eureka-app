@@ -15,6 +15,29 @@ export interface CandidateProfile extends Candidate {
   /** Marketing contacts: present only with candidate.phone:read over an owned candidate (the phone rule). */
   marketingEmail?: string | null;
   vitelNumber?: string | null;
+  /** Eligibility keys (ELIGIBILITY_OPTIONS); [] when none recorded. */
+  eligibility?: string[];
+  /** "City, ST" entries the candidate is marketed in. */
+  marketingLocations?: string[];
+  /** Owners only (not through Open to all teams). */
+  linkedinUrl?: string | null;
+  resumeUrl?: string | null;
+  /** Times the candidate reached confirmation. */
+  confirmations?: number;
+  /** Company links: owners and compliance editors only. */
+  companies?: { everify: Named | null; offerLetter: Named | null; form1099: Named | null };
+  /** candidate.compliance:update covers this candidate (UI hint). */
+  canEditCompliance?: boolean;
+}
+
+export interface Named { id: string; name: string }
+
+/** PUT /candidates/:id/compliance (candidate.compliance:update); omitted keys keep their value, null clears. */
+export interface ComplianceUpdate {
+  everifyCompanyId?: string | null;
+  offerLetterCompanyId?: string | null;
+  form1099CompanyId?: string | null;
+  documentsStatus?: string | null;
 }
 
 export type BatchStatus = "planned" | "in_training" | "completed" | "cancelled";
@@ -81,6 +104,11 @@ export interface ListFilters {
   visibility?: Visibility | "";
   /** Candidates list only. */
   batchId?: string;
+  locationId?: string;
+  visa?: string;
+  documents?: string;
+  resume?: "yes" | "no" | "";
+  stay?: "guest_house" | "remote" | "";
   cursor?: string | null;
   limit?: number;
 }
@@ -95,6 +123,13 @@ export interface ProfileUpdate {
   technologyId?: string;
   /** null removes the candidate from its batch. */
   batchId?: string | null;
+  /** A location id, "remote", or null (not recorded). */
+  ghLocation?: string | null;
+  marketingLocations?: string[] | null;
+  linkedinUrl?: string | null;
+  resumeUrl?: string | null;
+  eligibility?: string[] | null;
+  visaCategory?: string | null;
 }
 
 export interface CreateCandidate {
@@ -157,6 +192,7 @@ function listQuery(f: ListFilters): string {
   if (f.technology) q.set("technology", f.technology);
   if (f.visibility) q.set("visibility", f.visibility);
   if (f.batchId) q.set("batchId", f.batchId);
+  for (const k of EXTRA_FILTER_KEYS) { const v = f[k]; if (v) q.set(k, v); }
   if (f.cursor) q.set("cursor", f.cursor);
   q.set("limit", String(f.limit ?? 50));
   return q.toString();
@@ -183,7 +219,13 @@ export const salesApi = {
   batches: (locationId?: string) =>
     api<BatchList>(`/api/v1/batches${locationId ? `?locationId=${enc(locationId)}` : ""}`),
   createBatch: (b: CreateBatch) => api<{ id: string }>("/api/v1/batches", { method: "POST", ...json(b) }),
+  setCompliance: (id: string, b: ComplianceUpdate) =>
+    api<{ id: string }>(`/api/v1/candidates/${enc(id)}/compliance`, { method: "PUT", ...json(b) }),
+  complianceCompanies: () => api<{ items: { id: string; name: string; location: string }[] }>("/api/v1/candidate-companies"),
 };
+
+/** Hot List filters added for Eureka App 4 (also on the Candidates list, saved views and export). */
+export const EXTRA_FILTER_KEYS = ["locationId", "visa", "documents", "resume", "stay"] as const;
 
 /** Filters a saved view stores (the Hot List filters, no paging). */
 export interface ViewFilters {
@@ -191,6 +233,11 @@ export interface ViewFilters {
   status?: string;
   technology?: string;
   visibility?: Visibility;
+  locationId?: string;
+  visa?: string;
+  documents?: string;
+  resume?: "yes" | "no";
+  stay?: "guest_house" | "remote";
 }
 
 export interface SavedView { id: string; name: string; filters: ViewFilters; createdAt: string; updatedAt: string }
@@ -210,6 +257,11 @@ export function viewFilters(f: ListFilters): ViewFilters {
   if (f.status) out.status = f.status;
   if (f.technology) out.technology = f.technology;
   if (f.visibility) out.visibility = f.visibility;
+  if (f.locationId) out.locationId = f.locationId;
+  if (f.visa) out.visa = f.visa;
+  if (f.documents) out.documents = f.documents;
+  if (f.resume) out.resume = f.resume;
+  if (f.stay) out.stay = f.stay;
   return out;
 }
 

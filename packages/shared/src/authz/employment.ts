@@ -32,9 +32,18 @@ export interface EmployeeActions {
   exit: boolean;
   /** Bench employee back to marketing (candidate bench -> active) so Sales can place them again. */
   returnToMarket: boolean;
+  /** Leaving a project (0150): put the benched employee's candidate in a Sales team (authz.assign_employee_team). */
+  assignTeam: boolean;
+  /** Payroll company, E-Verify and onboarded dates of the assignments (0150, authz.set_assignment_employment). */
+  editEmployment: boolean;
 }
 
-export const NO_EMPLOYEE_ACTIONS: EmployeeActions = { endAssignment: false, setEndDate: false, exit: false, returnToMarket: false };
+export const NO_EMPLOYEE_ACTIONS: EmployeeActions = {
+  endAssignment: false, setEndDate: false, exit: false, returnToMarket: false, assignTeam: false, editEmployment: false,
+};
+
+/** Candidate statuses from which HR/Accounts may assign a team to a benched employee (authz.assign_employee_team). */
+export const TEAM_ASSIGNABLE_CANDIDATE_STATUSES = ["bench", "active"] as const;
 
 export interface EmployeeState {
   status: string;
@@ -72,5 +81,7 @@ export function employeeActions(
     setEndDate: onAssignment,
     exit: bench,
     returnToMarket: bench && s.lastEndReason !== "bgc_failed" && s.candidateStatus === "bench",
+    assignTeam: bench && (TEAM_ASSIGNABLE_CANDIDATE_STATUSES as readonly string[]).includes(s.candidateStatus ?? ""),
+    editEmployment: true,
   };
 }

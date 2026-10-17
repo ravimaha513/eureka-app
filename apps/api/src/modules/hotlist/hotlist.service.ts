@@ -8,7 +8,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { resolveScope } from "@eureka/shared";
+import { DOCUMENTS_STATUSES, VISA_CATEGORIES, resolveScope } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
@@ -42,6 +42,10 @@ interface ExportRow {
   marketing_start_date: string | null;
   technical_rating: number | null;
   phone: string | null;
+  visa_category: keyof typeof VISA_CATEGORIES | null;
+  documents_status: keyof typeof DOCUMENTS_STATUSES | null;
+  gh_remote: boolean;
+  gh_location_name: string | null;
 }
 
 export type BulkError = "not_found" | "forbidden" | "invalid_transition" | "placement_open" | "failed";
@@ -52,6 +56,7 @@ const label = (s: string) => { const t = s.replace(/_/g, " "); return t.charAt(0
 /** Audit-safe summary of the filters: free text (name search, technology) is recorded only as a flag (rule 5). */
 export const filterSummary = (f: HotlistFilters) => ({
   status: f.status, technology: f.technology ? true : undefined, visibility: f.visibility, search: f.search ? true : undefined,
+  locationId: f.locationId, visa: f.visa, documents: f.documents, resume: f.resume, stay: f.stay,
 });
 
 const likePattern = (s: string) => `%${s.replace(/[%_\\]/g, "\\$&")}%`;
@@ -168,8 +173,9 @@ export class HotlistService {
     const rows = await this.db.withUser(user.id, async (c) => {
       await c.query(`SET LOCAL statement_timeout = '60s'`); // design N9: separate export timeout
       const r = (await c.query<ExportRow>(
-        `SELECT * FROM authz.hotlist_export($1, $2, $3, $4, $5)`,
-        [f.status ?? null, f.technology ?? null, f.visibility ?? null, f.search ? likePattern(f.search) : null, EXPORT_ROW_CAP + 1],
+        `SELECT * FROM authz.hotlist_export($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [f.status ?? null, f.technology ?? null, f.visibility ?? null, f.search ? likePattern(f.search) : null, EXPORT_ROW_CAP + 1,
+          f.locationId ?? null, f.visa ?? null, f.documents ?? null, f.resume === undefined ? null : f.resume === "yes", f.stay ?? null],
       )).rows;
       await this.audit.record(c, {
         actorId: user.id, action: "hotlist.export", entityType: "candidate",
@@ -182,13 +188,16 @@ export class HotlistService {
     const now = Date.now();
     const csv = toCsv(
       ["Candidate", "Technology", "Status", "Visibility", "Priority", "Team", "Recruiter", "Location", "Phone",
-        "Marketing since", "Days in market", "Technical rating"],
+        "Marketing since", "Days in market", "Technical rating", "Visa", "Documents", "Stay"],
       page.map((r) => [
         `${r.first_name} ${r.last_name}`, r.technology, label(r.marketing_status),
         r.visibility === "all_teams" ? "Open to all teams" : "Team only", r.priority, r.team_name,
         r.recruiter_name ?? "Unassigned", r.location_name, r.phone, r.marketing_start_date,
         r.marketing_start_date ? Math.floor((now - Date.parse(r.marketing_start_date)) / 86_400_000) : null,
         r.technical_rating,
+        r.visa_category ? VISA_CATEGORIES[r.visa_category] : null,
+        r.documents_status ? DOCUMENTS_STATUSES[r.documents_status] : null,
+        r.gh_remote ? "Remote" : r.gh_location_name ? `Guest house (${r.gh_location_name})` : null,
       ]),
     );
     return { csv, rows: page.length, truncated };

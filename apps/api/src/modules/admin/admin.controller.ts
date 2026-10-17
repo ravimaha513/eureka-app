@@ -15,6 +15,7 @@ import {
   SetManager,
   UserListQuery,
   SetPassword,
+  SetDesignation,
 } from "./admin.schemas.js";
 import { AdminService } from "./admin.service.js";
 
@@ -68,6 +69,11 @@ export class AdminController {
   @HttpCode(204)
   async reactivate(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string): Promise<void> {
     await this.svc.setStatus(user, id, true);
+  }
+
+  @Put("users/:id/designation")
+  setDesignation(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.setDesignation(user, id, SetDesignation.parse(body).designation, "admin");
   }
 
   @Put("users/:id/manager")
@@ -153,5 +159,21 @@ export class TeamsController {
   @RequirePermission("team:move_member")
   moveMember(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.moveMember(user, id, MoveMember.parse(body));
+  }
+}
+
+/**
+ * Designation changes outside the admin area (docs/performance-api.md PF-7):
+ * designation:change over the users the grant covers (manager and associate
+ * director: their hierarchy), not access:manage.
+ */
+@Controller("api/v1/users")
+export class UserDesignationController {
+  constructor(private readonly svc: AdminService) {}
+
+  @Put(":id/designation")
+  @RequirePermission("designation:change")
+  setDesignation(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.setDesignation(user, id, SetDesignation.parse(body).designation, "hierarchy");
   }
 }

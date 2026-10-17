@@ -83,7 +83,64 @@ problems with the code in `detail`, CSRF header on every write.
 - **Staff contacts:** `staff.contact:read` goes to HR and Org Admin (Org Admin gains no business data: the
   `engine.test.ts` invariant was updated to allow this one directory permission). Should Associate HR, managers or
   the whole staff see work phones?
-- **Designation** is read-only in Settings (it is set by `designation:change` holders); there is still no API to change it.
+- **Designation** is read-only in Settings. It is changed by `designation:change` holders (Performance page, `PUT /api/v1/users/:id/designation`) and in Users & Access (`access:manage`); see `docs/performance-api.md` PF-7.
 - **Sessions:** the list covers 30 days; session rows are not pruned yet (as before). IP and device are recorded only
   for sessions created after 0081.
 - The **Application status dialog** on the reference screens belongs to the jobs portal package, not here.
+
+## Interview reports (IR)
+
+Gap L4 of the Eureka App 4 spec ("interview reports by proxy, technology, candidate and duration"; the spec's "proxy" is
+the **interview coach**). Built in migration `0130_interview_reports.sql`, `apps/api/src/modules/interview-reports`,
+shared constants `packages/shared/src/interviewReports.ts`, web screen **Interview reports** (Insights) and the
+Interviews board. No new permission, table, policy or grant: the reports are reads under the caller's interview RLS.
+
+| Rule | Enforcement |
+|---|---|
+| IR-1 The coach is `interview.coach_id` (Sales field, IS-5) and must be an **active holder of `interview_coach`** when it is set or changed. A coach who later loses the role stays on the interviews they already have. | API `assertCoach` (422 `invalid_coach`); `eureka.interview_coach_guard` (BEFORE INSERT OR UPDATE OF coach_id) through the definer `authz.is_interview_coach(uuid)` (REVOKE FROM PUBLIC, `search_path` pinned, EXECUTE to `eureka_app`, `eureka_owner`) |
+| IR-2 The duration is `ends_at - starts_at` (IS-2: no duration column); buckets: under 30, 30-59, 60-89, 90-119, 120 min or more. | `INTERVIEW_DURATION_BUCKETS` |
+| IR-3 Scope: the interviews the caller can read on the board (`interview:read`, interview RLS) **and** where they hold `report:read`; exports also need `report:export` over the row. Coaches (no `report:read`) get 403; HR, Accounts, BU Head (no `interview:read`) get an empty report. | `activityPredicate` for each scope, `@RequirePermission` |
+| IR-4 Counted interviews: start in `[from, to)`, call status not `cancelled`, `rescheduled` or `no_invite`. Cleared = `interview.cleared`; completed = call status `completed`. | `INTERVIEW_REPORT_EXCLUDED_STATUSES` |
+| IR-5 The daily report lists **every** interview of the day (cancelled ones with their status, not counted in its totals) with the latest **candidate feedback** (`kind = 'candidate'`, the feedback email about an hour after the interview, 0021): rating, notes, format, next step. Candidate feedback is readable wherever the interview is (`feedback_read`). The board rows carry the same latest feedback (`candidateFeedback`: rating, notes, submittedAt) for the Candidate feedback column. | `LEFT JOIN LATERAL` on index `interview_feedback_candidate_latest` |
+| IR-6 Exports: CSV (formula injection neutralised), capped at 50 000 rows, 5 per 10 minutes per user, POST + CSRF, audited `report.export` (`entityType` `interview`, `report` = `interviews` / `interviews_daily`, grouping, period, row count, truncated): no names, links or feedback text (rule 5). The daily CSV contains the candidate's feedback text, like the screen. | `InterviewReportsService` |
+| IR-7 JSON views are rate-limited (30 per minute per user), have a 60-second statement timeout (503 with a hint) and cap groups / rows at 1000 (`truncated`). | same pattern as the joinings and exits report |
+
+### Endpoints
+
+- `GET /api/v1/reports/interviews?from&to&groupBy` (`report:read`): `from`/`to` are a date or an ISO date-time with
+  offset (the web app sends local midnights), span ≤ 2 years, `groupBy` = `coach` (default) | `technology` |
+  `candidate` | `duration`. Returns `{ from, to, groupBy, totals: { interviews, cleared, completed, totalDurationMin,
+  avgDurationMin }, groups: [{ key, label, interviews, cleared, completed, totalDurationMin, avgDurationMin }],
+  truncated }`. `key` is the coach / technology / candidate id or the bucket key; `null` = no coach ("Unassigned") or a
+  candidate the caller cannot read ("(not visible)"). Groups are ordered by interviews (duration: bucket order).
+- `POST /api/v1/reports/interviews/export` (`report:export`), body `{ from, to, groupBy }`: CSV
+  `interviews-by-<groupBy>-<from date>.csv`, headers `x-export-rows`, `x-export-truncated`.
+- `GET /api/v1/reports/interviews/daily?from&to` (`report:read`): span ≤ 26 hours (one local day). Returns
+  `{ from, to, totals: { interviews, cleared, withCandidateFeedback }, items: [{ id, startsAt, endsAt, durationMin,
+  round, interviewType, callStatus, cleared, candidate, technology, client, recruiter, team, location, coach,
+  candidateFeedback: { rating, notes, format, nextStep, submittedAt } | null }], truncated }`.
+- `POST /api/v1/reports/interviews/daily/export` (`report:export`), body `{ from, to }`: CSV
+  `interviews-daily-<from date>.csv`.
+- `GET /api/v1/interviews` and `GET /api/v1/interviews/:id` add `candidateFeedback` (latest candidate feedback or `null`).
+
+### Web
+
+- **Interview reports** (Insights; shown with `report:read` and `interview:read`): Summary tab (period, Group by,
+  tiles for interviews / cleared / total and average duration, table, Export CSV with `report:export`) and Daily
+  interviews tab (day picker, previous / next day, one row per interview with the candidate's rating, notes excerpt
+  and next step; cleared rows green; Export CSV).
+- **Interviews board:** a Candidate feedback column (stars and a 120-character excerpt; the full text stays in the
+  Feedback dialog) and cleared rows highlighted green (`tr.row-cleared`, `--ok-bg`) with a "Cleared" badge.
+
+### Decisions and open questions
+
+- No new duration or coach column: both already existed (0003 `coach_id`, 0080 derived duration). The database coach
+  check (IR-1) is new; the API already enforced it.
+- Reports reuse `report:read` / `report:export` (no `interview.report:*` permission). Should coaches see a report of
+  their own interviews (today: no, they lack `report:read`)?
+- Cancelled, rescheduled and no-invite interviews are left out of the counts (IR-4). Confirm, or should the report
+  show a per-status breakdown?
+- Duration is the scheduled slot, not the actual call length (the candidate's form also asks for a duration,
+  `interview_feedback.duration_min`, which is not used by the report).
+- The daily CSV includes the candidate's free-text feedback (the same text report readers see on screen); the audit
+  row does not.

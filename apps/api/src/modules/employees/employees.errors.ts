@@ -12,10 +12,16 @@ const CODES: Record<string, (code: string) => HttpException> = {
   unchanged: unprocessable,
   bgc_failed_last: unprocessable,
   candidate_not_on_bench: unprocessable,
+  // 0150
+  invalid_field: unprocessable,
+  invalid_company: unprocessable,
+  invalid_date: unprocessable,
+  invalid_rate: unprocessable,
+  invalid_team: unprocessable,
 };
 
 /**
- * Maps errors raised by the employment definer functions (migration 0045) to
+ * Maps errors raised by the employment definer functions (migrations 0045, 0150) to
  * problem details with a stable code in `detail`.
  */
 export function mapEmploymentError(err: unknown): never {

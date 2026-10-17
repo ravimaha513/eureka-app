@@ -3,6 +3,8 @@ import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, type Me } from "../api";
 import { fmtDate } from "../sales/ui";
 import { employeeKeys, employeesApi, employmentError, employmentLabel, localToday, shiftDays } from "./employeesApi";
+import { MarketReportPanel } from "./MarketReport";
+import { ActiveEmployeesReport } from "./ActiveEmployeesReport";
 
 const EXPORT_ROW_CAP = 50_000;
 
@@ -17,12 +19,49 @@ export function download(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+type ReportTab = "joinings" | "market";
+
+/**
+ * Reports page: Joinings and exits for every report:read holder, and the
+ * Market tab (gap L3, MarketReport.tsx) for report.market:read holders.
+ */
+export function ReportsPage({ me }: { me: Pick<Me, "capabilities"> }) {
+  const tabsId = useId();
+  const canExport = me.capabilities.includes("report:export");
+  const hasMarket = me.capabilities.includes("report.market:read");
+  const hasJoinings = me.capabilities.includes("report:read");
+  const [tab, setTab] = useState<ReportTab>(hasJoinings ? "joinings" : "market");
+  if (!hasMarket) {
+    return (
+      <>
+        <div><h1 tabIndex={-1}>Reports</h1></div>
+        <JoiningsExitsPanel canExport={canExport} />
+      </>
+    );
+  }
+  const tabs: [ReportTab, string][] = [...(hasJoinings ? [["joinings", "Joinings and exits"] as [ReportTab, string]] : []), ["market", "Market"]];
+  return (
+    <>
+      <div><h1 tabIndex={-1}>Reports</h1></div>
+      <div className="tabs" role="tablist" aria-label="Reports">
+        {tabs.map(([k, label]) => (
+          <button key={k} type="button" role="tab" id={`${tabsId}-t-${k}`} className="tab" aria-selected={tab === k}
+            aria-controls={`${tabsId}-p-${k}`} onClick={() => setTab(k)}>{label}</button>
+        ))}
+      </div>
+      <div role="tabpanel" id={`${tabsId}-p-${tab}`} aria-labelledby={`${tabsId}-t-${tab}`}>
+        {tab === "market" ? <MarketReportPanel canExport={canExport} onDownload={download} /> : <JoiningsExitsPanel canExport={canExport} />}
+      </div>
+    </>
+  );
+}
+
 /**
  * Reports > Joinings and exits (FR-EMP, design B7): assignments that started
  * or ended in a period, for what the user can see. Export (report:export) is
  * capped and audited by the server.
  */
-export function ReportsPage({ me }: { me: Pick<Me, "capabilities"> }) {
+function JoiningsExitsPanel({ canExport }: { canExport: boolean }) {
   const id = useId();
   const today = localToday();
   const [from, setFrom] = useState(shiftDays(today, -90));
@@ -34,7 +73,6 @@ export function ReportsPage({ me }: { me: Pick<Me, "capabilities"> }) {
     enabled: !invalid,
     placeholderData: keepPreviousData,
   });
-  const canExport = me.capabilities.includes("report:export");
   const run = useMutation({
     mutationFn: () => employeesApi.exportJoiningsExits(from, to),
     onSuccess: (r) => download(r.blob, r.filename),
@@ -43,10 +81,7 @@ export function ReportsPage({ me }: { me: Pick<Me, "capabilities"> }) {
 
   return (
     <>
-      <div>
-        <h1 tabIndex={-1}>Reports</h1>
-        <p className="sub">Joinings and exits: assignments that started or ended in the period, for the teams and placements you can see.</p>
-      </div>
+      <p className="sub">Joinings and exits: assignments that started or ended in the period, for the teams and placements you can see.</p>
 
       <form className="filters" aria-label="Report period" onSubmit={(e) => e.preventDefault()}>
         <div className="toolbar">
@@ -89,6 +124,10 @@ export function ReportsPage({ me }: { me: Pick<Me, "capabilities"> }) {
           <ul className="tiles">
             <li className="tile card"><span className="tilelabel">Joinings</span><span className="tilevalue">{d.totals.joinings}</span>
               <span className="tilehint">{d.totals.firstPlacements} first placements</span></li>
+            {d.totals.firstAssignments !== undefined && (
+              <li className="tile card"><span className="tilelabel">First assignments</span><span className="tilevalue">{d.totals.firstAssignments}</span>
+                <span className="tilehint">{d.totals.laterAssignments ?? 0} later assignments</span></li>
+            )}
             <li className="tile card"><span className="tilelabel">Exits</span><span className="tilevalue">{d.totals.exits}</span>
               <span className="tilehint">Assignments that ended</span></li>
             {Object.entries(d.totals.exitsByReason).map(([k, v]) => (
@@ -109,29 +148,48 @@ export function ReportsPage({ me }: { me: Pick<Me, "capabilities"> }) {
             </div>
           )}
 
+          {(d.byCompany?.length ?? 0) > 0 && (
+            <div className="card tablewrap">
+              <table aria-label="By payroll company">
+                <thead><tr><th>Payroll company</th><th>Joinings</th><th>First / later assignments</th><th>Exits</th></tr></thead>
+                <tbody>
+                  {d.byCompany!.map((g) => (
+                    <tr key={g.company?.id ?? "none"}><td>{g.company?.name ?? "Not set"}</td><td>{g.joinings}</td>
+                      <td>{g.firstAssignments} / {g.laterAssignments}</td><td>{g.exits}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           <div className="card tablewrap">
             <table aria-label="Joinings and exits">
-              <thead><tr><th>Event</th><th>Date</th><th>Candidate</th><th>Client</th><th>Team / recruiter</th><th>Location</th><th>End reason</th></tr></thead>
+              <thead><tr><th>Event</th><th>Date</th><th>Candidate</th><th>Client</th><th>Team / recruiter</th><th>Location</th><th>Technology</th><th>Payroll company</th><th>End reason</th></tr></thead>
               <tbody>
                 {d.items.map((i) => (
                   <tr key={`${i.kind}-${i.assignmentId}`}>
                     <td><span className={`badge ${i.kind === "joining" ? "st-joined" : "st-backout"}`}>{i.kind === "joining" ? "Joining" : "Exit"}</span>
-                      {i.kind === "joining" && i.isFirstPlacement && <>{" "}<span className="badge first">First placement</span></>}</td>
+                      {i.kind === "joining" && i.isFirstPlacement && <>{" "}<span className="badge first">First placement</span></>}
+                      {i.isFirstAssignment === false && <span className="block muted">Later assignment</span>}</td>
                     <td>{fmtDate(i.date)}</td>
                     <td>{i.candidate.name ?? <span className="muted">Name hidden</span>}<span className="block muted">Assignment {i.assignmentNo}</span></td>
-                    <td>{i.client}</td>
+                    <td>{i.client ?? <span className="muted">—</span>}</td>
                     <td>{i.team?.name ?? "—"}<span className="block muted">{i.recruiter ?? ""}</span></td>
                     <td>{i.location ?? "—"}</td>
+                    <td>{i.technology ?? "—"}</td>
+                    <td>{i.payrollCompany?.name ?? "—"}</td>
                     <td>{i.endReason ? employmentLabel(i.endReason) : "—"}</td>
                   </tr>
                 ))}
-                {d.items.length === 0 && <tr><td colSpan={7} className="empty">No joinings or exits in this period.</td></tr>}
+                {d.items.length === 0 && <tr><td colSpan={9} className="empty">No joinings or exits in this period.</td></tr>}
               </tbody>
             </table>
           </div>
           {d.truncated && <p className="muted" role="status">Showing the first {d.items.length.toLocaleString("en-US")} rows. Choose a shorter period to see the rest.</p>}
         </section>
       ) : null)}
+
+      <ActiveEmployeesReport />
     </>
   );
 }

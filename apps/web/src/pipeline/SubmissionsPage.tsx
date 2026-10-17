@@ -5,6 +5,7 @@ import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../admin/Dialog
 import { useLookupName } from "../lookups";
 import { salesApi } from "../sales/salesApi";
 import { Drawer, Field } from "../sales/ui";
+import { AssessmentsSection } from "../pipelinereport/AssessmentsSection";
 import { CreatePlacementDialog } from "./CreatePlacementDialog";
 import { pipelineError } from "./errors";
 import {
@@ -252,6 +253,7 @@ function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlacement }: {
                 )}
               </section>
             )}
+            <AssessmentsSection submissionId={s.id} />
           </>
         )}
       </Drawer>

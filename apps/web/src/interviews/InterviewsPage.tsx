@@ -25,6 +25,16 @@ export interface Interview {
   editableFields: string[]; feedbackKinds: string[];
   /** interviews-settings (migration 0080). */
   position?: string | null; interviewType?: InterviewType | null; meetingUrl?: string | null; durationMin?: number;
+  /** interview-reports (migration 0130): latest feedback the candidate sent through the feedback email. */
+  candidateFeedback?: { rating: number | null; notes: string | null; submittedAt: string } | null;
+}
+
+/** Board cell: the candidate's own feedback (rating and a short excerpt; the full text is in the Feedback dialog). */
+export function CandidateFeedbackCell({ f }: { f: Interview["candidateFeedback"] }) {
+  if (!f) return <span className="muted">No feedback yet</span>;
+  const notes = f.notes?.trim() ?? "";
+  const excerpt = notes.length > 120 ? `${notes.slice(0, 117)}…` : notes;
+  return <>{f.rating !== null ? <Stars value={f.rating} label="Candidate rating" /> : <span>No rating</span>}{excerpt && <span className="block cf-notes" title={notes}>{excerpt}</span>}</>;
 }
 export interface InterviewDetail extends Interview {
   panel: { id: string; name: string; lead: boolean }[];
@@ -340,11 +350,12 @@ export function InterviewsPage({ me, initialOpenId = null }: { me: Me; initialOp
     {clientFilter && <p className="hint">Client history: {clientFilter.name} <button className="btn" onClick={() => setClientFilter(null)}>Clear client filter</button></p>}
     {notice && <p role="status" className="livemsg">{notice}</p>}{invalidRange && <p role="alert">Through date must be on or after From date.</p>}
     {!invalidRange && q.isPending && <p>Loading interviews…</p>}{q.isError && <p role="alert">Could not load interviews. <button className="btn" onClick={() => void q.refetch()}>Retry</button></p>}
-    {!invalidRange && <div className="card tablewrap"><table><thead><tr><th>Candidate / client</th><th>Time / round</th><th>Team / location</th><th>Readiness</th><th>Recordings</th><th>Actions</th></tr></thead><tbody>{items.map(i => <tr key={i.id}>
+    {!invalidRange && <div className="card tablewrap"><table><thead><tr><th>Candidate / client</th><th>Time / round</th><th>Team / location</th><th>Readiness</th><th>Candidate feedback</th><th>Recordings</th><th>Actions</th></tr></thead><tbody>{items.map(i => <tr key={i.id} className={i.cleared ? "row-cleared" : undefined}>
       <td><b>{i.candidate.name ?? "Candidate"}</b><span className="block">{i.client ? <button className="linkbtn" aria-label={`View history for ${i.client.name}`} onClick={() => { setClientFilter(i.client); setFrom(""); setTo(""); setStatus(""); setCleared(""); setLocationId(""); }}>{i.client.name}</button> : "No client"}</span><span className="block">Recruiter: {i.recruiter.name}</span></td>
       <td><time dateTime={i.startsAt}>{new Date(i.startsAt).toLocaleString(undefined, { timeZone: displayZone })}</time><span className="block">to {new Date(i.endsAt).toLocaleString(undefined, { timeZone: displayZone })}</span><span className="block">{i.round} · {label(i.callStatus)}{i.interviewType ? ` · ${INTERVIEW_TYPE_LABELS[i.interviewType]}` : ""}</span></td>
       <td>{i.team?.name ?? "—"}<span className="block">{i.location?.name ?? "No location"}</span><span className="block">Coach: {i.coach?.name ?? "Unassigned"}</span></td>
-      <td>{i.cleared ? "Cleared" : "Not cleared"}<span className="block">{i.inviteReceived ? "Invite received" : "Awaiting invite"}</span><span className="block">{i.consentCaptured ? "Consent captured" : "Consent pending"}</span>{i.systemName && <span className="block">{i.systemName}</span>}</td>
+      <td>{i.cleared ? <span className="badge cleared">Cleared</span> : "Not cleared"}<span className="block">{i.inviteReceived ? "Invite received" : "Awaiting invite"}</span><span className="block">{i.consentCaptured ? "Consent captured" : "Consent pending"}</span>{i.systemName && <span className="block">{i.systemName}</span>}</td>
+      <td><CandidateFeedbackCell f={i.candidateFeedback} /></td>
       <td>{i.consentCaptured ? <>{i.otterUrl?.startsWith("https://") && <a href={i.otterUrl} target="_blank" rel="noopener noreferrer">Otter</a>} {i.recordingUrl?.startsWith("https://") && <a href={i.recordingUrl} target="_blank" rel="noopener noreferrer">Recording</a>}{!i.otterUrl && !i.recordingUrl && "—"}</> : "Consent required"}</td>
       <td><div className="rowactions"><button className="btn" aria-label={`Details of the interview with ${i.candidate.name ?? "the candidate"}`} onClick={() => setDetails(i)}>Details</button>{i.editableFields.length > 0 && <button className="btn" onClick={() => setEdit(i)}>Edit interview</button>}<button className="btn" onClick={() => setFeedback(i)}>Feedback</button></div></td>
     </tr>)}</tbody></table>{!q.isPending && !q.isError && !items.length && <p className="empty">No interviews match these filters.</p>}</div>}

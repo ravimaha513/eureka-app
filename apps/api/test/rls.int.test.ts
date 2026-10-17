@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { activityVisible, candidateVisible, hotlistVisible, ownsCandidate, resolveScope } from "@eureka/shared";
+import { HOTLIST_VISIBILITY, activityVisible, candidateVisible, hotlistVisible, ownsCandidate, resolveScope } from "@eureka/shared";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { CLIENT_ID, LOC, T, TECH_ID, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 
@@ -82,7 +82,7 @@ describe("differential: database RLS alone matches the application engine", () =
   // Base-table RLS never depends on the Hot List policy (review of 0010).
   describe.each(["everyone", "team"] as const)("Hot List policy %s", (policy) => {
     beforeAll(() => setPolicy(policy));
-    afterAll(() => setPolicy("everyone"));
+    afterAll(() => setPolicy(HOTLIST_VISIBILITY));
 
     it.each(users)("candidate rows readable by %s = engine candidate:read", async (key) => {
       const access = toUserAccess(key);
@@ -131,6 +131,11 @@ describe("differential: database RLS alone matches the application engine", () =
     await expect(asUser(db.app, U.r1a, (cl) => cl.query(`SELECT authz.transition_candidate($1, NULL)`, [c.id])))
       .rejects.toThrow(/invalid transition/);
   });
+
+  // The open Hot List function is exercised under the policy that serves it.
+  describe("authz.hotlist_page under the open policy", () => {
+  beforeAll(() => setPolicy("everyone"));
+  afterAll(() => setPolicy(HOTLIST_VISIBILITY));
 
   it("a 200-row Hot List page resolves the caller's scope once (fast)", async () => {
     await asUser(db.app, U.r1a, (c) => c.query(`SELECT count(*) FROM authz.hotlist_page(NULL, NULL, NULL, NULL, NULL, 200)`));
@@ -198,6 +203,7 @@ describe("differential: database RLS alone matches the application engine", () =
     const unknown = await asUser(db.app, "00000000-0000-0000-0000-00000000dead", async (c) =>
       (await c.query(`SELECT count(*)::int n FROM authz.hotlist_page(NULL, NULL, NULL, NULL, NULL, 500)`)).rows[0].n);
     expect(unknown).toBe(0);
+  });
   });
 
   it("the policy setting only accepts known values and is not writable by the app", async () => {

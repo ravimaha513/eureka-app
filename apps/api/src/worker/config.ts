@@ -53,6 +53,9 @@ const WorkerConfigSchema = z
     // Only candidates that crossed the bench threshold within this many days are notified
     // (no flood on first enable; a worker down longer than this misses those crossings).
     NOTIFY_BENCH_WINDOW_DAYS: z.coerce.number().int().min(1).max(365).default(7),
+    // pipeline-vendors (migration 0171): a "not responding" flag still open after this many days reaches the
+    // hold stage (second notice to the recruiter and lead, final notice to the candidate).
+    NONRESPONSE_HOLD_DAYS: z.coerce.number().int().min(1).max(60).default(3),
     // Resume scan-and-promote (resume-scan job): the documents bucket in AWS, or
     // the API's local document directory with the fake scanner (development).
     // Neither: the job is off and uploads stay pending.

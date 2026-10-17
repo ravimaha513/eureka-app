@@ -1,9 +1,9 @@
 import { useId, useMemo, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowDownRight, ArrowUpRight, BadgeCheck, CalendarCheck, CalendarClock, Minus, Send, UserPlus, Users, type LucideIcon } from "lucide-react";
 import { FunnelBars, PALETTE, PieShare, TrendChart } from "./Charts";
 import { pipelineError } from "../pipeline/errors";
-import { pipelineLabel } from "../pipeline/pipelineApi";
+import { pipelineLabel, saveBlob } from "../pipeline/pipelineApi";
 import { fmtDate } from "../sales/ui";
 import {
   GROUP_LABELS, METRIC_HINTS, METRIC_LABELS, PERIODS, UNGROUPED,
@@ -96,8 +96,10 @@ function detailText(kind: AttentionKind, i: AttentionItem): string {
  * scope over a period, by recruiter, team or location, and the "needs attention"
  * lists. The API decides scope; this page only presents what it returns.
  */
-export function DashboardPage({ canOpen = () => false, onOpen, firstName }: {
+export function DashboardPage({ canOpen = () => false, onOpen, firstName, canExport = false }: {
   firstName?: string;
+  /** report:export: offer the sales report CSV (the server checks again). */
+  canExport?: boolean;
   canOpen?: (target: DashboardTarget) => boolean;
   onOpen?: (target: DashboardTarget, id: string) => void;
 }) {
@@ -126,6 +128,10 @@ export function DashboardPage({ canOpen = () => false, onOpen, firstName }: {
   const funnel = d ? FUNNEL.filter((m) => d.metrics.includes(m)).map((m) => ({ key: m, label: METRIC_LABELS[m], value: d.totals[m] ?? 0 })) : [];
   const trend = d ? d.series.map((x) => ({ date: x.date, ...Object.fromEntries(d.metrics.map((m) => [m, x.counts[m] ?? 0])) })) as ({ date: string } & Record<string, number | string>)[] : [];
   const shownGroup = d?.groupBy ?? groupBy ?? "recruiter";
+  const exportRun = useMutation({
+    mutationFn: () => dashboardApi.exportCsv({ ...range, groupBy: d?.groupBy ?? groupBy }),
+    onSuccess: (r) => saveBlob(r.blob, r.filename),
+  });
 
   return (
     <>
@@ -150,6 +156,16 @@ export function DashboardPage({ canOpen = () => false, onOpen, firstName }: {
               {(Object.keys(GROUP_LABELS) as GroupBy[]).map((g) => <option key={g} value={g}>{GROUP_LABELS[g]}</option>)}
             </select>
           </div>
+          {canExport && (
+            <div className="export">
+              <button type="button" className="btn" disabled={exportRun.isPending || !d} onClick={() => exportRun.mutate()}>
+                {exportRun.isPending ? "Exporting…" : "Export CSV"}
+              </button>
+              <p role="status" aria-live="polite" className={exportRun.isError ? "error" : "muted"}>
+                {exportRun.isError ? pipelineError(exportRun.error, "generic") : exportRun.data ? `Exported ${exportRun.data.rows} ${exportRun.data.rows === 1 ? "row" : "rows"} and a total.` : ""}
+              </p>
+            </div>
+          )}
         </div>
       </form>
 
@@ -249,6 +265,7 @@ export function DashboardPage({ canOpen = () => false, onOpen, firstName }: {
                   {d.groups.length === 0 && <tr><td colSpan={d.metrics.length + 1} className="empty">No activity in this period.</td></tr>}
                 </tbody>
               </table>
+              {d.groupsTruncated && <p className="muted">Showing the {d.groups.length} most active; totals include everyone.</p>}
             </div>
           )}
 

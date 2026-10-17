@@ -20,7 +20,10 @@ import { CONTRACT_KIND_LABELS, CONTRACT_KINDS, INTERVIEW_TYPE_LABELS } from "@eu
 export interface OutboxEvent { id: string; type: string; aggregate_id: string; payload: Record<string, unknown> }
 
 /** What a recipient can open from the inbox (the web app has a screen for each; `digest` opens nothing). */
-export interface EntityRef { type: "placement" | "candidate" | "conversation" | "application" | "interview" | "digest"; id: string }
+export interface EntityRef {
+  type: "placement" | "candidate" | "conversation" | "application" | "interview" | "digest" | "performance_target";
+  id: string;
+}
 
 /** The worker's database handle (a pool or a client) for the detail reads. */
 export interface Queryable { query<R extends Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: R[] }> }
@@ -92,6 +95,8 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 export const PLACEMENT_STATUS_LABELS: Record<string, string> = {
   confirmed: "Confirmed", paperwork: "Paperwork", bgc: "Background check", ready: "Ready to join",
   joined: "Joined", backout: "Backed out", bgc_failed: "Background check failed",
+  // sales-placements (migration 0160)
+  joining_issue: "Joining issue",
 };
 
 function statusLabel(v: unknown): string {
@@ -264,7 +269,8 @@ export const EVENT_SPECS: Record<string, EventSpec> = {
   },
 
   // FR-NTF-05 bench-time (producer: the bench-time job, migration 0046): TL, recruiter, manager, CEO once
-  // a candidate has been on bench for N days. Distinct from employee.benched (the move to the bench).
+  // a candidate has been on bench for N days; 0150 adds the POC (recruiter of the latest assignment's placement).
+  // Distinct from employee.benched (the move to the bench).
   "employee.bench_time": {
     email: true, inApp: true,
     render: (ev) => {
@@ -272,7 +278,7 @@ export const EVENT_SPECS: Record<string, EventSpec> = {
       date(ev.payload, "benchSince");
       int(ev.payload, "benchDays", 0, 36500);
       const threshold = int(ev.payload, "thresholdDays", 1, 365);
-      checkNotify(ev.payload, ["recruiter", "lead", "manager", "ceo"]);
+      checkNotify(ev.payload, ["recruiter", "lead", "manager", "ceo", "poc"]);
       return {
         subject: `Eureka: candidate on bench for more than ${plural(threshold, "day")}`,
         message: `A candidate has been on bench for more than ${plural(threshold, "day")}.`,
@@ -486,6 +492,125 @@ EVENT_SPECS["staff.birthdays_today"] = {
   },
 };
 
+// payments (gap L1, migration 0100). Never an amount, a date, a client or a name: open the placement.
+// FR-NTF-07 first-payment: the first payment recorded for a placement; recruiter, team lead, manager.
+EVENT_SPECS["payment.first_received"] = {
+  email: true, inApp: true,
+  render: (ev) => {
+    const placementId = uuid(ev.payload, "placementId");
+    if (aggregate(ev) !== placementId) throw new Error("outbox event payload has an invalid placementId");
+    uuid(ev.payload, "invoiceId");
+    uuid(ev.payload, "paymentId");
+    checkNotify(ev.payload, []);
+    return {
+      subject: "Eureka: first payment received for a placement",
+      message: "The first payment for a placement was recorded by Accounts in Eureka.",
+      refLabel: "Placement reference", refId: placementId,
+      inbox: {
+        title: "First payment received",
+        body: "Accounts recorded the first payment for a placement. Open the placement for the details.",
+        entity: { type: "placement", id: placementId },
+      },
+    };
+  },
+};
+// FR-NTF-08 payment-delay: an invoice is past its expected payment date and not fully received; recruiter
+// and team lead, to follow up with the vendor.
+EVENT_SPECS["payment.delayed"] = {
+  email: true, inApp: true,
+  render: (ev) => {
+    const invoiceId = uuid(ev.payload, "invoiceId");
+    if (aggregate(ev) !== invoiceId) throw new Error("outbox event payload has an invalid invoiceId");
+    const placementId = uuid(ev.payload, "placementId");
+    const days = int(ev.payload, "daysLate", 1, 3650);
+    checkNotify(ev.payload, []);
+    return {
+      subject: `Eureka: payment delayed by ${plural(days, "day")}`,
+      message: `A vendor payment for a placement is ${plural(days, "day")} past its expected date. Please follow up with the vendor.`,
+      refLabel: "Placement reference", refId: placementId,
+      inbox: {
+        title: `Payment delayed by ${plural(days, "day")}`,
+        body: "A vendor payment is past its expected date. Open the placement and follow up with the vendor.",
+        entity: { type: "placement", id: placementId },
+      },
+    };
+  },
+};
+
+// performance (migration 0112, docs/performance-api.md PF-6): a recruiter target period ended with activity
+// below target. The person, their team lead and the lead's manager. Counts and the period kind only (no name, no date).
+const PERIOD_WORDS = { week: "week", month: "month", quarter: "quarter" } as const;
+const TARGET_METRICS = [["submissions", "submissions"], ["interviews", "interviews"], ["placements", "placements"]] as const;
+EVENT_SPECS["performance.below_target"] = {
+  email: true, inApp: true,
+  render: (ev) => {
+    const targetId = uuid(ev.payload, "targetId");
+    if (aggregate(ev) !== targetId) throw new Error("outbox event payload has an invalid targetId");
+    uuid(ev.payload, "userId");
+    const kind = oneOf(ev.payload, "periodKind", ["week", "month", "quarter"] as const);
+    date(ev.payload, "periodStart"); // validated, never shown
+    checkNotify(ev.payload, []);
+    const parts: string[] = [];
+    let short = 0;
+    for (const [key, label] of TARGET_METRICS) {
+      if (ev.payload[`${key}Target`] === undefined) {
+        if (ev.payload[`${key}Actual`] !== undefined) throw new Error(`outbox event payload has an invalid ${key}Actual`);
+        continue;
+      }
+      const target = int(ev.payload, `${key}Target`, 0, 100000);
+      const actual = int(ev.payload, `${key}Actual`, 0, 1000000);
+      if (actual < target) short++;
+      parts.push(`${label} ${actual} of ${target}`);
+    }
+    if (short === 0) throw new Error("outbox event payload is not below target");
+    const period = PERIOD_WORDS[kind];
+    return {
+      subject: `Eureka: recruiter activity below target for the ${period}`,
+      message: `A recruiter's activity for the ${period} ended below target (${parts.join(", ")}).`,
+      refLabel: "Target reference", refId: targetId,
+      inbox: {
+        title: `Activity below target for the ${period}`,
+        body: `A recruiter's activity for the ${period} ended below target (${parts.join(", ")}). Open Performance for the details.`,
+        entity: { type: "performance_target", id: targetId },
+      },
+    };
+  },
+};
+
+// pipeline-vendors (migration 0171): Sales flagged a candidate as not responding (stage `warning`), or the flag is still
+// open after the hold delay (stage `hold`). The candidate's recruiter and team lead; email + inbox. No name or reason.
+EVENT_SPECS["candidate.not_responding"] = {
+  email: true, inApp: true,
+  render: (ev) => {
+    const candidateId = uuid(ev.payload, "candidateId");
+    uuid(ev.payload, "flagId");
+    const stage = oneOf(ev.payload, "stage", ["warning", "hold"] as const);
+    checkNotify(ev.payload, ["recruiter", "lead"]);
+    if (stage === "warning") {
+      return {
+        subject: "Eureka: candidate not responding",
+        message: "A candidate was flagged as not responding. The candidate is sent a warning that marketing will be put on hold.",
+        refLabel: "Candidate reference", refId: candidateId,
+        inbox: {
+          title: "Candidate not responding",
+          body: "A candidate was flagged as not responding and is warned that marketing will be put on hold. Open the candidate to follow up.",
+          entity: { type: "candidate", id: candidateId },
+        },
+      };
+    }
+    return {
+      subject: "Eureka: candidate still not responding",
+      message: "A candidate is still not responding after the warning. Decide whether to put marketing on hold or stop it.",
+      refLabel: "Candidate reference", refId: candidateId,
+      inbox: {
+        title: "Candidate still not responding",
+        body: "A candidate is still not responding after the warning. Open the candidate to put marketing on hold or stop it.",
+        entity: { type: "candidate", id: candidateId },
+      },
+    };
+  },
+};
+
 export const DELIVERED_TYPES = Object.keys(EVENT_SPECS);
 export const EMAIL_TYPES = DELIVERED_TYPES.filter((t) => EVENT_SPECS[t]!.email);
 export const INBOX_TYPES = DELIVERED_TYPES.filter((t) => EVENT_SPECS[t]!.inApp);
@@ -502,6 +627,8 @@ const OTHER_LABELS: Record<string, string> = {
   ceo: "the CEO", bu_head: "a BU Head", recruiter: "the recruiter", lead: "the team lead",
   manager: "the team lead's manager", documents_team: "the assigned Documents Team member", chat: "a chat member",
   hiring_manager: "the job's hiring manager", interview_coordinator: "an interview coordinator", associate_hr: "a member of Associate HR",
+  // 0150: bench-time POC.
+  poc: "the recruiter who placed the candidate on their last project",
 };
 
 export function whyLine(reasons: readonly string[]): string {

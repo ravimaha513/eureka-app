@@ -24,7 +24,8 @@ import { CandidatesService } from "./modules/candidates/candidates.service.js";
 import { SubmissionsController, SubmissionsService } from "./modules/submissions/submissions.controller.js";
 import { InterviewsController } from "./modules/interviews/interviews.controller.js";
 import { InterviewsService } from "./modules/interviews/interviews.service.js";
-import { AdminController, TeamsController } from "./modules/admin/admin.controller.js";
+import { AdminController, TeamsController, UserDesignationController } from "./modules/admin/admin.controller.js";
+import { PerformanceController, PerformanceService } from "./modules/performance/performance.controller.js";
 import { AdminService } from "./modules/admin/admin.service.js";
 import { PlacementsController } from "./modules/placements/placements.controller.js";
 import { PlacementsService } from "./modules/placements/placements.service.js";
@@ -72,6 +73,11 @@ import { CalendarController, InterviewCalendarController } from "./modules/calen
 import { CalendarService } from "./modules/calendar/calendar.service.js";
 import { CALENDAR_PROVIDER, DevCalendarProvider, GoogleCalendarProvider } from "./modules/calendar/calendar.provider.js";
 import { StaffBirthdaysController, StaffBirthdaysService } from "./modules/staff/birthdays.controller.js";
+import { PaymentsController, PaymentsService } from "./modules/payments/payments.controller.js";
+import { MarketReportController, MarketReportService } from "./modules/reports/market-report.controller.js";
+import { InterviewReportsController, InterviewReportsService } from "./modules/interview-reports/interview-reports.controller.js";
+import { AssessmentsController, NonResponseController, PipelineReportController, PipelineReportService } from "./modules/pipeline-report/pipeline-report.controller.js";
+import { PreferredVendorsController, PreferredVendorsService } from "./modules/preferred-vendors/preferred-vendors.controller.js";
 
 @Controller("api")
 class HealthController {
@@ -108,6 +114,16 @@ export class AppModule {
         ApplicationsController, ApplicationInterviewsController, ApplicantsController, PortalJobsController,
         // interview-alerts
         ContractsController, CalendarController, InterviewCalendarController, StaffBirthdaysController,
+        // payments
+        PaymentsController,
+        // performance
+        PerformanceController, UserDesignationController,
+        // market-reports
+        MarketReportController,
+        // interview-reports
+        InterviewReportsController,
+        // pipeline-vendors
+        PipelineReportController, AssessmentsController, NonResponseController, PreferredVendorsController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
@@ -126,8 +142,18 @@ export class AppModule {
         ApplicationsService, PortalJobsService,
         // interview-alerts
         ContractsService, CalendarService, StaffBirthdaysService,
+        // performance
+        PerformanceService,
         { provide: CALENDAR_PROVIDER, useFactory: () => config.CALENDAR_MODE === "google"
           ? new GoogleCalendarProvider(config.GOOGLE_CLIENT_ID!, config.GOOGLE_CLIENT_SECRET!) : new DevCalendarProvider() },
+        // payments
+        PaymentsService,
+        // market-reports
+        MarketReportService,
+        // interview-reports
+        InterviewReportsService,
+        // pipeline-vendors
+        PipelineReportService, PreferredVendorsService,
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],

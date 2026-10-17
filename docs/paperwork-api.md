@@ -66,3 +66,11 @@ dates or notes reach the email or inbox.
 
 
 Follow-up (review of 0044, not fixed): `checklist_item.document_id` is in the app role's column grant, so a `placement:read` holder without `document:read` could select the id (only the id; the document row, its type and download stay refused by `document_read` RLS). No API returns it to them. Moving it behind `authz.checklist_item_texts` would close it.
+
+### BGC history years (migration 0160)
+
+`employmentYears` and `addressYears` take one of **3, 5, 7 or 10** (or `null`), in the API schema and as table CHECKs
+(`BGC_HISTORY_YEARS` in `@eureka/shared`); anything else is 422 (`invalid_change` from the database). The web form offers
+the four choices as selects. Earlier free values (0-50) were rounded up to the next choice so the recorded check still covers
+what was asked (1-3 → 3, 4-5 → 5, 6-7 → 7, 8 or more → 10); 0 became `null`. The rewrite went through the definer path, so
+the version moved and each changed record has a history row without an actor (system).

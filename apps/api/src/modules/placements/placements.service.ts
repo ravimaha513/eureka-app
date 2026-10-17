@@ -3,6 +3,8 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
@@ -20,12 +22,16 @@ import {
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
+import { RateLimiter } from "../../platform/rate-limit.js";
+import { toCsv } from "../hotlist/csv.js";
+import { EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS } from "../hotlist/hotlist.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import { mapPlacementError } from "./placements.errors.js";
 import {
   IdempotencyKey,
   type CreatePlacement,
+  type PlacementExportQuery,
   type PlacementListQuery,
   type PlacementStatusChange,
 } from "./placements.schemas.js";
@@ -58,6 +64,10 @@ interface PlacementRow {
   project_state: string | null;
   tentative_start: string;
   is_first_placement: boolean;
+  reconfirmed: boolean;
+  technology_id: string | null;
+  technology_name: string | null;
+  joined_at: Date | null;
   status: string;
   status_changed_at: Date | null;
   created_at: Date;
@@ -68,6 +78,7 @@ const SELECT = `
   SELECT pl.id, pl.submission_id, pl.candidate_id, pl.recruiter_id, pl.team_id, pl.location_id,
          pl.client_id, pl.vendor_id, pl.implementation_partner_id, pl.placement_type, pl.rate, pl.work_mode,
          pl.project_city, pl.project_state, pl.tentative_start::text AS tentative_start, pl.is_first_placement,
+         pl.reconfirmed, pl.technology_id, tech.name AS technology_name, pl.joined_at,
          pl.status, pl.status_changed_at, pl.created_at, ${toMicros("pl.created_at")} AS k,
          c.recruiter_id AS cand_recruiter_id, c.team_id AS cand_team_id, c.location_id AS cand_location_id,
          CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name END AS candidate_name,
@@ -81,7 +92,11 @@ const SELECT = `
   LEFT JOIN eureka.location l ON l.id = pl.location_id
   JOIN eureka.client cl ON cl.id = pl.client_id
   LEFT JOIN eureka.vendor v ON v.id = pl.vendor_id
-  LEFT JOIN eureka.implementation_partner ip ON ip.id = pl.implementation_partner_id`;
+  LEFT JOIN eureka.implementation_partner ip ON ip.id = pl.implementation_partner_id
+  LEFT JOIN eureka.technology tech ON tech.id = pl.technology_id`;
+
+/** Rows in one placements CSV export (the report is a working list, not a data dump). */
+export const PLACEMENT_EXPORT_ROW_CAP = 5000;
 
 const actor = (r: Pick<PlacementRow, "recruiter_id" | "team_id" | "location_id">) => ({
   recruiterId: r.recruiter_id, teamId: r.team_id, locationId: r.location_id,
@@ -117,6 +132,9 @@ export class PlacementsService {
       projectState: r.project_state,
       tentativeStart: r.tentative_start,
       isFirstPlacement: r.is_first_placement,
+      reconfirmed: r.reconfirmed,
+      technology: ref(r.technology_id, r.technology_name),
+      joinedAt: r.joined_at,
       ...(showRate ? { rate: r.rate === null ? null : Number(r.rate) } : {}),
       candidate: { id: r.candidate_id, name: r.candidate_name },
       recruiter: { id: r.recruiter_id, name: r.recruiter_name },
@@ -133,17 +151,28 @@ export class PlacementsService {
     };
   }
 
-  async list(user: AuthedUser, q: PlacementListQuery) {
+  /** WHERE fragments for the list and the export: the read predicate (RLS underneath) and the filters. */
+  private filterWhere(user: AuthedUser, q: PlacementExportQuery, params: unknown[]): string[] {
     const scope = resolveScope(user.access, "placement:read");
     if (!scope) throw new ForbiddenException();
-    const params: unknown[] = [];
     const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
     const where = [activityPredicate(scope, params, "pl", "c")];
     if (q.status) where.push(`pl.status = ${p(q.status)}`);
     if (q.candidateId) where.push(`pl.candidate_id = ${p(q.candidateId)}`);
     if (q.recruiterId) where.push(`pl.recruiter_id = ${p(q.recruiterId)}`);
+    if (q.vendorId) where.push(`pl.vendor_id = ${p(q.vendorId)}::uuid`);
+    if (q.clientId) where.push(`pl.client_id = ${p(q.clientId)}::uuid`);
+    if (q.technologyId) where.push(`pl.technology_id = ${p(q.technologyId)}::uuid`);
+    if (q.locationId) where.push(`pl.location_id = ${p(q.locationId)}::uuid`);
     if (q.from) where.push(`pl.created_at >= ${p(q.from)}::timestamptz`);
     if (q.to) where.push(`pl.created_at < ${p(q.to)}::timestamptz`);
+    return where;
+  }
+
+  async list(user: AuthedUser, q: PlacementListQuery) {
+    const params: unknown[] = [];
+    const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
+    const where = this.filterWhere(user, q, params);
     if (q.cursor) {
       const [k, id] = splitCursor(q.cursor);
       where.push(`(pl.created_at, pl.id) < (${fromMicros(p(k))}, ${p(id)}::uuid)`);
@@ -156,6 +185,47 @@ export class PlacementsService {
       items: page.map((r) => this.present(user.access, r)),
       nextCursor: rows.length > q.limit && last ? `${last.k}.${last.id}` : null,
     };
+  }
+
+  private readonly exportLimiter = new RateLimiter(EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
+
+  /**
+   * Placements report CSV (migration 0160): the list with the same filters and
+   * scope, for report:export holders who read placements. No rates and no
+   * contacts; formula-injection safe cells; capped, rate-limited and audited
+   * (filter names and counts only, never the values).
+   */
+  async exportCsv(user: AuthedUser, q: PlacementExportQuery): Promise<{ csv: string; rows: number; truncated: boolean }> {
+    if (!resolveScope(user.access, "report:export")) throw new ForbiddenException();
+    const params: unknown[] = [];
+    const where = this.filterWhere(user, q, params);
+    if (!this.exportLimiter.take(user.id)) {
+      throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
+    }
+    params.push(PLACEMENT_EXPORT_ROW_CAP + 1);
+    const sql = `${SELECT} WHERE ${where.join(" AND ")} ORDER BY pl.created_at DESC, pl.id DESC LIMIT $${params.length}`;
+    const rows = await this.db.withUser(user.id, async (c) => {
+      const out = (await c.query<PlacementRow>(sql, params)).rows;
+      await this.audit.record(c, {
+        actorId: user.id, action: "placement.export", entityType: "placement",
+        changes: {
+          rows: Math.min(out.length, PLACEMENT_EXPORT_ROW_CAP), truncated: out.length > PLACEMENT_EXPORT_ROW_CAP,
+          cap: PLACEMENT_EXPORT_ROW_CAP,
+          filters: Object.keys(q).filter((k) => q[k as keyof PlacementExportQuery] !== undefined).sort(),
+        },
+      });
+      return out;
+    });
+    const page = rows.slice(0, PLACEMENT_EXPORT_ROW_CAP);
+    const day = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+    const csv = toCsv(
+      ["Candidate", "Technology", "Status", "Type", "Work mode", "End client", "Vendor", "Implementation partner",
+        "Recruiter", "Team", "Location", "Tentative start", "Joined on", "First placement", "Re-confirmed", "Created on"],
+      page.map((r) => [r.candidate_name ?? "(not visible)", r.technology_name, r.status, r.placement_type, r.work_mode,
+        r.client_name, r.vendor_name, r.implementation_partner_name, r.recruiter_name, r.team_name, r.location_name,
+        r.tentative_start, day(r.joined_at), r.is_first_placement ? "yes" : "no", r.reconfirmed ? "yes" : "no", day(r.created_at)]),
+    );
+    return { csv, rows: page.length, truncated: rows.length > PLACEMENT_EXPORT_ROW_CAP };
   }
 
   private async load(c: pg.PoolClient, user: AuthedUser, id: string): Promise<PlacementRow> {
@@ -271,10 +341,10 @@ export class PlacementsService {
       let candidateChange: { from: string | null; to: string | null };
       try {
         const r = await c.query<{ placement_id: string; is_first_placement: boolean; candidate_from: string | null; candidate_to: string | null }>(
-          `SELECT * FROM authz.create_placement($1, $2, $3, $4, $5, $6, $7::date, $8, $9::jsonb)`,
+          `SELECT * FROM authz.create_placement($1, $2, $3, $4, $5, $6, $7::date, $8, $9::jsonb, $10)`,
           [body.submissionId, body.placementType, body.rate ?? null, body.workMode, body.projectCity ?? null,
             body.projectState ?? null, body.tentativeStart, body.implementationPartnerId ?? null,
-            body.contacts ? JSON.stringify(body.contacts) : null]);
+            body.contacts ? JSON.stringify(body.contacts) : null, body.reconfirmed ?? false]);
         const row = r.rows[0]!;
         result = { id: row.placement_id, isFirstPlacement: row.is_first_placement };
         candidateChange = { from: row.candidate_from, to: row.candidate_to };
@@ -289,7 +359,7 @@ export class PlacementsService {
         changes: {
           submissionId: body.submissionId, candidateId: sub.candidate_id, placementType: body.placementType,
           workMode: body.workMode, tentativeStart: body.tentativeStart, isFirstPlacement: result.isFirstPlacement,
-          contactCount: body.contacts?.length ?? 0,
+          reconfirmed: body.reconfirmed ?? false, contactCount: body.contacts?.length ?? 0,
         },
       });
       await this.auditCandidate(c, user, sub.candidate_id, candidateChange);

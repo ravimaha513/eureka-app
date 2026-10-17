@@ -40,6 +40,7 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 - `POST /api/v1/admin/users/:id/deactivate` returns 204 (AD-5).
 - `POST /api/v1/admin/users/:id/reactivate` returns 204.
 - `PUT /api/v1/admin/users/:id/manager` with `{ managerId: uuid | null }` returns 204 (AD-2, AD-9). A cycle is a 422.
+- `PUT /api/v1/admin/users/:id/designation` with `{ designation: string | null }` returns 200 `{ id, designation }` (migration 0111; `authz.set_designation`; not yourself; at most 120 characters, no control characters, 422 `invalid_designation`; audited as `user.designation_changed`). Managers and associate directors change designations in their hierarchy through `PUT /api/v1/users/:id/designation` (`designation:change`, `docs/performance-api.md` PF-7).
 
 ### Roles
 - `POST /api/v1/admin/role-requests` with `{ userId, role, locationId? }` returns 201 `{ id, status: "applied" | "pending_approval" }`.
@@ -63,7 +64,7 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 
 Added during implementation:
 - 409: `email_exists`, `role_already_held`, `request_pending`, `request_not_pending`, `request_expired`, `last_admin`, `requester_not_admin`
-- 422: `email_domain`, `unknown_role`, `invalid_manager`, `invalid_lead`, `user_inactive`, `not_a_member`, `same_team`, `lead_of_team`, `has_reports`, `separation_of_duties`
+- 422: `invalid_designation`, `email_domain`, `unknown_role`, `invalid_manager`, `invalid_lead`, `user_inactive`, `not_a_member`, `same_team`, `lead_of_team`, `has_reports`, `separation_of_duties`
 
 ## Implementation notes
 

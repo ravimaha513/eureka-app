@@ -6,6 +6,8 @@ export interface NavItem {
   section: "Workspace" | "Hiring" | "Operations" | "Training" | "Insights" | "Admin" | "Other";
   /** Shown when the user holds ANY of these capabilities (presentation only; the API decides). */
   anyOf: Permission[];
+  /** And, when set, ALL of these (presentation only; the API decides). */
+  allOf?: Permission[];
 }
 
 export const NAV: NavItem[] = [
@@ -31,7 +33,12 @@ export const NAV: NavItem[] = [
   { key: "training", label: "Training Batches", section: "Training", anyOf: ["training:read"] },
   { key: "courses", label: "Courses", section: "Training", anyOf: ["training:manage"] },
   { key: "performance", label: "Performance", section: "Insights", anyOf: ["performance:read"] },
-  { key: "reports", label: "Reports", section: "Insights", anyOf: ["report:read"] },
+  { key: "reports", label: "Reports", section: "Insights", anyOf: ["report:read", "report.market:read"] },
+  // interview-reports: interviews the user can read, where they may read reports.
+  { key: "interview-reports", label: "Interview reports", section: "Insights", anyOf: ["report:read"], allOf: ["interview:read"] },
+  // pipeline-vendors: GET /api/v1/reports/pipeline needs report:read (and candidate:read, checked by the API)
+  { key: "pipeline", label: "Candidate Pipeline", section: "Insights", anyOf: ["report:read"] },
+  { key: "vendors", label: "Preferred Vendors", section: "Workspace", anyOf: ["vendor.preferred:create", "vendor.preferred:read"] },
   { key: "access", label: "Users & Access", section: "Admin", anyOf: ["access:manage"] },
   // interview-alerts: HR keeps the staff birthdays the CEO's morning digest is built from.
   { key: "birthdays", label: "Staff birthdays", section: "Admin", anyOf: ["staff.birthday:manage"] },
@@ -47,5 +54,5 @@ export const SETTINGS_NAV: NavItem = { key: "settings", label: "Settings & Prefe
 
 export function visibleNav(capabilities: readonly string[]): NavItem[] {
   const caps = new Set(capabilities);
-  return NAV.filter((n) => n.anyOf.some((p) => caps.has(p)));
+  return NAV.filter((n) => n.anyOf.some((p) => caps.has(p)) && (n.allOf ?? []).every((p) => caps.has(p)));
 }

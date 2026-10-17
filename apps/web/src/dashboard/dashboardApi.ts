@@ -1,11 +1,13 @@
 /** Typed client for GET /api/v1/dashboard (docs/dashboards-api.md). */
 import { api } from "../api";
+import { postExport } from "../pipeline/pipelineApi";
 
 export const METRICS = [
   "submissions", "interviewsScheduled", "interviewsCleared", "placementsCreated", "placementsJoined", "candidatesAdded",
 ] as const;
 export type Metric = (typeof METRICS)[number];
-export type GroupBy = "recruiter" | "team" | "location";
+/** `manager` (sales reports by manager) and `candidate` (location sales view) since migration 0160. */
+export type GroupBy = "recruiter" | "team" | "location" | "manager" | "candidate";
 export type AttentionKind = "submissionStale" | "interviewFeedbackMissing" | "placementStalled";
 
 export interface AttentionItem {
@@ -25,6 +27,8 @@ export interface Dashboard {
   metrics: Metric[];
   totals: Partial<Record<Metric, number>>;
   groups: { id: string | null; name: string | null; counts: Partial<Record<Metric, number>> }[];
+  /** True when more groups had activity than the server returns (the most active ones are kept); totals stay exact. */
+  groupsTruncated?: boolean;
   /** One entry per local day of the period (zero-filled), for the activity-over-time chart. */
   series: { date: string; counts: Partial<Record<Metric, number>> }[];
   needsAttention: {
@@ -52,8 +56,12 @@ export const METRIC_HINTS: Record<Metric, string> = {
   candidatesAdded: "new candidate profiles",
 };
 
-export const GROUP_LABELS: Record<GroupBy, string> = { recruiter: "Recruiter", team: "Team", location: "Location" };
-export const UNGROUPED: Record<GroupBy, string> = { recruiter: "Unassigned", team: "No team", location: "No location" };
+export const GROUP_LABELS: Record<GroupBy, string> = {
+  recruiter: "Recruiter", team: "Team", manager: "Manager", location: "Location", candidate: "Candidate",
+};
+export const UNGROUPED: Record<GroupBy, string> = {
+  recruiter: "Unassigned", team: "No team", manager: "No manager", location: "No location", candidate: "Not visible to you",
+};
 
 export const PERIODS = [
   { days: 7, label: "Last 7 days" },
@@ -74,4 +82,9 @@ export const dashboardApi = {
     if (q.groupBy) p.set("groupBy", q.groupBy);
     return api<Dashboard>(`/api/v1/dashboard?${p.toString()}`);
   },
+  /** Sales report CSV (grouped counts and a total row); audited by the server, needs report:export. */
+  exportCsv: (q: { from: string; to: string; groupBy?: GroupBy }) =>
+    postExport("/api/v1/dashboard/export", {
+      from: q.from, to: q.to, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, ...(q.groupBy ? { groupBy: q.groupBy } : {}),
+    }, "sales-report.csv"),
 };
