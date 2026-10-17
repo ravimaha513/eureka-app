@@ -869,6 +869,17 @@ const CASES: RejectCase[] = [
     prepare: async () => ({ url: "/api/v1/reports/joinings-exits/export", body: { from: "2025-01-01", to: "2025-06-30" }, state: async () => null }),
     forbidden: { teamId: T.t2, recruiterId: U.r2a, scope: "org", limit: 1_000_000, includePhones: true, cap: 1 },
   },
+  // interview-reports
+  {
+    route: "POST /api/v1/reports/interviews/export", actor: "l1",
+    prepare: async () => ({ url: "/api/v1/reports/interviews/export", body: { from: "2030-01-01", to: "2030-03-01", groupBy: "coach" }, state: async () => null }),
+    forbidden: { teamId: T.t2, recruiterId: U.r2a, coachId: U.coach, scope: "org", limit: 1_000_000, includeFeedback: true, cap: 1 },
+  },
+  {
+    route: "POST /api/v1/reports/interviews/daily/export", actor: "l1",
+    prepare: async () => ({ url: "/api/v1/reports/interviews/daily/export", body: { from: "2030-01-07T00:00:00Z", to: "2030-01-08T00:00:00Z" }, state: async () => null }),
+    forbidden: { teamId: T.t2, recruiterId: U.r2a, scope: "org", limit: 1_000_000, groupBy: "coach", cap: 1 },
+  },
   // interviews
   {
     route: "POST /api/v1/interviews", actor: "r1a",
