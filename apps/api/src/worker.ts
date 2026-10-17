@@ -36,6 +36,7 @@ import { createKeyProvider } from "./platform/crypto/config.js";
 import { keyRotationJob } from "./worker/jobs/key-rotation.js";
 import { visaExpiryJob } from "./worker/jobs/visa-expiry.js";
 import { birthdayDigestJob } from "./worker/jobs/birthdays.js";
+import { performanceBelowTargetJob } from "./worker/jobs/performance-below-target.js";
 
 const log = createLogger({ service: "worker" });
 const config = loadWorkerConfig();
@@ -79,6 +80,8 @@ const jobs = [
   portalPruneJob(30),
   // interview-alerts (migration 0087): the CEO's morning staff-birthday digest into the outbox.
   birthdayDigestJob(),
+  // performance (migration 0112): recruiter activity below target, once per ended target period.
+  performanceBelowTargetJob(),
 ];
 {
   // Without a mail mode only the in-app channel is delivered; emailing events stay unpublished.

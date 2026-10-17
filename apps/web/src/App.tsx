@@ -25,6 +25,7 @@ import { ApplicationsPage } from "./jobs/ApplicationsPage";
 import { ApplicantsPage } from "./jobs/ApplicantsPage";
 import { BirthdaysPage } from "./staff/BirthdaysPage";
 import { PaymentsPage } from "./payments/PaymentsPage";
+import { PerformancePage } from "./performance/PerformancePage";
 import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sparkles, Sun } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
@@ -193,9 +194,7 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
   );
 }
 
-const PLANNED: Record<string, string> = {
-  performance: "Recruiter performance against targets, with alerts for managers.",
-};
+const PLANNED: Record<string, string> = {};
 
 function Placeholder({ item }: { item: NavItem }) {
   return (
@@ -240,9 +239,10 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [interviewId, setInterviewId] = useState<string | null>(null);
   const canOpenEntity = (e: InboxItem["entity"]) =>
     (e.type === "placement" ? has("placements") : e.type === "conversation" ? has("chat") : e.type === "application" ? has("applications")
-      : e.type === "interview" ? has("interviews") : e.type === "digest" ? false : candidateScreen !== null);
+      : e.type === "interview" ? has("interviews") : e.type === "performance_target" ? has("performance") : e.type === "digest" ? false : candidateScreen !== null);
   const openEntity = (e: InboxItem["entity"]) => {
     if (e.type === "digest") return;
+    if (e.type === "performance_target") { setProfileId(null); setActive("performance"); return; }
     if (e.type === "interview") { setProfileId(null); setInterviewId(e.id); setActive("interviews"); return; }
     if (e.type === "application") { setProfileId(null); setApplicationId(e.id); setActive("applications"); return; }
     if (e.type === "placement") { setProfileId(null); openPlacement(e.id); return; }
@@ -331,6 +331,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "birthdays" ? <BirthdaysPage />
             : current.key === "employees" ? <EmployeesPage me={me} />
             : current.key === "reports" ? <ReportsPage me={me} />
+            : current.key === "performance" ? <PerformancePage me={me} />
             : current.key === "companies" ? <CompaniesPage key="companies" me={me} />
             : current.key === "facilities" ? <FacilitiesPage key="facilities" me={me} />
             : current.key === "datahub" ? <DataHubPage />

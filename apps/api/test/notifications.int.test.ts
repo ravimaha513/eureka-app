@@ -407,6 +407,9 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
     } finally {
       ic.release();
     }
+    // performance (0112): a real target of r1a, set by their manager.
+    const target = await asUser(db.app, U.m1, async (c) => (await c.query<{ target_id: string }>(
+      "SELECT * FROM authz.performance_target_set($1, 'month', '2026-09-01', 5, NULL, NULL)", [U.r1a])).rows[0]!.target_id, true);
     const events = [
       ["work_authorization.expiring", PAYLOADS.workAuth(candidateId, a)],
       ["employee.benched", PAYLOADS.projectExit(a, placementId, candidateId)],
@@ -425,18 +428,23 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
       // payments (0100): the aggregate is the placement (first payment) or the invoice (delay).
       ["payment.first_received", { placementId, invoiceId, paymentId: a }],
       ["payment.delayed", { invoiceId, placementId, daysLate: 12 }],
+      ["performance.below_target", { targetId: target, userId: U.r1a, periodKind: "month", periodStart: "2026-09-01", submissionsTarget: 5, submissionsActual: 2 }],
     ] as const;
     // interview.requested is delivered with the interview's details (candidate email included, owner decision
     // 2026-10-15; docs/notifications.md) read from a real interview row: covered by alerts.int.test.ts, not here.
     const DETAILED = ["interview.requested"];
     expect(events.map(([t]) => t).sort()).toEqual(Object.keys(EVENT_SPECS).filter((t) => !t.startsWith("placement.") && !DETAILED.includes(t)).sort());
     const digestId = await newId(db);
-    const aggregateOf = (type: string): [string, string] =>
-      type === "chat.direct_message" ? ["chat_conversation", chat]
-        : type === "contract.created" ? ["contract", item]
-          : type === "staff.birthdays_today" ? ["birthday_digest", digestId]
-            : type === "payment.first_received" ? ["placement", placementId]
-              : type === "payment.delayed" ? ["invoice", invoiceId] : ["candidate", candidateId];
+    // The aggregate of each event type (default: the candidate).
+    const AGGREGATES: Record<string, [string, string]> = {
+      "chat.direct_message": ["chat_conversation", chat],
+      "contract.created": ["contract", item],
+      "staff.birthdays_today": ["birthday_digest", digestId],
+      "payment.first_received": ["placement", placementId],
+      "payment.delayed": ["invoice", invoiceId],
+      "performance.below_target": ["performance_target", target],
+    };
+    const aggregateOf = (type: string): [string, string] => AGGREGATES[type] ?? ["candidate", candidateId];
     const secrets = [person, "Placed", "81.25", "Irving", "Petra", "petra@vendor.example", "4695550188", "Northwind",
       "2027-01-15", "2026-09-30", "2026-09-29", "2026-11-01", "2026-05-01", "terminated", "resigned", "r1a", "Team Rohit",
       "4321.5", "2026-08-01", "2026-08-31"];

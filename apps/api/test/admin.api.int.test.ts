@@ -71,6 +71,8 @@ const ADMIN_ENDPOINTS: { method: Method; url: string; body?: unknown; adminStatu
   { method: "POST", url: `/api/v1/admin/users/${NIL}/deactivate`, adminStatus: 404 },
   { method: "POST", url: `/api/v1/admin/users/${NIL}/reactivate`, adminStatus: 404 },
   { method: "PUT", url: `/api/v1/admin/users/${U.r1a}/manager`, body: {}, adminStatus: 422 },
+  // performance (migration 0111): designation through Users & Access.
+  { method: "PUT", url: `/api/v1/admin/users/${U.r1a}/designation`, body: {}, adminStatus: 422 },
   { method: "POST", url: "/api/v1/admin/role-requests", body: {}, adminStatus: 422 },
   { method: "GET", url: "/api/v1/admin/role-requests", adminStatus: 200 },
   { method: "POST", url: `/api/v1/admin/role-requests/${NIL}/approve`, adminStatus: 404 },

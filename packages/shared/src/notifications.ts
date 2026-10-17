@@ -28,6 +28,8 @@ export const NOTIFICATION_PREFERENCE_TYPES: readonly NotificationTypeInfo[] = [
   // payments (gap L1)
   { type: "payment.first_received", label: "First payment received", description: "Accounts recorded the first payment for a placement of yours.", mandatory: false },
   { type: "payment.delayed", label: "Payment delayed", description: "A vendor payment for a placement of yours is past its expected date.", mandatory: false },
+  // performance (migration 0112)
+  { type: "performance.below_target", label: "Activity below target", description: "A recruiter's target period ended with activity below target (the recruiter, their lead and manager).", mandatory: false },
   { type: "chat.direct_message", label: "New direct message", description: "Someone wrote to you in Chat and you have not looked at the conversation for 10 minutes.", mandatory: false },
 ];
 

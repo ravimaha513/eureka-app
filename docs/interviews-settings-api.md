@@ -83,7 +83,7 @@ problems with the code in `detail`, CSRF header on every write.
 - **Staff contacts:** `staff.contact:read` goes to HR and Org Admin (Org Admin gains no business data: the
   `engine.test.ts` invariant was updated to allow this one directory permission). Should Associate HR, managers or
   the whole staff see work phones?
-- **Designation** is read-only in Settings (it is set by `designation:change` holders); there is still no API to change it.
+- **Designation** is read-only in Settings. It is changed by `designation:change` holders (Performance page, `PUT /api/v1/users/:id/designation`) and in Users & Access (`access:manage`); see `docs/performance-api.md` PF-7.
 - **Sessions:** the list covers 30 days; session rows are not pruned yet (as before). IP and device are recorded only
   for sessions created after 0081.
 - The **Application status dialog** on the reference screens belongs to the jobs portal package, not here.
