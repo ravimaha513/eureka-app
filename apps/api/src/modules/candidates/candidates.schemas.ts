@@ -1,7 +1,32 @@
 import { z } from "zod";
-import { PHONE_PROBLEM_MESSAGES, normalizeEmail, normalizePhoneE164, phoneProblem } from "@eureka/shared";
+import {
+  DOCUMENTS_FILTERS,
+  DOCUMENTS_STATUS_LIST,
+  ELIGIBILITY_LIST,
+  MARKETING_LOCATIONS_MAX,
+  PHONE_PROBLEM_MESSAGES,
+  STAY_FILTERS,
+  VISA_CATEGORY_LIST,
+  normalizeEmail,
+  normalizePhoneE164,
+  phoneProblem,
+} from "@eureka/shared";
 
 const uuid = z.string().uuid();
+
+/**
+ * Hot List filters added for the Eureka App 4 spec (also on the Candidates
+ * list): office location, marketed visa, documents status ("none" = not
+ * recorded), resume on file (an uploaded current resume or a resume link) and
+ * stay (guest house or remote).
+ */
+export const ExtraListFilters = {
+  locationId: uuid.optional(),
+  visa: z.enum(VISA_CATEGORY_LIST as [string, ...string[]]).optional(),
+  documents: z.enum(DOCUMENTS_FILTERS).optional(),
+  resume: z.enum(["yes", "no"]).optional(),
+  stay: z.enum(STAY_FILTERS).optional(),
+};
 
 export const CandidateListQuery = z
   .object({
@@ -9,6 +34,7 @@ export const CandidateListQuery = z
     technology: z.string().max(80).optional(),
     visibility: z.enum(["team", "all_teams"]).optional(),
     search: z.string().max(80).optional(),
+    ...ExtraListFilters,
     /** Candidates list only (FR-CAN-02); the Hot List has no batch filter. */
     batchId: uuid.optional(),
     cursor: uuid.optional(),
@@ -47,9 +73,43 @@ export const ProfileUpdate = z
     technologyId: uuid.optional(),
     /** null removes the candidate from its batch. */
     batchId: uuid.nullable().optional(),
+    /** Guest house location (a location id), "remote", or null when not recorded. */
+    ghLocation: z.union([uuid, z.literal("remote")]).nullable().optional(),
+    /** "City, ST" entries the candidate is marketed in; [] or null clears them. */
+    marketingLocations: z
+      .array(z.string().trim().min(1).max(60).regex(/^[^\p{Cc}|]+$/u, "No control characters or |"))
+      .max(MARKETING_LOCATIONS_MAX)
+      .refine((a) => new Set(a.map((x) => x.toLowerCase())).size === a.length, { message: "Duplicate location" })
+      .nullable()
+      .optional(),
+    linkedinUrl: z.string().trim().max(300)
+      .regex(/^https:\/\/([a-z]{2,3}\.)?linkedin\.com\/\S+$/, "Use an https://linkedin.com/... link")
+      .nullable().optional(),
+    /** A link to the marketing resume (e.g. a shared drive); uploaded files use /resumes. */
+    resumeUrl: z.string().trim().max(500).regex(/^https:\/\/\S+$/, "Use an https:// link").nullable().optional(),
+    /** [] or null clears it. */
+    eligibility: z.array(z.enum(ELIGIBILITY_LIST as [string, ...string[]])).max(ELIGIBILITY_LIST.length)
+      .refine((a) => new Set(a).size === a.length, { message: "Duplicate value" })
+      .nullable().optional(),
+    visaCategory: z.enum(VISA_CATEGORY_LIST as [string, ...string[]]).nullable().optional(),
   })
   .strict();
 export type ProfileUpdate = z.infer<typeof ProfileUpdate>;
+
+/**
+ * PUT /candidates/:id/compliance (candidate.compliance:update). Omitted keys
+ * keep their value; null clears a link.
+ */
+export const ComplianceUpdate = z
+  .object({
+    everifyCompanyId: uuid.nullable().optional(),
+    offerLetterCompanyId: uuid.nullable().optional(),
+    form1099CompanyId: uuid.nullable().optional(),
+    documentsStatus: z.enum(DOCUMENTS_STATUS_LIST as [string, ...string[]]).nullable().optional(),
+  })
+  .strict()
+  .refine((b) => Object.keys(b).length > 0, { message: "Nothing to change" });
+export type ComplianceUpdate = z.infer<typeof ComplianceUpdate>;
 
 export const VisibilityUpdate = z.object({ visibility: z.enum(["team", "all_teams"]) }).strict();
 export const RatingUpdate = z.object({ rating: z.number().int().min(1).max(5) }).strict();

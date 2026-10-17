@@ -17,3 +17,4 @@ export * from "./birthdays.js";
 export * from "./payments.js";
 export * from "./marketReport.js";
 export * from "./interviewReports.js";
+export * from "./candidates.js";

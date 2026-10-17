@@ -8,12 +8,14 @@ import { CandidateTimeline } from "./CandidateTimeline";
 import { CandidateWorkAuthorization } from "../workauth/CandidateWorkAuthorization";
 import { CandidateTraining } from "../training/CandidateTraining";
 import { EditProfileDialog } from "./EditProfileDialog";
+import { ComplianceDialog } from "./ComplianceDialog";
+import { documentsLabel, eligibilityLabel, stayLabel, visaLabel } from "./candidateFields";
 import { salesError } from "./errors";
 import { DUPLICATE_WARNING, LogSubmissionDialog } from "./LogSubmissionDialog";
 import { TRANSITIONS, salesApi, salesKeys, statusLabel, type CandidateProfile as Profile, type Visibility } from "./salesApi";
 import { OpenToAllBadge, Phone, Priority, StatusBadge, fmtDate } from "./ui";
 
-type Modal = { kind: "edit" } | { kind: "submit" } | { kind: "terminate" };
+type Modal = { kind: "edit" } | { kind: "submit" } | { kind: "terminate" } | { kind: "compliance" };
 
 /**
  * Candidate profile (GET /api/v1/candidates/:id). Actions follow the record's
@@ -90,6 +92,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
           <h1 ref={headingRef} tabIndex={-1}>{c.name}</h1>
           <p className="sub">
             <StatusBadge status={c.status} />{" "}
+            {c.statusLabel && c.statusLabel.includes("/") && <>{c.statusLabel}{" "}</>}
             {c.visibility === "all_teams" && <><OpenToAllBadge />{" "}</>}
             <Priority p={c.priority} /> · {c.technology} · {c.team.name}
           </p>
@@ -110,8 +113,20 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
           <dl className="facts">
             <dt>Technology</dt><dd>{c.technology}</dd>
             <dt>Team</dt><dd>{c.team.name}</dd>
+            {c.teamAssignedAt && <><dt>Added to team</dt><dd>{fmtDate(c.teamAssignedAt)}</dd></>}
             <dt>Recruiter</dt><dd>{c.recruiter?.name ?? "Unassigned"}</dd>
             <dt>Location</dt><dd>{c.location.name}</dd>
+            {c.stay !== undefined && <><dt>Stay</dt><dd>{stayLabel(c)}</dd></>}
+            {c.marketingLocations !== undefined && <><dt>Marketing locations</dt><dd>{c.marketingLocations.length ? c.marketingLocations.join("; ") : "Not recorded"}</dd></>}
+            {c.visaCategory !== undefined && <><dt>Visa (marketed)</dt><dd>{visaLabel(c.visaCategory)}</dd></>}
+            {c.eligibility !== undefined && <><dt>Eligibility</dt><dd>{eligibilityLabel(c.eligibility)}</dd></>}
+            {c.confirmations !== undefined && <><dt>Confirmations</dt><dd>{c.confirmations}</dd></>}
+            {c.linkedinUrl !== undefined && (
+              <><dt>LinkedIn</dt><dd>{c.linkedinUrl ? <a href={c.linkedinUrl} target="_blank" rel="noopener noreferrer">Open profile</a> : "—"}</dd></>
+            )}
+            {c.resumeUrl !== undefined && (
+              <><dt>Resume link</dt><dd>{c.resumeUrl ? <a href={c.resumeUrl} target="_blank" rel="noopener noreferrer">Open resume</a> : "—"}</dd></>
+            )}
             {c.batch !== undefined && <><dt>Batch</dt><dd>{c.batch?.label ?? "No batch"}</dd></>}
             <dt>Phone</dt><dd><Phone c={c} /></dd>
             {c.dobMasked && <><dt>Date of birth</dt><dd className="masked">{c.dobMasked}</dd></>}
@@ -157,6 +172,22 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
           </section>
         )}
 
+        {(c.companies !== undefined || c.documentsStatus !== undefined) && (
+          <section className="card pad" aria-labelledby="compliance-h">
+            <h2 id="compliance-h">Companies and documents</h2>
+            <dl className="facts">
+              <dt>Documents status</dt><dd>{documentsLabel(c.documentsStatus)}</dd>
+              {c.companies && (
+                <>
+                  <dt>E-Verify company</dt><dd>{c.companies.everify?.name ?? "—"}</dd>
+                  <dt>Offer letter company</dt><dd>{c.companies.offerLetter?.name ?? "—"}</dd>
+                  <dt>1099 company</dt><dd>{c.companies.form1099?.name ?? "—"}</dd>
+                </>
+              )}
+            </dl>
+            {c.canEditCompliance && <button type="button" className="btn" onClick={() => setModal({ kind: "compliance" })}>Edit companies and documents</button>}
+          </section>
+        )}
         {caps.has("document:read") && <CandidateResumes candidateId={c.id} />}
         {caps.has("document:read") && <DocumentsSection owner={{ kind: "candidate", id: c.id }} title="Paperwork documents" />}
         {caps.has("visa:read") && <CandidateWorkAuthorization candidateId={c.id} />}
@@ -167,6 +198,9 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
 
       {modal?.kind === "edit" && (
         <EditProfileDialog candidate={c} onClose={() => setModal(null)} onSaved={() => { setModal(null); announce("Profile saved."); refresh(); }} />
+      )}
+      {modal?.kind === "compliance" && (
+        <ComplianceDialog candidate={c} onClose={() => setModal(null)} onSaved={() => { setModal(null); announce("Companies and documents saved."); refresh(); }} />
       )}
       {modal?.kind === "submit" && (
         <LogSubmissionDialog candidate={c}

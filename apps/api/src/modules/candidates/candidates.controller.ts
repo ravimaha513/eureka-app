@@ -4,6 +4,7 @@ import {
   BatchListQuery,
   BatchStatusChange,
   CandidateListQuery,
+  ComplianceUpdate,
   CreateBatch,
   CreateCandidate,
   DuplicateCheck,
@@ -63,6 +64,20 @@ export class CandidatesController {
   @RequirePermission("candidate:update")
   update(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.updateProfile(user, id, ProfileUpdate.parse(body));
+  }
+
+  /** E-Verify, offer letter and 1099 company links and the documents status (HR, Accounts, Immigration, Documents team). */
+  @Put("candidates/:id/compliance")
+  @RequirePermission("candidate.compliance:update")
+  compliance(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.setCompliance(user, id, ComplianceUpdate.parse(body));
+  }
+
+  /** Active companies for the compliance picker. */
+  @Get("candidate-companies")
+  @RequirePermission("candidate.compliance:update")
+  complianceCompanies(@CurrentUser() user: AuthedUser) {
+    return this.svc.complianceCompanies(user);
   }
 
   @Put("candidates/:id/visibility")

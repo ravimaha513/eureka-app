@@ -1,4 +1,6 @@
 import { useId } from "react";
+import { DOCUMENTS_STATUSES, VISA_CATEGORIES } from "@eureka/shared";
+import { useLookups } from "../lookups";
 import type { useCandidateList } from "./useCandidateList";
 import { statusLabel } from "./salesApi";
 
@@ -9,6 +11,16 @@ export function ListFilters({ s, label, statuses, batches }: {
   s: ListState; label: string; statuses: readonly string[]; batches?: { id: string; label: string }[];
 }) {
   const id = useId();
+  const locations = useLookups().data?.locations ?? [];
+  const sel = (key: keyof ListState["extra"], text: string, options: [string, string][], any: string) => (
+    <div className="field inline">
+      <label htmlFor={`${id}-${key}`}>{text}</label>
+      <select id={`${id}-${key}`} value={s.extra[key]} onChange={(e) => s.setExtra(key, e.target.value as never)}>
+        <option value="">{any}</option>
+        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    </div>
+  );
   return (
     <form className="toolbar" role="search" aria-label={`${label} filters`} onSubmit={(e) => e.preventDefault()}>
       <div className="field inline">
@@ -44,6 +56,11 @@ export function ListFilters({ s, label, statuses, batches }: {
           </select>
         </div>
       )}
+      {sel("locationId", "Location", locations.map((l) => [l.id, l.name]), "Any location")}
+      {sel("visa", "Visa", Object.entries(VISA_CATEGORIES), "Any visa")}
+      {sel("documents", "Documents", [...Object.entries(DOCUMENTS_STATUSES), ["none", "Not recorded"]], "Any documents status")}
+      {sel("resume", "Resume", [["yes", "Resume on file"], ["no", "No resume"]], "Any resume")}
+      {sel("stay", "Stay", [["guest_house", "Guest house"], ["remote", "Remote"]], "Guest house or remote")}
       {s.hasFilters && <button type="button" className="btn" onClick={s.clear}>Clear filters</button>}
     </form>
   );

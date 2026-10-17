@@ -30,8 +30,8 @@ Line numbers are as of this commit.
 
 | Requirement | Status | Evidence | Gap |
 |---|---|---|---|
-| List, open to everyone with masked phones (OD-01) | Built | `db/migrations/0011_hotlist_function.sql:42`, `candidates.service.ts` `openHotlist` | — |
-| Filters (name, technology, status, visibility) | Built | `apps/web/src/sales/ListControls.tsx:8`, `HotlistQuery` in `candidates.schemas.ts` | No location, team, priority or rating filter. Left alone: the list-performance workstream is changing the Hot List query; add them after it lands. |
+| List, team-scoped (Eureka App 4; was open to everyone under OD-01) | Built | `HOTLIST_VISIBILITY = "team"` in `packages/shared/src/authz/catalog.ts`; `docs/candidates-api.md` | The open policy (`authz.hotlist_page`) is kept and tested; switching back is a catalog change. |
+| Filters (name, technology, status, visibility, location, visa, documents, resume, stay) | Built | `ExtraListFilters` in `candidates.schemas.ts`, `db/migrations/0140_candidate_profile_fields.sql`, `apps/web/src/sales/ListControls.tsx` | No team, priority or rating filter. |
 | Saved views | Built | `db/migrations/0025_hotlist_extras.sql:10`, `apps/web/src/sales/HotListExtras.tsx:34` | — |
 | Bulk status / visibility | Built | `apps/api/src/modules/hotlist/hotlist.controller.ts:36`, `apps/api/test/hotlist-extras.api.int.test.ts` | — |
 | Quick view | Built | `apps/web/src/sales/HotListPage.tsx:104` (drawer), `Sales.test.tsx` | — |

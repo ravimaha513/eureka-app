@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { candidateVisible, hotlistVisible, ownsCandidate, resolveScope } from "@eureka/shared";
+import { HOTLIST_VISIBILITY, candidateVisible, hotlistVisible, ownsCandidate, resolveScope } from "@eureka/shared";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { T, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 
@@ -122,7 +122,7 @@ describe("authz.hotlist_export (differential against the engine)", () => {
   // 0030: a row must be in the report:export scope AND on the caller's Hot List.
   describe.each(["everyone", "team"] as const)("Hot List policy %s", (policy) => {
     beforeAll(() => setPolicy(policy));
-    afterAll(() => setPolicy("everyone"));
+    afterAll(() => setPolicy(HOTLIST_VISIBILITY));
 
     it.each(users)("%s exports exactly the Hot List candidates in their report:export scope", async (key) => {
       const access = toUserAccess(key);
@@ -163,14 +163,14 @@ describe("authz.hotlist_export (differential against the engine)", () => {
     } finally {
       await c.query("ROLLBACK");
       c.release();
-      await setPolicy("everyone");
+      await setPolicy(HOTLIST_VISIBILITY);
     }
     expect((await exportAs(U.l1)).length).toBeGreaterThan(0);
   });
 
   it("never returns DOB, email or a raw phone column", async () => {
     const { rows } = await db.admin.query<{ cols: string[] }>(`
-      SELECT proargnames AS cols FROM pg_proc WHERE oid = 'authz.hotlist_export(text,text,text,text,int)'::regprocedure`);
+      SELECT proargnames AS cols FROM pg_proc WHERE oid = 'authz.hotlist_export(text,text,text,text,int,uuid,text,text,boolean,text)'::regprocedure`);
     const cols = rows[0]!.cols.join(",");
     expect(cols).not.toMatch(/dob|email|phone_e164/);
   });
@@ -199,9 +199,9 @@ describe("authz.hotlist_export (differential against the engine)", () => {
     expect(await exportAs(U.ceo, 0)).toHaveLength(1);
     const { rows } = await db.admin.query<{ lang: string; src: string }>(`
       SELECT l.lanname AS lang, p.prosrc AS src FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
-      WHERE p.oid = 'authz.hotlist_export(text,text,text,text,int)'::regprocedure`);
+      WHERE p.oid = 'authz.hotlist_export(text,text,text,text,int,uuid,text,text,boolean,text)'::regprocedure`);
     expect(rows[0]!.lang).toBe("plpgsql");
-    expect(rows[0]!.src).toMatch(/RETURN QUERY EXECUTE \$q\$[\s\S]*\$q\$ USING p_status, p_technology, p_visibility, p_search, p_limit;/);
+    expect(rows[0]!.src).toMatch(/RETURN QUERY EXECUTE \$q\$[\s\S]*\$q\$ USING p_status, p_technology, p_visibility, p_search, p_limit,\s+p_location, p_visa, p_documents, p_resume, p_stay;/);
   });
 
   it("a deactivated user exports nothing", async () => {
@@ -215,8 +215,8 @@ describe("authz.hotlist_export (differential against the engine)", () => {
 
   it("is executable only by the app role", async () => {
     const { rows } = await db.admin.query(`
-      SELECT has_function_privilege('eureka_worker', 'authz.hotlist_export(text,text,text,text,int)', 'EXECUTE') w,
-             has_function_privilege('eureka_app', 'authz.hotlist_export(text,text,text,text,int)', 'EXECUTE') a`);
+      SELECT has_function_privilege('eureka_worker', 'authz.hotlist_export(text,text,text,text,int,uuid,text,text,boolean,text)', 'EXECUTE') w,
+             has_function_privilege('eureka_app', 'authz.hotlist_export(text,text,text,text,int,uuid,text,text,boolean,text)', 'EXECUTE') a`);
     expect(rows[0]).toEqual({ w: false, a: true });
   });
 });

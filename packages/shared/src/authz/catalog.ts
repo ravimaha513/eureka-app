@@ -6,14 +6,16 @@
  */
 
 /**
- * Hot List visibility policy (OD-01, decided 2026-09-29): "everyone" means every
- * signed-in user sees every candidate in a Hot List status (list columns only),
- * with the phone masked unless they own the candidate. Candidate profiles, submissions,
- * interviews and placements stay scoped. Set to "team" to restore AS-07 (team
- * hierarchy plus Open-to-all-teams candidates). The migration runner copies this
- * value into authz.policy_setting, where authz.hotlist_page() reads it.
+ * Hot List visibility policy. "team" (Eureka App 4 spec, 2026-10-16; AS-07): a
+ * candidate assigned to a team is on the Hot List of that lead's sales team (its
+ * hierarchy upwards) and of the interview prep team (interview coaches of that
+ * team); candidates marked "Open to all teams" are on every Sales user's Hot List.
+ * Location roles keep their location and the CEO the organisation. "everyone"
+ * (OD-01, 2026-09-29 to 2026-10-16) lists every Hot List candidate to every
+ * signed-in user (list columns only, phones masked). The migration runner
+ * copies this value into authz.policy_setting, where authz.hotlist_page() reads it.
  */
-export const HOTLIST_VISIBILITY: "everyone" | "team" = "everyone";
+export const HOTLIST_VISIBILITY: "everyone" | "team" = "team";
 
 /** Statuses shown on the Hot List. */
 export const HOTLIST_STATUSES = ["active", "on_hold", "full_of_interviews", "confirmation", "bench", "stopped"] as const;
@@ -82,6 +84,8 @@ export const PERMISSIONS = [
   "candidate.rating:update",
   "candidate.phone:read",
   "candidate.dob:read",
+  /** E-Verify, offer letter and 1099 company links and the documents status summary (gap/candidates). */
+  "candidate.compliance:update",
   "hotlist:read",
   // marketing
   "submission:read",
@@ -391,6 +395,7 @@ export const GRANTS: Record<Role, Grants> = {
   hr: {
     "assignment:read": "org",
     "candidate:read": "org",
+    "candidate.compliance:update": "org",
     "candidate.phone:read": "org",
     "candidate.dob:read": "org",
     "placement:read": "org",
@@ -437,6 +442,7 @@ export const GRANTS: Record<Role, Grants> = {
   accounts: {
     "assignment:read": "org",
     "candidate:read": "org",
+    "candidate.compliance:update": "org",
     "placement:read": "org",
     "rate:read": "org",
     "employee:read": "org",
@@ -455,6 +461,7 @@ export const GRANTS: Record<Role, Grants> = {
   immigration: {
     "assignment:read": "org",
     "candidate:read": "org",
+    "candidate.compliance:update": "org",
     "candidate.phone:read": "org",
     "candidate.dob:read": "org",
     "employee:read": "org",
@@ -483,10 +490,11 @@ export const GRANTS: Record<Role, Grants> = {
     "chat:use": "own",
   },
   // interview-alerts: the support team that coordinates interviews. Reads every
-  // interview (and the candidates on them) to coordinate, blocks the support
-  // calendar; no Sales writes, no documents, no rates.
+  // interview to coordinate, blocks the support calendar; no Sales writes, no
+  // documents, no rates. No candidate:read (gap/candidates, team-scoped Hot List):
+  // the candidate's name on each interview comes from
+  // authz.interview_candidate_name (0141), not from the Candidates list.
   interview_coordinator: {
-    "candidate:read": "org",
     "interview:read": "org",
     "calendar:block": "org",
     // datahub
@@ -496,6 +504,7 @@ export const GRANTS: Record<Role, Grants> = {
   },
   documents_team: {
     "candidate:read": "org",
+    "candidate.compliance:update": "org",
     "document:read": "org",
     "document:upload": "org",
     "document:verify": "org",

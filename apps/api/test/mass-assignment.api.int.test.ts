@@ -779,6 +779,18 @@ const CASES: RejectCase[] = [
     forbidden: {
       teamId: T.t2, recruiterId: U.r2a, visibility: "all_teams", technicalRating: 5, status: "stopped", marketingStatus: "stopped",
       locationId: LOC.austin, personId: FOREIGN_ID, firstName: "X", phone: "+14695559999", benchSince: "2020-01-01",
+      teamAssignedAt: PAST, everifyCompanyId: FOREIGN_ID, documentsStatus: "complete", ghLocationId: LOC.austin, ghRemote: true,
+    },
+  },
+  {
+    route: "PUT /api/v1/candidates/:id/compliance", actor: "hr",
+    prepare: async () => ({
+      url: `/api/v1/candidates/${own().id}/compliance`, body: { documentsStatus: "pending" },
+      state: () => rows(`SELECT * FROM eureka.candidate WHERE id = $1`, [own().id]),
+    }),
+    forbidden: {
+      teamId: T.t2, recruiterId: U.r2a, priority: "P1", linkedinUrl: "https://linkedin.com/in/x", visaCategory: "h1b",
+      teamAssignedAt: PAST, rowVersion: 99, candidateId: FOREIGN_ID,
     },
   },
   {

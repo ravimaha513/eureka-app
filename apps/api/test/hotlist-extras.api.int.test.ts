@@ -101,7 +101,9 @@ describe("saved views", () => {
 
   it("views are private: another user sees none of them and gets 404 on rename or delete", async () => {
     const v = (await call("r1a", "POST", "/api/v1/hotlist/views", { name: "Private", filters: {} })).json();
-    for (const key of ["r1b", "l1", "m1", "ceo", "admin"] as const) {
+    // The org admin holds no hotlist:read under the team policy (403 before any view is looked up).
+    expect((await call("admin", "GET", "/api/v1/hotlist/views")).statusCode).toBe(403);
+    for (const key of ["r1b", "l1", "m1", "ceo"] as const) {
       const list = (await call(key, "GET", "/api/v1/hotlist/views")).json();
       expect(list.items.map((i: { id: string }) => i.id), key).not.toContain(v.id);
       expect((await call(key, "PATCH", `/api/v1/hotlist/views/${v.id}`, { name: "Mine now" })).statusCode, key).toBe(404);
@@ -205,7 +207,7 @@ describe("export", () => {
     expect(r.headers["content-disposition"]).toMatch(/^attachment; filename="hotlist-\d{4}-\d{2}-\d{2}\.csv"$/);
     expect(r.headers["x-export-truncated"]).toBe("false");
     const body = r.body.replace(/^﻿/, "");
-    expect(body.split("\r\n")[0]).toBe("Candidate,Technology,Status,Visibility,Priority,Team,Recruiter,Location,Phone,Marketing since,Days in market,Technical rating");
+    expect(body.split("\r\n")[0]).toBe("Candidate,Technology,Status,Visibility,Priority,Team,Recruiter,Location,Phone,Marketing since,Days in market,Technical rating,Visa,Documents,Stay");
     const rows = csvRows(r.body);
     const expected = expectedFor("l1");
     expect(rows).toHaveLength(expected.length);

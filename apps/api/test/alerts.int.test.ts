@@ -172,6 +172,23 @@ describe("interview request alerts (IA-1..IA-5)", () => {
     expect((await call("coord", "GET", "/api/v1/placements?limit=5")).statusCode).toBe(403);
     expect((await call("coord", "GET", "/api/v1/submissions?limit=5")).statusCode).toBe(403);
   });
+
+  it("the coordinator does not read candidates org-wide (team-scoped Hot List) but sees the name on each interview", async () => {
+    expect((await call("coord", "GET", "/api/v1/candidates?limit=5")).statusCode).toBe(403);
+    expect((await call("coord", "GET", "/api/v1/hotlist?limit=5")).statusCode).toBe(403);
+    const candidateId = r1aInterview().candidate.id;
+    expect([403, 404]).toContain((await call("coord", "GET", `/api/v1/candidates/${candidateId}`)).statusCode);
+    const n = await asUser(db.app, coord, async (c) =>
+      (await c.query<{ n: number }>("SELECT count(*)::int AS n FROM eureka.candidate")).rows[0]!.n);
+    expect(n).toBe(0);
+    const items = (await call("coord", "GET", `/api/v1/interviews?limit=50&candidateId=${candidateId}`)).json().items as { candidate: { id: string; name: string | null } }[];
+    expect(items.length).toBeGreaterThan(0);
+    for (const i of items) expect(i.candidate.name).toMatch(/\S+ \S+/);
+    // The fallback name read is for interview:read at org scope only.
+    const other = await asUser(db.app, U.hr, async (c) => (await c.query<{ n: string | null }>(
+      "SELECT authz.interview_candidate_name(id) AS n FROM eureka.interview LIMIT 1")).rows);
+    expect(other.every((r) => r.n === null)).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------

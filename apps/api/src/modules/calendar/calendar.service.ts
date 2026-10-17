@@ -146,7 +146,8 @@ export class CalendarService {
     const { rows } = await c.query<InterviewRow>(
       `SELECT i.id, i.round, i.starts_at, i.ends_at, i.call_status, i.interview_type, i.meeting_url, i.recruiter_id, i.team_id, i.location_id,
               c.recruiter_id AS c_recruiter, c.team_id AS c_team, c.location_id AS c_location,
-              CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name END AS candidate_name,
+              CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name
+              ELSE authz.interview_candidate_name(i.id) END AS candidate_name,
               cl.name AS client_name, s.job_title, ru.display_name AS recruiter_name
          FROM eureka.interview i
          LEFT JOIN eureka.candidate c ON c.id = i.candidate_id
