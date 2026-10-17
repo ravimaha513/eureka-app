@@ -864,6 +864,28 @@ const CASES: RejectCase[] = [
     },
     forbidden: { candidateStatus: "active", status: "on_assignment", candidateId: FOREIGN_ID, teamId: T.t2, recruiterId: U.r2a },
   },
+  // 0150: employment facts and team assignment after a project.
+  {
+    route: "PATCH /api/v1/assignments/:id/employment", actor: "hr",
+    prepare: async () => {
+      const j = await employeeOnAssignment();
+      return {
+        url: `/api/v1/assignments/${j.assignmentId}/employment`, body: { everifyDate: "2026-01-02" },
+        state: async () => ({ ...(await employmentState(j.personId)),
+          employment: await rows(`SELECT * FROM eureka.assignment_employment WHERE assignment_id = $1`, [j.assignmentId]) }),
+      };
+    },
+    forbidden: { updatedBy: U.r2a, updatedAt: "2020-01-01T00:00:00Z", assignmentId: FOREIGN_ID, payroll_company_id: FOREIGN_ID,
+      endDate: "2026-01-01", personId: FOREIGN_ID },
+  },
+  {
+    route: "POST /api/v1/employees/:id/assign-team", actor: "hr",
+    prepare: async () => {
+      const j = await benchedEmployee();
+      return { url: `/api/v1/employees/${j.personId}/assign-team`, body: { teamId: T.t2 }, state: () => employmentState(j.personId) };
+    },
+    forbidden: { recruiterId: U.r2a, candidateId: FOREIGN_ID, status: "on_assignment", candidateStatus: "active", locationId: FOREIGN_ID },
+  },
   {
     route: "POST /api/v1/reports/joinings-exits/export", actor: "l1",
     prepare: async () => ({ url: "/api/v1/reports/joinings-exits/export", body: { from: "2025-01-01", to: "2025-06-30" }, state: async () => null }),

@@ -1,7 +1,10 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Res } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { EmployeeExportQuery, EmployeeListQuery, EndAssignment, ExitEmployee, PlannedEndDate, ReportPeriod, ReturnToMarket } from "./employees.schemas.js";
+import {
+  ActiveEmployeesQuery, AssignTeam, AssignmentEmployment, EmployeeExportQuery, EmployeeListQuery, EndAssignment, ExitEmployee,
+  PlannedEndDate, ReportPeriod, ReturnToMarket,
+} from "./employees.schemas.js";
 import { EmployeesService } from "./employees.service.js";
 import { ReportsService } from "./reports.service.js";
 
@@ -32,6 +35,13 @@ export class EmployeesController {
     return out.csv;
   }
 
+  /** 0150: payroll company picker and filter (the group's companies: id, name, status). */
+  @Get("payroll-companies")
+  @RequirePermission("employee:read")
+  payrollCompanies(@CurrentUser() user: AuthedUser) {
+    return this.svc.payrollCompanies(user);
+  }
+
   @Get(":id")
   @RequirePermission("employee:read")
   get(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
@@ -54,6 +64,14 @@ export class EmployeesController {
     ReturnToMarket.parse(body ?? {});
     return this.svc.returnToMarket(user, id);
   }
+
+  /** 0150, leaving a project: HR/Accounts assign the benched employee's candidate to a Sales team. */
+  @Post(":id/assign-team")
+  @HttpCode(200)
+  @RequirePermission("assignment:update")
+  assignTeam(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.assignTeam(user, id, AssignTeam.parse(body));
+  }
 }
 
 /** Assignment lifecycle: project exit and planned end date (assignment:update). */
@@ -73,9 +91,16 @@ export class AssignmentsController {
   plannedEnd(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.setPlannedEndDate(user, id, PlannedEndDate.parse(body));
   }
+
+  /** 0150: payroll company, E-Verify date, onboarded date, pay rate (rate:read as well). */
+  @Patch(":id/employment")
+  @RequirePermission("assignment:update")
+  employment(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.setEmployment(user, id, AssignmentEmployment.parse(body));
+  }
 }
 
-/** Joinings and exits (design B7). */
+/** Joinings and exits (design B7) and active employees per month (0150). */
 @Controller("api/v1/reports")
 export class ReportsController {
   constructor(private readonly svc: ReportsService) {}
@@ -84,6 +109,13 @@ export class ReportsController {
   @RequirePermission("report:read")
   joiningsExits(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.joiningsExits(user, ReportPeriod.parse(q));
+  }
+
+  /** 0150: employees on assignment in a calendar month, by client and payroll company. */
+  @Get("active-employees")
+  @RequirePermission("report:read")
+  activeEmployees(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
+    return this.svc.activeEmployees(user, ActiveEmployeesQuery.parse(q));
   }
 
   /** POST, not GET: audited and CSRF-protected, like the Hot List export. */

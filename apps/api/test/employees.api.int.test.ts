@@ -136,9 +136,11 @@ describe("employees list and detail", () => {
     const name = (await db.admin.query(`SELECT first_name || ' ' || last_name AS n FROM eureka.person WHERE id = $1`, [b.personId])).rows[0].n;
     expect(ids(await call("hr", "GET", `/api/v1/employees?search=${encodeURIComponent(name)}`))).toEqual([b.personId]);
     const client = (await db.admin.query(`SELECT client_id FROM eureka.placement WHERE id = $1`, [a.placementId])).rows[0].client_id;
-    const byClient = ids(await call("hr", "GET", `/api/v1/employees?clientId=${client}&limit=200`));
+    const byClient = ids(await call("hr", "GET", `/api/v1/employees?clientId=${client}&clientMatch=current&limit=200`));
     expect(byClient).toContain(a.personId);
     expect(byClient).not.toContain(c.personId); // benched: no current client
+    // 0150: without clientMatch=current, past assignments match too.
+    expect(ids(await call("hr", "GET", `/api/v1/employees?clientId=${client}&limit=200`))).toContain(c.personId);
     expect((await call("hr", "GET", "/api/v1/employees?status=hired")).statusCode).toBe(422);
     expect((await call("hr", "GET", "/api/v1/employees?teamId=x")).statusCode).toBe(422);
   });
@@ -152,7 +154,7 @@ describe("employees list and detail", () => {
 
   it("read-only roles see no actions; Immigration sees employees but no assignment (placement not visible)", async () => {
     const ceo = (await call("ceo", "GET", "/api/v1/employees?limit=200")).json().items.find((i: { id: string }) => i.id === c.personId);
-    expect(ceo.actions).toEqual({ endAssignment: false, setEndDate: false, exit: false, returnToMarket: false });
+    expect(ceo.actions).toEqual({ endAssignment: false, setEndDate: false, exit: false, returnToMarket: false, assignTeam: false, editEmployment: false });
     const imm = (await call("imm", "GET", "/api/v1/employees?limit=200")).json().items.find((i: { id: string }) => i.id === a.personId);
     expect(imm.assignment).toBeNull();
     expect(imm.actions.endAssignment).toBe(false);
@@ -255,7 +257,8 @@ const EXPECTED: Partial<Record<Key, [number, number] | 403>> = {
   r1a: [1, 0], r1b: [0, 1], r2a: [1, 1], r3a: [1, 0],
   l1: [2, 2], l2: [1, 1], l3: [1, 0], m1: [3, 3], m2: [1, 0],
   ad: [4, 3], ceo: [4, 3], hr: [4, 3], acct: [4, 3], bu: [4, 3],
-  locD: [0, 0], locA: [0, 0], coach: 403, admin: 403, admin2: 403, imm: 403, ahr: 403, docs: 403,
+  // imm: report:read since 0150, read through authz.employment_movements (employee:read, no placement scope).
+  locD: [0, 0], locA: [0, 0], coach: 403, admin: 403, admin2: 403, imm: [4, 3], ahr: 403, docs: 403,
 };
 
 describe("joinings/exits report", () => {
@@ -297,6 +300,12 @@ describe("joinings/exits report", () => {
     const res = await call(k, "GET", `/api/v1/reports/joinings-exits?${Q}`);
     if (res.statusCode === 403) return;
     const r = res.json();
+    if (k === "imm") {
+      // 0150: no placement scope (placements 404): the rows come from authz.employment_movements, org-wide like HR's.
+      const hr = (await call("hr", "GET", `/api/v1/reports/joinings-exits?${Q}`)).json();
+      expect(r.totals).toEqual(hr.totals);
+      return;
+    }
     // What the role can list: placement detail carries `assignment` only where assignment:read covers it.
     let joinings = 0, exits = 0;
     for (const j of Object.values(seeded)) {
@@ -326,7 +335,7 @@ describe("joinings/exits report", () => {
     expect(res.headers["x-export-rows"]).toBe("4");
     expect(res.headers["x-export-truncated"]).toBe("false");
     const lines = res.body.replace(/^﻿/, "").trim().split("\r\n");
-    expect(lines[0]).toBe("Event,Date,Candidate,Assignment no.,Client,Team,Recruiter,Location,First placement,End reason");
+    expect(lines[0]).toBe("Event,Date,Candidate,Assignment no.,Client,Team,Recruiter,Location,First placement,End reason,Assignment,Technology,Payroll company");
     expect(lines.slice(1).map((l) => l.split(",").slice(0, 2).join(","))).toEqual([
       "Exit,2025-06-30", "Exit,2025-02-15", "Joining,2025-02-02", "Joining,2025-01-10",
     ]);

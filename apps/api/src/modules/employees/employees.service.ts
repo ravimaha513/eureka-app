@@ -16,7 +16,9 @@ import { toCsv } from "../hotlist/csv.js";
 import { EXPORTS_PER_WINDOW, EXPORT_ROW_CAP, EXPORT_WINDOW_MS } from "../hotlist/hotlist.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import { mapEmploymentError } from "./employees.errors.js";
-import type { EmployeeExportQuery, EmployeeListQuery, EndAssignment, ExitEmployee, PlannedEndDate } from "./employees.schemas.js";
+import type {
+  AssignTeam, AssignmentEmployment, EmployeeExportQuery, EmployeeListQuery, EndAssignment, ExitEmployee, PlannedEndDate,
+} from "./employees.schemas.js";
 
 /**
  * Employees (FR-EMP-01..09, migration 0045, docs/employees-api.md). Reads run
@@ -56,6 +58,16 @@ interface EmployeeRow {
   visibility: "team" | "all_teams" | null;
   email: string | null;
   phone: string | null;
+  // 0150: the candidate's recruiter and its team's lead; the latest assignment's vendor and payroll company.
+  c_recruiter_name: string | null;
+  lead_id: string | null;
+  lead_name: string | null;
+  vendor_id: string | null;
+  vendor_name: string | null;
+  payroll_company_id: string | null;
+  payroll_company_name: string | null;
+  everify_date: string | null;
+  onboarded_date: string | null;
 }
 
 /** The latest assignment the caller can read (RLS), with its placement's actor snapshot and plan. */
@@ -68,19 +80,36 @@ const SELECT = `
          la.end_reason, pp.planned_end_date::text AS planned_end_date,
          pl.id AS placement_id, pl.client_id, cl.name AS client_name,
          pl.recruiter_id, pl.team_id AS pl_team_id, pl.location_id AS pl_location_id,
-         c.recruiter_id AS c_recruiter_id, c.visibility, p.personal_email::text AS email, p.phone_e164 AS phone
+         c.recruiter_id AS c_recruiter_id, c.visibility, p.personal_email::text AS email, p.phone_e164 AS phone,
+         cru.display_name AS c_recruiter_name, tm.lead_id, lu.display_name AS lead_name,
+         pl.vendor_id, v.name AS vendor_name, ae.payroll_company_id, pc.name AS payroll_company_name,
+         ae.everify_date::text AS everify_date, ae.onboarded_date::text AS onboarded_date
   FROM eureka.employee e
   LEFT JOIN eureka.person p ON p.id = e.person_id
   LEFT JOIN eureka.candidate c ON c.id = e.candidate_id
   LEFT JOIN eureka.location l ON l.id = c.location_id
   LEFT JOIN eureka.team tm ON tm.id = c.team_id
+  LEFT JOIN eureka.app_user cru ON cru.id = c.recruiter_id
+  LEFT JOIN eureka.app_user lu ON lu.id = tm.lead_id
   LEFT JOIN LATERAL (
     SELECT a.id, a.assignment_no, a.start_date, a.end_date, a.end_reason, a.placement_id
     FROM eureka.assignment a WHERE a.person_id = e.person_id
     ORDER BY a.assignment_no DESC LIMIT 1) la ON true
   LEFT JOIN eureka.placement pl ON pl.id = la.placement_id
   LEFT JOIN eureka.client cl ON cl.id = pl.client_id
-  LEFT JOIN eureka.assignment_plan pp ON pp.assignment_id = la.id`;
+  LEFT JOIN eureka.vendor v ON v.id = pl.vendor_id
+  LEFT JOIN eureka.assignment_plan pp ON pp.assignment_id = la.id
+  LEFT JOIN eureka.assignment_employment ae ON ae.assignment_id = la.id
+  LEFT JOIN authz.payroll_companies() pc ON pc.id = ae.payroll_company_id`;
+
+/**
+ * 0150: a readable assignment (current or past) of the employee matches.
+ * `alias` columns: placement fields; RLS keeps unreadable assignments out.
+ */
+const anyAssignment = (cond: string) => `EXISTS (
+  SELECT 1 FROM eureka.assignment ax JOIN eureka.placement px ON px.id = ax.placement_id
+  LEFT JOIN eureka.assignment_employment aex ON aex.assignment_id = ax.id
+  WHERE ax.person_id = e.person_id AND ${cond})`;
 
 const ref = (id: string | null, name: string | null) => (id ? { id, name } : null);
 
@@ -143,12 +172,18 @@ export class EmployeesService {
       exitReason: r.exit_reason,
       location: ref(r.location_id, r.location_name),
       team: ref(r.team_id, r.team_name),
+      /** 0150: the team's lead and the candidate's recruiter (Sales owners of the person). */
+      lead: ref(r.lead_id, r.lead_name),
+      recruiter: ref(r.c_recruiter_id, r.c_recruiter_name),
       contact: employeeContact(access, r),
       /** Latest assignment the caller can read; null when none is readable. */
       assignment: r.assignment_id ? {
         id: r.assignment_id, assignmentNo: r.assignment_no, placementId: r.placement_id,
         startDate: r.start_date, endDate: r.end_date, endReason: r.end_reason, plannedEndDate: r.planned_end_date,
         client: ref(r.client_id, r.client_name),
+        vendor: ref(r.vendor_id, r.vendor_name),
+        payrollCompany: ref(r.payroll_company_id, r.payroll_company_name),
+        everifyDate: r.everify_date, onboardedDate: r.onboarded_date,
       } : null,
       /** Hints for the UI; the server and the database check every write again. */
       actions: employeeActions(access, latestActor(r), {
@@ -195,11 +230,13 @@ export class EmployeesService {
     });
     const page = rows.slice(0, EXPORT_ROW_CAP);
     const csv = toCsv(
-      ["Name", "Email", "Phone", "Status", "Employee since", "Status since", "Location", "Team", "Client", "Assignment no.", "Start date", "Planned end date"],
+      ["Name", "Email", "Phone", "Status", "Employee since", "Status since", "Location", "Team", "Client", "Assignment no.", "Start date", "Planned end date",
+        "Lead", "Recruiter", "Vendor", "Payroll company", "E-Verify date", "Onboarded date"],
       page.map((r) => {
         const contact = employeeContact(user.access, r);
         return [r.name ?? "(not visible)", contact.email, contact.phone, r.status, r.employee_since, r.status_since,
-          r.location_name, r.team_name, r.client_name, r.assignment_no, r.start_date, r.planned_end_date];
+          r.location_name, r.team_name, r.client_name, r.assignment_no, r.start_date, r.planned_end_date,
+          r.lead_name, r.c_recruiter_name, r.vendor_name, r.payroll_company_name, r.everify_date, r.onboarded_date];
       }),
     );
     return { csv, rows: page.length, truncated: rows.length > EXPORT_ROW_CAP };
@@ -211,7 +248,13 @@ export class EmployeesService {
     const where: string[] = ["true"];
     if (q.status) where.push(`e.status = ${p(q.status)}`);
     if (q.locationId) where.push(`c.location_id = ${p(q.locationId)}::uuid`);
-    if (q.clientId) where.push(`la.end_date IS NULL AND pl.client_id = ${p(q.clientId)}::uuid`);
+    if (q.clientId) {
+      where.push(q.clientMatch === "current"
+        ? `la.end_date IS NULL AND pl.client_id = ${p(q.clientId)}::uuid`
+        : anyAssignment(`px.client_id = ${p(q.clientId)}::uuid`));
+    }
+    if (q.vendorId) where.push(anyAssignment(`px.vendor_id = ${p(q.vendorId)}::uuid`));
+    if (q.payrollCompanyId) where.push(anyAssignment(`aex.payroll_company_id = ${p(q.payrollCompanyId)}::uuid`));
     if (q.endingWithinDays) {
       where.push(`la.end_date IS NULL AND pp.planned_end_date <= CURRENT_DATE + ${p(q.endingWithinDays)}::int`);
     }
@@ -234,14 +277,27 @@ export class EmployeesService {
       const assignments = await c.query<{
         id: string; assignment_no: number; start_date: string; end_date: string | null; end_reason: string | null;
         planned_end_date: string | null; placement_id: string; client_id: string; client_name: string; is_first_placement: boolean;
+        vendor_id: string | null; vendor_name: string | null; payroll_company_id: string | null; payroll_company_name: string | null;
+        everify_date: string | null; onboarded_date: string | null;
+        recruiter_id: string; team_id: string | null; location_id: string | null;
       }>(
         `SELECT a.id, a.assignment_no, a.start_date::text, a.end_date::text, a.end_reason, pp.planned_end_date::text,
-                pl.id AS placement_id, pl.client_id, cl.name AS client_name, pl.is_first_placement
+                pl.id AS placement_id, pl.client_id, cl.name AS client_name, pl.is_first_placement,
+                pl.vendor_id, v.name AS vendor_name, ae.payroll_company_id, pc.name AS payroll_company_name,
+                ae.everify_date::text AS everify_date, ae.onboarded_date::text AS onboarded_date,
+                pl.recruiter_id, pl.team_id, pl.location_id
          FROM eureka.assignment a
          JOIN eureka.placement pl ON pl.id = a.placement_id
          JOIN eureka.client cl ON cl.id = pl.client_id
+         LEFT JOIN eureka.vendor v ON v.id = pl.vendor_id
          LEFT JOIN eureka.assignment_plan pp ON pp.assignment_id = a.id
+         LEFT JOIN eureka.assignment_employment ae ON ae.assignment_id = a.id
+         LEFT JOIN authz.payroll_companies() pc ON pc.id = ae.payroll_company_id
          WHERE a.person_id = $1 ORDER BY a.assignment_no DESC`, [id]);
+      // Pay rates only where rate:read covers the placement's actor snapshot (PL-6); the definer re-checks.
+      const rateScope = resolveScope(user.access, "rate:read");
+      const rates = new Map((await c.query<{ assignment_id: string; pay_rate: string }>(
+        `SELECT assignment_id, pay_rate::text FROM authz.assignment_pay_rates($1)`, [id])).rows.map((r) => [r.assignment_id, Number(r.pay_rate)]));
       const history = await c.query<{
         id: string; kind: string; at: Date; actor_name: string | null; assignment_id: string | null;
         from_status: string | null; to_status: string | null; effective_on: string | null; previous_on: string | null; reason: string | null;
@@ -256,6 +312,12 @@ export class EmployeesService {
           id: a.id, assignmentNo: a.assignment_no, placementId: a.placement_id, startDate: a.start_date, endDate: a.end_date,
           endReason: a.end_reason, plannedEndDate: a.planned_end_date, client: { id: a.client_id, name: a.client_name },
           isFirstPlacement: a.is_first_placement,
+          vendor: ref(a.vendor_id, a.vendor_name),
+          payrollCompany: ref(a.payroll_company_id, a.payroll_company_name),
+          everifyDate: a.everify_date, onboardedDate: a.onboarded_date,
+          // The key is present (value or null) only for callers who may see and set the pay rate.
+          ...(ownsActivity(rateScope, { recruiterId: a.recruiter_id, teamId: a.team_id, locationId: a.location_id })
+            ? { payRate: rates.get(a.id) ?? null } : {}),
         })),
         history: history.rows.map((h) => ({
           id: h.id, kind: h.kind, at: h.at, actor: h.actor_name, assignmentId: h.assignment_id, fromStatus: h.from_status,
@@ -381,6 +443,78 @@ export class EmployeesService {
       });
       await this.auditCandidate(c, user, r.candidate_id, r.candidate_from, r.candidate_to);
       return { id, candidateStatus: r.candidate_to };
+    });
+  }
+
+  /** 0150: the group's companies for the payroll company picker and filter (id, name, status only). */
+  async payrollCompanies(user: AuthedUser) {
+    this.requireEmployeeRead(user.access);
+    const rows = await this.db.withUser(user.id, async (c) => (await c.query<{ id: string; name: string; status: string }>(
+      `SELECT id, name, status FROM authz.payroll_companies() ORDER BY lower(name), id`)).rows);
+    return { items: rows };
+  }
+
+  /**
+   * 0150: payroll company, E-Verify date, onboarded date and pay rate of an
+   * assignment (open or ended). Same rights as every employment write; the pay
+   * rate also needs rate:read over the placement's actor snapshot. Audited with
+   * the changed field names (and the company id) only, never the rate (rule 5).
+   */
+  async setEmployment(user: AuthedUser, id: string, body: AssignmentEmployment) {
+    return this.db.withUser(user.id, async (c) => {
+      const a = await this.loadAssignment(c, user, id);
+      const actor = { recruiterId: a.recruiter_id, teamId: a.team_id, locationId: a.location_id };
+      const rateVisible = ownsActivity(resolveScope(user.access, "rate:read"), actor);
+      if (body.payRate !== undefined && !rateVisible) throw new ForbiddenException("Not permitted");
+      let changed: string[];
+      try {
+        changed = (await c.query<{ f: string[] }>(`SELECT authz.set_assignment_employment($1, $2::jsonb) AS f`,
+          [id, JSON.stringify(body)])).rows[0]!.f;
+      } catch (err) {
+        mapEmploymentError(err);
+      }
+      await this.audit.record(c, {
+        actorId: user.id, action: "assignment.employment_updated", entityType: "assignment", entityId: id,
+        changes: { fields: changed, ...(changed.includes("payrollCompanyId") ? { payrollCompanyId: body.payrollCompanyId ?? null } : {}) },
+      });
+      const r = (await c.query<{ payroll_company_id: string | null; payroll_company_name: string | null; everify_date: string | null; onboarded_date: string | null }>(
+        `SELECT ae.payroll_company_id, pc.name AS payroll_company_name, ae.everify_date::text AS everify_date, ae.onboarded_date::text AS onboarded_date
+         FROM eureka.assignment_employment ae LEFT JOIN authz.payroll_companies() pc ON pc.id = ae.payroll_company_id
+         WHERE ae.assignment_id = $1`, [id])).rows[0];
+      const rate = rateVisible
+        ? (await c.query<{ pay_rate: string }>(`SELECT pay_rate::text FROM authz.assignment_pay_rates($1) WHERE assignment_id = $2`, [a.person_id, id])).rows[0]
+        : undefined;
+      return {
+        id, changed,
+        payrollCompany: ref(r?.payroll_company_id ?? null, r?.payroll_company_name ?? null),
+        everifyDate: r?.everify_date ?? null, onboardedDate: r?.onboarded_date ?? null,
+        ...(rateVisible ? { payRate: rate ? Number(rate.pay_rate) : null } : {}),
+      };
+    });
+  }
+
+  /**
+   * 0150, leaving a project: HR/Accounts/Associate HR put a benched employee's
+   * candidate in a Sales team (no candidate:assign needed); the recruiter is
+   * cleared for the new lead to assign, and the lead and manager are notified
+   * (candidate.assigned). Audited with ids only.
+   */
+  async assignTeam(user: AuthedUser, id: string, body: AssignTeam) {
+    return this.db.withUser(user.id, async (c) => {
+      const e = await this.loadEmployee(c, user, id);
+      if (e.status !== "bench") throw new UnprocessableEntityException("invalid_transition");
+      let r: { cand_id: string; from_team_id: string | null; to_team_id: string };
+      try {
+        r = (await c.query<typeof r>(`SELECT * FROM authz.assign_employee_team($1, $2)`, [id, body.teamId])).rows[0]!;
+      } catch (err) {
+        mapEmploymentError(err);
+      }
+      await this.audit.record(c, {
+        actorId: user.id, action: "employee.team_assigned", entityType: "employee", entityId: id,
+        changes: { candidateId: r.cand_id, fromTeamId: r.from_team_id, toTeamId: r.to_team_id },
+      });
+      const team = (await c.query<{ name: string }>(`SELECT name FROM eureka.team WHERE id = $1`, [r.to_team_id])).rows[0];
+      return { id, candidateId: r.cand_id, team: { id: r.to_team_id, name: team?.name ?? null }, recruiter: null };
     });
   }
 }
