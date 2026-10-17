@@ -587,7 +587,7 @@ The catalog is in `packages/shared/src/authz/catalog.ts`. It defines the followi
 | Accounts | **own:** chat:use, datahub:read<br>**org:** assignment:read, assignment:update, candidate.compliance:update, candidate:read, datahub:manage, document.restricted:read, document:read, employee:read, invoice:read, invoice:update, placement:read, rate:read, report:read |
 | Immigration | **own:** chat:use, datahub:read<br>**org:** assignment:read, candidate.compliance:update, candidate.dob:read, candidate.phone:read, candidate:read, document.restricted:read, document:read, document:upload, document:verify, employee:read, visa:read, visa:update |
 | Interview Coach | **own:** chat:use, datahub:read<br>**coached:** candidate:read, hotlist:read, interview.feedback:create, interview:read, training.progress:update, training:read |
-| Interview Coordinator (Support) | **own:** chat:use, datahub:read<br>**org:** calendar:block, candidate:read, interview:read |
+| Interview Coordinator (Support) | **own:** chat:use, datahub:read<br>**org:** calendar:block, interview:read |
 | Documents Team | **own:** chat:use, datahub:read<br>**org:** candidate.compliance:update, candidate:read, document:read, document:upload, document:verify |
 | BU Head | **own:** chat:use, datahub:read<br>**org:** assignment:read, employee:read, placement:read, report:read |
 | Org Admin | **own:** chat:use<br>**org:** access:manage, audit:read, staff.contact:read |

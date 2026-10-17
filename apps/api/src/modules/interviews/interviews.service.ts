@@ -72,7 +72,8 @@ const SELECT = `
          i.round, i.starts_at, i.ends_at, i.coach_id, i.invite_received, i.call_status, i.cleared, i.cleared_at,
          i.otter_url, i.recording_url, i.consent_captured, i.system_name, i.interview_type, i.meeting_url,
          i.updated_at, ${toMicros("i.starts_at")} AS k,
-         CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name END AS candidate_name,
+         CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name
+              ELSE authz.interview_candidate_name(i.id) END AS candidate_name,
          ru.display_name AS recruiter_name, cu.display_name AS coach_name,
          tm.name AS team_name, l.name AS location_name, cl.name AS client_name,
          c.recruiter_id AS c_recruiter, c.team_id AS c_team, c.location_id AS c_location,

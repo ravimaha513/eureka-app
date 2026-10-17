@@ -462,10 +462,11 @@ export const GRANTS: Record<Role, Grants> = {
     "chat:use": "own",
   },
   // interview-alerts: the support team that coordinates interviews. Reads every
-  // interview (and the candidates on them) to coordinate, blocks the support
-  // calendar; no Sales writes, no documents, no rates.
+  // interview to coordinate, blocks the support calendar; no Sales writes, no
+  // documents, no rates. No candidate:read (gap/candidates, team-scoped Hot List):
+  // the candidate's name on each interview comes from
+  // authz.interview_candidate_name (0141), not from the Candidates list.
   interview_coordinator: {
-    "candidate:read": "org",
     "interview:read": "org",
     "calendar:block": "org",
     // datahub

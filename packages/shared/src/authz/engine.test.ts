@@ -316,4 +316,12 @@ describe("Hot List visibility default (team; Eureka App 4)", () => {
     }
     expect(checked).toBeGreaterThan(20);
   });
+
+  it("interview coordinators read every interview but no candidate list or Hot List", () => {
+    const COORD = base({ userId: "IC", roles: [{ role: "interview_coordinator" }] });
+    expect(resolveScope(COORD, "interview:read")?.all).toBe(true);
+    expect(resolveScope(COORD, "candidate:read")).toBeNull();
+    expect(resolveScope(COORD, "hotlist:read")).toBeNull();
+    expect(candidateVisible(resolveScope(COORD, "candidate:read"), cand({}))).toBe(false);
+  });
 });

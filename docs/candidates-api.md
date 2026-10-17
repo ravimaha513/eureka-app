@@ -19,6 +19,7 @@ RLS:
 | Location incharge / ops admin | Candidates of their location |
 | CEO | Everyone (the offshore office manager is an associate director since 0090) |
 | HR, Accounts, Immigration, Documents team, BU head, org admin | No Hot List (they keep the Candidates list where they hold `candidate:read`) |
+| Interview coordinator (support) | No Hot List and no Candidates list (`candidate:read` dropped, 0141); the Interviews board shows each interview's candidate name through `authz.interview_candidate_name` |
 
 Phones stay masked outside the caller's own scope. Every Hot List page is audited (`hotlist.read`,
 filter summary only) under either policy. The open function `authz.hotlist_page` is kept and takes
