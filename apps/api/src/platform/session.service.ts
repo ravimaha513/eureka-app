@@ -43,18 +43,25 @@ export class SessionService {
     return sid;
   }
 
-  /** Returns the session if valid; enforces absolute and idle timeouts and user status. */
+  /**
+   * Returns the session if valid; enforces absolute and idle timeouts and user status. last_seen_at is
+   * written at most once a minute (not on every request), so the idle timeout is exact to a minute.
+   */
   async resolve(sid: string | undefined): Promise<SessionInfo | null> {
     if (!sid || sid.length > 100) return null;
     const idHash = SessionService.hash(sid);
     const { rows } = await this.db.system((c) =>
       c.query<{ user_id: string; auth_time: Date }>(
-        `UPDATE eureka.session s SET last_seen_at = now()
-         FROM eureka.app_user u
-         WHERE s.id_hash = $1 AND u.id = s.user_id AND u.status = 'active'
-           AND s.revoked_at IS NULL AND s.expires_at > now()
-           AND s.last_seen_at > now() - make_interval(mins => $2)
-         RETURNING s.user_id, s.auth_time`,
+        `WITH live AS (
+           SELECT s.id_hash, s.user_id, s.auth_time, s.last_seen_at FROM eureka.session s
+           JOIN eureka.app_user u ON u.id = s.user_id AND u.status = 'active'
+           WHERE s.id_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now()
+             AND s.last_seen_at > now() - make_interval(mins => $2)
+         ), touch AS (
+           UPDATE eureka.session s SET last_seen_at = now() FROM live
+           WHERE s.id_hash = live.id_hash AND live.last_seen_at < now() - interval '1 minute'
+         )
+         SELECT user_id, auth_time FROM live`,
         [idHash, this.config.SESSION_IDLE_MINUTES],
       ),
     );
