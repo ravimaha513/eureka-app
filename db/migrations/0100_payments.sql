@@ -402,7 +402,8 @@ END $$;
 
 -- FR-PAY-04/05: a payment received (date, amount) against a live invoice. The
 -- date is on or after the invoice date and not in the future; the total
--- received never exceeds the invoice amount (when one is set). The first
+-- received never exceeds the invoice amount (when one is set), and a fully
+-- received invoice (without an amount: any payment) takes no more payments. The first
 -- payment ever recorded for the placement emits `payment.first_received`
 -- (once per placement, ledger job `first-payment`).
 CREATE FUNCTION authz.payment_record(p_invoice uuid, p_received date, p_amount numeric)
@@ -429,6 +430,9 @@ BEGIN
     RAISE EXCEPTION 'invalid_amount' USING ERRCODE = 'check_violation';
   END IF;
   SELECT coalesce(sum(p.amount), 0) INTO paid FROM eureka.payment p WHERE p.invoice_id = i.id AND p.voided_at IS NULL;
+  IF paid > 0 AND (i.amount IS NULL OR paid >= i.amount) THEN
+    RAISE EXCEPTION 'invoice_received' USING ERRCODE = 'check_violation';
+  END IF;
   IF i.amount IS NOT NULL AND paid + p_amount > i.amount THEN
     RAISE EXCEPTION 'overpayment' USING ERRCODE = 'check_violation';
   END IF;
