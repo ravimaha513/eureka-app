@@ -57,8 +57,12 @@ export function loadUsers(): { email: string; name: string; kind: string; n: num
 export const mintedSid = (key: string, email: string) => createHmac("sha256", key).update(email).digest("hex");
 
 const LOCATIONS = [["Dallas", "TX"], ["Austin", "TX"], ["Houston", "TX"], ["Charlotte", "NC"]] as const;
-const TECHNOLOGIES = ["Java", ".NET", "Python", "Data Engineering", "DevOps", "Salesforce", "QA Automation",
-  "React", "Business Analyst", "SAP", "Cloud Engineering", "Data Science"];
+/**
+ * The Eureka App 4 technology list (migration 0140 adds the same names to databases that already
+ * hold technologies). ".NET" keeps the existing spelling, which the import mapping targets.
+ */
+const TECHNOLOGIES = ["Java", "DE/PY", "Python Developer", ".NET", "DevOps", "AI/ML", "Networking", "Service Now",
+  "Business Analyst", "Others", "Data Science", "PY AI", "Salesforce Administrator", "Python Full Stack"];
 const CLIENTS = ["Northwind Financial", "Contoso Health", "Fabrikam Retail", "Tailspin Airlines", "Adventure Works",
   "Wide World Importers", "Proseware", "Litware", "Woodgrove Bank", "Fourth Coffee", "Alpine Ski House",
   "Blue Yonder Airlines", "Coho Vineyard", "Graphic Design Institute", "Humongous Insurance", "Lucerne Publishing",
