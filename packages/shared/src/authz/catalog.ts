@@ -119,6 +119,8 @@ export const PERMISSIONS = [
   "performance:read",
   /** Recruiter targets per period (docs/performance-api.md PF-4); set by managers and associate directors. */
   "performance.target:manage",
+  // market-reports: point-in-time candidate counts (in market, placed, per status) for planning batches
+  "report.market:read",
   // vendors and org
   "vendor.preferred:create",
   "vendor.preferred:read",
@@ -236,6 +238,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "team",
     // interview-alerts: block the support calendar for the team's interviews
     "calendar:block": "team",
+    // market-reports
+    "report.market:read": "team",
     // datahub
     "datahub:read": "own",
     // training
@@ -261,6 +265,8 @@ export const GRANTS: Record<Role, Grants> = {
     "designation:change": "hierarchy",
     // performance: recruiter targets for the hierarchy
     "performance.target:manage": "hierarchy",
+    // market-reports
+    "report.market:read": "hierarchy",
     // datahub
     "datahub:read": "own",
     // training
@@ -286,6 +292,8 @@ export const GRANTS: Record<Role, Grants> = {
     "designation:change": "hierarchy",
     // performance: recruiter targets for the hierarchy
     "performance.target:manage": "hierarchy",
+    // market-reports
+    "report.market:read": "hierarchy",
     // datahub
     "datahub:read": "own",
     // training
@@ -312,6 +320,8 @@ export const GRANTS: Record<Role, Grants> = {
     "report:read": "org",
     "report:export": "org",
     "vendor.preferred:read": "org",
+    // market-reports
+    "report.market:read": "org",
     // datahub
     "datahub:read": "own",
     // training
@@ -333,6 +343,8 @@ export const GRANTS: Record<Role, Grants> = {
     "placement:read": "location",
     "performance:read": "location",
     "report:read": "location",
+    // market-reports
+    "report.market:read": "location",
     // datahub
     "datahub:read": "own",
     // training
@@ -364,6 +376,8 @@ export const GRANTS: Record<Role, Grants> = {
     "interview.feedback:create": "location",
     "placement:read": "location",
     "report:read": "location",
+    // market-reports
+    "report.market:read": "location",
     // datahub
     "datahub:read": "own",
     "datahub:manage": "location",

@@ -3,6 +3,7 @@ import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { ApiError, type Me } from "../api";
 import { fmtDate } from "../sales/ui";
 import { employeeKeys, employeesApi, employmentError, employmentLabel, localToday, shiftDays } from "./employeesApi";
+import { MarketReportPanel } from "./MarketReport";
 
 const EXPORT_ROW_CAP = 50_000;
 
@@ -17,12 +18,49 @@ export function download(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+type ReportTab = "joinings" | "market";
+
+/**
+ * Reports page: Joinings and exits for every report:read holder, and the
+ * Market tab (gap L3, MarketReport.tsx) for report.market:read holders.
+ */
+export function ReportsPage({ me }: { me: Pick<Me, "capabilities"> }) {
+  const tabsId = useId();
+  const canExport = me.capabilities.includes("report:export");
+  const hasMarket = me.capabilities.includes("report.market:read");
+  const hasJoinings = me.capabilities.includes("report:read");
+  const [tab, setTab] = useState<ReportTab>(hasJoinings ? "joinings" : "market");
+  if (!hasMarket) {
+    return (
+      <>
+        <div><h1 tabIndex={-1}>Reports</h1></div>
+        <JoiningsExitsPanel canExport={canExport} />
+      </>
+    );
+  }
+  const tabs: [ReportTab, string][] = [...(hasJoinings ? [["joinings", "Joinings and exits"] as [ReportTab, string]] : []), ["market", "Market"]];
+  return (
+    <>
+      <div><h1 tabIndex={-1}>Reports</h1></div>
+      <div className="tabs" role="tablist" aria-label="Reports">
+        {tabs.map(([k, label]) => (
+          <button key={k} type="button" role="tab" id={`${tabsId}-t-${k}`} className="tab" aria-selected={tab === k}
+            aria-controls={`${tabsId}-p-${k}`} onClick={() => setTab(k)}>{label}</button>
+        ))}
+      </div>
+      <div role="tabpanel" id={`${tabsId}-p-${tab}`} aria-labelledby={`${tabsId}-t-${tab}`}>
+        {tab === "market" ? <MarketReportPanel canExport={canExport} onDownload={download} /> : <JoiningsExitsPanel canExport={canExport} />}
+      </div>
+    </>
+  );
+}
+
 /**
  * Reports > Joinings and exits (FR-EMP, design B7): assignments that started
  * or ended in a period, for what the user can see. Export (report:export) is
  * capped and audited by the server.
  */
-export function ReportsPage({ me }: { me: Pick<Me, "capabilities"> }) {
+function JoiningsExitsPanel({ canExport }: { canExport: boolean }) {
   const id = useId();
   const today = localToday();
   const [from, setFrom] = useState(shiftDays(today, -90));
@@ -34,7 +72,6 @@ export function ReportsPage({ me }: { me: Pick<Me, "capabilities"> }) {
     enabled: !invalid,
     placeholderData: keepPreviousData,
   });
-  const canExport = me.capabilities.includes("report:export");
   const run = useMutation({
     mutationFn: () => employeesApi.exportJoiningsExits(from, to),
     onSuccess: (r) => download(r.blob, r.filename),
@@ -43,10 +80,7 @@ export function ReportsPage({ me }: { me: Pick<Me, "capabilities"> }) {
 
   return (
     <>
-      <div>
-        <h1 tabIndex={-1}>Reports</h1>
-        <p className="sub">Joinings and exits: assignments that started or ended in the period, for the teams and placements you can see.</p>
-      </div>
+      <p className="sub">Joinings and exits: assignments that started or ended in the period, for the teams and placements you can see.</p>
 
       <form className="filters" aria-label="Report period" onSubmit={(e) => e.preventDefault()}>
         <div className="toolbar">

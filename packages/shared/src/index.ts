@@ -15,3 +15,4 @@ export * from "./jobs.js";
 export * from "./contracts.js";
 export * from "./birthdays.js";
 export * from "./payments.js";
+export * from "./marketReport.js";

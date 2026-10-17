@@ -31,7 +31,7 @@ export const NAV: NavItem[] = [
   { key: "training", label: "Training Batches", section: "Training", anyOf: ["training:read"] },
   { key: "courses", label: "Courses", section: "Training", anyOf: ["training:manage"] },
   { key: "performance", label: "Performance", section: "Insights", anyOf: ["performance:read"] },
-  { key: "reports", label: "Reports", section: "Insights", anyOf: ["report:read"] },
+  { key: "reports", label: "Reports", section: "Insights", anyOf: ["report:read", "report.market:read"] },
   { key: "access", label: "Users & Access", section: "Admin", anyOf: ["access:manage"] },
   // interview-alerts: HR keeps the staff birthdays the CEO's morning digest is built from.
   { key: "birthdays", label: "Staff birthdays", section: "Admin", anyOf: ["staff.birthday:manage"] },
