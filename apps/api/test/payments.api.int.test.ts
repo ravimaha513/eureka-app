@@ -110,7 +110,7 @@ describe("Accounts raises an invoice and records payments", () => {
 
   it("requires an Idempotency-Key, replays a repeat and refuses a reused key with another body", async () => {
     const body = { placementId: j.placementId, invoiceNo: "INV-A-1", invoiceDate: addDays(today, -40), termsDays: 30, hours: 160, amount: 9876.5,
-      timesheetSubmittedOn: addDays(today, -42), periodStart: addDays(today, -70), periodEnd: addDays(today, -41), incentiveAmount: 250 };
+      timesheetSubmittedOn: addDays(today, -42), periodStart: addDays(today, -70), periodEnd: addDays(today, -41), incentiveAmount: 250.75 };
     expect((await call("acct", "POST", "/api/v1/invoices", body)).statusCode).toBe(400);
     const key = newKey();
     const first = await call("acct", "POST", "/api/v1/invoices", body, key);
@@ -147,7 +147,7 @@ describe("Accounts raises an invoice and records payments", () => {
     const [row] = res.json().items;
     expect(row).toMatchObject({
       id: inv, invoiceNo: "INV-A-1", status: "delayed", invoiceDate: addDays(today, -40), termsDays: 30,
-      expectedDate: addDays(today, -10), delayDays: 10, hours: 160, amount: 9876.5, incentiveAmount: 250, paidAmount: 0, rate: 60,
+      expectedDate: addDays(today, -10), delayDays: 10, hours: 160, amount: 9876.5, incentiveAmount: 250.75, paidAmount: 0, rate: 60,
       timesheetSubmittedOn: addDays(today, -42), periodStart: addDays(today, -70), periodEnd: addDays(today, -41),
       paymentCount: 0, receivedOn: null, rowVersion: 1,
       placement: { id: j.placementId, status: "joined", placementType: "w2" },
@@ -193,20 +193,20 @@ describe("Accounts raises an invoice and records payments", () => {
     const url = `/api/v1/invoices/${inv}/payments`;
     expect((await call("acct", "POST", url, { receivedOn: today, amount: 100 })).statusCode).toBe(400);
     const key = newKey();
-    const p1 = await call("acct", "POST", url, { receivedOn: addDays(today, -1), amount: 4000 }, key);
+    const p1 = await call("acct", "POST", url, { receivedOn: addDays(today, -1), amount: 4000.25 }, key);
     expect(p1.statusCode, p1.body).toBe(201);
     expect(p1.json()).toMatchObject({ invoiceId: inv, firstPayment: true });
-    const replay = await call("acct", "POST", url, { receivedOn: addDays(today, -1), amount: 4000 }, key);
+    const replay = await call("acct", "POST", url, { receivedOn: addDays(today, -1), amount: 4000.25 }, key);
     expect(replay.json()).toEqual(p1.json());
     expect((await call("acct", "POST", url, { receivedOn: today, amount: 6000 }, newKey())).json().detail).toBe("overpayment");
     expect((await call("acct", "POST", url, { receivedOn: addDays(today, 1), amount: 1 }, newKey())).statusCode).toBe(422);
-    const p2 = await call("acct", "POST", url, { receivedOn: today, amount: 5876.5 }, newKey());
+    const p2 = await call("acct", "POST", url, { receivedOn: today, amount: 5876.25 }, newKey());
     expect(p2.json().firstPayment).toBe(false);
     const d = (await call("acct", "GET", `/api/v1/invoices/${inv}`)).json();
     expect(d).toMatchObject({ status: "received", paidAmount: 9876.5, receivedOn: today, firstReceivedOn: addDays(today, -1), delayDays: 0,
       actions: { edit: true, recordPayment: false, void: false } });
     expect(d.payments).toHaveLength(2);
-    expect(d.payments[0]).toMatchObject({ receivedOn: addDays(today, -1), amount: 4000, recordedBy: "acct", voidedAt: null, actions: { void: true } });
+    expect(d.payments[0]).toMatchObject({ receivedOn: addDays(today, -1), amount: 4000.25, recordedBy: "acct", voidedAt: null, actions: { void: true } });
     const sales = (await call("r1b", "GET", `/api/v1/invoices/${inv}`)).json();
     expect(sales.payments[0]).not.toHaveProperty("amount");
     expect((await call("acct", "POST", url, { receivedOn: today, amount: 1 }, newKey())).json().detail).toBe("invoice_received");
@@ -222,7 +222,7 @@ describe("Accounts raises an invoice and records payments", () => {
     expect(rec[0]!.changes).toEqual({ paymentId: p1.json().id, placementId: j.placementId, receivedOn: addDays(today, -1), firstPayment: true });
     const all = JSON.stringify((await db.admin.query(
       "SELECT changes FROM eureka.audit_event WHERE action LIKE 'invoice.%' OR action LIKE 'payment.%'")).rows);
-    for (const s of ["9876", "4000", "5876", "INV-A-1", "250"]) expect(all, s).not.toContain(s);
+    for (const s of ["9876.5", "4000.25", "5876.25", "INV-A-1", "250.75"]) expect(all, s).not.toContain(s);
   });
 
   it("void: If-Match, refused with live payments, then gone from the default list", async () => {
