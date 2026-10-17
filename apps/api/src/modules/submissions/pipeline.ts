@@ -58,6 +58,8 @@ const CODES: Record<string, (code: string) => HttpException> = {
   invalid_panel: (c) => new UnprocessableEntityException(c),
   invalid_panel_member: (c) => new UnprocessableEntityException(c),
   lead_not_in_panel: (c) => new UnprocessableEntityException(c),
+  // interview-reports (migration 0130): eureka.interview_coach_guard
+  invalid_coach: (c) => new UnprocessableEntityException(c),
 };
 
 /**

@@ -60,6 +60,9 @@ interface InterviewRow {
   interview_type: string | null;
   meeting_url: string | null;
   job_title: string | null;
+  cf_rating: number | null;
+  cf_notes: string | null;
+  cf_at: Date | null;
   updated_at: Date;
   k: string;
   c_recruiter: string | null;
@@ -76,7 +79,7 @@ const SELECT = `
          ru.display_name AS recruiter_name, cu.display_name AS coach_name,
          tm.name AS team_name, l.name AS location_name, cl.name AS client_name,
          c.recruiter_id AS c_recruiter, c.team_id AS c_team, c.location_id AS c_location,
-         sub.job_title
+         sub.job_title, cf.rating AS cf_rating, cf.notes AS cf_notes, cf.created_at AS cf_at
   FROM eureka.interview i
   LEFT JOIN eureka.submission sub ON sub.id = i.submission_id
   LEFT JOIN eureka.candidate c ON c.id = i.candidate_id
@@ -85,7 +88,11 @@ const SELECT = `
   LEFT JOIN eureka.app_user cu ON cu.id = i.coach_id
   LEFT JOIN eureka.team tm ON tm.id = i.team_id
   LEFT JOIN eureka.location l ON l.id = i.location_id
-  LEFT JOIN eureka.client cl ON cl.id = i.client_id`;
+  LEFT JOIN eureka.client cl ON cl.id = i.client_id
+  LEFT JOIN LATERAL (
+    SELECT f.rating, f.notes, f.created_at FROM eureka.interview_feedback f
+    WHERE f.interview_id = i.id AND f.kind = 'candidate' ORDER BY f.created_at DESC, f.id DESC LIMIT 1
+  ) cf ON true`;
 
 const SALES_SCOPES: readonly Scope[] = ["own", "team", "hierarchy", "org"];
 const FEEDBACK_SCOPES: Record<FeedbackKind, readonly Scope[]> = {
@@ -167,6 +174,11 @@ export class InterviewsService {
       /** IS-3: only readers of the interview get here (RLS + scope predicate). */
       meetingUrl: r.meeting_url,
       durationMin: Math.round((r.ends_at.getTime() - r.starts_at.getTime()) / 60_000),
+      /**
+       * Latest feedback the candidate sent through the feedback email (kind
+       * 'candidate'); readable wherever the interview is (feedback_read).
+       */
+      candidateFeedback: r.cf_at === null ? null : { rating: r.cf_rating, notes: r.cf_notes, submittedAt: r.cf_at },
       updatedAt: r.updated_at,
       /** Presentation hint for the board; the server re-checks on write. */
       editableFields: [...editableFields(access, ref(r))].sort(),

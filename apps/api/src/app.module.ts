@@ -75,6 +75,7 @@ import { CALENDAR_PROVIDER, DevCalendarProvider, GoogleCalendarProvider } from "
 import { StaffBirthdaysController, StaffBirthdaysService } from "./modules/staff/birthdays.controller.js";
 import { PaymentsController, PaymentsService } from "./modules/payments/payments.controller.js";
 import { MarketReportController, MarketReportService } from "./modules/reports/market-report.controller.js";
+import { InterviewReportsController, InterviewReportsService } from "./modules/interview-reports/interview-reports.controller.js";
 
 @Controller("api")
 class HealthController {
@@ -117,6 +118,8 @@ export class AppModule {
         PerformanceController, UserDesignationController,
         // market-reports
         MarketReportController,
+        // interview-reports
+        InterviewReportsController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
@@ -143,6 +146,8 @@ export class AppModule {
         PaymentsService,
         // market-reports
         MarketReportService,
+        // interview-reports
+        InterviewReportsService,
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],

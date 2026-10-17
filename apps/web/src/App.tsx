@@ -15,6 +15,7 @@ import { PaperworkPage } from "./paperwork/PaperworkPage";
 import { NotificationBell, type InboxItem } from "./notifications/Inbox";
 import { EmployeesPage } from "./employees/EmployeesPage";
 import { ReportsPage } from "./employees/JoiningsExitsReport";
+import { InterviewReportsPage } from "./interviews/InterviewReportsPage";
 import { CompaniesPage, FacilitiesPage } from "./sites/SitesPage";
 import { DataHubPage } from "./datahub/DataHubPage";
 import { TrainingPage } from "./training/TrainingPage";
@@ -332,6 +333,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "employees" ? <EmployeesPage me={me} />
             : current.key === "reports" ? <ReportsPage me={me} />
             : current.key === "performance" ? <PerformancePage me={me} />
+            : current.key === "interview-reports" ? <InterviewReportsPage me={me} />
             : current.key === "companies" ? <CompaniesPage key="companies" me={me} />
             : current.key === "facilities" ? <FacilitiesPage key="facilities" me={me} />
             : current.key === "datahub" ? <DataHubPage />

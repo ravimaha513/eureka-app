@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
-  BadgeCheck, BookOpen, BriefcaseBusiness, Building2, CalendarClock, ChevronDown, Database, FileBarChart, FileCheck2, FolderOpen, Flame, LayoutDashboard, LogOut, MessageCircle, Moon,
+  BadgeCheck, BookOpen, BriefcaseBusiness, Building2, CalendarClock, ChartColumn, ChevronDown, Database, FileBarChart, FileCheck2, FolderOpen, Flame, LayoutDashboard, LogOut, MessageCircle, Moon,
   GraduationCap, House, Send, Settings, ShieldCheck, Sun, TrendingUp, Users, UserRoundCheck, UserRoundSearch, Wallet, type LucideIcon,
 } from "lucide-react";
 import type { Theme } from "./theme";
@@ -18,6 +18,8 @@ export const NAV_ICONS: Record<string, LucideIcon> = {
   chat: MessageCircle,
   // jobs-portal
   jobs: BriefcaseBusiness, applications: FolderOpen, applicants: UserRoundSearch,
+  // interview-reports
+  "interview-reports": ChartColumn,
 };
 
 const TINTS = ["indigo", "teal", "amber", "rose", "violet", "sky"] as const;
