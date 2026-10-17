@@ -622,6 +622,31 @@ const CASES: RejectCase[] = [
     }),
     forbidden: { userId: U.r2a, valid: false },
   },
+  // performance (docs/performance-api.md PF-4, PF-7): the person comes from the URL, the setter and versions from the server
+  {
+    route: "PUT /api/v1/admin/users/:id/designation", actor: "admin",
+    prepare: async () => ({
+      url: `/api/v1/admin/users/${U.r1b}/designation`, body: { designation: "MA Senior Recruiter" },
+      state: () => rows(`SELECT id, designation FROM eureka.app_user ORDER BY id`),
+    }),
+    forbidden: { userId: U.r2a, displayName: "Boss", email: "boss@eureka.example", roles: ["ceo"], status: "inactive" },
+  },
+  {
+    route: "PUT /api/v1/users/:id/designation", actor: "m1",
+    prepare: async () => ({
+      url: `/api/v1/users/${U.r1a}/designation`, body: { designation: "MA Recruiter" },
+      state: () => rows(`SELECT id, designation FROM eureka.app_user ORDER BY id`),
+    }),
+    forbidden: { userId: U.r2a, displayName: "Boss", email: "boss@eureka.example", roles: ["ceo"], status: "inactive" },
+  },
+  {
+    route: "PUT /api/v1/performance/targets", actor: "m1",
+    prepare: async () => ({
+      url: "/api/v1/performance/targets", body: { userId: U.r1a, periodKind: "month", periodStart: "2030-01-01", submissions: 5 },
+      state: () => rows(`SELECT * FROM eureka.performance_target ORDER BY id`),
+    }),
+    forbidden: { targetId: FOREIGN_ID, setBy: U.ad, teamId: T.t2, periodEnd: "2030-01-31", status: "met", submissionsActual: 9, notifiedAt: PAST },
+  },
   {
     route: "POST /api/v1/admin/role-requests", actor: "admin",
     prepare: async () => ({
