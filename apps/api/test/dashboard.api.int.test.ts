@@ -228,8 +228,8 @@ const EXPECTED: Record<string, { groupBy: string; totals: Record<string, number>
   m2: { groupBy: "team", totals: all(2, 1, 1, 1, 1, 2) },
   ad: { groupBy: "team", totals: all(7, 4, 3, 3, 2, 5) },
   ceo: { groupBy: "location", totals: all(7, 4, 3, 3, 2, 5) },
-  locD: { groupBy: "location", totals: all(4, 2, 1, 1, 2, 3) },
-  locA: { groupBy: "location", totals: all(3, 2, 2, 2, 0, 2) },
+  locD: { groupBy: "candidate", totals: all(4, 2, 1, 1, 2, 3) },
+  locA: { groupBy: "candidate", totals: all(3, 2, 2, 2, 0, 2) },
   // No submission or interview access: those metrics are absent, not zero.
   hr: { groupBy: "location", totals: { placementsCreated: 3, placementsJoined: 2, candidatesAdded: 5 } },
   acct: { groupBy: "location", totals: { placementsCreated: 3, placementsJoined: 2, candidatesAdded: 5 } },
@@ -277,7 +277,7 @@ describe("dashboard totals per role scope (hand-calculated)", () => {
   });
 
   it("a location admin sees only their location and can regroup by team", async () => {
-    expect((await dashboard("locD")).groups).toEqual([{ id: LOC.dallas, name: "Dallas", counts: all(4, 2, 1, 1, 2, 3) }]);
+    expect((await dashboard("locD", `${PERIOD}&groupBy=location`)).groups).toEqual([{ id: LOC.dallas, name: "Dallas", counts: all(4, 2, 1, 1, 2, 3) }]);
     const byTeam = await dashboard("locD", `${PERIOD}&groupBy=team`);
     expect(byTeam.groupBy).toBe("team");
     expect(byTeam.groups.map((g) => [g.name, g.counts.submissions])).toEqual([["Team Anjali", 1], ["Team Rohit", 3], ["Team Vikram", 0]]);
