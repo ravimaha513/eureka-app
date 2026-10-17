@@ -2,10 +2,13 @@ import { ForbiddenException, HttpException, HttpStatus, Injectable, ServiceUnava
 import type pg from "pg";
 import { z } from "zod";
 import { GRANTS, resolveScope, type EffectiveScope, type Permission, type UserAccess } from "@eureka/shared";
+import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
+import { toCsv } from "../hotlist/csv.js";
+import { EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS } from "../hotlist/hotlist.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import { QueryInstant } from "../submissions/pipeline.js";
 import {
@@ -13,12 +16,17 @@ import {
   DEFAULT_PERIOD_DAYS,
   MAX_PERIOD_DAYS,
   DASHBOARD_REQUESTS_PER_MINUTE,
+  MAX_GROUPS,
   NEEDS_ATTENTION_LIMIT,
 } from "./dashboard.config.js";
 
 const DAY_MS = 86_400_000;
 
-export const GROUP_BY = ["recruiter", "team", "location"] as const;
+/**
+ * `manager` (sales reports by manager) and `candidate` (location sales view:
+ * submissions, interviews and cleared calls per candidate) since migration 0160.
+ */
+export const GROUP_BY = ["recruiter", "team", "location", "manager", "candidate"] as const;
 export type GroupBy = (typeof GROUP_BY)[number];
 
 function validTimeZone(tz: string): boolean {
@@ -58,16 +66,19 @@ const OPEN_PLACEMENT_SQL = `('confirmed', 'paperwork', 'bgc', 'ready')`;
 /** Interviews that happen (or happened): not cancelled, rescheduled or without an invite. */
 const LIVE_INTERVIEW_SQL = `NOT IN ('cancelled', 'rescheduled', 'no_invite')`;
 
-const SCOPE_RANK = { own: 0, coached: 0, team: 0, hierarchy: 1, location: 2, org: 2 } as const;
+const SCOPE_RANK = { own: 0, coached: 0, team: 0, hierarchy: 1, location: 2, org: 3 } as const;
 
-/** The natural grouping for the caller's broadest report:read grant: recruiters for a lead, teams for a manager, locations above. */
+/**
+ * The natural grouping for the caller's broadest report:read grant: recruiters for a lead, teams for a manager,
+ * candidates for a location role (the location sales view, migration 0160), locations at org scope.
+ */
 export function defaultGroupBy(access: UserAccess): GroupBy {
   let rank = 0;
   for (const a of access.roles) {
     const s = GRANTS[a.role]["report:read"];
     if (s) rank = Math.max(rank, SCOPE_RANK[s]);
   }
-  return rank === 2 ? "location" : rank === 1 ? "team" : "recruiter";
+  return rank === 3 ? "location" : rank === 2 ? "candidate" : rank === 1 ? "team" : "recruiter";
 }
 
 /** Normalizes the period: default the last DEFAULT_PERIOD_DAYS; from < to; at most MAX_PERIOD_DAYS. */
@@ -80,6 +91,18 @@ export function resolvePeriod(q: Pick<DashboardQuery, "from" | "to">, now = Date
   }
   return { from, to };
 }
+
+/** CSV headings and the label of the null group, per grouping. */
+const GROUP_LABELS: Record<GroupBy, string> = {
+  recruiter: "Recruiter", team: "Team", location: "Location", manager: "Manager", candidate: "Candidate",
+};
+const UNGROUPED: Record<GroupBy, string> = {
+  recruiter: "Unassigned", team: "No team", location: "No location", manager: "No manager", candidate: "No candidate",
+};
+const METRIC_LABELS: Record<Metric, string> = {
+  submissions: "Submissions", interviewsScheduled: "Interviews", interviewsCleared: "Interviews cleared",
+  placementsCreated: "Placements", placementsJoined: "Joined", candidatesAdded: "Candidates added",
+};
 
 type Params = unknown[];
 const bind = (params: Params) => (v: unknown) => { params.push(v); return `$${params.length}`; };
@@ -131,15 +154,41 @@ export type AttentionKind = "submissionStale" | "interviewFeedbackMissing" | "pl
 export class DashboardService {
   /** Per-user limit on these expensive queries (design A6.5). */
   private readonly limiter = new RateLimiter(DASHBOARD_REQUESTS_PER_MINUTE, 60_000);
+  private readonly exportLimiter = new RateLimiter(EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
 
-  constructor(private readonly db: DbService) {}
+  constructor(private readonly db: DbService, private readonly audit: AuditService) {}
 
   async get(user: AuthedUser, q: DashboardQuery) {
+    return this.run(user, q, "view");
+  }
+
+  /**
+   * Sales report CSV (migration 0160): the grouped activity counts of the
+   * dashboard for the same period, grouping and scope, plus a total row.
+   * report:read and report:export; rate-limited and audited (grouping,
+   * period and counts only).
+   */
+  async exportCsv(user: AuthedUser, q: DashboardQuery): Promise<{ csv: string; rows: number; truncated: boolean }> {
+    if (!resolveScope(user.access, "report:export")) throw new ForbiddenException();
+    const d = await this.run(user, q, "export");
+    const csv = toCsv(
+      [GROUP_LABELS[d.groupBy], ...d.metrics.map((m) => METRIC_LABELS[m])],
+      [
+        ...d.groups.map((g) => [g.id === null ? UNGROUPED[d.groupBy] : g.name ?? "(not visible)", ...d.metrics.map((m) => g.counts[m])]),
+        ["Total", ...d.metrics.map((m) => d.totals[m])],
+      ],
+    );
+    return { csv, rows: d.groups.length, truncated: d.groupsTruncated };
+  }
+
+  private async run(user: AuthedUser, q: DashboardQuery, mode: "view" | "export") {
     const report = resolveScope(user.access, "report:read");
     if (!report) throw new ForbiddenException();
     const { from, to } = resolvePeriod(q);
-    if (!this.limiter.take(user.id)) {
-      throw new HttpException("Too many dashboard requests; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
+    const limiter = mode === "export" ? this.exportLimiter : this.limiter;
+    if (!limiter.take(user.id)) {
+      throw new HttpException(mode === "export" ? "Too many exports; try again in a few minutes"
+        : "Too many dashboard requests; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
     }
     const groupBy = q.groupBy ?? defaultGroupBy(user.access);
     const read: Scopes["read"] = {};
@@ -151,7 +200,7 @@ export class DashboardService {
     const metrics = METRIC_KEYS.filter((m) => read[METRICS[m]]);
 
     try {
-      return await this.load(user, scopes, metrics, groupBy, from, to, q.tz ?? "UTC");
+      return await this.load(user, scopes, metrics, groupBy, from, to, q.tz ?? "UTC", mode);
     } catch (err) {
       // query_canceled: the statement timeout fired. Mapped here, not globally, so other endpoints keep their behaviour.
       if ((err as { code?: string }).code === "57014") {
@@ -161,12 +210,14 @@ export class DashboardService {
     }
   }
 
-  private async load(user: AuthedUser, scopes: Scopes, metrics: Metric[], groupBy: GroupBy, from: Date, to: Date, tz: string) {
+  private async load(user: AuthedUser, scopes: Scopes, metrics: Metric[], groupBy: GroupBy, from: Date, to: Date, tz: string,
+    mode: "view" | "export") {
     const report = scopes.report;
     return this.db.withUser(user.id, async (c) => {
       // Org-wide reports get the longer report timeout (design B4.8 N9).
       if (report.all) await c.query("SET LOCAL statement_timeout = '60s'");
-      const counts = metrics.length ? await this.counts(c, scopes, groupBy, from, to, tz) : [];
+      let counts = metrics.length ? await this.counts(c, scopes, groupBy, from, to, tz) : [];
+      if (groupBy === "manager") counts = await this.toManagers(c, counts);
       const names = await this.names(c, groupBy, [...new Set(counts.map((r) => r.k).filter((k): k is string => k !== null))]);
       const zero = () => Object.fromEntries(metrics.map((m) => [m, 0])) as Record<Metric, number>;
       const totals = zero();
@@ -183,14 +234,30 @@ export class DashboardService {
         g[r.m] += r.n;
         groups.set(r.k, g);
       }
-      const groupList = [...groups].map(([id, counts]) => ({ id, name: id === null ? null : names.get(id) ?? null, counts }))
-        .sort((a, b) => (a.name === null ? 1 : b.name === null ? -1 : a.name.localeCompare(b.name) || String(a.id).localeCompare(String(b.id))));
+      let groupList = [...groups].map(([id, counts]) => ({ id, name: id === null ? null : names.get(id) ?? null, counts }));
+      // Per-candidate (or very wide) groupings: keep the MAX_GROUPS most active groups; totals stay exact.
+      const groupsTruncated = groupList.length > MAX_GROUPS;
+      if (groupsTruncated) {
+        const sum = (g: (typeof groupList)[number]) => metrics.reduce((n, m) => n + g.counts[m], 0);
+        groupList = groupList.sort((a, b) => sum(b) - sum(a) || String(a.id).localeCompare(String(b.id))).slice(0, MAX_GROUPS);
+      }
+      groupList.sort((a, b) => (a.name === null ? 1 : b.name === null ? -1 : a.name.localeCompare(b.name) || String(a.id).localeCompare(String(b.id))));
+      const period = { from: from.toISOString(), to: to.toISOString() };
+      if (mode === "export") {
+        await this.audit.record(c, {
+          actorId: user.id, action: "dashboard.export", entityType: "report",
+          changes: { groupBy, from: period.from, to: period.to, rows: groupList.length, truncated: groupsTruncated, metrics },
+        });
+        return { period, groupBy, metrics, totals, groups: groupList, groupsTruncated, series: [], needsAttention: null };
+      }
       return {
-        period: { from: from.toISOString(), to: to.toISOString() },
+        period,
         groupBy,
         metrics,
         totals,
         groups: groupList,
+        /** True when more than MAX_GROUPS groups had activity; `groups` then holds the most active ones. */
+        groupsTruncated,
         /** One entry per local day of the period, zero-filled, for the activity-over-time chart. */
         series: [...days].map(([date, counts]) => ({ date, counts })),
         needsAttention: {
@@ -208,29 +275,39 @@ export class DashboardService {
     const $from = p(from.toISOString());
     const $to = p(to.toISOString());
     const $tz = p(tz);
-    const col = { recruiter: "recruiter_id", team: "team_id", location: "location_id" }[groupBy];
+    /** Group key of an activity row (alias a) or of a candidate row (cand = true), as text. */
+    const key = (a: string, cand = false): string => {
+      switch (groupBy) {
+        case "recruiter": return `${a}.recruiter_id::text`;
+        case "team": return `${a}.team_id::text`;
+        case "location": return `${a}.location_id::text`;
+        case "candidate": return cand ? `${a}.id::text` : `${a}.candidate_id::text`;
+        // Resolved to the manager in toManagers: the team's lead, or the recruiter when there is no team.
+        case "manager": return `CASE WHEN ${a}.team_id IS NOT NULL THEN 't:' || ${a}.team_id ELSE 'r:' || ${a}.recruiter_id END`;
+      }
+    };
     const inPeriod = (expr: string) => `${expr} >= ${$from}::timestamptz AND ${expr} < ${$to}::timestamptz`;
     const branches: string[] = [];
 
     const sub = activityWhere(s, "submission:read", params, "s");
-    if (sub) branches.push(`SELECT 'submissions' AS m, s.${col} AS k, s.submitted_at AS ts FROM eureka.submission s
+    if (sub) branches.push(`SELECT 'submissions' AS m, ${key("s")} AS k, s.submitted_at AS ts FROM eureka.submission s
       LEFT JOIN eureka.candidate c ON c.id = s.candidate_id WHERE ${sub} AND ${inPeriod("s.submitted_at")}`);
 
     const int = activityWhere(s, "interview:read", params, "i");
     if (int) {
-      branches.push(`SELECT 'interviewsScheduled', i.${col}, i.starts_at FROM eureka.interview i
+      branches.push(`SELECT 'interviewsScheduled', ${key("i")}, i.starts_at FROM eureka.interview i
         LEFT JOIN eureka.candidate c ON c.id = i.candidate_id
         WHERE ${int} AND ${inPeriod("i.starts_at")} AND i.call_status ${LIVE_INTERVIEW_SQL}`);
-      branches.push(`SELECT 'interviewsCleared', i.${col}, i.cleared_at FROM eureka.interview i
+      branches.push(`SELECT 'interviewsCleared', ${key("i")}, i.cleared_at FROM eureka.interview i
         LEFT JOIN eureka.candidate c ON c.id = i.candidate_id
         WHERE ${int} AND i.cleared AND ${inPeriod("i.cleared_at")}`);
     }
 
     const pl = activityWhere(s, "placement:read", params, "pl");
     if (pl) {
-      branches.push(`SELECT 'placementsCreated', pl.${col}, pl.created_at FROM eureka.placement pl
+      branches.push(`SELECT 'placementsCreated', ${key("pl")}, pl.created_at FROM eureka.placement pl
         LEFT JOIN eureka.candidate c ON c.id = pl.candidate_id WHERE ${pl} AND ${inPeriod("pl.created_at")}`);
-      branches.push(`SELECT 'placementsJoined', pl.${col}, pl.joined_at FROM eureka.placement pl
+      branches.push(`SELECT 'placementsJoined', ${key("pl")}, pl.joined_at FROM eureka.placement pl
         LEFT JOIN eureka.candidate c ON c.id = pl.candidate_id
         WHERE ${pl} AND pl.joined_at IS NOT NULL AND ${inPeriod("pl.joined_at")}`);
     }
@@ -239,7 +316,7 @@ export class DashboardService {
     if (candRead) {
       const where = [scopePredicate(candRead, params, "c")];
       if (!s.report.all) where.push(ownsCandidateSql(s.report, params, "c"));
-      branches.push(`SELECT 'candidatesAdded', c.${col}, c.created_at FROM eureka.candidate c
+      branches.push(`SELECT 'candidatesAdded', ${key("c", true)}, c.created_at FROM eureka.candidate c
         WHERE ${where.join(" AND ")} AND ${inPeriod("c.created_at")}`);
     }
 
@@ -250,12 +327,42 @@ export class DashboardService {
     return (await c.query<CountRow>(sql, params)).rows;
   }
 
+  /**
+   * Sales reports by manager: each team (snapshot) maps to the nearest user at
+   * or above its lead in the current reporting lines who holds the manager
+   * role; activity without a team maps from its recruiter the same way. No
+   * such user: the "No manager" group (null). Org reference tables only.
+   */
+  private async toManagers(c: pg.PoolClient, rows: CountRow[]): Promise<CountRow[]> {
+    const keys = [...new Set(rows.map((r) => r.k).filter((k): k is string => k !== null))];
+    if (!keys.length) return rows;
+    const teams = keys.filter((k) => k.startsWith("t:")).map((k) => k.slice(2));
+    const users = keys.filter((k) => k.startsWith("r:")).map((k) => k.slice(2));
+    const { rows: map } = await c.query<{ key: string; manager_id: string | null }>(
+      `WITH start AS (
+         SELECT 't:' || t.id AS key, t.lead_id AS u FROM eureka.team t WHERE t.id = ANY($1::uuid[])
+         UNION ALL SELECT 'r:' || r, r FROM pg_catalog.unnest($2::uuid[]) r)
+       SELECT st.key, (
+         SELECT m.id FROM (SELECT st.u AS id, 0 AS depth
+                           UNION ALL SELECT rc.ancestor_id, rc.depth FROM eureka.reporting_closure rc WHERE rc.descendant_id = st.u) m
+         WHERE EXISTS (SELECT 1 FROM eureka.user_role ur
+                       WHERE ur.user_id = m.id AND ur.role_key = 'manager' AND ur.valid @> pg_catalog.now())
+         ORDER BY m.depth, m.id LIMIT 1) AS manager_id
+       FROM start st`, [teams, users]);
+    const managerOf = new Map(map.map((r) => [r.key, r.manager_id]));
+    return rows.map((r) => ({ ...r, k: r.k === null ? null : managerOf.get(r.k) ?? null }));
+  }
+
   private async names(c: pg.PoolClient, groupBy: GroupBy, ids: string[]): Promise<Map<string, string>> {
     if (!ids.length) return new Map();
     const sql = {
       recruiter: `SELECT id, display_name AS name FROM eureka.app_user WHERE id = ANY($1::uuid[])`,
+      manager: `SELECT id, display_name AS name FROM eureka.app_user WHERE id = ANY($1::uuid[])`,
       team: `SELECT id, name FROM eureka.team WHERE id = ANY($1::uuid[])`,
       location: `SELECT id, name FROM eureka.location WHERE id = ANY($1::uuid[])`,
+      // Under RLS: a candidate the caller cannot read keeps its counts but no name.
+      candidate: `SELECT c.id, p.first_name || ' ' || p.last_name AS name FROM eureka.candidate c
+                  JOIN eureka.person p ON p.id = c.person_id WHERE c.id = ANY($1::uuid[])`,
     }[groupBy];
     return new Map((await c.query<{ id: string; name: string }>(sql, [ids])).rows.map((r) => [r.id, r.name]));
   }
