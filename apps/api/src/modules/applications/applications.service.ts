@@ -1,18 +1,17 @@
 import {
-  ConflictException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, Logger, NotFoundException,
+  ConflictException, ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
 import type pg from "pg";
 import {
-  APPLICATION_STATUS_LABELS, APP_INTERVIEW_LABELS, can, maskPhone, nextApplicationStatuses, resolveScope,
+  APPLICATION_STATUS_LABELS, can, maskPhone, nextApplicationStatuses, resolveScope,
   type ApplicationStatus, type UserAccess,
 } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
-import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
-import { MAIL_PORT, type MailPort } from "../../platform/mail.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
+import { ApplicantNoticesService } from "./applicant-notices.service.js";
 import { CandidatesService } from "../candidates/candidates.service.js";
 import { toCsv } from "../hotlist/csv.js";
 import { JobsService, JOB_SELECT, companyNames, type JobRow } from "../jobs/jobs.service.js";
@@ -78,7 +77,6 @@ const fullName = (r: { first_name: string | null; last_name: string | null }) =>
 
 @Injectable()
 export class ApplicationsService {
-  private readonly log = new Logger("Applications");
   private readonly exportLimiter = new RateLimiter(10, 10 * 60_000);
 
   constructor(
@@ -86,8 +84,7 @@ export class ApplicationsService {
     private readonly audit: AuditService,
     private readonly jobs: JobsService,
     private readonly candidates: CandidatesService,
-    @Inject(MAIL_PORT) private readonly mail: MailPort,
-    @Inject(CONFIG) private readonly config: AppConfig,
+    private readonly notices: ApplicantNoticesService,
   ) {}
 
   private manageable(access: UserAccess, r: Pick<AppRow, "hiring_manager_id">) {
@@ -231,17 +228,6 @@ export class ApplicationsService {
     });
   }
 
-  /**
-   * Fire and forget after commit; the applicant's email never carries staff comments, and greets without
-   * the name (typed at sign-up by whoever created the account). Failures log the error class only: provider
-   * messages can contain the recipient address.
-   */
-  private notifyApplicant(to: string | null, _first: string | null, subject: string, lines: string[], kind: string) {
-    if (!to) return;
-    const text = `Hello,\n\n${lines.join("\n")}\n\nSign in to Eureka Careers for the details: ${new URL("/portal/applications", this.config.PUBLIC_BASE_URL).toString()}\n\n— Eureka Careers\n`;
-    void this.mail.send({ to, subject, text }).catch((err: unknown) => this.log.warn(`applicant ${kind} email failed (${(err as { name?: string })?.name ?? "error"})`));
-  }
-
   async transition(user: AuthedUser, id: string, expected: number | null, body: StatusChange) {
     if (expected === null) throw new HttpException("if_match_required", HttpStatus.PRECONDITION_REQUIRED);
     const out = await this.db.withUser(user.id, async (c) => {
@@ -257,8 +243,7 @@ export class ApplicationsService {
         changes: { from: res.from_status, to: res.to_status, comment: body.comment !== undefined && body.comment !== "" } });
       return { r, res };
     });
-    this.notifyApplicant(out.r.email, out.r.first_name, `Your application for ${out.r.job_title}: ${APPLICATION_STATUS_LABELS[body.to]}`,
-      [`The status of your application for ${out.r.job_title} is now: ${APPLICATION_STATUS_LABELS[body.to]}.`], "status");
+    this.notices.kick(); // the status email was queued by application_transition (0190)
     return { id, status: out.res.to_status, rowVersion: out.res.row_version };
   }
 
@@ -275,12 +260,7 @@ export class ApplicationsService {
         changes: { applicationId: id, interviewType: b.interviewType, round: b.round, leadUserId: b.leadUserId, panelUserIds: b.panelUserIds, statusTo: res.to_status } });
       return { r, res };
     });
-    const when = new Date(b.startsAt).toISOString().replace("T", " ").slice(0, 16);
-    this.notifyApplicant(out.r.email, out.r.first_name, `Interview scheduled: ${out.r.job_title}`, [
-      `An interview for your application for ${out.r.job_title} has been scheduled.`,
-      `Type: ${APP_INTERVIEW_LABELS[b.interviewType]}`, `Round: ${APP_INTERVIEW_LABELS[b.round]}`,
-      `When: ${when} UTC (${b.durationMinutes} minutes)`, ...(b.meetingLink ? [`Meeting link: ${b.meetingLink}`] : []),
-    ], "interview");
+    this.notices.kick(); // the interview email was queued by application_schedule_interview (0190)
     return { id: out.res.interview_id, applicationStatus: out.res.to_status };
   }
 

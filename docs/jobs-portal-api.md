@@ -1,6 +1,6 @@
 # Jobs, applicant portal and applications (jobs-portal package)
 
-Migrations `0060_jobs.sql`, `0061_applicant_portal.sql`, `0062_applications.sql`. Code: `apps/api/src/modules/jobs`,
+Migrations `0060_jobs.sql`, `0061_applicant_portal.sql`, `0062_applications.sql`, `0190_applicant_notice.sql`. Code: `apps/api/src/modules/jobs`,
 `modules/applications`, `modules/portal`, `platform/mail.ts`, `platform/portal-session.service.ts`; shared rules in
 `packages/shared/src/jobs.ts`; web `apps/web/src/jobs`, `apps/web/src/portal`. Rule IDs (JP-n) are referenced from code and tests.
 
@@ -150,6 +150,12 @@ scheduled interviews.
 | `PUT /application-interviews/:id/scorecard` | JP-29: the caller's own scorecard (technical, communication, problemSolving, attitude 1–5, notes); lead, panel or a manager of the application |
 | `POST /applications/:id/candidate` | JP-30: hired only, `candidate:create`; reuses `CandidatesService.create` (team rules, duplicate check, `409 possible_duplicate` unless `confirmDuplicate`) and links the application in the same transaction |
 | `GET /api/v1/applicants`, `POST /applicants/export` | JP-21: `applicant:read`; the phone needs `applicant.phone:read` (masked otherwise); export audited |
+
+Applicant emails (status changes, scheduled interviews) are **queued in the database** in the same transaction as the change, by
+`authz.application_transition` and `authz.application_schedule_interview` (migration 0190, `eureka.applicant_notice`, ids and a status only).
+The API sends them right after the commit and retries every minute with backoff (1 to 128 minutes; `failed` after 8 attempts), claiming
+with `authz.applicant_notice_claim` so concurrent API tasks never send the same notice at once
+(`modules/applications/applicant-notices.service.ts`). Delivery is at least once; notices are removed after 30 days.
 
 Interviewer access (JP-18b): an interviewer (lead or panel member) reads the application only while the interview is **scheduled or completed** and the
 application is not final (hired, rejected, withdrawn). A manager can change the lead and replace the panel of a scheduled interview

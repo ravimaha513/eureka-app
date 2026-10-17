@@ -7,6 +7,8 @@ let ip = 1;
 export interface PortalSession { cookie: string; csrf: string; id: string }
 
 /** Sign-up and link emails are sent after the reply: wait for them. */
+import { ApplicantNoticesService } from "../src/modules/applications/applicant-notices.service.js";
+
 export const drainPortal = (app: NestFastifyApplication) => app.get(PortalAuthService).drain();
 
 /** Makes an applicant's links older (so the per-applicant cooldown of 60 s does not apply), as the definer. */
@@ -43,5 +45,6 @@ export function portalCall(app: NestFastifyApplication, s: PortalSession, method
 
 export async function mailboxOf(app: NestFastifyApplication, to: string): Promise<{ subject: string; text: string }[]> {
   await drainPortal(app);
+  await app.get(ApplicantNoticesService).drain();
   return (await app.inject({ method: "GET", url: `/api/portal/dev/mailbox?to=${encodeURIComponent(to)}` })).json().items;
 }

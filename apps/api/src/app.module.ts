@@ -65,6 +65,7 @@ import { PortalAuthController, PortalAuthService, PortalDevMailboxController, Po
 import { PortalSessionService } from "./platform/portal-session.service.js";
 import { MAIL_PORT, createMailPort } from "./platform/mail.js";
 import { ApplicantsController, ApplicationInterviewsController, ApplicationsController, ApplicationsService } from "./modules/applications/applications.controller.js";
+import { ApplicantNoticesService } from "./modules/applications/applicant-notices.service.js";
 import { PortalJobsController, PortalJobsService } from "./modules/portal/portal-jobs.controller.js";
 // interview-alerts
 import { ContractsController } from "./modules/contracts/contracts.controller.js";
@@ -138,7 +139,7 @@ export class AppModule {
         ChatService,
         // jobs-portal
         JobsService, PortalSessionService, PortalAuthService, { provide: MAIL_PORT, useFactory: () => createMailPort(config) },
-        ApplicationsService, PortalJobsService,
+        ApplicationsService, ApplicantNoticesService, PortalJobsService,
         // interview-alerts
         ContractsService, CalendarService, StaffBirthdaysService,
         // performance
