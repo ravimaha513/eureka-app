@@ -225,6 +225,10 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   preferred vendors visible to the owner and their superiors (RLS over `vendor.preferred:read`, screen "Preferred
   Vendors"). 0171 replaces `authz.notification_recipients` / `authz.notification_entity` (0089 + one branch): a later
   migration replacing them must carry the `candidate.not_responding` branch over.
+- Notification registry union (migration 0180): 0100, 0112, 0150 and 0171 each replaced
+  `authz.notification_recipients` / `authz.notification_entity` on top of 0089, so 0180 re-creates both as 0089 plus
+  every slice's branches (payment.first_received / payment.delayed, performance.below_target, the bench-time POC,
+  candidate.not_responding) and re-checks the inbox entity constraint. A later replacement must start from 0180.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
