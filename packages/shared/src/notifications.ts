@@ -25,6 +25,7 @@ export const NOTIFICATION_PREFERENCE_TYPES: readonly NotificationTypeInfo[] = [
   { type: "interview.requested", label: "Interview requested", description: "An interview was scheduled, rescheduled or cancelled (interview coordinators).", mandatory: false },
   { type: "contract.created", label: "New contract", description: "A contract (MSA, PO, SOW) was added to a placement, so invoicing and the closure documents can start.", mandatory: false },
   { type: "staff.birthdays_today", label: "Staff birthdays", description: "The morning list of staff birthdays (CEO).", mandatory: false },
+  { type: "candidate.not_responding", label: "Candidate not responding", description: "A candidate you recruit for or lead was flagged as not responding, or is still not responding after the warning.", mandatory: false },
   { type: "chat.direct_message", label: "New direct message", description: "Someone wrote to you in Chat and you have not looked at the conversation for 10 minutes.", mandatory: false },
 ];
 

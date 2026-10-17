@@ -486,6 +486,40 @@ EVENT_SPECS["staff.birthdays_today"] = {
   },
 };
 
+// pipeline-vendors (migration 0171): Sales flagged a candidate as not responding (stage `warning`), or the flag is still
+// open after the hold delay (stage `hold`). The candidate's recruiter and team lead; email + inbox. No name or reason.
+EVENT_SPECS["candidate.not_responding"] = {
+  email: true, inApp: true,
+  render: (ev) => {
+    const candidateId = uuid(ev.payload, "candidateId");
+    uuid(ev.payload, "flagId");
+    const stage = oneOf(ev.payload, "stage", ["warning", "hold"] as const);
+    checkNotify(ev.payload, ["recruiter", "lead"]);
+    if (stage === "warning") {
+      return {
+        subject: "Eureka: candidate not responding",
+        message: "A candidate was flagged as not responding. The candidate is sent a warning that marketing will be put on hold.",
+        refLabel: "Candidate reference", refId: candidateId,
+        inbox: {
+          title: "Candidate not responding",
+          body: "A candidate was flagged as not responding and is warned that marketing will be put on hold. Open the candidate to follow up.",
+          entity: { type: "candidate", id: candidateId },
+        },
+      };
+    }
+    return {
+      subject: "Eureka: candidate still not responding",
+      message: "A candidate is still not responding after the warning. Decide whether to put marketing on hold or stop it.",
+      refLabel: "Candidate reference", refId: candidateId,
+      inbox: {
+        title: "Candidate still not responding",
+        body: "A candidate is still not responding after the warning. Open the candidate to put marketing on hold or stop it.",
+        entity: { type: "candidate", id: candidateId },
+      },
+    };
+  },
+};
+
 export const DELIVERED_TYPES = Object.keys(EVENT_SPECS);
 export const EMAIL_TYPES = DELIVERED_TYPES.filter((t) => EVENT_SPECS[t]!.email);
 export const INBOX_TYPES = DELIVERED_TYPES.filter((t) => EVENT_SPECS[t]!.inApp);

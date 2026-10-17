@@ -35,6 +35,7 @@ import { createKeyProvider } from "./platform/crypto/config.js";
 import { keyRotationJob } from "./worker/jobs/key-rotation.js";
 import { visaExpiryJob } from "./worker/jobs/visa-expiry.js";
 import { birthdayDigestJob } from "./worker/jobs/birthdays.js";
+import { candidateNonresponseJob, candidateNonresponseMailJob } from "./worker/jobs/candidate-nonresponse.js";
 
 const log = createLogger({ service: "worker" });
 const config = loadWorkerConfig();
@@ -76,6 +77,8 @@ const jobs = [
   portalPruneJob(30),
   // interview-alerts (migration 0087): the CEO's morning staff-birthday digest into the outbox.
   birthdayDigestJob(),
+  // pipeline-vendors: "candidate not responding" flags still open after NONRESPONSE_HOLD_DAYS (migration 0171).
+  candidateNonresponseJob(config.NONRESPONSE_HOLD_DAYS),
 ];
 {
   // Without a mail mode only the in-app channel is delivered; emailing events stay unpublished.
@@ -93,6 +96,10 @@ if (config.FEEDBACK_MAIL_MODE !== "disabled") {
   const mail = config.FEEDBACK_MAIL_MODE === "local" ? new LocalMail(config.FEEDBACK_MAIL_DIR!) : new SesMail(config.AWS_REGION!, config.FEEDBACK_FROM_EMAIL!);
   const origin = new URL(config.FEEDBACK_PUBLIC_ORIGIN!).origin;
   jobs.push(feedbackEmailJob(mail, origin, config.FEEDBACK_TOKEN_KEY!), feedbackNotificationJob(mail, origin));
+  // Candidate-facing "not responding" warnings use the same candidate mail transport (migration 0171).
+  jobs.push(candidateNonresponseMailJob(mail, config.NONRESPONSE_HOLD_DAYS));
+} else {
+  log.warn("candidate emails are off (FEEDBACK_MAIL_MODE disabled): no interview feedback or not-responding warnings are sent");
 }
 if (config.DOCUMENTS_BUCKET || config.LOCAL_STORAGE_DIR) {
   const store = config.DOCUMENTS_BUCKET
