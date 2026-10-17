@@ -234,6 +234,8 @@ const EXPECTED: Record<string, { groupBy: string; totals: Record<string, number>
   hr: { groupBy: "location", totals: { placementsCreated: 3, placementsJoined: 2, candidatesAdded: 5 } },
   acct: { groupBy: "location", totals: { placementsCreated: 3, placementsJoined: 2, candidatesAdded: 5 } },
   bu: { groupBy: "location", totals: { placementsCreated: 3, placementsJoined: 2 } },
+  // report:read since 0150 (joinings/exits): only candidate:read among the metric permissions.
+  imm: { groupBy: "location", totals: { candidatesAdded: 5 } },
 };
 
 describe("dashboard totals per role scope (hand-calculated)", () => {
@@ -284,7 +286,7 @@ describe("dashboard totals per role scope (hand-calculated)", () => {
   });
 
   it("refuses roles without report:read", async () => {
-    for (const key of ["coach", "admin", "imm"] as const) {
+    for (const key of ["coach", "admin"] as const) {
       expect((await get(key, `/api/v1/dashboard?${PERIOD}`)).statusCode, key).toBe(403);
     }
   });

@@ -471,6 +471,8 @@ export const GRANTS: Record<Role, Grants> = {
     "document.restricted:read": "org",
     "visa:read": "org",
     "visa:update": "org",
+    // employees gaps (0150): joinings/exits and active-employee counts (no placement scope: client columns stay empty).
+    "report:read": "org",
     // datahub
     "datahub:read": "own",
     // chat

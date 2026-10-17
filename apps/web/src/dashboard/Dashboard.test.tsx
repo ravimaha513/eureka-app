@@ -162,11 +162,11 @@ describe("Dashboard", () => {
 });
 
 describe("Dashboard navigation", () => {
-  it.each(["recruiter", "lead", "manager", "assoc_director", "location_incharge", "location_ops_admin", "ceo", "hr", "bu_head"] as Role[])(
+  it.each(["recruiter", "lead", "manager", "assoc_director", "location_incharge", "location_ops_admin", "ceo", "hr", "bu_head", "immigration"] as Role[])(
     "%s has a Dashboard", (role) => {
       expect(visibleNav(meFor(role).capabilities).map((n) => n.key)).toContain("dashboard");
     });
-  it.each(["interview_coach", "org_admin", "immigration", "documents_team", "associate_hr"] as Role[])(
+  it.each(["interview_coach", "org_admin", "documents_team", "associate_hr"] as Role[])(
     "%s has no Dashboard (no report:read)", (role) => {
       expect(visibleNav(meFor(role).capabilities).map((n) => n.key)).not.toContain("dashboard");
     });

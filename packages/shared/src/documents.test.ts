@@ -60,9 +60,9 @@ describe("paperwork document types and upload rules", () => {
     expect(DOCUMENT_MAX_BYTES).toBe(15_728_640);
   });
 
-  it("I-9, driving license and work-authorization copies are restricted (design A6.3)", () => {
+  it("I-9, driving license, work-authorization, E-Verify and 1099 copies are restricted (design A6.3, 0150)", () => {
     const restricted = DOCUMENT_TYPE_LIST.filter((t) => DOCUMENT_TYPES[t].classification === "restricted").sort();
-    expect(restricted).toEqual(["drivers_license", "i9", "work_authorization"]);
+    expect(restricted).toEqual(["drivers_license", "everify", "form_1099", "i9", "work_authorization"]);
     for (const t of DOCUMENT_TYPE_LIST) expect(t).toMatch(/^[a-z][a-z0-9_]{1,39}$/);
     expect(isDocumentType("i9")).toBe(true);
     expect(isDocumentType("hasOwnProperty")).toBe(false);

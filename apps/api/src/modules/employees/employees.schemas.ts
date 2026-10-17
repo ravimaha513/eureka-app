@@ -12,7 +12,12 @@ export const EmployeeListQuery = z
   .object({
     status: z.enum(EMPLOYEE_STATUSES).optional(),
     locationId: uuid.optional(),
+    /** 0150: matches any readable assignment (current or past) unless clientMatch=current. */
     clientId: uuid.optional(),
+    clientMatch: z.enum(["any", "current"]).optional(),
+    /** 0150: any readable assignment's placement vendor / payroll company. */
+    vendorId: uuid.optional(),
+    payrollCompanyId: uuid.optional(),
     /** Open assignments whose planned end date is within this many days (overdue included). */
     endingWithinDays: z.coerce.number().int().min(1).max(365).optional(),
     search: z.string().trim().min(1).max(80).optional(),
@@ -48,3 +53,29 @@ export const ReportPeriod = z
   .refine((p) => p.from <= p.to, { message: "from must be on or before to", path: ["to"] })
   .refine((p) => (Date.parse(p.to) - Date.parse(p.from)) / 86_400_000 <= 731, { message: "the period can span at most two years", path: ["to"] });
 export type ReportPeriod = z.infer<typeof ReportPeriod>;
+
+/**
+ * PATCH /assignments/:id/employment (0150): HR-owned employment facts. Every
+ * key is optional (at least one); null clears it. payRate needs rate:read over
+ * the placement's actor snapshot as well.
+ */
+export const AssignmentEmployment = z
+  .object({
+    payrollCompanyId: uuid.nullable().optional(),
+    everifyDate: day.nullable().optional(),
+    onboardedDate: day.nullable().optional(),
+    payRate: z.number().positive().max(1000).multipleOf(0.01).nullable().optional(),
+  })
+  .strict()
+  .refine((b) => Object.keys(b).length > 0, { message: "send at least one field" });
+export type AssignmentEmployment = z.infer<typeof AssignmentEmployment>;
+
+/** POST /employees/:id/assign-team (0150, leaving a project). */
+export const AssignTeam = z.object({ teamId: uuid }).strict();
+export type AssignTeam = z.infer<typeof AssignTeam>;
+
+/** GET /reports/active-employees (0150): a calendar month, optionally one client. */
+export const ActiveEmployeesQuery = z
+  .object({ month: z.string().regex(/^(20\d\d|2100)-(0[1-9]|1[0-2])$/, "use YYYY-MM"), clientId: uuid.optional() })
+  .strict();
+export type ActiveEmployeesQuery = z.infer<typeof ActiveEmployeesQuery>;

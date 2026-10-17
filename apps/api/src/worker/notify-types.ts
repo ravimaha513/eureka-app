@@ -267,7 +267,8 @@ export const EVENT_SPECS: Record<string, EventSpec> = {
   },
 
   // FR-NTF-05 bench-time (producer: the bench-time job, migration 0046): TL, recruiter, manager, CEO once
-  // a candidate has been on bench for N days. Distinct from employee.benched (the move to the bench).
+  // a candidate has been on bench for N days; 0150 adds the POC (recruiter of the latest assignment's placement).
+  // Distinct from employee.benched (the move to the bench).
   "employee.bench_time": {
     email: true, inApp: true,
     render: (ev) => {
@@ -275,7 +276,7 @@ export const EVENT_SPECS: Record<string, EventSpec> = {
       date(ev.payload, "benchSince");
       int(ev.payload, "benchDays", 0, 36500);
       const threshold = int(ev.payload, "thresholdDays", 1, 365);
-      checkNotify(ev.payload, ["recruiter", "lead", "manager", "ceo"]);
+      checkNotify(ev.payload, ["recruiter", "lead", "manager", "ceo", "poc"]);
       return {
         subject: `Eureka: candidate on bench for more than ${plural(threshold, "day")}`,
         message: `A candidate has been on bench for more than ${plural(threshold, "day")}.`,
@@ -590,6 +591,8 @@ const OTHER_LABELS: Record<string, string> = {
   ceo: "the CEO", bu_head: "a BU Head", recruiter: "the recruiter", lead: "the team lead",
   manager: "the team lead's manager", documents_team: "the assigned Documents Team member", chat: "a chat member",
   hiring_manager: "the job's hiring manager", interview_coordinator: "an interview coordinator", associate_hr: "a member of Associate HR",
+  // 0150: bench-time POC.
+  poc: "the recruiter who placed the candidate on their last project",
 };
 
 export function whyLine(reasons: readonly string[]): string {
