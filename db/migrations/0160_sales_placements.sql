@@ -257,3 +257,58 @@ GRANT EXECUTE ON FUNCTION authz.create_placement(uuid, text, numeric, text, text
 -- CREATE OR REPLACE keeps the ACL; restated so this file stands on its own.
 REVOKE ALL ON FUNCTION authz.transition_placement(uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION authz.transition_placement(uuid, text, text) TO eureka_app;
+
+-- ---------- contracts (0086) ----------
+-- joining_issue closes the placement like backout, so no contract may be added after it.
+-- Body is 0086's authz.create_contract verbatim apart from the closed-status list.
+SET ROLE authz_definer;
+CREATE OR REPLACE FUNCTION authz.create_contract(
+  p_placement uuid, p_kind text, p_title text, p_reference text, p_starts_on date, p_ends_on date, p_notes text)
+RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE
+  me  uuid := authz.current_user_id();
+  p   record;
+  cid uuid;
+  n   integer;
+BEGIN
+  IF me IS NULL OR p_placement IS NULL THEN
+    RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  SELECT pl.id, pl.client_id, pl.candidate_id, pl.recruiter_id, pl.team_id, pl.location_id, pl.status INTO p
+    FROM eureka.placement pl WHERE pl.id = p_placement;
+  -- Read-before-write (HANDOFF rule 6): the placement read rule of 0022, else 404.
+  IF NOT FOUND OR NOT coalesce(authz.has_org('placement:read')
+       OR p.recruiter_id = ANY (authz.recruiter_ids('placement:read'))
+       OR p.team_id = ANY (authz.team_ids('placement:read'))
+       OR p.location_id = ANY (authz.location_ids('placement:read'))
+       OR p.candidate_id = ANY (authz.owned_candidate_ids('placement:read')), false) THEN
+    RAISE EXCEPTION 'not_found' USING ERRCODE = 'no_data_found';
+  END IF;
+  -- Sales over the actor snapshot (placement:update), or Accounts (invoice:update at org scope), else 403.
+  IF NOT coalesce(authz.has_org('invoice:update')
+       OR authz.has_org('placement:update')
+       OR p.recruiter_id = ANY (authz.recruiter_ids('placement:update'))
+       OR p.team_id = ANY (authz.owned_team_ids('placement:update')), false) THEN
+    RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF coalesce(p.status, '') IN ('backout', 'bgc_failed', 'joining_issue') THEN
+    RAISE EXCEPTION 'placement_closed' USING ERRCODE = 'check_violation';
+  END IF;
+
+  INSERT INTO eureka.contract (placement_id, client_id, kind, title, reference, starts_on, ends_on, notes, created_by)
+  VALUES (p_placement, p.client_id, p_kind, pg_catalog.btrim(p_title), NULLIF(pg_catalog.btrim(p_reference), ''),
+          p_starts_on, p_ends_on, NULLIF(pg_catalog.btrim(p_notes), ''), me)
+  RETURNING id INTO cid;
+  SELECT count(*)::integer INTO n FROM eureka.contract c WHERE c.placement_id = p_placement;
+
+  -- Ids, the kind code and a count only (rule 5): Accounts, HR and Associate HR open the placement for the rest.
+  INSERT INTO eureka.outbox_event (type, aggregate_type, aggregate_id, payload)
+  VALUES ('contract.created', 'contract', cid, pg_catalog.jsonb_build_object(
+    'contractId', cid, 'placementId', p_placement, 'candidateId', p.candidate_id, 'kind', p_kind,
+    'contractCount', LEAST(n, 1000), 'notify', pg_catalog.jsonb_build_array('hr', 'associate_hr', 'accounts')));
+  RETURN cid;
+END $$;
+RESET ROLE;
+REVOKE ALL ON FUNCTION authz.create_contract(uuid, text, text, text, date, date, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION authz.create_contract(uuid, text, text, text, date, date, text) TO eureka_app;

@@ -164,6 +164,11 @@ describe("placement status joining_issue", () => {
     const audit = (await audits("placement.status")).filter((r) => r.entity_id === p.id);
     expect(audit.map((r) => r.changes)).toEqual([{ from: "confirmed", to: "joining_issue", reasonGiven: true }]);
     expect(audit.map((r) => JSON.stringify(r.changes)).join()).not.toContain("Client delayed");
+    // Closed like a backout: no contract can be added (0086 create_contract, rebuilt in 0160).
+    expect((await call("r1a", "GET", `/api/v1/placements/${p.id}/contracts`)).json().canAdd).toBe(false);
+    const k = await call("r1a", "POST", `/api/v1/placements/${p.id}/contracts`, { kind: "sow", title: "SOW" });
+    expect(k.statusCode).toBe(422);
+    expect(k.json().detail).toBe("placement_closed");
     // Final: nothing further; and the submission can be placed again, as a first placement.
     expect((await call("r1a", "GET", `/api/v1/placements/${p.id}`)).json().allowedTransitions).toEqual([]);
     const again = await postPlacement("r1a", createBody(p.submissionId));
