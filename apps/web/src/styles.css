@@ -694,3 +694,10 @@ a.contactlink { color: var(--pri); }
   .settingsnav { flex-direction: row; flex-wrap: wrap; }
   .prefrow { flex-direction: column; align-items: flex-start; }
 }
+
+/* payments (gap L1): derived invoice status */
+.badge.pay-pending { background: var(--pri-50); color: var(--pri-700); }
+.badge.pay-delayed { background: var(--bad-bg); color: var(--bad-fg); }
+.badge.pay-received { background: var(--ok-bg); color: var(--ok-fg); }
+.badge.pay-void { background: var(--neutral-bg); color: var(--neutral-fg); }
+@media (max-width: 640px) { .formgrid.cols2.paygrid { grid-template-columns: minmax(0, 1fr); } }

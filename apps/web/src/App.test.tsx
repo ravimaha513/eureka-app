@@ -19,7 +19,8 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("role-aware navigation", () => {
   it.each([
-    ["recruiter", ["Hot List", "Submissions", "Interviews", "Placements"], ["Users & Access", "Payments", "Employees"]],
+    // Payments (gap L1): Sales read their placements' invoices by hierarchy.
+    ["recruiter", ["Hot List", "Submissions", "Interviews", "Placements", "Payments"], ["Users & Access", "Employees"]],
     ["location_ops_admin", ["Hot List", "Interviews"], ["Performance", "Payments", "Users & Access"]],
     // Hot List is open to every signed-in user (OD-01).
     ["hr", ["Employees", "Paperwork & BGC", "Hot List"], ["Payments", "Users & Access"]],
