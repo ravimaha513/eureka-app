@@ -2,9 +2,9 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Download, Mail, Phone } from "lucide-react";
 import { Person } from "../shell/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { download } from "./JoiningsExitsReport";
-import type { Me } from "../api";
-import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { saveBlob } from "../lib/download";
+import { can, type Me } from "../api";
+import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { useLookups } from "../lookups";
 import { StatusChips } from "../pipeline/ui";
 import { Drawer, Field, fmtDate, useFocusAfterFailure } from "../sales/ui";
@@ -12,6 +12,8 @@ import {
   EMPLOYEE_STATUSES, END_REASONS, EXIT_REASONS, employeeKeys, employeesApi, employmentError, employmentLabel, localToday,
   type Employee, type EmployeeDetail, type EmploymentChanges, type HistoryEntry,
 } from "./employeesApi";
+import { Pager, useCursorPager } from "../ui/Pager";
+import { QueryError } from "../ui/QueryError";
 
 const PAGE_SIZE = 50;
 const SOON_DAYS = 30;
@@ -49,11 +51,10 @@ export function EmployeesPage({ me }: { me?: Pick<Me, "capabilities"> }) {
   const [soon, setSoon] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [search, setSearch] = useState("");
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const pager = useCursorPager();
+  const { page, reset } = pager;
   const [openId, setOpenId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const page = cursors.length - 1;
-  const reset = () => setCursors([null]);
 
   // Name search applies after a short pause (one request per typed word, not per key).
   useEffect(() => {
@@ -66,7 +67,7 @@ export function EmployeesPage({ me }: { me?: Pick<Me, "capabilities"> }) {
   const exportFilters = {
     status, locationId, clientId, clientMatch, vendorId, payrollCompanyId, endingWithinDays: soon ? SOON_DAYS : undefined, search,
   };
-  const filters = { ...exportFilters, cursor: cursors[page] ?? "", limit: PAGE_SIZE };
+  const filters = { ...exportFilters, cursor: pager.cursor ?? "", limit: PAGE_SIZE };
   const companies = useQuery({ queryKey: employeeKeys.payrollCompanies, queryFn: employeesApi.payrollCompanies, staleTime: 10 * 60_000 });
   const q = useQuery({
     queryKey: [...employeeKeys.all, "list", filters],
@@ -82,11 +83,11 @@ export function EmployeesPage({ me }: { me?: Pick<Me, "capabilities"> }) {
   const clients = lookups.data?.clients ?? [];
   const vendors = lookups.data?.vendors ?? [];
   const companyList = companies.data?.items ?? [];
-  const canExport = me?.capabilities.includes("report:export") ?? false;
+  const canExport = can(me, "report:export");
   const exportRun = useMutation({
     mutationFn: () => employeesApi.exportEmployees(exportFilters),
     onSuccess: (r) => {
-      download(r.blob, r.filename);
+      saveBlob(r.blob, r.filename);
       setNotice(`Exported ${r.rows} ${r.rows === 1 ? "employee" : "employees"}${r.truncated ? " (capped: narrow the filters for the rest)" : ""}.`);
     },
   });
@@ -163,7 +164,7 @@ export function EmployeesPage({ me }: { me?: Pick<Me, "capabilities"> }) {
 
       <div className="card tablewrap">
         {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-          <p className="empty error" role="alert">{employmentError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+          <QueryError query={q} message={employmentError(q.error)} />
         ) : (
           <div className="tablewrap"><table aria-label="Employees" aria-busy={q.isFetching || undefined}>
             <thead><tr>
@@ -201,12 +202,7 @@ export function EmployeesPage({ me }: { me?: Pick<Me, "capabilities"> }) {
       </div>
       <div className="listfoot">
         <p role="status" aria-live="polite" className="muted">{countMsg}</p>
-        <nav className="pager" aria-label="Employee pages">
-          <button type="button" className="btn sm" disabled={page === 0} onClick={() => setCursors((c) => (c.length > 1 ? c.slice(0, -1) : c))}>Previous</button>
-          <span>Page {page + 1}</span>
-          <button type="button" className="btn sm" disabled={!q.data?.nextCursor || q.isPlaceholderData}
-            onClick={() => { const nx = q.data?.nextCursor; if (nx) setCursors((c) => [...c, nx]); }}>Next</button>
-        </nav>
+        <Pager pager={pager} label="Employee pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
       </div>
 
       {openId && <EmployeeDrawer id={openId} initial={items.find((e) => e.id === openId) ?? null} onClose={() => setOpenId(null)} onNotice={setNotice} />}

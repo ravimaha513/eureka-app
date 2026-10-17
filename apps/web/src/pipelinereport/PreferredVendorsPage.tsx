@@ -1,9 +1,10 @@
 import { useId, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { useLookups } from "../lookups";
 import { Field } from "../sales/ui";
 import { pvApi, pvError, pvKeys, type PreferredVendor, type PreferredVendorInput } from "./pipelineReportApi";
+import { QueryError } from "../ui/QueryError";
 
 /**
  * Preferred vendors (PV-9..PV-12): recruiters keep the vendors they prefer; only
@@ -53,7 +54,7 @@ export function PreferredVendorsPage() {
 
       <p role="status" aria-live="polite" className="livemsg">{message}</p>
       {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-        <p className="empty error" role="alert">{pvError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+        <QueryError query={q} message={pvError(q.error)} />
       ) : d ? (
         <div className="card tablewrap" aria-busy={q.isFetching || undefined}>
           <table aria-label="Preferred vendors">

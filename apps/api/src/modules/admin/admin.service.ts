@@ -15,6 +15,7 @@ import { CONFIG, parseEmailList, type AppConfig } from "../../platform/config.js
 import { DbService } from "../../platform/db.service.js";
 import { mapAdminError } from "./admin.errors.js";
 import type { BulkCreateUsers, CreateLocation, CreateRoleRequest, CreateTeam, CreateUser, MoveMember, UserListQuery } from "./admin.schemas.js";
+import { likeContains } from "../../platform/sql.js";
 
 const EMAIL = z.string().email();
 
@@ -80,7 +81,7 @@ export class AdminService {
       const params: unknown[] = [];
       const where: string[] = [];
       if (q.search) {
-        params.push(`%${q.search.replace(/[%_\\]/g, "\\$&")}%`);
+        params.push(likeContains(q.search));
         where.push(`(u.display_name ILIKE $${params.length} OR u.email::text ILIKE $${params.length})`);
       }
       if (q.status) { params.push(q.status); where.push(`u.status = $${params.length}`); }

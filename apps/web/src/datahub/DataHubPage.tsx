@@ -7,9 +7,9 @@ import {
   DATAHUB_LEVELS, DATAHUB_LEVEL_LABELS, DOCUMENT_CONTENT_TYPES, ROLES, ROLE_LABELS, datahubFolderNameProblem,
   type DatahubLevel, type Role,
 } from "@eureka/shared";
-import { ConfirmDialog, Dialog, DialogActions } from "../admin/Dialog";
+import { ConfirmDialog, Dialog, DialogActions } from "../ui/Dialog";
 import { documentKeys, documentTypeOf, isStepUpRequired } from "../documents/documentsApi";
-import { StepUpDialog } from "../documents/StepUpDialog";
+import { StepUpDialog } from "../ui/StepUpDialog";
 import { useLookups } from "../lookups";
 import { browser, fmtBytes } from "../sales/resumesApi";
 import { Field, useFocusAfterFailure } from "../sales/ui";

@@ -2,7 +2,7 @@ import { useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, Pencil, Plus, Trash2 } from "lucide-react";
 import type { Me } from "../api";
-import { ConfirmDialog, Dialog, DialogActions } from "../admin/Dialog";
+import { ConfirmDialog, Dialog, DialogActions } from "../ui/Dialog";
 import { useLookups } from "../lookups";
 import { Drawer, Field, useFocusAfterFailure } from "../sales/ui";
 import { fieldErrors } from "../sales/errors";

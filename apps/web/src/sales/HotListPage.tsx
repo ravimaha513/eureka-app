@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Person } from "../shell/ui";
+import type { Permission } from "@eureka/shared";
 import type { Candidate, Me } from "../api";
 import { salesError } from "./errors";
 import { BulkBar, ExportButton, SavedViews } from "./HotListExtras";
@@ -16,9 +17,9 @@ export interface ListPageProps {
 }
 
 /** Whether this row's profile can be opened by the viewer (UI only; the API decides). */
-export const profileOpenable = (c: Candidate, caps: readonly string[]) => caps.includes("candidate:read") && c.canOpenProfile !== false;
+export const profileOpenable = (c: Candidate, caps: readonly Permission[]) => caps.includes("candidate:read") && c.canOpenProfile !== false;
 
-export function CandidateName({ c, caps, onOpenProfile }: { c: Candidate; caps: readonly string[]; onOpenProfile?: (id: string) => void }) {
+export function CandidateName({ c, caps, onOpenProfile }: { c: Candidate; caps: readonly Permission[]; onOpenProfile?: (id: string) => void }) {
   if (onOpenProfile && profileOpenable(c, caps)) {
     return (
       <Person name={c.name}>

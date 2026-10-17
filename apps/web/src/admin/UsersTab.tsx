@@ -5,9 +5,10 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { api } from "../api";
 import { adminApi, type AdminUser, type BulkReport, type UserRole } from "./adminApi";
 import { CSV_TEMPLATE, csvToRows, type BulkRow } from "./csv";
-import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "./Dialog";
+import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { friendlyError } from "./errors";
 import { keys, useAccess, useMeta, usePeople } from "./shared";
+import { Pager, useCursorPager } from "../ui/Pager";
 
 const PAGE_SIZE = 50;
 
@@ -31,20 +32,19 @@ export function UsersTab() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<"" | "active" | "inactive">("");
-  // Cursor stack: cursors[i] is the cursor that loads page i (page 0 has none).
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
-  const page = cursors.length - 1;
+  const pager = useCursorPager();
+  const { page } = pager;
   const [modal, setModal] = useState<Modal | null>(null);
   const passwordLogin = usePasswordLogin();
 
   useEffect(() => {
-    const t = setTimeout(() => { setSearch(searchInput.trim()); setCursors([null]); }, 250);
+    const t = setTimeout(() => { setSearch(searchInput.trim()); pager.reset(); }, 250);
     return () => clearTimeout(t);
   }, [searchInput]);
 
   const q = useQuery({
-    queryKey: [...keys.users, { search, status, cursor: cursors[page] }],
-    queryFn: () => adminApi.users({ search, status: status || undefined, cursor: cursors[page], limit: PAGE_SIZE }),
+    queryKey: [...keys.users, { search, status, cursor: pager.cursor }],
+    queryFn: () => adminApi.users({ search, status: status || undefined, cursor: pager.cursor, limit: PAGE_SIZE }),
     placeholderData: keepPreviousData,
   });
 
@@ -81,7 +81,7 @@ export function UsersTab() {
         </div>
         <div className="field inline">
           <label htmlFor="user-status">Status</label>
-          <select id="user-status" value={status} onChange={(e) => { setStatus(e.target.value as typeof status); setCursors([null]); }}>
+          <select id="user-status" value={status} onChange={(e) => { setStatus(e.target.value as typeof status); pager.reset(); }}>
             <option value="">All</option><option value="active">Active</option><option value="inactive">Inactive</option>
           </select>
         </div>
@@ -138,12 +138,7 @@ export function UsersTab() {
           </table></div>
         )}
       </div>
-      <nav className="pager" aria-label="Users pages">
-        <button className="btn sm" disabled={page === 0} onClick={() => setCursors((c) => c.slice(0, -1))}>Previous</button>
-        <span>Page {page + 1}</span>
-        <button className="btn sm" disabled={!q.data?.nextCursor || q.isPlaceholderData}
-          onClick={() => q.data?.nextCursor && setCursors((c) => [...c, q.data!.nextCursor])}>Next</button>
-      </nav>
+      <Pager pager={pager} label="Users pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
 
       {modal?.kind === "create" && <CreateUserDialog passwordLogin={passwordLogin} onClose={close} onDone={(name) => done(`Created ${name}.`)} />}
       {modal?.kind === "bulk" && <BulkImportDialog onClose={close} onDone={(n) => done(`Created ${n} users.`)} />}

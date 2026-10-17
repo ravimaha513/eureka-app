@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   Body, Controller, ForbiddenException, Get, HttpCode, HttpException, HttpStatus, Inject, Logger, NotFoundException, Post, Query, Req, Res,
 } from "@nestjs/common";
@@ -8,6 +8,7 @@ import { CurrentUser, type AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { OidcService } from "../../platform/oidc.service.js";
+import { openCookie, sealCookie } from "../../platform/sealed-cookie.js";
 
 const STEP_UP_COOKIE = "eureka_stepup";
 const COOKIE_PATH = "/api/auth/step-up";
@@ -19,6 +20,8 @@ export const StartStepUp = z.object({ returnTo: ReturnPath }).strict();
 const StepUpPassword = z.object({ password: z.string().min(1).max(200) }).strict();
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest();
+/** The step-up cookie's MAC also covers the session it was issued to. */
+const boundTo = (session: Buffer) => `step-up|${session.toString("hex")}`;
 
 /**
  * Step-up re-authentication (design A6.1) before restricted actions (opening
@@ -58,10 +61,6 @@ export class StepUpController {
     return new URL("/api/auth/step-up/callback", this.config.PUBLIC_BASE_URL).toString();
   }
 
-  /** HMAC over the payload and the session it was issued to. */
-  private sign(payload: string, session: Buffer): string {
-    return createHmac("sha256", this.config.SESSION_SECRET).update(`step-up|${session.toString("hex")}|${payload}`).digest("base64url");
-  }
 
   /** Whether this session holds a live step-up grant, and which modes the server offers. */
   @Get()
@@ -92,8 +91,8 @@ export class StepUpController {
       if (err.message === "too_many_step_ups") throw new HttpException("too_many_step_ups", HttpStatus.TOO_MANY_REQUESTS);
       throw err;
     });
-    const payload = Buffer.from(JSON.stringify({ state: s.state, nonce: s.nonce, verifier: s.verifier })).toString("base64url");
-    void reply.setCookie(STEP_UP_COOKIE, `${payload}.${this.sign(payload, user.sessionHash)}`, {
+    const cookie = sealCookie(this.config.SESSION_SECRET, { state: s.state, nonce: s.nonce, verifier: s.verifier }, boundTo(user.sessionHash));
+    void reply.setCookie(STEP_UP_COOKIE, cookie, {
       httpOnly: true, secure: this.config.NODE_ENV === "production", sameSite: "lax", path: COOKIE_PATH, maxAge: 600,
     });
     return { redirectUrl: s.url };
@@ -106,13 +105,9 @@ export class StepUpController {
     @Req() req: FastifyRequest, @Res() reply: FastifyReply,
   ) {
     if (this.config.AUTH_MODE !== "google") throw new NotFoundException();
-    const raw = req.cookies?.[STEP_UP_COOKIE] ?? "";
-    const [payload, sig] = raw.split(".");
-    const expected = payload ? Buffer.from(this.sign(payload, user.sessionHash)) : Buffer.alloc(0);
-    if (!payload || !sig || expected.length !== sig.length || !timingSafeEqual(expected, Buffer.from(sig))) {
-      throw new ForbiddenException("Step-up expired, please try again");
-    }
-    const saved = JSON.parse(Buffer.from(payload, "base64url").toString()) as { state: string; nonce: string; verifier: string };
+    const saved = openCookie<{ state: string; nonce: string; verifier: string }>(
+      this.config.SESSION_SECRET, req.cookies?.[STEP_UP_COOKIE], boundTo(user.sessionHash));
+    if (!saved) throw new ForbiddenException("Step-up expired, please try again");
     if (typeof state !== "string" || state !== saved.state) throw new ForbiddenException("Step-up state mismatch");
     void reply.clearCookie(STEP_UP_COOKIE, { path: COOKIE_PATH });
 

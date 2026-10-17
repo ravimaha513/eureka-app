@@ -42,6 +42,8 @@ import type {
   ProfileUpdate,
   TimelineQuery,
 } from "./candidates.schemas.js";
+import { likeContains } from "../../platform/sql.js";
+import { dbErrorMapper } from "../../platform/errors.js";
 
 interface CandidateRow {
   id: string;
@@ -144,12 +146,7 @@ export function auditSafeProfile(body: ProfileUpdate): Record<string, unknown> {
 }
 
 /** Maps the batch functions' and trigger's coded errors (migration 0026) to problem details. */
-function mapBatchError(err: unknown): never {
-  const e = err as { message?: string; code?: string };
-  const make = e.message !== undefined && e.code !== undefined ? BATCH_ERRORS[e.message] : undefined;
-  if (make) throw make();
-  throw err;
-}
+const mapBatchError: (err: unknown) => never = dbErrorMapper(BATCH_ERRORS);
 
 
 /**
@@ -362,7 +359,7 @@ export class CandidatesService implements OnModuleInit {
     if (q.batchId) { params.push(q.batchId); where.push(`c.batch_id = $${params.length}`); }
     where.push(...extraFilterPredicates(q, params));
     if (q.search) {
-      params.push(`%${q.search.replace(/[%_\\]/g, "\\$&")}%`);
+      params.push(likeContains(q.search));
       where.push(`(p.first_name || ' ' || p.last_name) ILIKE $${params.length}`);
     }
     if (q.cursor) { params.push(q.cursor); where.push(`c.id > $${params.length}`); }
@@ -408,7 +405,7 @@ export class CandidatesService implements OnModuleInit {
    * read is audited.
    */
   private async openHotlist(user: AuthedUser, q: CandidateListQuery) {
-    const search = q.search ? `%${q.search.replace(/[%_\\]/g, "\\$&")}%` : null;
+    const search = q.search ? likeContains(q.search) : null;
     const rows = await this.db.withUser(user.id, async (c) => {
       const r = (await c.query<HotlistRow>(
         `SELECT * FROM authz.hotlist_page($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,

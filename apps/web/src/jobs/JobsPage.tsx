@@ -2,12 +2,14 @@ import { useEffect, useId, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { JOB_KINDS, JOB_STATUSES, jobLabel } from "@eureka/shared";
-import type { Me } from "../api";
+import { can, type Me } from "../api";
 import { Drawer, fmtDate } from "../sales/ui";
 import { Person } from "../shell/ui";
 import { JobDialog } from "./JobDialog";
 import { RichTextView } from "./RichText";
 import { jobError, jobKeys, jobsApi, type Job } from "./jobsApi";
+import { Pager, useCursorPager } from "../ui/Pager";
+import { QueryError } from "../ui/QueryError";
 import "./jobs.css";
 
 const PAGE_SIZE = 50;
@@ -33,21 +35,20 @@ export function JobsPage({ me }: { me: Pick<Me, "capabilities" | "id"> }) {
   const [status, setStatus] = useState("");
   const [searchText, setSearchText] = useState("");
   const [search, setSearch] = useState("");
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const pager = useCursorPager();
+  const { page, reset } = pager;
   const [editing, setEditing] = useState<Job | "new" | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const page = cursors.length - 1;
-  const reset = () => setCursors([null]);
   useEffect(() => {
     const t = setTimeout(() => { setSearch(searchText.trim()); reset(); }, 300);
     return () => clearTimeout(t);
   }, [searchText]);
 
-  const filters = { kind, status, search, cursor: cursors[page] ?? "", limit: PAGE_SIZE };
+  const filters = { kind, status, search, cursor: pager.cursor ?? "", limit: PAGE_SIZE };
   const q = useQuery({ queryKey: [...jobKeys.all, "list", filters], queryFn: () => jobsApi.list(filters), placeholderData: keepPreviousData });
   const items = q.data?.items ?? [];
-  const canCreate = me.capabilities.includes("job:manage");
+  const canCreate = can(me, "job:manage");
   const hasFilters = Boolean(kind || status || search);
   const n = items.length;
 
@@ -89,7 +90,7 @@ export function JobsPage({ me }: { me: Pick<Me, "capabilities" | "id"> }) {
 
       <div className="card tablewrap">
         {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-          <p className="empty error" role="alert">{jobError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+          <QueryError query={q} message={jobError(q.error)} />
         ) : (
           <div className="tablewrap"><table aria-label="Jobs" aria-busy={q.isFetching || undefined}>
             <thead><tr><th>Job title</th><th>Client / company</th><th>Hiring manager</th><th>Deadline</th><th>Applicants</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead>
@@ -115,12 +116,7 @@ export function JobsPage({ me }: { me: Pick<Me, "capabilities" | "id"> }) {
       </div>
       <div className="listfoot">
         <p role="status" aria-live="polite" className="muted">{q.isLoading || q.error ? "" : `${n} ${n === 1 ? "job" : "jobs"} on page ${page + 1}${q.data?.nextCursor ? ", more on the next page" : ""}.`}</p>
-        <nav className="pager" aria-label="Job pages">
-          <button type="button" className="btn sm" disabled={page === 0} onClick={() => setCursors((c) => (c.length > 1 ? c.slice(0, -1) : c))}>Previous</button>
-          <span>Page {page + 1}</span>
-          <button type="button" className="btn sm" disabled={!q.data?.nextCursor || q.isPlaceholderData}
-            onClick={() => { const nx = q.data?.nextCursor; if (nx) setCursors((c) => [...c, nx]); }}>Next</button>
-        </nav>
+        <Pager pager={pager} label="Job pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
       </div>
 
       {openId && <JobDrawer id={openId} initial={items.find((j) => j.id === openId)} onClose={() => setOpenId(null)} onEdit={(j) => setEditing(j)} />}

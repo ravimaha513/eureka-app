@@ -5,8 +5,8 @@ import {
   INTERVIEW_DURATIONS, INTERVIEW_ROUNDS, INTERVIEW_TYPES, INTERVIEW_TYPE_LABELS, PANEL_MAX, SCORECARD_CRITERIA, SCORECARD_KINDS,
   SCORECARD_LABELS, type InterviewType, type Scorecard,
 } from "@eureka/shared";
-import { api, type Me } from "../api";
-import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { api, can, type Me } from "../api";
+import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { useLookups } from "../lookups";
 import { Drawer } from "../sales/ui";
 import { Avatar } from "../shell/ui";
@@ -320,7 +320,11 @@ export function InterviewDrawer({ item, displayZone, onClose }: { item: Intervie
   );
 }
 
-export function InterviewsPage({ me, initialOpenId = null }: { me: Me; initialOpenId?: string | null }) {
+export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
+  me: Me; initialOpenId?: string | null;
+  /** The interview whose details are open changed (the shell keeps it in the URL). */
+  onOpenChange?: (id: string | null) => void;
+}) {
   const [displayZone, setDisplayZone] = useState(zone);
   const [clientFilter, setClientFilter] = useState<Named | null>(null);
   const qc = useQueryClient(); const [from, setFrom] = useState(localInput(new Date().toISOString()).slice(0, 10)); const [to, setTo] = useState(""); const [status, setStatus] = useState(""); const [cleared, setCleared] = useState(""); const [locationId, setLocationId] = useState("");
@@ -334,10 +338,15 @@ export function InterviewsPage({ me, initialOpenId = null }: { me: Me; initialOp
   }, getNextPageParam: p => p.nextCursor || undefined });
   const done = () => { setSchedule(false); setEdit(null); setNotice("Interview saved."); void qc.invalidateQueries({ queryKey: ["interviews"] }); void qc.invalidateQueries({ queryKey: ["interview"] }); };
   // interview-alerts: opened from an inbox entry: load that interview and show its details.
-  const initial = useQuery({ queryKey: ["interview", initialOpenId], queryFn: () => api<InterviewDetail>(`/api/v1/interviews/${encodeURIComponent(initialOpenId!)}`), enabled: initialOpenId !== null });
-  useEffect(() => { if (initial.data) setDetails(initial.data); }, [initial.data]);
+  // Also the URL's interview (/interviews/<id>), so back/forward open and close the details.
+  const initial = useQuery({ queryKey: ["interview", initialOpenId], queryFn: () => api<InterviewDetail>(`/api/v1/interviews/${encodeURIComponent(initialOpenId!)}`), enabled: initialOpenId !== null && details?.id !== initialOpenId });
+  useEffect(() => {
+    if (initialOpenId === null) setDetails(null);
+    else if (initial.data?.id === initialOpenId) setDetails(initial.data);
+  }, [initial.data, initialOpenId]);
+  const showDetails = (i: Interview | null) => { setDetails(i); onOpenChange?.(i?.id ?? null); };
   const items = q.data?.pages.flatMap(p => p.items) ?? [];
-  return <section className="panel"><div className="pagehead"><div><h1>Interviews</h1><p className="sub">Schedule, clear and review interviews. Board times in {displayZone}. Date filters and scheduling use {zone}.</p></div>{me.capabilities.includes("interview:create") && <button className="btn primary push" onClick={() => setSchedule(true)}>Schedule interview</button>}</div>
+  return <section className="panel"><div className="pagehead"><div><h1>Interviews</h1><p className="sub">Schedule, clear and review interviews. Board times in {displayZone}. Date filters and scheduling use {zone}.</p></div>{can(me, "interview:create") && <button className="btn primary push" onClick={() => setSchedule(true)}>Schedule interview</button>}</div>
     <div className="toolbar"><Field title="Display timezone"><select value={displayZone} onChange={e => setDisplayZone(e.target.value)}><option value={zone}>{zone} (local)</option>{zone !== "America/New_York" && <option value="America/New_York">America/New_York (EST/EDT)</option>}</select></Field><Field title="From date"><input type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field title="Through date"><input type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>
       <Field title="Call status filter"><select value={status} onChange={e => setStatus(e.target.value)}><option value="">All statuses</option>{STATUSES.map(s => <option key={s} value={s}>{label(s)}</option>)}</select></Field>
       <Field title="Clearance filter"><select value={cleared} onChange={e => setCleared(e.target.value)}><option value="">All</option><option value="true">Cleared</option><option value="false">Not cleared</option></select></Field>
@@ -345,7 +354,7 @@ export function InterviewsPage({ me, initialOpenId = null }: { me: Me; initialOp
       <button className="btn" onClick={() => { setFrom(localInput(new Date().toISOString()).slice(0,10)); setTo(localInput(new Date().toISOString()).slice(0,10)); }}>Today</button>
       <button className="btn" onClick={() => { setFrom(""); setTo(""); setStatus(""); setCleared(""); setLocationId(""); setClientFilter(null); }}>Reset filters</button>
     </div>
-    {me.capabilities.includes("calendar:block") && <SupportCalendarCard />}
+    {can(me, "calendar:block") && <SupportCalendarCard />}
     {initialOpenId && initial.isError && <p role="alert">That interview is no longer available to you.</p>}
     {clientFilter && <p className="hint">Client history: {clientFilter.name} <button className="btn" onClick={() => setClientFilter(null)}>Clear client filter</button></p>}
     {notice && <p role="status" className="livemsg">{notice}</p>}{invalidRange && <p role="alert">Through date must be on or after From date.</p>}
@@ -357,10 +366,10 @@ export function InterviewsPage({ me, initialOpenId = null }: { me: Me; initialOp
       <td>{i.cleared ? <span className="badge cleared">Cleared</span> : "Not cleared"}<span className="block">{i.inviteReceived ? "Invite received" : "Awaiting invite"}</span><span className="block">{i.consentCaptured ? "Consent captured" : "Consent pending"}</span>{i.systemName && <span className="block">{i.systemName}</span>}</td>
       <td><CandidateFeedbackCell f={i.candidateFeedback} /></td>
       <td>{i.consentCaptured ? <>{i.otterUrl?.startsWith("https://") && <a href={i.otterUrl} target="_blank" rel="noopener noreferrer">Otter</a>} {i.recordingUrl?.startsWith("https://") && <a href={i.recordingUrl} target="_blank" rel="noopener noreferrer">Recording</a>}{!i.otterUrl && !i.recordingUrl && "—"}</> : "Consent required"}</td>
-      <td><div className="rowactions"><button className="btn" aria-label={`Details of the interview with ${i.candidate.name ?? "the candidate"}`} onClick={() => setDetails(i)}>Details</button>{i.editableFields.length > 0 && <button className="btn" onClick={() => setEdit(i)}>Edit interview</button>}<button className="btn" onClick={() => setFeedback(i)}>Feedback</button></div></td>
+      <td><div className="rowactions"><button className="btn" aria-label={`Details of the interview with ${i.candidate.name ?? "the candidate"}`} onClick={() => showDetails(i)}>Details</button>{i.editableFields.length > 0 && <button className="btn" onClick={() => setEdit(i)}>Edit interview</button>}<button className="btn" onClick={() => setFeedback(i)}>Feedback</button></div></td>
     </tr>)}</tbody></table>{!q.isPending && !q.isError && !items.length && <p className="empty">No interviews match these filters.</p>}</div>}
     {q.hasNextPage && <button className="btn" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Load more interviews</button>}
     {schedule && <Schedule onClose={() => setSchedule(false)} onDone={done} />}{edit && <Edit item={edit} onClose={() => setEdit(null)} onDone={done} />}{feedback && <Feedback item={feedback} onClose={() => setFeedback(null)} />}
-    {details && <InterviewDrawer item={details} displayZone={displayZone} onClose={() => setDetails(null)} />}
+    {details && <InterviewDrawer item={details} displayZone={displayZone} onClose={() => showDetails(null)} />}
   </section>;
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Dialog, DialogActions } from "../admin/Dialog";
+import { Dialog, DialogActions } from "../ui/Dialog";
 import { LookupPicker } from "../lookups";
 import { fieldErrors } from "../sales/errors";
 import { Field } from "../sales/ui";

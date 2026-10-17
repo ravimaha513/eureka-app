@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, LogOut, ShieldCheck, UserRound } from "lucide-react";
 import type { Me } from "../api";
-import { ConfirmDialog } from "../admin/Dialog";
+import { ConfirmDialog } from "../ui/Dialog";
 import { Field, useFocusAfterFailure } from "../sales/ui";
 import { Avatar } from "../shell/ui";
 import { isValidBirthday, type Birthday } from "@eureka/shared";

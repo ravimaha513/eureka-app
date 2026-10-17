@@ -20,6 +20,8 @@ import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import type {
   ApplicantListQuery, ApplicationExport, ApplicationListQuery, CreateCandidateFromApplication, ScheduleInterview, Scorecard, SetPeople, StatusChange,
 } from "./applications.schemas.js";
+import { likeContains } from "../../platform/sql.js";
+import { dbErrorMapper } from "../../platform/errors.js";
 
 /**
  * Applications, applicants and application interviews for staff
@@ -69,12 +71,7 @@ const CODES: Record<string, () => HttpException> = {
 };
 
 /** Maps the application functions' coded errors (migration 0062) to problem details with the code in `detail`. */
-export function mapApplicationError(err: unknown): never {
-  const e = err as { message?: string; code?: string };
-  const make = e.message !== undefined && e.code !== undefined ? CODES[e.message] : undefined;
-  if (make) throw make();
-  throw err;
-}
+export const mapApplicationError: (err: unknown) => never = dbErrorMapper(CODES);
 
 const fullName = (r: { first_name: string | null; last_name: string | null }) =>
   r.first_name !== null ? `${r.first_name} ${r.last_name ?? ""}`.trim() : null;
@@ -152,7 +149,7 @@ export class ApplicationsService {
     const where = ["true"];
     if (q.status) where.push(`a.status = ${p(q.status)}`);
     if (q.jobId) where.push(`a.job_id = ${p(q.jobId)}::uuid`);
-    if (q.search) where.push(`(ap.first_name || ' ' || ap.last_name) ILIKE ${p(`%${q.search.replace(/[%_\\]/g, "\\$&")}%`)} ESCAPE '\\'`);
+    if (q.search) where.push(`(ap.first_name || ' ' || ap.last_name) ILIKE ${p(likeContains(q.search))} ESCAPE '\\'`);
     if (cursor) {
       const [t, id] = splitCursor(cursor);
       where.push(`(a.applied_at, a.id) < (${fromMicros(p(t))}, ${p(id)}::uuid)`);
@@ -374,7 +371,7 @@ export class ApplicationsService {
     const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
     const where = ["true"];
     if (q.search) {
-      const s = p(`%${q.search.replace(/[%_\\]/g, "\\$&")}%`);
+      const s = p(likeContains(q.search));
       where.push(`((ap.first_name || ' ' || ap.last_name) ILIKE ${s} ESCAPE '\\' OR ap.email ILIKE ${s} ESCAPE '\\')`);
     }
     if (q.cursor) {

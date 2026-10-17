@@ -1,14 +1,16 @@
 import { useId, useMemo, useState } from "react";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowDownRight, ArrowUpRight, BadgeCheck, CalendarCheck, CalendarClock, Minus, Send, UserPlus, Users, type LucideIcon } from "lucide-react";
-import { FunnelBars, PALETTE, PieShare, TrendChart } from "./Charts";
+import { FunnelBars, PALETTE, PieShare, TrendChart } from "../ui/Charts";
 import { pipelineError } from "../pipeline/errors";
-import { pipelineLabel, saveBlob } from "../pipeline/pipelineApi";
+import { saveBlob } from "../lib/download";
+import { pipelineLabel } from "../pipeline/pipelineApi";
 import { fmtDate } from "../sales/ui";
 import {
   GROUP_LABELS, METRIC_HINTS, METRIC_LABELS, PERIODS, UNGROUPED,
   dashboardApi, periodRange, type AttentionItem, type AttentionKind, type Dashboard, type GroupBy, type Metric,
 } from "./dashboardApi";
+import { QueryError } from "../ui/QueryError";
 
 /** Where a "needs attention" row can be opened. */
 export type DashboardTarget = "submissions" | "interviews" | "placements";
@@ -170,7 +172,7 @@ export function DashboardPage({ canOpen = () => false, onOpen, firstName, canExp
       </form>
 
       {q.isLoading ? <p className="empty">Loading…</p> : q.error || !d ? (
-        <p className="empty error" role="alert">{pipelineError(q.error, "generic")} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+        <QueryError query={q} message={pipelineError(q.error, "generic")} />
       ) : (
         <div className="dashboard" aria-busy={q.isFetching || undefined}>
           <section aria-labelledby={`${id}-totals`}>

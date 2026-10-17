@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useCursorPager } from "../ui/Pager";
 import { salesApi, salesKeys, type ListFilters, type ViewFilters, type Visibility } from "./salesApi";
 
 export const PAGE_SIZE = 50;
@@ -27,10 +28,8 @@ export function useCandidateList(kind: "hotlist" | "candidates") {
   const [visibility, setVisibilityRaw] = useState<Visibility | "">("");
   const [batchId, setBatchIdRaw] = useState("");
   const [extra, setExtraRaw] = useState<ExtraFilters>(NO_EXTRA);
-  // cursors[i] loads page i; page 0 has no cursor.
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
-  const page = cursors.length - 1;
-  const reset = () => setCursors([null]);
+  const pager = useCursorPager();
+  const { page, reset } = pager;
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -42,7 +41,7 @@ export function useCandidateList(kind: "hotlist" | "candidates") {
 
   const filters: ListFilters = {
     search, technology, status, visibility, batchId: kind === "candidates" ? batchId : "", ...extra,
-    cursor: cursors[page], limit: PAGE_SIZE,
+    cursor: pager.cursor, limit: PAGE_SIZE,
   };
   const q = useQuery({
     queryKey: [...(kind === "hotlist" ? salesKeys.hotlist : salesKeys.candidates), filters],
@@ -74,8 +73,8 @@ export function useCandidateList(kind: "hotlist" | "candidates") {
     },
     /** The filters in effect (debounced text), without paging. */
     applied: { search, technology, status, visibility, ...extra },
-    prev: () => setCursors((c) => (c.length > 1 ? c.slice(0, -1) : c)),
-    next: () => { const n = q.data?.nextCursor; if (n) setCursors((c) => [...c, n]); },
+    prev: pager.prev,
+    next: () => pager.next(q.data?.nextCursor),
     canNext: Boolean(q.data?.nextCursor) && !q.isPlaceholderData,
   };
 }

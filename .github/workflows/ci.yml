@@ -7,6 +7,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same PR supersedes the running checks; main keeps every run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -36,8 +41,11 @@ jobs:
           psql postgres://postgres:postgres@127.0.0.1:5432/postgres -c "CREATE ROLE rds_admin LOGIN PASSWORD 'x' CREATEROLE CREATEDB" -c "CREATE DATABASE rds_sim OWNER rds_admin"
           MIGRATION_DATABASE_URL=postgres://rds_admin:x@127.0.0.1:5432/rds_sim APP_DB_PASSWORD=a WORKER_DB_PASSWORD=w \
             pnpm --filter @eureka/api exec tsx src/db/migrate.ts
-      # Unit tests, SRS golden expectations, RLS/differential and API authorization matrix
+      # Unit tests, SRS golden expectations, RLS/differential and API authorization matrix.
+      # API test files run in parallel, each on a copy of one migrated template database.
       - run: pnpm -r test
+      # Deploy builds the web app only after the API is live; catch a broken build here.
+      - run: pnpm --filter @eureka/web build
       - name: Grants table in docs is up to date
         run: |
           pnpm -s docs:grants > /tmp/grants.md

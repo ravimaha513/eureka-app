@@ -6,38 +6,32 @@ import { ROLES, type Role, type UserAccess } from "@eureka/shared";
 @Injectable()
 export class AccessService {
   async load(c: pg.PoolClient, userId: string): Promise<UserAccess> {
-    const roles = await c.query<{ role_key: string; location_id: string | null }>(
-      `SELECT role_key, location_id FROM eureka.user_role WHERE user_id = $1 AND valid @> now()`,
-      [userId],
-    );
-    const teams = await c.query<{ team_id: string }>(
-      `SELECT team_id FROM eureka.team_member WHERE user_id = $1 AND valid @> now()
-       UNION SELECT id FROM eureka.team WHERE lead_id = $1`,
-      [userId],
-    );
-    const subs = await c.query<{ descendant_id: string }>(
-      `SELECT descendant_id FROM eureka.reporting_closure WHERE ancestor_id = $1`,
-      [userId],
-    );
-    const subtree = await c.query<{ id: string }>(
-      `SELECT t.id FROM eureka.team t WHERE t.lead_id = $1
-       UNION SELECT t.id FROM eureka.team t JOIN eureka.reporting_closure rc ON rc.descendant_id = t.lead_id
-       WHERE rc.ancestor_id = $1`,
-      [userId],
-    );
-    const coached = await c.query<{ team_id: string }>(
-      `SELECT team_id FROM eureka.coach_assignment WHERE coach_id = $1 AND valid @> now()`,
+    // One round trip: this runs before every authenticated request.
+    const { rows: [r] } = await c.query<{
+      roles: { role_key: string; location_id: string | null }[];
+      teams: string[]; subs: string[]; subtree: string[]; coached: string[];
+    }>(
+      `SELECT
+         COALESCE((SELECT json_agg(json_build_object('role_key', role_key, 'location_id', location_id))
+                   FROM eureka.user_role WHERE user_id = $1 AND valid @> now()), '[]') AS roles,
+         ARRAY(SELECT team_id FROM eureka.team_member WHERE user_id = $1 AND valid @> now()
+               UNION SELECT id FROM eureka.team WHERE lead_id = $1)::text[] AS teams,
+         ARRAY(SELECT descendant_id FROM eureka.reporting_closure WHERE ancestor_id = $1)::text[] AS subs,
+         ARRAY(SELECT t.id FROM eureka.team t WHERE t.lead_id = $1
+               UNION SELECT t.id FROM eureka.team t JOIN eureka.reporting_closure rc ON rc.descendant_id = t.lead_id
+               WHERE rc.ancestor_id = $1)::text[] AS subtree,
+         ARRAY(SELECT team_id FROM eureka.coach_assignment WHERE coach_id = $1 AND valid @> now())::text[] AS coached`,
       [userId],
     );
     return {
       userId,
-      roles: roles.rows
-        .filter((r) => (ROLES as readonly string[]).includes(r.role_key))
-        .map((r) => ({ role: r.role_key as Role, locationId: r.location_id ?? undefined })),
-      teamIds: teams.rows.map((r) => r.team_id),
-      subordinateUserIds: subs.rows.map((r) => r.descendant_id),
-      subtreeTeamIds: subtree.rows.map((r) => r.id),
-      coachedTeamIds: coached.rows.map((r) => r.team_id),
+      roles: r!.roles
+        .filter((x) => (ROLES as readonly string[]).includes(x.role_key))
+        .map((x) => ({ role: x.role_key as Role, locationId: x.location_id ?? undefined })),
+      teamIds: r!.teams,
+      subordinateUserIds: r!.subs,
+      subtreeTeamIds: r!.subtree,
+      coachedTeamIds: r!.coached,
     };
   }
 }

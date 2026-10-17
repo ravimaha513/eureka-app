@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ELIGIBILITY_OPTIONS, MARKETING_LOCATIONS_MAX, VISA_CATEGORIES } from "@eureka/shared";
 import { useLookups } from "../lookups";
-import { Dialog, DialogActions } from "../admin/Dialog";
+import { Dialog, DialogActions } from "../ui/Dialog";
 import { fieldErrors, salesError } from "./errors";
 import { OPEN_BATCH_STATUSES, salesApi, salesKeys, type CandidateProfile, type Priority, type ProfileUpdate } from "./salesApi";
 import { Field } from "./ui";

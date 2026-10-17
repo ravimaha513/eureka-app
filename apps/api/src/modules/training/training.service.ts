@@ -34,6 +34,7 @@ import type {
   UpdateModule,
   UpdateTrainingBatch,
 } from "./training.schemas.js";
+import { likeContains } from "../../platform/sql.js";
 
 interface BatchRow {
   id: string;
@@ -82,7 +83,6 @@ const BATCH_SELECT = `
   JOIN eureka.technology t ON t.id = b.technology_id
   LEFT JOIN eureka.app_user u ON u.id = b.trainer_id`;
 
-const like = (s: string) => `%${s.replace(/[%_\\]/g, "\\$&")}%`;
 
 /** docs/training-api.md (migration 0065). */
 @Injectable()
@@ -300,7 +300,7 @@ export class TrainingService {
       const students = (await c.query<{ candidate_id: string; first_name: string; last_name: string; technology: string; marketing_status: string }>(
         `SELECT * FROM authz.training_batch_students($1) s
          WHERE ($2::text IS NULL OR (s.first_name || ' ' || s.last_name) ILIKE $2)
-         ORDER BY s.first_name, s.last_name, s.candidate_id`, [id, search ? like(search) : null])).rows;
+         ORDER BY s.first_name, s.last_name, s.candidate_id`, [id, search ? likeContains(search) : null])).rows;
       const courses = await this.batchCourses(c, id);
       const modules = courses.flatMap((co) => co.modules.map((m) => ({ courseId: co.id, moduleId: m.id, durationMinutes: m.durationMinutes })));
       const done = (await c.query<{ candidate_id: string; module_id: string; completed_at: Date; completed_by: string; completed_by_name: string | null }>(
@@ -339,7 +339,7 @@ export class TrainingService {
       if (!(await this.coveredFor(c, id, "training:manage"))) throw new ForbiddenException("Not permitted");
       const scope = resolveScope(user.access, "candidate:read");
       if (!scope) return { items: [], nextCursor: null };
-      const params: unknown[] = [b.location_id, id, search ? like(search) : null];
+      const params: unknown[] = [b.location_id, id, search ? likeContains(search) : null];
       const { rows } = await c.query<{
         id: string; first_name: string; last_name: string; technology: string; marketing_status: string;
         batch_id: string | null; batch_name: string | null; batch_month: string | null; batch_technology: string | null;

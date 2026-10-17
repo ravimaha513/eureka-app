@@ -1,7 +1,7 @@
 /** Typed client for the CEO market reports (docs/market-reports-api.md MR-1, MR-2). */
 import type { MarketReportGroup } from "@eureka/shared";
-import { api, apiFetch } from "../api";
-import type { ExportResult } from "./employeesApi";
+import { api } from "../api";
+import { fetchCsv, type ExportResult } from "../lib/download";
 
 export interface MarketCounts {
   candidates: number;
@@ -29,14 +29,7 @@ const clean = (f: MarketFilters) =>
 
 export const marketReportApi = {
   get: (f: MarketFilters) => api<MarketReport>(`/api/v1/reports/market?${new URLSearchParams(clean(f)).toString()}`),
-  exportCsv: async (f: MarketFilters): Promise<ExportResult> => {
-    const res = await apiFetch("/api/v1/reports/market/export", { method: "POST", body: JSON.stringify(clean(f)) });
-    const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "market-report.csv";
-    return {
-      blob: await res.blob(), filename: name,
-      rows: Number(res.headers.get("x-export-rows") ?? 0), truncated: res.headers.get("x-export-truncated") === "true",
-    };
-  },
+  exportCsv: (f: MarketFilters): Promise<ExportResult> => fetchCsv("/api/v1/reports/market/export", clean(f), "market-report.csv"),
 };
 
 export const marketKeys = {

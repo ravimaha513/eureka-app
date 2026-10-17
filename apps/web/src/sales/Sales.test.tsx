@@ -660,8 +660,10 @@ describe("Sales navigation", () => {
     fireEvent.click(link);
     expect(await screen.findByRole("heading", { level: 1, name: "Asha Iyer" })).toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "Hot List" })).not.toBeInTheDocument();
+    expect(window.location.pathname).toMatch(/^\/hotlist\/./);
     fireEvent.click(screen.getByRole("button", { name: "← Back to Hot List" }));
     expect(screen.getByRole("table", { name: "Hot List" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/hotlist");
     expect(screen.getByLabelText("Status")).toHaveValue("active");
     await waitFor(() => expect(screen.getByRole("button", { name: "Open profile of Asha Iyer" })).toHaveFocus());
   });

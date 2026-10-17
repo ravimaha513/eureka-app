@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, CalendarDays, ChevronDown, ChevronUp, GraduationCap, Pencil, Plus, Trash2, UserMinus, Users } from "lucide-react";
 import type { Me } from "../api";
-import { ConfirmDialog, Dialog } from "../admin/Dialog";
+import { ConfirmDialog, Dialog } from "../ui/Dialog";
 import { fmtDate } from "../sales/ui";
 import { BatchDialog } from "./BatchDialog";
 import {

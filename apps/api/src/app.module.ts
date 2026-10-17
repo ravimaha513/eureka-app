@@ -135,7 +135,6 @@ export class AppModule {
         DatahubService,
         // training
         TrainingService,
-        WorkAuthorizationService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
         ChatService,
         // jobs-portal
         JobsService, PortalSessionService, PortalAuthService, { provide: MAIL_PORT, useFactory: () => createMailPort(config) },

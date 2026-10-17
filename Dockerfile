@@ -50,6 +50,7 @@ COPY --from=build /app/apps/api/package.json        apps/api/package.json
 COPY --from=build /app/apps/api/dist                apps/api/dist
 COPY --from=certs /certs                            certs
 COPY db/migrations                                  db/migrations
+COPY db/functions                                   db/functions
 USER 10001
 WORKDIR /app/apps/api
 EXPOSE 3000

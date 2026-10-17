@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Me } from "../api";
-import { Dialog, DialogActions } from "../admin/Dialog";
+import { Dialog, DialogActions } from "../ui/Dialog";
 import { useLookups } from "../lookups";
 import { Field, useFocusAfterFailure } from "../sales/ui";
 import { fieldErrors } from "../sales/errors";

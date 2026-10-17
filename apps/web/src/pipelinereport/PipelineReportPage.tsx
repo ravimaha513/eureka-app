@@ -6,6 +6,7 @@ import { localToday, shiftDays } from "../employees/employeesApi";
 import {
   FUNNEL, PIPELINE_STAGES, STAGE_LABELS, pvApi, pvError, pvKeys, type PipelineFilters, type PipelineItem,
 } from "./pipelineReportApi";
+import { QueryError } from "../ui/QueryError";
 
 const PAGE = 50;
 
@@ -89,7 +90,7 @@ export function PipelineReportPage({ onOpenCandidate }: { onOpenCandidate?: (id:
       </form>
 
       {invalid ? null : q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-        <p className="empty error" role="alert">{pvError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+        <QueryError query={q} message={pvError(q.error)} />
       ) : d ? (
         <section aria-labelledby={`${id}-h`} aria-busy={q.isFetching || undefined}>
           <h2 id={`${id}-h`}>{d.total.toLocaleString("en-US")} {d.total === 1 ? "candidate" : "candidates"}

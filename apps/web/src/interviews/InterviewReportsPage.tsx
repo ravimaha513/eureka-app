@@ -1,9 +1,10 @@
 import { useId, useState } from "react";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { INTERVIEW_REPORT_GROUPS, type InterviewReportGroup } from "@eureka/shared";
-import { ApiError, api, apiFetch, type Me } from "../api";
-import { download } from "../employees/JoiningsExitsReport";
+import { ApiError, api, can, type Me } from "../api";
+import { fetchCsv, saveBlob, type ExportResult } from "../lib/download";
 import { CandidateFeedbackCell, dateBoundary } from "./InterviewsPage";
+import { QueryError } from "../ui/QueryError";
 
 /**
  * Interview reports (gap L4; docs/interviews-settings-api.md "Interview
@@ -32,17 +33,11 @@ interface DailyItem {
   candidateFeedback: { rating: number | null; notes: string | null; format: string | null; nextStep: string | null; submittedAt: string } | null;
 }
 interface DailyReport { from: string; to: string; truncated: boolean; items: DailyItem[]; totals: { interviews: number; cleared: number; withCandidateFeedback: number } }
-interface ExportResult { blob: Blob; filename: string; rows: number; truncated: boolean }
 
 const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const shiftDays = (day: string, n: number) => { const d = new Date(`${day}T00:00:00`); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const hours = (min: number) => (min >= 60 ? `${Math.floor(min / 60)} h ${min % 60} min` : `${min} min`);
 
-async function postCsv(path: string, body: unknown, fallback: string): Promise<ExportResult> {
-  const res = await apiFetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? fallback;
-  return { blob: await res.blob(), filename: name, rows: Number(res.headers.get("x-export-rows") ?? 0), truncated: res.headers.get("x-export-truncated") === "true" };
-}
 const errorText = (e: unknown) => e instanceof ApiError ? (e.detail ?? e.message) : "Something went wrong. Please try again.";
 
 function ExportStatus({ run }: { run: { isError: boolean; error: unknown; data?: ExportResult } }) {
@@ -65,7 +60,7 @@ function GroupedReport({ canExport }: { canExport: boolean }) {
     queryFn: () => api<GroupReport>(`/api/v1/reports/interviews?${new URLSearchParams(period())}`),
     enabled: !invalid, placeholderData: keepPreviousData,
   });
-  const run = useMutation({ mutationFn: () => postCsv("/api/v1/reports/interviews/export", period(), "interviews.csv"), onSuccess: (r) => download(r.blob, r.filename) });
+  const run = useMutation({ mutationFn: () => fetchCsv("/api/v1/reports/interviews/export", period(), "interviews.csv"), onSuccess: (r) => saveBlob(r.blob, r.filename) });
   const d = q.data;
   return (
     <section aria-labelledby={`${id}-h`}>
@@ -89,7 +84,7 @@ function GroupedReport({ canExport }: { canExport: boolean }) {
         <ExportStatus run={run} />
       </form>
       {!invalid && (q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-        <p className="empty error" role="alert">{errorText(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+        <QueryError query={q} message={errorText(q.error)} />
       ) : d ? (
         <div aria-busy={q.isFetching || undefined}>
           <ul className="tiles">
@@ -128,7 +123,7 @@ function DailyReportSection({ canExport }: { canExport: boolean }) {
     queryFn: () => api<DailyReport>(`/api/v1/reports/interviews/daily?${new URLSearchParams(period())}`),
     enabled: Boolean(day), placeholderData: keepPreviousData,
   });
-  const run = useMutation({ mutationFn: () => postCsv("/api/v1/reports/interviews/daily/export", period(), "interviews-daily.csv"), onSuccess: (r) => download(r.blob, r.filename) });
+  const run = useMutation({ mutationFn: () => fetchCsv("/api/v1/reports/interviews/daily/export", period(), "interviews-daily.csv"), onSuccess: (r) => saveBlob(r.blob, r.filename) });
   const d = q.data;
   return (
     <section aria-labelledby={`${id}-h`}>
@@ -146,7 +141,7 @@ function DailyReportSection({ canExport }: { canExport: boolean }) {
         <ExportStatus run={run} />
       </form>
       {day && (q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-        <p className="empty error" role="alert">{errorText(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+        <QueryError query={q} message={errorText(q.error)} />
       ) : d ? (
         <div aria-busy={q.isFetching || undefined}>
           <p className="muted">{d.totals.interviews} interviews, {d.totals.cleared} cleared, {d.totals.withCandidateFeedback} with candidate feedback.</p>
@@ -176,7 +171,7 @@ function DailyReportSection({ canExport }: { canExport: boolean }) {
 
 export function InterviewReportsPage({ me }: { me: Pick<Me, "capabilities"> }) {
   const [tab, setTab] = useState<"grouped" | "daily">("grouped");
-  const canExport = me.capabilities.includes("report:export");
+  const canExport = can(me, "report:export");
   return (
     <>
       <div>

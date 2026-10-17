@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BedDouble, Building2, CircleCheck, Download, House, Plus, Receipt, Search, Users, Wallet } from "lucide-react";
 import type { Me } from "../api";
-import { PALETTE, PieShare, TrendChart } from "../dashboard/Charts";
+import { PALETTE, PieShare, TrendChart } from "../ui/Charts";
 import { fmtDate } from "../sales/ui";
 import { EditSiteDialog, SiteFormDialog } from "./SiteFormDialog";
 import { SiteDrawer } from "./SiteDrawer";
@@ -11,6 +11,8 @@ import {
   type BillsSummary, type Company, type CompanyStats, type Facility, type FacilityStats, type Site, type SiteKind,
 } from "./sitesApi";
 import { KIND, Kpi, SiteIcon, StatusPill } from "./ui";
+import { Pager, useCursorPager } from "../ui/Pager";
+import { QueryError } from "../ui/QueryError";
 
 const PAGE_SIZE = 25;
 
@@ -32,19 +34,19 @@ export function SitesPage({ kind, me }: { kind: SiteKind; me: Pick<Me, "capabili
   const canBills = caps.has("bill:read");
   const [text, setText] = useState("");
   const [search, setSearch] = useState("");
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const pager = useCursorPager();
+  const { page } = pager;
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const page = cursors.length - 1;
 
   useEffect(() => {
-    const t = setTimeout(() => { setSearch(text.trim()); setCursors([null]); }, 300);
+    const t = setTimeout(() => { setSearch(text.trim()); pager.reset(); }, 300);
     return () => clearTimeout(t);
   }, [text]);
 
-  const filters = { q: search, limit: PAGE_SIZE, cursor: cursors[page] ?? "" };
+  const filters = { q: search, limit: PAGE_SIZE, cursor: pager.cursor ?? "" };
   const list = useQuery({
     queryKey: siteKeys.list(kind, filters),
     queryFn: () => sitesApi.list(kind, filters),
@@ -106,7 +108,7 @@ export function SitesPage({ kind, me }: { kind: SiteKind; me: Pick<Me, "capabili
           </div>
         </div>
         {list.isLoading ? <p className="empty">Loading…</p> : list.error ? (
-          <p className="empty error" role="alert">{sitesError(list.error, k.one)} <button type="button" className="btn sm" onClick={() => void list.refetch()}>Retry</button></p>
+          <QueryError query={list} message={sitesError(list.error, k.one)} />
         ) : (
           <div className="tablewrap"><table aria-label={k.Many} aria-busy={list.isFetching || undefined}>
             <thead><tr>
@@ -159,12 +161,7 @@ export function SitesPage({ kind, me }: { kind: SiteKind; me: Pick<Me, "capabili
         )}
         <div className="listfoot cardfoot">
           <p role="status" aria-live="polite" className="muted">{countMsg}</p>
-          <nav className="pager" aria-label={`${k.One} pages`}>
-            <button type="button" className="btn sm" disabled={page === 0} onClick={() => setCursors((c) => (c.length > 1 ? c.slice(0, -1) : c))}>Previous</button>
-            <span>Page {page + 1}</span>
-            <button type="button" className="btn sm" disabled={!list.data?.nextCursor || list.isPlaceholderData}
-              onClick={() => { const nx = list.data?.nextCursor; if (nx) setCursors((c) => [...c, nx]); }}>Next</button>
-          </nav>
+          <Pager pager={pager} label={`${k.One} pages`} nextCursor={list.data?.nextCursor} pending={list.isPlaceholderData} />
         </div>
       </section>
 

@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "../api";
-import { Dialog, DialogActions } from "../admin/Dialog";
+import { Dialog, DialogActions } from "../ui/Dialog";
 import { fieldErrors } from "../sales/errors";
 import { Field } from "../sales/ui";
 import { pipelineError } from "./errors";

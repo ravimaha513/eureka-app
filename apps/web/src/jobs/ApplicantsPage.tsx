@@ -4,6 +4,7 @@ import { Download } from "lucide-react";
 import { fmtDate } from "../sales/ui";
 import { Person } from "../shell/ui";
 import { applicationError, applicationKeys, applicationsApi } from "./applicationsApi";
+import { Pager, useCursorPager } from "../ui/Pager";
 import "./jobs.css";
 
 /** Applicants (applicant:read, HR): portal accounts; phones need applicant.phone:read (masked otherwise). */
@@ -11,14 +12,14 @@ export function ApplicantsPage() {
   const id = useId();
   const [searchText, setSearchText] = useState("");
   const [search, setSearch] = useState("");
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const pager = useCursorPager();
+  const { page } = pager;
   const [notice, setNotice] = useState("");
-  const page = cursors.length - 1;
   useEffect(() => {
-    const t = setTimeout(() => { setSearch(searchText.trim()); setCursors([null]); }, 300);
+    const t = setTimeout(() => { setSearch(searchText.trim()); pager.reset(); }, 300);
     return () => clearTimeout(t);
   }, [searchText]);
-  const filters = { search, cursor: cursors[page] ?? "", limit: 50 };
+  const filters = { search, cursor: pager.cursor ?? "", limit: 50 };
   const q = useQuery({ queryKey: [...applicationKeys.applicants, filters], queryFn: () => applicationsApi.applicants(filters), placeholderData: keepPreviousData });
   const items = q.data?.items ?? [];
   return (
@@ -64,12 +65,7 @@ export function ApplicantsPage() {
       </div>
       <div className="listfoot">
         <span />
-        <nav className="pager" aria-label="Applicant pages">
-          <button type="button" className="btn sm" disabled={page === 0} onClick={() => setCursors((c) => (c.length > 1 ? c.slice(0, -1) : c))}>Previous</button>
-          <span>Page {page + 1}</span>
-          <button type="button" className="btn sm" disabled={!q.data?.nextCursor || q.isPlaceholderData}
-            onClick={() => { const nx = q.data?.nextCursor; if (nx) setCursors((c) => [...c, nx]); }}>Next</button>
-        </nav>
+        <Pager pager={pager} label="Applicant pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
       </div>
     </>
   );

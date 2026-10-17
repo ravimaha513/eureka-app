@@ -9,8 +9,10 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - `pnpm -r typecheck` and `pnpm -r test` must pass before every commit (integration tests need
   PostgreSQL 16 at `TEST_PG_ADMIN_URL`, default `postgres://postgres:postgres@127.0.0.1:5432`).
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0055**; 0040 and 0049 are unused) and must apply as a
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0054** (0060-0062 are jobs-portal); 0040 and 0049 are unused) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`; take the next free number after the
+  highest one, a unit test rejects duplicates) and pinned by checksum once applied. Functions with a
+  file in `db/functions/` are changed in that file, never in a new migration (`db/functions/README.md`).
+  Migrations must apply as a
   non-superuser (Amazon RDS master): CI checks this.
 - Commit small and atomic; get an independent review of every security-relevant change.
 

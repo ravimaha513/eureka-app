@@ -6,6 +6,7 @@ import { fmtDate } from "../sales/ui";
 import { statusLabel } from "../sales/salesApi";
 import { employmentError } from "./employeesApi";
 import { GROUP_LABELS, NO_VALUE, marketKeys, marketReportApi, type MarketCounts, type MarketFilters } from "./marketReportApi";
+import { QueryError } from "../ui/QueryError";
 
 /**
  * Reports > Market (gap L3, docs/market-reports-api.md): how many candidates
@@ -89,7 +90,7 @@ export function MarketReportPanel({ canExport, onDownload }: { canExport: boolea
       </form>
 
       {!invalid && (q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-        <p className="empty error" role="alert">{employmentError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+        <QueryError query={q} message={employmentError(q.error)} />
       ) : d ? (
         <section aria-labelledby={`${id}-mk`} aria-busy={q.isFetching || undefined}>
           <h2 id={`${id}-mk`}>Market by {GROUP_LABELS[d.groupBy].toLowerCase()}</h2>

@@ -2,14 +2,16 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { INVOICE_STATUSES, MAX_TERMS_DAYS, PAYMENT_TERMS_DAYS, expectedPaymentDate } from "@eureka/shared";
-import type { Me } from "../api";
-import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { can, type Me } from "../api";
+import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { localToday } from "../employees/employeesApi";
 import { Drawer, Field, fmtDate, useFocusAfterFailure } from "../sales/ui";
 import {
   fmtMoney, invoiceStatusLabel, paymentError, paymentKeys, paymentsApi,
   type BillablePlacement, type Invoice, type InvoiceDetail, type InvoiceFields, type Named,
 } from "./paymentsApi";
+import { Pager, useCursorPager } from "../ui/Pager";
+import { QueryError } from "../ui/QueryError";
 
 const PAGE_SIZE = 50;
 
@@ -36,13 +38,12 @@ export function PaymentsPage({ me }: { me?: Pick<Me, "capabilities"> }) {
   const [to, setTo] = useState("");
   const [searchText, setSearchText] = useState("");
   const [search, setSearch] = useState("");
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const pager = useCursorPager();
+  const { page, reset } = pager;
   const [openId, setOpenId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState("");
-  const page = cursors.length - 1;
-  const reset = () => setCursors([null]);
-  const canEdit = me?.capabilities.includes("invoice:update") ?? false;
+  const canEdit = can(me, "invoice:update");
 
   useEffect(() => {
     const t = setTimeout(() => { setSearch(searchText.trim()); reset(); }, 300);
@@ -50,7 +51,7 @@ export function PaymentsPage({ me }: { me?: Pick<Me, "capabilities"> }) {
   }, [searchText]);
 
   const period = { from: from || undefined, to: to || undefined, search: search || undefined };
-  const filters = { ...period, status, cursor: cursors[page] ?? "", limit: PAGE_SIZE };
+  const filters = { ...period, status, cursor: pager.cursor ?? "", limit: PAGE_SIZE };
   const q = useQuery({ queryKey: [...paymentKeys.all, "list", filters], queryFn: () => paymentsApi.list(filters), placeholderData: keepPreviousData });
   const summary = useQuery({ queryKey: [...paymentKeys.all, "summary", period], queryFn: () => paymentsApi.summary(period) });
   const items = q.data?.items ?? [];
@@ -122,7 +123,7 @@ export function PaymentsPage({ me }: { me?: Pick<Me, "capabilities"> }) {
 
       <div className="card tablewrap">
         {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-          <p className="empty error" role="alert">{paymentError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+          <QueryError query={q} message={paymentError(q.error)} />
         ) : (
           <div className="tablewrap"><table aria-label="Invoices" aria-busy={q.isFetching || undefined}>
             <thead><tr>
@@ -163,12 +164,7 @@ export function PaymentsPage({ me }: { me?: Pick<Me, "capabilities"> }) {
       </div>
       <div className="listfoot">
         <p role="status" aria-live="polite" className="muted">{countMsg}</p>
-        <nav className="pager" aria-label="Invoice pages">
-          <button type="button" className="btn sm" disabled={page === 0} onClick={() => setCursors((c) => (c.length > 1 ? c.slice(0, -1) : c))}>Previous</button>
-          <span>Page {page + 1}</span>
-          <button type="button" className="btn sm" disabled={!q.data?.nextCursor || q.isPlaceholderData}
-            onClick={() => { const nx = q.data?.nextCursor; if (nx) setCursors((c) => [...c, nx]); }}>Next</button>
-        </nav>
+        <Pager pager={pager} label="Invoice pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
       </div>
 
       {openId && <InvoiceDrawer id={openId} initial={items.find((i) => i.id === openId) ?? null} onClose={() => setOpenId(null)} onNotice={done} />}

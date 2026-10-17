@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { jobsApi } from "../jobs/jobsApi";
 import { ApiError } from "../api";
-import { Dialog, DialogActions } from "../admin/Dialog";
+import { Dialog, DialogActions } from "../ui/Dialog";
 import { LookupPicker } from "../lookups";
 import { UUID_RE, fieldErrors, salesError } from "./errors";
 import { salesApi, type CreateSubmission } from "./salesApi";

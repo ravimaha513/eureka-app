@@ -52,7 +52,21 @@ export const NAV: NavItem[] = [
  */
 export const SETTINGS_NAV: NavItem = { key: "settings", label: "Settings & Preferences", section: "Admin", anyOf: [] };
 
-export function visibleNav(capabilities: readonly string[]): NavItem[] {
+export function visibleNav(capabilities: readonly Permission[]): NavItem[] {
   const caps = new Set(capabilities);
   return NAV.filter((n) => n.anyOf.some((p) => caps.has(p)) && (n.allOf ?? []).every((p) => caps.has(p)));
+}
+
+
+/**
+ * URL routing: each screen lives at /<key>; an open record at /<key>/<id>
+ * (a candidate profile under hotlist or candidates, a placement, an application, an interview, a chat).
+ */
+export const screenPath = (key: string, id?: string | null) => (id ? `/${key}/${encodeURIComponent(id)}` : `/${key}`);
+
+export function parseScreenPath(pathname: string): { key: string | null; id: string | null } {
+  const [key, id] = pathname.split("/").filter(Boolean);
+  let decoded: string | null = null;
+  try { decoded = id ? decodeURIComponent(id) : null; } catch { /* malformed escape: no record */ }
+  return { key: key ?? null, id: decoded };
 }

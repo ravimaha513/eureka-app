@@ -19,6 +19,8 @@ import {
   decodeListCursor, encodeListCursor,
   type ConversationListQuery, type MessagesQuery, type SendMessage,
 } from "./chat.schemas.js";
+import { likeContains } from "../../platform/sql.js";
+import { dbErrorMapper } from "../../platform/errors.js";
 
 /** Presigned POST lifetime (as documents; the database upload window is 5 minutes). */
 export const CHAT_UPLOAD_TTL_SECONDS = 120;
@@ -60,12 +62,7 @@ const DB_ERRORS: Record<string, () => HttpException> = {
   rate_limited: () => new HttpException("rate_limited", HttpStatus.TOO_MANY_REQUESTS),
 };
 
-function mapDbError(err: unknown): never {
-  const e = err as { message?: string; code?: string };
-  const make = e.message !== undefined && e.code !== undefined ? DB_ERRORS[e.message] : undefined;
-  if (make) throw make();
-  throw err;
-}
+const mapDbError: (err: unknown) => never = dbErrorMapper(DB_ERRORS);
 
 interface MessageRow {
   id: string; conversation_id: string; seq: string; rev: string; sender_id: string; sender_name: string | null;
@@ -164,7 +161,7 @@ export class ChatService {
       const params: unknown[] = [user.id, CHAT_UNREAD_CAP];
       const where = [filter];
       if (q.q) {
-        params.push(`%${q.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`);
+        params.push(likeContains(q.q));
         where.push(`coalesce(x.name, x.other_name) ILIKE $${params.length}`);
       }
       if (cursor) {
@@ -485,7 +482,7 @@ export class ChatService {
       const params: unknown[] = [user.id, q.limit];
       let match = "";
       if (q.q) {
-        params.push(`%${q.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`);
+        params.push(likeContains(q.q));
         match = `AND (u.display_name ILIKE $3 OR u.designation ILIKE $3)`;
       }
       const { rows } = await c.query<{ id: string; display_name: string; designation: string | null }>(

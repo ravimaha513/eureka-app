@@ -49,6 +49,18 @@ async function openFirstTeamRohitProfile(page: Page): Promise<string> {
 
 test.describe.configure({ mode: "serial" });
 
+test("a candidate profile has its own address: reload keeps it open and Back returns to the list", async ({ page }) => {
+  await signIn(page, "Recruiter (Team Rohit)");
+  await expect(page).toHaveURL(/\/hotlist$/);
+  const name = await openFirstTeamRohitProfile(page);
+  await expect(page).toHaveURL(/\/hotlist\/[^/]+$/);
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/hotlist$/);
+  await expect(hotlist(page)).toBeVisible();
+});
+
 test("recruiter filters the Hot List, opens an own candidate and logs submissions", async ({ page }) => {
   await signIn(page, "Recruiter (Team Rohit)");
   await filterActiveTeamOnly(page);

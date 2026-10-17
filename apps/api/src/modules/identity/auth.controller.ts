@@ -1,4 +1,3 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { Body, Controller, ForbiddenException, Get, HttpCode, Inject, NotFoundException, Post, Query, Req, Res } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -8,6 +7,7 @@ import { AllowPasswordChange, CurrentUser, Public, type AuthedUser } from "../..
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { OidcService } from "../../platform/oidc.service.js";
+import { openCookie, sealCookie } from "../../platform/sealed-cookie.js";
 import { SESSION_COOKIE, SessionService } from "../../platform/session.service.js";
 
 const OIDC_COOKIE = "eureka_oidc";
@@ -27,10 +27,6 @@ export class AuthController {
     return new URL("/api/auth/callback", this.config.PUBLIC_BASE_URL).toString();
   }
 
-  private sign(value: string): string {
-    return createHmac("sha256", this.config.SESSION_SECRET).update(value).digest("base64url");
-  }
-
   private setSessionCookie(reply: FastifyReply, sid: string): void {
     void reply.setCookie(SESSION_COOKIE, sid, {
       httpOnly: true,
@@ -46,9 +42,8 @@ export class AuthController {
   login(@Res() reply: FastifyReply): void {
     if (this.config.AUTH_MODE !== "google") throw new NotFoundException();
     const s = this.oidc.start(this.redirectUri());
-    const payload = Buffer.from(JSON.stringify({ state: s.state, nonce: s.nonce, verifier: s.verifier })).toString("base64url");
     void reply
-      .setCookie(OIDC_COOKIE, `${payload}.${this.sign(payload)}`, {
+      .setCookie(OIDC_COOKIE, sealCookie(this.config.SESSION_SECRET, { state: s.state, nonce: s.nonce, verifier: s.verifier }), {
         httpOnly: true, secure: this.config.NODE_ENV === "production", sameSite: "lax", path: "/api/auth", maxAge: 600,
       })
       .redirect(s.url, 302);
@@ -58,13 +53,8 @@ export class AuthController {
   @Get("callback")
   async callback(@Query("code") code: string, @Query("state") state: string, @Req() req: FastifyRequest, @Res() reply: FastifyReply) {
     if (this.config.AUTH_MODE !== "google") throw new NotFoundException();
-    const raw = req.cookies?.[OIDC_COOKIE] ?? "";
-    const [payload, sig] = raw.split(".");
-    const expected = payload ? Buffer.from(this.sign(payload)) : Buffer.alloc(0);
-    if (!payload || !sig || expected.length !== sig.length || !timingSafeEqual(expected, Buffer.from(sig))) {
-      throw new ForbiddenException("Sign-in expired, please try again");
-    }
-    const saved = JSON.parse(Buffer.from(payload, "base64url").toString()) as { state: string; nonce: string; verifier: string };
+    const saved = openCookie<{ state: string; nonce: string; verifier: string }>(this.config.SESSION_SECRET, req.cookies?.[OIDC_COOKIE]);
+    if (!saved) throw new ForbiddenException("Sign-in expired, please try again");
     if (!state || state !== saved.state || !code) throw new ForbiddenException("Sign-in state mismatch");
 
     const idToken = await this.oidc.exchange(code, saved.verifier, this.redirectUri());

@@ -1,7 +1,7 @@
 import { useId, useMemo, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Me } from "../api";
-import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { can, type Me } from "../api";
+import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { localToday, shiftDays } from "../employees/employeesApi";
 import { fmtDate } from "../sales/ui";
 import {
@@ -9,6 +9,7 @@ import {
   dayRange, pct, performanceApi, performanceError, performanceKeys, periodStartOf,
   type Kind, type PeriodKind, type Person, type PersonRow, type Ratios, type Target,
 } from "./performanceApi";
+import { QueryError } from "../ui/QueryError";
 
 const fmtInstant = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" });
 const RATIO_KEYS = Object.keys(RATIO_LABELS) as (keyof Ratios)[];
@@ -36,7 +37,7 @@ export function PerformancePage({ me }: { me: Pick<Me, "capabilities"> }) {
     | { kind: "target"; target?: Target } | { kind: "deleteTarget"; target: Target }
     | { kind: "designation"; person: Person } | { kind: "move"; person: Person } | null>(null);
   const [notice, setNotice] = useState("");
-  const canSetTargets = me.capabilities.includes("performance.target:manage");
+  const canSetTargets = can(me, "performance.target:manage");
 
   const summary = useQuery({
     queryKey: range ? performanceKeys.summary(range) : ["performance", "summary", "invalid"],
@@ -96,7 +97,7 @@ export function PerformancePage({ me }: { me: Pick<Me, "capabilities"> }) {
       </form>
 
       {!invalid && (summary.isLoading ? <p className="empty">Loading…</p> : summary.error || !s ? (
-        <p className="empty error" role="alert">{performanceError(summary.error)} <button type="button" className="btn sm" onClick={() => void summary.refetch()}>Retry</button></p>
+        <QueryError query={summary} message={performanceError(summary.error)} />
       ) : (
         <section aria-labelledby={`${id}-totals`} aria-busy={summary.isFetching || undefined}>
           <h2 id={`${id}-totals`} className="sectiontitle">Activity, {fmtInstant(s.period.from)} – {fmtInstant(new Date(Date.parse(s.period.to) - 1).toISOString())}</h2>

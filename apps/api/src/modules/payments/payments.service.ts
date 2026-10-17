@@ -21,6 +21,7 @@ import { mapPaymentError } from "./payments.errors.js";
 import type {
   BillablePlacementQuery, CreateInvoice, InvoiceListQuery, InvoiceSummaryQuery, RecordPayment, UpdateInvoice,
 } from "./payments.schemas.js";
+import { likeContains } from "../../platform/sql.js";
 
 /**
  * Payments / incentive dashboard (gap L1, migration 0100, docs/payments-api.md).
@@ -228,7 +229,7 @@ export class PaymentsService {
     if (q.from) where.push(`iv.invoice_date >= ${p(q.from)}::date`);
     if (q.to) where.push(`iv.invoice_date <= ${p(q.to)}::date`);
     if (q.search) {
-      where.push(`(p.first_name || ' ' || p.last_name) ILIKE ${p(`%${q.search.replace(/[%_\\]/g, "\\$&")}%`)} ESCAPE '\\'`);
+      where.push(`(p.first_name || ' ' || p.last_name) ILIKE ${p(likeContains(q.search))} ESCAPE '\\'`);
     }
     return where;
   }
@@ -299,7 +300,7 @@ export class PaymentsService {
     const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
     const where = [activityPredicate(scope, params, "pl", "c"), "pl.joined_at IS NOT NULL"];
     if (q.search) {
-      where.push(`(p.first_name || ' ' || p.last_name) ILIKE ${p(`%${q.search.replace(/[%_\\]/g, "\\$&")}%`)} ESCAPE '\\'`);
+      where.push(`(p.first_name || ' ' || p.last_name) ILIKE ${p(likeContains(q.search))} ESCAPE '\\'`);
     }
     if (q.uninvoiced) where.push(`NOT EXISTS (SELECT 1 FROM eureka.invoice i WHERE i.placement_id = pl.id AND i.voided_at IS NULL)`);
     const sql = `

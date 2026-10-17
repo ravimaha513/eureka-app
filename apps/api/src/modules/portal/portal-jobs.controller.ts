@@ -10,6 +10,7 @@ import { DbService } from "../../platform/db.service.js";
 import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import { companyNames } from "../jobs/jobs.service.js";
 import { PortalApplicationsQuery, PortalJobsQuery } from "../applications/applications.schemas.js";
+import { dbErrorMapper } from "../../platform/errors.js";
 
 /**
  * Applicant portal: jobs and own applications (docs/jobs-portal-api.md
@@ -39,12 +40,7 @@ const CODES: Record<string, () => HttpException> = {
   already_applied: () => new ConflictException("already_applied"),
   invalid_transition: () => new UnprocessableEntityException("invalid_transition"),
 };
-function mapPortalError(err: unknown): never {
-  const e = err as { message?: string; code?: string };
-  const make = e.message !== undefined && e.code !== undefined ? CODES[e.message] : undefined;
-  if (make) throw make();
-  throw err;
-}
+const mapPortalError: (err: unknown) => never = dbErrorMapper(CODES);
 
 @Injectable()
 export class PortalJobsService {
