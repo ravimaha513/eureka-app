@@ -220,7 +220,7 @@ export class EmployeesService {
       throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
     }
     const { sql, params } = this.listSql(q, EXPORT_ROW_CAP + 1);
-    const rows = await this.db.withUser(user.id, async (c) => {
+    const rows = await this.db.withUserExport(user.id, async (c) => {
       const out = (await c.query<EmployeeRow>(sql, params)).rows;
       await this.audit.record(c, {
         actorId: user.id, action: "employee.export", entityType: "employee",

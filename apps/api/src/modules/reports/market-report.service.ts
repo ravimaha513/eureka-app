@@ -73,8 +73,7 @@ export class MarketReportService {
   private async rows(user: AuthedUser, q: MarketReportQuery, forExport: boolean,
     after?: (c: pg.PoolClient, rows: Row[]) => Promise<void>): Promise<Row[]> {
     try {
-      return await this.db.withUser(user.id, async (c) => {
-        await c.query(`SET LOCAL statement_timeout = '60s'`); // design N9: org-wide reports
+      return await this.db.withUserExport(user.id, async (c) => {
         const rows = (await c.query<Row>(
           `SELECT group_id, group_name, marketing_status, candidates, placed_in_period FROM authz.market_report($1, $2, $3, $4)`,
           [q.groupBy, q.placedFrom ?? null, q.placedTo ?? null, forExport])).rows;

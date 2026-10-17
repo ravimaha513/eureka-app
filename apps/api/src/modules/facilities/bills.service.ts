@@ -339,7 +339,7 @@ export class BillsService {
     if (!this.exportLimiter.take(`bills:${user.id}`)) {
       throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
     }
-    return this.db.withUser(user.id, async (c) => {
+    return this.db.withUserExport(user.id, async (c) => {
       await this.owner(c, user, kind, ownerId);
       const params: unknown[] = [];
       const where = this.filters(kind, ownerId, q, params);

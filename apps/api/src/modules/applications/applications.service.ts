@@ -162,7 +162,7 @@ export class ApplicationsService {
   async exportCsv(user: AuthedUser, q: ApplicationExport) {
     if (!can(user.access, "application:read")) throw new ForbiddenException();
     if (!this.exportLimiter.take(user.id)) throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
-    return this.db.withUser(user.id, async (c) => {
+    return this.db.withUserExport(user.id, async (c) => {
       const rows = await this.rows(user, q, EXPORT_ROW_CAP + 1, undefined, c);
       const page = rows.slice(0, EXPORT_ROW_CAP);
       const names = await companyNames(c, page.map((r) => r.company_id ? r.job_id : null));
@@ -398,7 +398,7 @@ export class ApplicationsService {
 
   async exportApplicants(user: AuthedUser, q: { search?: string }) {
     if (!this.exportLimiter.take(user.id)) throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
-    return this.db.withUser(user.id, async (c) => {
+    return this.db.withUserExport(user.id, async (c) => {
       const rows = await this.applicants(user, { ...q, limit: EXPORT_ROW_CAP }, EXPORT_ROW_CAP + 1, c);
       const page = rows.slice(0, EXPORT_ROW_CAP);
       await this.audit.record(c, { actorId: user.id, action: "applicant.export", entityType: "applicant",

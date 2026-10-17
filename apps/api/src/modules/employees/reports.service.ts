@@ -163,8 +163,7 @@ export class ReportsService {
       ORDER BY greatest(CASE WHEN b.end_date BETWEEN $1::date AND $2::date THEN b.end_date END,
                         CASE WHEN b.start_date BETWEEN $1::date AND $2::date THEN b.start_date END) DESC, b.id
       LIMIT ${limit}`;
-    return this.db.withUser(user.id, async (c) => {
-      await c.query(`SET LOCAL statement_timeout = '60s'`); // design N9: org-wide reports
+    return this.db.withUserExport(user.id, async (c) => {
       const rows = await timed(() => c.query<Row>(sql, params)).then((r) => r.rows);
       if (after) await after(c, rows);
       return rows;
@@ -193,8 +192,7 @@ export class ReportsService {
       LEFT JOIN eureka.team tm ON tm.id = b.team_id
       LEFT JOIN pc ON pc.id = b.payroll_company_id
       GROUP BY b.team_id, tm.name, b.payroll_company_id, pc.name`;
-    return this.db.withUser(user.id, async (c) => {
-      await c.query(`SET LOCAL statement_timeout = '60s'`);
+    return this.db.withUserExport(user.id, async (c) => {
       return (await timed(() => c.query<GroupCount>(sql, params))).rows;
     });
   }
@@ -294,8 +292,7 @@ export class ReportsService {
     if (src.kind === "none") return empty;
     const params: unknown[] = [from, to];
     const base = baseSql(src, params, "active", q.clientId);
-    const out = await this.db.withUser(user.id, async (c) => {
-      await c.query(`SET LOCAL statement_timeout = '60s'`);
+    const out = await this.db.withUserExport(user.id, async (c) => {
       const sql = `
         WITH b AS MATERIALIZED (${base}), ${PC}
         SELECT 'total' AS g, NULL::uuid AS id, NULL::text AS name, count(DISTINCT b.person_id)::int AS n FROM b
@@ -341,7 +338,7 @@ export class ReportsService {
     };
     const rows = src.kind !== "none"
       ? await this.rows(user, period, src, EXPORT_ROW_CAP + 1, audit)
-      : await this.db.withUser(user.id, async (c) => { await audit(c, []); return [] as Row[]; });
+      : await this.db.withUserExport(user.id, async (c) => { await audit(c, []); return [] as Row[]; });
     const truncated = truncatedOf(rows, period);
     const page = this.items(rows.slice(0, EXPORT_ROW_CAP), period).slice(0, EXPORT_ROW_CAP);
     const csv = toCsv(

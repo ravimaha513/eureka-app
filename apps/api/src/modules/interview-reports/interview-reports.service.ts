@@ -131,8 +131,7 @@ export class InterviewReportsService {
 
   private async run<T extends pg.QueryResultRow>(user: AuthedUser, sql: string, params: unknown[],
     after?: (c: pg.PoolClient, rows: T[]) => Promise<void>): Promise<T[]> {
-    return this.db.withUser(user.id, async (c) => {
-      await c.query(`SET LOCAL statement_timeout = '60s'`); // design N9: org-wide reports
+    return this.db.withUserExport(user.id, async (c) => {
       const rows = (await timed(() => c.query<T>(sql, params))).rows;
       if (after) await after(c, rows);
       return rows;
@@ -210,7 +209,7 @@ export class InterviewReportsService {
     const params: unknown[] = [];
     const rows = scopes.length
       ? await this.run<GroupRow>(user, this.groupSql(scopes, q, params, EXPORT_ROW_CAP + 1), params, audit)
-      : await this.db.withUser(user.id, async (c) => { await audit(c, []); return [] as GroupRow[]; });
+      : await this.db.withUserExport(user.id, async (c) => { await audit(c, []); return [] as GroupRow[]; });
     const page = rows.slice(0, EXPORT_ROW_CAP).map((r) => this.item(q.groupBy, r));
     const head: Record<InterviewReportGroup, string> = { coach: "Interview coach", technology: "Technology", candidate: "Candidate", duration: "Duration" };
     const csv = toCsv(
@@ -301,7 +300,7 @@ export class InterviewReportsService {
     const params: unknown[] = [];
     const rows = scopes.length
       ? await this.run<DailyRow>(user, this.dailySql(scopes, q, params, EXPORT_ROW_CAP + 1), params, audit)
-      : await this.db.withUser(user.id, async (c) => { await audit(c, []); return [] as DailyRow[]; });
+      : await this.db.withUserExport(user.id, async (c) => { await audit(c, []); return [] as DailyRow[]; });
     const page = rows.slice(0, EXPORT_ROW_CAP).map((r) => this.dailyItem(r));
     const csv = toCsv(
       ["Start", "End", "Duration (min)", "Candidate", "Technology", "Client", "Round", "Recruiter", "Team", "Location",

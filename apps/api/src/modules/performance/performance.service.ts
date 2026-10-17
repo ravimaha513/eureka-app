@@ -6,7 +6,7 @@ import { z } from "zod";
 import { SALES_ROLES, resolveScope, type EffectiveScope, type Permission, type UserAccess } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
-import { DbService } from "../../platform/db.service.js";
+import { DbService, EXPORT_STATEMENT_TIMEOUT } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
@@ -145,7 +145,7 @@ export class PerformanceService {
   private async report<T>(user: AuthedUser, all: boolean, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
     try {
       return await this.db.withUser(user.id, async (c) => {
-        if (all) await c.query("SET LOCAL statement_timeout = '60s'");
+        if (all) await c.query(`SET LOCAL statement_timeout = '${EXPORT_STATEMENT_TIMEOUT}'`);
         return fn(c);
       });
     } catch (err) {

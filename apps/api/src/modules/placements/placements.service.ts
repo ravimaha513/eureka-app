@@ -204,7 +204,7 @@ export class PlacementsService {
     }
     params.push(PLACEMENT_EXPORT_ROW_CAP + 1);
     const sql = `${SELECT} WHERE ${where.join(" AND ")} ORDER BY pl.created_at DESC, pl.id DESC LIMIT $${params.length}`;
-    const rows = await this.db.withUser(user.id, async (c) => {
+    const rows = await this.db.withUserExport(user.id, async (c) => {
       const out = (await c.query<PlacementRow>(sql, params)).rows;
       await this.audit.record(c, {
         actorId: user.id, action: "placement.export", entityType: "placement",

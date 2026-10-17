@@ -2,6 +2,9 @@ import { Inject, Injectable, type OnModuleDestroy } from "@nestjs/common";
 import pg from "pg";
 import { CONFIG, type AppConfig } from "./config.js";
 
+/** Statement timeout for exports and org-wide reports; every other query has the pool's 5s. */
+export const EXPORT_STATEMENT_TIMEOUT = "60s";
+
 /**
  * Database access for the API. Every business query runs inside withUser(),
  * which opens a transaction and passes ONLY the user id to PostgreSQL
@@ -32,6 +35,17 @@ export class DbService implements OnModuleDestroy {
     } finally {
       c.release();
     }
+  }
+
+  /**
+   * withUser for CSV exports and org-wide reports (design N9): the statement timeout is raised from the
+   * pool's 5s to EXPORT_STATEMENT_TIMEOUT for this transaction only.
+   */
+  async withUserExport<T>(userId: string, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
+    return this.withUser(userId, async (c) => {
+      await c.query(`SET LOCAL statement_timeout = '${EXPORT_STATEMENT_TIMEOUT}'`);
+      return fn(c);
+    });
   }
 
   /**

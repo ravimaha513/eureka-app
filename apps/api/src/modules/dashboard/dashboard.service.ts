@@ -4,7 +4,7 @@ import { z } from "zod";
 import { GRANTS, resolveScope, type EffectiveScope, type Permission, type UserAccess } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
-import { DbService } from "../../platform/db.service.js";
+import { DbService, EXPORT_STATEMENT_TIMEOUT } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import { toCsv } from "../hotlist/csv.js";
@@ -215,7 +215,7 @@ export class DashboardService {
     const report = scopes.report;
     return this.db.withUser(user.id, async (c) => {
       // Org-wide reports get the longer report timeout (design B4.8 N9).
-      if (report.all) await c.query("SET LOCAL statement_timeout = '60s'");
+      if (report.all) await c.query(`SET LOCAL statement_timeout = '${EXPORT_STATEMENT_TIMEOUT}'`);
       let counts = metrics.length ? await this.counts(c, scopes, groupBy, from, to, tz) : [];
       if (groupBy === "manager") counts = await this.toManagers(c, counts);
       const names = await this.names(c, groupBy, [...new Set(counts.map((r) => r.k).filter((k): k is string => k !== null))]);

@@ -5,7 +5,7 @@ import type pg from "pg";
 import { ownsActivity, ownsCandidate, resolveScope, type EffectiveScope } from "@eureka/shared";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { AuditService } from "../../platform/audit.service.js";
-import { DbService } from "../../platform/db.service.js";
+import { DbService, EXPORT_STATEMENT_TIMEOUT } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
@@ -91,7 +91,7 @@ export class PipelineReportService {
     }
     try {
       return await this.db.withUser(user.id, async (c) => {
-        if (report.all) await c.query("SET LOCAL statement_timeout = '60s'");
+        if (report.all) await c.query(`SET LOCAL statement_timeout = '${EXPORT_STATEMENT_TIMEOUT}'`);
         const params: Params = [];
         const base = this.baseSql(params, report, cand, q);
         const p = bind(params);

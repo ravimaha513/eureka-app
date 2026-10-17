@@ -170,8 +170,7 @@ export class HotlistService {
     if (!this.exportLimiter.take(user.id)) {
       throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
     }
-    const rows = await this.db.withUser(user.id, async (c) => {
-      await c.query(`SET LOCAL statement_timeout = '60s'`); // design N9: separate export timeout
+    const rows = await this.db.withUserExport(user.id, async (c) => {
       const r = (await c.query<ExportRow>(
         `SELECT * FROM authz.hotlist_export($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [f.status ?? null, f.technology ?? null, f.visibility ?? null, f.search ? likeContains(f.search) : null, EXPORT_ROW_CAP + 1,
