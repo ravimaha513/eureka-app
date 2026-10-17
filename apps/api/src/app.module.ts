@@ -24,7 +24,8 @@ import { CandidatesService } from "./modules/candidates/candidates.service.js";
 import { SubmissionsController, SubmissionsService } from "./modules/submissions/submissions.controller.js";
 import { InterviewsController } from "./modules/interviews/interviews.controller.js";
 import { InterviewsService } from "./modules/interviews/interviews.service.js";
-import { AdminController, TeamsController } from "./modules/admin/admin.controller.js";
+import { AdminController, TeamsController, UserDesignationController } from "./modules/admin/admin.controller.js";
+import { PerformanceController, PerformanceService } from "./modules/performance/performance.controller.js";
 import { AdminService } from "./modules/admin/admin.service.js";
 import { PlacementsController } from "./modules/placements/placements.controller.js";
 import { PlacementsService } from "./modules/placements/placements.service.js";
@@ -108,6 +109,8 @@ export class AppModule {
         ApplicationsController, ApplicationInterviewsController, ApplicantsController, PortalJobsController,
         // interview-alerts
         ContractsController, CalendarController, InterviewCalendarController, StaffBirthdaysController,
+        // performance
+        PerformanceController, UserDesignationController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
@@ -126,6 +129,8 @@ export class AppModule {
         ApplicationsService, PortalJobsService,
         // interview-alerts
         ContractsService, CalendarService, StaffBirthdaysService,
+        // performance
+        PerformanceService,
         { provide: CALENDAR_PROVIDER, useFactory: () => config.CALENDAR_MODE === "google"
           ? new GoogleCalendarProvider(config.GOOGLE_CLIENT_ID!, config.GOOGLE_CLIENT_SECRET!) : new DevCalendarProvider() },
         { provide: APP_GUARD, useClass: AuthGuard },
