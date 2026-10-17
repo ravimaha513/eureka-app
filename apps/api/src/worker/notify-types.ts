@@ -20,7 +20,10 @@ import { CONTRACT_KIND_LABELS, CONTRACT_KINDS, INTERVIEW_TYPE_LABELS } from "@eu
 export interface OutboxEvent { id: string; type: string; aggregate_id: string; payload: Record<string, unknown> }
 
 /** What a recipient can open from the inbox (the web app has a screen for each; `digest` opens nothing). */
-export interface EntityRef { type: "placement" | "candidate" | "conversation" | "application" | "interview" | "digest"; id: string }
+export interface EntityRef {
+  type: "placement" | "candidate" | "conversation" | "application" | "interview" | "digest" | "performance_target";
+  id: string;
+}
 
 /** The worker's database handle (a pool or a client) for the detail reads. */
 export interface Queryable { query<R extends Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: R[] }> }
@@ -483,6 +486,46 @@ EVENT_SPECS["staff.birthdays_today"] = {
       .map((r) => r.display_name);
     if (names.length === 0) throw new Error("birthday names are not available; retry pending");
     return [`Birthdays today: ${names.join(", ")}.`];
+  },
+};
+
+// performance (migration 0112, docs/performance-api.md PF-6): a recruiter target period ended with activity
+// below target. The person, their team lead and the lead's manager. Counts and the period kind only (no name, no date).
+const PERIOD_WORDS = { week: "week", month: "month", quarter: "quarter" } as const;
+const TARGET_METRICS = [["submissions", "submissions"], ["interviews", "interviews"], ["placements", "placements"]] as const;
+EVENT_SPECS["performance.below_target"] = {
+  email: true, inApp: true,
+  render: (ev) => {
+    const targetId = uuid(ev.payload, "targetId");
+    if (aggregate(ev) !== targetId) throw new Error("outbox event payload has an invalid targetId");
+    uuid(ev.payload, "userId");
+    const kind = oneOf(ev.payload, "periodKind", ["week", "month", "quarter"] as const);
+    date(ev.payload, "periodStart"); // validated, never shown
+    checkNotify(ev.payload, []);
+    const parts: string[] = [];
+    let short = 0;
+    for (const [key, label] of TARGET_METRICS) {
+      if (ev.payload[`${key}Target`] === undefined) {
+        if (ev.payload[`${key}Actual`] !== undefined) throw new Error(`outbox event payload has an invalid ${key}Actual`);
+        continue;
+      }
+      const target = int(ev.payload, `${key}Target`, 0, 100000);
+      const actual = int(ev.payload, `${key}Actual`, 0, 1000000);
+      if (actual < target) short++;
+      parts.push(`${label} ${actual} of ${target}`);
+    }
+    if (short === 0) throw new Error("outbox event payload is not below target");
+    const period = PERIOD_WORDS[kind];
+    return {
+      subject: `Eureka: recruiter activity below target for the ${period}`,
+      message: `A recruiter's activity for the ${period} ended below target (${parts.join(", ")}).`,
+      refLabel: "Target reference", refId: targetId,
+      inbox: {
+        title: `Activity below target for the ${period}`,
+        body: `A recruiter's activity for the ${period} ended below target (${parts.join(", ")}). Open Performance for the details.`,
+        entity: { type: "performance_target", id: targetId },
+      },
+    };
   },
 };
 

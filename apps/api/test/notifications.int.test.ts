@@ -394,6 +394,9 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
     const item = await newId(db);
     const chat = await asUser(db.app, U.r1a, async (c) => (await c.query<{ conversation_id: string }>(
       `SELECT conversation_id FROM authz.chat_open_direct($1)`, [U.hr])).rows[0]!.conversation_id, true);
+    // performance (0112): a real target of r1a, set by their manager.
+    const target = await asUser(db.app, U.m1, async (c) => (await c.query<{ target_id: string }>(
+      "SELECT * FROM authz.performance_target_set($1, 'month', '2026-09-01', 5, NULL, NULL)", [U.r1a])).rows[0]!.target_id, true);
     const events = [
       ["work_authorization.expiring", PAYLOADS.workAuth(candidateId, a)],
       ["employee.benched", PAYLOADS.projectExit(a, placementId, candidateId)],
@@ -409,6 +412,7 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
       // interview-alerts (0086/0087): a contract on the placement; a birthday digest naming a staff member (hr), never a candidate.
       ["contract.created", { contractId: item, placementId, candidateId, kind: "po", contractCount: 1 }],
       ["staff.birthdays_today", { day: "2026-10-15", userIds: [U.hr], count: 1 }],
+      ["performance.below_target", { targetId: target, userId: U.r1a, periodKind: "month", periodStart: "2026-09-01", submissionsTarget: 5, submissionsActual: 2 }],
     ] as const;
     // interview.requested is delivered with the interview's details (candidate email included, owner decision
     // 2026-10-15; docs/notifications.md) read from a real interview row: covered by alerts.int.test.ts, not here.
@@ -418,7 +422,8 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
     const aggregateOf = (type: string): [string, string] =>
       type === "chat.direct_message" ? ["chat_conversation", chat]
         : type === "contract.created" ? ["contract", item]
-          : type === "staff.birthdays_today" ? ["birthday_digest", digestId] : ["candidate", candidateId];
+          : type === "staff.birthdays_today" ? ["birthday_digest", digestId]
+            : type === "performance.below_target" ? ["performance_target", target] : ["candidate", candidateId];
     const secrets = [person, "Placed", "81.25", "Irving", "Petra", "petra@vendor.example", "4695550188", "Northwind",
       "2027-01-15", "2026-09-30", "2026-09-29", "2026-11-01", "2026-05-01", "terminated", "resigned", "r1a", "Team Rohit"];
     for (const [type, payload] of events) {
