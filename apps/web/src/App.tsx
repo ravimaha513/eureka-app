@@ -27,6 +27,8 @@ import { ApplicantsPage } from "./jobs/ApplicantsPage";
 import { BirthdaysPage } from "./staff/BirthdaysPage";
 import { PaymentsPage } from "./payments/PaymentsPage";
 import { PerformancePage } from "./performance/PerformancePage";
+import { PipelineReportPage } from "./pipelinereport/PipelineReportPage";
+import { PreferredVendorsPage } from "./pipelinereport/PreferredVendorsPage";
 import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sparkles, Sun } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
@@ -345,6 +347,8 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             : current.key === "applications" ? <ApplicationsPage key={applicationId ?? "list"} me={me} initialOpenId={applicationId} />
             : current.key === "applicants" ? <ApplicantsPage />
             : current.key === "payments" ? <PaymentsPage me={me} />
+            : current.key === "pipeline" ? <PipelineReportPage />
+            : current.key === "vendors" ? <PreferredVendorsPage />
             : current.key === "dashboard" ? (
               <DashboardPage firstName={me.displayName.split(" ")[0]} canOpen={(t) => items.some((i) => i.key === t)}
                 canExport={me.capabilities.includes("report:export")}

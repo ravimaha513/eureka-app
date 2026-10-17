@@ -76,6 +76,8 @@ import { StaffBirthdaysController, StaffBirthdaysService } from "./modules/staff
 import { PaymentsController, PaymentsService } from "./modules/payments/payments.controller.js";
 import { MarketReportController, MarketReportService } from "./modules/reports/market-report.controller.js";
 import { InterviewReportsController, InterviewReportsService } from "./modules/interview-reports/interview-reports.controller.js";
+import { AssessmentsController, NonResponseController, PipelineReportController, PipelineReportService } from "./modules/pipeline-report/pipeline-report.controller.js";
+import { PreferredVendorsController, PreferredVendorsService } from "./modules/preferred-vendors/preferred-vendors.controller.js";
 
 @Controller("api")
 class HealthController {
@@ -120,6 +122,8 @@ export class AppModule {
         MarketReportController,
         // interview-reports
         InterviewReportsController,
+        // pipeline-vendors
+        PipelineReportController, AssessmentsController, NonResponseController, PreferredVendorsController,
       ],
       providers: [
         { provide: CONFIG, useValue: config },
@@ -148,6 +152,8 @@ export class AppModule {
         MarketReportService,
         // interview-reports
         InterviewReportsService,
+        // pipeline-vendors
+        PipelineReportService, PreferredVendorsService,
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_FILTER, useClass: ProblemFilter },
       ],

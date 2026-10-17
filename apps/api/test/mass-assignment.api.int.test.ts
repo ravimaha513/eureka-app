@@ -1372,6 +1372,64 @@ const CASES: RejectCase[] = [
   // chat (migration 0070, docs/chat-api.md): members, roles, sender, revisions, read marks and keys are the server's
   ...chatCases(),
   ...paymentCases(),
+  // pipeline-vendors (migrations 0170-0172, docs/pipeline-vendors-api.md): candidate, owner, versions, flags and stages are the server's
+  {
+    route: "POST /api/v1/submissions/:id/assessments", actor: "r1a",
+    prepare: async () => {
+      const { submissionId } = await interviewOf();
+      return { url: `/api/v1/submissions/${submissionId}/assessments`, body: { platform: "glider", status: "assigned", assignedOn: "2030-01-05" },
+        state: () => rows(`SELECT * FROM eureka.assessment WHERE submission_id = $1`, [submissionId]) };
+    },
+    forbidden: { submissionId: FOREIGN_ID, candidateId: FOREIGN_ID, recruiterId: U.r1b, teamId: T.t2 },
+  },
+  {
+    route: "PATCH /api/v1/assessments/:id", actor: "r1a",
+    prepare: async () => {
+      const { submissionId } = await interviewOf();
+      const a = await ok("r1a", "POST", `/api/v1/submissions/${submissionId}/assessments`, { platform: "glider", status: "assigned", assignedOn: "2030-01-05" });
+      return { url: `/api/v1/assessments/${a.id}`, headers: { "if-match": '"1"' },
+        body: { platform: "glider", status: "completed", assignedOn: "2030-01-05", completedOn: "2030-01-06" },
+        state: () => rows(`SELECT * FROM eureka.assessment WHERE id = $1`, [a.id]) };
+    },
+    forbidden: { submissionId: FOREIGN_ID, candidateId: FOREIGN_ID },
+  },
+  {
+    route: "POST /api/v1/candidates/:id/non-response", actor: "r1a",
+    prepare: async () => {
+      const cand = await freshOwn();
+      return { url: `/api/v1/candidates/${cand.id}/non-response`, body: { reason: "no_reply_calls" },
+        state: () => rows(`SELECT * FROM eureka.candidate_nonresponse WHERE candidate_id = $1`, [cand.id]) };
+    },
+    forbidden: { candidateId: FOREIGN_ID, status: "resolved", resolution: "responded", flaggedBy: U.l1, flaggedAt: PAST,
+      holdReachedAt: PAST, candidateWarnedAt: PAST, note: "free text" },
+  },
+  {
+    route: "POST /api/v1/candidates/:id/non-response/resolve", actor: "r1a",
+    prepare: async () => {
+      const cand = await freshOwn();
+      await ok("r1a", "POST", `/api/v1/candidates/${cand.id}/non-response`, { reason: "other" });
+      return { url: `/api/v1/candidates/${cand.id}/non-response/resolve`, body: { resolution: "responded" },
+        state: () => rows(`SELECT * FROM eureka.candidate_nonresponse WHERE candidate_id = $1`, [cand.id]) };
+    },
+    forbidden: { candidateId: FOREIGN_ID, status: "open", resolvedBy: U.l1, resolvedAt: PAST, flagId: FOREIGN_ID },
+  },
+  {
+    route: "POST /api/v1/preferred-vendors", actor: "r1a",
+    prepare: async () => ({
+      url: "/api/v1/preferred-vendors", body: { vendorName: `MA vendor ${++n}` },
+      state: () => rows(`SELECT * FROM eureka.preferred_vendor ORDER BY id`),
+    }),
+    forbidden: { ownerId: U.r1b, owner: { id: U.r1b }, archived: true, teamId: T.t2 },
+  },
+  {
+    route: "PATCH /api/v1/preferred-vendors/:id", actor: "r1a",
+    prepare: async () => {
+      const v = await ok("r1a", "POST", "/api/v1/preferred-vendors", { vendorName: `MA vendor ${++n}` });
+      return { url: `/api/v1/preferred-vendors/${v.id}`, headers: { "if-match": '"1"' }, body: { vendorName: `MA renamed ${n}` },
+        state: () => rows(`SELECT * FROM eureka.preferred_vendor WHERE id = $1`, [v.id]) };
+    },
+    forbidden: { ownerId: U.r1b, archived: true },
+  },
   // jobs-portal (migration 0060): owner, team, version, posting time and kind are the server's
   {
     route: "POST /api/v1/jobs", actor: "l1",

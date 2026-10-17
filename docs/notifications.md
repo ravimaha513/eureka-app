@@ -77,6 +77,7 @@ among `hr`, `accounts`, `immigration`.
 | `application.received` | jobs-portal JP-31 | 0062 `authz.application_apply` (an applicant applied) | `applicationId`, `jobId`, `notify` | `hr` and the job's current hiring manager (reason `hiring_manager`, only while the payload's job is the application's job) | `hiring_manager`, `hr` | inbox only | application |
 | `payment.first_received` | FR-NTF-07, FR-PAY-05 (first-payment) | 0100 `authz.payment_record`: the first payment ever recorded for a placement (ledger job `first-payment`, key = placement id) | `placementId` (= aggregate id), `invoiceId`, `paymentId` | the placement's recruiter, its team's lead and that lead's manager (only while the payload's invoice belongs to the placement) | none | email + inbox | placement |
 | `payment.delayed` | FR-NTF-08, FR-PAY-06 (payment-delay) | 0100 job `payment-delay` (`authz.emit_payment_delays`): live invoices past their expected date and not fully received, once per invoice and expected date | `invoiceId` (= aggregate id), `placementId`, `daysLate` (1..3650) | the placement's recruiter and its team's lead (no manager; same invoice check) | none | email + inbox | placement |
+| `candidate.not_responding` | FR-NTF-02 candidate-unresponsive (docs/pipeline-vendors-api.md PV-7) | 0171 `authz.nonresponse_flag` (stage `warning`, when Sales flag the candidate) and job `candidate-nonresponse` (`authz.emit_candidate_nonresponse_hold`, stage `hold`, once per flag) | `candidateId`, `flagId`, `stage` ∈ {warning, hold} | the candidate's current recruiter and the lead of its current team, while the payload's flag belongs to that candidate (no manager) | `recruiter`, `lead` | email + inbox | candidate |
 
 `employee.benched` (0045) is the move to the bench at project exit; `employee.bench_time` (0046) is the reminder
 once a candidate has been on the bench for N days. Emails and inbox rows never show the dates, reasons or codes
@@ -111,6 +112,8 @@ definer function (like `authz.emit_bench_time(day, threshold)`) to `eureka_worke
 | `birthday-digest` | daily 08:00 America/New_York | the New York date | interview-alerts (0087). One `staff.birthdays_today` per day with at least one staff birthday (ledger key = the date); 29 February counts on 28 February in non-leap years; the database refuses a future day |
 | `performance-below-target` | daily 07:15 America/New_York | the New York date | performance (0112). One `performance.below_target` per target whose period ended within the last 14 days with a metric short of its target (ledger key = the target id); the database refuses a future day |
 | `notification-prune` | daily 04:30 America/New_York | UTC date (maintenance) | Deletes inbox rows older than `NOTIFICATION_RETENTION_DAYS` (default 180); the database refuses fewer than 30 days |
+| `candidate-nonresponse` | daily 07:40 America/New_York | the New York date | Always on. Open "not responding" flags raised at least `NONRESPONSE_HOLD_DAYS` (default 3) New York days before reach the hold stage once (`hold_reached_at`, ledger key `<flag>:hold`); the database refuses a future day and a delay outside 1-60 (0171) |
+| `candidate-nonresponse-mail` | every tick | `<flag id>:<stage>` | Only with a candidate mail transport (`FEEDBACK_MAIL_MODE`). The warning and hold emails to the candidate's personal email (fixed text), at most once per flag and stage, within 14 days of the stage, never after the flag is resolved (0171, docs/pipeline-vendors-api.md PV-8) |
 
 All are covered by time-travel tests on a fixed clock (`apps/api/test/notifications.int.test.ts`).
 
@@ -134,6 +137,8 @@ placement or candidate when the user has that screen.
 
 - `eureka_app`: SELECT own `notification` rows, UPDATE (`read_at`) own rows. Nothing on `inbox_fanout` or the ledger.
 - `eureka_worker` (0081): SELECT (`user_id`, `type`, `in_app`) on `notification_preference`.
+- `eureka_worker` (0171): EXECUTE `authz.emit_candidate_nonresponse_hold`, `authz.nonresponse_mail_due`, `authz.nonresponse_mail_data`
+  (returns the candidate's personal email inside the send transaction), `authz.nonresponse_mail_sent`; no table access.
 - `eureka_worker`: EXECUTE `authz.notification_recipients`, `authz.emit_bench_time`, `authz.emit_paperwork_overdue` (0052), `authz.emit_payment_delays` (0100); `notification` SELECT of
   the key columns only (never titles or bodies), INSERT during fan-out for named recipients, DELETE past 30 days;
   `inbox_fanout` SELECT/INSERT. An inbox row's `entity_type`/`entity_id` must equal `authz.notification_entity(event)`
@@ -150,10 +155,10 @@ placement or candidate when the user has that screen.
   inbox fan-out skips recipients who switched a type off (`eureka.notification_preference`, worker SELECT only);
   `work_authorization.expiring` and `checklist.item_overdue` are mandatory. Email opt-out is not offered. A new in-app
   type must be added to `packages/shared/src/notifications.ts` too (a test compares it with `INBOX_TYPES`).
-- **FR-NTF-02 candidate-unresponsive** ("warn candidate after N days without response"): not built. Nothing in
-  the data records a candidate's response, the threshold is OD-05, and warning the candidate means emailing an
-  external address with content to agree. Needs: what counts as a response, N, the message, and whether the
-  recruiter is told instead or as well.
+- **FR-NTF-02 candidate-unresponsive**: built in 0171 (docs/pipeline-vendors-api.md PV-5..PV-8). Sales flag a
+  candidate as not responding (that is what counts as no response); the candidate is warned by email, the recruiter
+  and team lead are notified, and after `NONRESPONSE_HOLD_DAYS` (default 3, OD-05 still open) both get a hold-stage
+  notice. Open: the email wording, N, and whether the manager should be told too.
 - **Bench POC (FR-NTF-05):** design lists "POC, TL, recruiter, manager, CEO"; the POC is undefined. Built (0150) as the
   recruiter who placed the candidate on their latest assignment (reason `poc`); confirm or name another role. Threshold N (OD-05): the job is off until `NOTIFY_BENCH_DAYS` is set.
 - **Admin teams (FR-NTF-09):** taken as HR, Accounts, Immigration; Associate HR is not included (same open

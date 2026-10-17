@@ -410,6 +410,9 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
     // performance (0112): a real target of r1a, set by their manager.
     const target = await asUser(db.app, U.m1, async (c) => (await c.query<{ target_id: string }>(
       "SELECT * FROM authz.performance_target_set($1, 'month', '2026-09-01', 5, NULL, NULL)", [U.r1a])).rows[0]!.target_id, true);
+    // pipeline-vendors (0171): a real "not responding" flag on the candidate (its recruiter flags it).
+    const flagId = await asUser(db.app, U.r1a, async (c) => (await c.query<{ id: string }>(
+      `SELECT authz.nonresponse_flag($1, 'missed_interview') AS id`, [candidateId])).rows[0]!.id, true);
     const events = [
       ["work_authorization.expiring", PAYLOADS.workAuth(candidateId, a)],
       ["employee.benched", PAYLOADS.projectExit(a, placementId, candidateId)],
@@ -429,6 +432,7 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
       ["payment.first_received", { placementId, invoiceId, paymentId: a }],
       ["payment.delayed", { invoiceId, placementId, daysLate: 12 }],
       ["performance.below_target", { targetId: target, userId: U.r1a, periodKind: "month", periodStart: "2026-09-01", submissionsTarget: 5, submissionsActual: 2 }],
+      ["candidate.not_responding", { candidateId, flagId, stage: "hold" }],
     ] as const;
     // interview.requested is delivered with the interview's details (candidate email included, owner decision
     // 2026-10-15; docs/notifications.md) read from a real interview row: covered by alerts.int.test.ts, not here.
