@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GRANTS, PERMISSIONS, ROLES, LOCATION_ROLES, RESTRICTED_PERMISSIONS, ORG_SENSITIVE_PERMISSIONS, isRestrictedRole } from "./catalog.js";
+import { GRANTS, HOTLIST_VISIBILITY, PERMISSIONS, ROLES, LOCATION_ROLES, RESTRICTED_PERMISSIONS, ORG_SENSITIVE_PERMISSIONS, isRestrictedRole } from "./catalog.js";
 import {
   activityVisible,
   applyCandidateFieldPolicy,
@@ -279,5 +279,41 @@ describe("batch planning (canCreateBatch)", () => {
   it("is Sales leadership only: leads and managers yes; recruiters, location, coaches, HR and admins no", () => {
     expect([L1, M].map(canCreateBatch)).toEqual([true, true]);
     expect([R1a, LOCADM, COACH, HR, ADMIN].map(canCreateBatch)).toEqual([false, false, false, false, false]);
+  });
+});
+
+describe("Hot List visibility default (team; Eureka App 4)", () => {
+  const otherTeam = cand({ recruiterId: "R2a", teamId: "T2", locationId: LOC_A });
+
+  it("the default policy is team: another team's Team-only candidate is off the recruiter's Hot List", () => {
+    expect(HOTLIST_VISIBILITY).toBe("team");
+    expect(hotlistVisible(resolveScope(R1a, "hotlist:read"), otherTeam)).toBe(false);
+    expect(hotlistVisible(resolveScope(R1a, "hotlist:read"), { ...otherTeam, visibility: "all_teams" })).toBe(true);
+    expect(resolveScope(HR, "hotlist:read")).toBeNull();
+    expect(capabilities(HR)).not.toContain("hotlist:read");
+  });
+
+  it("the interview prep team (coach of the team) sees that team's candidates, not other teams'", () => {
+    expect(hotlistVisible(resolveScope(COACH, "hotlist:read"), otherTeam)).toBe(true);
+    expect(hotlistVisible(resolveScope(COACH, "hotlist:read"), cand({}))).toBe(false);
+  });
+
+  it("recruiter entry rights: every Hot List candidate a Sales user sees can take a submission and a placement", () => {
+    const statuses = ["active", "on_hold", "full_of_interviews", "confirmation", "bench", "stopped"];
+    const refs = statuses.flatMap((s) => (["team", "all_teams"] as const).flatMap((v) => [
+      cand({ marketingStatus: s, visibility: v }),
+      cand({ recruiterId: "R1b", marketingStatus: s, visibility: v }),
+      cand({ recruiterId: "R2a", teamId: "T2", locationId: LOC_A, marketingStatus: s, visibility: v }),
+    ]));
+    let checked = 0;
+    for (const u of [R1a, L1, M]) {
+      for (const c of refs) {
+        if (!hotlistVisible(resolveScope(u, "hotlist:read"), c)) continue;
+        checked++;
+        expect(candidateVisible(resolveScope(u, "submission:create"), c)).toBe(true);
+        expect(candidateVisible(resolveScope(u, "placement:create"), c)).toBe(true);
+      }
+    }
+    expect(checked).toBeGreaterThan(20);
   });
 });
