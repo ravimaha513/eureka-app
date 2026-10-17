@@ -18,6 +18,7 @@ import { resumeCleanKey, resumeDownloadName, resumeQuarantineKey } from "../../p
 import { DOCUMENT_STORAGE, type DocumentStorage } from "../../platform/storage/document-storage.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import type { ResumeUpload } from "./resumes.schemas.js";
+import { dbErrorMapper } from "../../platform/errors.js";
 
 /**
  * Presigned POST lifetime (review: short, it can be replayed until it expires).
@@ -70,12 +71,7 @@ const DB_ERRORS: Record<string, () => HttpException> = {
   too_many_pending: () => new ConflictException("too_many_pending"),
 };
 
-function mapDbError(err: unknown): never {
-  const e = err as { message?: string; code?: string };
-  const make = e.message !== undefined && e.code !== undefined ? DB_ERRORS[e.message] : undefined;
-  if (make) throw make();
-  throw err;
-}
+const mapDbError: (err: unknown) => never = dbErrorMapper(DB_ERRORS);
 
 /**
  * Candidate resumes (FR-CAN-07) on the document quarantine pipeline (design

@@ -48,3 +48,15 @@ export function toProblem(err: unknown): Problem {
       return { status: 500, title: "Internal Server Error" };
   }
 }
+
+/**
+ * Mapper for the coded errors that definer functions and triggers raise (`RAISE EXCEPTION 'stale'`):
+ * a database error whose message is a key of `codes` becomes that problem; anything else is rethrown.
+ */
+export function dbErrorMapper(codes: Record<string, () => Error>): (err: unknown) => never {
+  return (err) => {
+    const e = err as { message?: string; code?: string };
+    if (e.message !== undefined && e.code !== undefined && Object.hasOwn(codes, e.message)) throw codes[e.message]!();
+    throw err;
+  };
+}

@@ -5,6 +5,7 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { AuditService } from "../../platform/audit.service.js";
 import { DbService } from "../../platform/db.service.js";
 import { mapPvError } from "../pipeline-report/pipeline-report.errors.js";
+import { likeContains } from "../../platform/sql.js";
 
 /** docs/pipeline-vendors-api.md PV-9..PV-12. Strict schemas (rule 4). */
 const Text = (max: number) => z.string().trim().min(1).max(max).regex(/^[^\u0000-\u001f\u007f]*$/, "no control characters");
@@ -51,7 +52,6 @@ const SELECT = `SELECT pv.id, pv.owner_id, u.display_name AS owner_name, pv.vend
   LEFT JOIN eureka.technology t ON t.id = pv.technology_id`;
 
 /** The ILIKE pattern of a literal substring. */
-const like = (s: string) => `%${s.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
 
 @Injectable()
 export class PreferredVendorsService {
@@ -88,7 +88,7 @@ export class PreferredVendorsService {
       if (q.ownerId) where.push(`pv.owner_id = ${p(q.ownerId)}::uuid`);
       if (q.technologyId) where.push(`pv.technology_id = ${p(q.technologyId)}::uuid`);
       if (q.q) {
-        const pat = p(like(q.q));
+        const pat = p(likeContains(q.q));
         where.push(`(pv.vendor_name ILIKE ${pat} OR pv.contact_name ILIKE ${pat} OR pv.clients ILIKE ${pat})`);
       }
       const rows = (await c.query<Row>(`${SELECT.replace("pv.row_version", "pv.row_version, count(*) OVER ()::int AS total")}

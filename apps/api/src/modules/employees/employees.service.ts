@@ -19,6 +19,7 @@ import { mapEmploymentError } from "./employees.errors.js";
 import type {
   AssignTeam, AssignmentEmployment, EmployeeExportQuery, EmployeeListQuery, EndAssignment, ExitEmployee, PlannedEndDate,
 } from "./employees.schemas.js";
+import { likeContains } from "../../platform/sql.js";
 
 /**
  * Employees (FR-EMP-01..09, migration 0045, docs/employees-api.md). Reads run
@@ -259,7 +260,7 @@ export class EmployeesService {
       where.push(`la.end_date IS NULL AND pp.planned_end_date <= CURRENT_DATE + ${p(q.endingWithinDays)}::int`);
     }
     if (q.search) {
-      where.push(`(p.first_name || ' ' || p.last_name) ILIKE ${p(`%${q.search.replace(/[%_\\]/g, "\\$&")}%`)} ESCAPE '\\'`);
+      where.push(`(p.first_name || ' ' || p.last_name) ILIKE ${p(likeContains(q.search))} ESCAPE '\\'`);
     }
     if (q.cursor) {
       const i = q.cursor.indexOf(".");

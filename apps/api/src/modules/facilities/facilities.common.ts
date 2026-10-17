@@ -2,6 +2,7 @@ import {
   ConflictException, ForbiddenException, HttpException, HttpStatus, NotFoundException, UnprocessableEntityException,
 } from "@nestjs/common";
 import { resolveScope, type Permission, type UserAccess } from "@eureka/shared";
+import { dbErrorMapper } from "../../platform/errors.js";
 
 /** A company (own legal entity / office) or a facility (guest house). */
 export type OwnerKind = "company" | "facility";
@@ -51,12 +52,7 @@ const DB_ERRORS: Record<string, () => HttpException> = {
 };
 
 /** Maps the definer functions' errors (migration 0054) to problem details with the code in `detail`. */
-export function mapDbError(err: unknown): never {
-  const e = err as { message?: string; code?: string };
-  const make = e.message !== undefined && e.code !== undefined ? DB_ERRORS[e.message] : undefined;
-  if (make) throw make();
-  throw err;
-}
+export const mapDbError: (err: unknown) => never = dbErrorMapper(DB_ERRORS);
 
 export function requireVersion(expected: number | null, current: number): void {
   if (expected === null) throw new HttpException("if_match_required", HttpStatus.PRECONDITION_REQUIRED);

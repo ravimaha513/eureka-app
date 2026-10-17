@@ -17,6 +17,7 @@ import { RateLimiter } from "../../platform/rate-limit.js";
 import { CandidatesService } from "../candidates/candidates.service.js";
 import { toCsv } from "./csv.js";
 import type { BulkStatus, BulkVisibility, CreateView, HotlistFilters, UpdateView } from "./hotlist.schemas.js";
+import { likeContains } from "../../platform/sql.js";
 
 /** Row cap for a Hot List export (design A6.5 and B7: 50,000). */
 export const EXPORT_ROW_CAP = 50_000;
@@ -59,7 +60,6 @@ export const filterSummary = (f: HotlistFilters) => ({
   locationId: f.locationId, visa: f.visa, documents: f.documents, resume: f.resume, stay: f.stay,
 });
 
-const likePattern = (s: string) => `%${s.replace(/[%_\\]/g, "\\$&")}%`;
 
 const presentView = (r: ViewRow) => ({
   id: r.id, name: r.name, filters: r.filters, createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
@@ -174,7 +174,7 @@ export class HotlistService {
       await c.query(`SET LOCAL statement_timeout = '60s'`); // design N9: separate export timeout
       const r = (await c.query<ExportRow>(
         `SELECT * FROM authz.hotlist_export($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [f.status ?? null, f.technology ?? null, f.visibility ?? null, f.search ? likePattern(f.search) : null, EXPORT_ROW_CAP + 1,
+        [f.status ?? null, f.technology ?? null, f.visibility ?? null, f.search ? likeContains(f.search) : null, EXPORT_ROW_CAP + 1,
           f.locationId ?? null, f.visa ?? null, f.documents ?? null, f.resume === undefined ? null : f.resume === "yes", f.stay ?? null],
       )).rows;
       await this.audit.record(c, {

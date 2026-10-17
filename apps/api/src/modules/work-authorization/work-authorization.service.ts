@@ -14,6 +14,7 @@ import { DbService } from "../../platform/db.service.js";
 import { requireStepUp } from "../../platform/step-up.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import type { WorkAuthCreate, WorkAuthUpdate } from "./work-authorization.schemas.js";
+import { dbErrorMapper } from "../../platform/errors.js";
 
 /** Enforced in the database across API tasks (authz.work_auth_reveal, migration 0047). */
 export const REVEALS_PER_MINUTE = 20;
@@ -65,12 +66,7 @@ const DB_ERRORS: Record<string, () => HttpException> = {
   too_many_reveals: () => new HttpException("too_many_reveals", HttpStatus.TOO_MANY_REQUESTS),
 };
 
-function mapDbError(err: unknown): never {
-  const e = err as { message?: string; code?: string };
-  const make = e.message !== undefined && e.code !== undefined ? DB_ERRORS[e.message] : undefined;
-  if (make) throw make();
-  throw err;
-}
+const mapDbError: (err: unknown) => never = dbErrorMapper(DB_ERRORS);
 
 /**
  * Work authorization records (FR-VIS-01, 02; design B4.4, B4.6; migration
