@@ -113,7 +113,7 @@ Eureka is a **modular monolith**: one API service and one worker service from th
                                           └──► SES
 ```
 
-Modules own their tables and expose service interfaces; no module reads another module's tables directly.
+Modules own the tables they write and expose service interfaces; writes to another module's tables go through its service or a definer function. Candidate and person are the exception on the read side: they are a shared read model that many modules join (Hot List, submissions, placements, reports), protected by RLS rather than by module boundaries.
 
 | Module | Owns | SRS |
 |---|---|---|
@@ -138,7 +138,7 @@ The scale (hundreds of users), the access model and the need for one small team 
 |---|---|---|---|
 | Web app | React 18, TypeScript, Vite, TanStack Router/Query/Table, Tailwind CSS, shadcn/ui (Radix) | Data-heavy grids with saved views and column pickers; accessible components; no SSR needed for an authenticated internal app | Next.js if public pages appear |
 | API and worker | Node.js 22 LTS, NestJS 10 (Fastify adapter), Zod | Modules match the modular monolith; guards and interceptors fit layered authorization; one language and shared Zod schemas across web and API | Java 21 + Spring Boot fits the same design equally well; extract modules into services when needed |
-| Data access | Drizzle ORM + node-postgres, SQL-first migrations | Full control of SQL, needed for scope predicates and RLS; typed queries | Kysely or raw SQL |
+| Data access | node-postgres with hand-written SQL, SQL-first migrations (built: no ORM) | Full control of SQL, needed for scope predicates and RLS | Drizzle or Kysely for typed queries |
 | Database | PostgreSQL 16 on Amazon RDS Multi-AZ | Relational integrity; Row-Level Security; `pg_trgm` and full-text search at this volume; exclusion constraints for effective dating | Aurora, read replicas, partitioning, OpenSearch for search, warehouse via CDC |
 | Authentication | Direct OIDC with Google Workspace from the API acting as Backend-for-Frontend | Company SSO; step-up via `prompt=login`; `hd` domain claim available; no tokens in the browser | Cognito, Auth0 or Okta as a broker when a second IdP is needed |
 | Jobs and events | Transactional outbox + a Postgres job table (`job_run`, leases and SKIP LOCKED) in the worker; pg-boss was rejected because it needs DDL rights at runtime | No extra infrastructure; exactly-once intent, at-least-once delivery; easy reschedule of interview-related jobs | SQS, then Amazon MSK, fed from the same outbox |
@@ -254,7 +254,7 @@ TLS 1.2+ everywhere; RDS, snapshots and S3 encrypted with KMS; the database is i
 - AWS accounts `eureka-dev`, `eureka-staging`, `eureka-prod` under AWS Organizations; region us-east-1.
 - VPC with public subnets (ALB only) and private subnets (ECS, RDS); VPC endpoints for S3, Secrets Manager, KMS, SES.
 - ECS rolling deploys with the deployment circuit breaker.
-- Migrations run as a one-off task before the deploy and follow expand/contract so old and new code both work.
+- Migrations run as a one-off task before the deploy and follow expand/contract so old and new code both work. They are forward-only (no down migrations; restore from a snapshot instead), pinned by checksum once applied, serialised by an advisory lock and bounded by `lock_timeout`. Functions that change often live one per file in `db/functions/` and are re-applied when their checksum changes (`db/functions/README.md`).
 - Backups: RDS PITR (35 days) and a daily snapshot copied to us-west-2.
 
 ## A9. Observability
@@ -310,6 +310,7 @@ eureka-app/
     shared/           authz catalog and engine, Zod schemas, enums, DTO types
   db/
     migrations/       ordered SQL migrations (schema, RLS, grants)
+    functions/        current definition of each frequently changed SQL function (repeatable)
     seed/             fictional development data
   infra/              Terraform modules and environments
   docs/               design, implementation plan, ADRs
@@ -317,7 +318,7 @@ eureka-app/
 
 ## B2. Data model
 
-Every table has `id uuid` (UUIDv7), `org_id uuid`, `created_at`, `created_by`, `updated_at`, `updated_by`, and `row_version int` for optimistic concurrency. Money is `numeric(12,2)` with `currency char(3)`. Retirable records have `deleted_at`.
+Every table has `id uuid` (UUIDv7), `org_id uuid`, `created_at`, `created_by`, `updated_at`, `updated_by`, and `row_version int` for optimistic concurrency. Money is `numeric(12,2)` with `currency char(3)`. Records are retired through a status column (for example `inactive`, `archived`); only chat messages use `deleted_at`.
 
 ### B2.1 Organization and identity
 
