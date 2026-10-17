@@ -1,11 +1,15 @@
-import { StrictMode } from "react";
+import { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError } from "./api";
-import App from "./App";
-import { PublicFeedback } from "./feedback/PublicFeedback";
-import { PortalApp } from "./portal/PortalApp";
+import { lazyDefault, lazyNamed } from "./lib/lazy";
 import "./styles.css";
+
+// The staff app, the applicant portal and the public feedback form are separate chunks:
+// each entry loads only the code it needs.
+const App = lazyDefault(() => import("./App"));
+const PortalApp = lazyNamed(() => import("./portal/PortalApp"), "PortalApp");
+const PublicFeedback = lazyNamed(() => import("./feedback/PublicFeedback"), "PublicFeedback");
 
 // Queries retry once on a network or server error; a 4xx answer (no access, not found, invalid) is final.
 // Mutations never retry (TanStack's default). Tests build their own client with retry off.
@@ -24,7 +28,9 @@ const portalPath = /^\/portal(\/|$)/.test(window.location.pathname);
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={client}>
-      {feedbackPath ? <PublicFeedback token={feedbackPath[1]!} /> : portalPath ? <PortalApp /> : <App />}
+      <Suspense fallback={<p className="empty">Loading…</p>}>
+        {feedbackPath ? <PublicFeedback token={feedbackPath[1]!} /> : portalPath ? <PortalApp /> : <App />}
+      </Suspense>
     </QueryClientProvider>
   </StrictMode>,
 );

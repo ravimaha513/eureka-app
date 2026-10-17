@@ -1,37 +1,43 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api, can, setCsrf, type Me } from "./api";
-import { SETTINGS_NAV, visibleNav, type NavItem } from "./nav";
-import { SettingsPage } from "./settings/SettingsPage";
-import { AccessPage } from "./admin/AccessPage";
-import { DashboardPage } from "./dashboard/DashboardPage";
-import { CandidateProfile } from "./sales/CandidateProfile";
-import { CandidatesPage } from "./sales/CandidatesPage";
-import { InterviewsPage } from "./interviews/InterviewsPage";
+import { SETTINGS_NAV, parseScreenPath, screenPath, visibleNav, type NavItem } from "./nav";
+import { lazyNamed } from "./lib/lazy";
+import { navigate, usePathname } from "./lib/router";
 import { HotListPage } from "./sales/HotListPage";
-import { PlacementsPage } from "./pipeline/PlacementsPage";
-import { SubmissionsPage } from "./pipeline/SubmissionsPage";
-import { PaperworkPage } from "./paperwork/PaperworkPage";
 import { NotificationBell, type InboxItem } from "./notifications/Inbox";
-import { EmployeesPage } from "./employees/EmployeesPage";
-import { ReportsPage } from "./employees/JoiningsExitsReport";
-import { InterviewReportsPage } from "./interviews/InterviewReportsPage";
-import { CompaniesPage, FacilitiesPage } from "./sites/SitesPage";
-import { DataHubPage } from "./datahub/DataHubPage";
-import { TrainingPage } from "./training/TrainingPage";
-import { CoursesPage } from "./training/CoursesPage";
-import { ChatNavBadge, ChatPage } from "./chat/ChatPage";
-import { JobsPage } from "./jobs/JobsPage";
-import { ApplicationsPage } from "./jobs/ApplicationsPage";
-import { ApplicantsPage } from "./jobs/ApplicantsPage";
-import { BirthdaysPage } from "./staff/BirthdaysPage";
-import { PaymentsPage } from "./payments/PaymentsPage";
-import { PerformancePage } from "./performance/PerformancePage";
-import { PipelineReportPage } from "./pipelinereport/PipelineReportPage";
-import { PreferredVendorsPage } from "./pipelinereport/PreferredVendorsPage";
+import { ChatNavBadge } from "./chat/ChatNavBadge";
 import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sparkles, Sun } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
+
+// Every screen but the default landing (the Hot List) is its own chunk, loaded on first visit.
+const SettingsPage = lazyNamed(() => import("./settings/SettingsPage"), "SettingsPage");
+const AccessPage = lazyNamed(() => import("./admin/AccessPage"), "AccessPage");
+const DashboardPage = lazyNamed(() => import("./dashboard/DashboardPage"), "DashboardPage");
+const CandidateProfile = lazyNamed(() => import("./sales/CandidateProfile"), "CandidateProfile");
+const CandidatesPage = lazyNamed(() => import("./sales/CandidatesPage"), "CandidatesPage");
+const InterviewsPage = lazyNamed(() => import("./interviews/InterviewsPage"), "InterviewsPage");
+const PlacementsPage = lazyNamed(() => import("./pipeline/PlacementsPage"), "PlacementsPage");
+const SubmissionsPage = lazyNamed(() => import("./pipeline/SubmissionsPage"), "SubmissionsPage");
+const PaperworkPage = lazyNamed(() => import("./paperwork/PaperworkPage"), "PaperworkPage");
+const EmployeesPage = lazyNamed(() => import("./employees/EmployeesPage"), "EmployeesPage");
+const ReportsPage = lazyNamed(() => import("./employees/JoiningsExitsReport"), "ReportsPage");
+const InterviewReportsPage = lazyNamed(() => import("./interviews/InterviewReportsPage"), "InterviewReportsPage");
+const CompaniesPage = lazyNamed(() => import("./sites/SitesPage"), "CompaniesPage");
+const FacilitiesPage = lazyNamed(() => import("./sites/SitesPage"), "FacilitiesPage");
+const DataHubPage = lazyNamed(() => import("./datahub/DataHubPage"), "DataHubPage");
+const TrainingPage = lazyNamed(() => import("./training/TrainingPage"), "TrainingPage");
+const CoursesPage = lazyNamed(() => import("./training/CoursesPage"), "CoursesPage");
+const ChatPage = lazyNamed(() => import("./chat/ChatPage"), "ChatPage");
+const JobsPage = lazyNamed(() => import("./jobs/JobsPage"), "JobsPage");
+const ApplicationsPage = lazyNamed(() => import("./jobs/ApplicationsPage"), "ApplicationsPage");
+const ApplicantsPage = lazyNamed(() => import("./jobs/ApplicantsPage"), "ApplicantsPage");
+const BirthdaysPage = lazyNamed(() => import("./staff/BirthdaysPage"), "BirthdaysPage");
+const PaymentsPage = lazyNamed(() => import("./payments/PaymentsPage"), "PaymentsPage");
+const PerformancePage = lazyNamed(() => import("./performance/PerformancePage"), "PerformancePage");
+const PipelineReportPage = lazyNamed(() => import("./pipelinereport/PipelineReportPage"), "PipelineReportPage");
+const PreferredVendorsPage = lazyNamed(() => import("./pipelinereport/PreferredVendorsPage"), "PreferredVendorsPage");
 
 /** The Hot List screen (kept under its original name for existing callers). */
 export const HotList = HotListPage;
@@ -211,49 +217,53 @@ function Placeholder({ item }: { item: NavItem }) {
   );
 }
 
+/** Shown while a screen's chunk loads. */
+const PageLoading = () => <p className="empty">Loading…</p>;
+
 export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const items = useMemo(() => visibleNav(me.capabilities), [me.capabilities]);
-  const [active, setActive] = useState(items.find((i) => i.key === "hotlist")?.key ?? items[0]?.key);
-  // Open candidate profile. The list stays mounted (hidden) so its filters, page
-  // and scroll survive, and focus returns to the row that opened the profile.
-  const [profileId, setProfileId] = useState<string | null>(null);
-  // A placement to open when switching to Placements from another screen (e.g. right after creating it).
-  const [placementId, setPlacementId] = useState<string | null>(null);
-  const openPlacement = (id: string) => { setPlacementId(id); setActive("placements"); };
-  // jobs-portal: an application to open when switching to Applications (from the inbox).
-  const [applicationId, setApplicationId] = useState<string | null>(null);
+  const has = (key: string) => items.some((i) => i.key === key);
+  // The address bar holds the screen (/<key>) and any open record (/<key>/<id>), so refresh,
+  // back/forward and shared links work. "/" and screens this role lacks land on the default screen.
+  const landing = items.find((i) => i.key === "hotlist")?.key ?? items[0]?.key;
+  const route = parseScreenPath(usePathname());
+  const routed = route.key !== null && (route.key === SETTINGS_NAV.key || has(route.key));
+  const active = routed ? route.key : landing;
+  useEffect(() => { if (!routed && landing) navigate(screenPath(landing), { replace: true }); }, [routed, landing]);
+  const go = (key: string, id?: string | null) => navigate(screenPath(key, id));
+  const recordId = routed ? route.id : null;
+  const onCandidateScreen = active === "hotlist" || active === "candidates";
+  // Open candidate profile (/hotlist/<id> or /candidates/<id>). The list stays mounted (hidden)
+  // so its filters, page and scroll survive, and focus returns to the row that opened the profile.
+  const profileId = onCandidateScreen ? recordId : null;
   const opener = useRef<HTMLElement | null>(null);
-  const [restoreFocus, setRestoreFocus] = useState(false);
-  const openProfile = (id: string) => { opener.current = document.activeElement as HTMLElement | null; setProfileId(id); };
-  const closeProfile = () => { setProfileId(null); setRestoreFocus(true); };
+  const openProfile = (id: string) => { opener.current = document.activeElement as HTMLElement | null; if (active) go(active, id); };
+  const closeProfile = () => { if (active) go(active); };
+  // Closing a profile (its Back button or the browser's) returns focus to what opened it.
+  const shownProfile = useRef(profileId);
   useEffect(() => {
-    if (!restoreFocus) return;
-    setRestoreFocus(false);
+    const was = shownProfile.current;
+    shownProfile.current = profileId;
+    if (!was || profileId || !onCandidateScreen) return;
     const el = opener.current;
     if (el && el.isConnected && !el.closest("[hidden]")) el.focus();
     else document.querySelector<HTMLElement>(".content h1")?.focus();
-  }, [restoreFocus]);
+  }, [profileId, onCandidateScreen]);
   // Inbox entries open the placement or the candidate profile when the user has that screen.
-  const has = (key: string) => items.some((i) => i.key === key);
   const candidateScreen = has("candidates") ? "candidates" : has("hotlist") ? "hotlist" : null;
-  // A chat conversation to open when switching to Chat (from a direct-message notification).
-  const [chatId, setChatId] = useState<string | null>(null);
-  // interview-alerts: an interview to open on the Interviews board (from an interview-requested notification).
-  const [interviewId, setInterviewId] = useState<string | null>(null);
   const canOpenEntity = (e: InboxItem["entity"]) =>
     (e.type === "placement" ? has("placements") : e.type === "conversation" ? has("chat") : e.type === "application" ? has("applications")
       : e.type === "interview" ? has("interviews") : e.type === "performance_target" ? has("performance") : e.type === "digest" ? false : candidateScreen !== null);
   const openEntity = (e: InboxItem["entity"]) => {
     if (e.type === "digest") return;
-    if (e.type === "performance_target") { setProfileId(null); setActive("performance"); return; }
-    if (e.type === "interview") { setProfileId(null); setInterviewId(e.id); setActive("interviews"); return; }
-    if (e.type === "application") { setProfileId(null); setApplicationId(e.id); setActive("applications"); return; }
-    if (e.type === "placement") { setProfileId(null); openPlacement(e.id); return; }
-    if (e.type === "conversation") { setProfileId(null); setChatId(e.id); setActive("chat"); return; }
+    if (e.type === "performance_target") { go("performance"); return; }
+    if (e.type === "interview") { go("interviews", e.id); return; }
+    if (e.type === "application") { go("applications", e.id); return; }
+    if (e.type === "placement") { go("placements", e.id); return; }
+    if (e.type === "conversation") { go("chat", e.id); return; }
     if (!candidateScreen) return;
-    setPlacementId(null);
-    setActive(candidateScreen);
-    openProfile(e.id);
+    opener.current = document.activeElement as HTMLElement | null;
+    go(candidateScreen, e.id);
   };
   const sections = [...new Set(items.map((i) => i.section))];
   const current = active === SETTINGS_NAV.key ? SETTINGS_NAV : items.find((i) => i.key === active);
@@ -290,7 +300,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                 return (
                   <button key={i.key} className="nav" title={collapsed ? i.label : undefined} aria-current={i.key === active ? "page" : undefined}
                     aria-describedby={i.key === "chat" ? "chat-nav-unread" : undefined}
-                    onClick={() => { setActive(i.key); setProfileId(null); setPlacementId(null); setChatId(null); setApplicationId(null); setNavOpen(false); }}>
+                    onClick={() => { go(i.key); setNavOpen(false); }}>
                     {Icon && <Icon className="navicon" size={19} strokeWidth={1.8} aria-hidden="true" />}<span className="navlabel">{i.label}</span>
                     {i.key === "chat" && <ChatNavBadge id="chat-nav-unread" part="badge" />}
                   </button>
@@ -311,50 +321,57 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <div className="topright">
             <NotificationBell onOpen={openEntity} canOpen={canOpenEntity} />
             <UserMenu name={me.displayName} roles={me.roles.map((r) => r.label).join(", ")} onSignOut={onSignOut}
-              onSettings={() => { setActive(SETTINGS_NAV.key); setProfileId(null); setPlacementId(null); setNavOpen(false); }} />
+              onSettings={() => { go(SETTINGS_NAV.key); setNavOpen(false); }} />
           </div>
         </div>
         <div className="content">
-          {!current ? <p className="empty">Your role has no screens yet.</p>
-            : current.key === "hotlist" || current.key === "candidates" ? (
-              <>
-                <div className="panel" hidden={profileId !== null}>
-                  {current.key === "hotlist"
-                    ? <HotListPage key="hotlist" me={me} onOpenProfile={openProfile} />
-                    : <CandidatesPage key="candidates" me={me} onOpenProfile={openProfile} />}
-                </div>
-                {profileId && <CandidateProfile key={profileId} id={profileId} me={me} onBack={closeProfile} backLabel={`Back to ${current.label}`} />}
-              </>
-            )
-            : current.key === "submissions" ? <SubmissionsPage me={me} onOpenPlacement={items.some((i) => i.key === "placements") ? openPlacement : undefined} />
-            : current.key === "placements" ? <PlacementsPage key={placementId ?? "list"} me={me} initialOpenId={placementId} />
-            : current.key === "interviews" ? <InterviewsPage key={interviewId ?? "board"} me={me} initialOpenId={interviewId} />
-            : current.key === "paperwork" ? <PaperworkPage me={me} />
-            : current.key === "access" ? <AccessPage me={me} />
-            : current.key === "birthdays" ? <BirthdaysPage />
-            : current.key === "employees" ? <EmployeesPage me={me} />
-            : current.key === "reports" ? <ReportsPage me={me} />
-            : current.key === "performance" ? <PerformancePage me={me} />
-            : current.key === "interview-reports" ? <InterviewReportsPage me={me} />
-            : current.key === "companies" ? <CompaniesPage key="companies" me={me} />
-            : current.key === "facilities" ? <FacilitiesPage key="facilities" me={me} />
-            : current.key === "datahub" ? <DataHubPage />
-            : current.key === "training" ? <TrainingPage me={me} />
-            : current.key === "courses" ? <CoursesPage me={me} />
-            : current.key === "settings" ? <SettingsPage me={me} />
-            : current.key === "chat" ? <ChatPage me={me} initialConversationId={chatId} />
-            : current.key === "jobs" ? <JobsPage me={me} />
-            : current.key === "applications" ? <ApplicationsPage key={applicationId ?? "list"} me={me} initialOpenId={applicationId} />
-            : current.key === "applicants" ? <ApplicantsPage />
-            : current.key === "payments" ? <PaymentsPage me={me} />
-            : current.key === "pipeline" ? <PipelineReportPage />
-            : current.key === "vendors" ? <PreferredVendorsPage />
-            : current.key === "dashboard" ? (
-              <DashboardPage firstName={me.displayName.split(" ")[0]} canOpen={(t) => items.some((i) => i.key === t)}
-                canExport={can(me, "report:export")}
-                onOpen={(t, id) => { if (t === "placements") openPlacement(id); else setActive(t); }} />
-            )
-            : <Placeholder item={current} />}
+          <Suspense fallback={<PageLoading />}>
+            {!current ? <p className="empty">Your role has no screens yet.</p>
+              : current.key === "hotlist" || current.key === "candidates" ? (
+                <>
+                  <div className="panel" hidden={profileId !== null}>
+                    {current.key === "hotlist"
+                      ? <HotListPage key="hotlist" me={me} onOpenProfile={openProfile} />
+                      : <CandidatesPage key="candidates" me={me} onOpenProfile={openProfile} />}
+                  </div>
+                  {/* Its own boundary, so loading the profile chunk never hides the list behind it. */}
+                  {profileId && (
+                    <Suspense fallback={<PageLoading />}>
+                      <CandidateProfile key={profileId} id={profileId} me={me} onBack={closeProfile} backLabel={`Back to ${current.label}`} />
+                    </Suspense>
+                  )}
+                </>
+              )
+              : current.key === "submissions" ? <SubmissionsPage me={me} onOpenPlacement={has("placements") ? (id) => go("placements", id) : undefined} />
+              : current.key === "placements" ? <PlacementsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("placements", id)} />
+              : current.key === "interviews" ? <InterviewsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("interviews", id)} />
+              : current.key === "paperwork" ? <PaperworkPage me={me} />
+              : current.key === "access" ? <AccessPage me={me} />
+              : current.key === "birthdays" ? <BirthdaysPage />
+              : current.key === "employees" ? <EmployeesPage me={me} />
+              : current.key === "reports" ? <ReportsPage me={me} />
+              : current.key === "performance" ? <PerformancePage me={me} />
+              : current.key === "interview-reports" ? <InterviewReportsPage me={me} />
+              : current.key === "companies" ? <CompaniesPage key="companies" me={me} />
+              : current.key === "facilities" ? <FacilitiesPage key="facilities" me={me} />
+              : current.key === "datahub" ? <DataHubPage />
+              : current.key === "training" ? <TrainingPage me={me} />
+              : current.key === "courses" ? <CoursesPage me={me} />
+              : current.key === "settings" ? <SettingsPage me={me} />
+              : current.key === "chat" ? <ChatPage me={me} initialConversationId={recordId} onOpenChange={(id) => go("chat", id)} />
+              : current.key === "jobs" ? <JobsPage me={me} />
+              : current.key === "applications" ? <ApplicationsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("applications", id)} />
+              : current.key === "applicants" ? <ApplicantsPage />
+              : current.key === "payments" ? <PaymentsPage me={me} />
+              : current.key === "pipeline" ? <PipelineReportPage />
+              : current.key === "vendors" ? <PreferredVendorsPage />
+              : current.key === "dashboard" ? (
+                <DashboardPage firstName={me.displayName.split(" ")[0]} canOpen={(t) => has(t)}
+                  canExport={can(me, "report:export")}
+                  onOpen={(t, id) => go(t, t === "placements" ? id : null)} />
+              )
+              : <Placeholder item={current} />}
+          </Suspense>
         </div>
       </main>
     </div>

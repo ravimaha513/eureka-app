@@ -6,6 +6,7 @@ import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { DocumentsSection } from "../documents/DocumentsSection";
 import { saveBlob } from "../lib/download";
 import { docTypeLabel } from "../lib/format";
+import { useRoutedId } from "../lib/router";
 import { ContractsSection } from "./ContractsSection";
 import { Drawer, Field, fmtDate } from "../sales/ui";
 import { useLookups, type Named } from "../lookups";
@@ -61,7 +62,11 @@ function ChecklistProgress({ items }: { items: NonNullable<Placement["checklist"
 const where = (p: Pick<Placement, "projectCity" | "projectState">) => [p.projectCity, p.projectState].filter(Boolean).join(", ");
 
 /** Placements list (GET /api/v1/placements) with a detail drawer for contacts, assignment and status changes. */
-export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "capabilities">; initialOpenId?: string | null }) {
+export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
+  me?: Pick<Me, "capabilities">; initialOpenId?: string | null;
+  /** The open placement changed (the shell keeps it in the URL). */
+  onOpenChange?: (id: string | null) => void;
+}) {
   const id = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [status, setStatusRaw] = useState("");
@@ -82,7 +87,7 @@ export function PlacementsPage({ me, initialOpenId = null }: { me?: Pick<Me, "ca
   const pager = useCursorPager();
   const { page, reset } = pager;
   const invalidRange = Boolean(from && to && from > to);
-  const [openId, setOpenId] = useState<string | null>(initialOpenId);
+  const [openId, setOpenId] = useRoutedId(initialOpenId, onOpenChange);
   const [notice, setNotice] = useState("");
 
   const filters = {

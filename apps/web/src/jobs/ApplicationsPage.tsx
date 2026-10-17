@@ -7,6 +7,7 @@ import {
 } from "@eureka/shared";
 import { can, type Me } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
+import { useRoutedId } from "../lib/router";
 import { useLookups } from "../lookups";
 import { Drawer, Field, fmtDate } from "../sales/ui";
 import { Person } from "../shell/ui";
@@ -30,7 +31,11 @@ const fmtWhen = (iso: string) => new Date(iso).toLocaleString(undefined, { dateS
 export const stars = (n: number) => `${"★".repeat(n)}${"☆".repeat(5 - n)}`;
 
 /** Applications (staff): HR sees all; a hiring manager their jobs'; an interviewer those they review (the server decides). */
-export function ApplicationsPage({ me, initialOpenId }: { me: Pick<Me, "capabilities" | "id">; initialOpenId?: string | null }) {
+export function ApplicationsPage({ me, initialOpenId, onOpenChange }: {
+  me: Pick<Me, "capabilities" | "id">; initialOpenId?: string | null;
+  /** The open application changed (the shell keeps it in the URL). */
+  onOpenChange?: (id: string | null) => void;
+}) {
   const id = useId();
   const [status, setStatus] = useState("");
   const [jobId, setJobId] = useState("");
@@ -38,7 +43,7 @@ export function ApplicationsPage({ me, initialOpenId }: { me: Pick<Me, "capabili
   const [search, setSearch] = useState("");
   const pager = useCursorPager();
   const { page, reset } = pager;
-  const [openId, setOpenId] = useState<string | null>(initialOpenId ?? null);
+  const [openId, setOpenId] = useRoutedId(initialOpenId ?? null, onOpenChange);
   const [notice, setNotice] = useState("");
   useEffect(() => {
     const t = setTimeout(() => { setSearch(searchText.trim()); reset(); }, 300);

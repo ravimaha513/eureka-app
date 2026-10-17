@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { CHAT_BODY_MAX, CHAT_FILTERS, CHAT_NAME_MAX, CHAT_POLL, chatFileName, type ChatFilter } from "@eureka/shared";
 import type { Me } from "../api";
+import { useRoutedId } from "../lib/router";
 import { ConfirmDialog } from "../ui/Dialog";
 import { documentFileProblem, documentTypeOf } from "../documents/documentsApi";
 import { browser, postToStorage } from "../sales/resumesApi";
@@ -15,49 +16,13 @@ import {
   MAX_ATTACHMENTS, attachmentState, chatApi, chatError, chatKeys, errorStatus, mergeMessages, pollDelay,
   type ConversationDetail, type ConversationSummary, type Member, type Message, type Person,
 } from "./chatApi";
+import { countLabel, useHidden } from "./ChatNavBadge";
 import { Linkified } from "./linkify";
 import "./chat.css";
 
 const FILTER_LABELS: Record<ChatFilter, string> = {
   all: "All Messages", unread: "Unread", group: "Group", favorite: "Favorite", archived: "Archived",
 };
-
-/** True while the tab is hidden (polling backs off; design A7). */
-export function useHidden(): boolean {
-  const [hidden, setHidden] = useState(() => typeof document !== "undefined" && document.hidden);
-  useEffect(() => {
-    const on = () => setHidden(document.hidden);
-    document.addEventListener("visibilitychange", on);
-    return () => document.removeEventListener("visibilitychange", on);
-  }, []);
-  return hidden;
-}
-
-/** Unread chat messages for the navigation badge (polled; slower in a hidden tab). */
-export function useChatUnread(enabled: boolean) {
-  const hidden = useHidden();
-  return useQuery({
-    queryKey: chatKeys.unread,
-    queryFn: chatApi.unread,
-    enabled,
-    refetchInterval: (query) => pollDelay(hidden ? CHAT_POLL.badgeHiddenMs : CHAT_POLL.badgeMs, query.state.fetchFailureCount, errorStatus(query.state.error)) || false,
-    refetchIntervalInBackground: true,
-  });
-}
-
-const countLabel = (n: number, capped = false) => (capped || n > 99 ? "99+" : String(n));
-
-/**
- * The count next to "Chat" in the sidebar. `badge` is the visible number
- * (hidden from assistive technology, inside the nav button); `text` is the
- * sentence that describes the button (outside it, so its name stays "Chat").
- */
-export function ChatNavBadge({ id, part }: { id: string; part: "badge" | "text" }) {
-  const q = useChatUnread(true);
-  const n = q.data?.unread ?? 0;
-  if (part === "badge") return n > 0 ? <span className="navbadge" aria-hidden="true">{countLabel(n, q.data?.capped)}</span> : null;
-  return <span id={id} className="sr-only">{n > 0 ? `${countLabel(n, q.data?.capped)} unread chat messages` : "No unread chat messages"}</span>;
-}
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 const dayKey = (iso: string) => new Date(iso).toDateString();
@@ -78,8 +43,12 @@ const newClientId = () =>
   (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID()
     : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (Number(c) ^ (Math.random() * 16) >> (Number(c) / 4)).toString(16)));
 
-export function ChatPage({ me, initialConversationId = null }: { me: Me; initialConversationId?: string | null }) {
-  const [selected, setSelected] = useState<string | null>(initialConversationId);
+export function ChatPage({ me, initialConversationId = null, onOpenChange }: {
+  me: Me; initialConversationId?: string | null;
+  /** The open conversation changed (the shell keeps it in the URL). */
+  onOpenChange?: (id: string | null) => void;
+}) {
+  const [selected, setSelected] = useRoutedId(initialConversationId, onOpenChange);
   const [filter, setFilter] = useState<ChatFilter>("all");
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
@@ -88,7 +57,6 @@ export function ChatPage({ me, initialConversationId = null }: { me: Me; initial
   const qc = useQueryClient();
   const term = search.trim();
 
-  useEffect(() => { if (initialConversationId) setSelected(initialConversationId); }, [initialConversationId]);
 
   const list = useQuery({
     queryKey: chatKeys.list(filter, term),

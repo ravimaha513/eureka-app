@@ -394,5 +394,7 @@ describe("Pipeline navigation", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Placements" })).toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: "Placements" })).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("dialog", { name: "Divya Menon · Northwind Financial" })).toBeInTheDocument();
+    // The open placement is in the URL, so the link can be shared or reloaded.
+    expect(window.location.pathname).toBe("/placements/p9");
   });
 });
