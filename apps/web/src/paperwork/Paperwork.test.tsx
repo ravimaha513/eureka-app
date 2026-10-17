@@ -225,9 +225,9 @@ describe("Paperwork drawer", () => {
     expect(within(drawer).getByText("7 years")).toBeInTheDocument();
     fireEvent.click(await within(drawer).findByRole("button", { name: "Update background check" }));
     const dlg = screen.getByRole("dialog", { name: "Update background check" });
-    const address = within(dlg).getByRole("combobox", { name: "Address history", exact: true });
+    const address = within(dlg).getByRole("combobox", { name: "Address history" });
     expect(within(address).getAllByRole("option").map((o) => o.textContent)).toEqual(["Not recorded", "3 years", "5 years", "7 years", "10 years"]);
-    expect(within(dlg).getByRole("combobox", { name: "Employment history", exact: true })).toHaveValue("7");
+    expect(within(dlg).getByRole("combobox", { name: "Employment history" })).toHaveValue("7");
     fireEvent.change(address, { target: { value: "10" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.writes()).toHaveLength(1));
