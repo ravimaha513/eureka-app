@@ -374,6 +374,79 @@ function chatCases(): RejectCase[] {
 }
 
 
+// payments (gap L1, migration 0100): status, expected date, delay, received amounts, voids, versions and the
+// placement data are the server's; Accounts sends invoice facts and payments only.
+const PAYMENT_FORBIDDEN: Record<string, unknown> = {
+  status: "received", expectedDate: "2020-01-31", delayDays: 0, paidAmount: 1, paymentCount: 0, receivedOn: "2020-01-02",
+  voidedAt: PAST, voidedBy: U.admin, recruiterId: U.r1b, teamId: T.t2, candidateId: FOREIGN_ID, invoiceId: FOREIGN_ID, rate: 1,
+};
+const payDay = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10);
+async function maInvoice(): Promise<string> {
+  const j = await joinedEmployee(db);
+  const r = await call("acct", "POST", "/api/v1/invoices", { placementId: j.placementId, invoiceDate: payDay(5), termsDays: 30, amount: 1000 },
+    { "idempotency-key": `ma-inv-${++n}` });
+  expect(r.statusCode, r.body).toBe(201);
+  return r.json().id as string;
+}
+async function maPayment(invoice: string): Promise<string> {
+  const r = await call("acct", "POST", `/api/v1/invoices/${invoice}/payments`, { receivedOn: payDay(2), amount: 10 }, { "idempotency-key": `ma-pay-${++n}` });
+  expect(r.statusCode, r.body).toBe(201);
+  return r.json().id as string;
+}
+const paymentState = () => rows(`SELECT (SELECT json_agg(i ORDER BY i.id) FROM eureka.invoice i) AS invoices,
+  (SELECT json_agg(p ORDER BY p.id) FROM eureka.payment p) AS payments, (SELECT count(*) FROM eureka.idempotency_key)::int AS keys`);
+function paymentCases(): RejectCase[] {
+  return [
+    {
+      route: "POST /api/v1/invoices", actor: "acct",
+      prepare: async () => {
+        const j = await joinedEmployee(db);
+        return {
+          url: "/api/v1/invoices", headers: { "idempotency-key": `ma-${++n}` },
+          body: { placementId: j.placementId, invoiceDate: payDay(5), termsDays: 30 }, state: paymentState,
+        };
+      },
+      forbidden: { ...PAYMENT_FORBIDDEN, placement: { id: FOREIGN_ID } },
+    },
+    {
+      route: "PATCH /api/v1/invoices/:id", actor: "acct",
+      prepare: async () => {
+        const id = await maInvoice();
+        return { url: `/api/v1/invoices/${id}`, headers: { "if-match": '"1"' }, body: { termsDays: 45 }, state: paymentState };
+      },
+      forbidden: { ...PAYMENT_FORBIDDEN, placementId: FOREIGN_ID },
+    },
+    {
+      route: "POST /api/v1/invoices/:id/void", actor: "acct",
+      prepare: async () => {
+        const id = await maInvoice();
+        return { url: `/api/v1/invoices/${id}/void`, headers: { "if-match": '"1"' }, body: {}, state: paymentState };
+      },
+      forbidden: PAYMENT_FORBIDDEN,
+    },
+    {
+      route: "POST /api/v1/invoices/:id/payments", actor: "acct",
+      prepare: async () => {
+        const id = await maInvoice();
+        return {
+          url: `/api/v1/invoices/${id}/payments`, headers: { "idempotency-key": `ma-${++n}` },
+          body: { receivedOn: payDay(1), amount: 25 }, state: paymentState,
+        };
+      },
+      forbidden: { ...Object.fromEntries(Object.entries(PAYMENT_FORBIDDEN).filter(([k]) => k !== "receivedOn")), firstPayment: true, recordedBy: U.admin, paymentId: FOREIGN_ID },
+    },
+    {
+      route: "POST /api/v1/invoices/:id/payments/:paymentId/void", actor: "acct",
+      prepare: async () => {
+        const id = await maInvoice();
+        const pay = await maPayment(id);
+        return { url: `/api/v1/invoices/${id}/payments/${pay}/void`, body: {}, state: paymentState };
+      },
+      forbidden: { ...PAYMENT_FORBIDDEN, paymentId: FOREIGN_ID },
+    },
+  ];
+}
+
 const CASES: RejectCase[] = [
   // interview-alerts (migration 0086): a contract's placement, client, creator and times are the server's
   {
@@ -1227,6 +1300,7 @@ const CASES: RejectCase[] = [
   },
   // chat (migration 0070, docs/chat-api.md): members, roles, sender, revisions, read marks and keys are the server's
   ...chatCases(),
+  ...paymentCases(),
   // jobs-portal (migration 0060): owner, team, version, posting time and kind are the server's
   {
     route: "POST /api/v1/jobs", actor: "l1",
