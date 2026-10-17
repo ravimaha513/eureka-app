@@ -869,6 +869,12 @@ const CASES: RejectCase[] = [
     prepare: async () => ({ url: "/api/v1/reports/joinings-exits/export", body: { from: "2025-01-01", to: "2025-06-30" }, state: async () => null }),
     forbidden: { teamId: T.t2, recruiterId: U.r2a, scope: "org", limit: 1_000_000, includePhones: true, cap: 1 },
   },
+  // market-reports
+  {
+    route: "POST /api/v1/reports/market/export", actor: "l1",
+    prepare: async () => ({ url: "/api/v1/reports/market/export", body: { groupBy: "team" }, state: async () => null }),
+    forbidden: { teamId: T.t2, recruiterId: U.r2a, scope: "org", export: false, includeNames: true, statuses: ["placed"] },
+  },
   // interviews
   {
     route: "POST /api/v1/interviews", actor: "r1a",

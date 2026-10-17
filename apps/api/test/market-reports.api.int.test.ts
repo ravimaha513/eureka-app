@@ -122,9 +122,9 @@ describe("differential: counts equal the engine's report.market:read scope over 
     expect(d.totals.inMarket).toBe(mine.filter((c) => (IN_MARKET_STATUSES as readonly string[]).includes(c.marketingStatus)).length);
     expect(d.totals.placed).toBe(mine.filter((c) => c.marketingStatus === "placed").length);
     for (const s of d.statuses) expect(d.totals.byStatus[s], s).toBe(mine.filter((c) => c.marketingStatus === s).length);
-    const byTeam = new Map<string, number>();
+    const byTeam = new Map<string | null, number>();
     for (const c of mine) byTeam.set(c.teamId, (byTeam.get(c.teamId) ?? 0) + 1);
-    expect(new Map(d.groups.map((g) => [g.id!, g.candidates]))).toEqual(byTeam);
+    expect(new Map(d.groups.map((g) => [g.id, g.candidates]))).toEqual(byTeam);
     // Groups add up to the totals, status by status.
     for (const s of d.statuses) expect(d.groups.reduce((n, g) => n + g.byStatus[s]!, 0), s).toBe(d.totals.byStatus[s]);
     expect(d.totals.placedInPeriod).toBeNull();
