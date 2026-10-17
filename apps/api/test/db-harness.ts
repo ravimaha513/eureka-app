@@ -1,8 +1,9 @@
 import pg from "pg";
-import { migrate } from "../src/db/migrate.js";
+import { inject } from "vitest";
+import { seedCatalog } from "../src/db/migrate.js";
+import { APP_PASSWORD } from "./global-setup.js";
 
 const ADMIN_BASE = process.env.TEST_PG_ADMIN_URL ?? "postgres://postgres:postgres@127.0.0.1:5432";
-const APP_PASSWORD = "eureka_app_test";
 
 export interface TestDb {
   name: string;
@@ -12,19 +13,23 @@ export interface TestDb {
   drop(): Promise<void>;
 }
 
-/** Creates a fresh database, applies all migrations and returns pools per role. */
+/**
+ * Creates a fresh database as a copy of the run's migrated template (global-setup.ts) and returns
+ * pools per role. Each file gets its own database, so files run in parallel.
+ */
 export async function createTestDb(): Promise<TestDb> {
   const name = `eureka_test_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
   const root = new pg.Client({ connectionString: `${ADMIN_BASE}/postgres` });
   await root.connect();
-  await root.query(`CREATE DATABASE ${name}`);
+  await root.query(`CREATE DATABASE ${name} TEMPLATE ${inject("templateDb")}`);
   await root.end();
 
-  await migrate(`${ADMIN_BASE}/${name}`);
-
   const admin = new pg.Pool({ connectionString: `${ADMIN_BASE}/${name}`, max: 4 });
-  await admin.query(`ALTER ROLE eureka_app PASSWORD '${APP_PASSWORD}'`);
-  await admin.query(`ALTER ROLE eureka_worker PASSWORD '${APP_PASSWORD}'`);
+  // The template was seeded without these; a file that sets them gets the policy switches they imply.
+  if (process.env.EUREKA_ENVIRONMENT || process.env.SINGLE_ADMIN_MODE) {
+    const c = await admin.connect();
+    try { await seedCatalog(c); } finally { c.release(); }
+  }
   const url = new URL(ADMIN_BASE);
   const roleUrl = (role: string) => `postgres://${role}:${APP_PASSWORD}@${url.host}/${name}`;
   const app = new pg.Pool({ connectionString: roleUrl("eureka_app"), max: 8 });
