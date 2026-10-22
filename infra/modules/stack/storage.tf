@@ -70,10 +70,13 @@ resource "aws_s3_bucket_logging" "b" {
 #
 # Encryption: objects must end up under the data key. The worker sends no SSE
 # headers and relies on the bucket default (SSE-KMS, data key), so the denies
-# only fire when a header IS present and names something else
-# (StringNotEqualsIfExists): an explicit other KMS key, a non-KMS algorithm
-# such as AES256, or "aws:kms" without a key id (which means aws/s3). A deny
-# on a missing header would block the worker.
+# only fire when a header IS present and names something else: an explicit
+# other KMS key, a non-KMS algorithm such as AES256, or "aws:kms" without a key
+# id (which means aws/s3). A deny on a missing header would block the worker.
+# "Present" needs its own Null = false test: a negated operator such as
+# StringNotEquals matches when the key is absent, and its ...IfExists form
+# does too, so on its own either one denies every header-less PutObject
+# (audit-export failed with AccessDenied in staging until 2026-10-22).
 resource "aws_s3_bucket_policy" "tls_only" {
   for_each = { for k, v in aws_s3_bucket.b : k => v if k == "audit" }
   bucket   = each.value.id
@@ -94,7 +97,10 @@ resource "aws_s3_bucket_policy" "tls_only" {
         Principal = "*"
         Action    = "s3:PutObject"
         Resource  = "${each.value.arn}/*"
-        Condition = { StringNotEqualsIfExists = { "s3:x-amz-server-side-encryption-aws-kms-key-id" = aws_kms_key.data.arn } }
+        Condition = {
+          Null            = { "s3:x-amz-server-side-encryption-aws-kms-key-id" = "false" }
+          StringNotEquals = { "s3:x-amz-server-side-encryption-aws-kms-key-id" = aws_kms_key.data.arn }
+        }
       },
       {
         Sid       = "DenyNonKmsEncryption"
@@ -102,7 +108,10 @@ resource "aws_s3_bucket_policy" "tls_only" {
         Principal = "*"
         Action    = "s3:PutObject"
         Resource  = "${each.value.arn}/*"
-        Condition = { StringNotEqualsIfExists = { "s3:x-amz-server-side-encryption" = "aws:kms" } }
+        Condition = {
+          Null            = { "s3:x-amz-server-side-encryption" = "false" }
+          StringNotEquals = { "s3:x-amz-server-side-encryption" = "aws:kms" }
+        }
       },
       {
         # "aws:kms" without a key id selects the AWS-managed aws/s3 key, not the data key.
