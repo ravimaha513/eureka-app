@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { capabilities, ROLES, type Role } from "@eureka/shared";
-import { HotList, Shell } from "./App";
+import App, { HotList, Shell } from "./App";
 import type { Me } from "./api";
 import { visibleNav } from "./nav";
 
@@ -124,6 +124,23 @@ describe("theme and account menu", () => {
     fireEvent.click(account);
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
     expect(onSignOut).toHaveBeenCalled();
+  });
+});
+
+describe("sign out", () => {
+  it("returns to the sign-in screen after logout", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/v1/me") return new Response(JSON.stringify(meFor("recruiter")), { status: 200 });
+      if (url === "/api/auth/logout") return new Response(null, { status: 204 });
+      if (url.startsWith("/api/v1/notifications/unread-count")) return new Response(JSON.stringify({ unread: 0, capped: false }), { status: 200 });
+      return new Response(JSON.stringify({ items: [] }), { status: 200 });
+    });
+    wrap(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Account: Test User" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(await screen.findByRole("heading", { name: "Hi, welcome back!" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", expect.objectContaining({ method: "POST" }));
   });
 });
 

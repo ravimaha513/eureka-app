@@ -398,8 +398,10 @@ export default function App() {
   const signOut = async () => {
     // A 401 here means the session is already gone; either way the client must return to the sign-in screen.
     try { await api("/api/auth/logout", { method: "POST" }); } catch { /* already signed out */ }
-    qc.clear();
-    await qc.invalidateQueries();
+    // Set "me" to null first: clear() alone drops the query without notifying the mounted observer, which keeps the stale user.
+    setCsrf("");
+    qc.setQueryData(["me"], null);
+    qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
   };
   if (me.data.mustChangePassword) return <ChangePassword onDone={() => qc.invalidateQueries()} onSignOut={signOut} />;
   return <Shell me={me.data} onSignOut={signOut} />;
