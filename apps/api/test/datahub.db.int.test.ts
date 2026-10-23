@@ -54,13 +54,14 @@ const download = (user: string, version: string, s: Buffer | null) =>
     `SELECT * FROM authz.datahub_download($1, $2)`, [version, s]).then((r) => r[0]!);
 
 // ---- an independent model of the level rules (docs/datahub-api.md DH-1..DH-3) ----
-interface ModelFolder { id: string; parent: string | null; level: "internal" | "confidential" | "restricted"; roles: Role[]; members: string[]; location: string | null }
+interface ModelFolder { id: string; by: string; parent: string | null; level: "internal" | "confidential" | "restricted"; roles: Role[]; members: string[]; location: string | null }
 const folders: ModelFolder[] = [];
 const rolesOf = (key: keyof typeof U) => USERS[key].roles.map((r) => r.role);
 const staff = (key: keyof typeof U) => rolesOf(key).some((r) => GRANTS[r]["datahub:read"] !== undefined);
 const manages = (key: keyof typeof U, f: ModelFolder) => staff(key) && USERS[key].roles.some((r) => {
   const s = GRANTS[r.role]["datahub:manage"];
-  return s === "org" || (s === "location" && r.location !== undefined && LOC[r.location] === f.location);
+  return s === "org" || (s === "location" && r.location !== undefined && LOC[r.location] === f.location)
+    || (GRANTS[r.role]["datahub:create"] !== undefined && f.by === U[key]);
 });
 function ownRule(key: keyof typeof U, f: ModelFolder): boolean {
   if (!staff(key)) return false;
@@ -74,9 +75,9 @@ function readable(key: keyof typeof U, f: ModelFolder): boolean {
 }
 
 const F: Record<string, string> = {};
-async function add(user: string, name: string, f: Omit<ModelFolder, "id">, upload = false) {
+async function add(user: string, name: string, f: Omit<ModelFolder, "id" | "by">, upload = false) {
   const id = await createFolder(user, { parent: f.parent, name, level: f.level, roles: f.roles, members: f.members, location: f.location, upload });
-  folders.push({ id, ...f });
+  folders.push({ id, by: user, ...f });
   F[name] = id;
   return id;
 }
@@ -89,6 +90,9 @@ beforeAll(async () => {
   await add(U.locD, "Dallas guest house", { parent: null, level: "internal", roles: [], members: [], location: LOC.dallas });
   await add(U.hr, "Austin office", { parent: null, level: "confidential", roles: ["location_incharge"], members: [], location: LOC.austin });
   await add(U.locD, "Dallas leases", { parent: null, level: "restricted", roles: [], members: [U.locD], location: LOC.dallas });
+  // DH-2a: a Lead creates (datahub:create) a confidential folder for HR only: they still read and manage it.
+  await add(U.l1, "Team Rohit onboarding", { parent: null, level: "confidential", roles: ["hr"], members: [], location: null });
+  await add(U.l1, "Team Rohit offers", { parent: F["Team Rohit onboarding"]!, level: "restricted", roles: [], members: [U.l1], location: null });
 });
 
 describe("folder visibility (RLS) matches the model for every fixture user", () => {
@@ -170,6 +174,31 @@ describe("folder writes", () => {
     // A subfolder of a folder in another location is not a way around the location scope.
     expect(await err(createFolder(U.hr, { parent: F["Dallas guest house"]!, name: "Sub", level: "internal", location: LOC.austin })))
       .toMatchObject({ message: "invalid_location" });
+  });
+
+  it("creators (datahub:create, DH-2a): org-wide folders only, manage their own folders and nobody else's", async () => {
+    const managed = async (u: string) => (await q<{ ids: string[] }>(u, `SELECT authz.datahub_managed_folders() AS ids`))[0]!.ids;
+    expect(await err(createFolder(U.l1, { name: "Dallas lead folder", level: "internal", location: LOC.dallas }))).toMatchObject({ message: "not_permitted" });
+    expect(await err(createFolder(U.l1, { parent: F["Company policies"]!, name: "Sub", level: "internal" }))).toMatchObject({ message: "not_permitted" });
+    expect(await err(q(U.l1, `SELECT authz.datahub_update_folder($1, 1, '{"name":"x"}', '{}')`, [F["Company policies"]]))).toMatchObject({ message: "not_permitted" });
+    const id = await createFolder(U.ceo, { name: "Board papers", level: "restricted" });
+    expect(await managed(U.ceo)).toContain(id);
+    expect(await managed(U.m1)).not.toContain(id);
+    expect(await managed(U.l1)).toEqual(expect.arrayContaining([F["Team Rohit onboarding"], F["Team Rohit offers"]]));
+    expect(await managed(U.l1)).not.toContain(id);
+    // The creator manages their restricted folder but reads its files only once a member (as any manager).
+    expect((await q<{ ids: string[] }>(U.ceo, `SELECT authz.datahub_readable_folders() AS ids`))[0]!.ids).not.toContain(id);
+    expect((await q<{ c: boolean }>(U.ceo, `SELECT authz.datahub_set_member($1, $2, true) AS c`, [id, U.ceo]))[0]!.c).toBe(true);
+    expect((await q<{ ids: string[] }>(U.ceo, `SELECT authz.datahub_readable_folders() AS ids`))[0]!.ids).toContain(id);
+    // Losing the grant loses the folders.
+    await db.admin.query(`UPDATE eureka.role_permission SET permission = 'datahub:create_off' WHERE role_key = 'ceo' AND permission = 'datahub:create'`);
+    try {
+      expect(await managed(U.ceo)).not.toContain(id);
+    } finally {
+      await db.admin.query(`UPDATE eureka.role_permission SET permission = 'datahub:create' WHERE role_key = 'ceo' AND permission = 'datahub:create_off'`);
+    }
+    await q(U.ceo, `SELECT authz.datahub_set_member($1, $2, false)`, [id, U.ceo]);
+    await q(U.ceo, `SELECT authz.datahub_delete_folder($1, 1)`, [id]);
   });
 
   it("update: managers only, row version, lowering restricted drops the members", async () => {

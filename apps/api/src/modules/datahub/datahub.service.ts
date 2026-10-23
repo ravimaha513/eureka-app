@@ -164,10 +164,14 @@ export class DatahubService {
     return row;
   }
 
-  /** What the caller may create: org-wide folders, and/or folders of these locations. */
+  /** What the caller may create: org-wide folders (org managers, DH-2a creators), and/or folders of these locations. */
   private createScope(user: AuthedUser) {
     const s = resolveScope(user.access, "datahub:manage");
-    return { org: s?.all ?? false, locationIds: s ? [...s.locationIds] : [] };
+    return { org: (s?.all ?? false) || can(user.access, "datahub:create"), locationIds: s ? [...s.locationIds] : [] };
+  }
+
+  private canCreate(user: AuthedUser) {
+    return can(user.access, "datahub:manage") || can(user.access, "datahub:create");
   }
 
   async folders(user: AuthedUser) {
@@ -182,9 +186,9 @@ export class DatahubService {
     return this.db.withUser(user.id, async (c) => presentFolder(await this.folderRow(c, user, id)));
   }
 
-  /** DH-2: datahub:manage. Optional Idempotency-Key: a retry with the same body returns the first answer. */
+  /** DH-2: datahub:manage or datahub:create (DH-2a). Optional Idempotency-Key: a retry with the same body returns the first answer. */
   async createFolder(user: AuthedUser, parse: () => FolderCreate, idempotencyKey: string | undefined) {
-    if (!can(user.access, "datahub:manage")) throw new ForbiddenException("Not permitted");
+    if (!this.canCreate(user)) throw new ForbiddenException("Not permitted");
     const body = parse();
     const key = idempotencyKey === undefined ? null : IdempotencyKey.safeParse(idempotencyKey);
     if (key && !key.success) throw new BadRequestException("invalid_idempotency_key");
@@ -275,7 +279,7 @@ export class DatahubService {
 
   /** People picker for restricted folders: active staff (holders of datahub:read), ids and names only. */
   async people(user: AuthedUser, q: { q?: string; limit: number }) {
-    if (!can(user.access, "datahub:manage")) throw new ForbiddenException("Not permitted");
+    if (!this.canCreate(user)) throw new ForbiddenException("Not permitted");
     return this.db.withUser(user.id, async (c) => {
       const term = q.q?.trim() ?? "";
       const params: unknown[] = [q.limit];

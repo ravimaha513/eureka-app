@@ -138,6 +138,8 @@ export const PERMISSIONS = [
   // datahub
   "datahub:read",
   "datahub:manage",
+  /** Create organisation-wide folders and manage only the folders one created (docs/datahub-api.md DH-2a). */
+  "datahub:create",
   // training
   "training:read",
   "training:manage",
@@ -234,6 +236,7 @@ export const GRANTS: Record<Role, Grants> = {
     "calendar:block": "team",
     // datahub
     "datahub:read": "own",
+    "datahub:create": "own",
     // training
     "training:read": "team",
     // chat
@@ -255,6 +258,7 @@ export const GRANTS: Record<Role, Grants> = {
     "designation:change": "hierarchy",
     // datahub
     "datahub:read": "own",
+    "datahub:create": "own",
     // training
     "training:read": "hierarchy",
     // chat
@@ -300,6 +304,7 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "org",
     // datahub
     "datahub:read": "own",
+    "datahub:create": "own",
     // training
     "training:read": "org",
     // chat
