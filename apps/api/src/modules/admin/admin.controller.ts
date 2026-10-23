@@ -160,10 +160,23 @@ export class AdminController {
   }
 }
 
-/** Team operations outside the admin area (AD-8): scoped by team:move_member, not access:manage. */
+/** Team operations outside the admin area (AD-8, AD-10): scoped by team:move_member / team:add_member, not access:manage. */
 @Controller("api/v1/teams")
 export class TeamsController {
   constructor(private readonly svc: AdminService) {}
+
+  @Get("mine")
+  @RequirePermission("team:add_member")
+  myTeams(@CurrentUser() user: AuthedUser) {
+    return this.svc.myTeams(user);
+  }
+
+  @Post(":id/members")
+  @HttpCode(204)
+  @RequirePermission("team:add_member")
+  async addMember(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
+    await this.svc.leadAddMember(user, id, AddMember.parse(body).userId);
+  }
 
   @Post(":id/move-member")
   @HttpCode(200)

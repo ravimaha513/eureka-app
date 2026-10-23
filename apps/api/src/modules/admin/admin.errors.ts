@@ -34,6 +34,7 @@ const CODES: Record<string, (code: string) => HttpException> = {
   invalid_lead: (c) => new UnprocessableEntityException(c),
   user_inactive: (c) => new UnprocessableEntityException(c),
   not_a_member: (c) => new UnprocessableEntityException(c),
+  not_a_recruiter: (c) => new UnprocessableEntityException(c),
   same_team: (c) => new UnprocessableEntityException(c),
   lead_of_team: (c) => new UnprocessableEntityException(c),
   has_reports: (c) => new UnprocessableEntityException(c),

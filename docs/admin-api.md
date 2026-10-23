@@ -19,6 +19,7 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 | AD-7 | Every change writes an `audit_event` in the same transaction. Role requests are stored in `role_request` with requester, approver and decision time. A pending request expires after 7 days. |
 | AD-8 | Moving a recruiter between teams (OD-07) needs `team:move_member` covering **both** teams in the actor's scope. Their candidates stay with the old team and go to `reassignTo`, which must be an active member or the lead of the old team. It defaults to the old team's lead. It all runs in one transaction in a definer function. |
 | AD-9 | Team lead changes and reporting lines are admin-only (`access:manage`) and keep the existing invariants (the closure rebuild and the cycle check). |
+| AD-10 | Adding people to a team needs `team:add_member`: a lead (`team` scope) adds to the team they lead; a manager or associate director (`hierarchy` scope) adds to any team whose lead is in their reporting subtree. Only active users holding the `recruiter` role and in no team can be added (422 `not_a_recruiter`, 422 `user_inactive`, 409 `already_member`); someone in another team is moved with AD-8. Not yourself. Runs in `authz.team_add_member` (`db/functions/authz/team_add_member.sql`), audited as `team.member_added`. |
 
 ## Endpoints
 
@@ -58,6 +59,8 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 - `POST /api/v1/admin/teams` with `{ name, leadId, locationId? }` returns 201 `{ id }`.
 - `PUT /api/v1/admin/teams/:id/lead` with `{ leadId }` returns 204.
 - `POST /api/v1/admin/teams/:id/members` with `{ userId }` returns 204. A user who is already in another team gets a 409; use the move endpoint instead.
+- `GET /api/v1/teams/mine` (permission `team:add_member`, AD-10) returns `{ items: [{ id, name, lead: {id,displayName}, members: [{id,displayName}] }], addable: [{ id, displayName, email }] }`: the caller's teams and the active recruiters in no team.
+- `POST /api/v1/teams/:id/members` with `{ userId }` (permission `team:add_member`, AD-10) returns 204. 404 unknown team, 403 `not_in_scope` for a team outside the caller's scope.
 - `POST /api/v1/teams/:id/move-member` with `{ userId, toTeamId, reassignTo? }` (permission `team:move_member`, AD-8) returns 200 `{ movedCandidates: number, reassignedTo: { id, displayName } }`.
 
 ## Error codes (`detail` field)

@@ -106,6 +106,12 @@ describe("authorization matrix (AD-1)", () => {
     expect(res.statusCode, res.body).toBe(can(toUserAccess(key), "team:move_member" as Permission) ? 422 : 403);
   });
 
+  it.each(users)("%s → lead team endpoints (team:add_member, AD-10)", async (key) => {
+    const ok = can(toUserAccess(key), "team:add_member" as Permission);
+    expect((await call(key, "GET", "/api/v1/teams/mine")).statusCode).toBe(ok ? 200 : 403);
+    expect((await call(key, "POST", `/api/v1/teams/${T.t1}/members`, {})).statusCode).toBe(ok ? 422 : 403);
+  });
+
   it.each([...ADMIN_ENDPOINTS, MOVE])("unauthenticated $method $url → 401", async (e) => {
     const res = await app.inject({ method: e.method, url: e.url, payload: e.body as never });
     expect(res.statusCode).toBe(401);
@@ -508,5 +514,82 @@ describe("move member (OD-07, AD-8)", () => {
   it("a user who is not in the source team is 422", async () => {
     const r = await call("m1", "POST", `/api/v1/teams/${T.t1}/move-member`, { userId: U.r2a, toTeamId: T.t2 });
     expect(r.statusCode).toBe(422);
+  });
+});
+
+describe("lead adds members to their own team (AD-10)", () => {
+  const NEW1 = "00000000-0000-0000-0000-0000000ad101";
+  const NEW2 = "00000000-0000-0000-0000-0000000ad102";
+  const GONE = "00000000-0000-0000-0000-0000000ad103";
+  const ids = (xs: { id: string }[]) => xs.map((x) => x.id);
+
+  beforeAll(async () => {
+    for (const [id, key, status] of [[NEW1, "new1", "active"], [NEW2, "new2", "active"], [GONE, "gone", "inactive"]] as const) {
+      await db.admin.query(`INSERT INTO eureka.app_user (id, email, display_name, status) VALUES ($1, $2, $3, $4)`,
+        [id, `${key}@eureka.example`, key, status]);
+      await db.admin.query(`INSERT INTO eureka.user_role (user_id, role_key) VALUES ($1, 'recruiter')`, [id]);
+    }
+  });
+
+  it("leads (team), managers and associate directors (hierarchy) hold team:add_member", () => {
+    expect(users.filter((u) => can(toUserAccess(u), "team:add_member" as Permission)).sort()).toEqual(["ad", "l1", "l2", "l3", "m1", "m2"]);
+  });
+
+  it("managers and associate directors list the teams led in their hierarchy", async () => {
+    // Earlier tests in this file change reporting lines, so read the expected teams from the closure.
+    for (const key of ["m1", "m2", "ad"] as const) {
+      const expected = (await db.admin.query(
+        `SELECT t.id FROM eureka.team t WHERE t.lead_id = $1
+            OR t.lead_id IN (SELECT descendant_id FROM eureka.reporting_closure WHERE ancestor_id = $1)`, [U[key]])).rows.map((r) => r.id);
+      expect(expected.length, key).toBeGreaterThan(0);
+      expect(ids((await call(key, "GET", "/api/v1/teams/mine")).json().items).sort(), key).toEqual(expected.sort());
+    }
+  });
+
+  it("lists the lead's own team and only active recruiters in no team", async () => {
+    const res = await call("l1", "GET", "/api/v1/teams/mine");
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json();
+    expect(ids(body.items)).toEqual([T.t1]);
+    const addable = ids(body.addable);
+    expect(addable).toEqual(expect.arrayContaining([NEW1, NEW2]));
+    expect(addable).not.toContain(GONE);
+    expect(addable).not.toContain(U.l1);
+    const inTeams = (await db.admin.query(`SELECT user_id FROM eureka.team_member WHERE valid @> now()`)).rows.map((r) => r.user_id);
+    expect(addable.filter((id: string) => inTeams.includes(id))).toEqual([]);
+    expect(body.addable[0]).toEqual({ id: expect.any(String), displayName: expect.any(String), email: expect.stringContaining("@") });
+  });
+
+  it("adds an unassigned recruiter, audited, and they leave the addable list", async () => {
+    const r = await call("l1", "POST", `/api/v1/teams/${T.t1}/members`, { userId: NEW1 });
+    expect(r.statusCode, r.body).toBe(204);
+    expect((await audits("team.member_added")).at(-1)).toMatchObject({ actor_id: U.l1, entity_id: T.t1, changes: { userId: NEW1 } });
+    const body = (await call("l1", "GET", "/api/v1/teams/mine")).json();
+    expect(ids(body.items[0].members)).toContain(NEW1);
+    expect(ids(body.addable)).not.toContain(NEW1);
+    expect(ids(body.addable)).toContain(NEW2);
+  });
+
+  it("refuses other teams, non-recruiters, members of a team, inactive users, self and unknown teams", async () => {
+    const add = async (key: keyof typeof U, team: string, userId: string) => {
+      const r = await call(key, "POST", `/api/v1/teams/${team}/members`, { userId });
+      return [r.statusCode, r.statusCode === 204 ? null : r.json().detail];
+    };
+    expect(await add("l1", T.t2, NEW2)).toEqual([403, "not_in_scope"]);
+    expect(await add("l1", T.t1, U.hr)).toEqual([422, "not_a_recruiter"]);
+    expect(await add("l1", T.t1, U.r3a)).toEqual([409, "already_member"]);
+    expect(await add("l1", T.t1, GONE)).toEqual([422, "user_inactive"]);
+    expect(await add("l1", T.t1, U.l1)).toEqual([403, "self_change"]);
+    expect((await add("l1", NIL, NEW2))[0]).toBe(404);
+    expect(await add("m2", T.t1, NEW2)).toEqual([403, "not_in_scope"]);
+    expect((await add("admin", T.t1, NEW2))[0]).toBe(403);
+    expect((await add("r1b", T.t1, NEW2))[0]).toBe(403);
+    expect((await db.admin.query(`SELECT 1 FROM eureka.team_member WHERE user_id = $1`, [NEW2])).rowCount).toBe(0);
+  });
+
+  it("a manager adds to a team led by someone in their hierarchy", async () => {
+    const r = await call("m1", "POST", `/api/v1/teams/${T.t2}/members`, { userId: NEW2 });
+    expect(r.statusCode, r.body).toBe(204);
+    expect((await audits("team.member_added")).at(-1)).toMatchObject({ actor_id: U.m1, entity_id: T.t2, changes: { userId: NEW2 } });
   });
 });

@@ -688,6 +688,14 @@ const CASES: RejectCase[] = [
     forbidden: { teamId: T.t3, valid: false, role: "lead" },
   },
   {
+    route: "POST /api/v1/teams/:id/members", actor: "l1",
+    prepare: async () => ({
+      url: `/api/v1/teams/${T.t1}/members`, body: { userId: U.r3a },
+      state: () => rows(`SELECT * FROM eureka.team_member ORDER BY team_id, user_id`),
+    }),
+    forbidden: { teamId: T.t3, valid: false, role: "lead" },
+  },
+  {
     route: "POST /api/v1/teams/:id/move-member", actor: "m1",
     prepare: async () => ({
       url: `/api/v1/teams/${T.t1}/move-member`, body: { userId: U.r1b, toTeamId: T.t2 },
