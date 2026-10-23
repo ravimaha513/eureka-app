@@ -394,6 +394,25 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
     const item = await newId(db);
     const chat = await asUser(db.app, U.r1a, async (c) => (await c.query<{ conversation_id: string }>(
       `SELECT conversation_id FROM authz.chat_open_direct($1)`, [U.hr])).rows[0]!.conversation_id, true);
+    // payments (0100): an invoice on this placement, inserted directly (the placement has not joined), so the
+    // resolver names the placement's people.
+    const invoiceId = await newId(db);
+    const ic = await db.admin.connect();
+    try {
+      await ic.query("BEGIN");
+      await ic.query("SET LOCAL session_replication_role = replica");
+      await ic.query("INSERT INTO eureka.invoice (id, placement_id, invoice_date, terms_days, amount, created_by) VALUES ($1, $2, '2026-08-01', 30, 4321.5, $3)",
+        [invoiceId, placementId, U.acct]);
+      await ic.query("COMMIT");
+    } finally {
+      ic.release();
+    }
+    // performance (0112): a real target of r1a, set by their manager.
+    const target = await asUser(db.app, U.m1, async (c) => (await c.query<{ target_id: string }>(
+      "SELECT * FROM authz.performance_target_set($1, 'month', '2026-09-01', 5, NULL, NULL)", [U.r1a])).rows[0]!.target_id, true);
+    // pipeline-vendors (0171): a real "not responding" flag on the candidate (its recruiter flags it).
+    const flagId = await asUser(db.app, U.r1a, async (c) => (await c.query<{ id: string }>(
+      `SELECT authz.nonresponse_flag($1, 'missed_interview') AS id`, [candidateId])).rows[0]!.id, true);
     const events = [
       ["work_authorization.expiring", PAYLOADS.workAuth(candidateId, a)],
       ["employee.benched", PAYLOADS.projectExit(a, placementId, candidateId)],
@@ -409,18 +428,30 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
       // interview-alerts (0086/0087): a contract on the placement; a birthday digest naming a staff member (hr), never a candidate.
       ["contract.created", { contractId: item, placementId, candidateId, kind: "po", contractCount: 1 }],
       ["staff.birthdays_today", { day: "2026-10-15", userIds: [U.hr], count: 1 }],
+      // payments (0100): the aggregate is the placement (first payment) or the invoice (delay).
+      ["payment.first_received", { placementId, invoiceId, paymentId: a }],
+      ["payment.delayed", { invoiceId, placementId, daysLate: 12 }],
+      ["performance.below_target", { targetId: target, userId: U.r1a, periodKind: "month", periodStart: "2026-09-01", submissionsTarget: 5, submissionsActual: 2 }],
+      ["candidate.not_responding", { candidateId, flagId, stage: "hold" }],
     ] as const;
     // interview.requested is delivered with the interview's details (candidate email included, owner decision
     // 2026-10-15; docs/notifications.md) read from a real interview row: covered by alerts.int.test.ts, not here.
     const DETAILED = ["interview.requested"];
     expect(events.map(([t]) => t).sort()).toEqual(Object.keys(EVENT_SPECS).filter((t) => !t.startsWith("placement.") && !DETAILED.includes(t)).sort());
     const digestId = await newId(db);
-    const aggregateOf = (type: string): [string, string] =>
-      type === "chat.direct_message" ? ["chat_conversation", chat]
-        : type === "contract.created" ? ["contract", item]
-          : type === "staff.birthdays_today" ? ["birthday_digest", digestId] : ["candidate", candidateId];
+    // The aggregate of each event type (default: the candidate).
+    const AGGREGATES: Record<string, [string, string]> = {
+      "chat.direct_message": ["chat_conversation", chat],
+      "contract.created": ["contract", item],
+      "staff.birthdays_today": ["birthday_digest", digestId],
+      "payment.first_received": ["placement", placementId],
+      "payment.delayed": ["invoice", invoiceId],
+      "performance.below_target": ["performance_target", target],
+    };
+    const aggregateOf = (type: string): [string, string] => AGGREGATES[type] ?? ["candidate", candidateId];
     const secrets = [person, "Placed", "81.25", "Irving", "Petra", "petra@vendor.example", "4695550188", "Northwind",
-      "2027-01-15", "2026-09-30", "2026-09-29", "2026-11-01", "2026-05-01", "terminated", "resigned", "r1a", "Team Rohit"];
+      "2027-01-15", "2026-09-30", "2026-09-29", "2026-11-01", "2026-05-01", "terminated", "resigned", "r1a", "Team Rohit",
+      "4321.5", "2026-08-01", "2026-08-31"];
     for (const [type, payload] of events) {
       const [aggType, aggId] = aggregateOf(type);
       const ev = await emitEvent(db, type, aggType, aggId, payload);

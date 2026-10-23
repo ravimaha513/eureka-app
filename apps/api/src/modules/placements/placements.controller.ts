@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query, Res } from "@nestjs/common";
+import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { CreatePlacement, PlacementListQuery, PlacementStatusChange } from "./placements.schemas.js";
+import { CreatePlacement, PlacementExportQuery, PlacementListQuery, PlacementStatusChange } from "./placements.schemas.js";
 import { PlacementsService } from "./placements.service.js";
 
 /** docs/placements-api.md. */
@@ -12,6 +13,20 @@ export class PlacementsController {
   @RequirePermission("placement:read")
   list(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.list(user, PlacementListQuery.parse(q));
+  }
+
+  /** Placements report CSV (migration 0160). POST, not GET: audited and CSRF-protected, like the Hot List export. */
+  @Post("export")
+  @HttpCode(200)
+  @RequirePermission("report:export")
+  async export(@CurrentUser() user: AuthedUser, @Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
+    const out = await this.svc.exportCsv(user, PlacementExportQuery.parse(body ?? {}));
+    void reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", `attachment; filename="placements-${new Date().toISOString().slice(0, 10)}.csv"`)
+      .header("x-export-rows", String(out.rows))
+      .header("x-export-truncated", String(out.truncated));
+    return out.csv;
   }
 
   @Get(":id")

@@ -3,6 +3,7 @@
  * (create only) and placements (docs/placements-api.md).
  */
 import { api } from "../api";
+import { fetchCsv } from "../lib/download";
 
 export interface Page<T> { items: T[]; nextCursor: string | null }
 export interface Ref { id: string; name: string }
@@ -46,7 +47,7 @@ export interface SubmissionFilters {
   limit?: number;
 }
 
-export const PLACEMENT_STATUSES = ["confirmed", "paperwork", "bgc", "ready", "joined", "backout", "bgc_failed"] as const;
+export const PLACEMENT_STATUSES = ["confirmed", "paperwork", "bgc", "ready", "joined", "backout", "bgc_failed", "joining_issue"] as const;
 export type PlacementType = "c2c" | "w2" | "1099";
 export type WorkMode = "onsite" | "remote" | "hybrid";
 export type ContactKind = "vendor_poc" | "invoicing_poc" | "client_manager";
@@ -74,6 +75,11 @@ export interface Placement {
   projectState: string | null;
   tentativeStart: string;
   isFirstPlacement: boolean;
+  /** "Existing consultant re-confirmed", entered on placement entry (migration 0160); absent on older servers. */
+  reconfirmed?: boolean;
+  /** Technology snapshot taken at creation (migration 0160). */
+  technology?: Ref | null;
+  joinedAt?: string | null;
   /** Present only when rate:read covers the placement (PL-6). */
   rate?: number | null;
   candidate: Ref;
@@ -104,9 +110,17 @@ export interface CreatePlacement {
   tentativeStart: string;
   implementationPartnerId?: string;
   contacts?: { kind: ContactKind; name: string; email?: string; phone?: string }[];
+  reconfirmed?: boolean;
 }
 
-export interface PlacementFilters { status?: string; from?: string; to?: string; cursor?: string; limit?: number }
+/** List and report filters; vendor, end client, technology and location since migration 0160. */
+export interface PlacementFilters {
+  status?: string; from?: string; to?: string; cursor?: string; limit?: number;
+  vendorId?: string; clientId?: string; technologyId?: string; locationId?: string;
+}
+
+/** Rows in one placements CSV export (PLACEMENT_EXPORT_ROW_CAP in the API). */
+export const PLACEMENT_EXPORT_ROW_CAP = 5000;
 
 export interface CreateInterview {
   submissionId: string; round: string; startsAt: string; endsAt: string; coachId?: string; inviteReceived?: boolean;
@@ -117,7 +131,7 @@ export const WORK_MODE_LABELS: Record<WorkMode, string> = { onsite: "Onsite", re
 export const CONTACT_KIND_LABELS: Record<ContactKind, string> = {
   vendor_poc: "Vendor POC", invoicing_poc: "Invoicing POC", client_manager: "Client manager",
 };
-const LABELS: Record<string, string> = { bgc: "BGC", bgc_failed: "BGC failed" };
+const LABELS: Record<string, string> = { bgc: "BGC", bgc_failed: "BGC failed", joining_issue: "Joining issue" };
 export const pipelineLabel = (s: string) => {
   if (LABELS[s]) return LABELS[s]!;
   const t = s.replace(/_/g, " ");
@@ -141,6 +155,9 @@ export const pipelineApi = {
   createInterview: (b: CreateInterview) => api<{ id: string }>("/api/v1/interviews", { method: "POST", body: JSON.stringify(b) }),
   placements: (f: PlacementFilters) => api<Page<Placement>>(`/api/v1/placements?${qs({ limit: 50, ...f })}`),
   placement: (id: string) => api<Placement>(`/api/v1/placements/${enc(id)}`),
+  /** Placements report CSV: the list filters without paging; capped and audited by the server. */
+  exportPlacements: (f: Omit<PlacementFilters, "cursor" | "limit">) =>
+    fetchCsv("/api/v1/placements/export", Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined && v !== "")), "placements.csv"),
   createPlacement: (b: CreatePlacement, idempotencyKey: string) =>
     api<{ id: string; isFirstPlacement: boolean }>("/api/v1/placements", {
       method: "POST", body: JSON.stringify(b), headers: { "Idempotency-Key": idempotencyKey },

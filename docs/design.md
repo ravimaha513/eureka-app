@@ -113,7 +113,7 @@ Eureka is a **modular monolith**: one API service and one worker service from th
                                           └──► SES
 ```
 
-Modules own their tables and expose service interfaces; no module reads another module's tables directly.
+Modules own the tables they write and expose service interfaces; writes to another module's tables go through its service or a definer function. Candidate and person are the exception on the read side: they are a shared read model that many modules join (Hot List, submissions, placements, reports), protected by RLS rather than by module boundaries.
 
 | Module | Owns | SRS |
 |---|---|---|
@@ -138,7 +138,7 @@ The scale (hundreds of users), the access model and the need for one small team 
 |---|---|---|---|
 | Web app | React 18, TypeScript, Vite, TanStack Router/Query/Table, Tailwind CSS, shadcn/ui (Radix) | Data-heavy grids with saved views and column pickers; accessible components; no SSR needed for an authenticated internal app | Next.js if public pages appear |
 | API and worker | Node.js 22 LTS, NestJS 10 (Fastify adapter), Zod | Modules match the modular monolith; guards and interceptors fit layered authorization; one language and shared Zod schemas across web and API | Java 21 + Spring Boot fits the same design equally well; extract modules into services when needed |
-| Data access | Drizzle ORM + node-postgres, SQL-first migrations | Full control of SQL, needed for scope predicates and RLS; typed queries | Kysely or raw SQL |
+| Data access | node-postgres with hand-written SQL, SQL-first migrations (built: no ORM) | Full control of SQL, needed for scope predicates and RLS | Drizzle or Kysely for typed queries |
 | Database | PostgreSQL 16 on Amazon RDS Multi-AZ | Relational integrity; Row-Level Security; `pg_trgm` and full-text search at this volume; exclusion constraints for effective dating | Aurora, read replicas, partitioning, OpenSearch for search, warehouse via CDC |
 | Authentication | Direct OIDC with Google Workspace from the API acting as Backend-for-Frontend | Company SSO; step-up via `prompt=login`; `hd` domain claim available; no tokens in the browser | Cognito, Auth0 or Okta as a broker when a second IdP is needed |
 | Jobs and events | Transactional outbox + a Postgres job table (`job_run`, leases and SKIP LOCKED) in the worker; pg-boss was rejected because it needs DDL rights at runtime | No extra infrastructure; exactly-once intent, at-least-once delivery; easy reschedule of interview-related jobs | SQS, then Amazon MSK, fed from the same outbox |
@@ -254,7 +254,7 @@ TLS 1.2+ everywhere; RDS, snapshots and S3 encrypted with KMS; the database is i
 - AWS accounts `eureka-dev`, `eureka-staging`, `eureka-prod` under AWS Organizations; region us-east-1.
 - VPC with public subnets (ALB only) and private subnets (ECS, RDS); VPC endpoints for S3, Secrets Manager, KMS, SES.
 - ECS rolling deploys with the deployment circuit breaker.
-- Migrations run as a one-off task before the deploy and follow expand/contract so old and new code both work.
+- Migrations run as a one-off task before the deploy and follow expand/contract so old and new code both work. They are forward-only (no down migrations; restore from a snapshot instead), pinned by checksum once applied, serialised by an advisory lock and bounded by `lock_timeout`. Functions that change often live one per file in `db/functions/` and are re-applied when their checksum changes (`db/functions/README.md`).
 - Backups: RDS PITR (35 days) and a daily snapshot copied to us-west-2.
 
 ## A9. Observability
@@ -310,6 +310,7 @@ eureka-app/
     shared/           authz catalog and engine, Zod schemas, enums, DTO types
   db/
     migrations/       ordered SQL migrations (schema, RLS, grants)
+    functions/        current definition of each frequently changed SQL function (repeatable)
     seed/             fictional development data
   infra/              Terraform modules and environments
   docs/               design, implementation plan, ADRs
@@ -317,7 +318,7 @@ eureka-app/
 
 ## B2. Data model
 
-Every table has `id uuid` (UUIDv7), `org_id uuid`, `created_at`, `created_by`, `updated_at`, `updated_by`, and `row_version int` for optimistic concurrency. Money is `numeric(12,2)` with `currency char(3)`. Retirable records have `deleted_at`.
+Every table has `id uuid` (UUIDv7), `org_id uuid`, `created_at`, `created_by`, `updated_at`, `updated_by`, and `row_version int` for optimistic concurrency. Money is `numeric(12,2)` with `currency char(3)`. Records are retired through a status column (for example `inactive`, `archived`); only chat messages use `deleted_at`.
 
 ### B2.1 Organization and identity
 
@@ -486,7 +487,7 @@ Built in migration 0043 (2026-10-03), paperwork documents, restricted documents 
 
 | Rule | Enforcement |
 |---|---|
-| `authz.document_type` (key, label, classification `internal`/`restricted`) holds the stable type keys the checklist's `doc_type` and API clients use; restricted per A6.3: `i9`, `drivers_license`, `work_authorization`; internal for now: `offer_letter`, `other` (the rest waits for the checklist content, an open question). Same list as `DOCUMENT_TYPES` in `packages/shared` (test). Types are never removed or reclassified | reference table owned by `authz_definer`, app SELECT only; guard trigger |
+| `authz.document_type` (key, label, classification `internal`/`restricted`) holds the stable type keys the checklist's `doc_type` and API clients use; restricted per A6.3: `i9`, `drivers_license`, `work_authorization`; also restricted (0150): `everify`, `form_1099`; internal for now: `offer_letter`, `other` (the rest waits for the checklist content, an open question). Same list as `DOCUMENT_TYPES` in `packages/shared` (test). Types are never removed or reclassified | reference table owned by `authz_definer`, app SELECT only; guard trigger |
 | `file_object` (classification, status and scan result as `resume`, content type PDF/DOCX/PNG/JPEG, size ≤ 15 MB, SHA-256, uploader, upload window) and `document` (candidate_id always, placement_id optional, doc_type, classification copied from the type, file_id unique, created_by/at). Deviation from B2.4 ("candidate_id or placement_id, exactly one"): a placement document also carries the placement's candidate, so visibility is one rule over the candidate and Immigration and the Documents Team (no `placement:read`) reach placement paperwork through the candidate. The stable id the checklist links to is `document.id` | table CHECKs; guards (server-set columns; a document is insert-only; its type's classification must match its file's; the placement must be the candidate's) |
 | Read: `document:read` covering the candidate (never the all-teams rule) and the candidate readable; restricted documents also need `document.restricted:read` over the candidate (HR, Accounts, Immigration). Files are readable with their document | policies `document_read`, `file_object_read` (InitPlans, key probes); `documentAccess` in `packages/shared` |
 | Upload: `document:upload` covering the candidate (on the placement route the placement must be readable); restricted types also need `document.restricted:read` (so HR and Immigration, not the Documents Team or Associate HR: open question); five pending uploads per candidate; audited `document.upload_requested` (ids, type, classification, content type, size) | `authz.create_document_upload` (definer; 404/403/422/409) |
@@ -561,10 +562,10 @@ The catalog is in `packages/shared/src/authz/catalog.ts`. It defines the followi
 | Placements | `placement:read`, `placement:create`, `placement:update`, `placement.bgc_status:update`, `rate:read` |
 | Documents and compliance | `document:read`, `document:upload`, `document:verify`, `document.restricted:read`, `bgc:update`, `visa:read`, `visa:update` |
 | Employees and finance | `employee:read`, `assignment:update`, `invoice:read`, `invoice:update` |
-| Reports | `report:read`, `report:export`, `performance:read` |
+| Reports | `report:read`, `report:export`, `performance:read`, `performance.target:manage` (recruiter targets; docs/performance-api.md) |
 | Vendors and teams | `vendor.preferred:create`, `vendor.preferred:read`, `team:move_member`, `designation:change` |
 | Administration | `access:manage`, `audit:read`, `staff.contact:read` (staff phone and bio from Settings; interviews-settings) |
-| DataHub (0075, 0092, docs/datahub-api.md) | `datahub:read`, `datahub:manage`, `datahub:create` |
+| DataHub (0075, docs/datahub-api.md) | `datahub:read`, `datahub:manage`, `datahub:create` |
 | Training (0065, `docs/training-api.md`) | `training:read`, `training:manage`, `training.progress:update` |
 | Administration | `access:manage`, `audit:read` |
 | Chat | `chat:use` (every role, own scope: take part in one's own conversations; docs/chat-api.md) |
@@ -575,20 +576,20 @@ The catalog is in `packages/shared/src/authz/catalog.ts`. It defines the followi
 
 | Role | Grants by scope |
 |---|---|
-| Recruiter | **own:** assignment:read, candidate:create, candidate:update, chat:use, datahub:read, document:read, document:upload, interview.feedback:create, interview:create, interview:read, interview:update, performance:read, placement:read, placement:update, report:read, submission:read, submission:update, training:read, vendor.preferred:create<br>**team:** candidate.phone:read, candidate:read, hotlist:read, job:read, placement:create, submission:create |
-| Lead (Sales) | **own:** chat:use, datahub:create, datahub:read, vendor.preferred:create<br>**team:** assignment:read, calendar:block, candidate.phone:read, candidate.visibility:update, candidate:assign, candidate:create, candidate:read, candidate:update, document:read, document:upload, hotlist:read, interview.feedback:create, interview:create, interview:read, interview:update, job:manage, job:read, performance:read, placement:create, placement:read, placement:update, report:export, report:read, submission:create, submission:read, submission:update, training:read, vendor.preferred:read |
-| Manager (Sales) | **own:** chat:use, datahub:create, datahub:read<br>**hierarchy:** assignment:read, calendar:block, candidate.phone:read, candidate.visibility:update, candidate:assign, candidate:create, candidate:read, candidate:update, designation:change, document:read, document:upload, hotlist:read, interview.feedback:create, interview:create, interview:read, interview:update, job:manage, job:read, performance:read, placement.bgc_status:update, placement:create, placement:read, placement:update, rate:read, report:export, report:read, submission:create, submission:read, submission:update, team:move_member, training:read, vendor.preferred:read |
-| Associate Director | **own:** chat:use, datahub:read<br>**hierarchy:** assignment:read, calendar:block, candidate.phone:read, candidate.visibility:update, candidate:assign, candidate:create, candidate:read, candidate:update, designation:change, document:read, document:upload, hotlist:read, interview.feedback:create, interview:create, interview:read, interview:update, job:manage, job:read, performance:read, placement.bgc_status:update, placement:create, placement:read, placement:update, rate:read, report:export, report:read, submission:create, submission:read, submission:update, team:move_member, training:read, vendor.preferred:read |
-| CEO | **own:** chat:use, datahub:create, datahub:read<br>**org:** assignment:read, candidate:read, employee:read, hotlist:read, interview:read, invoice:read, job:read, performance:read, placement:read, rate:read, report:export, report:read, submission:read, training:read, vendor.preferred:read |
-| Location Incharge | **own:** chat:use, datahub:read<br>**location:** candidate.phone:read, candidate.rating:update, candidate:read, hotlist:read, interview.feedback:create, interview:read, interview:update, performance:read, placement:read, report:read, submission:read, training.progress:update, training:manage, training:read |
-| Location Ops Admin | **own:** chat:use, datahub:read<br>**location:** bill:manage, bill:read, candidate.phone:read, candidate.rating:update, candidate:read, company:manage, company:read, datahub:manage, facility:manage, facility:read, hotlist:read, interview.feedback:create, interview:read, interview:update, placement:read, report:read, submission:read, training.progress:update, training:manage, training:read, utility.secret:read, utility:manage, utility:read |
-| HR | **own:** chat:use, datahub:read<br>**org:** applicant.phone:read, applicant:read, application:manage, application:read, assignment:read, assignment:update, bgc:update, candidate.dob:read, candidate.phone:read, candidate:read, datahub:manage, document.restricted:read, document:read, document:upload, document:verify, employee:read, job:manage, job:read, placement:read, report:read, staff.birthday:manage, staff.contact:read, visa:read |
+| Recruiter | **own:** assignment:read, candidate:create, candidate:update, chat:use, datahub:read, document:read, document:upload, interview.feedback:create, interview:create, interview:read, interview:update, invoice:read, performance:read, placement:read, placement:update, report:read, submission:read, submission:update, training:read, vendor.preferred:create<br>**team:** candidate.phone:read, candidate:read, hotlist:read, job:read, placement:create, submission:create |
+| Lead (Sales) | **own:** chat:use, datahub:create, datahub:read, vendor.preferred:create<br>**team:** assignment:read, calendar:block, candidate.phone:read, candidate.visibility:update, candidate:assign, candidate:create, candidate:read, candidate:update, document:read, document:upload, hotlist:read, interview.feedback:create, interview:create, interview:read, interview:update, invoice:read, job:manage, job:read, performance:read, placement:create, placement:read, placement:update, report.market:read, report:export, report:read, submission:create, submission:read, submission:update, training:read, vendor.preferred:read |
+| Manager (Sales) | **own:** chat:use, datahub:create, datahub:read<br>**hierarchy:** assignment:read, calendar:block, candidate.phone:read, candidate.visibility:update, candidate:assign, candidate:create, candidate:read, candidate:update, designation:change, document:read, document:upload, hotlist:read, interview.feedback:create, interview:create, interview:read, interview:update, invoice:read, job:manage, job:read, performance.target:manage, performance:read, placement.bgc_status:update, placement:create, placement:read, placement:update, rate:read, report.market:read, report:export, report:read, submission:create, submission:read, submission:update, team:move_member, training:read, vendor.preferred:read |
+| Associate Director | **own:** chat:use, datahub:read<br>**hierarchy:** assignment:read, calendar:block, candidate.phone:read, candidate.visibility:update, candidate:assign, candidate:create, candidate:read, candidate:update, designation:change, document:read, document:upload, hotlist:read, interview.feedback:create, interview:create, interview:read, interview:update, invoice:read, job:manage, job:read, performance.target:manage, performance:read, placement.bgc_status:update, placement:create, placement:read, placement:update, rate:read, report.market:read, report:export, report:read, submission:create, submission:read, submission:update, team:move_member, training:read, vendor.preferred:read |
+| CEO | **own:** chat:use, datahub:create, datahub:read<br>**org:** assignment:read, candidate:read, employee:read, hotlist:read, interview:read, invoice:read, job:read, performance:read, placement:read, rate:read, report.market:read, report:export, report:read, submission:read, training:read, vendor.preferred:read |
+| Location Incharge | **own:** chat:use, datahub:read<br>**location:** candidate.phone:read, candidate.rating:update, candidate:read, hotlist:read, interview.feedback:create, interview:read, interview:update, performance:read, placement:read, report.market:read, report:read, submission:read, training.progress:update, training:manage, training:read |
+| Location Ops Admin | **own:** chat:use, datahub:read<br>**location:** bill:manage, bill:read, candidate.phone:read, candidate.rating:update, candidate:read, company:manage, company:read, datahub:manage, facility:manage, facility:read, hotlist:read, interview.feedback:create, interview:read, interview:update, placement:read, report.market:read, report:read, submission:read, training.progress:update, training:manage, training:read, utility.secret:read, utility:manage, utility:read |
+| HR | **own:** chat:use, datahub:read<br>**org:** applicant.phone:read, applicant:read, application:manage, application:read, assignment:read, assignment:update, bgc:update, candidate.compliance:update, candidate.dob:read, candidate.phone:read, candidate:read, datahub:manage, document.restricted:read, document:read, document:upload, document:verify, employee:read, job:manage, job:read, placement:read, report:read, staff.birthday:manage, staff.contact:read, visa:read |
 | Associate HR | **own:** chat:use, datahub:read<br>**org:** assignment:read, assignment:update, candidate.phone:read, candidate:read, document:read, document:upload, employee:read, placement:read |
-| Accounts | **own:** chat:use, datahub:read<br>**org:** assignment:read, assignment:update, candidate:read, datahub:manage, document.restricted:read, document:read, employee:read, invoice:read, invoice:update, placement:read, rate:read, report:read |
-| Immigration | **own:** chat:use, datahub:read<br>**org:** assignment:read, candidate.dob:read, candidate.phone:read, candidate:read, document.restricted:read, document:read, document:upload, document:verify, employee:read, visa:read, visa:update |
+| Accounts | **own:** chat:use, datahub:read<br>**org:** assignment:read, assignment:update, candidate.compliance:update, candidate:read, datahub:manage, document.restricted:read, document:read, employee:read, invoice:read, invoice:update, placement:read, rate:read, report:read |
+| Immigration | **own:** chat:use, datahub:read<br>**org:** assignment:read, candidate.compliance:update, candidate.dob:read, candidate.phone:read, candidate:read, document.restricted:read, document:read, document:upload, document:verify, employee:read, report:read, visa:read, visa:update |
 | Interview Coach | **own:** chat:use, datahub:read<br>**coached:** candidate:read, hotlist:read, interview.feedback:create, interview:read, training.progress:update, training:read |
-| Interview Coordinator (Support) | **own:** chat:use, datahub:read<br>**org:** calendar:block, candidate:read, interview:read |
-| Documents Team | **own:** chat:use, datahub:read<br>**org:** candidate:read, document:read, document:upload, document:verify |
+| Interview Coordinator (Support) | **own:** chat:use, datahub:read<br>**org:** calendar:block, interview:read |
+| Documents Team | **own:** chat:use, datahub:read<br>**org:** candidate.compliance:update, candidate:read, document:read, document:upload, document:verify |
 | BU Head | **own:** chat:use, datahub:read<br>**org:** assignment:read, employee:read, placement:read, report:read |
 | Org Admin | **own:** chat:use<br>**org:** access:manage, audit:read, staff.contact:read |
 
@@ -632,7 +633,7 @@ The all-teams flag is set when a Sales role grants `candidate:read`, `hotlist:re
 | Interview location scope | `interview.location_id` (where the candidate interviews) |
 | Documents, BGC, work authorization | document:read scope over the owning candidate or placement; restricted classification additionally needs `document.restricted:read` |
 | Employees, assignments | employee:read (org-scoped roles only) |
-| Invoices, payments | invoice:read |
+| Invoices, payments | invoice:read over the placement (actor snapshot or owned candidate, like placements; migration 0100, docs/payments-api.md); amounts also need rate:read |
 | Preferred vendors | submitter, or `vendor.preferred:read` holders whose hierarchy contains the submitter (superiors only, FR-VEN-02) |
 
 These rules are implemented in `packages/shared/src/authz/engine.ts` and unit-tested.

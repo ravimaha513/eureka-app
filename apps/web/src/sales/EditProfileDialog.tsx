@@ -1,12 +1,20 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Dialog, DialogActions } from "../admin/Dialog";
+import { ELIGIBILITY_OPTIONS, MARKETING_LOCATIONS_MAX, VISA_CATEGORIES } from "@eureka/shared";
+import { useLookups } from "../lookups";
+import { Dialog, DialogActions } from "../ui/Dialog";
 import { fieldErrors, salesError } from "./errors";
 import { OPEN_BATCH_STATUSES, salesApi, salesKeys, type CandidateProfile, type Priority, type ProfileUpdate } from "./salesApi";
 import { Field } from "./ui";
 
-const FIELDS = ["priority", "marketingStartDate", "marketingEmail", "vitelNumber", "inPersonOk", "batchId"] as const;
+const FIELDS = ["priority", "marketingStartDate", "marketingEmail", "vitelNumber", "inPersonOk", "batchId",
+  "ghLocation", "marketingLocations", "linkedinUrl", "resumeUrl", "eligibility", "visaCategory"] as const;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const LINKEDIN = /^https:\/\/([a-z]{2,3}\.)?linkedin\.com\/\S+$/;
+const HTTPS = /^https:\/\/\S+$/;
+const sameList = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+/** "Dallas, TX; Austin, TX" -> ["Dallas, TX", "Austin, TX"] */
+const splitLocations = (s: string) => s.split(";").map((x) => x.trim()).filter(Boolean);
 
 /**
  * Edits the profile fields a candidate:update holder may change (ProfileUpdate;
@@ -24,12 +32,22 @@ export function EditProfileDialog({ candidate, onClose, onSaved }: {
     vitelNumber: candidate.vitelNumber ?? "",
     inPersonOk: (candidate.inPersonOk === true ? "yes" : candidate.inPersonOk === false ? "no" : "") as "" | "yes" | "no",
   };
+  const initialStay = candidate.stay === "remote" ? "remote" : candidate.ghLocation?.id ?? "";
+  const initialLocations = candidate.marketingLocations ?? [];
+  const initialEligibility = candidate.eligibility ?? [];
   const [v, setV] = useState({
     priority: candidate.priority as Priority,
     marketingStartDate: candidate.marketingStartDate?.slice(0, 10) ?? "",
     ...initial,
     batchId: candidate.batch?.id ?? "",
+    stay: initialStay,
+    marketingLocations: initialLocations.join("; "),
+    linkedinUrl: candidate.linkedinUrl ?? "",
+    resumeUrl: candidate.resumeUrl ?? "",
+    eligibility: initialEligibility,
+    visaCategory: candidate.visaCategory ?? "",
   });
+  const locations = useLookups().data?.locations ?? [];
   const keepHint = (known: boolean) => known ? "Can be changed but not removed." : "Leave empty to keep the current value.";
   // Batches the candidate can join: at its location, planned or in training (FR-CAN-02).
   const batches = useQuery({
@@ -48,6 +66,11 @@ export function EditProfileDialog({ candidate, onClose, onSaved }: {
     const e: Record<string, string> = {};
     if (v.marketingEmail.trim() && !EMAIL.test(v.marketingEmail.trim())) e.marketingEmail = "Enter a valid email address.";
     if (v.vitelNumber.trim().length > 20) e.vitelNumber = "Use at most 20 characters.";
+    if (v.linkedinUrl.trim() && !LINKEDIN.test(v.linkedinUrl.trim())) e.linkedinUrl = "Use an https://linkedin.com/… link.";
+    if (v.resumeUrl.trim() && !HTTPS.test(v.resumeUrl.trim())) e.resumeUrl = "Use an https:// link.";
+    const locs = splitLocations(v.marketingLocations);
+    if (locs.length > MARKETING_LOCATIONS_MAX) e.marketingLocations = `Enter at most ${MARKETING_LOCATIONS_MAX} locations.`;
+    else if (locs.some((l) => l.length > 60)) e.marketingLocations = "Each location can have at most 60 characters.";
     setErrors(e); setFormError("");
     if (Object.keys(e).length) { ev.currentTarget.querySelector<HTMLElement>("[aria-invalid='true']")?.focus(); return; }
 
@@ -58,6 +81,13 @@ export function EditProfileDialog({ candidate, onClose, onSaved }: {
     if (v.vitelNumber.trim() && v.vitelNumber.trim() !== initial.vitelNumber) body.vitelNumber = v.vitelNumber.trim();
     if (v.inPersonOk && v.inPersonOk !== initial.inPersonOk) body.inPersonOk = v.inPersonOk === "yes";
     if (candidate.batch !== undefined && v.batchId !== (candidate.batch?.id ?? "")) body.batchId = v.batchId || null;
+    if (candidate.stay !== undefined && v.stay !== initialStay) body.ghLocation = v.stay || null;
+    if (candidate.marketingLocations !== undefined && !sameList(locs, initialLocations)) body.marketingLocations = locs;
+    // The links are returned to owners only; editors are owners (candidate:update), so the current value is known.
+    if (candidate.linkedinUrl !== undefined && v.linkedinUrl.trim() !== (candidate.linkedinUrl ?? "")) body.linkedinUrl = v.linkedinUrl.trim() || null;
+    if (candidate.resumeUrl !== undefined && v.resumeUrl.trim() !== (candidate.resumeUrl ?? "")) body.resumeUrl = v.resumeUrl.trim() || null;
+    if (candidate.eligibility !== undefined && !sameList(v.eligibility, initialEligibility)) body.eligibility = v.eligibility;
+    if (candidate.visaCategory !== undefined && v.visaCategory !== (candidate.visaCategory ?? "")) body.visaCategory = v.visaCategory || null;
     if (Object.keys(body).length === 0) { setFormError("Nothing changed."); return; }
 
     setBusy(true);
@@ -106,6 +136,61 @@ export function EditProfileDialog({ candidate, onClose, onSaved }: {
                 {openBatches.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
               </select>
             )}
+          </Field>
+        )}
+        {candidate.stay !== undefined && (
+          <Field label="Stay" hint="The guest house the candidate stays at, or Remote." error={errors.ghLocation}>
+            {(p) => (
+              <select {...p} value={v.stay} onChange={(e) => setV((s) => ({ ...s, stay: e.target.value }))}>
+                <option value="">Not recorded</option>
+                <option value="remote">Remote</option>
+                {v.stay && v.stay !== "remote" && !locations.some((l) => l.id === v.stay) && <option value={v.stay}>{candidate.ghLocation?.name ?? "Current guest house"}</option>}
+                {locations.map((l) => <option key={l.id} value={l.id}>Guest house: {l.name}</option>)}
+              </select>
+            )}
+          </Field>
+        )}
+        {candidate.visaCategory !== undefined && (
+          <Field label="Visa (marketed)" error={errors.visaCategory}>
+            {(p) => (
+              <select {...p} value={v.visaCategory} onChange={(e) => setV((s) => ({ ...s, visaCategory: e.target.value }))}>
+                <option value="">Not recorded</option>
+                {Object.entries(VISA_CATEGORIES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+            )}
+          </Field>
+        )}
+        {candidate.eligibility !== undefined && (
+          <fieldset className="radios">
+            <legend>Eligibility</legend>
+            {Object.entries(ELIGIBILITY_OPTIONS).map(([k, l]) => (
+              <label key={k}>
+                <input type="checkbox" checked={v.eligibility.includes(k)}
+                  onChange={(e) => setV((s) => ({
+                    ...s,
+                    eligibility: e.target.checked
+                      ? Object.keys(ELIGIBILITY_OPTIONS).filter((x) => x === k || s.eligibility.includes(x))
+                      : s.eligibility.filter((x) => x !== k),
+                  }))} />
+                {l}
+              </label>
+            ))}
+            {errors.eligibility && <small className="error fielderr" role="alert">{errors.eligibility}</small>}
+          </fieldset>
+        )}
+        {candidate.marketingLocations !== undefined && (
+          <Field label="Marketing locations" hint={`Up to ${MARKETING_LOCATIONS_MAX}, separated by semicolons (e.g. Dallas, TX; Austin, TX).`} error={errors.marketingLocations}>
+            {(p) => <input {...p} value={v.marketingLocations} onChange={(e) => setV((s) => ({ ...s, marketingLocations: e.target.value }))} />}
+          </Field>
+        )}
+        {candidate.linkedinUrl !== undefined && (
+          <Field label="LinkedIn" hint="Leave empty to remove." error={errors.linkedinUrl}>
+            {(p) => <input {...p} type="url" placeholder="https://www.linkedin.com/in/…" value={v.linkedinUrl} onChange={(e) => setV((s) => ({ ...s, linkedinUrl: e.target.value }))} />}
+          </Field>
+        )}
+        {candidate.resumeUrl !== undefined && (
+          <Field label="Resume link" hint="A shared link to the marketing resume. Leave empty to remove." error={errors.resumeUrl}>
+            {(p) => <input {...p} type="url" placeholder="https://…" value={v.resumeUrl} onChange={(e) => setV((s) => ({ ...s, resumeUrl: e.target.value }))} />}
           </Field>
         )}
         <DialogActions onCancel={onClose} submitLabel="Save changes" busy={busy} error={formError} />

@@ -374,6 +374,79 @@ function chatCases(): RejectCase[] {
 }
 
 
+// payments (gap L1, migration 0100): status, expected date, delay, received amounts, voids, versions and the
+// placement data are the server's; Accounts sends invoice facts and payments only.
+const PAYMENT_FORBIDDEN: Record<string, unknown> = {
+  status: "received", expectedDate: "2020-01-31", delayDays: 0, paidAmount: 1, paymentCount: 0, receivedOn: "2020-01-02",
+  voidedAt: PAST, voidedBy: U.admin, recruiterId: U.r1b, teamId: T.t2, candidateId: FOREIGN_ID, invoiceId: FOREIGN_ID, rate: 1,
+};
+const payDay = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10);
+async function maInvoice(): Promise<string> {
+  const j = await joinedEmployee(db);
+  const r = await call("acct", "POST", "/api/v1/invoices", { placementId: j.placementId, invoiceDate: payDay(5), termsDays: 30, amount: 1000 },
+    { "idempotency-key": `ma-inv-${++n}` });
+  expect(r.statusCode, r.body).toBe(201);
+  return r.json().id as string;
+}
+async function maPayment(invoice: string): Promise<string> {
+  const r = await call("acct", "POST", `/api/v1/invoices/${invoice}/payments`, { receivedOn: payDay(2), amount: 10 }, { "idempotency-key": `ma-pay-${++n}` });
+  expect(r.statusCode, r.body).toBe(201);
+  return r.json().id as string;
+}
+const paymentState = () => rows(`SELECT (SELECT json_agg(i ORDER BY i.id) FROM eureka.invoice i) AS invoices,
+  (SELECT json_agg(p ORDER BY p.id) FROM eureka.payment p) AS payments, (SELECT count(*) FROM eureka.idempotency_key)::int AS keys`);
+function paymentCases(): RejectCase[] {
+  return [
+    {
+      route: "POST /api/v1/invoices", actor: "acct",
+      prepare: async () => {
+        const j = await joinedEmployee(db);
+        return {
+          url: "/api/v1/invoices", headers: { "idempotency-key": `ma-${++n}` },
+          body: { placementId: j.placementId, invoiceDate: payDay(5), termsDays: 30 }, state: paymentState,
+        };
+      },
+      forbidden: { ...PAYMENT_FORBIDDEN, placement: { id: FOREIGN_ID } },
+    },
+    {
+      route: "PATCH /api/v1/invoices/:id", actor: "acct",
+      prepare: async () => {
+        const id = await maInvoice();
+        return { url: `/api/v1/invoices/${id}`, headers: { "if-match": '"1"' }, body: { termsDays: 45 }, state: paymentState };
+      },
+      forbidden: { ...PAYMENT_FORBIDDEN, placementId: FOREIGN_ID },
+    },
+    {
+      route: "POST /api/v1/invoices/:id/void", actor: "acct",
+      prepare: async () => {
+        const id = await maInvoice();
+        return { url: `/api/v1/invoices/${id}/void`, headers: { "if-match": '"1"' }, body: {}, state: paymentState };
+      },
+      forbidden: PAYMENT_FORBIDDEN,
+    },
+    {
+      route: "POST /api/v1/invoices/:id/payments", actor: "acct",
+      prepare: async () => {
+        const id = await maInvoice();
+        return {
+          url: `/api/v1/invoices/${id}/payments`, headers: { "idempotency-key": `ma-${++n}` },
+          body: { receivedOn: payDay(1), amount: 25 }, state: paymentState,
+        };
+      },
+      forbidden: { ...Object.fromEntries(Object.entries(PAYMENT_FORBIDDEN).filter(([k]) => k !== "receivedOn")), firstPayment: true, recordedBy: U.admin, paymentId: FOREIGN_ID },
+    },
+    {
+      route: "POST /api/v1/invoices/:id/payments/:paymentId/void", actor: "acct",
+      prepare: async () => {
+        const id = await maInvoice();
+        const pay = await maPayment(id);
+        return { url: `/api/v1/invoices/${id}/payments/${pay}/void`, body: {}, state: paymentState };
+      },
+      forbidden: { ...PAYMENT_FORBIDDEN, paymentId: FOREIGN_ID },
+    },
+  ];
+}
+
 const CASES: RejectCase[] = [
   // interview-alerts (migration 0086): a contract's placement, client, creator and times are the server's
   {
@@ -549,6 +622,31 @@ const CASES: RejectCase[] = [
     }),
     forbidden: { userId: U.r2a, valid: false },
   },
+  // performance (docs/performance-api.md PF-4, PF-7): the person comes from the URL, the setter and versions from the server
+  {
+    route: "PUT /api/v1/admin/users/:id/designation", actor: "admin",
+    prepare: async () => ({
+      url: `/api/v1/admin/users/${U.r1b}/designation`, body: { designation: "MA Senior Recruiter" },
+      state: () => rows(`SELECT id, designation FROM eureka.app_user ORDER BY id`),
+    }),
+    forbidden: { userId: U.r2a, displayName: "Boss", email: "boss@eureka.example", roles: ["ceo"], status: "inactive" },
+  },
+  {
+    route: "PUT /api/v1/users/:id/designation", actor: "m1",
+    prepare: async () => ({
+      url: `/api/v1/users/${U.r1a}/designation`, body: { designation: "MA Recruiter" },
+      state: () => rows(`SELECT id, designation FROM eureka.app_user ORDER BY id`),
+    }),
+    forbidden: { userId: U.r2a, displayName: "Boss", email: "boss@eureka.example", roles: ["ceo"], status: "inactive" },
+  },
+  {
+    route: "PUT /api/v1/performance/targets", actor: "m1",
+    prepare: async () => ({
+      url: "/api/v1/performance/targets", body: { userId: U.r1a, periodKind: "month", periodStart: "2030-01-01", submissions: 5 },
+      state: () => rows(`SELECT * FROM eureka.performance_target ORDER BY id`),
+    }),
+    forbidden: { targetId: FOREIGN_ID, setBy: U.ad, teamId: T.t2, periodEnd: "2030-01-31", status: "met", submissionsActual: 9, notifiedAt: PAST },
+  },
   {
     route: "POST /api/v1/admin/role-requests", actor: "admin",
     prepare: async () => ({
@@ -706,6 +804,18 @@ const CASES: RejectCase[] = [
     forbidden: {
       teamId: T.t2, recruiterId: U.r2a, visibility: "all_teams", technicalRating: 5, status: "stopped", marketingStatus: "stopped",
       locationId: LOC.austin, personId: FOREIGN_ID, firstName: "X", phone: "+14695559999", benchSince: "2020-01-01",
+      teamAssignedAt: PAST, everifyCompanyId: FOREIGN_ID, documentsStatus: "complete", ghLocationId: LOC.austin, ghRemote: true,
+    },
+  },
+  {
+    route: "PUT /api/v1/candidates/:id/compliance", actor: "hr",
+    prepare: async () => ({
+      url: `/api/v1/candidates/${own().id}/compliance`, body: { documentsStatus: "pending" },
+      state: () => rows(`SELECT * FROM eureka.candidate WHERE id = $1`, [own().id]),
+    }),
+    forbidden: {
+      teamId: T.t2, recruiterId: U.r2a, priority: "P1", linkedinUrl: "https://linkedin.com/in/x", visaCategory: "h1b",
+      teamAssignedAt: PAST, rowVersion: 99, candidateId: FOREIGN_ID,
     },
   },
   {
@@ -767,7 +877,27 @@ const CASES: RejectCase[] = [
     forbidden: {
       status: "joined", isFirstPlacement: false, recruiterId: U.r1b, teamId: T.t2, candidateId: FOREIGN_ID, personId: FOREIGN_ID,
       locationId: LOC.austin, clientId: FOREIGN_ID, vendorId: FOREIGN_ID, statusChangedAt: PAST, joinedAt: PAST, statusReason: "x",
+      // migration 0160: the technology is the candidate's, snapshotted by the database
+      technologyId: TECH_ID, technology: TECH_ID,
     },
+  },
+  // placements report export (migration 0160): only the list filters
+  {
+    route: "POST /api/v1/placements/export", actor: "l1",
+    prepare: async () => ({
+      url: "/api/v1/placements/export", body: {},
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.audit_event WHERE action = 'placement.export'`),
+    }),
+    forbidden: { cursor: "1.00000000-0000-4000-8000-0000000000ff", limit: 100000, cap: 1_000_000, rate: true, contacts: true, userId: U.hr },
+  },
+  // sales report export (migration 0160): only the dashboard query
+  {
+    route: "POST /api/v1/dashboard/export", actor: "l1",
+    prepare: async () => ({
+      url: "/api/v1/dashboard/export", body: {},
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.audit_event WHERE action = 'dashboard.export'`),
+    }),
+    forbidden: { limit: 100000, maxGroups: 1_000_000, recruiterId: U.r1b, teamId: T.t2, locationId: LOC.austin, scope: "org", userId: U.hr },
   },
   {
     route: "PATCH /api/v1/placements/:id/status", actor: "r1a",
@@ -864,10 +994,49 @@ const CASES: RejectCase[] = [
     },
     forbidden: { candidateStatus: "active", status: "on_assignment", candidateId: FOREIGN_ID, teamId: T.t2, recruiterId: U.r2a },
   },
+  // 0150: employment facts and team assignment after a project.
+  {
+    route: "PATCH /api/v1/assignments/:id/employment", actor: "hr",
+    prepare: async () => {
+      const j = await employeeOnAssignment();
+      return {
+        url: `/api/v1/assignments/${j.assignmentId}/employment`, body: { everifyDate: "2026-01-02" },
+        state: async () => ({ ...(await employmentState(j.personId)),
+          employment: await rows(`SELECT * FROM eureka.assignment_employment WHERE assignment_id = $1`, [j.assignmentId]) }),
+      };
+    },
+    forbidden: { updatedBy: U.r2a, updatedAt: "2020-01-01T00:00:00Z", assignmentId: FOREIGN_ID, payroll_company_id: FOREIGN_ID,
+      endDate: "2026-01-01", personId: FOREIGN_ID },
+  },
+  {
+    route: "POST /api/v1/employees/:id/assign-team", actor: "hr",
+    prepare: async () => {
+      const j = await benchedEmployee();
+      return { url: `/api/v1/employees/${j.personId}/assign-team`, body: { teamId: T.t2 }, state: () => employmentState(j.personId) };
+    },
+    forbidden: { recruiterId: U.r2a, candidateId: FOREIGN_ID, status: "on_assignment", candidateStatus: "active", locationId: FOREIGN_ID },
+  },
   {
     route: "POST /api/v1/reports/joinings-exits/export", actor: "l1",
     prepare: async () => ({ url: "/api/v1/reports/joinings-exits/export", body: { from: "2025-01-01", to: "2025-06-30" }, state: async () => null }),
     forbidden: { teamId: T.t2, recruiterId: U.r2a, scope: "org", limit: 1_000_000, includePhones: true, cap: 1 },
+  },
+  // market-reports
+  {
+    route: "POST /api/v1/reports/market/export", actor: "l1",
+    prepare: async () => ({ url: "/api/v1/reports/market/export", body: { groupBy: "team" }, state: async () => null }),
+    forbidden: { teamId: T.t2, recruiterId: U.r2a, scope: "org", export: false, includeNames: true, statuses: ["placed"] },
+  },
+  // interview-reports
+  {
+    route: "POST /api/v1/reports/interviews/export", actor: "l1",
+    prepare: async () => ({ url: "/api/v1/reports/interviews/export", body: { from: "2030-01-01", to: "2030-03-01", groupBy: "coach" }, state: async () => null }),
+    forbidden: { teamId: T.t2, recruiterId: U.r2a, coachId: U.coach, scope: "org", limit: 1_000_000, includeFeedback: true, cap: 1 },
+  },
+  {
+    route: "POST /api/v1/reports/interviews/daily/export", actor: "l1",
+    prepare: async () => ({ url: "/api/v1/reports/interviews/daily/export", body: { from: "2030-01-07T00:00:00Z", to: "2030-01-08T00:00:00Z" }, state: async () => null }),
+    forbidden: { teamId: T.t2, recruiterId: U.r2a, scope: "org", limit: 1_000_000, groupBy: "coach", cap: 1 },
   },
   // interviews
   {
@@ -1227,6 +1396,65 @@ const CASES: RejectCase[] = [
   },
   // chat (migration 0070, docs/chat-api.md): members, roles, sender, revisions, read marks and keys are the server's
   ...chatCases(),
+  ...paymentCases(),
+  // pipeline-vendors (migrations 0170-0172, docs/pipeline-vendors-api.md): candidate, owner, versions, flags and stages are the server's
+  {
+    route: "POST /api/v1/submissions/:id/assessments", actor: "r1a",
+    prepare: async () => {
+      const { submissionId } = await interviewOf();
+      return { url: `/api/v1/submissions/${submissionId}/assessments`, body: { platform: "glider", status: "assigned", assignedOn: "2030-01-05" },
+        state: () => rows(`SELECT * FROM eureka.assessment WHERE submission_id = $1`, [submissionId]) };
+    },
+    forbidden: { submissionId: FOREIGN_ID, candidateId: FOREIGN_ID, recruiterId: U.r1b, teamId: T.t2 },
+  },
+  {
+    route: "PATCH /api/v1/assessments/:id", actor: "r1a",
+    prepare: async () => {
+      const { submissionId } = await interviewOf();
+      const a = await ok("r1a", "POST", `/api/v1/submissions/${submissionId}/assessments`, { platform: "glider", status: "assigned", assignedOn: "2030-01-05" });
+      return { url: `/api/v1/assessments/${a.id}`, headers: { "if-match": '"1"' },
+        body: { platform: "glider", status: "completed", assignedOn: "2030-01-05", completedOn: "2030-01-06" },
+        state: () => rows(`SELECT * FROM eureka.assessment WHERE id = $1`, [a.id]) };
+    },
+    forbidden: { submissionId: FOREIGN_ID, candidateId: FOREIGN_ID },
+  },
+  {
+    route: "POST /api/v1/candidates/:id/non-response", actor: "r1a",
+    prepare: async () => {
+      const cand = await freshOwn();
+      return { url: `/api/v1/candidates/${cand.id}/non-response`, body: { reason: "no_reply_calls" },
+        state: () => rows(`SELECT * FROM eureka.candidate_nonresponse WHERE candidate_id = $1`, [cand.id]) };
+    },
+    forbidden: { candidateId: FOREIGN_ID, status: "resolved", resolution: "responded", flaggedBy: U.l1, flaggedAt: PAST,
+      holdReachedAt: PAST, candidateWarnedAt: PAST, note: "free text" },
+  },
+  {
+    route: "POST /api/v1/candidates/:id/non-response/resolve", actor: "r1a",
+    prepare: async () => {
+      const cand = await freshOwn();
+      await ok("r1a", "POST", `/api/v1/candidates/${cand.id}/non-response`, { reason: "other" });
+      return { url: `/api/v1/candidates/${cand.id}/non-response/resolve`, body: { resolution: "responded" },
+        state: () => rows(`SELECT * FROM eureka.candidate_nonresponse WHERE candidate_id = $1`, [cand.id]) };
+    },
+    forbidden: { candidateId: FOREIGN_ID, status: "open", resolvedBy: U.l1, resolvedAt: PAST, flagId: FOREIGN_ID },
+  },
+  {
+    route: "POST /api/v1/preferred-vendors", actor: "r1a",
+    prepare: async () => ({
+      url: "/api/v1/preferred-vendors", body: { vendorName: `MA vendor ${++n}` },
+      state: () => rows(`SELECT * FROM eureka.preferred_vendor ORDER BY id`),
+    }),
+    forbidden: { ownerId: U.r1b, owner: { id: U.r1b }, archived: true, teamId: T.t2 },
+  },
+  {
+    route: "PATCH /api/v1/preferred-vendors/:id", actor: "r1a",
+    prepare: async () => {
+      const v = await ok("r1a", "POST", "/api/v1/preferred-vendors", { vendorName: `MA vendor ${++n}` });
+      return { url: `/api/v1/preferred-vendors/${v.id}`, headers: { "if-match": '"1"' }, body: { vendorName: `MA renamed ${n}` },
+        state: () => rows(`SELECT * FROM eureka.preferred_vendor WHERE id = $1`, [v.id]) };
+    },
+    forbidden: { ownerId: U.r1b, archived: true },
+  },
   // jobs-portal (migration 0060): owner, team, version, posting time and kind are the server's
   {
     route: "POST /api/v1/jobs", actor: "l1",

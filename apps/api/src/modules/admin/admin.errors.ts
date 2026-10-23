@@ -21,6 +21,7 @@ const CODES: Record<string, (code: string) => HttpException> = {
   password_weak: (c) => new UnprocessableEntityException(c),
   not_in_scope: (c) => new ForbiddenException(c),
   user_not_found: () => new NotFoundException(),
+  invalid_designation: (c) => new UnprocessableEntityException(c),
   team_not_found: () => new NotFoundException(),
   request_not_found: () => new NotFoundException(),
   role_not_held: () => new NotFoundException(),

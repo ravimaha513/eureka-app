@@ -203,20 +203,20 @@ describe("candidate endpoints", () => {
     expect(theirs.phone).toMatch(/^•••-•••-\d\d$/);
   });
 
-  it("Hot List is open to everyone (OD-01): other team's candidate listed with masked phone, profile still 404", async () => {
+  it("Hot List is team-scoped (Eureka App 4): another team's Team-only candidate is not listed; Open to all teams is, phone masked", async () => {
     const other = candidates.find((c) => c.teamId === T.t2 && c.visibility === "team" && c.marketingStatus === "active")!;
-    for (const key of ["r1a", "admin"] as const) {
-      const items: { id: string; phoneMasked: boolean }[] = [];
-      let cursor: string | null = null;
-      do {
-        const page: { items: typeof items; nextCursor: string | null } = (await call(key, "GET", `/api/v1/hotlist?limit=100${cursor ? `&cursor=${cursor}` : ""}`)).json();
-        items.push(...page.items);
-        cursor = page.nextCursor;
-      } while (cursor);
-      const row = items.find((i) => i.id === other.id);
-      expect(row, key).toBeDefined();
-      expect(row!.phoneMasked).toBe(true);
-    }
+    const shared = otherAllTeams();
+    const items: { id: string; phoneMasked: boolean }[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: { items: typeof items; nextCursor: string | null } = (await call("r1a", "GET", `/api/v1/hotlist?limit=100${cursor ? `&cursor=${cursor}` : ""}`)).json();
+      items.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(items.find((i) => i.id === other.id)).toBeUndefined();
+    expect(items.find((i) => i.id === shared.id)?.phoneMasked).toBe(true);
+    // The org admin holds no hotlist:read any more.
+    expect((await call("admin", "GET", "/api/v1/hotlist?limit=5")).statusCode).toBe(403);
     expect((await call("r1a", "GET", `/api/v1/candidates/${other.id}`)).statusCode).toBe(404);
   });
 
@@ -254,7 +254,7 @@ describe("candidate endpoints", () => {
 });
 
 describe("submissions", () => {
-  it("D-01: a lead cannot log a submission for a candidate seen only on the open Hot List", async () => {
+  it("D-01: a lead cannot log a submission for another team's Team-only candidate", async () => {
     const hotOnly = candidates.find((c) => c.teamId === T.t2 && c.visibility === "team" && c.marketingStatus === "active")!;
     const r = await call("l1", "POST", "/api/v1/submissions", { candidateId: hotOnly.id, jobTitle: "Java Developer", clientId: CLIENT_ID });
     expect([403, 404]).toContain(r.statusCode);

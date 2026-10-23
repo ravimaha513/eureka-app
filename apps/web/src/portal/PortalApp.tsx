@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LogOut, Moon, Sparkles, Sun } from "lucide-react";
 import { ApiError } from "../api";
+import { navigate, usePathname } from "../lib/router";
 import { Field } from "../sales/ui";
 import { useTheme } from "../shell/theme";
 import { normalizePhoneE164, PHONE_PROBLEM_MESSAGES, phoneProblem } from "@eureka/shared";
@@ -17,14 +18,7 @@ import "../jobs/jobs.css";
  */
 
 export function usePortalPath(): [string, (p: string) => void] {
-  const [path, setPath] = useState(window.location.pathname);
-  useEffect(() => {
-    const on = () => setPath(window.location.pathname);
-    window.addEventListener("popstate", on);
-    return () => window.removeEventListener("popstate", on);
-  }, []);
-  const go = (p: string) => { window.history.pushState(null, "", p); setPath(p); };
-  return [path, go];
+  return [usePathname(), (p) => navigate(p)];
 }
 
 function Brand() {

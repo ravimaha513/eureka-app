@@ -70,10 +70,13 @@ resource "aws_s3_bucket_logging" "b" {
 #
 # Encryption: objects must end up under the data key. The worker sends no SSE
 # headers and relies on the bucket default (SSE-KMS, data key), so the denies
-# only fire when a header IS present and names something else
-# (StringNotEqualsIfExists): an explicit other KMS key, a non-KMS algorithm
-# such as AES256, or "aws:kms" without a key id (which means aws/s3). A deny
-# on a missing header would block the worker.
+# only fire when a header IS present and names something else: an explicit
+# other KMS key, a non-KMS algorithm such as AES256, or "aws:kms" without a key
+# id (which means aws/s3). A deny on a missing header would block the worker.
+# "Present" needs its own Null = false test: a negated operator such as
+# StringNotEquals matches when the key is absent, and its ...IfExists form
+# does too, so on its own either one denies every header-less PutObject
+# (audit-export failed with AccessDenied in staging until 2026-10-22).
 resource "aws_s3_bucket_policy" "tls_only" {
   for_each = { for k, v in aws_s3_bucket.b : k => v if k == "audit" }
   bucket   = each.value.id
@@ -94,7 +97,10 @@ resource "aws_s3_bucket_policy" "tls_only" {
         Principal = "*"
         Action    = "s3:PutObject"
         Resource  = "${each.value.arn}/*"
-        Condition = { StringNotEqualsIfExists = { "s3:x-amz-server-side-encryption-aws-kms-key-id" = aws_kms_key.data.arn } }
+        Condition = {
+          Null            = { "s3:x-amz-server-side-encryption-aws-kms-key-id" = "false" }
+          StringNotEquals = { "s3:x-amz-server-side-encryption-aws-kms-key-id" = aws_kms_key.data.arn }
+        }
       },
       {
         Sid       = "DenyNonKmsEncryption"
@@ -102,7 +108,10 @@ resource "aws_s3_bucket_policy" "tls_only" {
         Principal = "*"
         Action    = "s3:PutObject"
         Resource  = "${each.value.arn}/*"
-        Condition = { StringNotEqualsIfExists = { "s3:x-amz-server-side-encryption" = "aws:kms" } }
+        Condition = {
+          Null            = { "s3:x-amz-server-side-encryption" = "false" }
+          StringNotEquals = { "s3:x-amz-server-side-encryption" = "aws:kms" }
+        }
       },
       {
         # "aws:kms" without a key id selects the AWS-managed aws/s3 key, not the data key.
@@ -229,6 +238,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "logs" {
 }
 
 # GuardDuty Malware Protection for S3 scans every object uploaded to quarantine/.
+# The role policy follows the one AWS documents for Malware Protection for S3:
+# on this versioned bucket the post-scan tag is a version tag. Without
+# s3:GetObjectVersionTagging, staging scans completed (CompletedScanCount rose)
+# but no object was ever tagged, so every upload stayed pending (until 2026-10-23).
 resource "aws_iam_role" "malware_scan" {
   name = "${local.name}-malware-scan"
   assume_role_policy = jsonencode({
@@ -244,8 +257,14 @@ resource "aws_iam_role_policy" "malware_scan" {
     Statement = [
       {
         Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObjectTagging", "s3:GetObjectTagging", "s3:PutObjectVersionTagging"]
+        Action   = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObjectTagging", "s3:GetObjectTagging", "s3:PutObjectVersionTagging", "s3:GetObjectVersionTagging"]
         Resource = "${aws_s3_bucket.b["documents"].arn}/quarantine/*"
+      },
+      {
+        # GuardDuty writes this fixed object to check it can reach the bucket.
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = "${aws_s3_bucket.b["documents"].arn}/malware-protection-resource-validation-object"
       },
       {
         Effect   = "Allow"

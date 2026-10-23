@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { cell, expectMaskedPhone } from "./support";
+import { cell } from "./support";
 
 /**
  * Sales journeys against the full stack with the dev seed (apps/api/test/fixtures.ts):
@@ -49,6 +49,18 @@ async function openFirstTeamRohitProfile(page: Page): Promise<string> {
 
 test.describe.configure({ mode: "serial" });
 
+test("a candidate profile has its own address: reload keeps it open and Back returns to the list", async ({ page }) => {
+  await signIn(page, "Recruiter (Team Rohit)");
+  await expect(page).toHaveURL(/\/hotlist$/);
+  const name = await openFirstTeamRohitProfile(page);
+  await expect(page).toHaveURL(/\/hotlist\/[^/]+$/);
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/hotlist$/);
+  await expect(hotlist(page)).toBeVisible();
+});
+
 test("recruiter filters the Hot List, opens an own candidate and logs submissions", async ({ page }) => {
   await signIn(page, "Recruiter (Team Rohit)");
   await filterActiveTeamOnly(page);
@@ -58,11 +70,8 @@ test("recruiter filters the Hot List, opens an own candidate and logs submission
   for (const row of await rows.all()) {
     await expect(await cell(hotlist(page), row, "Status")).toContainText("Active");
     await expect(row.getByText("Open to all teams")).toHaveCount(0);
-    // Other teams' team-only candidates: phone masked and no profile link.
-    if ((await (await cell(hotlist(page), row, "Team")).innerText()) !== "Team Rohit") {
-      await expectMaskedPhone(await cell(hotlist(page), row, "Phone"));
-      await expect(row.getByText("Profile belongs to another team")).toBeVisible();
-    }
+    // Team-only candidates of other teams are not on this Hot List (team policy).
+    await expect(await cell(hotlist(page), row, "Team")).toHaveText("Team Rohit");
   }
 
   // Name search narrows the list (debounced).

@@ -25,6 +25,7 @@ import {
   IdempotencyKey, decodeCursor, encodeCursor, likeEscape,
   type FolderCreate, type FolderUpdate, type UploadRequest,
 } from "./datahub.schemas.js";
+import { dbErrorMapper } from "../../platform/errors.js";
 
 /** Presigned POST lifetime (as documents; the database upload window is 5 minutes). */
 export const DATAHUB_UPLOAD_TTL_SECONDS = 120;
@@ -54,12 +55,7 @@ const DB_ERRORS: Record<string, () => HttpException> = {
   not_restricted: () => new UnprocessableEntityException("not_restricted"),
 };
 
-function mapDbError(err: unknown): never {
-  const e = err as { message?: string; code?: string };
-  const make = e.message !== undefined && e.code !== undefined ? DB_ERRORS[e.message] : undefined;
-  if (make) throw make();
-  throw err;
-}
+const mapDbError: (err: unknown) => never = dbErrorMapper(DB_ERRORS);
 
 interface FolderRow {
   id: string; parent_id: string | null; name: string; description: string | null; level: DatahubLevel; role_keys: string[];

@@ -2,6 +2,7 @@
 import { useId, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, type Candidate } from "../api";
+import { saveBlob } from "../lib/download";
 import {
   BULK_STATUS_OPTIONS,
   hotlistApi,
@@ -114,22 +115,11 @@ export function SavedViews({ s }: { s: ListState }) {
 
 // ---- export ------------------------------------------------------------------------------------
 
-function download(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
 /** Export button; render only when the user holds report:export (the server checks again). */
 export function ExportButton({ s }: { s: ListState }) {
   const run = useMutation({
     mutationFn: () => hotlistApi.exportCsv(viewFilters(s.applied)),
-    onSuccess: (r) => download(r.blob, r.filename),
+    onSuccess: (r) => saveBlob(r.blob, r.filename),
   });
   const n = run.data?.rows ?? 0;
   return (

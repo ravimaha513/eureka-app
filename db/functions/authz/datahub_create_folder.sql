@@ -1,56 +1,14 @@
--- DataHub folder creators (docs/datahub-api.md DH-2a): datahub:create lets a
--- role (Lead, Manager, CEO) create organisation-wide folders and manage only
--- the folders they created themselves, without datahub:manage over everyone
--- else's folders (which is a restricted permission: a second approver).
---   * datahub_managed_folders: also the live folders the caller created, while
---     they hold datahub:create (losing the grant loses the folders).
---   * datahub_readable_folders: a creator reads their own confidential folder,
---     as a manager does; restricted folders still need membership (the creator
---     adds themself, audited, as any manager).
---   * datahub_create_folder: datahub:create allows a top-level folder with no
---     location (organisation-wide); a location still needs datahub:manage
---     there. A subfolder still needs its parent managed, so a creator adds
---     subfolders under their own folders only.
--- The bodies are 0075's with only these changes; CREATE OR REPLACE keeps the
--- owner (authz_definer) and the EXECUTE grants.
-SET search_path = eureka, public;
+-- authz.datahub_create_folder: current definition (repeatable; db/functions/README.md).
+-- Earlier bodies: migration 0075. DataHub folder creators (datahub:create,
+-- docs/datahub-api.md DH-2a) added here. Change this file, not a new migration.
 
 SET ROLE authz_definer;
-
-CREATE OR REPLACE FUNCTION authz.datahub_readable_folders() RETURNS uuid[]
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-  WITH me AS (
-    SELECT authz.current_user_id() AS id, authz.has_perm('datahub:read') AS staff, authz.datahub_my_roles() AS roles,
-           authz.has_org('datahub:manage') AS org_mgr, authz.location_ids('datahub:manage') AS mgr_locs,
-           authz.has_perm('datahub:create') AS creator),
-  f AS (
-    SELECT x.id, x.parent_id,
-      coalesce(me.staff AND (
-        x.level = 'internal'
-        OR (x.level = 'confidential' AND (x.role_keys && me.roles OR me.org_mgr OR x.location_id = ANY (me.mgr_locs)
-                                       OR (me.creator AND x.created_by = me.id)))
-        OR (x.level = 'restricted' AND EXISTS (
-              SELECT 1 FROM eureka.datahub_folder_member m WHERE m.folder_id = x.id AND m.user_id = me.id))), false) AS ok
-    FROM eureka.datahub_folder x, me WHERE x.deleted_at IS NULL)
-  SELECT coalesce(pg_catalog.array_agg(c.id), '{}') FROM f c LEFT JOIN f p ON p.id = c.parent_id
-  WHERE c.ok AND (c.parent_id IS NULL OR coalesce(p.ok, false))
-$$;
-
-CREATE OR REPLACE FUNCTION authz.datahub_managed_folders() RETURNS uuid[]
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
-  WITH me AS (SELECT authz.current_user_id() AS id, authz.has_perm('datahub:read') AS staff,
-                     authz.has_org('datahub:manage') AS org_mgr, authz.location_ids('datahub:manage') AS mgr_locs,
-                     authz.has_perm('datahub:create') AS creator)
-  SELECT coalesce(pg_catalog.array_agg(x.id), '{}') FROM eureka.datahub_folder x, me
-  WHERE x.deleted_at IS NULL AND me.staff AND (me.org_mgr OR x.location_id = ANY (me.mgr_locs)
-                                   OR (me.creator AND x.created_by = me.id))
-$$;
-
-CREATE OR REPLACE FUNCTION authz.datahub_create_folder(
-  p_parent uuid, p_name text, p_description text, p_level text, p_roles text[], p_members uuid[],
-  p_members_can_upload boolean, p_location uuid)
-RETURNS uuid
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+CREATE OR REPLACE FUNCTION authz.datahub_create_folder(p_parent uuid, p_name text, p_description text, p_level text, p_roles text[], p_members uuid[], p_members_can_upload boolean, p_location uuid)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'pg_catalog', 'pg_temp'
+AS $function$
 DECLARE par record; loc uuid; f_id uuid; nmembers integer := 0; plevel text;
 BEGIN
   IF authz.current_user_id() IS NULL OR NOT coalesce(authz.has_perm('datahub:read'), false) THEN
@@ -130,6 +88,8 @@ BEGIN
     nmembers := authz.datahub_add_members(f_id, p_members);
   END IF;
   RETURN f_id;
-END $$;
+END $function$;
 
+REVOKE ALL ON FUNCTION authz.datahub_create_folder(uuid, text, text, text, text[], uuid[], boolean, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION authz.datahub_create_folder(uuid, text, text, text, text[], uuid[], boolean, uuid) TO eureka_app;
 RESET ROLE;

@@ -5,8 +5,9 @@ import {
   APPLICATION_STATUSES, APPLICATION_STATUS_LABELS, APP_INTERVIEW_LABELS, APP_INTERVIEW_ROUNDS, APP_INTERVIEW_TYPES, isSafeHttpsUrl,
   type ApplicationStatus,
 } from "@eureka/shared";
-import type { Me } from "../api";
-import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { can, type Me } from "../api";
+import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
+import { useRoutedId } from "../lib/router";
 import { useLookups } from "../lookups";
 import { Drawer, Field, fmtDate } from "../sales/ui";
 import { Person } from "../shell/ui";
@@ -16,6 +17,8 @@ import {
   applicationError, applicationKeys, applicationsApi, type AppInterview, type Application, type ApplicationDetail,
 } from "./applicationsApi";
 import { jobKeys, jobsApi, type Job } from "./jobsApi";
+import { Pager, useCursorPager } from "../ui/Pager";
+import { QueryError } from "../ui/QueryError";
 import "./jobs.css";
 
 const PAGE_SIZE = 50;
@@ -28,29 +31,32 @@ const fmtWhen = (iso: string) => new Date(iso).toLocaleString(undefined, { dateS
 export const stars = (n: number) => `${"★".repeat(n)}${"☆".repeat(5 - n)}`;
 
 /** Applications (staff): HR sees all; a hiring manager their jobs'; an interviewer those they review (the server decides). */
-export function ApplicationsPage({ me, initialOpenId }: { me: Pick<Me, "capabilities" | "id">; initialOpenId?: string | null }) {
+export function ApplicationsPage({ me, initialOpenId, onOpenChange }: {
+  me: Pick<Me, "capabilities" | "id">; initialOpenId?: string | null;
+  /** The open application changed (the shell keeps it in the URL). */
+  onOpenChange?: (id: string | null) => void;
+}) {
   const id = useId();
   const [status, setStatus] = useState("");
   const [jobId, setJobId] = useState("");
   const [searchText, setSearchText] = useState("");
   const [search, setSearch] = useState("");
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
-  const [openId, setOpenId] = useState<string | null>(initialOpenId ?? null);
+  const pager = useCursorPager();
+  const { page, reset } = pager;
+  const [openId, setOpenId] = useRoutedId(initialOpenId ?? null, onOpenChange);
   const [notice, setNotice] = useState("");
-  const page = cursors.length - 1;
-  const reset = () => setCursors([null]);
   useEffect(() => {
     const t = setTimeout(() => { setSearch(searchText.trim()); reset(); }, 300);
     return () => clearTimeout(t);
   }, [searchText]);
-  const filters = { status, jobId, search, cursor: cursors[page] ?? "", limit: PAGE_SIZE };
+  const filters = { status, jobId, search, cursor: pager.cursor ?? "", limit: PAGE_SIZE };
   const q = useQuery({ queryKey: [...applicationKeys.all, "list", filters], queryFn: () => applicationsApi.list(filters), placeholderData: keepPreviousData });
   const jobs = useQuery({
     queryKey: [...jobKeys.all, "list", { kind: "internal_opening", picker: true }],
-    queryFn: () => jobsApi.list({ kind: "internal_opening", limit: 200 }), enabled: me.capabilities.includes("job:read"), retry: false,
+    queryFn: () => jobsApi.list({ kind: "internal_opening", limit: 200 }), enabled: can(me, "job:read"), retry: false,
   });
   const items = q.data?.items ?? [];
-  const canExport = me.capabilities.includes("application:read");
+  const canExport = can(me, "application:read");
   const hasFilters = Boolean(status || jobId || search);
   const n = items.length;
 
@@ -98,7 +104,7 @@ export function ApplicationsPage({ me, initialOpenId }: { me: Pick<Me, "capabili
 
       <div className="card tablewrap">
         {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-          <p className="empty error" role="alert">{applicationError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+          <QueryError query={q} message={applicationError(q.error)} />
         ) : (
           <div className="tablewrap"><table aria-label="Applications" aria-busy={q.isFetching || undefined}>
             <thead><tr><th>Job title</th><th>Applicant</th><th>Company</th><th>Applied</th><th>Overall rating</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead>
@@ -121,12 +127,7 @@ export function ApplicationsPage({ me, initialOpenId }: { me: Pick<Me, "capabili
       </div>
       <div className="listfoot">
         <p role="status" aria-live="polite" className="muted">{q.isLoading || q.error ? "" : `${n} ${n === 1 ? "application" : "applications"} on page ${page + 1}${q.data?.nextCursor ? ", more on the next page" : ""}.`}</p>
-        <nav className="pager" aria-label="Application pages">
-          <button type="button" className="btn sm" disabled={page === 0} onClick={() => setCursors((c) => (c.length > 1 ? c.slice(0, -1) : c))}>Previous</button>
-          <span>Page {page + 1}</span>
-          <button type="button" className="btn sm" disabled={!q.data?.nextCursor || q.isPlaceholderData}
-            onClick={() => { const nx = q.data?.nextCursor; if (nx) setCursors((c) => [...c, nx]); }}>Next</button>
-        </nav>
+        <Pager pager={pager} label="Application pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
       </div>
       {openId && <ApplicationDrawer id={openId} initial={items.find((a) => a.id === openId)} me={me} onClose={() => setOpenId(null)} onNotice={setNotice} />}
     </>

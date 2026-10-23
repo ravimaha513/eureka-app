@@ -14,6 +14,7 @@ import { IdempotencyKey } from "../placements/placements.schemas.js";
 import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import { PARTY_PERMISSIONS } from "../lookups/lookups.controller.js";
 import type { CreateJob, JobListQuery, UpdateJob } from "./jobs.schemas.js";
+import { likeContains } from "../../platform/sql.js";
 
 /**
  * Jobs (docs/jobs-portal-api.md JP-1..JP-9, migration 0060). Reads run under
@@ -190,7 +191,7 @@ export class JobsService {
     if (q.status) where.push(`j.status = ${p(q.status)}`);
     if (q.clientId) where.push(`j.client_id = ${p(q.clientId)}::uuid`);
     if (q.mine) where.push(`j.hiring_manager_id = ${p(user.id)}::uuid`);
-    if (q.search) where.push(`j.title ILIKE ${p(`%${q.search.replace(/[%_\\]/g, "\\$&")}%`)} ESCAPE '\\'`);
+    if (q.search) where.push(`j.title ILIKE ${p(likeContains(q.search))} ESCAPE '\\'`);
     if (q.cursor) {
       const [t, id] = splitCursor(q.cursor);
       where.push(`(j.created_at, j.id) < (${fromMicros(p(t))}, ${p(id)}::uuid)`);

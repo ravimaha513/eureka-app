@@ -95,7 +95,7 @@ describe("Hot List", () => {
     wrap(<HotListPage me={RECRUITER} onOpenProfile={() => undefined} />);
     const foreign = await rowOf("Divya Menon");
     // The recruiter may change status, so the first column holds the row-selection checkbox.
-    const phoneCell = within(foreign).getAllByRole("cell")[8]!;
+    const phoneCell = within(foreign).getAllByRole("cell")[10]!;
     expect(phoneCell).toHaveClass("masked");
     expect(within(phoneCell).getByText("•••-•••-42")).toHaveAttribute("aria-hidden", "true");
     expect(within(phoneCell).getByText(/Phone hidden, ends in 42\. Not your team's candidate\./)).toHaveClass("sr-only");
@@ -660,8 +660,10 @@ describe("Sales navigation", () => {
     fireEvent.click(link);
     expect(await screen.findByRole("heading", { level: 1, name: "Asha Iyer" })).toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "Hot List" })).not.toBeInTheDocument();
+    expect(window.location.pathname).toMatch(/^\/hotlist\/./);
     fireEvent.click(screen.getByRole("button", { name: "← Back to Hot List" }));
     expect(screen.getByRole("table", { name: "Hot List" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/hotlist");
     expect(screen.getByLabelText("Status")).toHaveValue("active");
     await waitFor(() => expect(screen.getByRole("button", { name: "Open profile of Asha Iyer" })).toHaveFocus());
   });

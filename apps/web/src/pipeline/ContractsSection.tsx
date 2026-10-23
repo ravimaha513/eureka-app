@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CONTRACT_KINDS, CONTRACT_KIND_LABELS, CONTRACT_NOTES_MAX, CONTRACT_REFERENCE_MAX, CONTRACT_TITLE_MAX, type ContractKind } from "@eureka/shared";
-import { Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { Field, fmtDate } from "../sales/ui";
 import { contractError, contractKeys, contractsApi } from "./contractsApi";
 

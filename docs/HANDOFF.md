@@ -9,8 +9,10 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - `pnpm -r typecheck` and `pnpm -r test` must pass before every commit (integration tests need
   PostgreSQL 16 at `TEST_PG_ADMIN_URL`, default `postgres://postgres:postgres@127.0.0.1:5432`).
 - Browser journeys: `pnpm --filter @eureka/web e2e` against a running, freshly seeded stack.
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0055**; 0040 and 0049 are unused) and must apply as a
-- Migrations are append-only (`db/migrations/00NN_*.sql`, next is **0054** (0060-0062 are jobs-portal); 0040 and 0049 are unused) and must apply as a
+- Migrations are append-only (`db/migrations/00NN_*.sql`; take the next free number after the
+  highest one, a unit test rejects duplicates) and pinned by checksum once applied. Functions with a
+  file in `db/functions/` are changed in that file, never in a new migration (`db/functions/README.md`).
+  Migrations must apply as a
   non-superuser (Amazon RDS master): CI checks this.
 - Commit small and atomic; get an independent review of every security-relevant change.
 
@@ -209,6 +211,26 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   coordinators); block / release the support calendar for an interview's slot from the interview drawer
   (`eureka.calendar_block`). Terraform: `calendar_mode` (staging: google) and the generated `CALENDAR_TOKEN_KEY`;
   staging sends outbox mail from the portal sender since 2026-10-15. Tests: `apps/api/test/alerts.int.test.ts`.
+- Payments / incentive dashboard (gap L1, migration 0100, contract `docs/payments-api.md`): invoices per joined placement
+  (number, invoice date, terms, timesheet date, billing period, hours, amount, incentive part) and payments received, written by
+  Accounts (`invoice:update`) only through definer functions; Sales read by hierarchy (`invoice:read` recruiter own, lead team,
+  manager/AD hierarchy, CEO org) under RLS like placements, amounts only with `rate:read`. Placement data is joined, not copied;
+  expected date (generated), status pending/delayed/received/void and delay days come from the `invoice_status` view. Notifications
+  `payment.first_received` (recruiter, TL, manager) and `payment.delayed` (daily job `payment-delay`; recruiter, TL). Payments screen
+  (Operations). The notification resolver was replaced again in 0100: later replacements must carry the payment branches over.
+- Candidate pipeline, assessments, "not responding" and preferred vendors (gap list, migrations 0170-0172, contract
+  `docs/pipeline-vendors-api.md`): cross-candidate pipeline report `GET /api/v1/reports/pipeline` (owned candidates
+  narrowed to report:read, stages marketing → submitted → interviewing → assessment → confirmed → paperwork → joined,
+  filters, funnel; screen "Candidate Pipeline"); assessments ("gliders") per submission through definer functions;
+  Sales flag a candidate as not responding (`candidate.not_responding` to recruiter and lead, warning and final emails to
+  the candidate with the feedback mail transport, daily `candidate-nonresponse` hold stage after `NONRESPONSE_HOLD_DAYS`);
+  preferred vendors visible to the owner and their superiors (RLS over `vendor.preferred:read`, screen "Preferred
+  Vendors"). 0171 replaces `authz.notification_recipients` / `authz.notification_entity` (0089 + one branch): a later
+  migration replacing them must carry the `candidate.not_responding` branch over.
+- Notification registry union (migration 0180): 0100, 0112, 0150 and 0171 each replaced
+  `authz.notification_recipients` / `authz.notification_entity` on top of 0089, so 0180 re-creates both as 0089 plus
+  every slice's branches (payment.first_received / payment.delayed, performance.below_target, the bench-time POC,
+  candidate.not_responding) and re-checks the inbox entity constraint. A later replacement must start from 0180.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, CalendarDays, Download, FileUp, Plus, Search } from "lucide-react";
-import { Dialog, useSubmit } from "../admin/Dialog";
+import { Dialog, useSubmit } from "../ui/Dialog";
 import { DOCUMENT_CONTENT_TYPES } from "@eureka/shared";
 import { documentFileProblem, documentTypeOf } from "../documents/documentsApi";
 import { browser, postToStorage } from "../sales/resumesApi";

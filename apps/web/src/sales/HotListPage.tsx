@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { Person } from "../shell/ui";
+import type { Permission } from "@eureka/shared";
 import type { Candidate, Me } from "../api";
 import { salesError } from "./errors";
 import { BulkBar, ExportButton, SavedViews } from "./HotListExtras";
 import { ListFilters, ListFooter } from "./ListControls";
 import { HOTLIST_STATUS_OPTIONS } from "./salesApi";
 import { Drawer, OpenToAllBadge, Phone, Priority, StatusBadge, fmtDate } from "./ui";
+import { documentsLabel, stayLabel, visaLabel } from "./candidateFields";
 import { useCandidateList } from "./useCandidateList";
 
 export interface ListPageProps {
@@ -15,9 +17,9 @@ export interface ListPageProps {
 }
 
 /** Whether this row's profile can be opened by the viewer (UI only; the API decides). */
-export const profileOpenable = (c: Candidate, caps: readonly string[]) => caps.includes("candidate:read") && c.canOpenProfile !== false;
+export const profileOpenable = (c: Candidate, caps: readonly Permission[]) => caps.includes("candidate:read") && c.canOpenProfile !== false;
 
-export function CandidateName({ c, caps, onOpenProfile }: { c: Candidate; caps: readonly string[]; onOpenProfile?: (id: string) => void }) {
+export function CandidateName({ c, caps, onOpenProfile }: { c: Candidate; caps: readonly Permission[]; onOpenProfile?: (id: string) => void }) {
   if (onOpenProfile && profileOpenable(c, caps)) {
     return (
       <Person name={c.name}>
@@ -56,13 +58,15 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  const cols = canBulk ? 11 : 10;
+  const cols = canBulk ? 13 : 12;
 
   return (
     <>
       <div>
         <h1 tabIndex={-1}>Hot List</h1>
-        <p className="sub">Candidates ready for marketing. Phones are shown only for candidates in your scope; others are masked.</p>
+        <p className="sub">
+          Your team's candidates and every candidate open to all teams. Phones are shown only for candidates in your scope; others are masked.
+        </p>
       </div>
       <SavedViews s={s} />
       <ListFilters s={s} label="Hot List" statuses={HOTLIST_STATUS_OPTIONS} />
@@ -82,7 +86,8 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
                     onChange={() => setSelected(allSelected ? new Set() : new Set(selectable.map((c) => c.id)))} />
                 </th>
               )}
-              <th>Candidate</th><th>Technology</th><th>Status</th><th>Pri</th><th>Team</th><th>Recruiter</th><th>Location</th><th>Phone</th>
+              <th>Candidate</th><th>Technology</th><th>Status</th><th>Pri</th><th>Team</th><th>Recruiter</th><th>Location</th>
+              <th>Visa</th><th>Stay</th><th>Phone</th>
               <th>Days</th><th><span className="sr-only">Actions</span></th>
             </tr></thead>
             <tbody>
@@ -96,11 +101,16 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
                   )}
                   <td><CandidateName c={c} caps={caps} onOpenProfile={onOpenProfile} /></td>
                   <td>{c.technology}</td>
-                  <td><StatusBadge status={c.status} />{" "}{c.visibility === "all_teams" && <OpenToAllBadge />}</td>
+                  <td>
+                    <StatusBadge status={c.status} />{" "}{c.visibility === "all_teams" && <OpenToAllBadge />}
+                    {c.statusLabel && c.statusLabel.includes("/") && <small className="block">{c.statusLabel}</small>}
+                  </td>
                   <td><Priority p={c.priority} /></td>
                   <td>{c.team.name}</td>
                   <td>{c.recruiter?.name ?? "Unassigned"}</td>
                   <td>{c.location.name}</td>
+                  <td>{c.visaCategory ? visaLabel(c.visaCategory) : "—"}</td>
+                  <td>{c.stay ? stayLabel(c) : "—"}</td>
                   <td className={c.phoneMasked ? "masked" : ""}><Phone c={c} /></td>
                   <td>{c.daysInMarket ?? "—"}</td>
                   <td className="rowactions">
@@ -119,12 +129,16 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
         <Drawer title={preview.name} onClose={() => setPreview(null)}>
           <dl className="facts">
             <dt>Technology</dt><dd>{preview.technology}</dd>
-            <dt>Status</dt><dd><StatusBadge status={preview.status} /></dd>
+            <dt>Status</dt><dd><StatusBadge status={preview.status} />{preview.statusLabel && <> {preview.statusLabel}</>}</dd>
             <dt>Visibility</dt><dd>{preview.visibility === "all_teams" ? <OpenToAllBadge /> : "Team only"}</dd>
             <dt>Priority</dt><dd><Priority p={preview.priority} /></dd>
             <dt>Team</dt><dd>{preview.team.name}</dd>
             <dt>Recruiter</dt><dd>{preview.recruiter?.name ?? "Unassigned"}</dd>
             <dt>Location</dt><dd>{preview.location.name}</dd>
+            <dt>Stay</dt><dd>{stayLabel(preview)}</dd>
+            <dt>Visa</dt><dd>{visaLabel(preview.visaCategory)}</dd>
+            <dt>Documents</dt><dd>{documentsLabel(preview.documentsStatus)}</dd>
+            {preview.hasResume !== undefined && <><dt>Resume</dt><dd>{preview.hasResume ? "On file" : "None"}</dd></>}
             <dt>Phone</dt><dd><Phone c={preview} /></dd>
             <dt>Marketing since</dt><dd>{fmtDate(preview.marketingStartDate)}</dd>
             <dt>Days in market</dt><dd>{preview.daysInMarket ?? "—"}</dd>

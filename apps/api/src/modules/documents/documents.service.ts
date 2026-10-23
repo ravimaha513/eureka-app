@@ -21,6 +21,7 @@ import { DOCUMENT_STORAGE, type DocumentStorage } from "../../platform/storage/d
 import { scopePredicate } from "../candidates/candidates.service.js";
 import type { AccessLogQuery, DocumentUpload } from "./documents.schemas.js";
 import type { z } from "zod";
+import { dbErrorMapper } from "../../platform/errors.js";
 
 /** Presigned POST lifetime (as resumes; the database upload window is 5 minutes). */
 export const DOCUMENT_UPLOAD_TTL_SECONDS = 120;
@@ -80,12 +81,7 @@ const DB_ERRORS: Record<string, () => HttpException> = {
   too_many_pending: () => new ConflictException("too_many_pending"),
 };
 
-function mapDbError(err: unknown): never {
-  const e = err as { message?: string; code?: string };
-  const make = e.message !== undefined && e.code !== undefined ? DB_ERRORS[e.message] : undefined;
-  if (make) throw make();
-  throw err;
-}
+const mapDbError: (err: unknown) => never = dbErrorMapper(DB_ERRORS);
 
 type Owner = { kind: "candidate"; id: string } | { kind: "placement"; id: string };
 

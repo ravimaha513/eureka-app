@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { capabilities, ROLES, type Role } from "@eureka/shared";
-import { HotList, Shell } from "./App";
+import App, { HotList, Shell } from "./App";
 import type { Me } from "./api";
 import { visibleNav } from "./nav";
 
@@ -19,12 +19,13 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("role-aware navigation", () => {
   it.each([
-    ["recruiter", ["Hot List", "Submissions", "Interviews", "Placements"], ["Users & Access", "Payments", "Employees"]],
+    // Payments (gap L1): Sales read their placements' invoices by hierarchy.
+    ["recruiter", ["Hot List", "Submissions", "Interviews", "Placements", "Payments"], ["Users & Access", "Employees"]],
     ["location_ops_admin", ["Hot List", "Interviews"], ["Performance", "Payments", "Users & Access"]],
-    // Hot List is open to every signed-in user (OD-01).
-    ["hr", ["Employees", "Paperwork & BGC", "Hot List"], ["Payments", "Users & Access"]],
-    ["accounts", ["Payments", "Employees", "Hot List"], ["Users & Access"]],
-    ["org_admin", ["Users & Access", "Hot List"], ["Candidates", "Employees", "Payments"]],
+    // Hot List is team-scoped (Eureka App 4): roles without hotlist:read do not get it.
+    ["hr", ["Employees", "Paperwork & BGC"], ["Payments", "Users & Access", "Hot List"]],
+    ["accounts", ["Payments", "Employees"], ["Users & Access", "Hot List"]],
+    ["org_admin", ["Users & Access"], ["Candidates", "Employees", "Payments", "Hot List"]],
   ] as const)("%s sees only its screens", (role, shown, hidden) => {
     const labels = visibleNav(meFor(role).capabilities).map((n) => n.label);
     for (const s of shown) expect(labels).toContain(s);
@@ -40,8 +41,45 @@ describe("role-aware navigation", () => {
     wrap(<Shell me={meFor("org_admin")} onSignOut={() => undefined} />);
     const nav = screen.getByRole("complementary", { name: "Main navigation" });
     expect(within(nav).getByRole("button", { name: "Users & Access" })).toBeInTheDocument();
-    expect(within(nav).getByRole("button", { name: "Hot List" })).toBeInTheDocument();
+    expect(within(nav).queryByRole("button", { name: "Hot List" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("button", { name: "Payments" })).not.toBeInTheDocument();
+  });
+});
+
+describe("URL routing", () => {
+  const items = () => vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ items: [] }), { status: 200 }));
+  const nav = () => screen.getByRole("complementary", { name: "Main navigation" });
+  const goBackTo = (path: string) => act(() => {
+    window.history.replaceState(null, "", path);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+
+  it("lands on the Hot List at / and keeps the current screen in the address bar", async () => {
+    items();
+    wrap(<Shell me={meFor("recruiter")} onSignOut={() => undefined} />);
+    await waitFor(() => expect(window.location.pathname).toBe("/hotlist"));
+    expect(within(nav()).getByRole("button", { name: "Hot List" })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(within(nav()).getByRole("button", { name: "Submissions" }));
+    expect(window.location.pathname).toBe("/submissions");
+    expect(await screen.findByRole("heading", { level: 1, name: "Submissions" })).toBeInTheDocument();
+    goBackTo("/hotlist");
+    expect(within(nav()).getByRole("button", { name: "Hot List" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("opens the screen named in the URL", async () => {
+    items();
+    window.history.replaceState(null, "", "/submissions");
+    wrap(<Shell me={meFor("recruiter")} onSignOut={() => undefined} />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Submissions" })).toBeInTheDocument();
+    expect(within(nav()).getByRole("button", { name: "Submissions" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("sends a screen the role does not have to the default screen", async () => {
+    items();
+    window.history.replaceState(null, "", "/access");
+    wrap(<Shell me={meFor("recruiter")} onSignOut={() => undefined} />);
+    await waitFor(() => expect(window.location.pathname).toBe("/hotlist"));
+    expect(within(nav()).getByRole("button", { name: "Hot List" })).toHaveAttribute("aria-current", "page");
   });
 });
 
@@ -86,6 +124,23 @@ describe("theme and account menu", () => {
     fireEvent.click(account);
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
     expect(onSignOut).toHaveBeenCalled();
+  });
+});
+
+describe("sign out", () => {
+  it("returns to the sign-in screen after logout", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/v1/me") return new Response(JSON.stringify(meFor("recruiter")), { status: 200 });
+      if (url === "/api/auth/logout") return new Response(null, { status: 204 });
+      if (url.startsWith("/api/v1/notifications/unread-count")) return new Response(JSON.stringify({ unread: 0, capped: false }), { status: 200 });
+      return new Response(JSON.stringify({ items: [] }), { status: 200 });
+    });
+    wrap(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Account: Test User" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(await screen.findByRole("heading", { name: "Hi, welcome back!" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", expect.objectContaining({ method: "POST" }));
   });
 });
 

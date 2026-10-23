@@ -162,11 +162,11 @@ describe("Dashboard", () => {
 });
 
 describe("Dashboard navigation", () => {
-  it.each(["recruiter", "lead", "manager", "assoc_director", "location_incharge", "location_ops_admin", "ceo", "hr", "bu_head"] as Role[])(
+  it.each(["recruiter", "lead", "manager", "assoc_director", "location_incharge", "location_ops_admin", "ceo", "hr", "bu_head", "immigration"] as Role[])(
     "%s has a Dashboard", (role) => {
       expect(visibleNav(meFor(role).capabilities).map((n) => n.key)).toContain("dashboard");
     });
-  it.each(["interview_coach", "org_admin", "immigration", "documents_team", "associate_hr"] as Role[])(
+  it.each(["interview_coach", "org_admin", "documents_team", "associate_hr"] as Role[])(
     "%s has no Dashboard (no report:read)", (role) => {
       expect(visibleNav(meFor(role).capabilities).map((n) => n.key)).not.toContain("dashboard");
     });
@@ -177,5 +177,32 @@ describe("periodRange", () => {
     const r = periodRange(7, new Date(2026, 8, 30, 15, 30));
     expect(new Date(r.to)).toEqual(new Date(2026, 9, 1));
     expect(new Date(r.from)).toEqual(new Date(2026, 8, 24));
+  });
+});
+
+describe("Sales reports (migration 0160)", () => {
+  it("groups by manager or candidate and exports the grouped counts for report:export holders", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    api.routes["POST /api/v1/dashboard/export"] = () => ({ body: "csv" });
+    wrap(<DashboardPage canExport />);
+    await screen.findByRole("table", { name: "Activity by recruiter" });
+    const select = screen.getByLabelText("Group by");
+    expect(within(select).getByRole("option", { name: "Manager" })).toBeInTheDocument();
+    expect(within(select).getByRole("option", { name: "Candidate" })).toBeInTheDocument();
+    fireEvent.change(select, { target: { value: "manager" } });
+    await waitFor(() => expect(lastQuery().get("groupBy")).toBe("manager"));
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.path).toBe("/api/v1/dashboard/export");
+    expect(api.writes()[0]!.body).toMatchObject({ groupBy: "recruiter" }); // the grouping shown (the mock answers recruiter)
+  });
+
+  it("offers no export without report:export and says when the groups are cut", async () => {
+    api.routes["GET /api/v1/dashboard"] = () => ({ body: { ...LEAD, groupsTruncated: true } });
+    wrap(<DashboardPage />);
+    await screen.findByRole("table", { name: "Activity by recruiter" });
+    expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
+    expect(screen.getByText(/most active; totals include everyone/)).toBeInTheDocument();
   });
 });

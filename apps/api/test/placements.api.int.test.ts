@@ -291,7 +291,7 @@ describe("placements", () => {
         // allowedTransitions oracle from the catalog (independent of the service).
         const upd = ownsActivity(resolveScope(access, "placement:update"), m);
         const bgc = ownsActivity(resolveScope(access, "placement.bgc_status:update"), m);
-        const expected = !upd ? [] : ["paperwork", "backout", ...(bgc ? ["bgc_failed"] : [])];
+        const expected = !upd ? [] : ["paperwork", "backout", "joining_issue", ...(bgc ? ["bgc_failed"] : [])];
         expect([...(item.allowedTransitions as string[])].sort(), `${key} transitions`).toEqual(expected.sort());
       }
       for (const m of made) {
@@ -311,8 +311,8 @@ describe("placements", () => {
       const p = res.json();
       expect(Object.keys(p).sort()).toEqual([
         "allowedTransitions", "assignment", "bgc", "candidate", "checklist", "client", "contacts", "createdAt", "id", "implementationPartner",
-        "isFirstPlacement", "location", "placementType", "projectCity", "projectState", "rate", "recruiter", "status",
-        "statusChangedAt", "submissionId", "team", "tentativeStart", "vendor", "workMode",
+        "isFirstPlacement", "joinedAt", "location", "placementType", "projectCity", "projectState", "rate", "reconfirmed",
+        "recruiter", "status", "statusChangedAt", "submissionId", "team", "technology", "tentativeStart", "vendor", "workMode",
       ]);
       expect(p).toMatchObject({
         id: m.id, status: "confirmed", placementType: "w2", workMode: "hybrid", projectCity: "Dallas", projectState: "TX",

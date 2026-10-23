@@ -1,6 +1,6 @@
 # DataHub: API contract (Phase 3c)
 
-Migrations `0075_datahub.sql` and `0092_datahub_creators.sql`, `apps/api/src/modules/datahub`, `apps/web/src/datahub`, `packages/shared/src/datahub.ts`,
+Migration `0075_datahub.sql` (current bodies of `datahub_readable_folders`, `datahub_managed_folders` and `datahub_create_folder` in `db/functions/authz/`), `apps/api/src/modules/datahub`, `apps/web/src/datahub`, `packages/shared/src/datahub.ts`,
 permissions `datahub:read` / `datahub:manage` / `datahub:create` in `packages/shared/src/authz/catalog.ts`. JSON, RFC 9457 problems with the
 code in `detail`, CSRF header on writes. Reference screen: DataHub (search, folders panel, "Create New Folder" with Folder
 name, Security level, Role, Description; upload). Owner decision: organisation folders on the existing document storage and

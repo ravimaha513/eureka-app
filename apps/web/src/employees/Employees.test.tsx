@@ -34,7 +34,16 @@ const base = (): Record<string, Handler> => ({
   "GET /api/v1/employees": () => ({ body: { items: [E1, E2], nextCursor: null } }),
   "GET /api/v1/employees/e1": () => ({ body: detail(E1) }),
   "GET /api/v1/employees/e2": () => ({ body: detail(E2) }),
-  "GET /api/v1/lookups": () => ({ body: { technologies: [], clients: [{ id: "cl1", name: "Northwind Financial" }], vendors: [], implementationPartners: [], locations: [{ id: "loc", name: "Dallas" }], coaches: [] } }),
+  "GET /api/v1/lookups": () => ({ body: { technologies: [], clients: [{ id: "cl1", name: "Northwind Financial" }], vendors: [{ id: "v1", name: "Prime Vendor Co" }], implementationPartners: [], locations: [{ id: "loc", name: "Dallas" }], coaches: [] } }),
+  // 0150
+  "GET /api/v1/employees/payroll-companies": () => ({ body: { items: [
+    { id: "co1", name: "Eureka Payroll LLC", status: "active" }, { id: "co2", name: "Old Entity", status: "inactive" }] } }),
+  "GET /api/v1/employees/teams": () => ({ body: { items: [
+    { id: "t1", name: "Team Rohit", lead: { id: "l1", name: "Rohit" }, location: "Dallas" },
+    { id: "t2", name: "Team Meera", lead: { id: "l2", name: "Meera" }, location: "Austin" }] } }),
+  "GET /api/v1/reports/active-employees": (url) => ({ body: {
+    month: url.searchParams.get("month"), from: "2026-10-01", to: "2026-10-31", total: 3,
+    byClient: [{ client: { id: "cl1", name: "Northwind Financial" }, count: 3 }], byCompany: [{ company: null, count: 3 }] } }),
 });
 beforeEach(() => {
   api = mockApi(base());
@@ -68,8 +77,15 @@ describe("Employees list", () => {
     await waitFor(() => expect(lastList().get("status")).toBe("bench"));
     fireEvent.change(await screen.findByRole("combobox", { name: "Location" }), { target: { value: "loc" } });
     await waitFor(() => expect(lastList().get("locationId")).toBe("loc"));
-    fireEvent.change(screen.getByRole("combobox", { name: "Current client" }), { target: { value: "cl1" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Client" }), { target: { value: "cl1" } });
     await waitFor(() => expect(lastList().get("clientId")).toBe("cl1"));
+    expect(lastList().get("clientMatch")).toBeNull(); // 0150: any assignment by default
+    fireEvent.click(screen.getByRole("checkbox", { name: /Current assignment only/ }));
+    await waitFor(() => expect(lastList().get("clientMatch")).toBe("current"));
+    fireEvent.change(screen.getByRole("combobox", { name: "Vendor" }), { target: { value: "v1" } });
+    await waitFor(() => expect(lastList().get("vendorId")).toBe("v1"));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Payroll company" }), { target: { value: "co1" } });
+    await waitFor(() => expect(lastList().get("payrollCompanyId")).toBe("co1"));
     fireEvent.click(screen.getByRole("checkbox", { name: /Ending within 30 days/ }));
     await waitFor(() => expect(lastList().get("endingWithinDays")).toBe("30"));
     fireEvent.change(screen.getByRole("searchbox", { name: "Name" }), { target: { value: "Div" } });
@@ -83,6 +99,76 @@ describe("Employees list", () => {
     wrap(<EmployeesPage me={meFor("hr")} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("You don't have permission");
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+});
+
+describe("Employees 0150", () => {
+  it("shows the lead and the recruiter on the list", async () => {
+    api.routes["GET /api/v1/employees"] = () => ({ body: { items: [
+      { ...E1, lead: { id: "l1", name: "Rohit" }, recruiter: { id: "r1", name: "Kiran" } }, { ...E2, lead: null, recruiter: null }], nextCursor: null } });
+    wrap(<EmployeesPage me={meFor("hr")} />);
+    const r1 = await rowOf("Asha Iyer");
+    expect(within(r1).getByText("Rohit")).toBeInTheDocument();
+    expect(within(r1).getByText("Recruiter: Kiran")).toBeInTheDocument();
+    expect(within(await rowOf("Divya Menon")).getByText("No recruiter")).toBeInTheDocument();
+  });
+
+  it("assigns a team to a benched employee", async () => {
+    const e2 = { ...E2, actions: { ...E2.actions, assignTeam: true } };
+    api.routes["GET /api/v1/employees/e2"] = () => ({ body: detail(e2) });
+    api.routes["POST /api/v1/employees/e2/assign-team"] = () => ({ body: { id: "e2", team: { id: "t2", name: "Team Meera" } } });
+    wrap(<EmployeesPage me={meFor("accounts")} />);
+    const d = await openDrawer("Divya Menon");
+    fireEvent.click(await within(d).findByRole("button", { name: "Assign a team…" }));
+    const dlg = await screen.findByRole("dialog", { name: "Assign Divya Menon to a team" });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Assign team" }));
+    expect(await within(dlg).findByText("Choose a team.")).toBeInTheDocument();
+    const sel = within(dlg).getByLabelText("Team");
+    await waitFor(() => expect(within(sel).getByRole("option", { name: /Team Meera \(lead: Meera\)/ })).toBeInTheDocument());
+    fireEvent.change(sel, { target: { value: "t2" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Assign team" }));
+    await waitFor(() => expect(api.writes().map((w) => [w.path, w.body])).toEqual([["/api/v1/employees/e2/assign-team", { teamId: "t2" }]]));
+    expect(await screen.findAllByText(/Assigned to Team Meera/)).not.toHaveLength(0);
+  });
+
+  it("edits employment details; sends only changes; the pay rate only when the server offers it", async () => {
+    const a = { ...E1.assignment!, client: E1.assignment!.client!, isFirstPlacement: true, vendor: { id: "v1", name: "Prime Vendor Co" },
+      payrollCompany: null, everifyDate: null, onboardedDate: "2026-06-02", payRate: 41.5 };
+    const e1 = { ...E1, actions: { ...E1.actions, editEmployment: true } };
+    api.routes["GET /api/v1/employees/e1"] = () => ({ body: { ...detail(e1), assignments: [a] } });
+    api.routes["PATCH /api/v1/assignments/a-e1/employment"] = () => ({ body: { id: "a-e1", changed: ["payrollCompanyId"] } });
+    wrap(<EmployeesPage me={meFor("accounts")} />);
+    const d = await openDrawer("Asha Iyer");
+    const table = await within(d).findByRole("table", { name: "Assignments" });
+    expect(within(table).getByText("Prime Vendor Co")).toBeInTheDocument();
+    expect(within(table).getByText("$41.50/h")).toBeInTheDocument();
+    fireEvent.click(within(table).getByRole("button", { name: "Edit employment details of assignment 1" }));
+    const dlg = await screen.findByRole("dialog", { name: /Employment details: Asha Iyer, assignment 1/ });
+    const company = within(dlg).getByRole("combobox", { name: "Payroll company" });
+    await waitFor(() => expect(within(company).getByRole("option", { name: "Eureka Payroll LLC" })).toBeInTheDocument());
+    expect(within(company).queryByRole("option", { name: /Old Entity/ })).not.toBeInTheDocument();
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save details" }));
+    expect(await within(dlg).findByText("Nothing changed.")).toBeInTheDocument();
+    fireEvent.change(company, { target: { value: "co1" } });
+    fireEvent.change(within(dlg).getByLabelText("E-Verify date"), { target: { value: "2026-06-03" } });
+    fireEvent.change(within(dlg).getByLabelText(/Pay rate/), { target: { value: "41.555" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save details" }));
+    expect(await within(dlg).findByText(/at most two decimals/)).toBeInTheDocument();
+    fireEvent.change(within(dlg).getByLabelText(/Pay rate/), { target: { value: "41.5" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save details" }));
+    await waitFor(() => expect(api.writes().map((w) => w.body)).toEqual([{ payrollCompanyId: "co1", everifyDate: "2026-06-03" }]));
+  });
+
+  it("hides the pay rate field when the server omits payRate", async () => {
+    const a = { ...E1.assignment!, client: E1.assignment!.client!, isFirstPlacement: true, payrollCompany: null, everifyDate: null, onboardedDate: null };
+    api.routes["GET /api/v1/employees/e1"] = () => ({ body: { ...detail({ ...E1, actions: { ...E1.actions, editEmployment: true } }), assignments: [a] } });
+    wrap(<EmployeesPage me={meFor("hr")} />);
+    const d = await openDrawer("Asha Iyer");
+    const table = await within(d).findByRole("table", { name: "Assignments" });
+    expect(within(table).queryByText("Pay rate")).not.toBeInTheDocument();
+    fireEvent.click(within(table).getByRole("button", { name: /Edit employment details/ }));
+    const dlg = await screen.findByRole("dialog", { name: /Employment details/ });
+    expect(within(dlg).queryByLabelText(/Pay rate/)).not.toBeInTheDocument();
   });
 });
 
@@ -173,6 +259,25 @@ const REPORT: JoiningsExits = {
   ],
   truncated: false,
 };
+
+describe("Active employees report (0150)", () => {
+  beforeEach(() => {
+    api.routes["GET /api/v1/reports/joinings-exits"] = () => ({ body: REPORT });
+  });
+
+  it("loads the current month, filters by client", async () => {
+    wrap(<ReportsPage me={meFor("hr")} />);
+    const t = await screen.findByRole("table", { name: "Active employees by client" });
+    expect(within(t).getByText("3")).toBeInTheDocument();
+    expect(api.gets("/api/v1/reports/active-employees").at(-1)!.url.searchParams.get("month")).toBe("2026-10");
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-09" } });
+    await waitFor(() => expect(api.gets("/api/v1/reports/active-employees").at(-1)!.url.searchParams.get("month")).toBe("2026-09"));
+    const form = screen.getByRole("form", { name: "Active employees filters" });
+    fireEvent.change(await within(form).findByRole("combobox", { name: "Client" }), { target: { value: "cl1" } });
+    await waitFor(() => expect(api.gets("/api/v1/reports/active-employees").at(-1)!.url.searchParams.get("clientId")).toBe("cl1"));
+    expect(screen.getByRole("table", { name: "Active employees by payroll company" })).toHaveTextContent("Not set");
+  });
+});
 
 describe("Joinings and exits report", () => {
   beforeEach(() => {

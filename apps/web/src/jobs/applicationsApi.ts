@@ -1,5 +1,6 @@
 /** Typed client for applications, applicants and application interviews (docs/jobs-portal-api.md). */
-import { ApiError, api, apiFetch } from "../api";
+import { ApiError, api } from "../api";
+import { downloadCsv } from "../lib/download";
 import type { ApplicationStatus } from "@eureka/shared";
 import type { Job, Named } from "./jobsApi";
 
@@ -53,16 +54,6 @@ export const applicationKeys = {
   applicants: ["applicants"] as const,
 };
 
-async function download(path: string, body: unknown, name: string) {
-  const res = await apiFetch(path, post(body));
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = name; a.click();
-  URL.revokeObjectURL(url);
-  return { rows: Number(res.headers.get("x-export-rows") ?? 0), truncated: res.headers.get("x-export-truncated") === "true" };
-}
-
 export const applicationsApi = {
   list: (f: ApplicationFilters) => api<{ items: Application[]; nextCursor: string | null }>(`/api/v1/applications${qs(f)}`),
   get: (id: string) => api<ApplicationDetail>(`/api/v1/applications/${id}`),
@@ -78,9 +69,9 @@ export const applicationsApi = {
     api<{ id: string }>(`/api/v1/application-interviews/${id}/scorecard`, { method: "PUT", body: JSON.stringify(body) }),
   createCandidate: (id: string, body: { technologyId: string; locationId: string; confirmDuplicate?: boolean }) =>
     api<{ candidateId: string }>(`/api/v1/applications/${id}/candidate`, post(body)),
-  exportCsv: (f: Omit<ApplicationFilters, "cursor" | "limit">) => download("/api/v1/applications/export", f, "applications.csv"),
+  exportCsv: (f: Omit<ApplicationFilters, "cursor" | "limit">) => downloadCsv("/api/v1/applications/export", f, "applications.csv"),
   applicants: (f: { search?: string; cursor?: string; limit?: number }) => api<{ items: Applicant[]; nextCursor: string | null }>(`/api/v1/applicants${qs(f)}`),
-  exportApplicants: (f: { search?: string }) => download("/api/v1/applicants/export", f, "applicants.csv"),
+  exportApplicants: (f: { search?: string }) => downloadCsv("/api/v1/applicants/export", f, "applicants.csv"),
 };
 
 const MESSAGES: Record<string, string> = {

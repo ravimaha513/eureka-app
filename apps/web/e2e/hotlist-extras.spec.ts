@@ -113,9 +113,9 @@ test("lead changes the status of own-team candidates in bulk; other teams' are r
   await Promise.all([r1a.dispose(), r2a.dispose()]);
 
   await login(page, "l1@eureka.example");
-  // The Hot List is open to everyone, but another team's row cannot be selected.
-  await search(page, tag, 3);
-  await expect(hotlist(page).getByRole("checkbox", { name: `Select ${theirs!.name}` })).toBeDisabled();
+  // Another team's Team-only candidate is not on the lead's Hot List (team policy).
+  await search(page, tag, 2);
+  await expect(hotlist(page).getByRole("checkbox", { name: `Select ${theirs!.name}` })).toHaveCount(0);
   for (const c of own) await hotlist(page).getByRole("checkbox", { name: `Select ${c.name}` }).check();
   const bar = page.getByRole("region", { name: "Bulk actions" });
   await expect(bar).toContainText("2 candidates selected");

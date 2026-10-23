@@ -1,10 +1,11 @@
 import { useEffect, useId, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Me } from "../api";
-import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../admin/Dialog";
+import { can, type Me } from "../api";
+import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { useLookupName } from "../lookups";
 import { salesApi } from "../sales/salesApi";
 import { Drawer, Field } from "../sales/ui";
+import { AssessmentsSection } from "../pipelinereport/AssessmentsSection";
 import { CreatePlacementDialog } from "./CreatePlacementDialog";
 import { pipelineError } from "./errors";
 import {
@@ -12,6 +13,8 @@ import {
 } from "./pipelineApi";
 import { ScheduleInterviewDialog } from "./ScheduleInterviewDialog";
 import { PipelineStatus, StatusChips } from "./ui";
+import { Pager, useCursorPager } from "../ui/Pager";
+import { QueryError } from "../ui/QueryError";
 
 const PAGE_SIZE = 50;
 const CLOSING = new Set(["rejected", "withdrawn"]);
@@ -19,14 +22,13 @@ const CLOSING = new Set(["rejected", "withdrawn"]);
 /** Submissions list (GET /api/v1/submissions) with a detail drawer for status changes and next steps. */
 export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabilities">; onOpenPlacement?: (id: string) => void }) {
   const id = useId();
-  const canSearchCandidates = me.capabilities.includes("candidate:read");
+  const canSearchCandidates = can(me, "candidate:read");
   const [status, setStatusRaw] = useState("");
   const [from, setFromRaw] = useState("");
   const [to, setToRaw] = useState("");
   const [candidateId, setCandidateRaw] = useState("");
-  const [cursors, setCursors] = useState<(string | null)[]>([null]);
-  const page = cursors.length - 1;
-  const reset = () => setCursors([null]);
+  const pager = useCursorPager();
+  const { page, reset } = pager;
   const setStatus = (v: string) => { setStatusRaw(v); reset(); };
   const setFrom = (v: string) => { setFromRaw(v); reset(); };
   const setTo = (v: string) => { setToRaw(v); reset(); };
@@ -38,7 +40,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
   const filters = {
     status, candidateId,
     from: from ? dayBoundary(from) : "", to: to ? dayBoundary(to, true) : "",
-    cursor: cursors[page] ?? "", limit: PAGE_SIZE,
+    cursor: pager.cursor ?? "", limit: PAGE_SIZE,
   };
   const q = useQuery({
     queryKey: [...pipelineKeys.submissions, "list", filters],
@@ -88,7 +90,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
       {!invalidRange && (
         <div className="card tablewrap">
           {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-            <p className="empty error" role="alert">{pipelineError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+            <QueryError query={q} message={pipelineError(q.error)} />
           ) : (
             <div className="tablewrap"><table aria-label="Submissions" aria-busy={q.isFetching || undefined}>
               <thead><tr>
@@ -121,12 +123,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
       )}
       <div className="listfoot">
         <p role="status" aria-live="polite" className="muted">{countMsg}</p>
-        <nav className="pager" aria-label="Submission pages">
-          <button type="button" className="btn sm" disabled={page === 0} onClick={() => setCursors((c) => (c.length > 1 ? c.slice(0, -1) : c))}>Previous</button>
-          <span>Page {page + 1}</span>
-          <button type="button" className="btn sm" disabled={!q.data?.nextCursor || q.isPlaceholderData}
-            onClick={() => { const nx = q.data?.nextCursor; if (nx) setCursors((c) => [...c, nx]); }}>Next</button>
-        </nav>
+        <Pager pager={pager} label="Submission pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
       </div>
 
       {openId && (
@@ -252,6 +249,7 @@ function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlacement }: {
                 )}
               </section>
             )}
+            <AssessmentsSection submissionId={s.id} />
           </>
         )}
       </Drawer>

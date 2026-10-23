@@ -99,3 +99,12 @@ export const MoveMember = z
 export type MoveMember = z.infer<typeof MoveMember>;
 
 export const SetPassword = z.object({ password: z.string().min(10).max(72) }).strict();
+
+/** A designation (display label, never a role; empty or null clears it). docs/admin-api.md, docs/performance-api.md PF-7. */
+export const SetDesignation = z
+  .object({
+    designation: z.string().trim().max(120).refine((v) => !/[\u0000-\u001f\u007f]/.test(v), "remove control characters")
+      .nullable().transform((v) => (v ? v : null)),
+  })
+  .strict();
+export type SetDesignation = z.infer<typeof SetDesignation>;

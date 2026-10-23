@@ -694,3 +694,21 @@ a.contactlink { color: var(--pri); }
   .settingsnav { flex-direction: row; flex-wrap: wrap; }
   .prefrow { flex-direction: column; align-items: flex-start; }
 }
+
+/* payments (gap L1): derived invoice status */
+.badge.pay-pending { background: var(--pri-50); color: var(--pri-700); }
+.badge.pay-delayed { background: var(--bad-bg); color: var(--bad-fg); }
+.badge.pay-received { background: var(--ok-bg); color: var(--ok-fg); }
+.badge.pay-void { background: var(--neutral-bg); color: var(--neutral-fg); }
+@media (max-width: 640px) { .formgrid.cols2.paygrid { grid-template-columns: minmax(0, 1fr); } }
+/* interview-reports: cleared interviews are highlighted green (board and daily report). */
+tbody tr.row-cleared td { background: var(--ok-bg); }
+tbody tr.row-cleared:hover td { background: var(--ok-bg); }
+tbody tr.row-cleared td:first-child { box-shadow: inset 3px 0 0 var(--ok-fg); }
+.badge.cleared { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-line); }
+.cf-notes { color: var(--muted); font-size: .9em; max-width: 28ch; overflow-wrap: anywhere; }
+/* pipeline-vendors: pipeline report stages, assessment and responsiveness lists */
+.badge.st-not_started { background: var(--neutral-bg); color: var(--neutral-fg); }
+.badge.st-marketing, .badge.st-submitted, .badge.st-interviewing, .badge.st-assessment { background: var(--pri-50); color: var(--pri-700); }
+ul.plain { list-style: none; padding: 0; margin: 4px 0 8px; display: flex; flex-direction: column; gap: 6px; }
+form.stack { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }

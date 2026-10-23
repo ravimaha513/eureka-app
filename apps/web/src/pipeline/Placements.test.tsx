@@ -205,3 +205,59 @@ describe("Placement detail", () => {
     await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "Placements" })).toHaveFocus());
   });
 });
+
+describe("Placements report (migration 0160)", () => {
+  const LOOKUPS = {
+    technologies: [{ id: "tech1", name: "Java" }], clients: [{ id: "cl1", name: "Northwind Financial" }],
+    vendors: [{ id: "v1", name: "Contoso Staffing" }], implementationPartners: [], locations: [{ id: "loc", name: "Dallas" }], coaches: [],
+  };
+
+  it("filters by vendor, end client, technology and location", async () => {
+    api.routes["GET /api/v1/lookups"] = () => ({ body: LOOKUPS });
+    wrap(<PlacementsPage me={RECRUITER} />);
+    await rowOf("Asha Iyer");
+    fireEvent.change(await screen.findByLabelText("Vendor"), { target: { value: "v1" } });
+    fireEvent.change(screen.getByLabelText("End client"), { target: { value: "cl1" } });
+    fireEvent.change(screen.getByLabelText("Technology"), { target: { value: "tech1" } });
+    fireEvent.change(screen.getByLabelText("Location"), { target: { value: "loc" } });
+    await waitFor(() => expect(lastList().get("locationId")).toBe("loc"));
+    expect([lastList().get("vendorId"), lastList().get("clientId"), lastList().get("technologyId")]).toEqual(["v1", "cl1", "tech1"]);
+  });
+
+  it("shows the technology and the re-confirmed badge", async () => {
+    api.routes["GET /api/v1/placements"] = () => ({ body: { items: [{ ...P1, reconfirmed: true, technology: { id: "tech1", name: "Java" } }], nextCursor: null } });
+    wrap(<PlacementsPage me={RECRUITER} />);
+    const row = await rowOf("Asha Iyer");
+    expect(within(row).getByText("Re-confirmed")).toHaveClass("badge");
+    expect(within(row).getByText("Java")).toBeInTheDocument();
+  });
+
+  it("exports with the filters for report:export holders only", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    api.routes["POST /api/v1/placements/export"] = () => ({ body: "csv" });
+    const { unmount } = wrap(<PlacementsPage me={RECRUITER} />);
+    await rowOf("Asha Iyer");
+    expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
+    unmount();
+    wrap(<PlacementsPage me={meFor("lead")} />);
+    await rowOf("Asha Iyer");
+    fireEvent.click(within(screen.getByRole("group", { name: "Status" })).getByRole("button", { name: "Joined" }));
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.body).toEqual({ status: "joined" });
+  });
+
+  it("confirms a joining issue with a required reason", async () => {
+    api.routes["GET /api/v1/placements/p1"] = () => ({ body: { ...FULL_P1, allowedTransitions: ["paperwork", "backout", "joining_issue"] } });
+    api.routes["PATCH /api/v1/placements/p1/status"] = () => ({ body: { id: "p1", status: "joining_issue" } });
+    wrap(<PlacementsPage me={RECRUITER} />);
+    const drawer = await openDrawer("Asha Iyer");
+    fireEvent.click(await within(drawer).findByRole("button", { name: "Mark joining issue…" }));
+    const dlg = screen.getByRole("dialog", { name: "Mark joining issue for Asha Iyer?" });
+    fireEvent.change(within(dlg).getByLabelText("Reason"), { target: { value: "Client postponed the start" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Mark joining issue" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.body).toEqual({ to: "joining_issue", reason: "Client postponed the start" });
+  });
+});

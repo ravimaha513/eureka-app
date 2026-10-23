@@ -15,6 +15,7 @@ import { CONFIG, parseEmailList, type AppConfig } from "../../platform/config.js
 import { DbService } from "../../platform/db.service.js";
 import { mapAdminError } from "./admin.errors.js";
 import type { BulkCreateUsers, CreateLocation, CreateRoleRequest, CreateTeam, CreateUser, MoveMember, UserListQuery } from "./admin.schemas.js";
+import { likeContains } from "../../platform/sql.js";
 
 const EMAIL = z.string().email();
 
@@ -80,7 +81,7 @@ export class AdminService {
       const params: unknown[] = [];
       const where: string[] = [];
       if (q.search) {
-        params.push(`%${q.search.replace(/[%_\\]/g, "\\$&")}%`);
+        params.push(likeContains(q.search));
         where.push(`(u.display_name ILIKE $${params.length} OR u.email::text ILIKE $${params.length})`);
       }
       if (q.status) { params.push(q.status); where.push(`u.status = $${params.length}`); }
@@ -430,6 +431,37 @@ export class AdminService {
     await this.tx(user, async (c) => {
       await c.query(`SELECT authz.admin_add_team_member($1, $2)`, [teamId, userId]);
       await this.audit.record(c, { actorId: user.id, action: "admin.team.member_added", entityType: "team", entityId: teamId, changes: { userId } });
+    });
+  }
+
+  /**
+   * Designation (display label) of another user (migration 0111). `via`
+   * "admin": access:manage (Users & Access, any user); "hierarchy":
+   * designation:change over the users the grant covers. Read before write:
+   * 404 for an unknown user, 403 outside the caller's scope or for themself;
+   * authz.set_designation re-checks all of it in the database.
+   */
+  async setDesignation(user: AuthedUser, targetId: string, designation: string | null, via: "admin" | "hierarchy") {
+    return this.tx(user, async (c) => {
+      const before = (await c.query<{ designation: string | null }>(
+        `SELECT designation FROM eureka.app_user WHERE id = $1`, [targetId])).rows[0];
+      if (!before) throw new NotFoundException();
+      this.notSelf(user, targetId);
+      if (via === "hierarchy") {
+        const scope = resolveScope(user.access, "designation:change");
+        if (!scope) throw new ForbiddenException("not_permitted");
+        if (!scope.all) {
+          const covered = (await c.query<{ ok: boolean }>(
+            `SELECT $1::uuid = ANY (authz.scope_user_ids('designation:change')) AS ok`, [targetId])).rows[0]!.ok;
+          if (!covered) throw new ForbiddenException("not_in_scope");
+        }
+      }
+      await c.query(`SELECT authz.set_designation($1, $2)`, [targetId, designation]);
+      await this.audit.record(c, {
+        actorId: user.id, action: "user.designation_changed", entityType: "app_user", entityId: targetId,
+        changes: { designation, previous: before.designation, via },
+      });
+      return { id: targetId, designation };
     });
   }
 

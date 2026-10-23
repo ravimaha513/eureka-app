@@ -102,16 +102,16 @@ export class AuthGuard implements CanActivate {
       }
     }
 
-    // Access facts are loaded per request from current rows (no time-based cache).
-    const access = await this.db.withUser(session.userId, (c) => this.accessService.load(c, session.userId));
+    // Access facts are loaded per request from current rows (no time-based cache), in the same
+    // transaction as the temporary-password check (migration 0083).
+    const checkPassword = this.config.PASSWORD_LOGIN === "on" && !this.reflector.getAllAndOverride<boolean>(ALLOW_PASSWORD_CHANGE, targets);
+    const { access, mustChange } = await this.db.withUser(session.userId, async (c) => ({
+      access: await this.accessService.load(c, session.userId),
+      mustChange: checkPassword && (await c.query<{ m: boolean }>(`SELECT authz.password_must_change() AS m`)).rows[0]!.m,
+    }));
     req.user = { id: session.userId, access, sessionHash: session.idHash, authTime: session.authTime };
-
-    // A temporary (admin-set) password must be changed before anything else (migration 0083).
-    if (this.config.PASSWORD_LOGIN === "on" && !this.reflector.getAllAndOverride<boolean>(ALLOW_PASSWORD_CHANGE, targets)) {
-      const must = await this.db.withUser(session.userId, async (c) =>
-        (await c.query<{ m: boolean }>(`SELECT authz.password_must_change() AS m`)).rows[0]!.m);
-      if (must) throw new ForbiddenException("password_change_required");
-    }
+    // A temporary (admin-set) password must be changed before anything else.
+    if (mustChange) throw new ForbiddenException("password_change_required");
 
     const needed = this.reflector.getAllAndOverride<Permission | undefined>(REQUIRED_PERMISSION, targets);
     if (needed && !can(access, needed)) throw new ForbiddenException("Not permitted");

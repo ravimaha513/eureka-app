@@ -2,13 +2,14 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, CalendarDays, Plus, Trash2 } from "lucide-react";
 import type { Me } from "../api";
-import { ConfirmDialog } from "../admin/Dialog";
+import { ConfirmDialog } from "../ui/Dialog";
 import { fmtDate } from "../sales/ui";
 import { Avatar } from "../shell/ui";
 import { BatchDetailView } from "./BatchDetail";
 import { BatchDialog } from "./BatchDialog";
 import { BATCH_STATUSES, BATCH_STATUS_LABELS, trainingApi, trainingError, trainingKeys, type BatchCard } from "./trainingApi";
 import { BatchStatusPill, CoverArt } from "./ui";
+import { QueryError } from "../ui/QueryError";
 
 /** Training Batches (docs/training-api.md): cards with status filter; a card opens the batch. */
 export function TrainingPage({ me }: { me: Me }) {
@@ -55,7 +56,7 @@ function BatchList({ me, onOpen, heading, notice, setNotice }: {
       </div>
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
       {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
-        <p className="empty error" role="alert">{trainingError(q.error)} <button type="button" className="btn sm" onClick={() => void q.refetch()}>Retry</button></p>
+        <QueryError query={q} message={trainingError(q.error)} />
       ) : items.length === 0 ? (
         <div className="card"><p className="empty">{status ? "No batches with this status." : "No training batches to show yet."}</p></div>
       ) : (
