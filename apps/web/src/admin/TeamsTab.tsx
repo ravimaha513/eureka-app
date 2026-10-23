@@ -10,6 +10,7 @@ import { QueryError } from "../ui/QueryError";
 
 type Modal =
   | { kind: "create" }
+  | { kind: "rename"; team: Team }
   | { kind: "lead"; team: Team }
   | { kind: "add"; team: Team }
   | { kind: "move"; team: Team; member: Ref };
@@ -55,6 +56,7 @@ export function TeamsTab() {
                 {t.members.length === 0 && <li className="muted">No members yet.</li>}
               </ul>
               <div className="rowactions">
+                <button className="btn sm" aria-label={`Rename ${t.name}`} onClick={() => setModal({ kind: "rename", team: t })}>Rename</button>
                 <button className="btn sm" aria-label={`Change lead of ${t.name}`} onClick={() => setModal({ kind: "lead", team: t })}>Change lead</button>
                 <button className="btn sm" aria-label={`Add member to ${t.name}`} onClick={() => setModal({ kind: "add", team: t })}>Add member</button>
               </div>
@@ -65,6 +67,7 @@ export function TeamsTab() {
       )}
 
       {modal?.kind === "create" && <CreateTeamDialog onClose={close} onDone={done} />}
+      {modal?.kind === "rename" && <RenameTeamDialog team={modal.team} onClose={close} onDone={done} />}
       {modal?.kind === "lead" && <LeadDialog team={modal.team} onClose={close} onDone={done} />}
       {modal?.kind === "add" && <AddMemberDialog team={modal.team} onClose={close} onDone={done} />}
       {modal?.kind === "move" && (
@@ -117,6 +120,27 @@ function CreateTeamDialog({ onClose, onDone }: { onClose: () => void; onDone: (m
             {meta.data?.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select></div>
         <DialogActions onCancel={onClose} submitLabel="Create team" busy={busy} error={error} disabled={!name.trim() || !leadId} />
+      </form>
+    </Dialog>
+  );
+}
+
+function RenameTeamDialog({ team, onClose, onDone }: { team: Team; onClose: () => void; onDone: (m: string) => void }) {
+  const [name, setName] = useState(team.name);
+  const { busy, error, run } = useSubmit((e) => friendlyError(e));
+  const next = name.trim();
+  return (
+    <Dialog title={`Rename ${team.name}`} onClose={onClose}>
+      <form onSubmit={(e) => {
+        e.preventDefault();
+        void run(async () => {
+          await adminApi.renameTeam(team.id, next);
+          onDone(`Renamed ${team.name} to ${next}.`);
+        });
+      }}>
+        <div className="field"><label htmlFor="rt-name">Team name</label>
+          <input id="rt-name" required maxLength={120} data-autofocus value={name} onChange={(e) => setName(e.target.value)} /></div>
+        <DialogActions onCancel={onClose} submitLabel="Rename team" busy={busy} error={error} disabled={!next || next === team.name} />
       </form>
     </Dialog>
   );

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import {
@@ -7,6 +7,7 @@ import {
   CreateLocation,
   CreateRoleRequest,
   CreateTeam,
+  RenameTeam,
   CreateUser,
   MoveMember,
   RevokeRoleQuery,
@@ -145,6 +146,12 @@ export class AdminController {
   @Post("teams")
   createTeam(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createTeam(user, CreateTeam.parse(body));
+  }
+
+  @Patch("teams/:id")
+  @HttpCode(204)
+  async renameTeam(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
+    await this.svc.renameTeam(user, id, RenameTeam.parse(body).name);
   }
 
   @Put("teams/:id/lead")
