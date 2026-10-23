@@ -4,7 +4,9 @@ import { Person } from "../shell/ui";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { adminApi, type AdminUser, type BulkReport, type UserRole } from "./adminApi";
-import { CSV_TEMPLATE, csvToRows, type BulkRow } from "./csv";
+import { csvToRows, tableToRows, type BulkRow } from "./csv";
+import { isXlsx, readUserSheet } from "./xlsx";
+import { saveBlob } from "../lib/download";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { friendlyError } from "./errors";
 import { keys, useAccess, useMeta, usePeople } from "./shared";
@@ -245,6 +247,12 @@ const BULK_ERRORS: Record<string, string> = {
   duplicate_in_file: "Email appears earlier in this file",
   unknown_location: "No location with this name",
   email_exists: "A user with this email already exists",
+  unknown_role: "A role is not one of the roles in the template",
+  duplicate_role: "The same role is listed twice",
+  separation_of_duties: "Org Admin cannot be combined with another role",
+  location_required: "This role needs a location",
+  location_not_allowed: "This role cannot have a location",
+  role_already_held: "The user already holds this role",
 };
 
 function BulkImportDialog({ onClose, onDone }: { onClose: () => void; onDone: (created: number) => void }) {
@@ -258,7 +266,7 @@ function BulkImportDialog({ onClose, onDone }: { onClose: () => void; onDone: (c
     setRows(null); setReport(null); setFileError(undefined);
     if (!file) return;
     try {
-      const parsed = csvToRows(await file.text());
+      const parsed = isXlsx(file) ? tableToRows(await readUserSheet(file)) : csvToRows(await file.text());
       if (parsed.length === 0) throw new Error("The file has a header but no users.");
       if (parsed.length > 500) throw new Error("A file can have at most 500 users. Split it and import in parts.");
       setRows(parsed);
@@ -271,11 +279,19 @@ function BulkImportDialog({ onClose, onDone }: { onClose: () => void; onDone: (c
     }
   }
 
-  const template = useMemo(() => URL.createObjectURL(new Blob([CSV_TEMPLATE], { type: "text/csv" })), []);
-  useEffect(() => () => URL.revokeObjectURL(template), [template]);
+  const [templateError, setTemplateError] = useState<string | undefined>();
+  async function downloadTemplate() {
+    setTemplateError(undefined);
+    try {
+      saveBlob(await adminApi.bulkTemplate(), "users-import-template.xlsx");
+    } catch (e) {
+      setTemplateError(friendlyError(e));
+    }
+  }
   const ready = !!report && report.failed === 0;
+  const pending = report?.rows.reduce((n, r) => n + (r.roles ?? []).filter((x) => x.status === "pending_approval").length, 0) ?? 0;
   return (
-    <Dialog title="Import users from CSV" onClose={onClose}>
+    <Dialog title="Import users" onClose={onClose} className="xwide">
       <form onSubmit={(e) => {
         e.preventDefault();
         if (!rows || !ready) return;
@@ -286,28 +302,37 @@ function BulkImportDialog({ onClose, onDone }: { onClose: () => void; onDone: (c
         });
       }}>
         <p className="hint">
-          One user per row with the columns <b>email</b>, <b>name</b>, and optionally <b>designation</b> and <b>location</b> (a location name).{" "}
-          <a href={template} download="users-template.csv">Download a template</a>. New users have no roles; grant them afterwards.
-          Nothing is created unless every row is valid.
+          <button type="button" className="linkbtn" onClick={() => void downloadTemplate()}>Download the Excel template</button>,
+          fill in one user per row (<b>email</b> and <b>name</b> required; <b>designation</b>, <b>location</b> and up to three <b>roles</b> from
+          the dropdowns), then choose the file. CSV with the same columns works too. Restricted roles are sent for a second
+          admin's approval. Nothing is created unless every row is valid.
         </p>
-        <div className="field"><label htmlFor="bulk-file">CSV file</label>
-          <input id="bulk-file" type="file" accept=".csv,text/csv" data-autofocus onChange={(e) => void onFile(e.target.files?.[0])} /></div>
+        {templateError && <p className="error" role="alert">{templateError}</p>}
+        <div className="field"><label htmlFor="bulk-file">Excel or CSV file</label>
+          <input id="bulk-file" type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            data-autofocus onChange={(e) => void onFile(e.target.files?.[0])} /></div>
         {fileError && <p className="error" role="alert">{fileError}</p>}
         {checking && <p className="muted" role="status">Checking {rows?.length} rows…</p>}
         {report && (
           <>
             <p role="status">
               {report.failed === 0
-                ? <>All {report.rows.length} rows are valid and ready to import.</>
+                ? <>All {report.rows.length} rows are valid and ready to import.
+                    {pending > 0 && <> {pending} restricted role{pending === 1 ? "" : "s"} will wait for a second admin's approval.</>}</>
                 : <><b>{report.failed}</b> of {report.rows.length} rows have problems. Fix the file and choose it again; nothing has been created.</>}
             </p>
             <div className="tablewrap" style={{ maxHeight: "40vh", overflow: "auto" }}>
               <table aria-label="Import preview">
-                <thead><tr><th>Row</th><th>Name</th><th>Email</th><th>Result</th></tr></thead>
+                <thead><tr><th>Row</th><th>Name</th><th>Email</th><th>Roles</th><th>Result</th></tr></thead>
                 <tbody>
                   {report.rows.map((r) => (
                     <tr key={r.row}>
                       <td>{r.row}</td><td>{r.displayName || "—"}</td><td>{r.email}</td>
+                      <td>{(r.roles ?? []).length === 0 ? "—" : (
+                        <ul className="chips">{r.roles.map((x) => (
+                          <li key={x.role} className="chip">{x.label}{x.status === "pending_approval" ? " · needs approval" : ""}</li>
+                        ))}</ul>
+                      )}</td>
                       <td>{r.status === "ok" ? "OK" : <span className="error">{BULK_ERRORS[r.error!] ?? r.error}</span>}</td>
                     </tr>
                   ))}

@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Res } from "@nestjs/common";
+import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import {
   AddMember,
@@ -51,6 +52,16 @@ export class AdminController {
   @HttpCode(200)
   bulkCreateUsers(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.bulkCreateUsers(user, BulkCreateUsers.parse(body));
+  }
+
+  @Get("users/bulk/template")
+  async bulkTemplate(@CurrentUser() user: AuthedUser, @Res({ passthrough: true }) reply: FastifyReply) {
+    const file = await this.svc.bulkTemplate(user);
+    void reply
+      .header("content-type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("content-disposition", `attachment; filename="users-import-template.xlsx"`)
+      .header("cache-control", "no-store");
+    return file;
   }
 
   @Post("users/:id/password")

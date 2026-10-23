@@ -261,6 +261,62 @@ describe("users", () => {
       expect(await count("bulk.good%")).toBe(0);
     });
 
+    it("grants roles by label or key; restricted roles wait for a second approver", async () => {
+      const rows = [
+        { email: "bulk.role1@eureka.example", displayName: "Role One", location: "Dallas", roles: ["Recruiter", "location_incharge"] },
+        { email: "bulk.role2@eureka.example", displayName: "Role Two", roles: ["hr"] },
+      ];
+      const dry = (await bulk(true, rows)).json();
+      expect(dry).toMatchObject({ committed: false, failed: 0 });
+      expect(dry.rows[1].roles).toEqual([{ role: "hr", label: "HR", status: "pending_approval" }]);
+      expect(await count("bulk.role%")).toBe(0);
+
+      const r = await bulk(false, rows);
+      expect(r.statusCode, r.body).toBe(200);
+      const body = r.json();
+      expect(body).toMatchObject({ committed: true, created: 2, failed: 0 });
+      expect(body.rows[0].roles).toEqual([
+        { role: "recruiter", label: "Recruiter", status: "applied" },
+        { role: "location_incharge", label: "Location Incharge", status: "applied" },
+      ]);
+      const held = (await db.admin.query(
+        `SELECT role_key, location_id FROM eureka.user_role WHERE user_id = $1 ORDER BY role_key`, [body.rows[0].id])).rows;
+      expect(held).toEqual([{ role_key: "location_incharge", location_id: LOC.dallas }, { role_key: "recruiter", location_id: null }]);
+      const pending = (await db.admin.query(
+        `SELECT role_key, status, requested_by FROM eureka.role_request WHERE user_id = $1`, [body.rows[1].id])).rows;
+      expect(pending).toEqual([{ role_key: "hr", status: "pending", requested_by: U.admin }]);
+      expect((await db.admin.query(`SELECT count(*)::int AS n FROM eureka.user_role WHERE user_id = $1`, [body.rows[1].id])).rows[0].n).toBe(0);
+      const requested = (await audits("admin.role.requested")).at(-1);
+      expect(requested).toMatchObject({ entity_id: body.rows[1].id, changes: { role: "hr", bulk: true } });
+      // Withdraw it so later tests see only their own pending requests.
+      expect((await call("admin", "POST", `/api/v1/admin/role-requests/${requested.changes.requestId}/reject`)).statusCode).toBe(200);
+    });
+
+    it("names role problems per row and creates nobody", async () => {
+      const r = await bulk(false, [
+        { email: "bulk.rgood@eureka.example", displayName: "Good", roles: ["Recruiter"] },
+        { email: "bulk.r1@eureka.example", displayName: "Unknown", roles: ["Wizard"] },
+        { email: "bulk.r2@eureka.example", displayName: "Twice", roles: ["Recruiter", "recruiter"] },
+        { email: "bulk.r3@eureka.example", displayName: "Admin and data", roles: ["Org Admin", "Recruiter"] },
+        { email: "bulk.r4@eureka.example", displayName: "No location", roles: ["Location Ops Admin"] },
+      ]);
+      expect(r.statusCode, r.body).toBe(200);
+      const body = r.json();
+      expect(body).toMatchObject({ committed: false, created: 0, failed: 4 });
+      expect(body.rows.map((x: { error?: string }) => x.error)).toEqual([
+        undefined, "unknown_role", "duplicate_role", "separation_of_duties", "location_required",
+      ]);
+      expect(await count("bulk.r%good%")).toBe(0);
+    });
+
+    it("serves the template as an .xlsx to admins only", async () => {
+      const r = await call("admin", "GET", "/api/v1/admin/users/bulk/template");
+      expect(r.statusCode).toBe(200);
+      expect(r.headers["content-type"]).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      expect(r.rawPayload.subarray(0, 2).toString()).toBe("PK");
+      expect((await call("ceo", "GET", "/api/v1/admin/users/bulk/template")).statusCode).toBe(403);
+    });
+
     it("rejects an empty or oversized request", async () => {
       expect((await bulk(true, [])).statusCode).toBe(422);
       const many = Array.from({ length: 501 }, (_, i) => ({ email: `m${i}@eureka.example`, displayName: "M" }));

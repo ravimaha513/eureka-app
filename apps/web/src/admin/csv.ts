@@ -23,18 +23,23 @@ export function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((c) => c.trim() !== ""));
 }
 
-export interface BulkRow { email: string; displayName: string; designation?: string; location?: string }
+export interface BulkRow { email: string; displayName: string; designation?: string; location?: string; roles?: string[] }
 
-const HEADERS: Record<string, keyof BulkRow> = {
+type Field = Exclude<keyof BulkRow, "roles"> | "role";
+const HEADERS: Record<string, Field> = {
   email: "email", "e-mail": "email",
   name: "displayName", displayname: "displayName", "display name": "displayName", "full name": "displayName",
   designation: "designation", title: "designation",
   location: "location", "primary location": "location", primarylocation: "location",
+  role: "role", "role 1": "role", "role 2": "role", "role 3": "role", "role 4": "role", "role 5": "role",
 };
 
-/** Maps a header row to BulkRow fields. Throws a readable message when `email` or `name` is missing. */
-export function csvToRows(text: string): BulkRow[] {
-  const [head, ...body] = parseCsv(text);
+/**
+ * Maps a table whose first row is the header to BulkRow fields; every Role column adds one role.
+ * Throws a readable message when `email` or `name` is missing.
+ */
+export function tableToRows(table: string[][]): BulkRow[] {
+  const [head, ...body] = table.filter((r) => r.some((c) => c.trim() !== ""));
   if (!head) throw new Error("The file is empty.");
   const cols = head.map((h) => HEADERS[h.trim().toLowerCase()]);
   if (!cols.includes("email") || !cols.includes("displayName")) {
@@ -44,10 +49,14 @@ export function csvToRows(text: string): BulkRow[] {
     const r: BulkRow = { email: "", displayName: "" };
     cols.forEach((key, i) => {
       const v = (cells[i] ?? "").trim();
-      if (key && v) r[key] = v;
+      if (!key || !v) return;
+      if (key === "role") (r.roles ??= []).push(v);
+      else r[key] = v;
     });
     return r;
   });
 }
 
-export const CSV_TEMPLATE = "email,name,designation,location\nasha.rao@example.com,Asha Rao,Recruiter,Dallas\n";
+export function csvToRows(text: string): BulkRow[] {
+  return tableToRows(parseCsv(text));
+}
