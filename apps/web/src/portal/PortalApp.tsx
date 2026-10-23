@@ -10,6 +10,7 @@ import { portal, portalError, setPortalCsrf, type Applicant } from "./portalApi"
 import { PortalJobs } from "./PortalJobs";
 import { PortalApplications } from "./PortalApplications";
 import "../jobs/jobs.css";
+import { Loading } from "../ui/Loading";
 
 /**
  * The applicant portal ("Eureka Careers"): a separate minimal shell at
@@ -176,7 +177,7 @@ export function PortalApp() {
   });
   const refresh = () => void qc.invalidateQueries({ queryKey: ["portal"] });
   if (path.startsWith("/portal/verify")) return <Verify onSignedIn={refresh} go={go} />;
-  if (me.isLoading) return <p className="empty">Loading…</p>;
+  if (me.isLoading) return <Loading page />;
   if (!me.data) return path.startsWith("/portal/sign-in") ? <SignIn go={go} /> : <SignUp go={go} />;
   return (
     <PortalShell me={me.data} path={path} go={go} onSignOut={async () => {

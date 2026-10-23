@@ -7,6 +7,7 @@ import {
   FUNNEL, PIPELINE_STAGES, STAGE_LABELS, pvApi, pvError, pvKeys, type PipelineFilters, type PipelineItem,
 } from "./pipelineReportApi";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 const PAGE = 50;
 
@@ -89,7 +90,7 @@ export function PipelineReportPage({ onOpenCandidate }: { onOpenCandidate?: (id:
         {invalid && <p id={`${id}-range`} className="error" role="alert">Choose a start date on or before the end date.</p>}
       </form>
 
-      {invalid ? null : q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+      {invalid ? null : q.isLoading ? <Loading /> : q.error ? (
         <QueryError query={q} message={pvError(q.error)} />
       ) : d ? (
         <section aria-labelledby={`${id}-h`} aria-busy={q.isFetching || undefined}>

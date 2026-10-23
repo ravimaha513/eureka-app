@@ -8,6 +8,8 @@ import { ListFilters, ListFooter } from "./ListControls";
 import { STATUSES, salesApi, salesKeys } from "./salesApi";
 import { OpenToAllBadge, Phone, Priority, StatusBadge } from "./ui";
 import { useCandidateList } from "./useCandidateList";
+import { Loading } from "../ui/Loading";
+import { QueryError } from "../ui/QueryError";
 
 /**
  * Candidates in the user's scope (candidate:read), with "New candidate" for
@@ -39,7 +41,7 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
       {message && <p role="status" aria-live="polite" className="livemsg">{message}</p>}
       <ListFilters s={s} label="Candidates" statuses={STATUSES} batches={batches.data?.items ?? []} />
       <div className="card tablewrap">
-        {s.q.isLoading ? <p className="empty">Loading…</p> : s.q.error ? <p className="empty error" role="alert">{salesError(s.q.error)}</p> : (
+        {s.q.isLoading ? <Loading /> : s.q.error ? <QueryError query={s.q} message={salesError(s.q.error)} /> : (
           <table aria-label="Candidates" aria-busy={s.q.isFetching || undefined}>
             <thead><tr><th>Candidate</th><th>Technology</th><th>Status</th><th>Pri</th><th>Team</th><th>Recruiter</th><th>Location</th><th>Phone</th><th>Rating</th></tr></thead>
             <tbody>

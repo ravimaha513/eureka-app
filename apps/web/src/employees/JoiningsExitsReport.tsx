@@ -7,6 +7,7 @@ import { employeeKeys, employeesApi, employmentError, employmentLabel, localToda
 import { MarketReportPanel } from "./MarketReport";
 import { ActiveEmployeesReport } from "./ActiveEmployeesReport";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 const EXPORT_ROW_CAP = 50_000;
 
@@ -107,7 +108,7 @@ function JoiningsExitsPanel({ canExport }: { canExport: boolean }) {
         ) : null}
       </form>
 
-      {!invalid && (q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+      {!invalid && (q.isLoading ? <Loading /> : q.error ? (
         <QueryError query={q} message={employmentError(q.error)} />
       ) : d ? (
         <section aria-labelledby={`${id}-je`} aria-busy={q.isFetching || undefined}>

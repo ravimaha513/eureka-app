@@ -10,6 +10,8 @@ import {
   type AssignedCourse, type BatchDetail, type Student,
 } from "./trainingApi";
 import { BatchStatusPill, CoverArt, ProgressBar } from "./ui";
+import { Loading } from "../ui/Loading";
+import { QueryError } from "../ui/QueryError";
 
 /** One batch: header card with stats, then View Courses / View Students (docs/training-api.md). */
 export function BatchDetailView({ id, me, onBack, onDeleted }: {
@@ -27,7 +29,7 @@ export function BatchDetailView({ id, me, onBack, onDeleted }: {
   useEffect(() => { if (q.data) heading.current?.focus(); }, [q.data?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const refresh = () => qc.invalidateQueries({ queryKey: trainingKeys.all });
 
-  if (q.isLoading) return <p className="empty">Loading…</p>;
+  if (q.isLoading) return <Loading />;
   if (q.error || !q.data) {
     return (
       <div>
@@ -266,7 +268,7 @@ function StudentsPanel({ batch, onNotice }: { batch: BatchDetail; onNotice: (s: 
         </div>
       </div>
       {error && <p className="banner error" role="alert">{error}</p>}
-      {q.isLoading ? <p className="empty">Loading…</p> : q.error ? <p className="empty error" role="alert">{trainingError(q.error)}</p>
+      {q.isLoading ? <Loading /> : q.error ? <QueryError query={q} message={trainingError(q.error)} />
         : items.length === 0 ? <p className="empty">{search ? "No students match this search." : "No students in this batch yet."}</p> : (
           <ul className="tr-acc" aria-label="Students and progress">
             {items.map((s) => {

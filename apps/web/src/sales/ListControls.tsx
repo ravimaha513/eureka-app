@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { DOCUMENTS_STATUSES, VISA_CATEGORIES } from "@eureka/shared";
 import { useLookups } from "../lookups";
 import type { useCandidateList } from "./useCandidateList";
@@ -74,9 +75,9 @@ export function ListFooter({ s, label }: { s: ListState; label: string }) {
     <div className="listfoot">
       <p role="status" aria-live="polite" className="muted">{msg}</p>
       <nav className="pager" aria-label={`${label} pages`}>
-        <button type="button" className="btn sm" disabled={s.page === 0} onClick={s.prev}>Previous</button>
-        <span>Page {s.page + 1}</span>
-        <button type="button" className="btn sm" disabled={!s.canNext} onClick={s.next}>Next</button>
+        <button type="button" disabled={s.page === 0} onClick={s.prev}><ChevronLeft size={15} aria-hidden="true" />Previous</button>
+        <span className="pager-page">Page {s.page + 1}</span>
+        <button type="button" disabled={!s.canNext} onClick={s.next}>Next<ChevronRight size={15} aria-hidden="true" /></button>
       </nav>
     </div>
   );

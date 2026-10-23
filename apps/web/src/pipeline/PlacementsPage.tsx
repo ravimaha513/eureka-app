@@ -18,6 +18,7 @@ import {
 import { FirstPlacementBadge, PipelineStatus, StatusChips } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 const PAGE_SIZE = 50;
 /** Exits that need a confirmation and a reason (PL-4). */
@@ -158,7 +159,7 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
 
       {!invalidRange && (
         <div className="card tablewrap">
-          {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+          {q.isLoading ? <Loading /> : q.error ? (
             <QueryError query={q} message={pipelineError(q.error, "placement")} />
           ) : (
             <div className="tablewrap"><table aria-label="Placements" aria-busy={q.isFetching || undefined}>
@@ -232,7 +233,7 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
   return (
     <>
       <Drawer title={p ? `${p.candidate.name} · ${p.client.name}` : "Placement"} onClose={onClose} suspended={exit !== null} wide closeLabel="Close placement details">
-        {q.isLoading && !p ? <p className="empty">Loading…</p> : !p ? (
+        {q.isLoading && !p ? <Loading /> : !p ? (
           <p className="error" role="alert">{pipelineError(q.error, "placement")}</p>
         ) : (
           <>

@@ -7,6 +7,7 @@ import { statusLabel } from "../sales/salesApi";
 import { employmentError } from "./employeesApi";
 import { GROUP_LABELS, NO_VALUE, marketKeys, marketReportApi, type MarketCounts, type MarketFilters } from "./marketReportApi";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 /**
  * Reports > Market (gap L3, docs/market-reports-api.md): how many candidates
@@ -89,7 +90,7 @@ export function MarketReportPanel({ canExport, onDownload }: { canExport: boolea
         ) : null}
       </form>
 
-      {!invalid && (q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+      {!invalid && (q.isLoading ? <Loading /> : q.error ? (
         <QueryError query={q} message={employmentError(q.error)} />
       ) : d ? (
         <section aria-labelledby={`${id}-mk`} aria-busy={q.isFetching || undefined}>

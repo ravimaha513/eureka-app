@@ -11,6 +11,8 @@ import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { friendlyError } from "./errors";
 import { keys, useAccess, useMeta, usePeople } from "./shared";
 import { Pager, useCursorPager } from "../ui/Pager";
+import { Loading } from "../ui/Loading";
+import { QueryError } from "../ui/QueryError";
 
 const PAGE_SIZE = 50;
 
@@ -92,7 +94,7 @@ export function UsersTab() {
       </div>
 
       <div className="card">
-        {q.isLoading ? <p className="empty">Loading…</p> : q.error ? <p className="empty error" role="alert">{friendlyError(q.error)}</p> : (
+        {q.isLoading ? <Loading /> : q.error ? <QueryError query={q} message={friendlyError(q.error)} /> : (
           <div className="tablewrap"><table aria-label="Users" aria-busy={q.isFetching || undefined}>
             <thead><tr><th>User</th><th>Designation</th>{contact && <th>Phone</th>}<th>Status</th><th>Roles</th><th>Teams</th><th>Manager</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>

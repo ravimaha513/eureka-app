@@ -5,6 +5,8 @@ import { ConfirmDialog } from "../ui/Dialog";
 import { Drawer, fmtDate } from "../sales/ui";
 import { portal, portalError, type PortalApplication } from "./portalApi";
 import "../jobs/jobs.css";
+import { Loading } from "../ui/Loading";
+import { QueryError } from "../ui/QueryError";
 
 const fmtWhen = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const Status = ({ s }: { s: string }) => <span className={`badge app-${s}`}>{APPLICATION_STATUS_LABELS[s as ApplicationStatus] ?? s}</span>;
@@ -32,7 +34,7 @@ export function PortalApplications() {
       </div>
       <p role="status" aria-live="polite" className="livemsg">{msg}</p>
       <div className="card tablewrap">
-        {q.isLoading ? <p className="empty">Loading…</p> : q.error ? <p className="empty error" role="alert">{portalError(q.error)}</p> : (
+        {q.isLoading ? <Loading /> : q.error ? <QueryError query={q} message={portalError(q.error)} /> : (
           <div className="tablewrap"><table aria-label="Applications">
             <thead><tr><th>Job title</th><th>Company</th><th>Applied</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
@@ -70,7 +72,7 @@ function AppDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const a = q.data;
   return (
     <Drawer title={a?.job.title ?? "Application"} onClose={onClose} wide closeLabel="Close application details">
-      {!a ? (q.isLoading ? <p className="empty">Loading…</p> : <p className="error" role="alert">{portalError(q.error)}</p>) : (
+      {!a ? (q.isLoading ? <Loading /> : <p className="error" role="alert">{portalError(q.error)}</p>) : (
         <>
           <p><Status s={a.status} /></p>
           <h3>Interviews</h3>

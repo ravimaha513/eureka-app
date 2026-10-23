@@ -12,6 +12,7 @@ import {
 } from "./paymentsApi";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 const PAGE_SIZE = 50;
 
@@ -122,7 +123,7 @@ export function PaymentsPage({ me }: { me?: Pick<Me, "capabilities"> }) {
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
 
       <div className="card tablewrap">
-        {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+        {q.isLoading ? <Loading /> : q.error ? (
           <QueryError query={q} message={paymentError(q.error)} />
         ) : (
           <div className="tablewrap"><table aria-label="Invoices" aria-busy={q.isFetching || undefined}>
@@ -195,7 +196,7 @@ function InvoiceDrawer({ id, initial, onClose, onNotice }: {
   return (
     <>
       <Drawer title={r ? `Invoice for ${nameOf(r)}` : "Invoice"} onClose={onClose} suspended={action !== null} wide closeLabel="Close invoice details">
-        {q.isLoading && !r ? <p className="empty">Loading…</p> : !r ? (
+        {q.isLoading && !r ? <Loading /> : !r ? (
           <p className="error" role="alert">{paymentError(q.error)}</p>
         ) : (
           <>

@@ -5,6 +5,7 @@ import { Drawer } from "../sales/ui";
 import { RichTextView } from "../jobs/RichText";
 import { portal, portalError, type PortalJob } from "./portalApi";
 import "../jobs/jobs.css";
+import { Loading } from "../ui/Loading";
 
 /** "4 days ago" from a posting time. */
 export function postedAgo(iso: string | null, now = Date.now()): string {
@@ -36,7 +37,7 @@ export function PortalJobs(_: { onApplied: () => void; go: (p: string) => void }
     <>
       <div><h1 tabIndex={-1}>Finding Job</h1><p className="sub">Open positions at our companies.</p></div>
       <p role="status" aria-live="polite" className="livemsg">{msg}</p>
-      {q.isLoading ? <p className="empty">Loading…</p> : q.error ? <p className="error" role="alert">{portalError(q.error)}</p> : items.length === 0 ? (
+      {q.isLoading ? <Loading /> : q.error ? <p className="error" role="alert">{portalError(q.error)}</p> : items.length === 0 ? (
         <p className="empty">No open positions right now. Check back soon.</p>
       ) : (
         <div className="jobcards">
@@ -70,7 +71,7 @@ function PortalJobDrawer({ id, onClose, onApplied, onError }: { id: string; onCl
   const j = q.data;
   return (
     <Drawer title={j?.title ?? "Job"} onClose={onClose} wide closeLabel="Close job details">
-      {!j ? (q.isLoading ? <p className="empty">Loading…</p> : <p className="error" role="alert">{portalError(q.error)}</p>) : (
+      {!j ? (q.isLoading ? <Loading /> : <p className="error" role="alert">{portalError(q.error)}</p>) : (
         <>
           <p className="muted">{[j.location, jobLabel(j.workMode), jobLabel(j.employmentType), jobLabel(j.experienceLevel)].filter(Boolean).join(" · ")}</p>
           {j.skills.length > 0 && <p>{j.skills.map((s) => <span key={s} className="badge pill">{s}</span>)}</p>}

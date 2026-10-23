@@ -17,6 +17,7 @@ import {
 } from "./paperworkApi";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 const PAGE_SIZE = 50;
 const roleLabel = (r: string) => ROLE_LABELS[r as Role] ?? paperworkLabel(r);
@@ -127,7 +128,7 @@ function WorkQueue({ me }: { me: Pick<Me, "id" | "roles" | "capabilities"> }) {
       </form>
 
       <div className="card tablewrap">
-        {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+        {q.isLoading ? <Loading /> : q.error ? (
           <QueryError query={q} message={paperworkError(q.error)} />
         ) : (
           <div className="tablewrap"><table aria-label="Paperwork queue" aria-busy={q.isFetching || undefined}>
@@ -191,7 +192,7 @@ function PaperworkDrawer({ placementId, me, onClose }: { placementId: string; me
     <>
       <Drawer title={d ? `Paperwork · ${d.candidate.name ?? "Candidate"}` : "Paperwork"} onClose={onClose} wide
         suspended={editItem !== null || editBgc} closeLabel="Close paperwork details">
-        {q.isLoading ? <p className="empty">Loading…</p> : !d ? <p className="error" role="alert">{paperworkError(q.error)}</p> : (
+        {q.isLoading ? <Loading /> : !d ? <p className="error" role="alert">{paperworkError(q.error)}</p> : (
           <>
             <dl className="facts">
               <dt>Candidate</dt><dd>{d.candidate.name ?? "—"}</dd>

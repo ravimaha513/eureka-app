@@ -5,6 +5,7 @@ import { useLookups } from "../lookups";
 import { Field } from "../sales/ui";
 import { pvApi, pvError, pvKeys, type PreferredVendor, type PreferredVendorInput } from "./pipelineReportApi";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 /**
  * Preferred vendors (PV-9..PV-12): recruiters keep the vendors they prefer; only
@@ -53,7 +54,7 @@ export function PreferredVendorsPage() {
       </form>
 
       <p role="status" aria-live="polite" className="livemsg">{message}</p>
-      {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+      {q.isLoading ? <Loading /> : q.error ? (
         <QueryError query={q} message={pvError(q.error)} />
       ) : d ? (
         <div className="card tablewrap" aria-busy={q.isFetching || undefined}>

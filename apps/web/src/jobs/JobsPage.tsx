@@ -11,6 +11,7 @@ import { jobError, jobKeys, jobsApi, type Job } from "./jobsApi";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import "./jobs.css";
+import { Loading } from "../ui/Loading";
 
 const PAGE_SIZE = 50;
 
@@ -89,7 +90,7 @@ export function JobsPage({ me }: { me: Pick<Me, "capabilities" | "id"> }) {
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
 
       <div className="card tablewrap">
-        {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+        {q.isLoading ? <Loading /> : q.error ? (
           <QueryError query={q} message={jobError(q.error)} />
         ) : (
           <div className="tablewrap"><table aria-label="Jobs" aria-busy={q.isFetching || undefined}>
@@ -154,7 +155,7 @@ function JobDrawer({ id, initial, onClose, onEdit }: { id: string; initial?: Job
   const j = q.data;
   return (
     <Drawer title={j?.title ?? "Job"} onClose={onClose} wide closeLabel="Close job details">
-      {!j ? (q.isLoading ? <p className="empty">Loading…</p> : <p className="error" role="alert">{jobError(q.error)}</p>) : (
+      {!j ? (q.isLoading ? <Loading /> : <p className="error" role="alert">{jobError(q.error)}</p>) : (
         <>
           <p><JobStatus status={j.status} />{" "}{j.publishedToPortal && <span className="badge kind">On careers portal</span>}</p>
           <JobFacts j={j} />

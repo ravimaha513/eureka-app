@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 export interface CursorPager {
   /** Zero-based page index. */
@@ -31,9 +32,9 @@ export function Pager({ pager, label, nextCursor, pending = false }: {
 }) {
   return (
     <nav className="pager" aria-label={label}>
-      <button type="button" className="btn sm" disabled={pager.page === 0} onClick={pager.prev}>Previous</button>
-      <span>Page {pager.page + 1}</span>
-      <button type="button" className="btn sm" disabled={!nextCursor || pending} onClick={() => pager.next(nextCursor)}>Next</button>
+      <button type="button" disabled={pager.page === 0} onClick={pager.prev}><ChevronLeft size={15} aria-hidden="true" />Previous</button>
+      <span className="pager-page">Page {pager.page + 1}</span>
+      <button type="button" disabled={!nextCursor || pending} onClick={() => pager.next(nextCursor)}>Next<ChevronRight size={15} aria-hidden="true" /></button>
     </nav>
   );
 }

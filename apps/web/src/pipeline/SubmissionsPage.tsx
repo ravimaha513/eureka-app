@@ -15,6 +15,7 @@ import { ScheduleInterviewDialog } from "./ScheduleInterviewDialog";
 import { PipelineStatus, StatusChips } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 const PAGE_SIZE = 50;
 const CLOSING = new Set(["rejected", "withdrawn"]);
@@ -89,7 +90,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
 
       {!invalidRange && (
         <div className="card tablewrap">
-          {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+          {q.isLoading ? <Loading /> : q.error ? (
             <QueryError query={q} message={pipelineError(q.error)} />
           ) : (
             <div className="tablewrap"><table aria-label="Submissions" aria-busy={q.isFetching || undefined}>
@@ -205,7 +206,7 @@ function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlacement }: {
   return (
     <>
       <Drawer title={title} onClose={onClose} suspended={modal !== null} closeLabel="Close submission details">
-        {q.isLoading && !s ? <p className="empty">Loading…</p> : !s ? (
+        {q.isLoading && !s ? <Loading /> : !s ? (
           <p className="error" role="alert">{pipelineError(q.error, "submission")}</p>
         ) : (
           <>

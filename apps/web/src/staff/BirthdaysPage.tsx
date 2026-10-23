@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatBirthday, isValidBirthday, type Birthday } from "@eureka/shared";
 import { BirthdayFields } from "./BirthdayFields";
 import { staffApi, staffError, staffKeys, type StaffMember } from "./staffApi";
+import { Loading } from "../ui/Loading";
 
 /**
  * Staff birthdays (HR; docs/alerts-calendar-birthdays.md BD-2): every active
@@ -28,7 +29,7 @@ export function BirthdaysPage() {
         <label className="rowactions"><input type="checkbox" checked={onlyMissing} onChange={(e) => setOnlyMissing(e.target.checked)} /> Only without a birthday</label>
         <p className="hint">{withBirthday} of {q.data?.items.length ?? 0} staff have a birthday on file.</p>
       </div>
-      {q.isLoading && <p className="empty">Loading…</p>}
+      {q.isLoading && <Loading />}
       {q.error && <p className="error" role="alert">{staffError(q.error)}</p>}
       {q.data && (
         <div className="card tablewrap"><table aria-label="Staff birthdays">

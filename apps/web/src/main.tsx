@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError } from "./api";
 import { lazyDefault, lazyNamed } from "./lib/lazy";
 import "./styles.css";
+import { Loading } from "./ui/Loading";
 
 // The staff app, the applicant portal and the public feedback form are separate chunks:
 // each entry loads only the code it needs.
@@ -28,7 +29,7 @@ const portalPath = /^\/portal(\/|$)/.test(window.location.pathname);
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={client}>
-      <Suspense fallback={<p className="empty">Loading…</p>}>
+      <Suspense fallback={<Loading page />}>
         {feedbackPath ? <PublicFeedback token={feedbackPath[1]!} /> : portalPath ? <PortalApp /> : <App />}
       </Suspense>
     </QueryClientProvider>

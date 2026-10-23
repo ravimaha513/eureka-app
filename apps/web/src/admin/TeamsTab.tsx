@@ -5,6 +5,8 @@ import { adminApi, type MoveResult, type Ref, type Team } from "./adminApi";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { friendlyError } from "./errors";
 import { keys, useAccess, useMeta, usePeople } from "./shared";
+import { Loading } from "../ui/Loading";
+import { QueryError } from "../ui/QueryError";
 
 type Modal =
   | { kind: "create" }
@@ -33,7 +35,7 @@ export function TeamsTab() {
         {!canMove && <p className="hint" id="move-hint">Moving people between teams needs the “move team member” permission over both teams. Your role doesn't hold it.</p>}
         <button className="btn primary push" onClick={() => setModal({ kind: "create" })}>New team</button>
       </div>
-      {q.isLoading ? <p className="empty">Loading…</p> : q.error ? <p className="empty error" role="alert">{friendlyError(q.error)}</p> : (
+      {q.isLoading ? <Loading /> : q.error ? <QueryError query={q} message={friendlyError(q.error)} /> : (
         <div className="teamgrid">
           {q.data!.items.map((t) => (
             <section key={t.id} className="card team" aria-labelledby={`team-${t.id}`}>
