@@ -1,5 +1,5 @@
 /** Typed client for the admin and team API (docs/admin-api.md). */
-import { api } from "../api";
+import { api, apiFetch } from "../api";
 
 export interface Ref { id: string; displayName: string }
 export interface Place { id: string; name: string }
@@ -41,7 +41,10 @@ export interface RoleRequest {
   decidedAt: string | null;
 }
 
-export interface BulkRowResult { row: number; email: string; displayName: string; status: "ok" | "error"; error?: string; id?: string }
+export interface BulkRoleResult { role: string; label: string; status: "applied" | "pending_approval" }
+export interface BulkRowResult {
+  row: number; email: string; displayName: string; status: "ok" | "error"; error?: string; id?: string; roles: BulkRoleResult[];
+}
 export interface BulkReport { dryRun: boolean; committed: boolean; created: number; failed: number; rows: BulkRowResult[] }
 
 export interface Team { id: string; name: string; location: Place | null; lead: Ref; members: Ref[] }
@@ -64,8 +67,10 @@ export const adminApi = {
   userSummary: () => api<UserSummary>("/api/v1/admin/users/summary"),
   createUser: (b: { email: string; displayName: string; designation?: string; primaryLocationId?: string; temporaryPassword?: string }) =>
     api<{ id: string }>("/api/v1/admin/users", { method: "POST", ...json(b) }),
-  bulkCreateUsers: (b: { dryRun: boolean; rows: { email: string; displayName: string; designation?: string; location?: string }[] }) =>
+  bulkCreateUsers: (b: { dryRun: boolean; rows: { email: string; displayName: string; designation?: string; location?: string; roles?: string[] }[] }) =>
     api<BulkReport>("/api/v1/admin/users/bulk", { method: "POST", ...json(b) }),
+  /** The .xlsx template with role and location dropdowns. */
+  bulkTemplate: async () => (await apiFetch("/api/v1/admin/users/bulk/template")).blob(),
   /** Staging/local: a temporary password the user must change at first sign-in (not for restricted-role users). */
   setPassword: (id: string, password: string) =>
     api<void>(`/api/v1/admin/users/${enc(id)}/password`, { method: "POST", ...json({ password }) }),

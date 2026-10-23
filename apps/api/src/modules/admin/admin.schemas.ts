@@ -37,6 +37,8 @@ export const BulkCreateUsers = z
             displayName: z.string().max(120),
             designation: z.string().max(120).optional(),
             location: z.string().max(120).optional(),
+            // Role keys or labels (the template's dropdowns use labels). Location-bound roles use `location`.
+            roles: z.array(z.string().max(120)).max(5).optional(),
           })
           .strict(),
       )

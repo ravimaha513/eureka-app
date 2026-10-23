@@ -16,6 +16,7 @@ import { DbService } from "../../platform/db.service.js";
 import { mapAdminError } from "./admin.errors.js";
 import type { BulkCreateUsers, CreateLocation, CreateRoleRequest, CreateTeam, CreateUser, MoveMember, UserListQuery } from "./admin.schemas.js";
 import { likeContains } from "../../platform/sql.js";
+import { buildUserImportTemplate } from "./user-import-template.js";
 
 const EMAIL = z.string().email();
 
@@ -25,6 +26,13 @@ class BulkOutcome extends Error {
 }
 
 const label = (key: string) => ROLE_LABELS[key as Role] ?? key;
+
+/** A role from a key or its label, case-insensitive; null when it names no role. */
+const ROLE_BY_TEXT = new Map<string, Role>(ROLES.flatMap((k) => [[k, k], [ROLE_LABELS[k].toLowerCase(), k]] as [string, Role][]));
+const roleFromText = (text: string): Role | null => ROLE_BY_TEXT.get(text.toLowerCase()) ?? null;
+
+/** request_role failures that are a problem with one row, not with the import. */
+const ROW_ROLE_ERRORS = new Set(["separation_of_duties", "location_required", "location_not_allowed", "role_already_held"]);
 
 /**
  * Admin and team operations (docs/admin-api.md). The controllers check the
@@ -206,10 +214,12 @@ export class AdminService {
    * inserted in one transaction, and the transaction is rolled back when any
    * row fails or when `dryRun` is set, so a preview shows exactly what a real
    * run would do. Each user goes through the same definer function and audit
-   * event as the single create.
+   * event as the single create; each role through `authz.request_role`, so
+   * restricted roles still wait for a second approver (AD-3).
    */
   async bulkCreateUsers(user: AuthedUser, body: BulkCreateUsers) {
-    type Row = { row: number; email: string; displayName: string; status: "ok" | "error"; error?: string; id?: string };
+    type RoleResult = { role: Role; label: string; status: "applied" | "pending_approval" };
+    type Row = { row: number; email: string; displayName: string; status: "ok" | "error"; error?: string; id?: string; roles: RoleResult[] };
     try {
       return await this.tx(user, async (c) => {
         const locs = (await c.query<{ id: string; name: string }>(`SELECT id, name FROM eureka.location`)).rows;
@@ -221,7 +231,7 @@ export class AdminService {
           const displayName = r.displayName.trim();
           const designation = r.designation?.trim() || null;
           const locName = r.location?.trim();
-          const res: Row = { row: i + 1, email, displayName, status: "ok" };
+          const res: Row = { row: i + 1, email, displayName, status: "ok", roles: [] };
           results.push(res);
           const fail = (code: string) => { res.status = "error"; res.error = code; };
           if (!EMAIL.safeParse(email).success) { fail("invalid_email"); continue; }
@@ -231,25 +241,44 @@ export class AdminService {
           seen.add(email.toLowerCase());
           const locationId = locName ? byName.get(locName.toLowerCase()) : null;
           if (locName && !locationId) { fail("unknown_location"); continue; }
+          const roles = (r.roles ?? []).map((x) => x.trim()).filter(Boolean).map(roleFromText);
+          if (roles.includes(null)) { fail("unknown_role"); continue; }
+          const wanted = roles as Role[];
+          if (new Set(wanted).size !== wanted.length) { fail("duplicate_role"); continue; }
+          if (wanted.includes("org_admin") && wanted.length > 1) { fail("separation_of_duties"); continue; }
+          if (wanted.some((k) => LOCATION_ROLES.includes(k)) && !locationId) { fail("location_required"); continue; }
           await c.query("SAVEPOINT bulk_row");
           try {
             const { rows } = await c.query<{ id: string }>(
               `SELECT authz.admin_create_user($1, $2, $3, $4) AS id`, [email, displayName, designation, locationId ?? null]);
             res.id = rows[0]!.id;
+            await this.audit.record(c, {
+              actorId: user.id, action: "admin.user.created", entityType: "app_user", entityId: res.id,
+              changes: { email, displayName, designation: designation ?? undefined, primaryLocationId: locationId ?? undefined, bulk: true },
+            });
+            for (const role of wanted) {
+              const roleLocation = LOCATION_ROLES.includes(role) ? locationId! : null;
+              const q = (await c.query<{ request_id: string; request_status: "applied" | "pending_approval" }>(
+                `SELECT * FROM authz.request_role($1, $2, $3)`, [res.id, role, roleLocation])).rows[0]!;
+              await this.audit.record(c, {
+                actorId: user.id,
+                action: q.request_status === "applied" ? "admin.role.granted" : "admin.role.requested",
+                entityType: "app_user", entityId: res.id,
+                changes: { requestId: q.request_id, role, locationId: roleLocation, bulk: true },
+              });
+              res.roles.push({ role, label: ROLE_LABELS[role], status: q.request_status });
+            }
             await c.query("RELEASE SAVEPOINT bulk_row");
           } catch (err) {
-            const e = err as { code?: string; constraint?: string };
-            if (e.code === "23505" && e.constraint === "app_user_email_key") {
-              await c.query("ROLLBACK TO SAVEPOINT bulk_row");
-              fail("email_exists");
-              continue;
-            }
-            throw err; // not_permitted and anything unexpected abort the whole import
+            const e = err as { code?: string; constraint?: string; message?: string };
+            const code = e.code === "23505" && e.constraint === "app_user_email_key" ? "email_exists"
+              : e.code !== undefined && e.message !== undefined && ROW_ROLE_ERRORS.has(e.message) ? e.message : null;
+            if (!code) throw err; // not_permitted and anything unexpected abort the whole import
+            await c.query("ROLLBACK TO SAVEPOINT bulk_row");
+            delete res.id;
+            res.roles = [];
+            fail(code);
           }
-          await this.audit.record(c, {
-            actorId: user.id, action: "admin.user.created", entityType: "app_user", entityId: res.id!,
-            changes: { email, displayName, designation: designation ?? undefined, primaryLocationId: locationId ?? undefined, bulk: true },
-          });
         }
         const failed = results.filter((x) => x.status === "error").length;
         const committed = !body.dryRun && failed === 0;
@@ -257,7 +286,8 @@ export class AdminService {
           rows: committed ? results : results.map(({ id: _id, ...rest }) => rest) };
         if (!committed) throw new BulkOutcome(report);
         await this.audit.record(c, {
-          actorId: user.id, action: "admin.user.bulk_created", entityType: "app_user", changes: { count: results.length },
+          actorId: user.id, action: "admin.user.bulk_created", entityType: "app_user",
+          changes: { count: results.length, roles: results.reduce((n, x) => n + x.roles.length, 0) },
         });
         return report;
       });
@@ -265,6 +295,13 @@ export class AdminService {
       if (err instanceof BulkOutcome) return err.report;
       throw err;
     }
+  }
+
+  /** The bulk import template (docs/admin-api.md): an .xlsx with role and location dropdowns. */
+  async bulkTemplate(user: AuthedUser): Promise<Buffer> {
+    const locations = await this.tx(user, async (c) =>
+      (await c.query<{ name: string }>(`SELECT name FROM eureka.location ORDER BY name`)).rows.map((l) => l.name));
+    return buildUserImportTemplate(ROLES.map((k) => ROLE_LABELS[k]), locations);
   }
 
   async setStatus(user: AuthedUser, id: string, active: boolean) {
