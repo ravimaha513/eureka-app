@@ -8,6 +8,7 @@ import { Avatar } from "../shell/ui";
 import { isValidBirthday, type Birthday } from "@eureka/shared";
 import { BirthdayFields } from "../staff/BirthdayFields";
 import { DEVICE_LABELS, settingsApi, settingsError, settingsKeys, type Preference, type Profile, type SessionRow } from "./settingsApi";
+import { Loading } from "../ui/Loading";
 
 type Tab = "profile" | "notifications" | "security";
 const TABS: { key: Tab; label: string; Icon: typeof Bell }[] = [
@@ -65,7 +66,7 @@ export function SettingsPage({ me }: { me: Pick<Me, "displayName"> }) {
 
 function ProfileSection({ fallbackName }: { fallbackName: string }) {
   const q = useQuery({ queryKey: settingsKeys.profile, queryFn: settingsApi.profile });
-  if (q.isLoading) return <p className="empty">Loading…</p>;
+  if (q.isLoading) return <Loading />;
   if (q.error || !q.data) return <p className="error" role="alert">{settingsError(q.error)}</p>;
   return <ProfileForm p={q.data} fallbackName={fallbackName} />;
 }
@@ -131,7 +132,7 @@ function NotificationsSection() {
     <section aria-labelledby="notif-h">
       <h2 id="notif-h">Notifications</h2>
       <p className="hint">In-app notifications in the bell. Emails follow your role and are not changed here.</p>
-      {q.isLoading && <p className="empty">Loading…</p>}
+      {q.isLoading && <Loading />}
       {q.error && <p className="error" role="alert">{settingsError(q.error)}</p>}
       {set.error && <p className="error" role="alert">{settingsError(set.error)}</p>}
       <p role="status" className="livemsg">{msg}</p>
@@ -170,7 +171,7 @@ function SecuritySection() {
       <h3>Login activity</h3>
       <p className="hint">Your sign-ins from the last 30 days. IP addresses are shortened; device and browser are read from the browser's own description.</p>
       <p role="status" className="livemsg">{msg}</p>
-      {q.isLoading && <p className="empty">Loading…</p>}
+      {q.isLoading && <Loading />}
       {q.error && <p className="error" role="alert">{settingsError(q.error)}</p>}
       {q.data && (
         <div className="tablewrap"><table aria-label="Login activity">

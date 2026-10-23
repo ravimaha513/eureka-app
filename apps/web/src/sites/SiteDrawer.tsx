@@ -12,6 +12,7 @@ import {
   type Company, type FacilityDetail, type Site, type SiteDetail, type SiteKind,
 } from "./sitesApi";
 import { KIND, Layer, LayerProvider, PillTabs, SiteIcon, StatusPill, useLayers } from "./ui";
+import { Loading } from "../ui/Loading";
 
 type TabKey = "overview" | "employees" | "incharges" | "utilities" | "bills";
 
@@ -45,7 +46,7 @@ export function SiteDrawer({ kind, id, initial, me, onClose, onNotice }: {
       <Drawer title={`${k.One} details`} onClose={onClose} wide closeLabel={`Close ${k.one} details`}
         suspended={layers.open || editing} isSuspended={layers.isOpen}>
         {!s ? (
-          q.isLoading ? <p className="empty">Loading…</p> : <p className="error" role="alert">{sitesError(q.error, k.one)}</p>
+          q.isLoading ? <Loading /> : <p className="error" role="alert">{sitesError(q.error, k.one)}</p>
         ) : (
           <>
             <div className="sitehead">

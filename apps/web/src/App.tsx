@@ -10,6 +10,7 @@ import { ChatNavBadge } from "./chat/ChatNavBadge";
 import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sparkles, Sun } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
+import { Loading } from "./ui/Loading";
 
 // Every screen but the default landing (the Hot List) is its own chunk, loaded on first visit.
 const SettingsPage = lazyNamed(() => import("./settings/SettingsPage"), "SettingsPage");
@@ -218,7 +219,7 @@ function Placeholder({ item }: { item: NavItem }) {
 }
 
 /** Shown while a screen's chunk loads. */
-const PageLoading = () => <p className="empty">Loading…</p>;
+const PageLoading = () => <Loading />;
 
 export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const items = useMemo(() => visibleNav(me.capabilities), [me.capabilities]);
@@ -393,7 +394,7 @@ export default function App() {
       }
     },
   });
-  if (me.isLoading) return <p className="empty">Loading…</p>;
+  if (me.isLoading) return <Loading page />;
   if (!me.data) return <Login onSignedIn={() => qc.invalidateQueries()} />;
   const signOut = async () => {
     // A 401 here means the session is already gone; either way the client must return to the sign-in screen.

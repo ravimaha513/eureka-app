@@ -15,6 +15,7 @@ import { salesError } from "./errors";
 import { DUPLICATE_WARNING, LogSubmissionDialog } from "./LogSubmissionDialog";
 import { TRANSITIONS, salesApi, salesKeys, statusLabel, type CandidateProfile as Profile, type Visibility } from "./salesApi";
 import { OpenToAllBadge, Phone, Priority, StatusBadge, fmtDate } from "./ui";
+import { Loading } from "../ui/Loading";
 
 type Modal = { kind: "edit" } | { kind: "submit" } | { kind: "terminate" } | { kind: "compliance" };
 
@@ -59,7 +60,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
 
   const back = <button type="button" className="btn sm backbtn" onClick={onBack}>← {backLabel}</button>;
 
-  if (q.isLoading) return <>{back}<p className="empty">Loading…</p></>;
+  if (q.isLoading) return <>{back}<Loading /></>;
   if (q.error || !q.data) {
     const notFound = q.error instanceof ApiError && (q.error.status === 404 || q.error.status === 403);
     return (

@@ -13,6 +13,7 @@ import {
 import { KIND, Kpi, SiteIcon, StatusPill } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 const PAGE_SIZE = 25;
 
@@ -107,7 +108,7 @@ export function SitesPage({ kind, me }: { kind: SiteKind; me: Pick<Me, "capabili
             <a className="btn outline" href={exportUrl(kind)} download><Download size={16} aria-hidden="true" />Export<span className="sr-only"> {k.many} as CSV</span></a>
           </div>
         </div>
-        {list.isLoading ? <p className="empty">Loading…</p> : list.error ? (
+        {list.isLoading ? <Loading /> : list.error ? (
           <QueryError query={list} message={sitesError(list.error, k.one)} />
         ) : (
           <div className="tablewrap"><table aria-label={k.Many} aria-busy={list.isFetching || undefined}>

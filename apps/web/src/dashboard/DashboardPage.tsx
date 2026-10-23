@@ -11,6 +11,7 @@ import {
   dashboardApi, periodRange, type AttentionItem, type AttentionKind, type Dashboard, type GroupBy, type Metric,
 } from "./dashboardApi";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 /** Where a "needs attention" row can be opened. */
 export type DashboardTarget = "submissions" | "interviews" | "placements";
@@ -171,7 +172,7 @@ export function DashboardPage({ canOpen = () => false, onOpen, firstName, canExp
         </div>
       </form>
 
-      {q.isLoading ? <p className="empty">Loading…</p> : q.error || !d ? (
+      {q.isLoading ? <Loading /> : q.error || !d ? (
         <QueryError query={q} message={pipelineError(q.error, "generic")} />
       ) : (
         <div className="dashboard" aria-busy={q.isFetching || undefined}>

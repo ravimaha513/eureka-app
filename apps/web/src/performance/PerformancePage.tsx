@@ -10,6 +10,7 @@ import {
   type Kind, type PeriodKind, type Person, type PersonRow, type Ratios, type Target,
 } from "./performanceApi";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 const fmtInstant = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" });
 const RATIO_KEYS = Object.keys(RATIO_LABELS) as (keyof Ratios)[];
@@ -96,7 +97,7 @@ export function PerformancePage({ me }: { me: Pick<Me, "capabilities"> }) {
         {invalid && <p id={`${id}-range`} className="error" role="alert">Choose a start date on or before the end date.</p>}
       </form>
 
-      {!invalid && (summary.isLoading ? <p className="empty">Loading…</p> : summary.error || !s ? (
+      {!invalid && (summary.isLoading ? <Loading /> : summary.error || !s ? (
         <QueryError query={summary} message={performanceError(summary.error)} />
       ) : (
         <section aria-labelledby={`${id}-totals`} aria-busy={summary.isFetching || undefined}>
@@ -148,7 +149,7 @@ export function PerformancePage({ me }: { me: Pick<Me, "capabilities"> }) {
             <h2 id={`${id}-drill`} className="sectiontitle">{KIND_LABELS[drill.kind]}: {drill.name}</h2>
             <button type="button" className="btn sm" onClick={() => setDrill(null)}>Close</button>
           </div>
-          {activity.isLoading ? <p className="empty">Loading…</p> : activity.error || !activity.data ? (
+          {activity.isLoading ? <Loading /> : activity.error || !activity.data ? (
             <p className="empty error" role="alert">{performanceError(activity.error)}</p>
           ) : (
             <>
@@ -185,7 +186,7 @@ export function PerformancePage({ me }: { me: Pick<Me, "capabilities"> }) {
       {!invalid && (
         <section aria-labelledby={`${id}-active`} aria-busy={active.isFetching || undefined}>
           <h2 id={`${id}-active`} className="sectiontitle">Active candidates on end-client projects</h2>
-          {active.isLoading ? <p className="empty">Loading…</p> : active.error || !active.data ? (
+          {active.isLoading ? <Loading /> : active.error || !active.data ? (
             <p className="empty error" role="alert">{performanceError(active.error)}</p>
           ) : (
             <div className="card tablewrap">
@@ -216,7 +217,7 @@ export function PerformancePage({ me }: { me: Pick<Me, "capabilities"> }) {
             <h2 id={`${id}-targets`} className="sectiontitle">Targets</h2>
             {canSetTargets && <button type="button" className="btn primary sm" onClick={() => setDialog({ kind: "target" })}>Set target</button>}
           </div>
-          {targets.isLoading ? <p className="empty">Loading…</p> : targets.error || !targets.data ? (
+          {targets.isLoading ? <Loading /> : targets.error || !targets.data ? (
             <p className="empty error" role="alert">{performanceError(targets.error)}</p>
           ) : (
             <div className="card tablewrap">

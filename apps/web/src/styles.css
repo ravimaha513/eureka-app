@@ -119,8 +119,24 @@ tbody tr:hover td { background: var(--surface2); }
 .tab { border: 1px solid var(--line); background: var(--surface); padding: 7px 14px; border-radius: 999px; font-weight: 600; color: var(--muted); display: inline-flex; align-items: center; }
 .tab:hover { color: var(--text); }
 .tab[aria-pressed="true"] { background: var(--pri-50); color: var(--pri); border-color: var(--pri-200); }
-.empty { padding: 40px; text-align: center; color: var(--muted); }
+.empty { padding: 44px 24px; text-align: center; color: var(--muted); line-height: 1.5; }
 .error { color: var(--bad-fg); }
+/* States: empty (inbox glyph), inline error (alert glyph), loading (spinner), failed query (alert panel with Retry) */
+.empty::before { content: ""; display: block; width: 30px; height: 30px; margin: 0 auto 10px; background: var(--faint); opacity: .7;
+  -webkit-mask: var(--glyph) center / contain no-repeat; mask: var(--glyph) center / contain no-repeat;
+  --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 12h-6l-2 3h-4l-2-3H2'/%3E%3Cpath d='M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z'/%3E%3C/svg%3E"); }
+.empty.error::before { background: var(--bad-fg); opacity: .85;
+  --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3'/%3E%3Cpath d='M12 9v4'/%3E%3Cpath d='M12 17h.01'/%3E%3C/svg%3E"); }
+.loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 44px 24px; color: var(--muted); font-weight: 500; }
+.loading.page { min-height: 100vh; min-height: 100dvh; }
+.spinner { width: 18px; height: 18px; flex: none; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--pri); animation: spin .7s linear infinite; }
+.spin { animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner, .spin { animation-duration: 2.4s; } }
+.queryerror { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--bad-bg); border: 1px solid var(--bad-line); color: var(--text2); }
+.card > .queryerror { margin: 16px; }
+.queryerror p { flex: 1; min-width: 0; }
+.queryerror-icon { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 10px; background: var(--surface); color: var(--bad-fg); }
 
 .person { display: flex; align-items: center; gap: 10px; min-width: 150px; }
 .persontext { display: flex; flex-direction: column; min-width: 0; }
@@ -201,7 +217,14 @@ tbody tr:hover td { background: var(--surface2); }
 .rowactions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 td.rowactions { display: table-cell; white-space: nowrap; }
 td.rowactions > button + button { margin-left: 6px; }
-.pager { display: flex; align-items: center; gap: 10px; justify-content: flex-end; flex-wrap: wrap; color: var(--muted); }
+.pager { display: flex; align-items: center; justify-content: flex-end; color: var(--muted); }
+.pager > button, .pager-page { height: 32px; display: inline-flex; align-items: center; gap: 4px; padding: 0 12px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text2); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.pager > button:first-child { border-radius: 9px 0 0 9px; padding-left: 8px; }
+.pager > button:last-child { border-radius: 0 9px 9px 0; padding-right: 8px; }
+.pager-page { border-inline: 0; color: var(--text); font-variant-numeric: tabular-nums; min-width: 68px; justify-content: center; }
+.pager > button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.pager > button:disabled { background: var(--surface2); color: var(--faint); cursor: not-allowed; }
+.pager > button:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--pri); outline-offset: 2px; }
 .banner { padding: 8px 12px; border-radius: 8px; background: var(--bad-bg); border: 1px solid var(--bad-line); }
 .teamgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); gap: 12px; }
 .team { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }

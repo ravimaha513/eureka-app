@@ -5,6 +5,7 @@ import { ApiError, api, can, type Me } from "../api";
 import { fetchCsv, saveBlob, type ExportResult } from "../lib/download";
 import { CandidateFeedbackCell, dateBoundary } from "./InterviewsPage";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 /**
  * Interview reports (gap L4; docs/interviews-settings-api.md "Interview
@@ -83,7 +84,7 @@ function GroupedReport({ canExport }: { canExport: boolean }) {
         {invalid && <p className="error" role="alert">Choose a start date on or before the end date.</p>}
         <ExportStatus run={run} />
       </form>
-      {!invalid && (q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+      {!invalid && (q.isLoading ? <Loading /> : q.error ? (
         <QueryError query={q} message={errorText(q.error)} />
       ) : d ? (
         <div aria-busy={q.isFetching || undefined}>
@@ -140,7 +141,7 @@ function DailyReportSection({ canExport }: { canExport: boolean }) {
         </div>
         <ExportStatus run={run} />
       </form>
-      {day && (q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+      {day && (q.isLoading ? <Loading /> : q.error ? (
         <QueryError query={q} message={errorText(q.error)} />
       ) : d ? (
         <div aria-busy={q.isFetching || undefined}>

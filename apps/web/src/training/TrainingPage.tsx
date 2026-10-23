@@ -10,6 +10,7 @@ import { BatchDialog } from "./BatchDialog";
 import { BATCH_STATUSES, BATCH_STATUS_LABELS, trainingApi, trainingError, trainingKeys, type BatchCard } from "./trainingApi";
 import { BatchStatusPill, CoverArt } from "./ui";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 /** Training Batches (docs/training-api.md): cards with status filter; a card opens the batch. */
 export function TrainingPage({ me }: { me: Me }) {
@@ -55,7 +56,7 @@ function BatchList({ me, onOpen, heading, notice, setNotice }: {
         </div>
       </div>
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
-      {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+      {q.isLoading ? <Loading /> : q.error ? (
         <QueryError query={q} message={trainingError(q.error)} />
       ) : items.length === 0 ? (
         <div className="card"><p className="empty">{status ? "No batches with this status." : "No training batches to show yet."}</p></div>

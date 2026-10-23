@@ -9,6 +9,8 @@ import { HOTLIST_STATUS_OPTIONS } from "./salesApi";
 import { Drawer, OpenToAllBadge, Phone, Priority, StatusBadge, fmtDate } from "./ui";
 import { documentsLabel, stayLabel, visaLabel } from "./candidateFields";
 import { useCandidateList } from "./useCandidateList";
+import { Loading } from "../ui/Loading";
+import { QueryError } from "../ui/QueryError";
 
 export interface ListPageProps {
   me?: Pick<Me, "id" | "capabilities">;
@@ -76,7 +78,7 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
           onDone={() => setSelected(new Set())} />
       )}
       <div className="card tablewrap">
-        {s.q.isLoading ? <p className="empty">Loading…</p> : s.q.error ? <p className="empty error" role="alert">{salesError(s.q.error)}</p> : (
+        {s.q.isLoading ? <Loading /> : s.q.error ? <QueryError query={s.q} message={salesError(s.q.error)} /> : (
           <table aria-label="Hot List" aria-busy={s.q.isFetching || undefined}>
             <thead><tr>
               {canBulk && (

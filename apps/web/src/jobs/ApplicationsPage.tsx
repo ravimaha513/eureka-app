@@ -20,6 +20,7 @@ import { jobKeys, jobsApi, type Job } from "./jobsApi";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import "./jobs.css";
+import { Loading } from "../ui/Loading";
 
 const PAGE_SIZE = 50;
 
@@ -103,7 +104,7 @@ export function ApplicationsPage({ me, initialOpenId, onOpenChange }: {
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
 
       <div className="card tablewrap">
-        {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+        {q.isLoading ? <Loading /> : q.error ? (
           <QueryError query={q} message={applicationError(q.error)} />
         ) : (
           <div className="tablewrap"><table aria-label="Applications" aria-busy={q.isFetching || undefined}>
@@ -158,7 +159,7 @@ function ApplicationDrawer({ id, initial, me, onClose, onNotice }: {
   return (
     <>
       <Drawer title={a ? `${a.job.title ?? "Application"} · ${a.applicant.name ?? ""}` : "Application"} onClose={onClose} suspended={action !== null} wide closeLabel="Close application details">
-        {!a ? (q.isLoading ? <p className="empty">Loading…</p> : <p className="error" role="alert">{applicationError(q.error)}</p>) : (
+        {!a ? (q.isLoading ? <Loading /> : <p className="error" role="alert">{applicationError(q.error)}</p>) : (
           <>
             <p><AppStatus status={a.status} />{a.overallRating !== null && <span className="muted"> · Overall rating {a.overallRating} / 5</span>}</p>
             <p role="status" aria-live="polite" className="livemsg">{message}</p>

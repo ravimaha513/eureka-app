@@ -10,6 +10,8 @@ import {
   fmtMinutes, trainingApi, trainingError, trainingKeys, type Cover, type CourseDetail, type CourseModule,
 } from "./trainingApi";
 import { CoverArt, CoverPicker } from "./ui";
+import { Loading } from "../ui/Loading";
+import { QueryError } from "../ui/QueryError";
 
 /** Course library (docs/training-api.md TR-4): org catalog; managers of the owning location edit. */
 export function CoursesPage({ me }: { me: Me }) {
@@ -36,7 +38,7 @@ export function CoursesPage({ me }: { me: Me }) {
         </div>
       </div>
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
-      {q.isLoading ? <p className="empty">Loading…</p> : q.error ? <p className="empty error" role="alert">{trainingError(q.error)}</p>
+      {q.isLoading ? <Loading /> : q.error ? <QueryError query={q} message={trainingError(q.error)} />
         : items.length === 0 ? <div className="card"><p className="empty">No courses yet.</p></div> : (
           <ul className="tr-grid" aria-label="Courses">
             {items.map((c) => (
@@ -141,7 +143,7 @@ function CourseDrawer({ id, onClose, onNotice, onDeleted }: {
   return (
     <>
     <Drawer title={c ? c.title : "Course"} onClose={onClose} suspended={dialogOpen} wide closeLabel="Close course">
-      {q.isLoading ? <p className="empty">Loading…</p> : !c ? <p className="empty error" role="alert">{trainingError(q.error)}</p> : (
+      {q.isLoading ? <Loading /> : !c ? <p className="empty error" role="alert">{trainingError(q.error)}</p> : (
         <div className="tr-drawer">
           <div className="tr-coursehead">
             <CoverArt cover={c.cover} size="sm" />

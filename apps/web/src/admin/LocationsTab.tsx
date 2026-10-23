@@ -4,6 +4,8 @@ import { adminApi, LOCATION_KINDS, type LocationKind } from "./adminApi";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { friendlyError } from "./errors";
 import { keys, useAccess, useMeta } from "./shared";
+import { Loading } from "../ui/Loading";
+import { QueryError } from "../ui/QueryError";
 
 const KIND_LABELS: Record<LocationKind, string> = {
   training: "Training",
@@ -31,7 +33,7 @@ export function LocationsTab() {
         <p className="hint">Teams and location-bound roles use these locations. Creating one here does not change anyone's access.</p>
         <button className="btn primary push" onClick={() => setOpen(true)}>New location</button>
       </div>
-      {meta.isLoading ? <p className="empty">Loading…</p> : meta.error ? <p className="empty error" role="alert">{friendlyError(meta.error)}</p> : (
+      {meta.isLoading ? <Loading /> : meta.error ? <QueryError query={meta} message={friendlyError(meta.error)} /> : (
         <ul className="list" aria-label="Locations">
           {meta.data!.locations.map((l) => <li key={l.id}>{l.name}</li>)}
           {meta.data!.locations.length === 0 && <li className="empty">No locations yet.</li>}

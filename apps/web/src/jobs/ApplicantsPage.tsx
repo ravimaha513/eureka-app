@@ -6,6 +6,8 @@ import { Person } from "../shell/ui";
 import { applicationError, applicationKeys, applicationsApi } from "./applicationsApi";
 import { Pager, useCursorPager } from "../ui/Pager";
 import "./jobs.css";
+import { Loading } from "../ui/Loading";
+import { QueryError } from "../ui/QueryError";
 
 /** Applicants (applicant:read, HR): portal accounts; phones need applicant.phone:read (masked otherwise). */
 export function ApplicantsPage() {
@@ -44,7 +46,7 @@ export function ApplicantsPage() {
       </form>
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
       <div className="card tablewrap">
-        {q.isLoading ? <p className="empty">Loading…</p> : q.error ? <p className="empty error" role="alert">{applicationError(q.error)}</p> : (
+        {q.isLoading ? <Loading /> : q.error ? <QueryError query={q} message={applicationError(q.error)} /> : (
           <div className="tablewrap"><table aria-label="Applicants">
             <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Email verified</th><th>Applications</th><th>Signed up</th></tr></thead>
             <tbody>

@@ -14,6 +14,7 @@ import {
 } from "./employeesApi";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 const PAGE_SIZE = 50;
 const SOON_DAYS = 30;
@@ -163,7 +164,7 @@ export function EmployeesPage({ me }: { me?: Pick<Me, "capabilities"> }) {
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
 
       <div className="card tablewrap">
-        {q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+        {q.isLoading ? <Loading /> : q.error ? (
           <QueryError query={q} message={employmentError(q.error)} />
         ) : (
           <div className="tablewrap"><table aria-label="Employees" aria-busy={q.isFetching || undefined}>
@@ -247,7 +248,7 @@ function EmployeeDrawer({ id, initial, onClose, onNotice }: {
   return (
     <>
       <Drawer title={e ? nameOf(e) : "Employee"} onClose={onClose} suspended={action !== null || editing !== null} wide closeLabel="Close employee details">
-        {q.isLoading && !e ? <p className="empty">Loading…</p> : !e ? (
+        {q.isLoading && !e ? <Loading /> : !e ? (
           <p className="error" role="alert">{employmentError(q.error)}</p>
         ) : (
           <>

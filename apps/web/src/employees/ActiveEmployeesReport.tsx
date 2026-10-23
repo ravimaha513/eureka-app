@@ -3,6 +3,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useLookups } from "../lookups";
 import { employeeKeys, employeesApi, employmentError, localToday } from "./employeesApi";
 import { QueryError } from "../ui/QueryError";
+import { Loading } from "../ui/Loading";
 
 /** "2026-10" → "October 2026". */
 const monthLabel = (m: string) => {
@@ -53,7 +54,7 @@ export function ActiveEmployeesReport() {
         {!valid && <p id={`${id}-mx`} className="error">Choose a month.</p>}
       </form>
 
-      {valid && (q.isLoading ? <p className="empty">Loading…</p> : q.error ? (
+      {valid && (q.isLoading ? <Loading /> : q.error ? (
         <QueryError query={q} message={employmentError(q.error)} />
       ) : d ? (
         <div aria-busy={q.isFetching || undefined}>
