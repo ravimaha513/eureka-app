@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { UserPlus } from "lucide-react";
+import { Person } from "../shell/ui";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { teamApi, teamError, teamKeys, type Addable, type MyTeam } from "./teamApi";
 
@@ -26,15 +28,20 @@ export function MyTeamPage() {
         <div className="teamgrid">
           {q.data.items.map((t) => (
             <section key={t.id} className="card team" aria-labelledby={`myteam-${t.id}`}>
-              <header><h2 id={`myteam-${t.id}`}>{t.name}</h2></header>
-              <p><span className="muted">Lead</span> <b>{t.lead.displayName}</b></p>
+              <header>
+                <div className="rowactions">
+                  <h2 id={`myteam-${t.id}`}>{t.name}</h2>
+                  <span className="badge">{t.members.length} {t.members.length === 1 ? "member" : "members"}</span>
+                </div>
+                <button className="btn sm primary" aria-label={`Add member to ${t.name}`} onClick={() => setAdding(t)}>
+                  <UserPlus size={14} aria-hidden="true" />Add member
+                </button>
+              </header>
+              <Person name={t.lead.displayName}><b>{t.lead.displayName}</b><span className="block muted">Lead</span></Person>
               <ul className="members" aria-label={`Members of ${t.name}`}>
-                {t.members.map((m) => <li key={m.id}><span>{m.displayName}</span></li>)}
+                {t.members.map((m) => <li key={m.id}><Person name={m.displayName}>{m.displayName}</Person></li>)}
                 {t.members.length === 0 && <li className="muted">No members yet.</li>}
               </ul>
-              <div className="rowactions">
-                <button className="btn sm" aria-label={`Add member to ${t.name}`} onClick={() => setAdding(t)}>Add member</button>
-              </div>
             </section>
           ))}
           {q.data.items.length === 0 && <p className="empty">No teams to manage yet.</p>}
