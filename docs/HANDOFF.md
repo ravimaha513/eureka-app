@@ -231,6 +231,9 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   `authz.notification_recipients` / `authz.notification_entity` on top of 0089, so 0180 re-creates both as 0089 plus
   every slice's branches (payment.first_received / payment.delayed, performance.below_target, the bench-time POC,
   candidate.not_responding) and re-checks the inbox entity constraint. A later replacement must start from 0180.
+- Web UI states (PR #54, no migrations): `ui/Loading` (spinner, role=status; use it, not `<p className="empty">Loading…</p>`),
+  `ui/QueryError` alert panel with a busy Retry (use it for every failed list/report load), segmented `Pager`, and glyphs on
+  `.empty` / `.empty.error`.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
