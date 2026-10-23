@@ -77,7 +77,7 @@ function readable(key: keyof typeof U, f: ModelFolder): boolean {
 const F: Record<string, string> = {};
 async function add(user: string, name: string, f: Omit<ModelFolder, "id" | "by">, upload = false) {
   const id = await createFolder(user, { parent: f.parent, name, level: f.level, roles: f.roles, members: f.members, location: f.location, upload });
-  folders.push({ id, by: user, ...f });
+  folders.push({ id, by: user, ...f, members: f.level === "restricted" ? [...new Set([user, ...f.members])] : f.members });
   F[name] = id;
   return id;
 }
@@ -186,10 +186,11 @@ describe("folder writes", () => {
     expect(await managed(U.m1)).not.toContain(id);
     expect(await managed(U.l1)).toEqual(expect.arrayContaining([F["Team Rohit onboarding"], F["Team Rohit offers"]]));
     expect(await managed(U.l1)).not.toContain(id);
-    // The creator manages their restricted folder but reads its files only once a member (as any manager).
-    expect((await q<{ ids: string[] }>(U.ceo, `SELECT authz.datahub_readable_folders() AS ids`))[0]!.ids).not.toContain(id);
-    expect((await q<{ c: boolean }>(U.ceo, `SELECT authz.datahub_set_member($1, $2, true) AS c`, [id, U.ceo]))[0]!.c).toBe(true);
+    // The creator of a restricted folder is made a member (DH-3), so reads it straight away.
     expect((await q<{ ids: string[] }>(U.ceo, `SELECT authz.datahub_readable_folders() AS ids`))[0]!.ids).toContain(id);
+    expect((await db.admin.query(`SELECT user_id FROM eureka.datahub_folder_member WHERE folder_id = $1`, [id])).rows).toEqual([{ user_id: U.ceo }]);
+    expect((await db.admin.query(`SELECT count(*)::int n FROM eureka.audit_event WHERE entity_id = $1 AND action = 'datahub.member_added'`, [id])).rows[0].n).toBe(1);
+    expect((await q<{ c: boolean }>(U.ceo, `SELECT authz.datahub_set_member($1, $2, true) AS c`, [id, U.ceo]))[0]!.c).toBe(false);
     // Losing the grant loses the folders.
     await db.admin.query(`UPDATE eureka.role_permission SET permission = 'datahub:create_off' WHERE role_key = 'ceo' AND permission = 'datahub:create'`);
     try {

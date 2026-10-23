@@ -147,7 +147,8 @@ describe("folders", () => {
     expect((await call("l1", "POST", "/api/v1/datahub/folders", { name: "x", level: "internal", locationId: LOC.dallas })).statusCode).toBe(403);
     expect((await call("l1", "POST", "/api/v1/datahub/folders", { name: "x", level: "internal", parentId: F.internal })).statusCode).toBe(403);
     expect((await call("l1", "GET", "/api/v1/datahub/people?q=r1")).statusCode).toBe(200);
-    const id = await createFolder("l1", { name: "Team Rohit wiki", level: "restricted", memberIds: [U.l1] });
+    const id = await createFolder("l1", { name: "Team Rohit wiki", level: "restricted" });
+    expect((await call("l1", "GET", `/api/v1/datahub/folders/${id}/members`)).json().items.map((m: { id: string }) => m.id)).toEqual([U.l1]);
     const mine = (await folderList("l1")).items.find((f) => f.id === id)!;
     expect(mine.actions).toMatchObject({ read: true, upload: true, manage: true, createSubfolder: true });
     expect((await folderList("m1")).items.map((f) => f.id)).not.toContain(id);
