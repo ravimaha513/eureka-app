@@ -49,11 +49,12 @@ export function canManageTraining(user: UserAccess): boolean {
 
 /**
  * May create batches somewhere: Sales leadership (canCreateBatch, migration
- * 0026) or a training manager (migration 0065). Mirrors the first check of
- * authz.create_batch; the location is checked there too.
+ * 0026), a training manager (migration 0065) or a training.batch:create
+ * holder (TR-1a). Mirrors the first check of authz.create_batch; the location
+ * is checked there too.
  */
 export function canPlanBatch(user: UserAccess): boolean {
-  return canCreateBatch(user) || canManageTraining(user);
+  return canCreateBatch(user) || canManageTraining(user) || resolveScope(user, "training.batch:create") !== null;
 }
 
 /** Locations where a training:manage grant applies; `all` for an org grant. */

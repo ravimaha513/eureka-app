@@ -1,3 +1,4 @@
+import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { trainingBatchCovered, trainingCandidateCovered } from "@eureka/shared";
 import { asUser, createTestDb, ownedCandidateCalls, type TestDb } from "./db-harness.js";
@@ -77,7 +78,8 @@ describe("course catalog (TR-4)", () => {
     for (const key of users) {
       const rows = await q(U[key], `SELECT id FROM eureka.course WHERE id = $1`, [course]);
       expect(rows.length, key).toBe(toUserAccess(key).roles.some((r) =>
-        ["recruiter", "lead", "manager", "assoc_director", "ceo", "location_incharge", "location_ops_admin", "interview_coach"].includes(r.role)) ? 1 : 0);
+        ["recruiter", "lead", "manager", "assoc_director", "ceo", "location_incharge", "location_ops_admin", "interview_coach",
+          "hr", "associate_hr", "accounts", "immigration", "documents_team", "bu_head"].includes(r.role)) ? 1 : 0);
     }
   });
 });
@@ -85,10 +87,30 @@ describe("course catalog (TR-4)", () => {
 describe("batches (TR-5..TR-7)", () => {
   it("training managers create batches at their location only; coaches never", async () => {
     batch = (await q<{ id: string }>(U.locD, `SELECT authz.create_batch($1, $2, '2031-03-01', 20) AS id`, [LOC.dallas, TECH_ID]))[0]!.id;
-    await expect(q(U.locD, `SELECT authz.create_batch($1, $2, '2031-04-01', 20)`, [LOC.austin, TECH_ID])).rejects.toThrow(/location_not_in_scope/);
+    await expect(q(U.locA, `SELECT authz.create_batch($1, $2, '2031-04-01', 20)`, [LOC.dallas, TECH_ID])).rejects.toThrow(/location_not_in_scope/);
     await expect(q(U.coach, `SELECT authz.create_batch($1, $2, '2031-04-01', 20)`, [LOC.dallas, TECH_ID])).rejects.toThrow(/not_permitted/);
     const [b] = await q<{ status: string; created_by: string; row_version: number }>(U.locD, `SELECT status, created_by, row_version FROM eureka.batch WHERE id = $1`, [batch]);
     expect(b).toEqual({ status: "planned", created_by: U.locD, row_version: 1 });
+  });
+
+  it("training.batch:create holders create anywhere and set details only in the creating transaction (TR-1a)", async () => {
+    const upd = (c: pg.PoolClient, id: string, v: number) =>
+      c.query<{ v: number }>(`SELECT authz.update_batch($1, $2, 'HR plan', NULL, NULL, NULL, 12, 'rose', 'cap') AS v`, [id, v]);
+    const id = await asUser(db.app, U.hr, async (c) => {
+      const bid = (await c.query<{ id: string }>(`SELECT authz.create_batch($1, $2, '2031-07-01', 10) AS id`, [LOC.austin, TECH_ID])).rows[0]!.id;
+      expect((await upd(c, bid, 1)).rows[0]!.v).toBe(2);
+      return bid;
+    }, true);
+    const [b] = await q<{ name: string; created_by: string }>(U.hr, `SELECT name, created_by FROM eureka.batch WHERE id = $1`, [id]);
+    expect(b).toEqual({ name: "HR plan", created_by: U.hr });
+    // A later transaction: no training:manage, so no edits.
+    await expect(asUser(db.app, U.hr, (c) => upd(c, id, 2), true)).rejects.toThrow(/not_permitted/);
+    // Another user's fresh batch is not the caller's.
+    await expect(asUser(db.app, U.acct, async (c) => {
+      const bid = (await c.query<{ id: string }>(`SELECT authz.create_batch($1, $2, '2031-08-01', 10) AS id`, [LOC.austin, TECH_ID])).rows[0]!.id;
+      await c.query("SELECT set_config('eureka.user_id', $1, true)", [U.imm]);
+      return upd(c, bid, 1);
+    }, true)).rejects.toThrow(/not_permitted/);
   });
 
   it("update_batch checks the version, the trainer, the dates and the manager", async () => {

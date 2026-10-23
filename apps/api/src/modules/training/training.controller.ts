@@ -34,8 +34,9 @@ export class TrainingController {
     return this.svc.listBatches(user, BatchListQuery.parse(q));
   }
 
+  /** Training managers, Sales leadership and training.batch:create holders (canPlanBatch, TR-1a). */
   @Post("batches")
-  @RequirePermission("training:manage")
+  @RequirePermission("training:read")
   createBatch(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createBatch(user, () => CreateTrainingBatch.parse(body));
   }
@@ -129,9 +130,9 @@ export class TrainingController {
     return this.svc.setModuleCompletion(user, id, candidateId, moduleId, ModuleCompletion.parse(body).completed);
   }
 
-  /** People who may be named trainer (they can record progress). */
+  /** People who may be named trainer (they can record progress); for anyone who may create batches. */
   @Get("trainers")
-  @RequirePermission("training:manage")
+  @RequirePermission("training:read")
   trainers(@CurrentUser() user: AuthedUser) {
     return this.svc.trainers(user);
   }

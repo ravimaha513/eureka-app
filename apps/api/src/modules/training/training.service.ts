@@ -150,7 +150,7 @@ export class TrainingService {
     return {
       items: page.map((b) => this.presentBatch(user.access, b)),
       nextCursor: rows.length > q.limit && last ? `${last.start_month}~${last.id}` : null,
-      canCreate: canManageTraining(user.access),
+      canCreate: canPlanBatch(user.access),
     };
   }
 
@@ -400,6 +400,7 @@ export class TrainingService {
   }
 
   async trainers(user: AuthedUser) {
+    if (!canPlanBatch(user.access)) throw new ForbiddenException("Not permitted");
     return this.db.withUser(user.id, async (c) => ({
       items: (await c.query<{ id: string; name: string }>(
         `SELECT DISTINCT u.id, u.display_name AS name

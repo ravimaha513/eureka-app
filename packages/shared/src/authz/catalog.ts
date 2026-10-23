@@ -152,6 +152,8 @@ export const PERMISSIONS = [
   "training:read",
   "training:manage",
   "training.progress:update",
+  /** Create training batches anywhere (docs/training-api.md TR-1a); editing them needs training:manage. */
+  "training.batch:create",
   // interviews-settings
   /** Staff contact details (phone, bio) entered in Settings; read by HR and in Users & Access. */
   "staff.contact:read",
@@ -335,6 +337,7 @@ export const GRANTS: Record<Role, Grants> = {
     "datahub:create": "own",
     // training
     "training:read": "org",
+    "training.batch:create": "org",
     // chat
     "chat:use": "own",
     // jobs-portal
@@ -394,6 +397,7 @@ export const GRANTS: Record<Role, Grants> = {
     "training:read": "location",
     "training:manage": "location",
     "training.progress:update": "location",
+    "training.batch:create": "org",
     // chat
     "chat:use": "own",
   },
@@ -420,6 +424,9 @@ export const GRANTS: Record<Role, Grants> = {
     "staff.contact:read": "org",
     // interview-alerts: staff birthdays for the CEO's morning digest
     "staff.birthday:manage": "org",
+    // training
+    "training:read": "org",
+    "training.batch:create": "org",
     // chat
     "chat:use": "own",
     // jobs-portal
@@ -441,6 +448,9 @@ export const GRANTS: Record<Role, Grants> = {
     "document:upload": "org",
     // datahub
     "datahub:read": "own",
+    // training
+    "training:read": "org",
+    "training.batch:create": "org",
     // chat
     "chat:use": "own",
   },
@@ -460,6 +470,9 @@ export const GRANTS: Record<Role, Grants> = {
     // datahub
     "datahub:read": "own",
     "datahub:manage": "org",
+    // training
+    "training:read": "org",
+    "training.batch:create": "org",
     // chat
     "chat:use": "own",
   },
@@ -480,6 +493,9 @@ export const GRANTS: Record<Role, Grants> = {
     "report:read": "org",
     // datahub
     "datahub:read": "own",
+    // training
+    "training:read": "org",
+    "training.batch:create": "org",
     // chat
     "chat:use": "own",
   },
@@ -517,6 +533,9 @@ export const GRANTS: Record<Role, Grants> = {
     "document:verify": "org",
     // datahub
     "datahub:read": "own",
+    // training
+    "training:read": "org",
+    "training.batch:create": "org",
     // chat
     "chat:use": "own",
   },
@@ -527,6 +546,9 @@ export const GRANTS: Record<Role, Grants> = {
     "report:read": "org",
     // datahub
     "datahub:read": "own",
+    // training
+    "training:read": "org",
+    "training.batch:create": "org",
     // chat
     "chat:use": "own",
   },

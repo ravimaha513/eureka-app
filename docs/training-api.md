@@ -11,20 +11,21 @@ View Students, per-student, per-course and per-module progress.
 
 | Permission | Granted to (scope) | Why |
 |---|---|---|
-| `training:read` | Location Incharge, Location Ops Admin (location); Interview Coach (coached); Recruiter (own), Lead (team), Manager and AD (hierarchy), CEO (org) | Location roles run training at their location; coaches train; Sales follow the progress of candidates they already own; leadership reads all. |
+| `training:read` | Location Incharge, Location Ops Admin (location); Interview Coach (coached); Recruiter (own), Lead (team), Manager and AD (hierarchy); CEO, HR, Associate HR, Accounts, Immigration, Documents Team, BU Head (org) | Location roles run training at their location; coaches train; Sales follow the progress of candidates they already own; leadership and the restricted roles read all (they plan batches, TR-1a). |
 | `training:manage` | Location Incharge, Location Ops Admin (location) | Course library, batches (create, edit, status, delete), courses of a batch, students. |
 | `training.progress:update` | Location Incharge, Location Ops Admin (location); Interview Coach (coached) | Marking modules complete. |
+| `training.batch:create` | CEO, Location Ops Admin, HR, Associate HR, Accounts, Immigration, Documents Team, BU Head (org) | Creating batches at any location (TR-1a); every restricted role except Org Admin, which holds no business data. |
 
-None is restricted (no PII beyond names already visible to these roles). HR, Accounts, Immigration, Documents
-Team, BU Head and Org Admin get nothing (least privilege; ask if HR should read progress). Sales leadership keep
-planning batches through the 0026 endpoints (`/api/v1/batches`); the training screens' management actions need
-`training:manage`.
+None is restricted (no PII beyond names already visible to these roles). Org Admin gets nothing (it holds no
+business data). Sales leadership plan batches through the 0026 endpoints (`/api/v1/batches`) and the training
+screen's create (TR-1a); every other management action of the training screens needs `training:manage`.
 
 ## Rules
 
 | ID | Rule |
 |---|---|
 | TR-1 | Batches are created and changed only through definer functions (`authz.create_batch`, `authz.set_batch_status`, `authz.update_batch`, `authz.delete_batch`); the write guard (0032, replaced) lets the definer change status and the details (name, trainer, dates, size, cover; `start_month` follows `start_date`) and delete; location, technology, creator and creation time never change; every update bumps `row_version`. **Authority:** `update_batch` and `delete_batch` need `training:manage` at the batch location (`authz.training_manage_location_ids()`); Sales planning rights (`batch_manager`) reach only `create_batch` and `set_batch_status`, as before 0065. |
+| TR-1a | **Batch creators.** `POST /batches` is open to everyone `canPlanBatch` allows (403 otherwise): training managers (their locations), Sales leadership (`batch_manager`, their planning locations) and `training.batch:create` holders (any location; checked in `create_batch` only, so it reaches no other batch function). The API creates and names the batch in one transaction: `update_batch` also accepts a batch the caller created in the current transaction and has not edited yet (`created_by` = caller, `row_version` = 1, `created_at` = `now()`). Later edits, status changes by non-Sales creators and deletes still need `training:manage`. |
 | TR-2 | **Batch-level coverage** of a training permission (`authz.training_batch_ids(perm)`, mirrored by `trainingBatchCovered`): an org grant covers every batch, a location grant the batches at its location, a **coached** grant the batches where the user is the **trainer** (`batch.trainer_id`). Own, team and hierarchy grants cover no batch. |
 | TR-3 | The Training Batches screen lists batches covered at batch level for `training:read`, plus batches holding at least one candidate the caller owns under `training:read` (own/team/hierarchy, coached teams, location, org; never Open to all teams). Students, their names and their progress are listed in full with batch-level coverage, otherwise only the owned students; `students` on a card counts what the caller may see (`authz.training_batches()`, `authz.training_batch_students()`). Not listed = 404 everywhere in `/training/batches/:id…`. |
 | TR-4 | Courses are an org catalog: every `training:read` holder reads every course and module. Each course has an **owning location**; training managers of that location (or org) create, edit, archive, delete and reorder its modules (RLS on `course`/`course_module`). Modules: title ≤ 160, duration 1–10000 minutes, up to 10 `https://` resource links (no spaces or control characters, CHECK in the table). A course used by a batch, or a module with completions, cannot be deleted (409 `course_in_use`, `module_in_use`); archive it instead. Archived courses cannot be newly assigned (422 `course_archived`). Courses of a batch (`batch_course`, ordered) are written by managers covering the batch, only while it is planned or in training (422 `batch_closed`). **Shared courses are frozen for their owner:** while any batch outside the editor's `training:manage` locations uses a course, adding, deleting, reordering or re-timing its modules and archiving it are refused (409 `course_shared`, trigger guard using `authz.course_used_outside`; titles, descriptions and links stay editable), because durations feed other locations' students' progress live. Concurrent additions are serialised per course/batch (advisory lock); a course holds at most 1000 modules and a batch 1000 courses (422 `limit_reached`); a lost UNIQUE race is 409 `conflict`. Resource links: no user info (`user@host`) in the authority. The course list's `batches` counts only batches the caller can see. Unassigning a course keeps its completions (they reappear if it is assigned again). |
@@ -43,7 +44,7 @@ planning batches through the 0026 endpoints (`/api/v1/batches`); the training sc
 All under `/api/v1/training` unless noted.
 
 - `GET /batches?status=&cursor=&limit=` (`training:read`) → `{ items: [BatchCard], nextCursor, canCreate }`, newest start month first.
-- `POST /batches` (`training:manage`) `{ locationId, technologyId, startDate, endDate?, name?, trainerId?, sizePlanned?, coverColor?, coverIcon? }` → 201 `{ id }`.
+- `POST /batches` (TR-1a: `canPlanBatch`) `{ locationId, technologyId, startDate, endDate?, name?, trainerId?, sizePlanned?, coverColor?, coverIcon? }` → 201 `{ id }`.
 - `GET /batches/:id` (`training:read`) → `BatchCard & { assignedCourses: [{ id, title, description, cover, archived, totalMinutes, modules: [{ id, title, durationMinutes, resources }] }] }`.
 - `PATCH /batches/:id` (`training:manage`, `If-Match`) any of `{ name|null, trainerId|null, startDate, endDate|null, sizePlanned|null, coverColor, coverIcon }` → `{ id, rowVersion }`.
 - `PUT /batches/:id/status` (`training:manage`) `{ to: in_training|completed|cancelled }`; `DELETE /batches/:id` → 204.
@@ -52,7 +53,7 @@ All under `/api/v1/training` unless noted.
 - `GET /batches/:id/eligible-students?search=` (`training:manage`) → `{ items: [{ candidateId, name, technology, status, currentBatch }] }`.
 - `POST /batches/:id/students` `{ candidateId }` → 201; `DELETE /batches/:id/students/:candidateId` → 204 (`training:manage`).
 - `PUT /batches/:id/students/:candidateId/modules/:moduleId` (`training.progress:update`) `{ completed: boolean }` → `{ moduleId, completed, completedAt, completedBy }`.
-- `GET /trainers` (`training:manage`) → `{ items: [{ id, name }] }` (active users who may record progress).
+- `GET /trainers` (`canPlanBatch`) → `{ items: [{ id, name }] }` (active users who may record progress).
 - `GET /courses?includeArchived=true` (`training:read`) → `{ items: [{ id, title, description, cover, archived, location, modules, totalMinutes, batches, rowVersion, canEdit }], nextCursor: null, canCreate }`.
 - `POST /courses` (`training:manage`) `{ title, description?, coverColor?, coverIcon?, locationId?, modules?: [{ title, durationMinutes, resources? }] }` → 201 `{ id }`; `locationId` defaults to the caller's only managed location (422 `location_required` otherwise).
 - `GET /courses/:id`, `PATCH /courses/:id` (`If-Match`; `{ title, description, coverColor, coverIcon, archived }`), `DELETE /courses/:id`.
