@@ -531,8 +531,19 @@ describe("lead adds members to their own team (AD-10)", () => {
     }
   });
 
-  it("only leads hold team:add_member", () => {
-    expect(users.filter((u) => can(toUserAccess(u), "team:add_member" as Permission)).sort()).toEqual(["l1", "l2", "l3"]);
+  it("leads (team), managers and associate directors (hierarchy) hold team:add_member", () => {
+    expect(users.filter((u) => can(toUserAccess(u), "team:add_member" as Permission)).sort()).toEqual(["ad", "l1", "l2", "l3", "m1", "m2"]);
+  });
+
+  it("managers and associate directors list the teams led in their hierarchy", async () => {
+    // Earlier tests in this file change reporting lines, so read the expected teams from the closure.
+    for (const key of ["m1", "m2", "ad"] as const) {
+      const expected = (await db.admin.query(
+        `SELECT t.id FROM eureka.team t WHERE t.lead_id = $1
+            OR t.lead_id IN (SELECT descendant_id FROM eureka.reporting_closure WHERE ancestor_id = $1)`, [U[key]])).rows.map((r) => r.id);
+      expect(expected.length, key).toBeGreaterThan(0);
+      expect(ids((await call(key, "GET", "/api/v1/teams/mine")).json().items).sort(), key).toEqual(expected.sort());
+    }
   });
 
   it("lists the lead's own team and only active recruiters in no team", async () => {
@@ -570,9 +581,15 @@ describe("lead adds members to their own team (AD-10)", () => {
     expect(await add("l1", T.t1, GONE)).toEqual([422, "user_inactive"]);
     expect(await add("l1", T.t1, U.l1)).toEqual([403, "self_change"]);
     expect((await add("l1", NIL, NEW2))[0]).toBe(404);
-    expect((await add("m1", T.t1, NEW2))[0]).toBe(403);
+    expect(await add("m2", T.t1, NEW2)).toEqual([403, "not_in_scope"]);
     expect((await add("admin", T.t1, NEW2))[0]).toBe(403);
     expect((await add("r1b", T.t1, NEW2))[0]).toBe(403);
     expect((await db.admin.query(`SELECT 1 FROM eureka.team_member WHERE user_id = $1`, [NEW2])).rowCount).toBe(0);
+  });
+
+  it("a manager adds to a team led by someone in their hierarchy", async () => {
+    const r = await call("m1", "POST", `/api/v1/teams/${T.t2}/members`, { userId: NEW2 });
+    expect(r.statusCode, r.body).toBe(204);
+    expect((await audits("team.member_added")).at(-1)).toMatchObject({ actor_id: U.m1, entity_id: T.t2, changes: { userId: NEW2 } });
   });
 });

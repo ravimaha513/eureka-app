@@ -4,9 +4,10 @@ import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { teamApi, teamError, teamKeys, type Addable, type MyTeam } from "./teamApi";
 
 /**
- * My team (team:add_member; docs/admin-api.md AD-10): the teams a lead leads,
+ * My team (team:add_member; docs/admin-api.md AD-10): the teams a lead leads
+ * (for managers and associate directors, every team led in their hierarchy),
  * with their members, and adding an active recruiter who is in no team yet.
- * Moving someone out of another team stays with managers and admins.
+ * Moving someone out of another team is the move-member action (AD-8).
  */
 export function MyTeamPage() {
   const qc = useQueryClient();
@@ -36,7 +37,7 @@ export function MyTeamPage() {
               </div>
             </section>
           ))}
-          {q.data.items.length === 0 && <p className="empty">You don't lead a team yet.</p>}
+          {q.data.items.length === 0 && <p className="empty">No teams to manage yet.</p>}
         </div>
       )}
       {adding && (

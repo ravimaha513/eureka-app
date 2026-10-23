@@ -18,7 +18,7 @@ export function teamError(e: unknown): string {
   if (e.detail === "already_member") return "That person joined a team in the meantime. Ask an admin or manager to move them.";
   if (e.detail === "not_a_recruiter") return "Only people with the Recruiter role can be added here.";
   if (e.detail === "user_inactive") return "That person is no longer active.";
-  if (e.status === 403) return "You can only add people to a team you lead.";
+  if (e.status === 403) return "You can only add people to a team you lead or one led in your hierarchy.";
   if (e.status === 404) return "That team no longer exists.";
   return e.detail ?? e.title ?? e.message;
 }

@@ -139,7 +139,7 @@ export const PERMISSIONS = [
   "bill:read",
   "bill:manage",
   "team:move_member",
-  /** Add an unassigned recruiter to a team one leads (docs/admin-api.md AD-10). */
+  /** Add an unassigned recruiter to a team one leads, or one led in one's hierarchy (docs/admin-api.md AD-10). */
   "team:add_member",
   "designation:change",
   // administration
@@ -275,6 +275,8 @@ export const GRANTS: Record<Role, Grants> = {
     "report:export": "hierarchy",
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
+    // AD-10: add unassigned recruiters to teams led within their hierarchy
+    "team:add_member": "hierarchy",
     "designation:change": "hierarchy",
     // performance: recruiter targets for the hierarchy
     "performance.target:manage": "hierarchy",
@@ -303,6 +305,8 @@ export const GRANTS: Record<Role, Grants> = {
     "report:export": "hierarchy",
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
+    // AD-10: add unassigned recruiters to teams led within their hierarchy
+    "team:add_member": "hierarchy",
     "designation:change": "hierarchy",
     // performance: recruiter targets for the hierarchy
     "performance.target:manage": "hierarchy",

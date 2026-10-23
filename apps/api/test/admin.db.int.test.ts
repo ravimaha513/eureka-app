@@ -87,10 +87,13 @@ describe("definer functions refuse callers without access:manage", () => {
 
   it("team_add_member needs team:add_member and the actor's own team (AD-10)", async () => {
     const sql = `SELECT authz.team_add_member($1, $2)`;
-    for (const actor of [U.admin, U.m1, U.r1a, U.ceo]) {
+    for (const actor of [U.admin, U.r1a, U.ceo]) {
       await expect(asUser(db.app, actor, (c) => c.query(sql, [T.t1, U.hr])), actor).rejects.toThrow(/not_permitted/);
     }
     await expect(asUser(db.app, U.l1, (c) => c.query(sql, [T.t2, U.hr]))).rejects.toThrow(/not_in_scope/);
+    // Manager: hierarchy scope covers t1 and t2 (leads l1, l2), not t3.
+    await expect(asUser(db.app, U.m1, (c) => c.query(sql, [T.t3, U.hr]))).rejects.toThrow(/not_in_scope/);
+    await expect(asUser(db.app, U.m1, (c) => c.query(sql, [T.t2, U.hr]))).rejects.toThrow(/not_a_recruiter/);
     await expect(asUser(db.app, U.l1, (c) => c.query(sql, [T.t1, U.hr]))).rejects.toThrow(/not_a_recruiter/);
     await expect(db.app.query(sql, [T.t1, U.hr])).rejects.toThrow(/not_permitted/);
   });
