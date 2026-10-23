@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./pnpm-lock.yaml)",
+      "Read(**/node_modules/**)",
+      "Read(**/dist/**)",
+      "Read(**/coverage/**)",
+      "Read(**/.terraform/**)",
+      "Read(**/.terragrunt-cache/**)",
+      "Read(**/playwright-report/**)",
+      "Read(**/test-results/**)",
+      "Read(**/e2e-artifacts/**)",
+      "Read(./.pgdata/**)",
+      "Read(./.local/**)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/session-brief.sh", "timeout": 15 }]
+      }
+    ]
+  },
+  "env": {
+    "BASH_MAX_OUTPUT_LENGTH": "20000"
+  }
+}
