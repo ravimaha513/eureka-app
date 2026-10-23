@@ -139,6 +139,23 @@ describe("folders", () => {
     expect(deep.json().detail).toBe("too_deep");
   });
 
+  it("creators (Lead, Manager, CEO; DH-2a): org-wide folders they then manage, nobody else's", async () => {
+    const l1 = await folderList("l1");
+    expect(l1.canCreate).toBe(true);
+    expect(l1.createScope).toEqual({ org: true, locationIds: [] });
+    expect(l1.items.find((f) => f.id === F.confidential)!.actions.manage).toBe(false);
+    expect((await call("l1", "POST", "/api/v1/datahub/folders", { name: "x", level: "internal", locationId: LOC.dallas })).statusCode).toBe(403);
+    expect((await call("l1", "POST", "/api/v1/datahub/folders", { name: "x", level: "internal", parentId: F.internal })).statusCode).toBe(403);
+    expect((await call("l1", "GET", "/api/v1/datahub/people?q=r1")).statusCode).toBe(200);
+    const id = await createFolder("l1", { name: "Team Rohit wiki", level: "restricted", memberIds: [U.l1] });
+    const mine = (await folderList("l1")).items.find((f) => f.id === id)!;
+    expect(mine.actions).toMatchObject({ read: true, upload: true, manage: true, createSubfolder: true });
+    expect((await folderList("m1")).items.map((f) => f.id)).not.toContain(id);
+    expect((await call("m1", "PATCH", `/api/v1/datahub/folders/${id}`, { name: "y" }, { "if-match": '"1"' })).statusCode).toBe(404);
+    await call("l1", "DELETE", `/api/v1/datahub/folders/${id}/members/${U.l1}`);
+    expect((await call("l1", "DELETE", `/api/v1/datahub/folders/${id}`, undefined, { "if-match": '"1"' })).statusCode).toBe(204);
+  });
+
   it.each([
     [{ name: "", level: "internal" }],
     [{ name: "a/b", level: "internal" }],

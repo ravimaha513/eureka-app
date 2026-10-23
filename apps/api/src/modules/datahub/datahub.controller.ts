@@ -9,8 +9,8 @@ import { DatahubService } from "./datahub.service.js";
  * DataHub (docs/datahub-api.md): organisation folders with security levels
  * (internal, confidential, restricted) and versioned files on the document
  * storage and malware scan. Every route needs datahub:read (staff); managing
- * needs datahub:manage covering the folder, checked in the service and the
- * database.
+ * needs datahub:manage covering the folder, or datahub:create for the folders
+ * the caller created (DH-2a), checked in the service and the database.
  */
 @Controller("api/v1/datahub")
 export class DatahubController {
@@ -118,9 +118,9 @@ export class DatahubController {
     return this.svc.search(user, SearchQuery.parse(query));
   }
 
-  /** People picker for restricted folders (datahub:manage). */
+  /** People picker for restricted folders (datahub:manage or datahub:create, checked in the service). */
   @Get("people")
-  @RequirePermission("datahub:manage")
+  @RequirePermission("datahub:read")
   people(@CurrentUser() user: AuthedUser, @Query() query: unknown) {
     return this.svc.people(user, PeopleQuery.parse(query));
   }

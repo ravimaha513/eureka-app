@@ -85,6 +85,12 @@ describe("catalog integrity", () => {
     expect(RESTRICTED_PERMISSIONS).toContain("datahub:manage");
   });
 
+  it("DataHub: Lead, Manager and CEO create folders and manage only their own (own scope, not restricted; DH-2a)", () => {
+    expect(ROLES.filter((r) => GRANTS[r]["datahub:create"]).map((r) => [r, GRANTS[r]["datahub:create"]]))
+      .toEqual([["lead", "own"], ["manager", "own"], ["ceo", "own"]]);
+    expect(RESTRICTED_PERMISSIONS).not.toContain("datahub:create");
+  });
+
   it("restricted roles (second approver): org_admin, restricted-permission holders, org-wide sensitive holders", () => {
     expect(ROLES.filter(isRestrictedRole).sort()).toEqual(
       ["accounts", "associate_hr", "bu_head", "ceo", "documents_team", "hr", "immigration", "location_ops_admin", "org_admin"]);
