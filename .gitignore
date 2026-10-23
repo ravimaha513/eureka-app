@@ -10,7 +10,8 @@ coverage
 e2e-artifacts
 test-results
 playwright-report
-.claude/
+.claude/*
+!.claude/settings.json
 .local
 
 # terraform / terragrunt
