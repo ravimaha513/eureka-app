@@ -1,5 +1,6 @@
 -- authz.create_batch: current definition (repeatable; db/functions/README.md).
--- Earlier bodies: migrations 0026, 0032, 0065. Change this file, not a new migration.
+-- Earlier bodies: migrations 0026, 0032, 0065. training.batch:create holders
+-- (docs/training-api.md TR-1a) added here. Change this file, not a new migration.
 
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.create_batch(p_location uuid, p_technology uuid, p_start_month date, p_size integer)
@@ -11,7 +12,8 @@ AS $function$
 DECLARE new_id uuid;
 BEGIN
   IF authz.current_user_id() IS NULL
-     OR NOT coalesce(authz.batch_manager() OR authz.has_perm('training:manage'), false) THEN
+     OR NOT coalesce(authz.batch_manager() OR authz.has_perm('training:manage')
+                     OR authz.has_perm('training.batch:create'), false) THEN
     RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
   END IF;
   IF p_location IS NULL OR p_technology IS NULL OR p_start_month IS NULL
@@ -20,7 +22,11 @@ BEGIN
      OR (p_size IS NOT NULL AND NOT coalesce(p_size BETWEEN 1 AND 500, false)) THEN
     RAISE EXCEPTION 'invalid_batch' USING ERRCODE = 'check_violation';
   END IF;
-  IF NOT coalesce(p_location = ANY (authz.batch_manage_location_ids()), false) THEN
+  -- training.batch:create (TR-1a) reaches only this function, not set_batch_status,
+  -- so it is checked here rather than in batch_manage_location_ids.
+  IF NOT coalesce(p_location = ANY (authz.batch_manage_location_ids())
+                  OR authz.has_org('training.batch:create')
+                  OR p_location = ANY (authz.location_ids('training.batch:create')), false) THEN
     RAISE EXCEPTION 'location_not_in_scope' USING ERRCODE = 'insufficient_privilege';
   END IF;
   BEGIN

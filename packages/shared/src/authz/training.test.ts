@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GRANTS, RESTRICTED_PERMISSIONS, ROLES, type Role } from "./catalog.js";
+import { GRANTS, RESTRICTED_PERMISSIONS, ROLES, isRestrictedRole, type Role } from "./catalog.js";
 import type { CandidateRef, UserAccess } from "./engine.js";
 import {
   batchDisplayName,
@@ -27,18 +27,21 @@ const cand = (over: Partial<CandidateRef> = {}): CandidateRef =>
 
 describe("training grants (catalog)", () => {
   it("location roles manage at their location; coaches update progress; Sales and the CEO read; nobody else", () => {
-    const holders = (p: "training:read" | "training:manage" | "training.progress:update") =>
+    const holders = (p: "training:read" | "training:manage" | "training.progress:update" | "training.batch:create") =>
       Object.fromEntries(ROLES.filter((r) => GRANTS[r][p]).map((r) => [r, GRANTS[r][p]]));
     expect(holders("training:manage")).toEqual({ location_incharge: "location", location_ops_admin: "location" });
     expect(holders("training.progress:update")).toEqual({ location_incharge: "location", location_ops_admin: "location", interview_coach: "coached" });
     expect(holders("training:read")).toEqual({
       recruiter: "own", lead: "team", manager: "hierarchy", assoc_director: "hierarchy", ceo: "org",
       location_incharge: "location", location_ops_admin: "location", interview_coach: "coached",
+      hr: "org", associate_hr: "org", accounts: "org", immigration: "org", documents_team: "org", bu_head: "org",
     });
+    // TR-1a: every restricted role but org_admin (no business data) creates batches anywhere.
+    expect(holders("training.batch:create")).toEqual(Object.fromEntries(ROLES.filter((r) => isRestrictedRole(r) && r !== "org_admin").map((r) => [r, "org"])));
   });
 
   it("no training permission is restricted", () => {
-    for (const p of ["training:read", "training:manage", "training.progress:update"] as const) expect(RESTRICTED_PERMISSIONS).not.toContain(p);
+    for (const p of ["training:read", "training:manage", "training.progress:update", "training.batch:create"] as const) expect(RESTRICTED_PERMISSIONS).not.toContain(p);
   });
 });
 
@@ -55,7 +58,7 @@ describe("batch-level coverage (mirrors authz.training_batch_ids)", () => {
     expect(trainingBatchCovered(COACH, "training:read", dallas)).toBe(false);
     expect(trainingBatchCovered(COACH, "training:manage", coached)).toBe(false);
     expect(trainingBatchCovered(L1, "training:read", dallas)).toBe(false);
-    expect(trainingBatchCovered(HR, "training:read", dallas)).toBe(false);
+    expect(trainingBatchCovered(HR, "training:read", dallas)).toBe(true); // org training:read (TR-1a)
   });
 });
 
@@ -66,12 +69,12 @@ describe("candidate-level coverage", () => {
     expect(trainingCandidateCovered(L1, cand({ recruiterId: "R1b" }))).toBe(true);
     expect(trainingCandidateCovered(L1, cand({ recruiterId: "X", teamId: "T9", visibility: "all_teams", marketingStatus: "active" }))).toBe(false);
     expect(trainingCandidateCovered(COACH, cand({ recruiterId: null, teamId: "T2" }))).toBe(true);
-    expect(trainingCandidateCovered(HR, cand())).toBe(false);
+    expect(trainingCandidateCovered(HR, cand())).toBe(true); // org training:read (TR-1a)
   });
 
   it("manage helpers", () => {
     expect([LOCD, INCH, COACH, L1, CEO].map(canManageTraining)).toEqual([true, true, false, false, false]);
-    expect([LOCD, INCH, COACH, L1, CEO, R1a].map(canPlanBatch)).toEqual([true, true, false, true, false, false]);
+    expect([LOCD, INCH, COACH, L1, CEO, R1a, HR].map(canPlanBatch)).toEqual([true, true, false, true, true, false, true]);
     expect(trainingManageLocations(LOCD)).toEqual({ all: false, locationIds: [LOC_D] });
     expect(trainingManageLocations(R1a)).toEqual({ all: false, locationIds: [] });
   });

@@ -1,6 +1,6 @@
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { can, type Permission } from "@eureka/shared";
+import { can, canPlanBatch, type Permission } from "@eureka/shared";
 import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
@@ -51,19 +51,21 @@ async function call(key: keyof typeof U, method: Method, url: string, payload?: 
 }
 
 describe("authorization matrix (route permission)", () => {
-  const endpoints: { name: string; perm: Permission; method: Method; url: string; body?: unknown }[] = [
+  // Batch creation and the trainer picker: anyone who may create batches (canPlanBatch, TR-1a).
+  const planner = (k: keyof typeof U) => canPlanBatch(toUserAccess(k));
+  const endpoints: { name: string; perm: Permission | ((k: keyof typeof U) => boolean); method: Method; url: string; body?: unknown }[] = [
     { name: "GET /training/batches", perm: "training:read", method: "GET", url: "/api/v1/training/batches" },
     { name: "GET /training/courses", perm: "training:read", method: "GET", url: "/api/v1/training/courses" },
     { name: "GET /training/batches/:id", perm: "training:read", method: "GET", url: `/api/v1/training/batches/${ZERO}` },
-    { name: "POST /training/batches", perm: "training:manage", method: "POST", url: "/api/v1/training/batches", body: {} },
+    { name: "POST /training/batches", perm: planner, method: "POST", url: "/api/v1/training/batches", body: {} },
     { name: "POST /training/courses", perm: "training:manage", method: "POST", url: "/api/v1/training/courses", body: {} },
-    { name: "GET /training/trainers", perm: "training:manage", method: "GET", url: "/api/v1/training/trainers" },
+    { name: "GET /training/trainers", perm: planner, method: "GET", url: "/api/v1/training/trainers" },
     { name: "PUT progress", perm: "training.progress:update", method: "PUT", url: `/api/v1/training/batches/${ZERO}/students/${ZERO}/modules/${ZERO}`, body: { completed: true } },
     { name: "GET /candidates/:id/training", perm: "training:read", method: "GET", url: `/api/v1/candidates/${ZERO}/training` },
   ];
   it.each(users.flatMap((u) => endpoints.map((e) => [u, e.name, e] as const)))("%s → %s", async (key, _n, e) => {
     const res = await call(key, e.method, e.url, e.body);
-    if (can(toUserAccess(key), e.perm)) expect(res.statusCode, res.body).not.toBe(403);
+    if (typeof e.perm === "function" ? e.perm(key) : can(toUserAccess(key), e.perm)) expect(res.statusCode, res.body).not.toBe(403);
     else expect(res.statusCode, res.body).toBe(403);
   });
 });
@@ -184,12 +186,27 @@ describe("training batches, students and progress (TR-5..TR-11)", () => {
     modules = (await call("locD", "GET", `/api/v1/training/courses/${courseId}`)).json().modules.map((m: { id: string }) => m.id);
   });
 
+  it("restricted roles and Sales leadership create batches with details; only training managers edit them (TR-1a)", async () => {
+    const r = await call("hr", "POST", "/api/v1/training/batches", {
+      locationId: LOC.austin, technologyId: TECH_ID, startDate: "2034-01-10", name: "HR Batch", trainerId: U.coach, coverColor: "teal",
+    });
+    expect(r.statusCode, r.body).toBe(201);
+    const hrBatch = r.json().id as string;
+    const list = (await call("hr", "GET", "/api/v1/training/batches")).json();
+    expect(list.canCreate).toBe(true);
+    expect(list.items.find((b: { id: string }) => b.id === hrBatch)).toMatchObject({ name: "HR Batch", trainer: { id: U.coach }, cover: { color: "teal" } });
+    expect((await call("hr", "PATCH", `/api/v1/training/batches/${hrBatch}`, { name: "Renamed" }, { "if-match": '"2"' })).statusCode).toBe(403);
+    const l = await call("l1", "POST", "/api/v1/training/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2034-02-01", name: "Lead Batch" });
+    expect(l.statusCode, l.body).toBe(201);
+    expect((await call("r1a", "POST", "/api/v1/training/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2034-03-01" })).statusCode).toBe(403);
+  });
+
   it("creates a batch with a name, trainer and dates; refuses bad input", async () => {
     const base = { locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2032-09-30" };
     expect((await call("locD", "POST", "/api/v1/training/batches", { ...base, endDate: "2032-09-01" })).statusCode).toBe(422);
     expect((await call("locD", "POST", "/api/v1/training/batches", { ...base, status: "completed" })).statusCode).toBe(422);
     expect((await call("locD", "POST", "/api/v1/training/batches", { ...base, trainerId: U.r1a })).json().detail).toBe("invalid_trainer");
-    expect((await call("locD", "POST", "/api/v1/training/batches", { ...base, locationId: LOC.austin })).json().detail).toBe("location_not_in_scope");
+    expect((await call("locA", "POST", "/api/v1/training/batches", base)).json().detail).toBe("location_not_in_scope");
     const r = await call("locD", "POST", "/api/v1/training/batches", { ...base, endDate: "2033-06-30", name: "Secret Batch Name", trainerId: U.coach, coverColor: "violet" });
     expect(r.statusCode, r.body).toBe(201);
     batchId = r.json().id;

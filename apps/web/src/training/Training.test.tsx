@@ -52,7 +52,8 @@ describe("navigation", () => {
     expect(keys(LOC)).toEqual(expect.arrayContaining(["training", "courses"]));
     expect(keys(meFor("recruiter"))).toContain("training");
     expect(keys(meFor("recruiter"))).not.toContain("courses");
-    expect(keys(meFor("hr"))).not.toContain("training");
+    expect(keys(meFor("hr"))).toContain("training"); // org training:read (TR-1a)
+    expect(keys(meFor("org_admin"))).not.toContain("training");
   });
 });
 

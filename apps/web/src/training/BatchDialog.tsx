@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { Me } from "../api";
+import { can, type Me } from "../api";
 import { Dialog, DialogActions } from "../ui/Dialog";
 import { useLookups } from "../lookups";
 import { Field, useFocusAfterFailure } from "../sales/ui";
@@ -16,7 +16,9 @@ export function BatchDialog({ me, batch, onClose, onSaved }: {
 }) {
   const lookups = useLookups();
   const trainers = useQuery({ queryKey: ["training", "trainers"], queryFn: trainingApi.trainers, staleTime: 5 * 60_000 });
-  const myLocations = new Set(me.roles.map((r) => r.locationId).filter(Boolean));
+  // training.batch:create is org-wide (TR-1a): a new batch may go to any location.
+  const anyLocation = !batch && can(me, "training.batch:create");
+  const myLocations = new Set(anyLocation ? [] : me.roles.map((r) => r.locationId).filter(Boolean));
   const locations = (lookups.data?.locations ?? []).filter((l) => myLocations.size === 0 || myLocations.has(l.id));
   const [v, setV] = useState({
     name: batch?.customName ?? "", locationId: "", technologyId: "", startDate: batch?.startDate ?? "", endDate: batch?.endDate ?? "",
