@@ -71,6 +71,7 @@ describe("definer functions refuse callers without access:manage", () => {
     [`SELECT authz.revoke_role($1, 'recruiter', NULL)`, [U.r1b]],
     [`SELECT authz.admin_create_team('X', $1, NULL)`, [U.l1]],
     [`SELECT authz.admin_set_team_lead($1, $2)`, [T.t1, U.l2]],
+    [`SELECT authz.admin_rename_team($1, 'X')`, [T.t1]],
     [`SELECT authz.admin_add_team_member($1, $2)`, [T.t1, U.hr]],
   ];
   // Non-admin fixture users, including the org-scoped CEO and the top of the Sales hierarchy.

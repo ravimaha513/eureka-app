@@ -68,6 +68,8 @@ export const CreateTeam = z
   .strict();
 export type CreateTeam = z.infer<typeof CreateTeam>;
 
+export const RenameTeam = z.object({ name: z.string().trim().min(1).max(120) }).strict();
+
 export const LOCATION_KINDS = ["training", "gh", "office", "remote"] as const;
 
 export const CreateLocation = z

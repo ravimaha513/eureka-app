@@ -94,6 +94,8 @@ export const adminApi = {
   teams: () => api<{ items: Team[] }>("/api/v1/admin/teams"),
   createTeam: (b: { name: string; leadId: string; locationId?: string }) =>
     api<{ id: string }>("/api/v1/admin/teams", { method: "POST", ...json(b) }),
+  renameTeam: (teamId: string, name: string) =>
+    api<void>(`/api/v1/admin/teams/${enc(teamId)}`, { method: "PATCH", ...json({ name }) }),
   setLead: (teamId: string, leadId: string) =>
     api<void>(`/api/v1/admin/teams/${enc(teamId)}/lead`, { method: "PUT", ...json({ leadId }) }),
   addMember: (teamId: string, userId: string) =>
