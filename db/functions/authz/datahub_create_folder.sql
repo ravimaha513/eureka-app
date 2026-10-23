@@ -1,6 +1,7 @@
 -- authz.datahub_create_folder: current definition (repeatable; db/functions/README.md).
 -- Earlier bodies: migration 0075. DataHub folder creators (datahub:create,
--- docs/datahub-api.md DH-2a) added here. Change this file, not a new migration.
+-- docs/datahub-api.md DH-2a) and creator membership of restricted folders (DH-3)
+-- added here. Change this file, not a new migration.
 
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.datahub_create_folder(p_parent uuid, p_name text, p_description text, p_level text, p_roles text[], p_members uuid[], p_members_can_upload boolean, p_location uuid)
@@ -85,7 +86,8 @@ BEGIN
     'roleCount', pg_catalog.cardinality(coalesce(p_roles, '{}')), 'memberCount', pg_catalog.cardinality(coalesce(p_members, '{}')),
     'membersCanUpload', coalesce(p_members_can_upload, false)));
   IF p_level = 'restricted' THEN
-    nmembers := authz.datahub_add_members(f_id, p_members);
+    -- The creator is always a member of a restricted folder they create (DH-3).
+    nmembers := authz.datahub_add_members(f_id, pg_catalog.array_prepend(authz.current_user_id(), coalesce(p_members, '{}')));
   END IF;
   RETURN f_id;
 END $function$;
