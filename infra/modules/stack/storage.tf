@@ -238,6 +238,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "logs" {
 }
 
 # GuardDuty Malware Protection for S3 scans every object uploaded to quarantine/.
+# The role policy follows the one AWS documents for Malware Protection for S3:
+# on this versioned bucket the post-scan tag is a version tag. Without
+# s3:GetObjectVersionTagging, staging scans completed (CompletedScanCount rose)
+# but no object was ever tagged, so every upload stayed pending (until 2026-10-23).
 resource "aws_iam_role" "malware_scan" {
   name = "${local.name}-malware-scan"
   assume_role_policy = jsonencode({
@@ -253,8 +257,14 @@ resource "aws_iam_role_policy" "malware_scan" {
     Statement = [
       {
         Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObjectTagging", "s3:GetObjectTagging", "s3:PutObjectVersionTagging"]
+        Action   = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObjectTagging", "s3:GetObjectTagging", "s3:PutObjectVersionTagging", "s3:GetObjectVersionTagging"]
         Resource = "${aws_s3_bucket.b["documents"].arn}/quarantine/*"
+      },
+      {
+        # GuardDuty writes this fixed object to check it can reach the bucket.
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = "${aws_s3_bucket.b["documents"].arn}/malware-protection-resource-validation-object"
       },
       {
         Effect   = "Allow"
