@@ -7,6 +7,7 @@ import {
   ROLE_LABELS,
   isRestrictedRole,
   resolveScope,
+  resolveScopeFor,
   type Role,
 } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
@@ -503,6 +504,60 @@ export class AdminService {
   }
 
   /** OD-07 / AD-8: team:move_member must cover both teams (engine here, definer function in the database). */
+  /**
+   * AD-10: the teams the caller may add members to (the ones they lead, plus
+   * any a hierarchy or org grant covers), with their members and the active
+   * recruiters who are in no team yet.
+   */
+  async myTeams(user: AuthedUser) {
+    const all = !!resolveScope(user.access, "team:add_member")?.all;
+    const wider = [...(resolveScopeFor(user.access, "team:add_member", ["hierarchy"])?.teamIds ?? [])];
+    return this.tx(user, async (c) => {
+      const teams = await c.query<{ id: string; name: string; lead_id: string; lead_name: string }>(
+        `SELECT t.id, t.name, t.lead_id, u.display_name AS lead_name
+         FROM eureka.team t JOIN eureka.app_user u ON u.id = t.lead_id
+         WHERE $1::boolean OR t.lead_id = $2 OR t.id = ANY ($3::uuid[]) ORDER BY t.name, t.id`, [all, user.id, wider]);
+      const members = await c.query<{ team_id: string; id: string; display_name: string }>(
+        `SELECT tm.team_id, u.id, u.display_name FROM eureka.team_member tm
+         JOIN eureka.app_user u ON u.id = tm.user_id
+         WHERE tm.valid @> now() AND tm.team_id = ANY ($1::uuid[]) ORDER BY u.display_name`, [teams.rows.map((t) => t.id)]);
+      const addable = await c.query<{ id: string; display_name: string; email: string }>(
+        `SELECT u.id, u.display_name, u.email FROM eureka.app_user u
+         WHERE u.status = 'active' AND u.id <> $1
+           AND EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.user_id = u.id AND ur.role_key = 'recruiter' AND ur.valid @> now())
+           AND NOT EXISTS (SELECT 1 FROM eureka.team_member tm WHERE tm.user_id = u.id AND tm.valid @> now())
+         ORDER BY u.display_name, u.id LIMIT 500`, [user.id]);
+      return {
+        items: teams.rows.map((t) => ({
+          id: t.id,
+          name: t.name,
+          lead: { id: t.lead_id, displayName: t.lead_name },
+          members: members.rows.filter((m) => m.team_id === t.id).map((m) => ({ id: m.id, displayName: m.display_name })),
+        })),
+        addable: addable.rows.map((u) => ({ id: u.id, displayName: u.display_name, email: u.email })),
+      };
+    });
+  }
+
+  /**
+   * AD-10: add an unassigned recruiter to a team the caller leads. 404 for an
+   * unknown team, 403 outside the caller's teams; authz.team_add_member
+   * re-checks all of it in the database.
+   */
+  async leadAddMember(user: AuthedUser, teamId: string, userId: string) {
+    this.notSelf(user, userId);
+    await this.tx(user, async (c) => {
+      const team = (await c.query<{ lead_id: string }>(`SELECT lead_id FROM eureka.team WHERE id = $1`, [teamId])).rows[0];
+      if (!team) throw new NotFoundException();
+      const covered = !!resolveScope(user.access, "team:add_member")?.all
+        || team.lead_id === user.id
+        || !!resolveScopeFor(user.access, "team:add_member", ["hierarchy"])?.teamIds.has(teamId);
+      if (!covered) throw new ForbiddenException("not_in_scope");
+      await c.query(`SELECT authz.team_add_member($1, $2)`, [teamId, userId]);
+      await this.audit.record(c, { actorId: user.id, action: "team.member_added", entityType: "team", entityId: teamId, changes: { userId } });
+    });
+  }
+
   async moveMember(user: AuthedUser, fromTeamId: string, body: MoveMember) {
     this.notSelf(user, body.userId);
     const scope = resolveScope(user.access, "team:move_member");

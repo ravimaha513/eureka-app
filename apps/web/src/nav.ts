@@ -39,6 +39,8 @@ export const NAV: NavItem[] = [
   // pipeline-vendors: GET /api/v1/reports/pipeline needs report:read (and candidate:read, checked by the API)
   { key: "pipeline", label: "Candidate Pipeline", section: "Insights", anyOf: ["report:read"] },
   { key: "vendors", label: "Preferred Vendors", section: "Workspace", anyOf: ["vendor.preferred:create", "vendor.preferred:read"] },
+  // AD-10: leads add unassigned recruiters to their own team.
+  { key: "myteam", label: "My team", section: "Workspace", anyOf: ["team:add_member"] },
   { key: "access", label: "Users & Access", section: "Admin", anyOf: ["access:manage"] },
   // interview-alerts: HR keeps the staff birthdays the CEO's morning digest is built from.
   { key: "birthdays", label: "Staff birthdays", section: "Admin", anyOf: ["staff.birthday:manage"] },

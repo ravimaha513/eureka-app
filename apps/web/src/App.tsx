@@ -38,6 +38,7 @@ const PaymentsPage = lazyNamed(() => import("./payments/PaymentsPage"), "Payment
 const PerformancePage = lazyNamed(() => import("./performance/PerformancePage"), "PerformancePage");
 const PipelineReportPage = lazyNamed(() => import("./pipelinereport/PipelineReportPage"), "PipelineReportPage");
 const PreferredVendorsPage = lazyNamed(() => import("./pipelinereport/PreferredVendorsPage"), "PreferredVendorsPage");
+const MyTeamPage = lazyNamed(() => import("./team/MyTeamPage"), "MyTeamPage");
 
 /** The Hot List screen (kept under its original name for existing callers). */
 export const HotList = HotListPage;
@@ -365,6 +366,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
               : current.key === "payments" ? <PaymentsPage me={me} />
               : current.key === "pipeline" ? <PipelineReportPage />
               : current.key === "vendors" ? <PreferredVendorsPage />
+              : current.key === "myteam" ? <MyTeamPage />
               : current.key === "dashboard" ? (
                 <DashboardPage firstName={me.displayName.split(" ")[0]} canOpen={(t) => has(t)}
                   canExport={can(me, "report:export")}
