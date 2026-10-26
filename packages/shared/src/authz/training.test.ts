@@ -30,10 +30,10 @@ describe("training grants (catalog)", () => {
     const holders = (p: "training:read" | "training:manage" | "training.progress:update" | "training.batch:create") =>
       Object.fromEntries(ROLES.filter((r) => GRANTS[r][p]).map((r) => [r, GRANTS[r][p]]));
     expect(holders("training:manage")).toEqual({ location_incharge: "location", location_ops_admin: "location" });
-    expect(holders("training.progress:update")).toEqual({ location_incharge: "location", location_ops_admin: "location", interview_coach: "coached" });
+    expect(holders("training.progress:update")).toEqual({ location_incharge: "location", location_ops_admin: "location", interview_coach: "coached", interview_lead: "coached_hierarchy" });
     expect(holders("training:read")).toEqual({
       recruiter: "own", lead: "team", manager: "hierarchy", assoc_director: "hierarchy", ceo: "org",
-      location_incharge: "location", location_ops_admin: "location", interview_coach: "coached",
+      location_incharge: "location", location_ops_admin: "location", interview_coach: "coached", interview_lead: "coached_hierarchy",
       hr: "org", associate_hr: "org", accounts: "org", immigration: "org", documents_team: "org", bu_head: "org",
     });
     // TR-1a: every restricted role but org_admin (no business data) creates batches anywhere.
@@ -59,6 +59,15 @@ describe("batch-level coverage (mirrors authz.training_batch_ids)", () => {
     expect(trainingBatchCovered(COACH, "training:manage", coached)).toBe(false);
     expect(trainingBatchCovered(L1, "training:read", dallas)).toBe(false);
     expect(trainingBatchCovered(HR, "training:read", dallas)).toBe(true); // org training:read (TR-1a)
+  });
+
+  it("the Interview Lead covers batches trained by them or a coach below them", () => {
+    const IL = user("IL", "interview_lead", { subordinateUserIds: ["C"] });
+    expect(trainingBatchCovered(IL, "training:read", coached)).toBe(true);
+    expect(trainingBatchCovered(IL, "training.progress:update", { locationId: LOC_A, trainerId: "IL" })).toBe(true);
+    expect(trainingBatchCovered(IL, "training:read", { locationId: LOC_A, trainerId: "X" })).toBe(false);
+    expect(trainingBatchCovered(IL, "training:read", dallas)).toBe(false);
+    expect(trainingBatchCovered(IL, "training:manage", coached)).toBe(false);
   });
 });
 

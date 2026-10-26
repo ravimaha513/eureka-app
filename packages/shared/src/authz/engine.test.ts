@@ -29,7 +29,9 @@ const R1a = base({ userId: "R1a", roles: [{ role: "recruiter" }], teamIds: ["T1"
 const L1 = base({ userId: "L1", roles: [{ role: "lead" }], teamIds: ["T1"], subordinateUserIds: ["R1a", "R1b"], subtreeTeamIds: ["T1"] });
 const M = base({ userId: "M", roles: [{ role: "manager" }], subordinateUserIds: ["L1", "L2", "R1a", "R1b", "R2a"], subtreeTeamIds: ["T1", "T2"] });
 const LOCADM = base({ userId: "LA", roles: [{ role: "location_ops_admin", locationId: LOC_D }] });
-const COACH = base({ userId: "C", roles: [{ role: "interview_coach" }], coachedTeamIds: ["T2"] });
+const COACH = base({ userId: "C", roles: [{ role: "interview_coach" }], coachedTeamIds: ["T2"], subtreeCoachedTeamIds: ["T2"] });
+// Interview Lead: coach C reports to them; they coach T3 directly.
+const IL = base({ userId: "IL", roles: [{ role: "interview_lead" }], subordinateUserIds: ["C"], coachedTeamIds: ["T3"], subtreeCoachedTeamIds: ["T2", "T3"] });
 const HR = base({ userId: "H", roles: [{ role: "hr" }] });
 const ADMIN = base({ userId: "A", roles: [{ role: "org_admin" }] });
 
@@ -204,6 +206,18 @@ describe("candidateVisible", () => {
     const s = resolveScope(COACH, "candidate:read");
     expect(candidateVisible(s, cand({ teamId: "T2" }))).toBe(true);
     expect(candidateVisible(s, cand({ teamId: "T1" }))).toBe(false);
+  });
+
+  it("interview lead sees teams coached by them and their coaches, nothing else", () => {
+    for (const p of ["candidate:read", "hotlist:read", "interview:read", "interview.feedback:create", "training:read"] as const) {
+      const s = resolveScope(IL, p);
+      expect(candidateVisible(s, cand({ teamId: "T2" })), p).toBe(true);
+      expect(candidateVisible(s, cand({ teamId: "T3" })), p).toBe(true);
+      expect(candidateVisible(s, cand({ teamId: "T1" })), p).toBe(false);
+    }
+    // No Sales writes and not "Open to all teams".
+    expect(resolveScope(IL, "candidate:update")).toBeNull();
+    expect(candidateVisible(resolveScope(IL, "candidate:read"), cand({ teamId: "T9", visibility: "all_teams", marketingStatus: "active" }))).toBe(false);
   });
 
   it("denied scope sees nothing", () => {

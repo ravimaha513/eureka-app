@@ -67,7 +67,8 @@ describe("authz.scope_user_ids (0110)", () => {
     expect(await scopeIds(U.r1a, "performance:read")).toEqual([U.r1a]);
     expect(await scopeIds(U.l1, "performance:read")).toEqual(sorted([U.l1, U.r1a, U.r1b]));
     expect(await scopeIds(U.m1, "performance:read")).toEqual(sorted([U.m1, U.l1, U.l2, U.r1a, U.r1b, U.r2a]));
-    expect(await scopeIds(U.ad, "performance:read")).toEqual(sorted([U.ad, U.m1, U.m2, U.l1, U.l2, U.l3, U.r1a, U.r1b, U.r2a, U.r3a]));
+    // The AD's subtree includes Interview Prep (il and the coach below them).
+    expect(await scopeIds(U.ad, "performance:read")).toEqual(sorted([U.ad, U.m1, U.m2, U.l1, U.l2, U.l3, U.r1a, U.r1b, U.r2a, U.r3a, U.il, U.coach]));
     // Org scope is not expanded (callers test has_org first); no grant: nobody.
     expect(await scopeIds(U.ceo, "performance:read")).toEqual([]);
     expect(await scopeIds(U.hr, "performance:read")).toEqual([]);

@@ -47,7 +47,9 @@ export const DEMO_USERS: readonly DemoUser[] = [
   { key: "r1b", name: "Bhavna Joshi (demo)", designation: "Recruiter", role: "recruiter", manager: "l1" },
   { key: "r2a", name: "Chetan Kumar (demo)", designation: "Recruiter", role: "recruiter", manager: "l2" },
   { key: "r3a", name: "Divya Reddy (demo)", designation: "Recruiter", role: "recruiter", manager: "l3" },
-  { key: "coach", name: "Karthik Menon (demo)", designation: "Interview Coach", role: "interview_coach" },
+  // Interview Prep: the Interview Lead reports to the AD, the coach to the Interview Lead (AD-11).
+  { key: "il", name: "Sunita Pillai (demo)", designation: "Interview Lead", role: "interview_lead", manager: "ad" },
+  { key: "coach", name: "Karthik Menon (demo)", designation: "Interview Coach", role: "interview_coach", manager: "il" },
   { key: "locd", name: "Lakshmi Patel (demo)", designation: "Location Incharge", role: "location_incharge", location: "Demo Dallas" },
 ];
 

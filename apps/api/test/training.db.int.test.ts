@@ -78,7 +78,7 @@ describe("course catalog (TR-4)", () => {
     for (const key of users) {
       const rows = await q(U[key], `SELECT id FROM eureka.course WHERE id = $1`, [course]);
       expect(rows.length, key).toBe(toUserAccess(key).roles.some((r) =>
-        ["recruiter", "lead", "manager", "assoc_director", "ceo", "location_incharge", "location_ops_admin", "interview_coach",
+        ["recruiter", "lead", "manager", "assoc_director", "ceo", "location_incharge", "location_ops_admin", "interview_coach", "interview_lead",
           "hr", "associate_hr", "accounts", "immigration", "documents_team", "bu_head"].includes(r.role)) ? 1 : 0);
     }
   });

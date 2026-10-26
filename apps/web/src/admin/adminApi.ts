@@ -1,5 +1,6 @@
 /** Typed client for the admin and team API (docs/admin-api.md). */
 import { api, apiFetch } from "../api";
+import type { Coach } from "../team/coachApi";
 
 export interface Ref { id: string; displayName: string }
 export interface Place { id: string; name: string }
@@ -47,7 +48,7 @@ export interface BulkRowResult {
 }
 export interface BulkReport { dryRun: boolean; committed: boolean; created: number; failed: number; rows: BulkRowResult[] }
 
-export interface Team { id: string; name: string; location: Place | null; lead: Ref; members: Ref[] }
+export interface Team { id: string; name: string; location: Place | null; lead: Ref; members: Ref[]; coaches: Ref[] }
 export interface MoveResult { movedCandidates: number; reassignedTo: Ref }
 
 const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
@@ -91,7 +92,8 @@ export const adminApi = {
   createLocation: (b: { name: string; kind: LocationKind; state?: string; timezone?: string }) =>
     api<{ id: string }>("/api/v1/admin/locations", { method: "POST", ...json(b) }),
 
-  teams: () => api<{ items: Team[] }>("/api/v1/admin/teams"),
+  /** `coaches`: active holders of a coach role, who can be assigned to teams (AD-11). */
+  teams: () => api<{ items: Team[]; coaches: Coach[] }>("/api/v1/admin/teams"),
   createTeam: (b: { name: string; leadId: string; locationId?: string }) =>
     api<{ id: string }>("/api/v1/admin/teams", { method: "POST", ...json(b) }),
   renameTeam: (teamId: string, name: string) =>

@@ -24,7 +24,7 @@ import { CandidatesService } from "./modules/candidates/candidates.service.js";
 import { SubmissionsController, SubmissionsService } from "./modules/submissions/submissions.controller.js";
 import { InterviewsController } from "./modules/interviews/interviews.controller.js";
 import { InterviewsService } from "./modules/interviews/interviews.service.js";
-import { AdminController, TeamsController, UserDesignationController } from "./modules/admin/admin.controller.js";
+import { AdminController, CoachAssignmentsController, TeamsController, UserDesignationController } from "./modules/admin/admin.controller.js";
 import { PerformanceController, PerformanceService } from "./modules/performance/performance.controller.js";
 import { AdminService } from "./modules/admin/admin.service.js";
 import { PlacementsController } from "./modules/placements/placements.controller.js";
@@ -98,7 +98,7 @@ export class AppModule {
       module: AppModule,
       controllers: [
         FeedbackController, HealthController, AuthController, PasswordController, MeController, CandidatesController, SubmissionsController, InterviewsController,
-        AdminController, TeamsController, PlacementsController, LookupsController, DashboardController, HotlistController, ImportsController,
+        AdminController, TeamsController, CoachAssignmentsController, PlacementsController, LookupsController, DashboardController, HotlistController, ImportsController,
         PaperworkController,
         ResumesController, NotificationsController, DocumentsController, StepUpController,
         EmployeesController, AssignmentsController, ReportsController, WorkAuthorizationController,

@@ -7,6 +7,7 @@ import { friendlyError } from "./errors";
 import { keys, useAccess, useMeta, usePeople } from "./shared";
 import { Loading } from "../ui/Loading";
 import { QueryError } from "../ui/QueryError";
+import { CoachList } from "../team/Coaches";
 
 type Modal =
   | { kind: "create" }
@@ -55,6 +56,7 @@ export function TeamsTab() {
                 ))}
                 {t.members.length === 0 && <li className="muted">No members yet.</li>}
               </ul>
+              <CoachList team={t} coaches={t.coaches} available={q.data!.coaches} via="admin" onChanged={(msg) => { announce(msg); refresh(); }} />
               <div className="rowactions">
                 <button className="btn sm" aria-label={`Rename ${t.name}`} onClick={() => setModal({ kind: "rename", team: t })}>Rename</button>
                 <button className="btn sm" aria-label={`Change lead of ${t.name}`} onClick={() => setModal({ kind: "lead", team: t })}>Change lead</button>
