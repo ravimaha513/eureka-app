@@ -9,7 +9,7 @@ export class AccessService {
     // One round trip: this runs before every authenticated request.
     const { rows: [r] } = await c.query<{
       roles: { role_key: string; location_id: string | null }[];
-      teams: string[]; subs: string[]; subtree: string[]; coached: string[];
+      teams: string[]; subs: string[]; subtree: string[]; coached: string[]; shared: string[];
     }>(
       `SELECT
          COALESCE((SELECT json_agg(json_build_object('role_key', role_key, 'location_id', location_id))
@@ -26,7 +26,9 @@ export class AccessService {
          ARRAY(SELECT t.id FROM eureka.team t WHERE t.lead_id = $1
                UNION SELECT t.id FROM eureka.team t JOIN eureka.reporting_closure rc ON rc.descendant_id = t.lead_id
                WHERE rc.ancestor_id = $1)::text[] AS subtree,
-         ARRAY(SELECT team_id FROM eureka.coach_assignment WHERE coach_id = $1 AND valid @> now())::text[] AS coached`,
+         ARRAY(SELECT team_id FROM eureka.coach_assignment WHERE coach_id = $1 AND valid @> now())::text[] AS coached,
+         -- "Selected teams" shares reaching the caller's teams (0240); same set the candidate_read policy uses.
+         authz.shared_candidate_ids('candidate:read')::text[] AS shared`,
       [userId],
     );
     return {
@@ -38,6 +40,7 @@ export class AccessService {
       subordinateUserIds: r!.subs,
       subtreeTeamIds: r!.subtree,
       coachedTeamIds: r!.coached,
+      sharedCandidateIds: r!.shared,
     };
   }
 }

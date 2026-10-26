@@ -8,7 +8,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { DOCUMENTS_STATUSES, VISA_CATEGORIES, resolveScope } from "@eureka/shared";
+import { DOCUMENTS_STATUSES, VISA_CATEGORIES, resolveScope, type CandidateVisibility } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
@@ -37,7 +37,7 @@ interface ExportRow {
   team_name: string;
   recruiter_name: string | null;
   location_name: string;
-  visibility: "team" | "all_teams";
+  visibility: CandidateVisibility;
   marketing_status: string;
   priority: string;
   marketing_start_date: string | null;
@@ -121,7 +121,7 @@ export class HotlistService {
   // ---- bulk actions: the single-record operation, once per record ----
 
   bulkVisibility(user: AuthedUser, body: BulkVisibility) {
-    return this.bulk(user, "visibility", body.visibility, body.ids, (id) => this.candidates.setVisibility(user, id, body.visibility));
+    return this.bulk(user, "visibility", body.visibility, body.ids, (id) => this.candidates.setVisibility(user, id, body.visibility, body.teamIds));
   }
 
   bulkStatus(user: AuthedUser, body: BulkStatus) {
@@ -191,7 +191,7 @@ export class HotlistService {
         "Marketing since", "Days in market", "Technical rating", "Visa", "Documents", "Stay"],
       page.map((r) => [
         `${r.first_name} ${r.last_name}`, r.technology, label(r.marketing_status),
-        r.visibility === "all_teams" ? "Open to all teams" : "Team only", r.priority, r.team_name,
+        r.visibility === "all_teams" ? "Open to all teams" : r.visibility === "selected_teams" ? "Selected teams" : "Team only", r.priority, r.team_name,
         r.recruiter_name ?? "Unassigned", r.location_name, r.phone, r.marketing_start_date,
         r.marketing_start_date ? Math.floor((now - Date.parse(r.marketing_start_date)) / 86_400_000) : null,
         r.technical_rating,

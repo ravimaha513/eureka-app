@@ -13,8 +13,8 @@ import { ComplianceDialog } from "./ComplianceDialog";
 import { documentsLabel, eligibilityLabel, stayLabel, visaLabel } from "./candidateFields";
 import { salesError } from "./errors";
 import { DUPLICATE_WARNING, LogSubmissionDialog } from "./LogSubmissionDialog";
-import { TRANSITIONS, salesApi, salesKeys, statusLabel, type CandidateProfile as Profile, type Visibility } from "./salesApi";
-import { OpenToAllBadge, Phone, Priority, StatusBadge, fmtDate } from "./ui";
+import { TRANSITIONS, VISIBILITY_LABELS, salesApi, salesKeys, statusLabel, type CandidateProfile as Profile, type Visibility } from "./salesApi";
+import { OpenToAllBadge, Phone, Priority, SharedBadge, StatusBadge, fmtDate } from "./ui";
 import { Loading } from "../ui/Loading";
 
 type Modal = { kind: "edit" } | { kind: "submit" } | { kind: "terminate" } | { kind: "compliance" };
@@ -96,6 +96,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
             <StatusBadge status={c.status} />{" "}
             {c.statusLabel && c.statusLabel.includes("/") && <>{c.statusLabel}{" "}</>}
             {c.visibility === "all_teams" && <><OpenToAllBadge />{" "}</>}
+            {c.visibility === "selected_teams" && <><SharedBadge />{" "}</>}
             <Priority p={c.priority} /> · {c.technology} · {c.team.name}
           </p>
         </div>
@@ -135,7 +136,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
             <dt>Marketing since</dt><dd>{fmtDate(c.marketingStartDate)}</dd>
             <dt>Days in market</dt><dd>{c.daysInMarket ?? "—"}</dd>
             <dt>Technical rating</dt><dd>{c.technicalRating ? `${c.technicalRating} / 5` : "Not rated"}</dd>
-            <dt>Visibility</dt><dd>{c.visibility === "all_teams" ? "Open to all teams" : "Team only"}</dd>
+            <dt>Visibility</dt><dd>{VISIBILITY_LABELS[c.visibility]}{c.sharedTeams?.length ? `: ${c.sharedTeams.map((t) => t.name).join(", ")}` : ""}</dd>
             {c.inPersonOk !== undefined && <><dt>In-person interviews</dt><dd>{c.inPersonOk === null ? "Not recorded" : c.inPersonOk ? "Open to in-person" : "Remote only"}</dd></>}
             {c.marketingEmail !== undefined && <><dt>Marketing email</dt><dd>{c.marketingEmail ?? "—"}</dd></>}
             {c.vitelNumber !== undefined && <><dt>VITEL number</dt><dd>{c.vitelNumber ?? "—"}</dd></>}
@@ -149,6 +150,11 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
               <VisibilitySwitch value={c.visibility} busy={busy === "vis"}
                 onChange={(to) => void act("vis", () => salesApi.setVisibility(c.id, to),
                   to === "all_teams" ? `${c.name} is now open to all teams.` : `${c.name} is now visible to your team only.`)} />
+            )}
+            {canVisibility && (
+              <TeamSharePicker ownTeamId={c.team.id} visibility={c.visibility} shared={c.sharedTeams ?? []} busy={busy === "share"}
+                onSave={(ids) => void act("share", () => salesApi.setVisibility(c.id, ids.length ? "selected_teams" : "team", ids.length ? ids : undefined),
+                  ids.length ? `${c.name} is now shared with ${ids.length === 1 ? "1 team" : `${ids.length} teams`}.` : `${c.name} is now visible to your team only.`)} />
             )}
             {canRate && (
               <RatingForm current={c.technicalRating} busy={busy === "rating"}
@@ -233,6 +239,63 @@ function VisibilitySwitch({ value, busy, onChange }: { value: Visibility; busy: 
         <span className="knob" aria-hidden="true" /> <span>{on ? "On" : "Off"}</span>
       </button>
     </div>
+  );
+}
+
+/**
+ * "Selected teams" (0240): pick the teams that may also see the candidate. Saving
+ * with none picked goes back to team only; Open to all teams already covers every team.
+ */
+function TeamSharePicker({ ownTeamId, visibility, shared, busy, onSave }: {
+  ownTeamId: string; visibility: Visibility; shared: { id: string }[]; busy: boolean; onSave: (teamIds: string[]) => void;
+}) {
+  const id = useId();
+  const teams = useQuery({ queryKey: ["candidate-share-teams"], queryFn: () => salesApi.shareTeams(), staleTime: 300_000 });
+  const savedKey = shared.map((t) => t.id).sort().join(",");
+  const [picked, setPicked] = useState<Set<string>>(() => new Set(shared.map((t) => t.id)));
+  const [filter, setFilter] = useState("");
+  useEffect(() => setPicked(new Set(savedKey ? savedKey.split(",") : [])), [savedKey]);
+  const options = (teams.data?.items ?? []).filter((t) => t.id !== ownTeamId);
+  const needle = filter.trim().toLowerCase();
+  const shown = options.filter((t) => `${t.name} ${t.lead ?? ""}`.toLowerCase().includes(needle));
+  const dirty = [...picked].sort().join(",") !== savedKey;
+  const openToAll = visibility === "all_teams";
+  return (
+    <form className="manageblock" aria-labelledby={`${id}-l`} onSubmit={(e) => { e.preventDefault(); onSave([...picked]); }}>
+      <h3 id={`${id}-l`}>Share with selected teams</h3>
+      <p id={`${id}-d`} className="hint">
+        {openToAll
+          ? "Open to all teams already shares this candidate with every team. Turn it off to pick teams."
+          : "Picked teams can see and submit this candidate while they're active. Your team always sees it."}
+      </p>
+      {!openToAll && (
+        teams.isPending ? <Loading /> : teams.isError ? <p className="error" role="alert">Couldn't load teams.</p> : (
+          <>
+            <label className="field">
+              <span>Find a team</span>
+              <input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} aria-describedby={`${id}-d`} />
+            </label>
+            <fieldset className="radios sharelist">
+              <legend>Teams</legend>
+              {shown.length === 0 && <p className="muted">No teams match.</p>}
+              {shown.map((t) => (
+                <label key={t.id}>
+                  <input type="checkbox" checked={picked.has(t.id)} disabled={busy}
+                    onChange={(e) => setPicked((s) => {
+                      const n = new Set(s);
+                      if (e.target.checked) n.add(t.id); else n.delete(t.id);
+                      return n;
+                    })} />
+                  {t.name}{t.lead ? <span className="muted"> · {t.lead}</span> : null}
+                </label>
+              ))}
+            </fieldset>
+            <p className="muted">{picked.size === 0 ? "Not shared with other teams." : picked.size === 1 ? "1 team picked." : `${picked.size} teams picked.`}</p>
+            <button type="submit" className="btn" disabled={busy || !dirty} aria-busy={busy || undefined}>Save sharing</button>
+          </>
+        )
+      )}
+    </form>
   );
 }
 

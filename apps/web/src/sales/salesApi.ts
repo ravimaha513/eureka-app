@@ -29,6 +29,8 @@ export interface CandidateProfile extends Candidate {
   companies?: { everify: Named | null; offerLetter: Named | null; form1099: Named | null };
   /** candidate.compliance:update covers this candidate (UI hint). */
   canEditCompliance?: boolean;
+  /** Owners only: the teams a "Selected teams" candidate is shared with. */
+  sharedTeams?: Named[];
 }
 
 export interface Named { id: string; name: string }
@@ -95,7 +97,15 @@ export interface CandidateActions {
 
 export interface Page<T> { items: T[]; nextCursor: string | null }
 
-export type Visibility = "team" | "all_teams";
+export type Visibility = "team" | "all_teams" | "selected_teams";
+
+export const VISIBILITY_LABELS: Record<Visibility, string> = {
+  team: "Team only",
+  all_teams: "Open to all teams",
+  selected_teams: "Selected teams",
+};
+
+export interface ShareTeam { id: string; name: string; lead: string | null }
 export type Priority = "P1" | "P2" | "P3";
 
 export interface ListFilters {
@@ -205,8 +215,11 @@ export const salesApi = {
   candidate: (id: string) => api<CandidateProfile>(`/api/v1/candidates/${enc(id)}`),
   create: (b: CreateCandidate) => api<{ id: string }>("/api/v1/candidates", { method: "POST", ...json(b) }),
   update: (id: string, b: ProfileUpdate) => api<{ id: string }>(`/api/v1/candidates/${enc(id)}`, { method: "PATCH", ...json(b) }),
-  setVisibility: (id: string, visibility: Visibility) =>
-    api<{ id: string; visibility: Visibility }>(`/api/v1/candidates/${enc(id)}/visibility`, { method: "PUT", ...json({ visibility }) }),
+  /** `teamIds` with "selected_teams" only (the server rejects it otherwise). */
+  setVisibility: (id: string, visibility: Visibility, teamIds?: string[]) =>
+    api<{ id: string; visibility: Visibility }>(`/api/v1/candidates/${enc(id)}/visibility`, {
+      method: "PUT", ...json(visibility === "selected_teams" ? { visibility, teamIds } : { visibility }) }),
+  shareTeams: () => api<{ items: ShareTeam[] }>("/api/v1/candidate-share-teams"),
   setRating: (id: string, rating: number) =>
     api<{ id: string; technicalRating: number }>(`/api/v1/candidates/${enc(id)}/technical-rating`, { method: "PUT", ...json({ rating }) }),
   transition: (id: string, to: string) =>
@@ -275,8 +288,9 @@ export const hotlistApi = {
   deleteView: (id: string) => api<void>(`/api/v1/hotlist/views/${enc(id)}`, { method: "DELETE" }),
   bulkStatus: (ids: string[], to: string) =>
     api<BulkResponse>("/api/v1/hotlist/bulk/status", { method: "POST", ...json({ ids, to }) }),
-  bulkVisibility: (ids: string[], visibility: Visibility) =>
-    api<BulkResponse>("/api/v1/hotlist/bulk/visibility", { method: "POST", ...json({ ids, visibility }) }),
+  bulkVisibility: (ids: string[], visibility: Visibility, teamIds?: string[]) =>
+    api<BulkResponse>("/api/v1/hotlist/bulk/visibility", {
+      method: "POST", ...json(visibility === "selected_teams" ? { ids, visibility, teamIds } : { ids, visibility }) }),
   /** CSV of the current view; the server caps, masks and audits it. */
   exportCsv: (filters: ViewFilters): Promise<ExportResult> => fetchCsv("/api/v1/hotlist/export", filters, "hotlist.csv"),
 };
@@ -296,7 +310,8 @@ export function describeEvent(e: TimelineEvent): string {
   switch (e.type) {
     case "candidate.created": return "Candidate created";
     case "candidate.status_changed": return `Status changed from ${s(e.from)} to ${s(e.to)}`;
-    case "candidate.visibility_changed": return e.to === "all_teams" ? "Opened to all teams" : "Made visible to the team only";
+    case "candidate.visibility_changed":
+      return e.to === "all_teams" ? "Opened to all teams" : e.to === "selected_teams" ? "Shared with selected teams" : "Made visible to the team only";
     case "candidate.rating_changed": return e.to ? `Technical rating set to ${e.to} of 5` : "Technical rating cleared";
     case "candidate.assigned": return e.ref?.label ? `Assigned to ${e.ref.label}` : "Team or recruiter changed";
     case "candidate.batch_changed": return e.ref?.id ? `Added to batch ${e.ref.label ?? ""}`.trim() : "Removed from batch";

@@ -24,6 +24,7 @@ import {
   resolveScope,
   type CandidateCompanyLink,
   type CandidateRef,
+  type CandidateVisibility,
   type EffectiveScope,
   type Permission,
   type UserAccess,
@@ -58,7 +59,7 @@ interface CandidateRow {
   recruiter_name: string | null;
   location_id: string;
   location_name: string;
-  visibility: "team" | "all_teams";
+  visibility: CandidateVisibility;
   marketing_status: string;
   priority: string;
   marketing_start_date: string | null;
@@ -166,11 +167,14 @@ export function scopePredicate(scope: EffectiveScope, params: unknown[], alias =
   ];
   if (scope.allTeams) {
     parts.push(`(${alias}.visibility = 'all_teams' AND ${alias}.marketing_status = ANY(${p([...MARKETABLE_STATUSES])}::text[]))`);
+    // "Selected teams" (0240): the set is already limited to marketable, selected_teams candidates.
+    if (scope.sharedCandidateIds.size > 0) parts.push(`${alias}.id = ANY(${p([...scope.sharedCandidateIds])}::uuid[])`);
   }
   return `(${parts.join(" OR ")})`;
 }
 
-const toRef = (r: Pick<CandidateRow, "recruiter_id" | "team_id" | "location_id" | "visibility" | "marketing_status">): CandidateRef => ({
+const toRef = (r: Pick<CandidateRow, "id" | "recruiter_id" | "team_id" | "location_id" | "visibility" | "marketing_status">): CandidateRef => ({
+  id: r.id,
   recruiterId: r.recruiter_id,
   teamId: r.team_id,
   locationId: r.location_id,
@@ -223,7 +227,7 @@ interface HotlistRow {
   recruiter_name: string | null;
   location_id: string;
   location_name: string;
-  visibility: "team" | "all_teams";
+  visibility: CandidateVisibility;
   marketing_status: string;
   priority: string;
   marketing_start_date: string | null;
@@ -486,7 +490,11 @@ export class CandidatesService implements OnModuleInit {
       const companies = r ? (await c.query<{ link: CandidateCompanyLink; company_id: string; company_name: string }>(
         `SELECT * FROM authz.candidate_companies($1)`, [id])).rows : [];
       const uploaded = r ? (await c.query<{ ids: string[] }>(`SELECT authz.resume_flags(ARRAY[$1]::uuid[]) AS ids`, [id])).rows[0]!.ids : [];
-      return r && extra ? { row: r, open, extra, companies, hasResume: r.resume_link || uploaded.length > 0 } : undefined;
+      // "Selected teams" picks (0240), readable with the candidate.
+      const sharedTeams = r?.visibility === "selected_teams" ? (await c.query<{ id: string; name: string }>(
+        `SELECT t.id, t.name FROM eureka.candidate_team_share s JOIN eureka.team t ON t.id = s.team_id
+          WHERE s.candidate_id = $1 ORDER BY t.name, t.id`, [id])).rows : [];
+      return r && extra ? { row: r, open, extra, companies, sharedTeams, hasResume: r.resume_link || uploaded.length > 0 } : undefined;
     });
     if (!found) throw new NotFoundException();
     const ref = toRef(found.row);
@@ -505,6 +513,8 @@ export class CandidatesService implements OnModuleInit {
       /** Owners and compliance editors only (E-Verify, offer letter and 1099 companies). */
       ...(showCompanies ? { companies: { everify: link("everify"), offerLetter: link("offerLetter"), form1099: link("form1099") } } : {}),
       canEditCompliance: canCompliance,
+      /** Owners only: the teams a "Selected teams" candidate is shared with. */
+      ...(readScope !== null && ownsCandidate(readScope, ref) ? { sharedTeams: found.sharedTeams } : {}),
       /** Hints for the UI (docs/placements-api.md); every write is checked again. */
       actions: candidateActions(user.access, toRef(found.row), found.open),
     };
@@ -580,12 +590,31 @@ export class CandidatesService implements OnModuleInit {
     return { items: rows.map((r) => ({ id: r.id, name: r.name, location: r.location_name })) };
   }
 
-  async setVisibility(user: AuthedUser, id: string, visibility: "team" | "all_teams") {
+  /** Every team, with its lead, for the "Selected teams" picker; callers without candidate.visibility:update get 403. */
+  async shareTeams(user: AuthedUser) {
+    if (!resolveScope(user.access, "candidate.visibility:update")) throw new ForbiddenException();
+    const rows = await this.db.withUser(user.id, async (c) => (await c.query<{ id: string; name: string; lead_name: string | null }>(
+      `SELECT t.id, t.name, u.display_name AS lead_name
+         FROM eureka.team t LEFT JOIN eureka.app_user u ON u.id = t.lead_id
+        ORDER BY lower(t.name), t.id`)).rows);
+    return { items: rows.map((r) => ({ id: r.id, name: r.name, lead: r.lead_name })) };
+  }
+
+  async setVisibility(user: AuthedUser, id: string, visibility: CandidateVisibility, teamIds: string[] = []) {
     return this.db.withUser(user.id, async (c) => {
       await this.loadForWrite(c, user, id, "candidate.visibility:update");
-      await c.query(`UPDATE eureka.candidate SET visibility = $2 WHERE id = $1`, [id, visibility]);
-      await this.audit.record(c, { actorId: user.id, action: "candidate.visibility", entityType: "candidate", entityId: id, changes: { visibility } });
-      return { id, visibility };
+      try {
+        // authz.set_candidate_visibility (0240) re-checks and replaces the "Selected teams" picks.
+        await c.query(`SELECT authz.set_candidate_visibility($1, $2, $3::uuid[])`, [id, visibility, visibility === "selected_teams" ? teamIds : []]);
+      } catch (err) {
+        const m = (err as { message?: string }).message;
+        if (m === "teams_required" || m === "invalid_team" || m === "too_many_teams") throw new UnprocessableEntityException(m);
+        throw err;
+      }
+      // Ids only (rule 5).
+      await this.audit.record(c, { actorId: user.id, action: "candidate.visibility", entityType: "candidate", entityId: id,
+        changes: visibility === "selected_teams" ? { visibility, teamIds } : { visibility } });
+      return { id, visibility, ...(visibility === "selected_teams" ? { teamIds } : {}) };
     });
   }
 
@@ -709,7 +738,7 @@ export class CandidatesService implements OnModuleInit {
       if (!owner) {
         since = (await c.query<{ id: string | null }>(
           `SELECT max(id)::text AS id FROM eureka.candidate_event
-           WHERE candidate_id = $1 AND type = 'candidate.visibility_changed' AND to_value = 'all_teams'`, [id])).rows[0]?.id ?? null;
+           WHERE candidate_id = $1 AND type = 'candidate.visibility_changed' AND to_value IN ('all_teams', 'selected_teams')`, [id])).rows[0]?.id ?? null;
       }
       const ep: unknown[] = [id, q.cursor ?? null, q.limit + 1, since];
       const activity = (table: string, alias: string, perm: Permission) => {

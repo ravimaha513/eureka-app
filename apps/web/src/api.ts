@@ -23,7 +23,7 @@ export interface Candidate {
   name: string;
   technology: string;
   status: string;
-  visibility: "team" | "all_teams";
+  visibility: "team" | "all_teams" | "selected_teams";
   priority: "P1" | "P2" | "P3";
   team: { id: string; name: string };
   recruiter: { id: string; name: string } | null;

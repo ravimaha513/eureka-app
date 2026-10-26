@@ -45,6 +45,7 @@ export function ListFilters({ s, label, statuses, batches }: {
           <option value="">Any visibility</option>
           <option value="team">Team only</option>
           <option value="all_teams">Open to all teams</option>
+          <option value="selected_teams">Selected teams</option>
         </select>
       </div>
       {batches && (

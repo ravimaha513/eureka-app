@@ -95,11 +95,11 @@ export class ResumesService {
     const scope = resolveScope(user.access, "candidate:read");
     if (!scope) throw new NotFoundException();
     const params: unknown[] = [id];
-    const row = (await c.query<{ recruiter_id: string | null; team_id: string; location_id: string; visibility: "team" | "all_teams"; marketing_status: string }>(
+    const row = (await c.query<{ recruiter_id: string | null; team_id: string; location_id: string; visibility: CandidateRef["visibility"]; marketing_status: string }>(
       `SELECT c.recruiter_id, c.team_id, c.location_id, c.visibility, c.marketing_status
        FROM eureka.candidate c WHERE c.id = $1 AND ${scopePredicate(scope, params)}`, params)).rows[0];
     if (!row) throw new NotFoundException();
-    return { recruiterId: row.recruiter_id, teamId: row.team_id, locationId: row.location_id, visibility: row.visibility, marketingStatus: row.marketing_status };
+    return { id, recruiterId: row.recruiter_id, teamId: row.team_id, locationId: row.location_id, visibility: row.visibility, marketingStatus: row.marketing_status };
   }
 
   async list(user: AuthedUser, candidateId: string) {

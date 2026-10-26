@@ -203,6 +203,7 @@ export function BulkBar({ selected, items, canStatus, canVisibility, onDone }: {
                 <option value="">Choose visibility</option>
                 <option value="team">Team only</option>
                 <option value="all_teams">Open to all teams</option>
+                <option value="selected_teams">Selected teams</option>
               </select>
             </div>
             <button type="button" className="btn primary" disabled={!n || !vis || run.isPending}
