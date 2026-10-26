@@ -161,7 +161,7 @@ same transaction and not linked to another application. The client of a job is l
 (the lookups rule).
 
 Accepted (rationale): `GET /jobs/options` lists active staff (id and display name) to any `job:manage` holder for the hiring-manager and interview pickers: names only, the
-same data the app's lookups already expose, and filtering by "holds a role at the job's scope" would hide legitimate cross-team interviewers.
+same data the app's lookups already expose, and filtering by "holds a role at the job's scope" would hide legitimate cross-team interviewers. Team/hierarchy `job:manage` holders see only the people their grant covers, themselves and their reporting chain up; org holders see everyone.
 
 Overall rating = mean of all scorecard averages of the application. Audit rows and outbox payloads hold ids and codes only; comments and notes are never audited.
 Notification (JP-31): `application.received` (ids only) from `authz.application_apply` → in-app inbox for HR and the job's hiring manager (no email), entity `application`;

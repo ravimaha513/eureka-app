@@ -31,7 +31,7 @@ malware scan (migration 0043, `docs/paperwork-api.md`, HANDOFF "Paperwork and re
 - `PATCH /api/v1/datahub/folders/:id` (`If-Match`) with any of `{ name, description, level, roleKeys, membersCanUpload, memberIds }` → `{ id, rowVersion }`. `memberIds` adds people when the folder is (or becomes) restricted.
 - `DELETE /api/v1/datahub/folders/:id` (`If-Match`) → 204.
 - `GET /api/v1/datahub/folders/:id/members` (manager) → `{ items: [{ id, name, addedAt }] }`; `PUT|DELETE /api/v1/datahub/folders/:id/members/:userId` (manager, restricted folders; 422 `not_restricted`) → 204.
-- `GET /api/v1/datahub/people?q=&limit=` (`datahub:manage` or `datahub:create`) → `{ items: [{ id, name }] }` (active staff only).
+- `GET /api/v1/datahub/people?q=&limit=` (`datahub:manage` or `datahub:create`) → `{ items: [{ id, name }] }` (active staff only; creators without `datahub:manage` whose `performance:read` is team/hierarchy see only their team or reporting subtree).
 - `GET /api/v1/datahub/folders/:id/files?cursor=&limit=` → `{ items: [File], nextCursor }` by name; 403 `not_member` for a manager who cannot read a restricted folder.
 - `POST /api/v1/datahub/folders/:id/files` with `{ name, contentType, size }` → 201 `{ fileId, versionId, version, status: "pending", upload: { url, fields, expiresAt } }`.
 - `GET /api/v1/datahub/files/:id/versions` → `{ items: [Version] }` newest first; `DELETE /api/v1/datahub/files/:id` → 204.

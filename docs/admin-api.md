@@ -60,7 +60,7 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 - `PATCH /api/v1/admin/teams/:id` with `{ name }` (1–120 chars, trimmed) renames the team and returns 204. 404 unknown team. The audit row (`admin.team.renamed`) does not carry the name.
 - `PUT /api/v1/admin/teams/:id/lead` with `{ leadId }` returns 204.
 - `POST /api/v1/admin/teams/:id/members` with `{ userId }` returns 204. A user who is already in another team gets a 409; use the move endpoint instead.
-- `GET /api/v1/teams/mine` (permission `team:add_member`, AD-10) returns `{ items: [{ id, name, lead: {id,displayName}, members: [{id,displayName}] }], addable: [{ id, displayName, email }] }`: the caller's teams and the active recruiters in no team.
+- `GET /api/v1/teams/mine` (permission `team:add_member`, AD-10) returns `{ items: [{ id, name, lead: {id,displayName}, members: [{id,displayName}] }], addable: [{ id, displayName, email }] }`: the caller's teams and the active recruiters in no team (for team/hierarchy callers: only those with no manager yet or below the caller, or a lead of one of those teams, in the reporting line).
 - `POST /api/v1/teams/:id/members` with `{ userId }` (permission `team:add_member`, AD-10) returns 204. 404 unknown team, 403 `not_in_scope` for a team outside the caller's scope.
 - `POST /api/v1/teams/:id/move-member` with `{ userId, toTeamId, reassignTo? }` (permission `team:move_member`, AD-8) returns 200 `{ movedCandidates: number, reassignedTo: { id, displayName } }`.
 

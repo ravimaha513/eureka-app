@@ -15,6 +15,7 @@ import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import { PARTY_PERMISSIONS } from "../lookups/lookups.controller.js";
 import type { CreateJob, JobListQuery, UpdateJob } from "./jobs.schemas.js";
 import { likeContains } from "../../platform/sql.js";
+import { inPickerScope, pickerScopePerm } from "../../platform/people-scope.js";
 
 /**
  * Jobs (docs/jobs-portal-api.md JP-1..JP-9, migration 0060). Reads run under
@@ -233,14 +234,27 @@ export class JobsService {
     }));
   }
 
-  /** Pickers for the job form: kinds the caller may create, clients (client requirements), staff (hiring manager). */
+  /**
+   * Pickers for the job form: kinds the caller may create, clients (client requirements), staff (hiring manager).
+   * Staff for team/hierarchy grants: the people job:manage covers, the caller and their reporting chain up.
+   */
   async options(user: AuthedUser) {
     const kinds = creatableJobKinds(user.access);
+    const perm = pickerScopePerm(user.access, "job:manage");
+    const params: unknown[] = [];
+    let where = "";
+    if (perm) {
+      params.push(user.id);
+      where = `AND (u.id = $1 OR ${inPickerScope("u.id", perm, params)}
+        OR u.id IN (SELECT rc.ancestor_id FROM eureka.reporting_closure rc WHERE rc.descendant_id = $1))`;
+    }
     return this.db.withUser(user.id, async (c) => ({
       kinds,
       clients: kinds.includes("client_requirement")
         ? (await c.query(`SELECT id, name FROM eureka.client ORDER BY name, id`)).rows : [],
-      staff: (await c.query(`SELECT id, display_name AS name FROM eureka.app_user WHERE status = 'active' ORDER BY display_name, id`)).rows,
+      staff: (await c.query(
+        `SELECT u.id, u.display_name AS name FROM eureka.app_user u WHERE u.status = 'active' ${where}
+         ORDER BY u.display_name, u.id`, params)).rows,
     }));
   }
 

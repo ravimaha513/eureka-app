@@ -35,7 +35,7 @@ problems with the code in `detail`, CSRF header on every write.
   `panel: [{ id, name, lead }]` and `lead: { id, name } | null`.
 - `GET /api/v1/interviews/:id/feedback` items add `round` and `scorecard: { technicalSkills, communication,
   problemSolving, attitude } | null`. `POST` accepts `scorecard`.
-- `GET /api/v1/interviews/panel-options` → `{ items: [{ id, name }] }` (active users, up to 500).
+- `GET /api/v1/interviews/panel-options` → `{ items: [{ id, name }] }` (active users, up to 500; callers whose `interview:create` is own/team/hierarchy see the sales people in that scope plus every non-sales user).
 - `GET /api/v1/interviews/:id/calendar.ics` → `text/calendar` attachment.
 
 ## Settings & Preferences (ST)
