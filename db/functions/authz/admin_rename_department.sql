@@ -1,6 +1,6 @@
 -- authz.admin_rename_department: current definition (repeatable; db/functions/README.md).
 -- An admin (access:manage) renames a department (docs/admin-api.md, Departments).
--- Column privilege granted in 0220. Change this file, not a new migration.
+-- Column privilege granted in 0230. Change this file, not a new migration.
 
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.admin_rename_department(p_department uuid, p_name text)

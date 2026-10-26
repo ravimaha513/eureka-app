@@ -1,7 +1,7 @@
 -- authz.admin_set_user_department: current definition (repeatable; db/functions/README.md).
 -- An admin (access:manage) sets or clears a user's department (docs/admin-api.md,
 -- Departments). Descriptive only, so admins may set their own. Returns the
--- previous department for the audit row. Column privilege granted in 0220.
+-- previous department for the audit row. Column privilege granted in 0230.
 -- Change this file, not a new migration.
 
 SET ROLE authz_definer;

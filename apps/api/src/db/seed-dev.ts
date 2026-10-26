@@ -63,7 +63,7 @@ if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-
   const n = await seedDevDatahub(admin);
   if (n) console.log(`seeded DataHub: ${n} folders`);
 }
-// Departments (migration 0220): Sales, and Sales → Interview Prep. The Sales fixture chain (AD down to
+// Departments (migration 0230): Sales, and Sales → Interview Prep. The Sales fixture chain (AD down to
 // recruiters) goes in Sales and the fixture coach in Interview Prep; users that already have one keep it.
 await admin.query(`INSERT INTO eureka.department (name) VALUES ('Sales') ON CONFLICT DO NOTHING`);
 await admin.query(`INSERT INTO eureka.department (name, parent_id)

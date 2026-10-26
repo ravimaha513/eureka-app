@@ -3,7 +3,7 @@ import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { U, seedFixtures } from "./fixtures.js";
 
 /**
- * Departments (migration 0220): admin-only writes through definer functions,
+ * Departments (migration 0230): admin-only writes through definer functions,
  * and descriptive only: nothing in authz or any policy reads a department.
  */
 let db: TestDb;

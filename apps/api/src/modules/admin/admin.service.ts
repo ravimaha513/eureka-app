@@ -476,7 +476,7 @@ export class AdminService {
   }
 
   // ---------- departments ----------
-  // Descriptive only (migration 0220): nothing in authz reads a department.
+  // Descriptive only (migration 0230): nothing in authz reads a department.
 
   async listDepartments(user: AuthedUser) {
     return this.tx(user, async (c) => {

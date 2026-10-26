@@ -1,7 +1,7 @@
 -- authz.admin_create_department: current definition (repeatable; db/functions/README.md).
 -- An admin (access:manage) creates a department, or a sub-department under a
 -- top-level one (docs/admin-api.md, Departments). Table and column privileges in
--- 0220. Change this file, not a new migration.
+-- 0230. Change this file, not a new migration.
 
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.admin_create_department(p_name text, p_parent uuid)

@@ -5,7 +5,7 @@ import { loadConfig } from "../src/platform/config.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
 import { T, U, seedFixtures } from "./fixtures.js";
 
-/** Departments in Users & Access (docs/admin-api.md, Departments; migration 0220). */
+/** Departments in Users & Access (docs/admin-api.md, Departments; migration 0230). */
 let db: TestDb;
 let app: NestFastifyApplication;
 const SECRET = "test-secret-test-secret-test-secret-123";
