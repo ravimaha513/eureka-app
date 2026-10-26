@@ -23,6 +23,8 @@ const CODES: Record<string, (code: string) => HttpException> = {
   user_not_found: () => new NotFoundException(),
   invalid_designation: (c) => new UnprocessableEntityException(c),
   team_not_found: () => new NotFoundException(),
+  department_not_found: () => new NotFoundException(),
+  invalid_parent: (c) => new UnprocessableEntityException(c),
   request_not_found: () => new NotFoundException(),
   role_not_held: () => new NotFoundException(),
   location_required: (c) => new UnprocessableEntityException(c),
@@ -57,5 +59,6 @@ export function mapAdminError(err: unknown): never {
   if (e.code === "23P01") throw new ConflictException("already_member");
   if (e.code === "23505" && e.constraint === "app_user_email_key") throw new ConflictException("email_exists");
   if (e.code === "23505" && e.constraint === "location_name_key") throw new ConflictException("location_exists");
+  if (e.code === "23505" && e.constraint === "department_name_key") throw new ConflictException("department_exists");
   throw err;
 }
