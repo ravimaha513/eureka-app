@@ -1,4 +1,4 @@
--- Candidate visibility "Selected teams" (docs/candidates-api.md CA-6).
+-- Candidate visibility "Selected teams" (docs/candidates-api.md CA-5).
 --
 -- A candidate's visibility was `team` (its own team and hierarchy, location
 -- roles, the CEO) or `all_teams` (also every Sales user while active / full of
@@ -70,6 +70,8 @@ GRANT SELECT ON eureka.candidate_team_share TO eureka_app;
 GRANT SELECT, INSERT, DELETE ON eureka.candidate_team_share TO authz_definer;
 REVOKE ALL ON FUNCTION eureka.candidate_team_share_guard() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION eureka.candidate_team_share_guard() TO authz_definer;
+-- authz.set_candidate_visibility writes the column (the column guard still re-checks ownership).
+GRANT UPDATE (visibility) ON eureka.candidate TO authz_definer;
 
 -- ---------- definer functions ----------
 SET ROLE authz_definer;
