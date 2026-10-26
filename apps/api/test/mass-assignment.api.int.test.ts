@@ -680,6 +680,14 @@ const CASES: RejectCase[] = [
     forbidden: { teamId: T.t3, name: "Renamed", locationId: LOC.austin, members: [U.r1a] },
   },
   {
+    route: "PATCH /api/v1/admin/teams/:id", actor: "admin",
+    prepare: async () => ({
+      url: `/api/v1/admin/teams/${T.t2}`, body: { name: "Team Renamed" },
+      state: () => rows(`SELECT * FROM eureka.team ORDER BY id`),
+    }),
+    forbidden: { teamId: T.t3, leadId: U.l1, locationId: LOC.austin, members: [U.r1a] },
+  },
+  {
     route: "POST /api/v1/admin/teams/:id/members", actor: "admin",
     prepare: async () => ({
       url: `/api/v1/admin/teams/${T.t2}/members`, body: { userId: U.r3a },
@@ -2077,7 +2085,12 @@ const IGNORED: IgnoreCase[] = [
         { ...SERVER_MANAGED, userId: U.r2a, folderId: FOREIGN_ID, addedBy: U.admin, addedAt: PAST });
       expect(res.statusCode, res.body).toBe(204);
       const m = await rows(`SELECT folder_id, user_id, added_by FROM eureka.datahub_folder_member WHERE folder_id = $1`, [f.id]);
-      expect(m).toEqual([{ folder_id: f.id, user_id: U.r1a, added_by: U.hr }]);
+      // The creator is a member from creation (#55); the PUT adds only the path's user.
+      expect(m).toHaveLength(2);
+      expect(m).toEqual(expect.arrayContaining([
+        { folder_id: f.id, user_id: U.hr, added_by: U.hr },
+        { folder_id: f.id, user_id: U.r1a, added_by: U.hr },
+      ]));
     },
   },
   {

@@ -30,7 +30,7 @@ afterAll(async () => {
   await db?.drop();
 });
 
-type Method = "GET" | "POST" | "PUT" | "DELETE";
+type Method = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 type Session = { cookie: string; csrf: string };
 const sessions = new Map<string, Session>();
 
@@ -81,6 +81,7 @@ const ADMIN_ENDPOINTS: { method: Method; url: string; body?: unknown; adminStatu
   { method: "POST", url: "/api/v1/admin/locations", body: {}, adminStatus: 422 },
   { method: "GET", url: "/api/v1/admin/teams", adminStatus: 200 },
   { method: "POST", url: "/api/v1/admin/teams", body: {}, adminStatus: 422 },
+  { method: "PATCH", url: `/api/v1/admin/teams/${T.t1}`, body: {}, adminStatus: 422 },
   { method: "PUT", url: `/api/v1/admin/teams/${T.t1}/lead`, body: {}, adminStatus: 422 },
   { method: "POST", url: `/api/v1/admin/teams/${T.t1}/members`, body: {}, adminStatus: 422 },
 ];
@@ -469,6 +470,17 @@ describe("teams", () => {
     const t = (await call("admin", "GET", "/api/v1/admin/teams")).json().items.find((x: { id: string }) => x.id === id);
     expect(t).toEqual({ id, name: "Team New", location: { id: LOC.dallas, name: "Dallas" }, lead: { id: U.m2, displayName: "m2" }, members: [{ id: U.hr, displayName: "hr" }] });
     expect((await call("admin", "PUT", `/api/v1/admin/teams/${NIL}/lead`, { leadId: U.m2 })).statusCode).toBe(404);
+  });
+
+  it("renames a team; the audit row carries no name", async () => {
+    const { id } = (await call("admin", "POST", "/api/v1/admin/teams", { name: "Team Old", leadId: U.l3 })).json() as { id: string };
+    expect((await call("admin", "PATCH", `/api/v1/admin/teams/${id}`, { name: "  Team Renamed " })).statusCode).toBe(204);
+    const t = (await call("admin", "GET", "/api/v1/admin/teams")).json().items.find((x: { id: string }) => x.id === id);
+    expect(t.name).toBe("Team Renamed");
+    expect((await audits("admin.team.renamed")).at(-1)).toMatchObject({ entity_id: id, changes: null });
+    expect((await call("admin", "PATCH", `/api/v1/admin/teams/${id}`, { name: "   " })).statusCode).toBe(422);
+    expect((await call("admin", "PATCH", `/api/v1/admin/teams/${NIL}`, { name: "X" })).statusCode).toBe(404);
+    expect((await call("l1", "PATCH", `/api/v1/admin/teams/${T.t1}`, { name: "X" })).statusCode).toBe(403);
   });
 });
 

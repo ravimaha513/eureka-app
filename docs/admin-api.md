@@ -57,6 +57,7 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 - `GET /api/v1/admin/teams` returns
   `{ items: [{ id, name, location: {id,name}|null, lead: {id,displayName}, members: [{ id, displayName }] }] }`
 - `POST /api/v1/admin/teams` with `{ name, leadId, locationId? }` returns 201 `{ id }`.
+- `PATCH /api/v1/admin/teams/:id` with `{ name }` (1–120 chars, trimmed) renames the team and returns 204. 404 unknown team. The audit row (`admin.team.renamed`) does not carry the name.
 - `PUT /api/v1/admin/teams/:id/lead` with `{ leadId }` returns 204.
 - `POST /api/v1/admin/teams/:id/members` with `{ userId }` returns 204. A user who is already in another team gets a 409; use the move endpoint instead.
 - `GET /api/v1/teams/mine` (permission `team:add_member`, AD-10) returns `{ items: [{ id, name, lead: {id,displayName}, members: [{id,displayName}] }], addable: [{ id, displayName, email }] }`: the caller's teams and the active recruiters in no team.

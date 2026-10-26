@@ -446,6 +446,14 @@ export class AdminService {
     });
   }
 
+  // The name is free text, so the audit row records only that it changed (rule 5).
+  async renameTeam(user: AuthedUser, teamId: string, name: string) {
+    await this.tx(user, async (c) => {
+      await c.query(`SELECT authz.admin_rename_team($1, $2)`, [teamId, name]);
+      await this.audit.record(c, { actorId: user.id, action: "admin.team.renamed", entityType: "team", entityId: teamId });
+    });
+  }
+
   async createLocation(user: AuthedUser, body: CreateLocation) {
     return this.tx(user, async (c) => {
       const { rows } = await c.query<{ id: string }>(`SELECT authz.admin_create_location($1, $2, $3, $4) AS id`,
