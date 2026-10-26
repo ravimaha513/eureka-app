@@ -465,7 +465,7 @@ function DepartmentsDialog({ departments, onClose, onChanged }: {
     <Dialog title="Departments" onClose={onClose} wide>
       <p className="hint">Departments describe where people work (for example Sales › Interview Prep). They don't grant access.</p>
       {departments.length === 0 ? <p className="muted">No departments yet.</p> : (
-        <ul className="members" aria-label="Departments">
+        <ul className="members" aria-label="Departments" style={{ marginBlockEnd: "1rem" }}>
           {departmentOptions(departments).map((o) => {
             const d = byId.get(o.id)!;
             return (
