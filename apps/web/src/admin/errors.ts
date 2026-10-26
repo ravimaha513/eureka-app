@@ -18,6 +18,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   requester_not_admin: "The person who asked for this role is no longer an admin, so it can't be approved. Ask for it again.",
   email_exists: "A user with this email already exists.",
   location_exists: "A location with this name already exists.",
+  department_exists: "A department with this name already exists there.",
+  invalid_parent: "Sub-departments can only go under a top-level department.",
   email_domain: "That email isn't allowed. Use an address in the company's Google domain (or a listed test address).",
   role_already_held: "This person already has that role.",
   request_pending: "A request for this role is already waiting for approval.",

@@ -9,6 +9,12 @@ export const LOCATION_KINDS = ["training", "gh", "office", "remote"] as const;
 export type LocationKind = (typeof LOCATION_KINDS)[number];
 export interface AdminMeta { roles: RoleMeta[]; locations: Place[]; singleAdminMode?: boolean }
 
+/** Descriptive only (docs/admin-api.md AD-11): never grants access. */
+export interface Department { id: string; name: string; parentId: string | null; userCount: number }
+export interface UserDepartment { id: string; name: string; parent: { id: string; name: string } | null }
+/** "Sales › Interview Prep" for a sub-department, "Sales" for a top-level one. */
+export const departmentLabel = (d: UserDepartment) => (d.parent ? `${d.parent.name} › ${d.name}` : d.name);
+
 export interface UserRole { key: string; label: string; locationId: string | null; locationName: string | null }
 export interface AdminUser {
   id: string;
@@ -19,6 +25,7 @@ export interface AdminUser {
   phone?: string | null;
   status: "active" | "inactive";
   primaryLocation: Place | null;
+  department: UserDepartment | null;
   manager: Ref | null;
   roles: UserRole[];
   teams: { id: string; name: string; asLead: boolean }[];
@@ -47,7 +54,7 @@ export interface BulkRowResult {
 }
 export interface BulkReport { dryRun: boolean; committed: boolean; created: number; failed: number; rows: BulkRowResult[] }
 
-export interface Team { id: string; name: string; location: Place | null; lead: Ref; members: Ref[] }
+export interface Team { id: string; name: string; location: Place | null; lead: Ref; /** The lead's department. */ department: UserDepartment | null; members: Ref[] }
 export interface MoveResult { movedCandidates: number; reassignedTo: Ref }
 
 const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
@@ -56,10 +63,11 @@ const enc = encodeURIComponent;
 export const adminApi = {
   meta: () => api<AdminMeta>("/api/v1/admin/meta"),
 
-  users: (p: { search?: string; status?: "active" | "inactive"; cursor?: string | null; limit?: number }) => {
+  users: (p: { search?: string; status?: "active" | "inactive"; departmentId?: string; cursor?: string | null; limit?: number }) => {
     const q = new URLSearchParams();
     if (p.search) q.set("search", p.search);
     if (p.status) q.set("status", p.status);
+    if (p.departmentId) q.set("departmentId", p.departmentId);
     if (p.cursor) q.set("cursor", p.cursor);
     q.set("limit", String(p.limit ?? 50));
     return api<UserPage>(`/api/v1/admin/users?${q}`);
@@ -78,6 +86,14 @@ export const adminApi = {
   reactivate: (id: string) => api<void>(`/api/v1/admin/users/${enc(id)}/reactivate`, { method: "POST" }),
   setManager: (id: string, managerId: string | null) =>
     api<void>(`/api/v1/admin/users/${enc(id)}/manager`, { method: "PUT", ...json({ managerId }) }),
+  setDepartment: (id: string, departmentId: string | null) =>
+    api<void>(`/api/v1/admin/users/${enc(id)}/department`, { method: "PUT", ...json({ departmentId }) }),
+
+  departments: () => api<{ items: Department[] }>("/api/v1/admin/departments"),
+  createDepartment: (b: { name: string; parentId?: string }) =>
+    api<{ id: string }>("/api/v1/admin/departments", { method: "POST", ...json(b) }),
+  renameDepartment: (id: string, name: string) =>
+    api<void>(`/api/v1/admin/departments/${enc(id)}`, { method: "PATCH", ...json({ name }) }),
 
   requestRole: (b: { userId: string; role: string; locationId?: string }) =>
     api<{ id: string; status: "applied" | "pending_approval" }>("/api/v1/admin/role-requests", { method: "POST", ...json(b) }),
