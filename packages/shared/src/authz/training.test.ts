@@ -12,7 +12,7 @@ import {
 } from "./training.js";
 
 const user = (userId: string, role: Role, extra: Partial<UserAccess> = {}, locationId?: string): UserAccess => ({
-  userId, roles: [{ role, locationId }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], ...extra,
+  userId, roles: [{ role, locationId }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [], ...extra,
 });
 const LOC_D = "loc-d", LOC_A = "loc-a";
 const R1a = user("R1a", "recruiter", { teamIds: ["T1"] });

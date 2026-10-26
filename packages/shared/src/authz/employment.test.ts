@@ -5,7 +5,7 @@ import { resolveScope, type UserAccess } from "./engine.js";
 
 const as = (role: Role): UserAccess => ({
   userId: "u1", roles: [{ role, locationId: role.startsWith("location_") ? "loc" : undefined }],
-  teamIds: ["t1"], subordinateUserIds: [], subtreeTeamIds: ["t1"], coachedTeamIds: [],
+  teamIds: ["t1"], subordinateUserIds: [], subtreeTeamIds: ["t1"], coachedTeamIds: [], subtreeCoachedTeamIds: [],
 });
 const actor = { recruiterId: "r9", teamId: "t1", locationId: "loc" };
 const onAssignment = { status: "on_assignment", hasOpenAssignment: true, lastEndReason: null, candidateStatus: "placed" };

@@ -18,7 +18,8 @@ export interface TrainingBatchRef {
 /**
  * Batch-level coverage (TR-2), mirrors authz.training_batch_ids(perm): an org
  * grant covers every batch, a location grant the batches of that location, a
- * coached grant the batches where the user is the trainer. Own, team and
+ * coached grant the batches where the user is the trainer, a coached_hierarchy
+ * grant also those trained by anyone below them. Own, team and
  * hierarchy grants cover no batch (they reach single candidates, see
  * trainingCandidateCovered).
  */
@@ -28,6 +29,8 @@ export function trainingBatchCovered(user: UserAccess, perm: TrainingPermission,
     if (scope === "org") return true;
     if (scope === "location" && a.locationId === b.locationId) return true;
     if (scope === "coached" && b.trainerId !== null && b.trainerId === user.userId) return true;
+    if (scope === "coached_hierarchy" && b.trainerId !== null
+        && (b.trainerId === user.userId || user.subordinateUserIds.includes(b.trainerId))) return true;
   }
   return false;
 }

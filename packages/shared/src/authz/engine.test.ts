@@ -21,7 +21,7 @@ const base = (over: Partial<UserAccess> & Pick<UserAccess, "userId" | "roles">):
   teamIds: [],
   subordinateUserIds: [],
   subtreeTeamIds: [],
-  coachedTeamIds: [],
+  coachedTeamIds: [], subtreeCoachedTeamIds: [],
   ...over,
 });
 

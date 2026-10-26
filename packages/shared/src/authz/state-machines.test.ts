@@ -10,7 +10,7 @@ import {
 } from "./state-machines.js";
 
 const base = (over: Partial<UserAccess> & Pick<UserAccess, "userId" | "roles">): UserAccess => ({
-  teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], ...over,
+  teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [], ...over,
 });
 const R1a = base({ userId: "R1a", roles: [{ role: "recruiter" }], teamIds: ["T1"] });
 const L1 = base({ userId: "L1", roles: [{ role: "lead" }], teamIds: ["T1"], subordinateUserIds: ["R1a"], subtreeTeamIds: ["T1"] });

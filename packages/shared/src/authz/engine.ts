@@ -33,6 +33,8 @@ export interface UserAccess {
   subtreeTeamIds: string[];
   /** Teams this user supports as an Interview Coach. */
   coachedTeamIds: string[];
+  /** Teams coached by this user or by anyone below them in the reporting hierarchy. */
+  subtreeCoachedTeamIds: string[];
 }
 
 export interface EffectiveScope {
@@ -93,6 +95,9 @@ export function resolveScope(
         break;
       case "coached":
         user.coachedTeamIds.forEach((t) => teamIds.add(t));
+        break;
+      case "coached_hierarchy":
+        user.subtreeCoachedTeamIds.forEach((t) => teamIds.add(t));
         break;
       case "hierarchy":
         recruiterIds.add(user.userId);
