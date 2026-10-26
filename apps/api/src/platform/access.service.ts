@@ -14,8 +14,14 @@ export class AccessService {
       `SELECT
          COALESCE((SELECT json_agg(json_build_object('role_key', role_key, 'location_id', location_id))
                    FROM eureka.user_role WHERE user_id = $1 AND valid @> now()), '[]') AS roles,
-         ARRAY(SELECT team_id FROM eureka.team_member WHERE user_id = $1 AND valid @> now()
-               UNION SELECT id FROM eureka.team WHERE lead_id = $1)::text[] AS teams,
+         -- A lead's team is the one they lead, never one they are a member of
+         -- (e.g. their manager's team); mirrors authz.team_ids / actor_team (0210).
+         ARRAY(SELECT id FROM (
+                 SELECT id, 0 AS k FROM eureka.team WHERE lead_id = $1
+                 UNION ALL
+                 SELECT team_id, 1 FROM eureka.team_member WHERE user_id = $1 AND valid @> now()
+                   AND NOT EXISTS (SELECT 1 FROM eureka.team WHERE lead_id = $1)) t
+               ORDER BY k, id)::text[] AS teams,
          ARRAY(SELECT descendant_id FROM eureka.reporting_closure WHERE ancestor_id = $1)::text[] AS subs,
          ARRAY(SELECT t.id FROM eureka.team t WHERE t.lead_id = $1
                UNION SELECT t.id FROM eureka.team t JOIN eureka.reporting_closure rc ON rc.descendant_id = t.lead_id

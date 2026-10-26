@@ -25,7 +25,7 @@ export interface RoleAssignment {
 export interface UserAccess {
   userId: string;
   roles: RoleAssignment[];
-  /** Teams the user belongs to as a member (recruiter) or leads. */
+  /** Teams the user leads; for someone who leads none, the team they are a member of. */
   teamIds: string[];
   /** Users below this user in the reporting hierarchy (excluding the user). */
   subordinateUserIds: string[];
@@ -97,7 +97,7 @@ export function resolveScope(
       case "hierarchy":
         recruiterIds.add(user.userId);
         user.subordinateUserIds.forEach((u) => recruiterIds.add(u));
-        user.teamIds.forEach((t) => teamIds.add(t));
+        // Reporting lines only: led teams and teams led below; never a team one is a member of.
         user.subtreeTeamIds.forEach((t) => teamIds.add(t));
         break;
       case "location":

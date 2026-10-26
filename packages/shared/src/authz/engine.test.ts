@@ -150,6 +150,11 @@ describe("resolveScope", () => {
     expect(s.teamIds).toEqual(new Set(["T1", "T2"]));
   });
 
+  it("manager hierarchy ignores a team they are only a member of (their AD's)", () => {
+    const s = resolveScope({ ...M, teamIds: ["T_AD"] }, "candidate:read")!;
+    expect(s.teamIds).toEqual(new Set(["T1", "T2"]));
+  });
+
   it("location role requires a location id", () => {
     const bad = base({ userId: "X", roles: [{ role: "location_incharge" }] });
     expect(() => resolveScope(bad, "candidate:read")).toThrow(/requires a location/);
