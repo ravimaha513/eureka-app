@@ -13,8 +13,8 @@ RLS:
 
 | Who | Sees on the Hot List |
 |---|---|
-| Recruiter, lead | Their team's candidates, plus every candidate "Open to all teams" in an active status |
-| Manager, associate director | Their hierarchy's teams, plus Open to all teams |
+| Recruiter, lead | Their team's candidates, plus every candidate "Open to all teams" or shared with their team (CA-5) in an active status |
+| Manager, associate director | Their hierarchy's teams, plus Open to all teams and candidates shared with those teams |
 | Interview coach (interview prep team) | Candidates of the teams they coach |
 | Location incharge / ops admin | Candidates of their location |
 | CEO | Everyone (the offshore office manager is an associate director since 0090) |
@@ -98,6 +98,46 @@ org scope.
 Company names on the profile come from `authz.candidate_companies` (owners and compliance editors);
 the company rows themselves stay under `company:read`. The compliance columns cannot be written
 directly by the API role, even by the owning team (`candidate_profile_guard`).
+
+## Selected teams (CA-5)
+
+Migration `0240_candidate_team_share.sql`. A lead sees only their own team's candidates (Hot List and
+Candidates list) unless a candidate is Open to all teams or shared with the lead's team.
+`visibility` gains `selected_teams`: the candidate's own team and hierarchy keep seeing it as before,
+and the Sales users of the picked teams see it under exactly the Open-to-all-teams rule (active / full
+of interviews only; `candidate:read`, `hotlist:read`, `submission:create`, `placement:create`;
+phones masked; no actor names or history before it was shared; no ownership rights).
+
+| Who | Reached by a share with team X |
+|---|---|
+| Lead of X | yes |
+| Recruiters (members) of X | yes |
+| Manager / AD above X's lead | yes (X is in their hierarchy) |
+| Other teams, location roles, coaches | no (location roles and coaches keep their own scope) |
+
+- `PUT /api/v1/candidates/:id/visibility` takes `{ "visibility": "selected_teams", "teamIds": [...] }`
+  (1-50 distinct team ids; `teamIds` only with `selected_teams`, else 422). The candidate's own team is
+  dropped from the picks; none left is 422 `teams_required`, an unknown team 422 `invalid_team`.
+  `team` / `all_teams` clear the picks. Same rights as before (`candidate.visibility:update`: lead
+  over their team, manager / AD over their hierarchy, CEO, location roles over their location).
+  The write goes through `authz.set_candidate_visibility`, which re-checks read (404) and
+  ownership (403). Audited as `candidate.visibility` with the team ids only.
+- `POST /api/v1/hotlist/bulk/visibility` takes the same `teamIds` with `selected_teams`; each
+  candidate drops its own team from the picks, and a row left with none (or naming a team that is
+  gone) fails with `invalid_teams`. The Hot List bulk bar shows the team picker for this option.
+- `GET /api/v1/candidate-share-teams` (`candidate.visibility:update`): `{ items: [{ id, name, lead }] }`
+  for the picker.
+- `GET /api/v1/candidates/:id` adds `sharedTeams` (`[{ id, name }]`) for owners only.
+- List / Hot List / export filters accept `visibility=selected_teams`; the export column reads
+  "Selected teams"; the status label adds "Shared" (`Active/Shared`).
+
+Storage: `eureka.candidate_team_share (candidate_id, team_id, shared_by, shared_at)`, written only by
+the definer (guard trigger sets `shared_by` / `shared_at`), readable wherever the candidate is.
+`authz.shared_candidate_ids(perm)` lists the candidates shared with a team in the caller's
+`team_ids(perm)` or their `actor_team()`; the `candidate_read` policy uses it as an InitPlan set and
+the API loads it once per request (`UserAccess.sharedCandidateIds`). Shares count only while
+`visibility = 'selected_teams'`. Tests: `apps/api/test/candidate-team-share.{db,api}.int.test.ts`,
+`engine.test.ts` ("selected teams"), `apps/web/src/sales/Sales.test.tsx`.
 
 ## Technologies
 

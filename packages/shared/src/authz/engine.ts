@@ -33,6 +33,13 @@ export interface UserAccess {
   subtreeTeamIds: string[];
   /** Teams this user supports as an Interview Coach. */
   coachedTeamIds: string[];
+  /** Teams coached by this user or by anyone below them in the reporting hierarchy. */
+  subtreeCoachedTeamIds: string[];
+  /**
+   * Candidates shared with one of the user's teams ("Selected teams", migration 0240):
+   * authz.shared_candidate_ids. Counted only where the all-teams rule applies.
+   */
+  sharedCandidateIds?: string[];
 }
 
 export interface EffectiveScope {
@@ -42,6 +49,8 @@ export interface EffectiveScope {
   locationIds: ReadonlySet<string>;
   /** Candidates marked "Open to all teams" are visible (Sales roles only). */
   allTeams: boolean;
+  /** Candidates shared with the user's teams; visible only while `allTeams` holds. */
+  sharedCandidateIds: ReadonlySet<string>;
   /** hotlist:read only: every Hot List candidate is visible (HOTLIST_VISIBILITY = "everyone"). */
   hotlistOpen: boolean;
 }
@@ -94,6 +103,9 @@ export function resolveScope(
       case "coached":
         user.coachedTeamIds.forEach((t) => teamIds.add(t));
         break;
+      case "coached_hierarchy":
+        user.subtreeCoachedTeamIds.forEach((t) => teamIds.add(t));
+        break;
       case "hierarchy":
         recruiterIds.add(user.userId);
         user.subordinateUserIds.forEach((u) => recruiterIds.add(u));
@@ -113,7 +125,8 @@ export function resolveScope(
   }
 
   if (!granted && !hotlistOpen) return null;
-  return { all, recruiterIds, teamIds, locationIds, allTeams, hotlistOpen };
+  const sharedCandidateIds: ReadonlySet<string> = new Set(user.sharedCandidateIds ?? []);
+  return { all, recruiterIds, teamIds, locationIds, allTeams, sharedCandidateIds, hotlistOpen };
 }
 
 /**
@@ -153,11 +166,16 @@ export function can(user: UserAccess, permission: Permission): boolean {
   return resolveScope(user, permission) !== null;
 }
 
+export const CANDIDATE_VISIBILITIES = ["team", "all_teams", "selected_teams"] as const;
+export type CandidateVisibility = (typeof CANDIDATE_VISIBILITIES)[number];
+
 export interface CandidateRef {
+  /** Needed for "Selected teams"; without it a shared candidate is not visible through the share. */
+  id?: string;
   recruiterId: string | null;
   teamId: string | null;
   locationId: string | null;
-  visibility: "team" | "all_teams";
+  visibility: CandidateVisibility;
   marketingStatus: string;
 }
 
@@ -174,8 +192,10 @@ export function ownsCandidate(scope: EffectiveScope, c: CandidateRef): boolean {
 export function candidateVisible(scope: EffectiveScope | null, c: CandidateRef): boolean {
   if (!scope) return false;
   if (ownsCandidate(scope, c)) return true;
+  if (!scope.allTeams || !MARKETABLE_STATUSES.has(c.marketingStatus)) return false;
   return (
-    scope.allTeams && c.visibility === "all_teams" && MARKETABLE_STATUSES.has(c.marketingStatus)
+    c.visibility === "all_teams" ||
+    (c.visibility === "selected_teams" && c.id !== undefined && scope.sharedCandidateIds.has(c.id))
   );
 }
 

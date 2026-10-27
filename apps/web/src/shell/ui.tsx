@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   BadgeCheck, BookOpen, BriefcaseBusiness, Building2, CalendarClock, ChartColumn, ChevronDown, Database, FileBarChart, FileCheck2, FolderOpen, Flame, LayoutDashboard, LogOut, MessageCircle, Moon,
-  GraduationCap, GitBranch, Handshake, House, Send, Settings, ShieldCheck, Sun, TrendingUp, Users, UsersRound, UserRoundCheck, UserRoundSearch, Wallet, type LucideIcon,
+  GraduationCap, GitBranch, Handshake, House, Network, Send, Settings, ShieldCheck, Sun, TrendingUp, Users, UsersRound, UserRoundCheck, UserRoundSearch, Wallet, type LucideIcon,
 } from "lucide-react";
 import type { Theme } from "./theme";
 
@@ -24,6 +24,8 @@ export const NAV_ICONS: Record<string, LucideIcon> = {
   pipeline: GitBranch, vendors: Handshake,
   // AD-10: a lead's own team
   myteam: UsersRound,
+  // AD-11: an Interview Lead's coach assignments
+  coaching: Network,
 };
 
 const TINTS = ["indigo", "teal", "amber", "rose", "violet", "sky"] as const;

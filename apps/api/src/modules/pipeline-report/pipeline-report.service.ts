@@ -322,7 +322,7 @@ export class PipelineReportService {
 
   /** The candidate under candidate RLS (Open to all teams included, as the profile); 404 otherwise. */
   private async loadCandidate(c: pg.PoolClient, id: string) {
-    const r = await c.query<{ id: string; recruiter_id: string | null; team_id: string; location_id: string; visibility: "team" | "all_teams"; marketing_status: string }>(
+    const r = await c.query<{ id: string; recruiter_id: string | null; team_id: string; location_id: string; visibility: "team" | "all_teams" | "selected_teams"; marketing_status: string }>(
       `SELECT id, recruiter_id, team_id, location_id, visibility, marketing_status FROM eureka.candidate WHERE id = $1`, [id]);
     if (!r.rows[0]) throw new NotFoundException();
     return r.rows[0];

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  CANDIDATE_VISIBILITIES,
   DOCUMENTS_FILTERS,
   DOCUMENTS_STATUS_LIST,
   ELIGIBILITY_LIST,
@@ -32,7 +33,7 @@ export const CandidateListQuery = z
   .object({
     status: z.string().max(40).optional(),
     technology: z.string().max(80).optional(),
-    visibility: z.enum(["team", "all_teams"]).optional(),
+    visibility: z.enum(CANDIDATE_VISIBILITIES).optional(),
     search: z.string().max(80).optional(),
     ...ExtraListFilters,
     /** Candidates list only (FR-CAN-02); the Hot List has no batch filter. */
@@ -111,7 +112,14 @@ export const ComplianceUpdate = z
   .refine((b) => Object.keys(b).length > 0, { message: "Nothing to change" });
 export type ComplianceUpdate = z.infer<typeof ComplianceUpdate>;
 
-export const VisibilityUpdate = z.object({ visibility: z.enum(["team", "all_teams"]) }).strict();
+/** "Selected teams" picks (0240): 1-50 distinct teams; the candidate's own team is ignored. */
+export const ShareTeamIds = z.array(uuid).min(1).max(50)
+  .refine((ids) => new Set(ids).size === ids.length, { message: "Duplicate ids" });
+
+export const VisibilityUpdate = z
+  .object({ visibility: z.enum(CANDIDATE_VISIBILITIES), teamIds: ShareTeamIds.optional() })
+  .strict()
+  .refine((b) => (b.visibility === "selected_teams") === (b.teamIds !== undefined), { message: "teamIds goes with selected_teams" });
 export const RatingUpdate = z.object({ rating: z.number().int().min(1).max(5) }).strict();
 export const Transition = z
   .object({ to: z.enum(["active", "on_hold", "stopped", "full_of_interviews", "confirmation", "terminated"]) })

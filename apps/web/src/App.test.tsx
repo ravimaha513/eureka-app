@@ -9,7 +9,7 @@ import { visibleNav } from "./nav";
 const meFor = (role: Role): Me => ({
   id: "u1", email: "u@eureka.example", displayName: "Test User", csrfToken: "t",
   roles: [{ key: role, label: role, locationId: null }],
-  capabilities: capabilities({ userId: "u1", roles: [{ role, locationId: "loc" }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [] }),
+  capabilities: capabilities({ userId: "u1", roles: [{ role, locationId: "loc" }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [] }),
 });
 
 const wrap = (ui: React.ReactNode) =>

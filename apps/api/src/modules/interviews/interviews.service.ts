@@ -98,7 +98,7 @@ const SELECT = `
 
 const SALES_SCOPES: readonly Scope[] = ["own", "team", "hierarchy", "org"];
 const FEEDBACK_SCOPES: Record<FeedbackKind, readonly Scope[]> = {
-  coach: ["coached"],
+  coach: ["coached", "coached_hierarchy"],
   location: ["location"],
   client: SALES_SCOPES,
 };

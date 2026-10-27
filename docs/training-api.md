@@ -11,9 +11,9 @@ View Students, per-student, per-course and per-module progress.
 
 | Permission | Granted to (scope) | Why |
 |---|---|---|
-| `training:read` | Location Incharge, Location Ops Admin (location); Interview Coach (coached); Recruiter (own), Lead (team), Manager and AD (hierarchy); CEO, HR, Associate HR, Accounts, Immigration, Documents Team, BU Head (org) | Location roles run training at their location; coaches train; Sales follow the progress of candidates they already own; leadership and the restricted roles read all (they plan batches, TR-1a). |
+| `training:read` | Location Incharge, Location Ops Admin (location); Interview Coach (coached); Interview Lead (coached_hierarchy: batches trained by them or their coaches, candidates of teams they or their coaches coach); Recruiter (own), Lead (team), Manager and AD (hierarchy); CEO, HR, Associate HR, Accounts, Immigration, Documents Team, BU Head (org) | Location roles run training at their location; coaches train; Sales follow the progress of candidates they already own; leadership and the restricted roles read all (they plan batches, TR-1a). |
 | `training:manage` | Location Incharge, Location Ops Admin (location) | Course library, batches (create, edit, status, delete), courses of a batch, students. |
-| `training.progress:update` | Location Incharge, Location Ops Admin (location); Interview Coach (coached) | Marking modules complete. |
+| `training.progress:update` | Location Incharge, Location Ops Admin (location); Interview Coach (coached); Interview Lead (coached_hierarchy) | Marking modules complete. |
 | `training.batch:create` | CEO, Location Ops Admin, HR, Associate HR, Accounts, Immigration, Documents Team, BU Head (org) | Creating batches at any location (TR-1a); every restricted role except Org Admin, which holds no business data. |
 
 None is restricted (no PII beyond names already visible to these roles). Org Admin gets nothing (it holds no

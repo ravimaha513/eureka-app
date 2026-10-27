@@ -6,7 +6,7 @@ import { salesError } from "./errors";
 import { BulkBar, ExportButton, SavedViews } from "./HotListExtras";
 import { ListFilters, ListFooter } from "./ListControls";
 import { HOTLIST_STATUS_OPTIONS } from "./salesApi";
-import { Drawer, OpenToAllBadge, Phone, Priority, StatusBadge, fmtDate } from "./ui";
+import { Drawer, OpenToAllBadge, SharedBadge, Phone, Priority, StatusBadge, fmtDate } from "./ui";
 import { documentsLabel, stayLabel, visaLabel } from "./candidateFields";
 import { useCandidateList } from "./useCandidateList";
 import { Loading } from "../ui/Loading";
@@ -104,7 +104,7 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
                   <td><CandidateName c={c} caps={caps} onOpenProfile={onOpenProfile} /></td>
                   <td>{c.technology}</td>
                   <td>
-                    <StatusBadge status={c.status} />{" "}{c.visibility === "all_teams" && <OpenToAllBadge />}
+                    <StatusBadge status={c.status} />{" "}{c.visibility === "all_teams" && <OpenToAllBadge />}{c.visibility === "selected_teams" && <SharedBadge />}
                     {c.statusLabel && c.statusLabel.includes("/") && <small className="block">{c.statusLabel}</small>}
                   </td>
                   <td><Priority p={c.priority} /></td>
@@ -132,7 +132,7 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
           <dl className="facts">
             <dt>Technology</dt><dd>{preview.technology}</dd>
             <dt>Status</dt><dd><StatusBadge status={preview.status} />{preview.statusLabel && <> {preview.statusLabel}</>}</dd>
-            <dt>Visibility</dt><dd>{preview.visibility === "all_teams" ? <OpenToAllBadge /> : "Team only"}</dd>
+            <dt>Visibility</dt><dd>{preview.visibility === "all_teams" ? <OpenToAllBadge /> : preview.visibility === "selected_teams" ? <SharedBadge /> : "Team only"}</dd>
             <dt>Priority</dt><dd><Priority p={preview.priority} /></dd>
             <dt>Team</dt><dd>{preview.team.name}</dd>
             <dt>Recruiter</dt><dd>{preview.recruiter?.name ?? "Unassigned"}</dd>

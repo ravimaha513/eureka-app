@@ -8,7 +8,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { DOCUMENTS_STATUSES, VISA_CATEGORIES, resolveScope } from "@eureka/shared";
+import { DOCUMENTS_STATUSES, VISA_CATEGORIES, resolveScope, type CandidateVisibility } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
@@ -37,7 +37,7 @@ interface ExportRow {
   team_name: string;
   recruiter_name: string | null;
   location_name: string;
-  visibility: "team" | "all_teams";
+  visibility: CandidateVisibility;
   marketing_status: string;
   priority: string;
   marketing_start_date: string | null;
@@ -49,7 +49,7 @@ interface ExportRow {
   gh_location_name: string | null;
 }
 
-export type BulkError = "not_found" | "forbidden" | "invalid_transition" | "placement_open" | "failed";
+export type BulkError = "not_found" | "forbidden" | "invalid_transition" | "placement_open" | "invalid_teams" | "failed";
 export interface BulkResult { id: string; ok: boolean; error?: BulkError }
 
 const label = (s: string) => { const t = s.replace(/_/g, " "); return t.charAt(0).toUpperCase() + t.slice(1); };
@@ -121,7 +121,7 @@ export class HotlistService {
   // ---- bulk actions: the single-record operation, once per record ----
 
   bulkVisibility(user: AuthedUser, body: BulkVisibility) {
-    return this.bulk(user, "visibility", body.visibility, body.ids, (id) => this.candidates.setVisibility(user, id, body.visibility));
+    return this.bulk(user, "visibility", body.visibility, body.ids, (id) => this.candidates.setVisibility(user, id, body.visibility, body.teamIds));
   }
 
   bulkStatus(user: AuthedUser, body: BulkStatus) {
@@ -191,7 +191,7 @@ export class HotlistService {
         "Marketing since", "Days in market", "Technical rating", "Visa", "Documents", "Stay"],
       page.map((r) => [
         `${r.first_name} ${r.last_name}`, r.technology, label(r.marketing_status),
-        r.visibility === "all_teams" ? "Open to all teams" : "Team only", r.priority, r.team_name,
+        r.visibility === "all_teams" ? "Open to all teams" : r.visibility === "selected_teams" ? "Selected teams" : "Team only", r.priority, r.team_name,
         r.recruiter_name ?? "Unassigned", r.location_name, r.phone, r.marketing_start_date,
         r.marketing_start_date ? Math.floor((now - Date.parse(r.marketing_start_date)) / 86_400_000) : null,
         r.technical_rating,
@@ -208,6 +208,8 @@ function bulkError(err: unknown): BulkError {
   if (err instanceof HttpException) {
     const detail = (err.getResponse() as { message?: string }).message;
     if (detail === "invalid_transition" || detail === "placement_open") return detail;
+    // Selected teams (0240): the picks left nothing besides the candidate's own team, or name a team that is gone.
+    if (detail === "teams_required" || detail === "invalid_team" || detail === "too_many_teams") return "invalid_teams";
   }
   const status = err instanceof HttpException ? err.getStatus() : toProblem(err).status;
   if (status === 404) return "not_found";

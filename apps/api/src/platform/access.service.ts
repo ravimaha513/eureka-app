@@ -9,7 +9,7 @@ export class AccessService {
     // One round trip: this runs before every authenticated request.
     const { rows: [r] } = await c.query<{
       roles: { role_key: string; location_id: string | null }[];
-      teams: string[]; subs: string[]; subtree: string[]; coached: string[];
+      teams: string[]; subs: string[]; subtree: string[]; coached: string[]; subtree_coached: string[]; shared: string[];
     }>(
       `SELECT
          COALESCE((SELECT json_agg(json_build_object('role_key', role_key, 'location_id', location_id))
@@ -26,7 +26,14 @@ export class AccessService {
          ARRAY(SELECT t.id FROM eureka.team t WHERE t.lead_id = $1
                UNION SELECT t.id FROM eureka.team t JOIN eureka.reporting_closure rc ON rc.descendant_id = t.lead_id
                WHERE rc.ancestor_id = $1)::text[] AS subtree,
-         ARRAY(SELECT team_id FROM eureka.coach_assignment WHERE coach_id = $1 AND valid @> now())::text[] AS coached`,
+         ARRAY(SELECT team_id FROM eureka.coach_assignment WHERE coach_id = $1 AND valid @> now())::text[] AS coached,
+         -- coached_hierarchy (Interview Lead): teams coached by the user or anyone below; mirrors authz.coached_team_ids (0220).
+         ARRAY(SELECT DISTINCT ca.team_id FROM eureka.coach_assignment ca
+               WHERE ca.valid @> now()
+                 AND (ca.coach_id = $1 OR ca.coach_id IN (SELECT descendant_id FROM eureka.reporting_closure WHERE ancestor_id = $1))
+              )::text[] AS subtree_coached,
+         -- "Selected teams" shares reaching the caller's teams (0240); same set the candidate_read policy uses.
+         authz.shared_candidate_ids('candidate:read')::text[] AS shared`,
       [userId],
     );
     return {
@@ -38,6 +45,8 @@ export class AccessService {
       subordinateUserIds: r!.subs,
       subtreeTeamIds: r!.subtree,
       coachedTeamIds: r!.coached,
+      subtreeCoachedTeamIds: r!.subtree_coached,
+      sharedCandidateIds: r!.shared,
     };
   }
 }

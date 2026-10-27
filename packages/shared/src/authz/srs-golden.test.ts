@@ -20,7 +20,7 @@ const A = "loc-austin";
 
 // Org: AD > M > L1 (T1: R1, R1b) ; M > L2 (T2: R2). Location admin for Dallas.
 const u = (userId: string, roles: UserAccess["roles"], extra: Partial<UserAccess> = {}): UserAccess => ({
-  userId, roles, teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], ...extra,
+  userId, roles, teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [], ...extra,
 });
 const USERS: Record<string, UserAccess> = {
   recruiter: u("R1", [{ role: "recruiter" }], { teamIds: ["T1"] }),

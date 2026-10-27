@@ -20,7 +20,12 @@ export const HOTLIST_VISIBILITY: "everyone" | "team" = "team";
 /** Statuses shown on the Hot List. */
 export const HOTLIST_STATUSES = ["active", "on_hold", "full_of_interviews", "confirmation", "bench", "stopped"] as const;
 
-export const SCOPES = ["own", "team", "coached", "hierarchy", "location", "org"] as const;
+/**
+ * `coached`: teams the user supports as an Interview Coach (coach_assignment).
+ * `coached_hierarchy`: those teams plus the teams coached by anyone below the
+ * user in the reporting hierarchy (the Interview Lead over their coaches).
+ */
+export const SCOPES = ["own", "team", "coached", "coached_hierarchy", "hierarchy", "location", "org"] as const;
 export type Scope = (typeof SCOPES)[number];
 
 export const ROLES = [
@@ -36,6 +41,7 @@ export const ROLES = [
   "accounts",
   "immigration",
   "interview_coach",
+  "interview_lead",
   "interview_coordinator",
   "documents_team",
   "bu_head",
@@ -56,6 +62,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   accounts: "Accounts",
   immigration: "Immigration",
   interview_coach: "Interview Coach",
+  interview_lead: "Interview Lead",
   interview_coordinator: "Interview Coordinator (Support)",
   documents_team: "Documents Team",
   bu_head: "BU Head",
@@ -142,6 +149,8 @@ export const PERMISSIONS = [
   /** Add an unassigned recruiter to a team one leads, or one led in one's hierarchy (docs/admin-api.md AD-10). */
   "team:add_member",
   "designation:change",
+  /** Assign interview coaches to sales teams: coaches in one's reporting subtree (docs/admin-api.md AD-11). */
+  "coach:assign",
   // administration
   "access:manage",
   "audit:read",
@@ -517,6 +526,24 @@ export const GRANTS: Record<Role, Grants> = {
     // training: batches where they are the trainer (and progress of coached teams' candidates)
     "training:read": "coached",
     "training.progress:update": "coached",
+    // chat
+    "chat:use": "own",
+  },
+  // Interview Prep sub-department head: reports to the Associate Director; the
+  // Interview Coaches report to them. Sees what their coaches see (teams coached
+  // by anyone in their reporting subtree, or by themself) and assigns their
+  // coaches to sales teams (AD-11).
+  interview_lead: {
+    "candidate:read": "coached_hierarchy",
+    "hotlist:read": "coached_hierarchy",
+    "interview:read": "coached_hierarchy",
+    "interview.feedback:create": "coached_hierarchy",
+    "coach:assign": "hierarchy",
+    // datahub
+    "datahub:read": "own",
+    // training: batches trained by them or their coaches (and progress of coached teams' candidates)
+    "training:read": "coached_hierarchy",
+    "training.progress:update": "coached_hierarchy",
     // chat
     "chat:use": "own",
   },

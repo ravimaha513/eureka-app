@@ -36,6 +36,10 @@ const CODES: Record<string, (code: string) => HttpException> = {
   user_inactive: (c) => new UnprocessableEntityException(c),
   not_a_member: (c) => new UnprocessableEntityException(c),
   not_a_recruiter: (c) => new UnprocessableEntityException(c),
+  // AD-11: coach assignments (authz.assign_coach / unassign_coach)
+  not_a_coach: (c) => new UnprocessableEntityException(c),
+  not_assigned: (c) => new NotFoundException(c),
+  already_assigned: (c) => new ConflictException(c),
   same_team: (c) => new UnprocessableEntityException(c),
   lead_of_team: (c) => new UnprocessableEntityException(c),
   has_reports: (c) => new UnprocessableEntityException(c),

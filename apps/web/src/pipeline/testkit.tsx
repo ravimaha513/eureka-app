@@ -45,7 +45,7 @@ export const wrap = (ui: React.ReactNode): RenderResult =>
 export const meFor = (role: Role): Me => ({
   id: "u-me", email: "me@eureka.example", displayName: "Test User", csrfToken: "tok",
   roles: [{ key: role, label: role, locationId: null }],
-  capabilities: capabilities({ userId: "u-me", roles: [{ role, locationId: "loc" }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [] }),
+  capabilities: capabilities({ userId: "u-me", roles: [{ role, locationId: "loc" }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [] }),
 });
 
 export const COACH = "77777777-7777-4777-8777-777777777777";
