@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { can } from "../api";
-import { adminApi, type MoveResult, type Ref, type Team } from "./adminApi";
+import { adminApi, departmentLabel, type MoveResult, type Ref, type Team } from "./adminApi";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { friendlyError } from "./errors";
 import { keys, useAccess, useMeta, usePeople } from "./shared";
@@ -44,6 +44,7 @@ export function TeamsTab() {
               <header>
                 <h2 id={`team-${t.id}`}>{t.name}</h2>
                 {t.location && <span className="muted">{t.location.name}</span>}
+                {t.department && <span className="tag" title="Lead's department">{departmentLabel(t.department)}</span>}
               </header>
               <p><span className="muted">Lead</span> <b>{t.lead.displayName}</b></p>
               <ul className="members" aria-label={`Members of ${t.name}`}>

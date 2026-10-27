@@ -63,6 +63,16 @@ if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-
   const n = await seedDevDatahub(admin);
   if (n) console.log(`seeded DataHub: ${n} folders`);
 }
+// Departments (migration 0230): Sales, and Sales → Interview Prep. The Sales fixture chain (AD down to
+// recruiters) goes in Sales and the fixture coach in Interview Prep; users that already have one keep it.
+await admin.query(`INSERT INTO eureka.department (name) VALUES ('Sales') ON CONFLICT DO NOTHING`);
+await admin.query(`INSERT INTO eureka.department (name, parent_id)
+  SELECT 'Interview Prep', id FROM eureka.department WHERE parent_id IS NULL AND name = 'Sales' ON CONFLICT DO NOTHING`);
+await admin.query(`UPDATE eureka.app_user u SET department_id = d.id FROM eureka.department d
+  WHERE d.parent_id IS NULL AND d.name = 'Sales' AND u.department_id IS NULL
+    AND u.id IN (SELECT ('00000000-0000-0000-0000-0000000000' || lpad(n::text, 2, '0'))::uuid FROM generate_series(3, 12) n)`);
+await admin.query(`UPDATE eureka.app_user u SET department_id = d.id FROM eureka.department d JOIN eureka.department p ON p.id = d.parent_id
+  WHERE p.name = 'Sales' AND d.name = 'Interview Prep' AND u.department_id IS NULL AND u.id = '00000000-0000-0000-0000-000000000013'`);
 // Fictional chats between the dev users (skipped when a conversation exists).
 if ((await admin.query("SELECT 1 FROM eureka.app_user WHERE id = '00000000-0000-0000-0000-000000000009'")).rowCount) {
   const chat = await seedDevChat(admin);

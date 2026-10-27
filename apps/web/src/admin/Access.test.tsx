@@ -557,3 +557,78 @@ describe("friendlyError", () => {
     expect(friendlyError(new Error("offline"))).toBe("offline");
   });
 });
+
+// ---- departments (docs/admin-api.md AD-11) ---------------------------------------------------------
+
+describe("departments", () => {
+  const DEPTS = [
+    { id: "d-prep", name: "Interview Prep", parentId: "d-sales", userCount: 1 },
+    { id: "d-sales", name: "Sales", parentId: null, userCount: 2 },
+  ];
+  beforeEach(() => {
+    routes["GET /api/v1/admin/departments"] = () => ({ body: { items: DEPTS } });
+  });
+
+  it("shows each user's department and filters by it", async () => {
+    routes["GET /api/v1/admin/users"] = (u) => ({
+      body: {
+        items: u.searchParams.get("departmentId") === "d-sales"
+          ? [user("u-coach", "Kay Coach", { department: { id: "d-prep", name: "Interview Prep", parent: { id: "d-sales", name: "Sales" } } })]
+          : USERS,
+        nextCursor: null,
+      },
+    });
+    renderPage();
+    expect(within(await row("Priya Rao")).getAllByRole("cell")[2]).toHaveTextContent("—");
+    const filter = screen.getByLabelText("Department");
+    await within(filter).findByRole("option", { name: "Sales › Interview Prep" });
+    fireEvent.change(filter, { target: { value: "d-sales" } });
+    expect(within(await row("Kay Coach")).getAllByRole("cell")[2]).toHaveTextContent("Sales › Interview Prep");
+    expect(calls.filter((c) => c.path === "/api/v1/admin/users").at(-1)!.url.searchParams.get("departmentId")).toBe("d-sales");
+  });
+
+  it("sets a user's department", async () => {
+    routes["PUT /api/v1/admin/users/u-priya/department"] = () => ({ status: 204 });
+    renderPage();
+    fireEvent.click(within(await row("Priya Rao")).getByRole("button", { name: "Set department for Priya Rao" }));
+    const dlg = await screen.findByRole("dialog", { name: "Set department for Priya Rao" });
+    await within(dlg).findByRole("option", { name: "Sales › Interview Prep" });
+    fireEvent.change(within(dlg).getByLabelText("Department"), { target: { value: "d-prep" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save department" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(lastWrite()).toMatchObject({ method: "PUT", path: "/api/v1/admin/users/u-priya/department", body: { departmentId: "d-prep" } });
+    await waitFor(() => expect(status()).toHaveTextContent("Priya Rao is now in Sales › Interview Prep."));
+  });
+
+  it("creates a sub-department and renames one", async () => {
+    let dup = true;
+    routes["POST /api/v1/admin/departments"] = () => (dup ? problem(409, "department_exists") : { status: 201, body: { id: "d-new" } });
+    routes["PATCH /api/v1/admin/departments/d-sales"] = () => ({ status: 204 });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Departments" }));
+    const dlg = await screen.findByRole("dialog", { name: "Departments" });
+    await within(dlg).findByText("Interview Prep");
+    fireEvent.change(within(dlg).getByLabelText("New department"), { target: { value: "Bench" } });
+    fireEvent.change(within(dlg).getByLabelText(/Under/), { target: { value: "d-sales" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Add department" }));
+    expect(await within(dlg).findByRole("alert")).toHaveTextContent(ERROR_MESSAGES.department_exists!);
+    dup = false;
+    fireEvent.click(within(dlg).getByRole("button", { name: "Add department" }));
+    await waitFor(() => expect(lastWrite().body).toEqual({ name: "Bench", parentId: "d-sales" }));
+    expect(await screen.findByText("Created Sales › Bench.")).toBeInTheDocument();
+
+    fireEvent.click(within(dlg).getByRole("button", { name: "Rename Sales" }));
+    fireEvent.change(within(dlg).getByLabelText("New name for Sales"), { target: { value: "Sales US" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(lastWrite()).toMatchObject({ method: "PATCH", body: { name: "Sales US" } }));
+  });
+
+  it("shows the lead's department on the team card", async () => {
+    routes["GET /api/v1/admin/teams"] = () => ({
+      body: { items: [{ ...TEAMS[0], department: { id: "d-sales", name: "Sales", parent: null } }, { ...TEAMS[1], department: null }] },
+    });
+    renderPage("teams");
+    const card = (await screen.findByRole("heading", { name: "Team Rohit" })).closest("section")!;
+    expect(within(card).getByText("Sales")).toBeInTheDocument();
+  });
+});

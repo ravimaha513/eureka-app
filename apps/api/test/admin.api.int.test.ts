@@ -190,7 +190,7 @@ describe("metadata and listings", () => {
   it("teams list lead, current members and coaches, plus the users who can be coaches (AD-11)", async () => {
     const r = (await call("admin", "GET", "/api/v1/admin/teams")).json();
     expect(r.items.find((t: { id: string }) => t.id === T.t1)).toEqual({
-      id: T.t1, name: "Team Rohit", location: null, lead: { id: U.l1, displayName: "l1" },
+      id: T.t1, name: "Team Rohit", location: null, lead: { id: U.l1, displayName: "l1" }, department: null,
       members: [{ id: U.r1a, displayName: "r1a" }, { id: U.r1b, displayName: "r1b" }],
       coaches: [{ id: U.il, displayName: "il" }],
     });
@@ -487,7 +487,7 @@ describe("teams", () => {
     const dup = await call("admin", "POST", `/api/v1/admin/teams/${T.t1}/members`, { userId: U.hr });
     expect([dup.statusCode, dup.json().detail]).toEqual([409, "already_member"]);
     const t = (await call("admin", "GET", "/api/v1/admin/teams")).json().items.find((x: { id: string }) => x.id === id);
-    expect(t).toEqual({ id, name: "Team New", location: { id: LOC.dallas, name: "Dallas" }, lead: { id: U.m2, displayName: "m2" }, members: [{ id: U.hr, displayName: "hr" }], coaches: [] });
+    expect(t).toEqual({ id, name: "Team New", location: { id: LOC.dallas, name: "Dallas" }, lead: { id: U.m2, displayName: "m2" }, department: null, members: [{ id: U.hr, displayName: "hr" }], coaches: [] });
     expect((await call("admin", "PUT", `/api/v1/admin/teams/${NIL}/lead`, { leadId: U.m2 })).statusCode).toBe(404);
   });
 

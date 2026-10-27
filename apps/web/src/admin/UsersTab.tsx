@@ -3,13 +3,13 @@ import { Phone as PhoneIcon, Users as UsersIcon } from "lucide-react";
 import { Person } from "../shell/ui";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { adminApi, type AdminUser, type BulkReport, type UserRole } from "./adminApi";
+import { adminApi, departmentLabel, type AdminUser, type BulkReport, type Department, type UserRole } from "./adminApi";
 import { csvToRows, tableToRows, type BulkRow } from "./csv";
 import { isXlsx, readUserSheet } from "./xlsx";
 import { saveBlob } from "../lib/download";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { friendlyError } from "./errors";
-import { keys, useAccess, useMeta, usePeople } from "./shared";
+import { departmentOptions, keys, useAccess, useDepartments, useMeta, usePeople } from "./shared";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { Loading } from "../ui/Loading";
 import { QueryError } from "../ui/QueryError";
@@ -21,6 +21,8 @@ type Modal =
   | { kind: "bulk" }
   | { kind: "grant"; user: AdminUser }
   | { kind: "manager"; user: AdminUser }
+  | { kind: "department"; user: AdminUser }
+  | { kind: "departments" }
   | { kind: "deactivate"; user: AdminUser }
   | { kind: "password"; user: AdminUser }
   | { kind: "reactivate"; user: AdminUser }
@@ -36,6 +38,8 @@ export function UsersTab() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<"" | "active" | "inactive">("");
+  const [departmentId, setDepartmentId] = useState("");
+  const departments = useDepartments();
   const pager = useCursorPager();
   const { page } = pager;
   const [modal, setModal] = useState<Modal | null>(null);
@@ -47,8 +51,8 @@ export function UsersTab() {
   }, [searchInput]);
 
   const q = useQuery({
-    queryKey: [...keys.users, { search, status, cursor: pager.cursor }],
-    queryFn: () => adminApi.users({ search, status: status || undefined, cursor: pager.cursor, limit: PAGE_SIZE }),
+    queryKey: [...keys.users, { search, status, departmentId, cursor: pager.cursor }],
+    queryFn: () => adminApi.users({ search, status: status || undefined, departmentId: departmentId || undefined, cursor: pager.cursor, limit: PAGE_SIZE }),
     placeholderData: keepPreviousData,
   });
 
@@ -61,6 +65,8 @@ export function UsersTab() {
     announce(msg);
     void qc.invalidateQueries({ queryKey: keys.users });
     void qc.invalidateQueries({ queryKey: keys.requests });
+    void qc.invalidateQueries({ queryKey: keys.departments });
+    void qc.invalidateQueries({ queryKey: keys.teams });
   };
   const fmt = (e: unknown) => friendlyError(e);
 
@@ -89,14 +95,23 @@ export function UsersTab() {
             <option value="">All</option><option value="active">Active</option><option value="inactive">Inactive</option>
           </select>
         </div>
-        <button className="btn push" onClick={() => setModal({ kind: "bulk" })}>Import users</button>
+        <div className="field inline">
+          <label htmlFor="user-department">Department</label>
+          <select id="user-department" value={departmentId} onChange={(e) => { setDepartmentId(e.target.value); pager.reset(); }}>
+            <option value="">All</option>
+            <option value="none">No department</option>
+            {departmentOptions(departments.data ?? []).map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+          </select>
+        </div>
+        <button className="btn push" onClick={() => setModal({ kind: "departments" })}>Departments</button>
+        <button className="btn" onClick={() => setModal({ kind: "bulk" })}>Import users</button>
         <button className="btn primary" onClick={() => setModal({ kind: "create" })}>New user</button>
       </div>
 
       <div className="card">
         {q.isLoading ? <Loading /> : q.error ? <QueryError query={q} message={friendlyError(q.error)} /> : (
           <div className="tablewrap"><table aria-label="Users" aria-busy={q.isFetching || undefined}>
-            <thead><tr><th>User</th><th>Designation</th>{contact && <th>Phone</th>}<th>Status</th><th>Roles</th><th>Teams</th><th>Manager</th><th><span className="sr-only">Actions</span></th></tr></thead>
+            <thead><tr><th>User</th><th>Designation</th><th>Department</th>{contact && <th>Phone</th>}<th>Status</th><th>Roles</th><th>Teams</th><th>Manager</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {q.data!.items.map((u) => {
                 const self = u.id === me.id;
@@ -104,6 +119,7 @@ export function UsersTab() {
                   <tr key={u.id}>
                     <td><Person name={u.displayName}><b>{u.displayName}</b>{self && <span className="tag">you</span>}<small className="block">{u.email}</small></Person></td>
                     <td>{u.designation ?? "—"}</td>
+                    <td>{u.department ? departmentLabel(u.department) : "—"}</td>
                     {contact && <td>{u.phone ? <a className="contactlink" href={`tel:${u.phone}`}><PhoneIcon size={14} aria-hidden="true" />{u.phone}</a> : "—"}</td>}
                     <td><span className={`badge ${u.status}`}>{u.status}</span></td>
                     <td>
@@ -128,6 +144,7 @@ export function UsersTab() {
                           {u.status === "active" && <button className="btn sm" aria-label={`Grant role to ${u.displayName}`} onClick={() => setModal({ kind: "grant", user: u })}>Grant role</button>}
                           {passwordLogin && u.status === "active" && <button className="btn sm" aria-label={`Set password for ${u.displayName}`} onClick={() => setModal({ kind: "password", user: u })}>Set password</button>}
                           <button className="btn sm" aria-label={`Set manager for ${u.displayName}`} onClick={() => setModal({ kind: "manager", user: u })}>Manager</button>
+                          <button className="btn sm" aria-label={`Set department for ${u.displayName}`} onClick={() => setModal({ kind: "department", user: u })}>Department</button>
                           {u.status === "active"
                             ? <button className="btn sm danger" aria-label={`Deactivate ${u.displayName}`} onClick={() => setModal({ kind: "deactivate", user: u })}>Deactivate</button>
                             : <button className="btn sm" aria-label={`Reactivate ${u.displayName}`} onClick={() => setModal({ kind: "reactivate", user: u })}>Reactivate</button>}
@@ -137,7 +154,7 @@ export function UsersTab() {
                   </tr>
                 );
               })}
-              {q.data!.items.length === 0 && <tr><td colSpan={contact ? 8 : 7} className="empty">No users match.</td></tr>}
+              {q.data!.items.length === 0 && <tr><td colSpan={contact ? 9 : 8} className="empty">No users match.</td></tr>}
             </tbody>
           </table></div>
         )}
@@ -150,6 +167,13 @@ export function UsersTab() {
       {modal?.kind === "password" && <SetPasswordDialog user={modal.user} onClose={close}
         onDone={() => done(`Temporary password set for ${modal.user.displayName}. They must change it at first sign-in.`)} />}
       {modal?.kind === "manager" && <ManagerDialog user={modal.user} onClose={close} onDone={done} />}
+      {modal?.kind === "department" && <DepartmentDialog user={modal.user} departments={departments.data ?? []} onClose={close} onDone={done} />}
+      {modal?.kind === "departments" && <DepartmentsDialog departments={departments.data ?? []} onClose={close} onChanged={(msg) => {
+        announce(msg);
+        void qc.invalidateQueries({ queryKey: keys.departments });
+        void qc.invalidateQueries({ queryKey: keys.users });
+        void qc.invalidateQueries({ queryKey: keys.teams });
+      }} />}
       {modal?.kind === "deactivate" && (
         <ConfirmDialog title={`Deactivate ${modal.user.displayName}?`} confirmLabel="Deactivate" danger formatError={fmt}
           action={() => adminApi.deactivate(modal.user.id)} onClose={close}
@@ -394,6 +418,100 @@ function GrantRoleDialog({ user, onClose, onDone }: { user: AdminUser; onClose: 
         )}
         <DialogActions onCancel={onClose} submitLabel={selected?.restricted && !meta.data?.singleAdminMode ? "Request approval" : "Grant role"} busy={busy} error={error}
           disabled={!selected || (selected.locationBound && !locationId)} />
+      </form>
+    </Dialog>
+  );
+}
+
+function DepartmentDialog({ user, departments, onClose, onDone }: {
+  user: AdminUser; departments: Department[]; onClose: () => void; onDone: (msg: string) => void;
+}) {
+  const [departmentId, setDepartmentId] = useState(user.department?.id ?? "");
+  const { busy, error, run } = useSubmit((e) => friendlyError(e));
+  const options = departmentOptions(departments);
+  return (
+    <Dialog title={`Set department for ${user.displayName}`} onClose={onClose}>
+      <form onSubmit={(e) => {
+        e.preventDefault();
+        void run(async () => {
+          await adminApi.setDepartment(user.id, departmentId || null);
+          const label = options.find((d) => d.id === departmentId)?.label;
+          onDone(label ? `${user.displayName} is now in ${label}.` : `${user.displayName} has no department now.`);
+        });
+      }}>
+        <div className="field"><label htmlFor="dp-select">Department</label>
+          <select id="dp-select" data-autofocus value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
+            <option value="">No department</option>
+            {options.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+          </select></div>
+        <p className="hint">A label for filtering and reporting. It doesn't change what they can see or do; that comes from roles and reporting lines.</p>
+        <DialogActions onCancel={onClose} submitLabel="Save department" busy={busy} error={error} />
+      </form>
+    </Dialog>
+  );
+}
+
+/** Create and rename departments and sub-departments (two levels). */
+function DepartmentsDialog({ departments, onClose, onChanged }: {
+  departments: Department[]; onClose: () => void; onChanged: (msg: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [parentId, setParentId] = useState("");
+  const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
+  const { busy, error, run } = useSubmit((e) => friendlyError(e));
+  const byId = new Map(departments.map((d) => [d.id, d]));
+  const top = departments.filter((d) => !d.parentId);
+  return (
+    <Dialog title="Departments" onClose={onClose} wide>
+      <p className="hint">Departments describe where people work (for example Sales › Interview Prep). They don't grant access.</p>
+      {departments.length === 0 ? <p className="muted">No departments yet.</p> : (
+        <ul className="members" aria-label="Departments" style={{ marginBlockEnd: "1rem" }}>
+          {departmentOptions(departments).map((o) => {
+            const d = byId.get(o.id)!;
+            return (
+              <li key={d.id} style={o.sub ? { paddingInlineStart: "1.5rem" } : undefined}>
+                {editing?.id === d.id ? (
+                  <form style={{ display: "flex", gap: "0.5rem", alignItems: "center" }} onSubmit={(e) => {
+                    e.preventDefault();
+                    void run(async () => {
+                      await adminApi.renameDepartment(d.id, editing.name.trim());
+                      setEditing(null);
+                      onChanged(`Renamed ${d.name} to ${editing.name.trim()}.`);
+                    });
+                  }}>
+                    <label htmlFor="dpr-name" className="sr-only">New name for {d.name}</label>
+                    <input id="dpr-name" required maxLength={120} data-autofocus value={editing.name} onChange={(e) => setEditing({ id: d.id, name: e.target.value })} />
+                    <button className="btn sm primary" disabled={busy}>Save</button>
+                    <button type="button" className="btn sm" onClick={() => setEditing(null)}>Cancel</button>
+                  </form>
+                ) : (
+                  <>
+                    <span>{o.sub ? d.name : <b>{d.name}</b>}</span> <span className="muted">{d.userCount} {d.userCount === 1 ? "user" : "users"}</span>
+                    <button className="btn sm" aria-label={`Rename ${d.name}`} onClick={() => setEditing({ id: d.id, name: d.name })}>Rename</button>
+                  </>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <form onSubmit={(e) => {
+        e.preventDefault();
+        void run(async () => {
+          await adminApi.createDepartment({ name: name.trim(), ...(parentId ? { parentId } : {}) });
+          const parent = parentId ? byId.get(parentId)?.name : undefined;
+          onChanged(parent ? `Created ${parent} › ${name.trim()}.` : `Created ${name.trim()}.`);
+          setName("");
+        });
+      }}>
+        <div className="field"><label htmlFor="dp-name">New department</label>
+          <input id="dp-name" required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} /></div>
+        <div className="field"><label htmlFor="dp-parent">Under <span className="muted">(optional, makes it a sub-department)</span></label>
+          <select id="dp-parent" value={parentId} onChange={(e) => setParentId(e.target.value)}>
+            <option value="">None (top level)</option>
+            {top.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select></div>
+        <DialogActions onCancel={onClose} submitLabel="Add department" busy={busy} error={error} />
       </form>
     </Dialog>
   );

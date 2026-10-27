@@ -4,9 +4,11 @@ import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/
 import {
   AddMember,
   BulkCreateUsers,
+  CreateDepartment,
   CreateLocation,
   CreateRoleRequest,
   CreateTeam,
+  RenameDepartment,
   RenameTeam,
   CreateUser,
   MoveMember,
@@ -18,6 +20,7 @@ import {
   UserListQuery,
   SetPassword,
   SetDesignation,
+  SetDepartment,
 } from "./admin.schemas.js";
 import { AdminService } from "./admin.service.js";
 
@@ -88,6 +91,12 @@ export class AdminController {
     return this.svc.setDesignation(user, id, SetDesignation.parse(body).designation, "admin");
   }
 
+  @Put("users/:id/department")
+  @HttpCode(204)
+  async setDepartment(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
+    await this.svc.setDepartment(user, id, SetDepartment.parse(body).departmentId);
+  }
+
   @Put("users/:id/manager")
   @HttpCode(204)
   async setManager(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
@@ -134,6 +143,24 @@ export class AdminController {
   @Post("locations")
   createLocation(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createLocation(user, CreateLocation.parse(body));
+  }
+
+  // ---------- departments ----------
+
+  @Get("departments")
+  listDepartments(@CurrentUser() user: AuthedUser) {
+    return this.svc.listDepartments(user);
+  }
+
+  @Post("departments")
+  createDepartment(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
+    return this.svc.createDepartment(user, CreateDepartment.parse(body));
+  }
+
+  @Patch("departments/:id")
+  @HttpCode(204)
+  async renameDepartment(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
+    await this.svc.renameDepartment(user, id, RenameDepartment.parse(body).name);
   }
 
   // ---------- teams ----------

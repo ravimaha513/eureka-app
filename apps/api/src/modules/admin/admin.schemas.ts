@@ -7,6 +7,8 @@ export const UserListQuery = z
   .object({
     search: z.string().max(80).optional(),
     status: z.enum(["active", "inactive"]).optional(),
+    // A department and its sub-departments, or "none" for users without one.
+    departmentId: z.union([uuid, z.literal("none")]).optional(),
     cursor: uuid.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })
@@ -69,6 +71,13 @@ export const CreateTeam = z
 export type CreateTeam = z.infer<typeof CreateTeam>;
 
 export const RenameTeam = z.object({ name: z.string().trim().min(1).max(120) }).strict();
+
+const departmentName = z.string().trim().min(1).max(120).refine((v) => !/[\u0000-\u001f\u007f]/.test(v), "remove control characters");
+/** A department, or a sub-department under a top-level one (parentId). docs/admin-api.md, Departments. */
+export const CreateDepartment = z.object({ name: departmentName, parentId: uuid.optional() }).strict();
+export type CreateDepartment = z.infer<typeof CreateDepartment>;
+export const RenameDepartment = z.object({ name: departmentName }).strict();
+export const SetDepartment = z.object({ departmentId: uuid.nullable() }).strict();
 
 export const LOCATION_KINDS = ["training", "gh", "office", "remote"] as const;
 

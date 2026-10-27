@@ -15,7 +15,7 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, parseEmailList, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { mapAdminError } from "./admin.errors.js";
-import type { BulkCreateUsers, CreateLocation, CreateRoleRequest, CreateTeam, CreateUser, MoveMember, UserListQuery } from "./admin.schemas.js";
+import type { BulkCreateUsers, CreateDepartment, CreateLocation, CreateRoleRequest, CreateTeam, CreateUser, MoveMember, UserListQuery } from "./admin.schemas.js";
 import { likeContains } from "../../platform/sql.js";
 import { buildUserImportTemplate } from "./user-import-template.js";
 
@@ -25,6 +25,12 @@ const EMAIL = z.string().email();
 class BulkOutcome extends Error {
   constructor(readonly report: unknown) { super("bulk_rollback"); }
 }
+
+/** A user's department with its parent, from the department_* / parent_* columns of a join. */
+const departmentOf = (r: { department_id: string | null; department_name: string | null; parent_id: string | null; parent_name: string | null }) =>
+  r.department_id
+    ? { id: r.department_id, name: r.department_name!, parent: r.parent_id ? { id: r.parent_id, name: r.parent_name! } : null }
+    : null;
 
 const label = (key: string) => ROLE_LABELS[key as Role] ?? key;
 
@@ -94,15 +100,23 @@ export class AdminService {
         where.push(`(u.display_name ILIKE $${params.length} OR u.email::text ILIKE $${params.length})`);
       }
       if (q.status) { params.push(q.status); where.push(`u.status = $${params.length}`); }
+      if (q.departmentId === "none") where.push(`u.department_id IS NULL`);
+      else if (q.departmentId) {
+        params.push(q.departmentId);
+        where.push(`u.department_id IN (SELECT d.id FROM eureka.department d WHERE d.id = $${params.length} OR d.parent_id = $${params.length})`);
+      }
       if (q.cursor) { params.push(q.cursor); where.push(`u.id > $${params.length}`); }
       params.push(q.limit + 1);
       const { rows } = await c.query<{
         id: string; email: string; display_name: string; designation: string | null; status: string;
         location_id: string | null; location_name: string | null;
+        department_id: string | null; department_name: string | null; parent_id: string | null; parent_name: string | null;
       }>(
         `SELECT u.id, u.email, u.display_name, u.designation, u.status,
-                u.primary_location_id AS location_id, l.name AS location_name
+                u.primary_location_id AS location_id, l.name AS location_name,
+                d.id AS department_id, d.name AS department_name, p.id AS parent_id, p.name AS parent_name
          FROM eureka.app_user u LEFT JOIN eureka.location l ON l.id = u.primary_location_id
+         LEFT JOIN eureka.department d ON d.id = u.department_id LEFT JOIN eureka.department p ON p.id = d.parent_id
          ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
          ORDER BY u.id LIMIT $${params.length}`, params);
       const page = rows.slice(0, q.limit);
@@ -141,6 +155,7 @@ export class AdminService {
             ...(contact ? { phone: phones.rows.find((x) => x.user_id === r.id)?.phone_e164 ?? null } : {}),
             status: r.status,
             primaryLocation: r.location_id ? { id: r.location_id, name: r.location_name } : null,
+            department: departmentOf(r),
             manager: m ? { id: m.id, displayName: m.display_name } : null,
             roles: roles.rows.filter((x) => x.user_id === r.id).map((x) => ({
               key: x.role_key, label: label(x.role_key), locationId: x.location_id, locationName: x.location_name,
@@ -416,10 +431,14 @@ export class AdminService {
     return this.tx(user, async (c) => {
       const teams = await c.query<{
         id: string; name: string; location_id: string | null; location_name: string | null; lead_id: string; lead_name: string;
+        department_id: string | null; department_name: string | null; parent_id: string | null; parent_name: string | null;
       }>(
-        `SELECT t.id, t.name, t.location_id, l.name AS location_name, t.lead_id, u.display_name AS lead_name
+        `SELECT t.id, t.name, t.location_id, l.name AS location_name, t.lead_id, u.display_name AS lead_name,
+                d.id AS department_id, d.name AS department_name, p.id AS parent_id, p.name AS parent_name
          FROM eureka.team t JOIN eureka.app_user u ON u.id = t.lead_id
-         LEFT JOIN eureka.location l ON l.id = t.location_id ORDER BY t.name, t.id`);
+         LEFT JOIN eureka.location l ON l.id = t.location_id
+         LEFT JOIN eureka.department d ON d.id = u.department_id LEFT JOIN eureka.department p ON p.id = d.parent_id
+         ORDER BY t.name, t.id`);
       const members = await c.query<{ team_id: string; id: string; display_name: string }>(
         `SELECT tm.team_id, u.id, u.display_name FROM eureka.team_member tm
          JOIN eureka.app_user u ON u.id = tm.user_id WHERE tm.valid @> now() ORDER BY u.display_name`);
@@ -431,6 +450,8 @@ export class AdminService {
           name: t.name,
           location: t.location_id ? { id: t.location_id, name: t.location_name } : null,
           lead: { id: t.lead_id, displayName: t.lead_name },
+          // The lead's department (descriptive; Teams tab card header).
+          department: departmentOf(t),
           members: members.rows.filter((m) => m.team_id === t.id).map((m) => ({ id: m.id, displayName: m.display_name })),
           coaches: coached.filter((m) => m.team_id === t.id).map((m) => ({ id: m.id, displayName: m.display_name })),
         })),
@@ -455,6 +476,51 @@ export class AdminService {
     await this.tx(user, async (c) => {
       await c.query(`SELECT authz.admin_rename_team($1, $2)`, [teamId, name]);
       await this.audit.record(c, { actorId: user.id, action: "admin.team.renamed", entityType: "team", entityId: teamId });
+    });
+  }
+
+  // ---------- departments ----------
+  // Descriptive only (migration 0230): nothing in authz reads a department.
+
+  async listDepartments(user: AuthedUser) {
+    return this.tx(user, async (c) => {
+      const { rows } = await c.query<{ id: string; name: string; parent_id: string | null; user_count: number }>(
+        `SELECT d.id, d.name, d.parent_id,
+                (SELECT count(*)::int FROM eureka.app_user u WHERE u.department_id = d.id AND u.status = 'active') AS user_count
+         FROM eureka.department d ORDER BY lower(d.name), d.id`);
+      return { items: rows.map((r) => ({ id: r.id, name: r.name, parentId: r.parent_id, userCount: r.user_count })) };
+    });
+  }
+
+  // Names are free text, so audit rows record ids only (rule 5).
+  async createDepartment(user: AuthedUser, body: CreateDepartment) {
+    return this.tx(user, async (c) => {
+      const { rows } = await c.query<{ id: string }>(`SELECT authz.admin_create_department($1, $2) AS id`,
+        [body.name, body.parentId ?? null]);
+      const id = rows[0]!.id;
+      await this.audit.record(c, {
+        actorId: user.id, action: "admin.department.created", entityType: "department", entityId: id,
+        changes: { parentId: body.parentId ?? null },
+      });
+      return { id };
+    });
+  }
+
+  async renameDepartment(user: AuthedUser, departmentId: string, name: string) {
+    await this.tx(user, async (c) => {
+      await c.query(`SELECT authz.admin_rename_department($1, $2)`, [departmentId, name]);
+      await this.audit.record(c, { actorId: user.id, action: "admin.department.renamed", entityType: "department", entityId: departmentId });
+    });
+  }
+
+  async setDepartment(user: AuthedUser, userId: string, departmentId: string | null) {
+    await this.tx(user, async (c) => {
+      const { rows } = await c.query<{ previous: string | null }>(
+        `SELECT authz.admin_set_user_department($1, $2) AS previous`, [userId, departmentId]);
+      await this.audit.record(c, {
+        actorId: user.id, action: "admin.user.department", entityType: "app_user", entityId: userId,
+        changes: { departmentId, previous: rows[0]!.previous },
+      });
     });
   }
 
