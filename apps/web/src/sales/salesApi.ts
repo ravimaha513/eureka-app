@@ -259,7 +259,7 @@ export interface SavedView { id: string; name: string; filters: ViewFilters; cre
 /** Statuses offered in bulk (BULK_STATUSES in apps/api/src/modules/hotlist); terminated and confirmation stay per record. */
 export const BULK_STATUS_OPTIONS = ["active", "on_hold", "full_of_interviews", "stopped"] as const;
 
-export type BulkError = "not_found" | "forbidden" | "invalid_transition" | "placement_open" | "failed";
+export type BulkError = "not_found" | "forbidden" | "invalid_transition" | "placement_open" | "invalid_teams" | "failed";
 export interface BulkResponse { succeeded: number; failed: number; results: { id: string; ok: boolean; error?: BulkError }[] }
 
 export type { ExportResult };

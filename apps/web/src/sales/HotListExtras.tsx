@@ -3,6 +3,7 @@ import { useId, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, type Candidate } from "../api";
 import { saveBlob } from "../lib/download";
+import { TeamChecklist } from "./TeamChecklist";
 import {
   BULK_STATUS_OPTIONS,
   hotlistApi,
@@ -152,6 +153,7 @@ const BULK_REASON: Record<BulkError, string> = {
   forbidden: "you don't have permission to change this candidate",
   invalid_transition: "that status change isn't allowed from its current status",
   placement_open: "an open placement controls its status",
+  invalid_teams: "the picked teams include no team besides its own",
   failed: "could not be changed; try again",
 };
 
@@ -166,17 +168,19 @@ export function BulkBar({ selected, items, canStatus, canVisibility, onDone }: {
   const qc = useQueryClient();
   const [to, setTo] = useState("");
   const [vis, setVis] = useState<Visibility | "">("");
+  const [teams, setTeams] = useState<Set<string>>(() => new Set());
   const [names, setNames] = useState<Record<string, string>>({});
   const run = useMutation({
-    mutationFn: (a: { kind: "status"; to: string } | { kind: "visibility"; visibility: Visibility }) => {
+    mutationFn: (a: { kind: "status"; to: string } | { kind: "visibility"; visibility: Visibility; teamIds?: string[] }) => {
       const ids = [...selected];
       setNames(Object.fromEntries(items.filter((c) => selected.has(c.id)).map((c) => [c.id, c.name])));
-      return a.kind === "status" ? hotlistApi.bulkStatus(ids, a.to) : hotlistApi.bulkVisibility(ids, a.visibility);
+      return a.kind === "status" ? hotlistApi.bulkStatus(ids, a.to) : hotlistApi.bulkVisibility(ids, a.visibility, a.teamIds);
     },
-    onSuccess: () => { setTo(""); setVis(""); onDone(); void qc.invalidateQueries({ queryKey: salesKeys.hotlist }); },
+    onSuccess: () => { setTo(""); setVis(""); setTeams(new Set()); onDone(); void qc.invalidateQueries({ queryKey: salesKeys.hotlist }); },
   });
   const r: BulkResponse | undefined = run.data;
   const n = selected.size;
+  const pickTeams = vis === "selected_teams";
 
   return (
     <section className="bulkbar" aria-label="Bulk actions">
@@ -206,12 +210,20 @@ export function BulkBar({ selected, items, canStatus, canVisibility, onDone }: {
                 <option value="selected_teams">Selected teams</option>
               </select>
             </div>
-            <button type="button" className="btn primary" disabled={!n || !vis || run.isPending}
-              onClick={() => vis && run.mutate({ kind: "visibility", visibility: vis })}>Apply visibility</button>
+            <button type="button" className="btn primary" disabled={!n || !vis || (pickTeams && teams.size === 0) || run.isPending}
+              onClick={() => vis && run.mutate({ kind: "visibility", visibility: vis, ...(pickTeams ? { teamIds: [...teams] } : {}) })}>Apply visibility</button>
           </>
         )}
         <button type="button" className="btn" disabled={!n} onClick={onDone}>Clear selection</button>
       </div>
+      {canVisibility && pickTeams && (
+        <div className="bulkteams">
+          <p id={`${id}-teams`} className="hint">
+            Picked teams can see and submit these candidates while they're active. Each candidate's own team always sees it.
+          </p>
+          <TeamChecklist picked={teams} onChange={setTeams} disabled={run.isPending} describedBy={`${id}-teams`} />
+        </div>
+      )}
       {run.isError ? (
         <p className="error" role="alert">
           {run.error instanceof ApiError && run.error.status === 429 ? (run.error.detail ?? "Too many requests. Try again in a minute.")

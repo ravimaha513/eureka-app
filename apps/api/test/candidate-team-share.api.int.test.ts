@@ -117,6 +117,20 @@ describe("Hot List and profile with selected teams", () => {
     expect(await onHotlist("l2", c)).toBe(false);
   });
 
+  it("bulk: shares each row; a row whose only pick is its own team fails as invalid_teams", async () => {
+    const a = await fresh();
+    const b = await fresh();
+    const res = await call("l1", "POST", "/api/v1/hotlist/bulk/visibility", { ids: [a.id, b.id], visibility: "selected_teams", teamIds: [T.t2] });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ succeeded: 2, failed: 0 });
+    expect(await onHotlist("l2", a)).toBe(true);
+    expect(await onHotlist("l2", b)).toBe(true);
+
+    const own = await call("l1", "POST", "/api/v1/hotlist/bulk/visibility", { ids: [a.id], visibility: "selected_teams", teamIds: [T.t1] });
+    expect(own.json()).toMatchObject({ succeeded: 0, failed: 1, results: [{ id: a.id, ok: false, error: "invalid_teams" }] });
+    expect(await onHotlist("l2", a)).toBe(true); // unchanged
+  });
+
   it("audits ids only", async () => {
     const c = await fresh();
     await call("l1", "PUT", `/api/v1/candidates/${c.id}/visibility`, { visibility: "selected_teams", teamIds: [T.t3] });

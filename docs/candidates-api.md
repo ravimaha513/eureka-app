@@ -122,7 +122,9 @@ phones masked; no actor names or history before it was shared; no ownership righ
   over their team, manager / AD over their hierarchy, CEO, location roles over their location).
   The write goes through `authz.set_candidate_visibility`, which re-checks read (404) and
   ownership (403). Audited as `candidate.visibility` with the team ids only.
-- `POST /api/v1/hotlist/bulk/visibility` takes the same `teamIds` with `selected_teams`.
+- `POST /api/v1/hotlist/bulk/visibility` takes the same `teamIds` with `selected_teams`; each
+  candidate drops its own team from the picks, and a row left with none (or naming a team that is
+  gone) fails with `invalid_teams`. The Hot List bulk bar shows the team picker for this option.
 - `GET /api/v1/candidate-share-teams` (`candidate.visibility:update`): `{ items: [{ id, name, lead }] }`
   for the picker.
 - `GET /api/v1/candidates/:id` adds `sharedTeams` (`[{ id, name }]`) for owners only.

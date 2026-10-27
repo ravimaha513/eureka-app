@@ -16,6 +16,7 @@ import { DUPLICATE_WARNING, LogSubmissionDialog } from "./LogSubmissionDialog";
 import { TRANSITIONS, VISIBILITY_LABELS, salesApi, salesKeys, statusLabel, type CandidateProfile as Profile, type Visibility } from "./salesApi";
 import { OpenToAllBadge, Phone, Priority, SharedBadge, StatusBadge, fmtDate } from "./ui";
 import { Loading } from "../ui/Loading";
+import { TeamChecklist } from "./TeamChecklist";
 
 type Modal = { kind: "edit" } | { kind: "submit" } | { kind: "terminate" } | { kind: "compliance" };
 
@@ -250,14 +251,9 @@ function TeamSharePicker({ ownTeamId, visibility, shared, busy, onSave }: {
   ownTeamId: string; visibility: Visibility; shared: { id: string }[]; busy: boolean; onSave: (teamIds: string[]) => void;
 }) {
   const id = useId();
-  const teams = useQuery({ queryKey: ["candidate-share-teams"], queryFn: () => salesApi.shareTeams(), staleTime: 300_000 });
   const savedKey = shared.map((t) => t.id).sort().join(",");
   const [picked, setPicked] = useState<Set<string>>(() => new Set(shared.map((t) => t.id)));
-  const [filter, setFilter] = useState("");
   useEffect(() => setPicked(new Set(savedKey ? savedKey.split(",") : [])), [savedKey]);
-  const options = (teams.data?.items ?? []).filter((t) => t.id !== ownTeamId);
-  const needle = filter.trim().toLowerCase();
-  const shown = options.filter((t) => `${t.name} ${t.lead ?? ""}`.toLowerCase().includes(needle));
   const dirty = [...picked].sort().join(",") !== savedKey;
   const openToAll = visibility === "all_teams";
   return (
@@ -269,31 +265,10 @@ function TeamSharePicker({ ownTeamId, visibility, shared, busy, onSave }: {
           : "Picked teams can see and submit this candidate while they're active. Your team always sees it."}
       </p>
       {!openToAll && (
-        teams.isPending ? <Loading /> : teams.isError ? <p className="error" role="alert">Couldn't load teams.</p> : (
-          <>
-            <label className="field">
-              <span>Find a team</span>
-              <input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} aria-describedby={`${id}-d`} />
-            </label>
-            <fieldset className="radios sharelist">
-              <legend>Teams</legend>
-              {shown.length === 0 && <p className="muted">No teams match.</p>}
-              {shown.map((t) => (
-                <label key={t.id}>
-                  <input type="checkbox" checked={picked.has(t.id)} disabled={busy}
-                    onChange={(e) => setPicked((s) => {
-                      const n = new Set(s);
-                      if (e.target.checked) n.add(t.id); else n.delete(t.id);
-                      return n;
-                    })} />
-                  {t.name}{t.lead ? <span className="muted"> · {t.lead}</span> : null}
-                </label>
-              ))}
-            </fieldset>
-            <p className="muted">{picked.size === 0 ? "Not shared with other teams." : picked.size === 1 ? "1 team picked." : `${picked.size} teams picked.`}</p>
-            <button type="submit" className="btn" disabled={busy || !dirty} aria-busy={busy || undefined}>Save sharing</button>
-          </>
-        )
+        <>
+          <TeamChecklist picked={picked} onChange={setPicked} excludeTeamId={ownTeamId} disabled={busy} describedBy={`${id}-d`} />
+          <button type="submit" className="btn" disabled={busy || !dirty} aria-busy={busy || undefined}>Save sharing</button>
+        </>
       )}
     </form>
   );

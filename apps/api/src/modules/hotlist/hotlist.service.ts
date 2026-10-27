@@ -49,7 +49,7 @@ interface ExportRow {
   gh_location_name: string | null;
 }
 
-export type BulkError = "not_found" | "forbidden" | "invalid_transition" | "placement_open" | "failed";
+export type BulkError = "not_found" | "forbidden" | "invalid_transition" | "placement_open" | "invalid_teams" | "failed";
 export interface BulkResult { id: string; ok: boolean; error?: BulkError }
 
 const label = (s: string) => { const t = s.replace(/_/g, " "); return t.charAt(0).toUpperCase() + t.slice(1); };
@@ -208,6 +208,8 @@ function bulkError(err: unknown): BulkError {
   if (err instanceof HttpException) {
     const detail = (err.getResponse() as { message?: string }).message;
     if (detail === "invalid_transition" || detail === "placement_open") return detail;
+    // Selected teams (0240): the picks left nothing besides the candidate's own team, or name a team that is gone.
+    if (detail === "teams_required" || detail === "invalid_team" || detail === "too_many_teams") return "invalid_teams";
   }
   const status = err instanceof HttpException ? err.getStatus() : toProblem(err).status;
   if (status === 404) return "not_found";
