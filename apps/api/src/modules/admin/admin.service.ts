@@ -423,6 +423,8 @@ export class AdminService {
       const members = await c.query<{ team_id: string; id: string; display_name: string }>(
         `SELECT tm.team_id, u.id, u.display_name FROM eureka.team_member tm
          JOIN eureka.app_user u ON u.id = tm.user_id WHERE tm.valid @> now() ORDER BY u.display_name`);
+      const coached = await this.teamCoaches(c, null);
+      const coaches = await this.coachUsers(c, null);
       return {
         items: teams.rows.map((t) => ({
           id: t.id,
@@ -430,7 +432,9 @@ export class AdminService {
           location: t.location_id ? { id: t.location_id, name: t.location_name } : null,
           lead: { id: t.lead_id, displayName: t.lead_name },
           members: members.rows.filter((m) => m.team_id === t.id).map((m) => ({ id: m.id, displayName: m.display_name })),
+          coaches: coached.filter((m) => m.team_id === t.id).map((m) => ({ id: m.id, displayName: m.display_name })),
         })),
+        coaches,
       };
     });
   }
@@ -508,6 +512,80 @@ export class AdminService {
         changes: { designation, previous: before.designation, via },
       });
       return { id: targetId, designation };
+    });
+  }
+
+  // ---------- coach assignments (AD-11) ----------
+
+  /** Current coach assignments, limited to the given coaches (null: everyone). */
+  private async teamCoaches(c: pg.PoolClient, coachIds: string[] | null) {
+    return (await c.query<{ team_id: string; id: string; display_name: string }>(
+      `SELECT ca.team_id, u.id, u.display_name FROM eureka.coach_assignment ca
+       JOIN eureka.app_user u ON u.id = ca.coach_id
+       WHERE ca.valid @> now() AND ($1::uuid[] IS NULL OR ca.coach_id = ANY ($1::uuid[]))
+       ORDER BY u.display_name, u.id`, [coachIds])).rows;
+  }
+
+  /** Active users holding a coach role (interview_coach, interview_lead), limited to the given ids (null: everyone). */
+  private async coachUsers(c: pg.PoolClient, ids: string[] | null) {
+    const { rows } = await c.query<{ id: string; display_name: string; email: string; lead: boolean }>(
+      `SELECT u.id, u.display_name, u.email,
+              bool_or(ur.role_key = 'interview_lead') AS lead
+       FROM eureka.app_user u JOIN eureka.user_role ur ON ur.user_id = u.id
+       WHERE u.status = 'active' AND ur.valid @> now() AND ur.role_key IN ('interview_coach', 'interview_lead')
+         AND ($1::uuid[] IS NULL OR u.id = ANY ($1::uuid[]))
+       GROUP BY u.id ORDER BY u.display_name, u.id`, [ids]);
+    return rows.map((u) => ({ id: u.id, displayName: u.display_name, email: u.email, role: u.lead ? "interview_lead" : "interview_coach" }));
+  }
+
+  /**
+   * AD-11, coach:assign: every team (coaches support any sales team) with the
+   * caller's assignable coaches on it, and those coaches: active coach-role
+   * holders below the caller in the reporting hierarchy (everyone for an org grant).
+   */
+  async coachAssignments(user: AuthedUser) {
+    const scope = resolveScope(user.access, "coach:assign");
+    if (!scope) throw new ForbiddenException("not_permitted");
+    const ids = scope.all ? null : user.access.subordinateUserIds;
+    return this.tx(user, async (c) => {
+      const teams = await c.query<{ id: string; name: string; lead_id: string; lead_name: string }>(
+        `SELECT t.id, t.name, t.lead_id, u.display_name AS lead_name
+         FROM eureka.team t JOIN eureka.app_user u ON u.id = t.lead_id ORDER BY t.name, t.id`);
+      const coaches = await this.coachUsers(c, ids);
+      const coached = await this.teamCoaches(c, coaches.map((u) => u.id));
+      return {
+        items: teams.rows.map((t) => ({
+          id: t.id,
+          name: t.name,
+          lead: { id: t.lead_id, displayName: t.lead_name },
+          coaches: coached.filter((m) => m.team_id === t.id).map((m) => ({ id: m.id, displayName: m.display_name })),
+        })),
+        coaches,
+      };
+    });
+  }
+
+  /**
+   * AD-11: assign a coach to a team or end the assignment. `via` "admin":
+   * access:manage, any coach; "hierarchy": coach:assign over the coaches below
+   * the caller. 404 unknown team, 403 self or outside the scope; the definer
+   * functions re-check everything. Audited with ids only.
+   */
+  async changeCoach(user: AuthedUser, via: "admin" | "hierarchy", op: "assign" | "unassign", teamId: string, coachId: string) {
+    this.notSelf(user, coachId);
+    if (via === "hierarchy") {
+      const scope = resolveScope(user.access, "coach:assign");
+      if (!scope) throw new ForbiddenException("not_permitted");
+      if (!scope.all && !user.access.subordinateUserIds.includes(coachId)) throw new ForbiddenException("not_in_scope");
+    }
+    await this.tx(user, async (c) => {
+      const team = await c.query(`SELECT 1 FROM eureka.team WHERE id = $1`, [teamId]);
+      if (team.rowCount === 0) throw new NotFoundException();
+      await c.query(`SELECT authz.${op}_coach($1, $2)`, [coachId, teamId]);
+      await this.audit.record(c, {
+        actorId: user.id, action: `${via === "admin" ? "admin." : ""}team.coach_${op}ed`, entityType: "team", entityId: teamId,
+        changes: { coachId },
+      });
     });
   }
 

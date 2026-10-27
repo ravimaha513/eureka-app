@@ -82,7 +82,7 @@ const salesUpdate = (a: UserAccess, r: ActivityRef) =>
 const locationUpdate = (a: UserAccess, r: ActivityRef) =>
   r.locationId !== null && (resolveScopeFor(a, "interview:update", ["location"])?.locationIds.has(r.locationId) ?? false);
 const kinds = (a: UserAccess, r: ActivityRef) => ([
-  ["coach", ["coached"]], ["location", ["location"]], ["client", ["own", "team", "hierarchy", "org"]],
+  ["coach", ["coached", "coached_hierarchy"]], ["location", ["location"]], ["client", ["own", "team", "hierarchy", "org"]],
 ] as const).filter(([, s]) => activityVisible(resolveScopeFor(a, "interview.feedback:create", s), r)).map(([k]) => k);
 
 const sample = () => seed.interviews.find((i) => i.recruiterId === U.r1a)!;

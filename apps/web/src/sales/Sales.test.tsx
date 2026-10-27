@@ -14,7 +14,7 @@ import { DUPLICATE_WARNING } from "./LogSubmissionDialog";
 const meFor = (role: Role): Me => ({
   id: "u-me", email: "me@eureka.example", displayName: "Test User", csrfToken: "tok",
   roles: [{ key: role, label: role, locationId: null }],
-  capabilities: capabilities({ userId: "u-me", roles: [{ role, locationId: "loc" }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [] }),
+  capabilities: capabilities({ userId: "u-me", roles: [{ role, locationId: "loc" }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [] }),
 });
 const RECRUITER = meFor("recruiter");
 const LEAD = meFor("lead");

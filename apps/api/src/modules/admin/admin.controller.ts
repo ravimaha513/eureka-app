@@ -165,6 +165,20 @@ export class AdminController {
   async addMember(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
     await this.svc.addMember(user, id, AddMember.parse(body).userId);
   }
+
+  // AD-11: interview coaches supporting the team
+  @Post("teams/:id/coaches")
+  @HttpCode(204)
+  async assignCoach(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
+    await this.svc.changeCoach(user, "admin", "assign", id, AddMember.parse(body).userId);
+  }
+
+  @Delete("teams/:id/coaches/:userId")
+  @HttpCode(204)
+  async unassignCoach(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string,
+    @Param("userId", ParseUUIDPipe) userId: string): Promise<void> {
+    await this.svc.changeCoach(user, "admin", "unassign", id, userId);
+  }
 }
 
 /** Team operations outside the admin area (AD-8, AD-10): scoped by team:move_member / team:add_member, not access:manage. */
@@ -185,11 +199,39 @@ export class TeamsController {
     await this.svc.leadAddMember(user, id, AddMember.parse(body).userId);
   }
 
+  // AD-11: an Interview Lead assigns the coaches in their reporting subtree to any team.
+  @Post(":id/coaches")
+  @HttpCode(204)
+  @RequirePermission("coach:assign")
+  async assignCoach(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
+    await this.svc.changeCoach(user, "hierarchy", "assign", id, AddMember.parse(body).userId);
+  }
+
+  @Delete(":id/coaches/:userId")
+  @HttpCode(204)
+  @RequirePermission("coach:assign")
+  async unassignCoach(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string,
+    @Param("userId", ParseUUIDPipe) userId: string): Promise<void> {
+    await this.svc.changeCoach(user, "hierarchy", "unassign", id, userId);
+  }
+
   @Post(":id/move-member")
   @HttpCode(200)
   @RequirePermission("team:move_member")
   moveMember(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.moveMember(user, id, MoveMember.parse(body));
+  }
+}
+
+/** AD-11: every team with the caller's coaches assigned to it, and the coaches they may assign (coach:assign). */
+@Controller("api/v1/coach-assignments")
+export class CoachAssignmentsController {
+  constructor(private readonly svc: AdminService) {}
+
+  @Get()
+  @RequirePermission("coach:assign")
+  list(@CurrentUser() user: AuthedUser) {
+    return this.svc.coachAssignments(user);
   }
 }
 

@@ -712,6 +712,23 @@ const CASES: RejectCase[] = [
     }),
     forbidden: { fromTeamId: T.t3, movedCandidates: 0, teamId: T.t3 },
   },
+  // AD-11: coach assignments
+  {
+    route: "POST /api/v1/admin/teams/:id/coaches", actor: "admin",
+    prepare: async () => ({
+      url: `/api/v1/admin/teams/${T.t3}/coaches`, body: { userId: U.coach },
+      state: () => rows(`SELECT coach_id, team_id, upper_inf(valid) AS open FROM eureka.coach_assignment ORDER BY coach_id, team_id, lower(valid)`),
+    }),
+    forbidden: { teamId: T.t1, coachId: U.il, valid: false, coach_id: U.il },
+  },
+  {
+    route: "POST /api/v1/teams/:id/coaches", actor: "il",
+    prepare: async () => ({
+      url: `/api/v1/teams/${T.t3}/coaches`, body: { userId: U.coach },
+      state: () => rows(`SELECT coach_id, team_id, upper_inf(valid) AS open FROM eureka.coach_assignment ORDER BY coach_id, team_id, lower(valid)`),
+    }),
+    forbidden: { teamId: T.t1, coachId: U.il, valid: false, coach_id: U.il },
+  },
   // Hot List extras
   {
     route: "POST /api/v1/hotlist/views", actor: "r1a",
