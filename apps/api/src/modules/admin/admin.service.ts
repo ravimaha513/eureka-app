@@ -659,7 +659,9 @@ export class AdminService {
   /**
    * AD-10: the teams the caller may add members to (the ones they lead, plus
    * any a hierarchy or org grant covers), with their members and the active
-   * recruiters who are in no team yet.
+   * recruiters who are in no team yet: for team/hierarchy callers, only those
+   * with no manager yet or below the caller (or a lead of one of those teams)
+   * in the reporting line.
    */
   async myTeams(user: AuthedUser) {
     const all = !!resolveScope(user.access, "team:add_member")?.all;
@@ -678,7 +680,11 @@ export class AdminService {
          WHERE u.status = 'active' AND u.id <> $1
            AND EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.user_id = u.id AND ur.role_key = 'recruiter' AND ur.valid @> now())
            AND NOT EXISTS (SELECT 1 FROM eureka.team_member tm WHERE tm.user_id = u.id AND tm.valid @> now())
-         ORDER BY u.display_name, u.id LIMIT 500`, [user.id]);
+           AND ($2::boolean
+             OR NOT EXISTS (SELECT 1 FROM eureka.reporting_closure rc WHERE rc.descendant_id = u.id)
+             OR EXISTS (SELECT 1 FROM eureka.reporting_closure rc
+                 WHERE rc.descendant_id = u.id AND rc.ancestor_id = ANY ($3::uuid[])))
+         ORDER BY u.display_name, u.id LIMIT 500`, [user.id, all, [user.id, ...teams.rows.map((t) => t.lead_id)]]);
       return {
         items: teams.rows.map((t) => ({
           id: t.id,

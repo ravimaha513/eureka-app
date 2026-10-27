@@ -12,6 +12,7 @@ import {
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
+import { inPickerScope, pickerScopePerm } from "../../platform/people-scope.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import { TERMINAL_SUBMISSION_STATUSES, fromMicros, mapPipelineError, splitCursor, toMicros } from "../submissions/pipeline.js";
 import { interviewTimesProblem } from "../submissions/pipeline.js";
@@ -244,11 +245,22 @@ export class InterviewsService {
     };
   }
 
-  /** Active staff for the panel and lead pickers (IS-4): names only, like the coach picker. */
+  /**
+   * Active staff for the panel and lead pickers (IS-4): names only, like the coach picker.
+   * Sales callers with a team/hierarchy grant see the sales people in their scope plus all
+   * non-sales staff (coaches, trainers, support); org and location grants see everyone.
+   */
   async panelOptions(user: AuthedUser) {
+    const perm = pickerScopePerm(user.access, "interview:create");
+    const params: unknown[] = [];
+    const where = perm
+      ? `AND (${inPickerScope("u.id", perm, params)} OR NOT EXISTS (SELECT 1 FROM eureka.user_role ur
+           JOIN eureka.role r ON r.key = ur.role_key WHERE ur.user_id = u.id AND r.is_sales AND ur.valid @> now()))`
+      : "";
     return this.db.withUser(user.id, async (c) => ({
       items: (await c.query<{ id: string; name: string }>(
-        `SELECT u.id, u.display_name AS name FROM eureka.app_user u WHERE u.status = 'active' ORDER BY name, u.id LIMIT 500`,
+        `SELECT u.id, u.display_name AS name FROM eureka.app_user u WHERE u.status = 'active' ${where}
+         ORDER BY name, u.id LIMIT 500`, params,
       )).rows,
     }));
   }

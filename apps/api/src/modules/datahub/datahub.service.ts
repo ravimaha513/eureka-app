@@ -18,6 +18,7 @@ import {
 } from "@eureka/shared";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
+import { inPickerScope, pickerScopePerm } from "../../platform/people-scope.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
 import { documentQuarantineKey, documentStoredKey } from "../../platform/storage/content.js";
 import { DOCUMENT_STORAGE, type DocumentStorage } from "../../platform/storage/document-storage.js";
@@ -273,14 +274,20 @@ export class DatahubService {
     });
   }
 
-  /** People picker for restricted folders: active staff (holders of datahub:read), ids and names only. */
+  /**
+   * People picker for restricted folders: active staff (holders of datahub:read), ids and names only.
+   * Creators without datahub:manage whose people scope (performance:read) is a team or reporting
+   * subtree only see those people; datahub:manage holders and org/location roles see everyone.
+   */
   async people(user: AuthedUser, q: { q?: string; limit: number }) {
     if (!this.canCreate(user)) throw new ForbiddenException("Not permitted");
+    const perm = can(user.access, "datahub:manage") ? null : pickerScopePerm(user.access, "performance:read");
     return this.db.withUser(user.id, async (c) => {
       const term = q.q?.trim() ?? "";
       const params: unknown[] = [q.limit];
       let where = "";
       if (term) { params.push(`%${likeEscape(term)}%`); where = `AND lower(u.display_name) LIKE $2`; }
+      if (perm) where += ` AND ${inPickerScope("u.id", perm, params)}`;
       const { rows } = await c.query<{ id: string; name: string }>(
         `SELECT u.id, u.display_name AS name FROM eureka.app_user u
          WHERE u.status = 'active' ${where}
