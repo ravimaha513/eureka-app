@@ -40,7 +40,7 @@ interface HeaderRow {
   cand_recruiter_id: string | null;
   cand_team_id: string | null;
   cand_location_id: string | null;
-  cand_visibility: "team" | "all_teams" | null;
+  cand_visibility: CandidateRef["visibility"] | null;
   cand_status: string | null;
   candidate_name: string | null;
   recruiter_name: string | null;

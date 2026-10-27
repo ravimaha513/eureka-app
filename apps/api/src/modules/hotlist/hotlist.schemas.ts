@@ -1,13 +1,13 @@
 import { z } from "zod";
-import { HOTLIST_STATUSES } from "@eureka/shared";
-import { ExtraListFilters } from "../candidates/candidates.schemas.js";
+import { CANDIDATE_VISIBILITIES, HOTLIST_STATUSES } from "@eureka/shared";
+import { ExtraListFilters, ShareTeamIds } from "../candidates/candidates.schemas.js";
 
 /** The Hot List filters a saved view or an export carries (same names as GET /hotlist). */
 export const HotlistFilters = z
   .object({
     status: z.enum(HOTLIST_STATUSES).optional(),
     technology: z.string().trim().min(1).max(80).optional(),
-    visibility: z.enum(["team", "all_teams"]).optional(),
+    visibility: z.enum(CANDIDATE_VISIBILITIES).optional(),
     search: z.string().trim().min(1).max(80).optional(),
     ...ExtraListFilters,
   })
@@ -30,7 +30,10 @@ export const BULK_MAX = 100;
 const Ids = z.array(z.string().uuid()).min(1).max(BULK_MAX)
   .refine((ids) => new Set(ids).size === ids.length, { message: "Duplicate ids" });
 
-export const BulkVisibility = z.object({ ids: Ids, visibility: z.enum(["team", "all_teams"]) }).strict();
+export const BulkVisibility = z
+  .object({ ids: Ids, visibility: z.enum(CANDIDATE_VISIBILITIES), teamIds: ShareTeamIds.optional() })
+  .strict()
+  .refine((b) => (b.visibility === "selected_teams") === (b.teamIds !== undefined), { message: "teamIds goes with selected_teams" });
 export type BulkVisibility = z.infer<typeof BulkVisibility>;
 
 /**

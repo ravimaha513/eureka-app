@@ -82,12 +82,13 @@ const STATUS_WORDS: Record<string, string> = {
  * stay flag, so the label cannot disagree with the fields that drive access.
  * "N/A" is a candidate not in the market yet (in training).
  */
-export function marketingStatusLabel(status: string, visibility: "team" | "all_teams", remote: boolean): string {
+export function marketingStatusLabel(status: string, visibility: "team" | "all_teams" | "selected_teams", remote: boolean): string {
   if (status === "in_training") return "N/A";
   const base = STATUS_WORDS[status] ?? status;
   if (status !== "active") return base;
   const parts = [base];
   if (remote) parts.push("Remote");
   if (visibility === "all_teams") parts.push("All Teams");
+  if (visibility === "selected_teams") parts.push("Shared");
   return parts.join("/");
 }

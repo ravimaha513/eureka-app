@@ -80,10 +80,18 @@ export class CandidatesController {
     return this.svc.complianceCompanies(user);
   }
 
+  /** Teams for the "Selected teams" picker (0240). */
+  @Get("candidate-share-teams")
+  @RequirePermission("candidate.visibility:update")
+  shareTeams(@CurrentUser() user: AuthedUser) {
+    return this.svc.shareTeams(user);
+  }
+
   @Put("candidates/:id/visibility")
   @RequirePermission("candidate.visibility:update")
   visibility(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.svc.setVisibility(user, id, VisibilityUpdate.parse(body).visibility);
+    const b = VisibilityUpdate.parse(body);
+    return this.svc.setVisibility(user, id, b.visibility, b.teamIds);
   }
 
   @Put("candidates/:id/technical-rating")

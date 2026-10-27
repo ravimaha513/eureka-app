@@ -423,11 +423,11 @@ export class TrainingService {
     return this.db.withUser(user.id, async (c) => {
       const params: unknown[] = [candidateId];
       const r = (await c.query<{
-        recruiter_id: string | null; team_id: string; location_id: string; visibility: "team" | "all_teams"; marketing_status: string; batch_id: string | null;
+        recruiter_id: string | null; team_id: string; location_id: string; visibility: CandidateRef["visibility"]; marketing_status: string; batch_id: string | null;
       }>(`SELECT c.recruiter_id, c.team_id, c.location_id, c.visibility, c.marketing_status, c.batch_id
           FROM eureka.candidate c WHERE c.id = $1 AND ${scopePredicate(readScope, params)}`, params)).rows[0];
       if (!r) throw new NotFoundException();
-      const ref: CandidateRef = { recruiterId: r.recruiter_id, teamId: r.team_id, locationId: r.location_id, visibility: r.visibility, marketingStatus: r.marketing_status };
+      const ref: CandidateRef = { id: candidateId, recruiterId: r.recruiter_id, teamId: r.team_id, locationId: r.location_id, visibility: r.visibility, marketingStatus: r.marketing_status };
       if (!r.batch_id) {
         if (!trainingCandidateCovered(user.access, ref)) throw new ForbiddenException("Not permitted");
         return { batch: null };

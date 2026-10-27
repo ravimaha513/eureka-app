@@ -14,7 +14,8 @@ BEGIN
   IF NOT FOUND OR NOT coalesce(
        authz.owns('candidate:read', c.recruiter_id, c.team_id, c.location_id)
        OR (authz.all_teams('candidate:read') AND c.visibility = 'all_teams'
-           AND c.marketing_status IN ('active','full_of_interviews')), false) THEN
+           AND c.marketing_status IN ('active','full_of_interviews'))
+       OR c.id = ANY (authz.shared_candidate_ids('candidate:read')), false) THEN
     RAISE EXCEPTION 'candidate not found' USING ERRCODE = 'no_data_found';
   END IF;
   IF NOT coalesce(authz.owns('candidate:update', c.recruiter_id, c.team_id, c.location_id), false) THEN

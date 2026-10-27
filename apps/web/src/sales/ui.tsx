@@ -18,6 +18,7 @@ export function Phone({ c }: { c: Pick<Candidate, "phone" | "phoneMasked"> }) {
 export const StatusBadge = ({ status }: { status: string }) => <span className={`badge ${status}`}>{statusLabel(status)}</span>;
 
 export const OpenToAllBadge = () => <span className="badge all_teams">Open to all teams</span>;
+export const SharedBadge = () => <span className="badge all_teams">Selected teams</span>;
 
 export const Priority = ({ p }: { p: string }) => <span className={`prio ${p}`}>{p}</span>;
 

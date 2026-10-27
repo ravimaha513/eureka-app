@@ -6,7 +6,7 @@ import { CreateCandidateDialog } from "./CreateCandidateDialog";
 import { CandidateName, type ListPageProps } from "./HotListPage";
 import { ListFilters, ListFooter } from "./ListControls";
 import { STATUSES, salesApi, salesKeys } from "./salesApi";
-import { OpenToAllBadge, Phone, Priority, StatusBadge } from "./ui";
+import { OpenToAllBadge, SharedBadge, Phone, Priority, StatusBadge } from "./ui";
 import { useCandidateList } from "./useCandidateList";
 import { Loading } from "../ui/Loading";
 import { QueryError } from "../ui/QueryError";
@@ -49,7 +49,7 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
                 <tr key={c.id}>
                   <td><CandidateName c={c} caps={caps} onOpenProfile={onOpenProfile} /></td>
                   <td>{c.technology}</td>
-                  <td><StatusBadge status={c.status} />{" "}{c.visibility === "all_teams" && <OpenToAllBadge />}</td>
+                  <td><StatusBadge status={c.status} />{" "}{c.visibility === "all_teams" && <OpenToAllBadge />}{c.visibility === "selected_teams" && <SharedBadge />}</td>
                   <td><Priority p={c.priority} /></td>
                   <td>{c.team.name}</td>
                   <td>{c.recruiter?.name ?? "Unassigned"}</td>
