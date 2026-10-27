@@ -447,6 +447,7 @@ function paymentCases(): RejectCase[] {
   ];
 }
 
+let maDept = 0;
 const CASES: RejectCase[] = [
   // interview-alerts (migration 0086): a contract's placement, client, creator and times are the server's
   {
@@ -694,6 +695,37 @@ const CASES: RejectCase[] = [
       state: () => rows(`SELECT * FROM eureka.team_member ORDER BY team_id, user_id`),
     }),
     forbidden: { teamId: T.t3, valid: false, role: "lead" },
+  },
+  // departments (docs/admin-api.md AD-11, migration 0230): id, created_at and user counts are the server's
+  {
+    route: "POST /api/v1/admin/departments", actor: "admin",
+    prepare: async () => ({
+      url: "/api/v1/admin/departments", body: { name: `MA Dept ${++maDept}` },
+      state: () => rows(`SELECT * FROM eureka.department ORDER BY id`),
+    }),
+    forbidden: { userCount: 9, children: [FOREIGN_ID], members: [U.r1a], users: [U.r1a], status: "inactive" },
+  },
+  {
+    route: "PATCH /api/v1/admin/departments/:id", actor: "admin",
+    prepare: async () => {
+      const d = await ok("admin", "POST", "/api/v1/admin/departments", { name: `MA Dept ${++maDept}` });
+      return {
+        url: `/api/v1/admin/departments/${d.id}`, body: { name: `MA Dept ${++maDept}` },
+        state: () => rows(`SELECT * FROM eureka.department ORDER BY id`),
+      };
+    },
+    forbidden: { parentId: FOREIGN_ID, userCount: 9, members: [U.r1a], status: "inactive" },
+  },
+  {
+    route: "PUT /api/v1/admin/users/:id/department", actor: "admin",
+    prepare: async () => {
+      const d = await ok("admin", "POST", "/api/v1/admin/departments", { name: `MA Dept ${++maDept}` });
+      return {
+        url: `/api/v1/admin/users/${U.r1b}/department`, body: { departmentId: d.id },
+        state: () => rows(`SELECT id, department_id FROM eureka.app_user ORDER BY id`),
+      };
+    },
+    forbidden: { userId: U.r2a, roles: ["org_admin"], designation: "Boss", managerId: U.m1, status: "inactive" },
   },
   {
     route: "POST /api/v1/teams/:id/members", actor: "l1",
