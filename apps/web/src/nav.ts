@@ -41,6 +41,8 @@ export const NAV: NavItem[] = [
   { key: "vendors", label: "Preferred Vendors", section: "Workspace", anyOf: ["vendor.preferred:create", "vendor.preferred:read"] },
   // AD-10: leads add unassigned recruiters to their own team.
   { key: "myteam", label: "My team", section: "Workspace", anyOf: ["team:add_member"] },
+  // AD-11: an Interview Lead assigns their coaches to sales teams.
+  { key: "coaching", label: "Coach assignments", section: "Workspace", anyOf: ["coach:assign"] },
   { key: "access", label: "Users & Access", section: "Admin", anyOf: ["access:manage"] },
   // interview-alerts: HR keeps the staff birthdays the CEO's morning digest is built from.
   { key: "birthdays", label: "Staff birthdays", section: "Admin", anyOf: ["staff.birthday:manage"] },

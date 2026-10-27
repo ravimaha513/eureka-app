@@ -10,7 +10,7 @@ import { HotListPage } from "./HotListPage";
 const meFor = (role: Role): Me => ({
   id: "u-me", email: "me@eureka.example", displayName: "Test User", csrfToken: "tok",
   roles: [{ key: role, label: role, locationId: null }],
-  capabilities: capabilities({ userId: "u-me", roles: [{ role }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [] }),
+  capabilities: capabilities({ userId: "u-me", roles: [{ role }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [] }),
 });
 
 const A = "11111111-1111-4111-8111-111111111111";

@@ -91,5 +91,5 @@ export async function extraUser(db: TestDb, key: string, role: Role): Promise<{ 
     `INSERT INTO eureka.app_user (email, display_name) VALUES ($1, $2) RETURNING id`, [`${key}@eureka.example`, key]);
   const id = r.rows[0]!.id;
   await db.admin.query(`INSERT INTO eureka.user_role (user_id, role_key) VALUES ($1, $2)`, [id, role]);
-  return { id, access: { userId: id, roles: [{ role }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [] } };
+  return { id, access: { userId: id, roles: [{ role }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [] } };
 }

@@ -258,7 +258,7 @@ const EXPECTED: Partial<Record<Key, [number, number] | 403>> = {
   l1: [2, 2], l2: [1, 1], l3: [1, 0], m1: [3, 3], m2: [1, 0],
   ad: [4, 3], ceo: [4, 3], hr: [4, 3], acct: [4, 3], bu: [4, 3],
   // imm: report:read since 0150, read through authz.employment_movements (employee:read, no placement scope).
-  locD: [0, 0], locA: [0, 0], coach: 403, admin: 403, admin2: 403, imm: [4, 3], ahr: 403, docs: 403,
+  locD: [0, 0], locA: [0, 0], coach: 403, il: 403, admin: 403, admin2: 403, imm: [4, 3], ahr: 403, docs: 403,
 };
 
 describe("joinings/exits report", () => {

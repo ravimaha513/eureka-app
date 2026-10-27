@@ -3,7 +3,7 @@ import type { CandidateRef, UserAccess } from "./authz/engine.js";
 import { WORK_AUTH_NUMBER_RE, normalizeWorkAuthNumber, workAuthAccess } from "./workAuthorization.js";
 
 const user = (role: UserAccess["roles"][number]["role"], extra: Partial<UserAccess> = {}): UserAccess => ({
-  userId: "u1", roles: [{ role }], teamIds: ["t1"], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], ...extra,
+  userId: "u1", roles: [{ role }], teamIds: ["t1"], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [], ...extra,
 });
 const cand: CandidateRef = { recruiterId: "u1", teamId: "t1", locationId: "l1", visibility: "all_teams", marketingStatus: "active" };
 

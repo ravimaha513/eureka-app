@@ -33,6 +33,8 @@ export interface UserAccess {
   subtreeTeamIds: string[];
   /** Teams this user supports as an Interview Coach. */
   coachedTeamIds: string[];
+  /** Teams coached by this user or by anyone below them in the reporting hierarchy. */
+  subtreeCoachedTeamIds: string[];
   /**
    * Candidates shared with one of the user's teams ("Selected teams", migration 0240):
    * authz.shared_candidate_ids. Counted only where the all-teams rule applies.
@@ -100,6 +102,9 @@ export function resolveScope(
         break;
       case "coached":
         user.coachedTeamIds.forEach((t) => teamIds.add(t));
+        break;
+      case "coached_hierarchy":
+        user.subtreeCoachedTeamIds.forEach((t) => teamIds.add(t));
         break;
       case "hierarchy":
         recruiterIds.add(user.userId);
