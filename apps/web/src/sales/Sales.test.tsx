@@ -14,7 +14,7 @@ import { DUPLICATE_WARNING } from "./LogSubmissionDialog";
 const meFor = (role: Role): Me => ({
   id: "u-me", email: "me@eureka.example", displayName: "Test User", csrfToken: "tok",
   roles: [{ key: role, label: role, locationId: null }],
-  capabilities: capabilities({ userId: "u-me", roles: [{ role, locationId: "loc" }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [] }),
+  capabilities: capabilities({ userId: "u-me", roles: [{ role, locationId: "loc" }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [] }),
 });
 const RECRUITER = meFor("recruiter");
 const LEAD = meFor("lead");
@@ -288,6 +288,26 @@ describe("Candidate profile", () => {
     fireEvent.click(sw);
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Asha Iyer is now open to all teams."));
     expect(writes()[0]).toMatchObject({ method: "PUT", body: { visibility: "all_teams" } });
+  });
+
+  it("lets a lead share with picked teams, never listing the candidate's own team", async () => {
+    routes["GET /api/v1/candidate-share-teams"] = () => ({ body: { items: [
+      { id: "t1", name: "Team Rohit", lead: "Rohit" }, { id: "t2", name: "Team Anjali", lead: "Anjali" }, { id: "t3", name: "Team Vikram", lead: null },
+    ] } });
+    routes[`PUT /api/v1/candidates/${CID}/visibility`] = (_u, b) => ({ body: { id: CID, ...(b as object) } });
+    renderProfile(LEAD);
+    const anjali = await screen.findByRole("checkbox", { name: /Team Anjali/ });
+    expect(screen.queryByRole("checkbox", { name: /Team Rohit/ })).not.toBeInTheDocument();
+    const save = screen.getByRole("button", { name: "Save sharing" });
+    expect(save).toBeDisabled();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find a team" }), { target: { value: "vik" } });
+    expect(screen.queryByRole("checkbox", { name: /Team Anjali/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Team Vikram/ }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find a team" }), { target: { value: "" } });
+    expect(anjali).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Save sharing" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Asha Iyer is now shared with 1 team."));
+    expect(writes()[0]).toMatchObject({ method: "PUT", body: { visibility: "selected_teams", teamIds: ["t3"] } });
   });
 
   it("lets a location admin set the technical rating and nothing else", async () => {

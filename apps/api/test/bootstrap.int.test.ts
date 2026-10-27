@@ -182,7 +182,7 @@ describe("--demo-data", () => {
     const demo = (await db.admin.query<{ id: string; email: string; google_sub: string | null; roles: string[] }>(
       `SELECT u.id, u.email::text, u.google_sub, array_agg(ur.role_key) AS roles FROM eureka.app_user u
        JOIN eureka.user_role ur ON ur.user_id = u.id WHERE u.email::text LIKE '%@${DEMO_EMAIL_DOMAIN}' GROUP BY u.id`)).rows;
-    expect(demo).toHaveLength(12);
+    expect(demo).toHaveLength(13);
     expect(demo.every((u) => u.google_sub === null && !u.roles.includes("org_admin"))).toBe(true);
     // Not in the hosted domain, so Google sign-in can never produce these emails.
     await expect(app.get(OidcService).verify(await token("x", `demo-r1a@${DEMO_EMAIL_DOMAIN}`, DEMO_EMAIL_DOMAIN), "n1"))
@@ -198,6 +198,8 @@ describe("--demo-data", () => {
       (await c.query<{ n: number }>("SELECT count(*)::int AS n FROM eureka.candidate")).rows[0]!.n);
     expect(await visible(id("r1a"))).toBe(16); // team Rohit (two recruiters)
     expect(await visible(id("r2a"))).toBe(8); // team Anjali
+    expect(await visible(id("coach"))).toBe(8); // coaches team Anjali
+    expect(await visible(id("il"))).toBe(8); // Interview Lead: what the coach below them sees
     expect(await visible(id("l1"))).toBe(16); // team Rohit
     expect(await visible(id("ad"))).toBe(32); // whole hierarchy
     expect(await visible(id("locd"))).toBe(24); // Demo Dallas: teams Rohit and Vikram

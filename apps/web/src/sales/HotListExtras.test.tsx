@@ -10,7 +10,7 @@ import { HotListPage } from "./HotListPage";
 const meFor = (role: Role): Me => ({
   id: "u-me", email: "me@eureka.example", displayName: "Test User", csrfToken: "tok",
   roles: [{ key: role, label: role, locationId: null }],
-  capabilities: capabilities({ userId: "u-me", roles: [{ role }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [] }),
+  capabilities: capabilities({ userId: "u-me", roles: [{ role }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [] }),
 });
 
 const A = "11111111-1111-4111-8111-111111111111";
@@ -252,5 +252,24 @@ describe("Hot List bulk actions", () => {
     fireEvent.click(within(bulk()).getByRole("button", { name: "Apply visibility" }));
     expect(await within(bulk()).findByText("1 updated.")).toBeInTheDocument();
     expect(lastCall("POST", "/api/v1/hotlist/bulk/visibility")?.body).toEqual({ ids: [B], visibility: "all_teams" });
+  });
+
+  it("a lead shares the selected rows with picked teams and sees rows left with only their own team", async () => {
+    routes["GET /api/v1/candidate-share-teams"] = () => ({ body: { items: [
+      { id: "t2", name: "Team Anjali", lead: "Anjali" }, { id: "t3", name: "Team Vikram", lead: null },
+    ] } });
+    routes["POST /api/v1/hotlist/bulk/visibility"] = () => ({ body: { succeeded: 0, failed: 1, results: [{ id: B, ok: false, error: "invalid_teams" }] } });
+    wrap(<HotListPage me={meFor("lead")} />);
+    fireEvent.click(within(await rowOf("Bala Rao")).getByRole("checkbox", { name: "Select Bala Rao" }));
+    expect(within(bulk()).queryByRole("checkbox", { name: /Team Vikram/ })).not.toBeInTheDocument();
+    fireEvent.change(within(bulk()).getByLabelText("Set visibility"), { target: { value: "selected_teams" } });
+    const apply = within(bulk()).getByRole("button", { name: "Apply visibility" });
+    expect(apply).toBeDisabled();
+    fireEvent.click(await within(bulk()).findByRole("checkbox", { name: /Team Vikram/ }));
+    expect(apply).toBeEnabled();
+    fireEvent.click(apply);
+    const status = await within(bulk()).findByText("0 updated, 1 not changed.");
+    expect(status.closest("[role=status]")).toHaveTextContent("Bala Rao: the picked teams include no team besides its own");
+    expect(lastCall("POST", "/api/v1/hotlist/bulk/visibility")?.body).toEqual({ ids: [B], visibility: "selected_teams", teamIds: ["t3"] });
   });
 });

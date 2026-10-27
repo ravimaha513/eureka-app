@@ -66,7 +66,7 @@ const OPEN_PLACEMENT_SQL = `('confirmed', 'paperwork', 'bgc', 'ready')`;
 /** Interviews that happen (or happened): not cancelled, rescheduled or without an invite. */
 const LIVE_INTERVIEW_SQL = `NOT IN ('cancelled', 'rescheduled', 'no_invite')`;
 
-const SCOPE_RANK = { own: 0, coached: 0, team: 0, hierarchy: 1, location: 2, org: 3 } as const;
+const SCOPE_RANK = { own: 0, coached: 0, coached_hierarchy: 0, team: 0, hierarchy: 1, location: 2, org: 3 } as const;
 
 /**
  * The natural grouping for the caller's broadest report:read grant: recruiters for a lead, teams for a manager,

@@ -15,17 +15,18 @@ BEGIN
     SELECT authz.hotlist_open() AS open,
            authz.has_org('hotlist:read') AS ho, authz.recruiter_ids('hotlist:read') AS hr,
            authz.team_ids('hotlist:read') AS ht, authz.location_ids('hotlist:read') AS hl,
-           authz.all_teams('hotlist:read') AS hat,
+           authz.all_teams('hotlist:read') AS hat, authz.shared_candidate_ids('hotlist:read') AS hsh,
            authz.has_org('report:export') AS eo, authz.recruiter_ids('report:export') AS er,
            authz.team_ids('report:export') AS et, authz.location_ids('report:export') AS el,
            authz.has_org('candidate:read') AS ro, authz.recruiter_ids('candidate:read') AS rr,
            authz.team_ids('candidate:read') AS rt, authz.location_ids('candidate:read') AS rl,
-           authz.all_teams('candidate:read') AS rat
+           authz.all_teams('candidate:read') AS rat, authz.shared_candidate_ids('candidate:read') AS rsh
   ),
   picked AS (
     SELECT c.*, p.first_name, p.last_name, p.phone_e164, t.name AS technology_name,
       coalesce(s.ro OR c.recruiter_id = ANY (s.rr) OR c.team_id = ANY (s.rt) OR c.location_id = ANY (s.rl)
-               OR (s.rat AND c.visibility = 'all_teams' AND c.marketing_status IN ('active', 'full_of_interviews')), false) AS can_read
+               OR (s.rat AND c.visibility = 'all_teams' AND c.marketing_status IN ('active', 'full_of_interviews'))
+               OR c.id = ANY (s.rsh), false) AS can_read
     FROM eureka.candidate c
     JOIN eureka.person p ON p.id = c.person_id
     JOIN eureka.technology t ON t.id = c.technology_id
@@ -33,7 +34,8 @@ BEGIN
     WHERE coalesce(s.eo OR c.recruiter_id = ANY (s.er) OR c.team_id = ANY (s.et) OR c.location_id = ANY (s.el), false)
       AND coalesce(s.open
             OR s.ho OR c.recruiter_id = ANY (s.hr) OR c.team_id = ANY (s.ht) OR c.location_id = ANY (s.hl)
-            OR (s.hat AND c.visibility = 'all_teams' AND c.marketing_status IN ('active', 'full_of_interviews')), false)
+            OR (s.hat AND c.visibility = 'all_teams' AND c.marketing_status IN ('active', 'full_of_interviews'))
+            OR c.id = ANY (s.hsh), false)
       AND c.marketing_status IN ('active', 'on_hold', 'full_of_interviews', 'confirmation', 'bench', 'stopped')
       AND ($1::text IS NULL OR c.marketing_status = $1::text)
       AND ($2::text IS NULL OR t.name = $2::text)

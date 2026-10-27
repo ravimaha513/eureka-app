@@ -56,7 +56,7 @@ interface EmployeeRow {
   pl_team_id: string | null;
   pl_location_id: string | null;
   c_recruiter_id: string | null;
-  visibility: "team" | "all_teams" | null;
+  visibility: "team" | "all_teams" | "selected_teams" | null;
   email: string | null;
   phone: string | null;
   // 0150: the candidate's recruiter and its team's lead; the latest assignment's vendor and payroll company.

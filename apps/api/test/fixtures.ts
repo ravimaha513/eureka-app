@@ -9,6 +9,8 @@ import type { Role, UserAccess, CandidateRef } from "@eureka/shared";
  * Hierarchy: ceo <- ad <- m1 <- l1 <- {r1a, r1b}
  *                                  m1 <- l2 <- {r2a}
  *                           ad <- m2 <- l3 <- {r3a}
+ *                           ad <- il <- coach   (Interview Prep)
+ * Coaching: coach -> Team Anjali (t2); il -> Team Rohit (t1) directly.
  */
 export const LOC = { dallas: "00000000-0000-0000-0000-00000000d001", austin: "00000000-0000-0000-0000-00000000a001" };
 
@@ -21,6 +23,8 @@ export const U = {
   coach: uid(13), locD: uid(14), locA: uid(15), hr: uid(16), acct: uid(17), admin: uid(18), imm: uid(19),
   // Second org admin: role requests for restricted roles need a second approver (admin-api.md AD-3).
   admin2: uid(20),
+  // Interview Lead: head of Interview Prep, reports to the AD; the coach reports to them.
+  il: uid(21),
 };
 
 export const USERS: Record<keyof typeof U, UserDef> = {
@@ -35,7 +39,7 @@ export const USERS: Record<keyof typeof U, UserDef> = {
   r1b: { id: U.r1b, roles: [{ role: "recruiter" }], manager: U.l1 },
   r2a: { id: U.r2a, roles: [{ role: "recruiter" }], manager: U.l2 },
   r3a: { id: U.r3a, roles: [{ role: "recruiter" }], manager: U.l3 },
-  coach: { id: U.coach, roles: [{ role: "interview_coach" }] },
+  coach: { id: U.coach, roles: [{ role: "interview_coach" }], manager: U.il },
   locD: { id: U.locD, roles: [{ role: "location_ops_admin", location: "dallas" }] },
   locA: { id: U.locA, roles: [{ role: "location_incharge", location: "austin" }] },
   hr: { id: U.hr, roles: [{ role: "hr" }] },
@@ -43,6 +47,7 @@ export const USERS: Record<keyof typeof U, UserDef> = {
   admin: { id: U.admin, roles: [{ role: "org_admin" }] },
   imm: { id: U.imm, roles: [{ role: "immigration" }] },
   admin2: { id: U.admin2, roles: [{ role: "org_admin" }] },
+  il: { id: U.il, roles: [{ role: "interview_lead" }], manager: U.ad },
 };
 
 export const T = { t1: uid(101), t2: uid(102), t3: uid(103) };
@@ -51,7 +56,7 @@ export const TEAMS = [
   { id: T.t2, name: "Team Anjali", lead: U.l2, members: [U.r2a] },
   { id: T.t3, name: "Team Vikram", lead: U.l3, members: [U.r3a] },
 ];
-export const COACHING = [{ coach: U.coach, team: T.t2 }];
+export const COACHING = [{ coach: U.coach, team: T.t2 }, { coach: U.il, team: T.t1 }];
 
 const managerOf = new Map(Object.values(USERS).filter((u) => u.manager).map((u) => [u.id, u.manager!]));
 
@@ -78,6 +83,7 @@ export function toUserAccess(key: keyof typeof U): UserAccess {
     subordinateUserIds: subs,
     subtreeTeamIds: TEAMS.filter((t) => t.lead === def.id || subs.includes(t.lead)).map((t) => t.id),
     coachedTeamIds: COACHING.filter((c) => c.coach === def.id).map((c) => c.team),
+    subtreeCoachedTeamIds: [...new Set(COACHING.filter((c) => c.coach === def.id || subs.includes(c.coach)).map((c) => c.team))],
   };
 }
 

@@ -7,7 +7,7 @@ import { InterviewReportsPage } from "./InterviewReportsPage";
 import { InterviewsPage, type Interview } from "./InterviewsPage";
 
 const capsFor = (role: Role) =>
-  capabilities({ userId: "u1", roles: [{ role, locationId: "loc" }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [] });
+  capabilities({ userId: "u1", roles: [{ role, locationId: "loc" }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [] });
 const json = (value: unknown, headers: Record<string, string> = {}) => new Response(typeof value === "string" ? value : JSON.stringify(value), { headers });
 const wrap = (ui: React.ReactNode) =>
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>);

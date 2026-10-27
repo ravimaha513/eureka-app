@@ -90,7 +90,7 @@ interface SubmissionRow {
   c_recruiter: string | null;
   c_team: string | null;
   c_location: string | null;
-  visibility: "team" | "all_teams" | null;
+  visibility: CandidateRef["visibility"] | null;
   marketing_status: string | null;
 }
 
@@ -112,7 +112,7 @@ const activityRef = (r: SubmissionRow) => ({
   teamId: r.team_id,
   locationId: r.location_id,
   candidate: {
-    recruiterId: r.c_recruiter, teamId: r.c_team, locationId: r.c_location,
+    id: r.candidate_id, recruiterId: r.c_recruiter, teamId: r.c_team, locationId: r.c_location,
     visibility: r.visibility ?? "team", marketingStatus: r.marketing_status ?? "",
   },
 });
@@ -120,7 +120,7 @@ const activityRef = (r: SubmissionRow) => ({
 /** The candidate as the caller sees it (the join runs under candidate RLS; null when not readable). */
 const visibleCandidate = (r: SubmissionRow): CandidateRef | null =>
   r.c_team === null || r.visibility === null || r.marketing_status === null ? null : {
-    recruiterId: r.c_recruiter, teamId: r.c_team, locationId: r.c_location,
+    id: r.candidate_id, recruiterId: r.c_recruiter, teamId: r.c_team, locationId: r.c_location,
     visibility: r.visibility, marketingStatus: r.marketing_status,
   };
 
@@ -183,7 +183,7 @@ export class SubmissionsService {
         `SELECT recruiter_id, team_id, location_id, visibility, marketing_status FROM eureka.candidate WHERE id = $1`,
         [body.candidateId]);
       const r = rows[0];
-      if (!r || !candidateVisible(scope, {
+      if (!r || !candidateVisible(scope, { id: body.candidateId,
         recruiterId: r.recruiter_id, teamId: r.team_id, locationId: r.location_id,
         visibility: r.visibility, marketingStatus: r.marketing_status,
       })) throw new NotFoundException();

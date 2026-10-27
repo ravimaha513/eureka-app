@@ -17,7 +17,7 @@ BEGIN
            authz.team_ids('candidate.phone:read') AS pt, authz.location_ids('candidate.phone:read') AS pl,
            authz.has_org('candidate:read') AS ro, authz.recruiter_ids('candidate:read') AS rr,
            authz.team_ids('candidate:read') AS rt, authz.location_ids('candidate:read') AS rl,
-           authz.all_teams('candidate:read') AS rat
+           authz.all_teams('candidate:read') AS rat, authz.shared_candidate_ids('candidate:read') AS rsh
   ),
   page AS (
     SELECT c.*, p.first_name, p.last_name, p.phone_e164, t.name AS technology_name,
@@ -46,7 +46,8 @@ BEGIN
     SELECT h.*,
       coalesce(s.po OR h.recruiter_id = ANY (s.pr) OR h.team_id = ANY (s.pt) OR h.location_id = ANY (s.pl), false) AS phone_allowed,
       coalesce(s.ro OR h.recruiter_id = ANY (s.rr) OR h.team_id = ANY (s.rt) OR h.location_id = ANY (s.rl)
-               OR (s.rat AND h.visibility = 'all_teams' AND h.marketing_status IN ('active', 'full_of_interviews')), false) AS can_read
+               OR (s.rat AND h.visibility = 'all_teams' AND h.marketing_status IN ('active', 'full_of_interviews'))
+               OR h.id = ANY (s.rsh), false) AS can_read
     FROM page h CROSS JOIN s
   )
   SELECT h.id, h.first_name, h.last_name, h.technology_name,

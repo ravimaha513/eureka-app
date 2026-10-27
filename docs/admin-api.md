@@ -20,7 +20,8 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 | AD-8 | Moving a recruiter between teams (OD-07) needs `team:move_member` covering **both** teams in the actor's scope. Their candidates stay with the old team and go to `reassignTo`, which must be an active member or the lead of the old team. It defaults to the old team's lead. It all runs in one transaction in a definer function. |
 | AD-9 | Team lead changes and reporting lines are admin-only (`access:manage`) and keep the existing invariants (the closure rebuild and the cycle check). |
 | AD-10 | Adding people to a team needs `team:add_member`: a lead (`team` scope) adds to the team they lead; a manager or associate director (`hierarchy` scope) adds to any team whose lead is in their reporting subtree. Only active users holding the `recruiter` role and in no team can be added (422 `not_a_recruiter`, 422 `user_inactive`, 409 `already_member`); someone in another team is moved with AD-8. Not yourself. Runs in `authz.team_add_member` (`db/functions/authz/team_add_member.sql`), audited as `team.member_added`. |
-| AD-11 | Departments (migration 0230) are descriptive: a department and optional sub-department per user (e.g. Sales → Interview Prep), shown and filtered in Users & Access. Only admins (`access:manage`) create, rename or assign them, through definer functions. Nothing in `authz` or any policy reads a department, so it never grants or widens access; scope stays role + reporting line. |
+| AD-11 | **Interview coaches** support sales teams (`coach_assignment`; the coach sees the team's candidates, Hot List, interviews and training progress, and the team's lead sees their interview feedback through team scope). An `org_admin` (`access:manage`) assigns any active holder of `interview_coach` or `interview_lead` to any team; an **Interview Lead** (`coach:assign`, `hierarchy` scope) assigns the coaches below them in the reporting hierarchy to any team, never themself (403 `self_change`). The Interview Lead reports to the Associate Director and their coaches report to them; their `coached_hierarchy` grants cover the teams coached by them or anyone below them (migration 0220). Not a coach role: 422 `not_a_coach`; already assigned: 409 `already_assigned`; not assigned: 404 `not_assigned`. Runs in `authz.assign_coach` / `authz.unassign_coach` (`db/functions/authz/`, guard `authz.coach_assignment_guard`), audited as `admin.team.coach_assigned` / `admin.team.coach_unassigned` (Users & Access) or `team.coach_assigned` / `team.coach_unassigned` (Interview Lead), `changes: { coachId }` only. |
+| AD-12 | Departments (migration 0230) are descriptive: a department and optional sub-department per user (e.g. Sales → Interview Prep), shown and filtered in Users & Access. Only admins (`access:manage`) create, rename or assign them, through definer functions. Nothing in `authz` or any policy reads a department, so it never grants or widens access; scope stays role + reporting line. |
 
 ## Endpoints
 
@@ -31,7 +32,7 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 ### Locations
 - `POST /api/v1/admin/locations` with `{ name, kind, state?, timezone? }` returns 201 `{ id }`. `kind` is one of `training`, `gh`, `office`, `remote`; `timezone` is an IANA name (default `America/New_York`). Only `org_admin` (`access:manage`, org scope) can create one. The write goes through `authz.admin_create_location` (migration 0091) and is audited as `admin.location.created`. A duplicate name is 409 `location_exists`. Locations cannot be edited or deleted here yet.
 
-### Departments (AD-11)
+### Departments (AD-12)
 - `GET /api/v1/admin/departments` returns `{ items: [{ id, name, parentId: uuid|null, userCount }] }` (flat, ordered by name; `userCount` counts active users whose department is exactly this one).
 - `POST /api/v1/admin/departments` with `{ name, parentId? }` returns 201 `{ id }`. Two levels only: `parentId` must be a top-level department (422 `invalid_parent`; 404 unknown parent). Names are 1–120 characters, trimmed, no control characters (422 `invalid_name`), unique among siblings ignoring case (409 `department_exists`). `authz.admin_create_department`; audited as `admin.department.created` with `{ parentId }` only.
 - `PATCH /api/v1/admin/departments/:id` with `{ name }` returns 204. 404 unknown department. `authz.admin_rename_department`; audited as `admin.department.renamed` without the name.
@@ -63,13 +64,17 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 
 ### Teams
 - `GET /api/v1/admin/teams` returns
-  `{ items: [{ id, name, location: {id,name}|null, lead: {id,displayName}, department: { id, name, parent }|null, members: [{ id, displayName }] }] }`
+  `{ items: [{ id, name, location: {id,name}|null, lead: {id,displayName}, department: { id, name, parent }|null, members: [{ id, displayName }], coaches: [{ id, displayName }] }], coaches: [{ id, displayName, email, role: "interview_coach" | "interview_lead" }] }`
+  (`department`: the lead's department, AD-12; top-level `coaches`: the active users who can be assigned as coaches, AD-11).
 - `POST /api/v1/admin/teams` with `{ name, leadId, locationId? }` returns 201 `{ id }`.
 - `PATCH /api/v1/admin/teams/:id` with `{ name }` (1–120 chars, trimmed) renames the team and returns 204. 404 unknown team. The audit row (`admin.team.renamed`) does not carry the name.
 - `PUT /api/v1/admin/teams/:id/lead` with `{ leadId }` returns 204.
 - `POST /api/v1/admin/teams/:id/members` with `{ userId }` returns 204. A user who is already in another team gets a 409; use the move endpoint instead.
+- `POST /api/v1/admin/teams/:id/coaches` with `{ userId }` returns 204; `DELETE /api/v1/admin/teams/:id/coaches/:userId` returns 204 (AD-11). 404 unknown team or `not_assigned`, 409 `already_assigned`, 422 `not_a_coach` / `user_inactive`.
 - `GET /api/v1/teams/mine` (permission `team:add_member`, AD-10) returns `{ items: [{ id, name, lead: {id,displayName}, members: [{id,displayName}] }], addable: [{ id, displayName, email }] }`: the caller's teams and the active recruiters in no team.
 - `POST /api/v1/teams/:id/members` with `{ userId }` (permission `team:add_member`, AD-10) returns 204. 404 unknown team, 403 `not_in_scope` for a team outside the caller's scope.
+- `GET /api/v1/coach-assignments` (permission `coach:assign`, AD-11) returns `{ items: [{ id, name, lead: {id,displayName}, coaches: [{id,displayName}] }], coaches: [{ id, displayName, email, role }] }`: every team, with only the caller's own coaches (active coach-role holders below them) listed on it, and those coaches.
+- `POST /api/v1/teams/:id/coaches` with `{ userId }` and `DELETE /api/v1/teams/:id/coaches/:userId` (permission `coach:assign`, AD-11) return 204. 403 `not_in_scope` for someone not below the caller, 403 `self_change` for themself; otherwise as the admin endpoints.
 - `POST /api/v1/teams/:id/move-member` with `{ userId, toTeamId, reassignTo? }` (permission `team:move_member`, AD-8) returns 200 `{ movedCandidates: number, reassignedTo: { id, displayName } }`.
 
 ## Error codes (`detail` field)
@@ -78,6 +83,7 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 Added during implementation:
 - 404: `department_not_found` (as a plain 404)
 - 409: `department_exists`, `email_exists`, `role_already_held`, `request_pending`, `request_not_pending`, `request_expired`, `last_admin`, `requester_not_admin`
+- 404: `not_assigned`; 409: `already_assigned`; 422: `not_a_coach` (AD-11)
 - 422: `invalid_parent`, `invalid_name`, `invalid_designation`, `email_domain`, `unknown_role`, `invalid_manager`, `invalid_lead`, `user_inactive`, `not_a_member`, `same_team`, `lead_of_team`, `has_reports`, `separation_of_duties`
 
 ## Implementation notes

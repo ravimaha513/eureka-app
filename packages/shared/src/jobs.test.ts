@@ -7,7 +7,7 @@ import {
 } from "./jobs.js";
 
 const user = (role: Role, extra: Partial<UserAccess> = {}): UserAccess => ({
-  userId: `u-${role}`, roles: [{ role }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], ...extra,
+  userId: `u-${role}`, roles: [{ role }], teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [], ...extra,
 });
 
 describe("jobs-portal catalog block", () => {

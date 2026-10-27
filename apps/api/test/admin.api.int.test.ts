@@ -84,6 +84,8 @@ const ADMIN_ENDPOINTS: { method: Method; url: string; body?: unknown; adminStatu
   { method: "PATCH", url: `/api/v1/admin/teams/${T.t1}`, body: {}, adminStatus: 422 },
   { method: "PUT", url: `/api/v1/admin/teams/${T.t1}/lead`, body: {}, adminStatus: 422 },
   { method: "POST", url: `/api/v1/admin/teams/${T.t1}/members`, body: {}, adminStatus: 422 },
+  { method: "POST", url: `/api/v1/admin/teams/${T.t1}/coaches`, body: {}, adminStatus: 422 },
+  { method: "DELETE", url: `/api/v1/admin/teams/${T.t1}/coaches/${NIL}`, adminStatus: 404 },
 ];
 const MOVE = { method: "POST" as const, url: `/api/v1/teams/${T.t1}/move-member`, body: {} };
 
@@ -111,6 +113,18 @@ describe("authorization matrix (AD-1)", () => {
     const ok = can(toUserAccess(key), "team:add_member" as Permission);
     expect((await call(key, "GET", "/api/v1/teams/mine")).statusCode).toBe(ok ? 200 : 403);
     expect((await call(key, "POST", `/api/v1/teams/${T.t1}/members`, {})).statusCode).toBe(ok ? 422 : 403);
+  });
+
+  it.each(users)("%s → coach assignment endpoints (coach:assign, AD-11)", async (key) => {
+    const ok = can(toUserAccess(key), "coach:assign" as Permission);
+    expect((await call(key, "GET", "/api/v1/coach-assignments")).statusCode).toBe(ok ? 200 : 403);
+    expect((await call(key, "POST", `/api/v1/teams/${T.t1}/coaches`, {})).statusCode).toBe(ok ? 422 : 403);
+    // Nobody unknown is in anyone's subtree: 403 either way, nothing changes.
+    expect((await call(key, "DELETE", `/api/v1/teams/${T.t1}/coaches/${NIL}`)).statusCode).toBe(403);
+  });
+
+  it("only the Interview Lead holds coach:assign", () => {
+    expect(users.filter((u) => can(toUserAccess(u), "coach:assign" as Permission))).toEqual(["il"]);
   });
 
   it.each([...ADMIN_ENDPOINTS, MOVE])("unauthenticated $method $url → 401", async (e) => {
@@ -173,12 +187,17 @@ describe("metadata and listings", () => {
     expect((await call("admin", "GET", "/api/v1/admin/users?limit=500")).statusCode).toBe(422);
   });
 
-  it("teams list lead and current members", async () => {
+  it("teams list lead, current members and coaches, plus the users who can be coaches (AD-11)", async () => {
     const r = (await call("admin", "GET", "/api/v1/admin/teams")).json();
     expect(r.items.find((t: { id: string }) => t.id === T.t1)).toEqual({
       id: T.t1, name: "Team Rohit", location: null, lead: { id: U.l1, displayName: "l1" }, department: null,
       members: [{ id: U.r1a, displayName: "r1a" }, { id: U.r1b, displayName: "r1b" }],
+      coaches: [{ id: U.il, displayName: "il" }],
     });
+    expect(r.coaches).toEqual([
+      { id: U.coach, displayName: "coach", email: "coach@eureka.example", role: "interview_coach" },
+      { id: U.il, displayName: "il", email: "il@eureka.example", role: "interview_lead" },
+    ]);
   });
 });
 
@@ -468,7 +487,7 @@ describe("teams", () => {
     const dup = await call("admin", "POST", `/api/v1/admin/teams/${T.t1}/members`, { userId: U.hr });
     expect([dup.statusCode, dup.json().detail]).toEqual([409, "already_member"]);
     const t = (await call("admin", "GET", "/api/v1/admin/teams")).json().items.find((x: { id: string }) => x.id === id);
-    expect(t).toEqual({ id, name: "Team New", location: { id: LOC.dallas, name: "Dallas" }, lead: { id: U.m2, displayName: "m2" }, department: null, members: [{ id: U.hr, displayName: "hr" }] });
+    expect(t).toEqual({ id, name: "Team New", location: { id: LOC.dallas, name: "Dallas" }, lead: { id: U.m2, displayName: "m2" }, department: null, members: [{ id: U.hr, displayName: "hr" }], coaches: [] });
     expect((await call("admin", "PUT", `/api/v1/admin/teams/${NIL}/lead`, { leadId: U.m2 })).statusCode).toBe(404);
   });
 
@@ -603,5 +622,59 @@ describe("lead adds members to their own team (AD-10)", () => {
     const r = await call("m1", "POST", `/api/v1/teams/${T.t2}/members`, { userId: NEW2 });
     expect(r.statusCode, r.body).toBe(204);
     expect((await audits("team.member_added")).at(-1)).toMatchObject({ actor_id: U.m1, entity_id: T.t2, changes: { userId: NEW2 } });
+  });
+});
+
+describe("coach assignments (AD-11)", () => {
+  const assign = async (key: keyof typeof U, url: string, userId: string) => {
+    const r = await call(key, "POST", url, { userId });
+    return [r.statusCode, r.statusCode === 204 ? null : r.json().detail];
+  };
+  const drop = async (key: keyof typeof U, url: string) => {
+    const r = await call(key, "DELETE", url);
+    return [r.statusCode, r.statusCode === 204 ? null : r.json().detail];
+  };
+  const open = async (coach: string) => (await db.admin.query<{ team_id: string }>(
+    `SELECT team_id FROM eureka.coach_assignment WHERE coach_id = $1 AND valid @> now() ORDER BY team_id`, [coach])).rows.map((r) => r.team_id);
+
+  it("lists every team with the lead's own coaches on it, and those coaches", async () => {
+    const body = (await call("il", "GET", "/api/v1/coach-assignments")).json();
+    expect(body.coaches).toEqual([{ id: U.coach, displayName: "coach", email: "coach@eureka.example", role: "interview_coach" }]);
+    expect(body.items.map((t: { id: string }) => t.id).sort()).toEqual(expect.arrayContaining([T.t1, T.t2, T.t3]));
+    const byId = new Map(body.items.map((t: { id: string; coaches: unknown[] }) => [t.id, t.coaches]));
+    expect(byId.get(T.t2)).toEqual([{ id: U.coach, displayName: "coach" }]);
+    // The lead's own assignment is the admin's to change, so it is not listed as theirs to manage.
+    expect(byId.get(T.t1)).toEqual([]);
+  });
+
+  it("the Interview Lead assigns and unassigns a coach below them, audited with ids only; the coach's scope follows", async () => {
+    expect(await assign("il", `/api/v1/teams/${T.t3}/coaches`, U.coach)).toEqual([204, null]);
+    expect((await audits("team.coach_assigned")).at(-1)).toMatchObject({ actor_id: U.il, entity_id: T.t3, changes: { coachId: U.coach } });
+    expect(await open(U.coach)).toEqual([T.t2, T.t3].sort());
+    expect((await call("coach", "GET", "/api/v1/me")).statusCode).toBe(200);
+    expect(await assign("il", `/api/v1/teams/${T.t3}/coaches`, U.coach)).toEqual([409, "already_assigned"]);
+    expect(await drop("il", `/api/v1/teams/${T.t3}/coaches/${U.coach}`)).toEqual([204, null]);
+    expect((await audits("team.coach_unassigned")).at(-1)).toMatchObject({ actor_id: U.il, entity_id: T.t3, changes: { coachId: U.coach } });
+    expect(await open(U.coach)).toEqual([T.t2]);
+    expect(await drop("il", `/api/v1/teams/${T.t3}/coaches/${U.coach}`)).toEqual([404, "not_assigned"]);
+  });
+
+  it("the Interview Lead cannot change themself or people outside their subtree", async () => {
+    expect(await assign("il", `/api/v1/teams/${T.t3}/coaches`, U.il)).toEqual([403, "self_change"]);
+    expect(await drop("il", `/api/v1/teams/${T.t1}/coaches/${U.il}`)).toEqual([403, "self_change"]);
+    expect(await assign("il", `/api/v1/teams/${T.t3}/coaches`, U.r1a)).toEqual([403, "not_in_scope"]);
+    expect((await assign("il", `/api/v1/teams/${NIL}/coaches`, U.coach))[0]).toBe(404);
+    expect((await assign("ad", `/api/v1/teams/${T.t3}/coaches`, U.coach))[0]).toBe(403);
+    expect(await open(U.il)).toEqual([T.t1]);
+  });
+
+  it("an org admin assigns any coach-role holder, refuses others, and unassigns", async () => {
+    expect(await assign("admin", `/api/v1/admin/teams/${T.t3}/coaches`, U.il)).toEqual([204, null]);
+    expect((await audits("admin.team.coach_assigned")).at(-1)).toMatchObject({ actor_id: U.admin, entity_id: T.t3, changes: { coachId: U.il } });
+    expect(await assign("admin", `/api/v1/admin/teams/${T.t3}/coaches`, U.r1a)).toEqual([422, "not_a_coach"]);
+    expect((await assign("admin", `/api/v1/admin/teams/${NIL}/coaches`, U.il))[0]).toBe(404);
+    expect(await drop("admin", `/api/v1/admin/teams/${T.t3}/coaches/${U.il}`)).toEqual([204, null]);
+    expect((await audits("admin.team.coach_unassigned")).at(-1)).toMatchObject({ actor_id: U.admin, entity_id: T.t3, changes: { coachId: U.il } });
+    expect(await open(U.il)).toEqual([T.t1]);
   });
 });

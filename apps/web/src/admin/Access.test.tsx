@@ -36,8 +36,13 @@ const USERS = [
 ];
 const TEAMS = [
   { id: "t1", name: "Team Rohit", location: { id: "loc-dal", name: "Dallas" }, lead: { id: "u-lead", displayName: "Rohit Lead" },
-    members: [{ id: "u-priya", displayName: "Priya Rao" }, { id: "u-sam", displayName: "Sam Member" }] },
-  { id: "t2", name: "Team Anjali", location: null, lead: { id: "u-anj", displayName: "Anjali Lead" }, members: [] },
+    members: [{ id: "u-priya", displayName: "Priya Rao" }, { id: "u-sam", displayName: "Sam Member" }],
+    coaches: [{ id: "u-coach", displayName: "Cora Coach" }] },
+  { id: "t2", name: "Team Anjali", location: null, lead: { id: "u-anj", displayName: "Anjali Lead" }, members: [], coaches: [] },
+];
+const COACHES = [
+  { id: "u-coach", displayName: "Cora Coach", email: "u-coach@eureka.example", role: "interview_coach" },
+  { id: "u-il", displayName: "Ivy Lead", email: "u-il@eureka.example", role: "interview_lead" },
 ];
 const REQUESTS = [
   { id: "rq1", user: { id: "u-priya", displayName: "Priya Rao", email: "p@e" }, role: "hr", roleLabel: "HR", locationId: null,
@@ -86,7 +91,7 @@ beforeEach(() => {
       return { body: { items, nextCursor: u.searchParams.get("cursor") ? null : "c2" } };
     },
     "GET /api/v1/admin/role-requests": () => ({ body: { items: REQUESTS } }),
-    "GET /api/v1/admin/teams": () => ({ body: { items: TEAMS } }),
+    "GET /api/v1/admin/teams": () => ({ body: { items: TEAMS, coaches: COACHES } }),
   };
   mockFetch();
 });
@@ -459,6 +464,25 @@ describe("Teams tab", () => {
     fireEvent.click(within(dlg).getByRole("button", { name: "Add member" }));
     expect(await within(dlg).findByRole("alert")).toHaveTextContent(ERROR_MESSAGES.already_member!);
     expect(lastWrite().body).toEqual({ userId: "u-priya" });
+  });
+
+  it("assigns and removes interview coaches (AD-11)", async () => {
+    routes["POST /api/v1/admin/teams/t2/coaches"] = () => ({ status: 204 });
+    routes["DELETE /api/v1/admin/teams/t1/coaches/u-coach"] = () => ({ status: 204 });
+    renderPage("teams");
+    const rohit = await teamCard("Team Rohit");
+    expect(within(within(rohit).getByRole("list", { name: "Coaches of Team Rohit" })).getByText("Cora Coach")).toBeInTheDocument();
+    fireEvent.click(within(await teamCard("Team Anjali")).getByRole("button", { name: "Add coach to Team Anjali" }));
+    const dlg = await screen.findByRole("dialog", { name: "Add coach to Team Anjali" });
+    expect(within(dlg).getByRole("option", { name: /Ivy Lead .* · Interview Lead/ })).toBeInTheDocument();
+    fireEvent.change(within(dlg).getByLabelText("Coach"), { target: { value: "u-coach" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Add coach" }));
+    await waitFor(() => expect(status()).toHaveTextContent("Cora Coach now coaches Team Anjali."));
+    expect(lastWrite()).toMatchObject({ method: "POST", path: "/api/v1/admin/teams/t2/coaches", body: { userId: "u-coach" } });
+
+    fireEvent.click(within(await teamCard("Team Rohit")).getByRole("button", { name: "Remove coach Cora Coach from Team Rohit" }));
+    await waitFor(() => expect(status()).toHaveTextContent("Cora Coach no longer coaches Team Rohit."));
+    expect(lastWrite()).toMatchObject({ method: "DELETE", path: "/api/v1/admin/teams/t1/coaches/u-coach" });
   });
 
   it("creates a team and changes a lead", async () => {

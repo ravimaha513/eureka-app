@@ -21,7 +21,7 @@ const base = (over: Partial<UserAccess> & Pick<UserAccess, "userId" | "roles">):
   teamIds: [],
   subordinateUserIds: [],
   subtreeTeamIds: [],
-  coachedTeamIds: [],
+  coachedTeamIds: [], subtreeCoachedTeamIds: [],
   ...over,
 });
 
@@ -29,7 +29,9 @@ const R1a = base({ userId: "R1a", roles: [{ role: "recruiter" }], teamIds: ["T1"
 const L1 = base({ userId: "L1", roles: [{ role: "lead" }], teamIds: ["T1"], subordinateUserIds: ["R1a", "R1b"], subtreeTeamIds: ["T1"] });
 const M = base({ userId: "M", roles: [{ role: "manager" }], subordinateUserIds: ["L1", "L2", "R1a", "R1b", "R2a"], subtreeTeamIds: ["T1", "T2"] });
 const LOCADM = base({ userId: "LA", roles: [{ role: "location_ops_admin", locationId: LOC_D }] });
-const COACH = base({ userId: "C", roles: [{ role: "interview_coach" }], coachedTeamIds: ["T2"] });
+const COACH = base({ userId: "C", roles: [{ role: "interview_coach" }], coachedTeamIds: ["T2"], subtreeCoachedTeamIds: ["T2"] });
+// Interview Lead: coach C reports to them; they coach T3 directly.
+const IL = base({ userId: "IL", roles: [{ role: "interview_lead" }], subordinateUserIds: ["C"], coachedTeamIds: ["T3"], subtreeCoachedTeamIds: ["T2", "T3"] });
 const HR = base({ userId: "H", roles: [{ role: "hr" }] });
 const ADMIN = base({ userId: "A", roles: [{ role: "org_admin" }] });
 
@@ -206,8 +208,54 @@ describe("candidateVisible", () => {
     expect(candidateVisible(s, cand({ teamId: "T1" }))).toBe(false);
   });
 
+  it("interview lead sees teams coached by them and their coaches, nothing else", () => {
+    for (const p of ["candidate:read", "hotlist:read", "interview:read", "interview.feedback:create", "training:read"] as const) {
+      const s = resolveScope(IL, p);
+      expect(candidateVisible(s, cand({ teamId: "T2" })), p).toBe(true);
+      expect(candidateVisible(s, cand({ teamId: "T3" })), p).toBe(true);
+      expect(candidateVisible(s, cand({ teamId: "T1" })), p).toBe(false);
+    }
+    // No Sales writes and not "Open to all teams".
+    expect(resolveScope(IL, "candidate:update")).toBeNull();
+    expect(candidateVisible(resolveScope(IL, "candidate:read"), cand({ teamId: "T9", visibility: "all_teams", marketingStatus: "active" }))).toBe(false);
+  });
+
   it("denied scope sees nothing", () => {
     expect(candidateVisible(resolveScope(ADMIN, "candidate:read"), cand({}))).toBe(false);
+  });
+});
+
+describe("candidateVisible with selected teams (0240)", () => {
+  // C9 belongs to T2 and is shared with T1; authz.shared_candidate_ids lists it for T1's people.
+  const shared = cand({ id: "C9", recruiterId: "R2a", teamId: "T2", visibility: "selected_teams" });
+  const L1s = { ...L1, sharedCandidateIds: ["C9"] };
+  const R1as = { ...R1a, sharedCandidateIds: ["C9"] };
+
+  it("a lead does not see another team's candidate until it is shared with their team", () => {
+    expect(candidateVisible(resolveScope(L1, "candidate:read"), shared)).toBe(false);
+    expect(candidateVisible(resolveScope(L1s, "candidate:read"), shared)).toBe(true);
+    expect(hotlistVisible(resolveScope(L1s, "hotlist:read"), shared)).toBe(true);
+  });
+
+  it("shares give the all-teams entry rights and nothing more", () => {
+    expect(candidateVisible(resolveScope(R1as, "submission:create"), shared)).toBe(true);
+    expect(candidateVisible(resolveScope(R1as, "placement:create"), shared)).toBe(true);
+    expect(candidateVisible(resolveScope(R1as, "candidate:update"), shared)).toBe(false);
+  });
+
+  it("only while marketable, and only with the candidate id", () => {
+    const s = resolveScope(L1s, "candidate:read");
+    expect(candidateVisible(s, { ...shared, marketingStatus: "on_hold" })).toBe(false);
+    expect(candidateVisible(s, { ...shared, id: undefined })).toBe(false);
+  });
+
+  it("a stale share does not apply once the candidate is back to team only", () => {
+    expect(candidateVisible(resolveScope(L1s, "candidate:read"), { ...shared, visibility: "team" })).toBe(false);
+  });
+
+  it("non-Sales roles never see through shares", () => {
+    const hr = { ...HR, sharedCandidateIds: ["C9"] };
+    expect(candidateVisible(resolveScope(hr, "hotlist:read"), shared)).toBe(false);
   });
 });
 

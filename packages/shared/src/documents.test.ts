@@ -6,7 +6,7 @@ import {
 import type { CandidateRef, UserAccess } from "./authz/engine.js";
 
 const user = (roles: UserAccess["roles"], extra: Partial<UserAccess> = {}): UserAccess => ({
-  userId: "me", roles, teamIds: ["t1"], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], ...extra,
+  userId: "me", roles, teamIds: ["t1"], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [], ...extra,
 });
 const cand = (c: Partial<CandidateRef> = {}): CandidateRef => ({
   recruiterId: "me", teamId: "t1", locationId: "dallas", visibility: "team", marketingStatus: "active", ...c,
