@@ -148,7 +148,7 @@ scheduled interviews.
 | `POST /applications/:id/interviews` | JP-27: type phone/video/in_person, round, lead user, panel (≤10), slot, duration, meeting link **https only**; moves applied/shortlisted to interview_scheduled; emails the applicant |
 | `POST /application-interviews/:id/status` | JP-28: completed / cancelled / no_show |
 | `PUT /application-interviews/:id/scorecard` | JP-29: the caller's own scorecard (technical, communication, problemSolving, attitude 1–5, notes); lead, panel or a manager of the application |
-| `POST /applications/:id/candidate` | JP-30: hired only, `candidate:create`; reuses `CandidatesService.create` (team rules, duplicate check, `409 possible_duplicate` unless `confirmDuplicate`) and links the application in the same transaction |
+| `POST /applications/:id/candidate` | JP-30: hired only, `candidate:create`; reuses `CandidatesService.create` (team rules, duplicate check, `409 possible_duplicate` unless `confirmDuplicate`; a taken personal email or phone is always 409, candidates-api.md CA-6) and links the application in the same transaction |
 | `GET /api/v1/applicants`, `POST /applicants/export` | JP-21: `applicant:read`; the phone needs `applicant.phone:read` (masked otherwise); export audited |
 
 Interviewer access (JP-18b): an interviewer (lead or panel member) reads the application only while the interview is **scheduled or completed** and the

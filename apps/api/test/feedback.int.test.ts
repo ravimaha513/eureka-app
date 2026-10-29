@@ -17,7 +17,7 @@ const job = feedbackEmailJob(mail, "https://eureka.example", "11".repeat(32));
 const ctx = () => ({ pool: db.worker, log, signal: new AbortController().signal, heartbeat() {} });
 beforeAll(async () => {
  db=await createTestDb(); seed=await seedPipeline(db,await seedFixtures(db.admin));
- await db.admin.query("UPDATE eureka.person SET personal_email='candidate@example.test'");
+ await db.admin.query("UPDATE eureka.person SET personal_email='candidate+'||id||'@example.test'");
  const url=new URL(process.env.TEST_PG_ADMIN_URL ?? "postgres://postgres:postgres@127.0.0.1:5432");
  app=await createApp(loadConfig({NODE_ENV:"test",AUTH_MODE:"dev",SESSION_SECRET:"test-secret-test-secret-test-secret-123",DATABASE_URL:`postgres://eureka_app:eureka_app_test@${url.host}/${db.name}`}));
 },120_000);

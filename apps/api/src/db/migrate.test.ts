@@ -5,6 +5,8 @@ import { FUNCTIONS_DIR, MIGRATIONS_DIR, sqlFiles } from "./migrate.js";
 
 /** Migrations up to this one may still define functions that now live in db/functions. */
 const LAST_COPYING_MIGRATION = "0180";
+/** Functions created by a later migration and moved here afterwards: the migration that created each. */
+const CREATED_BY_MIGRATION: Record<string, string> = { "authz.candidate_contact_unique": "0260" };
 /** Numbers used twice before this check existed; both files are applied in name order. */
 const KNOWN_DUPLICATE_PREFIXES = new Set(["0090"]);
 
@@ -31,7 +33,9 @@ describe("migration files", () => {
     const managed = new Set(functionFiles.map((f) => f.replace(/\.sql$/, "").replace("/", ".")));
     const offenders = migrations
       .filter((f) => f.slice(0, 4) > LAST_COPYING_MIGRATION)
-      .flatMap((f) => defines(read(MIGRATIONS_DIR, f)).filter((fn) => managed.has(fn)).map((fn) => `${f}: ${fn}`));
+      .flatMap((f) => defines(read(MIGRATIONS_DIR, f))
+        .filter((fn) => managed.has(fn) && f.slice(0, 4) > (CREATED_BY_MIGRATION[fn] ?? LAST_COPYING_MIGRATION))
+        .map((fn) => `${f}: ${fn}`));
     expect(offenders, "change db/functions/<schema>/<name>.sql instead").toEqual([]);
   });
 });

@@ -139,6 +139,24 @@ the API loads it once per request (`UserAccess.sharedCandidateIds`). Shares coun
 `visibility = 'selected_teams'`. Tests: `apps/api/test/candidate-team-share.{db,api}.int.test.ts`,
 `engine.test.ts` ("selected teams"), `apps/web/src/sales/Sales.test.tsx`.
 
+## Contact uniqueness (CA-6)
+
+Migration `0260_candidate_unique_contact.sql` (#69); current trigger function in
+`db/functions/authz/candidate_contact_unique.sql`. A candidate's personal email (case-insensitive) and
+phone (E.164) each identify one candidate: a new candidate, or a candidate's person changing either
+value, is refused when another candidate's person already has it. Every writer is covered (API,
+imports, hire from portal). Existing duplicates are left alone; employees without a candidate are not
+checked.
+
+- `POST /api/v1/candidates` (and `POST /api/v1/applications/:id/candidate`) still runs the duplicate
+  check first: any match (personal email, marketing email or phone) is 409 `possible_duplicate`.
+  `confirmDuplicate: true` now overrides only a match on another candidate's **marketing** email; a
+  taken personal email or phone is 409 `duplicate_email` / `duplicate_phone` even when confirmed.
+- Race safety: a transaction-scoped advisory lock on one of 64 hash buckets per kind (email, phone),
+  so a bulk insert of any size holds at most 128 locks (0260's lock per value exhausted
+  `max_locks_per_transaction` on large imports).
+- Tests: `apps/api/test/candidate-extras.api.int.test.ts` ("duplicate check").
+
 ## Technologies
 
 The load seed uses the spec list (Java, DE/PY, Python Developer, .NET, DevOps, AI/ML, Networking,

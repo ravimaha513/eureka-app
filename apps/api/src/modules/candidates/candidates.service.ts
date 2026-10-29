@@ -125,6 +125,9 @@ const BATCH_ERRORS: Record<string, () => HttpException> = {
   location_not_in_scope: () => new ForbiddenException("location_not_in_scope"),
   batch_not_found: () => new NotFoundException(),
   invalid_transition: () => new UnprocessableEntityException("invalid_transition"),
+  // Contact uniqueness trigger (db/functions/authz/candidate_contact_unique.sql, CA-6).
+  duplicate_email: () => new ConflictException("duplicate_email"),
+  duplicate_phone: () => new ConflictException("duplicate_phone"),
 };
 
 /** Profile write errors: batch codes (0026), an unknown guest house location (FK). */
@@ -146,7 +149,7 @@ export function auditSafeProfile(body: ProfileUpdate): Record<string, unknown> {
   return out;
 }
 
-/** Maps the batch functions' and trigger's coded errors (migration 0026) to problem details. */
+/** Maps the batch functions' and triggers' coded errors (migrations 0026, 0260) to problem details. */
 const mapBatchError: (err: unknown) => never = dbErrorMapper(BATCH_ERRORS);
 
 

@@ -274,10 +274,20 @@ describe("duplicate check", () => {
     expect((await call("r1a", "POST", "/api/v1/candidates/duplicate-check", { firstName: "", lastName: "B", phone: "+14695550001" })).statusCode).toBe(422);
   });
 
-  it("matches the normalized email too, and creates after an explicit confirmation", async () => {
+  it("matches the normalized email too; a taken personal email or phone is refused even when confirmed", async () => {
     const r = await call("l3", "POST", "/api/v1/candidates", { ...base, email: "NORM@example.com" });
-    expect(r.statusCode).toBe(409);
-    const ok = await call("l3", "POST", "/api/v1/candidates", { ...base, email: "NORM@example.com", confirmDuplicate: true });
+    expect([r.statusCode, r.json().detail]).toEqual([409, "possible_duplicate"]);
+    const email = await call("l3", "POST", "/api/v1/candidates", { ...base, email: "NORM@example.com", confirmDuplicate: true });
+    expect([email.statusCode, email.json().detail]).toEqual([409, "duplicate_email"]);
+    const phone = await call("l3", "POST", "/api/v1/candidates", { ...base, phone: "+14695550001", confirmDuplicate: true });
+    expect([phone.statusCode, phone.json().detail]).toEqual([409, "duplicate_phone"]);
+  });
+
+  it("a match on another candidate's marketing email only is created after an explicit confirmation", async () => {
+    expect((await call("l1", "PATCH", `/api/v1/candidates/${first().id}`, { marketingEmail: "mkt.dup@example.com" })).statusCode).toBe(200);
+    const r = await call("l3", "POST", "/api/v1/candidates", { ...base, email: "MKT.dup@example.com" });
+    expect([r.statusCode, r.json().detail]).toEqual([409, "possible_duplicate"]);
+    const ok = await call("l3", "POST", "/api/v1/candidates", { ...base, email: "MKT.dup@example.com", confirmDuplicate: true });
     expect(ok.statusCode, ok.body).toBe(201);
     const audit = await db.admin.query(`SELECT changes FROM eureka.audit_event WHERE action = 'candidate.created' AND entity_id = $1`, [ok.json().id]);
     expect(audit.rows[0].changes).toEqual({ duplicateConfirmed: true });
