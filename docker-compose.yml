@@ -1,5 +1,7 @@
 # Local development only: PostgreSQL 16 for `pnpm local` (scripts/local-dev.sh).
 # Port 55432 avoids clashing with a Postgres already installed on the machine.
+# Fixed name so every worktree shares the same containers.
+name: eureka-app
 services:
   db:
     image: postgres:16-alpine
@@ -14,6 +16,27 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d eureka"]
       interval: 2s
+      timeout: 3s
+      retries: 30
+  # Throwaway Postgres for the API test suite (`pnpm test:api`): data on tmpfs, durability off.
+  # Never point anything you want to keep at it.
+  testdb:
+    image: postgres:16-alpine
+    profiles: [test]
+    shm_size: 1g
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:55433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data:size=4g
+    command: >-
+      postgres -c fsync=off -c synchronous_commit=off -c full_page_writes=off
+      -c wal_level=minimal -c max_wal_senders=0 -c checkpoint_timeout=1d -c max_wal_size=8GB
+      -c max_connections=600 -c shared_buffers=512MB -c jit=off
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 1s
       timeout: 3s
       retries: 30
 volumes:

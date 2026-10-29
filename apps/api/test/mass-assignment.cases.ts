@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { RequestMethod, type Type } from "@nestjs/common";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { shard } from "./shard.js";
 import { AppModule, createApp } from "../src/app.module.js";
 import { loadConfig, type AppConfig } from "../src/platform/config.js";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
@@ -2243,7 +2244,7 @@ function writeRoutes(): string[] {
   return out.sort();
 }
 
-describe("mass assignment: coverage", () => {
+describe.runIf(shard.first)("mass assignment: coverage", () => {
   it("every POST/PUT/PATCH route has a case, and every case names a real route", () => {
     const routes = writeRoutes();
     expect(routes.length).toBeGreaterThan(30);
@@ -2263,7 +2264,7 @@ describe("mass assignment: coverage", () => {
  * bucket policy, it accepts exactly the signed fields. A client cannot add its
  * own (status, key, metadata) or change the signed ones; nothing is stored.
  */
-describe("mass assignment: local storage upload accepts only the signed fields", () => {
+describe.runIf(shard.first)("mass assignment: local storage upload accepts only the signed fields", () => {
   const quarantined = async () => (await readdir(join(docs, "quarantine", "resume")).catch(() => [] as string[])).sort();
   const file = Buffer.alloc(100, 0x41); // the ticket is for 100 bytes
 
@@ -2301,7 +2302,7 @@ describe("mass assignment: local storage upload accepts only the signed fields",
 describe("mass assignment: strict bodies refuse server-managed and foreign fields", () => {
   const each = CASES.flatMap((c) => Object.entries({ ...SERVER_MANAGED, ...c.forbidden }).map(([field, value]) => [c.route, field, value, c] as const));
 
-  it.each(each)("%s with %s → 422, nothing written", async (route, field, value, c) => {
+  it.each(shard.mine(each))("%s with %s → 422, nothing written", async (route, field, value, c) => {
     const p = await c.prepare();
     const method = route.split(" ")[0] as Method;
     const before = [await p.state(), await auditHead()];
@@ -2317,7 +2318,7 @@ describe("mass assignment: strict bodies refuse server-managed and foreign field
   const permitted = CASES.filter((c) => c.notPermitted).flatMap((c) =>
     Object.entries(c.notPermitted!.fields).map(([field, value]) => [c.route, field, value, c] as const));
 
-  it.each(permitted)("%s with %s (not this caller's field) → 422, nothing written", async (route, field, value, c) => {
+  it.each(shard.mine(permitted))("%s with %s (not this caller's field) → 422, nothing written", async (route, field, value, c) => {
     const p = await c.prepare();
     const method = route.split(" ")[0] as Method;
     const before = [await p.state(), await auditHead()];
@@ -2329,7 +2330,7 @@ describe("mass assignment: strict bodies refuse server-managed and foreign field
 });
 
 describe("mass assignment: body-less endpoints ignore the body", () => {
-  it.each(IGNORED.map((c) => [c.route, c] as const))("%s", async (_route, c) => {
+  it.each(shard.mine(IGNORED.map((c) => [c.route, c] as const)))("%s", async (_route, c) => {
     await c.run();
   });
 });

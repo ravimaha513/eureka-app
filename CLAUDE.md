@@ -12,8 +12,8 @@ Internal talent-ops platform. pnpm monorepo, Node 22+, Postgres 16.
 ## Commands
 - `pnpm local` — full stack (Docker PG :55432, API :3000, web :5173)
 - `pnpm -r typecheck` and `pnpm -r test` before commit
-- Run one test file, not the suite: `pnpm --filter @eureka/api exec vitest run test/<file> --reporter=dot`
-- Local API tests need `TEST_PG_ADMIN_URL=postgres://postgres:postgres@127.0.0.1:55432`. Full API suite ~15 min; don't run web + api suites at once
+- API tests: `pnpm test:api` (full suite, ~4 min) or `pnpm test:api test/<file> --reporter=dot`. Starts the throwaway tmpfs Postgres `testdb` on :55433 (durability off, 600 connections); the dev DB on :55432 allows only 100, too few for the default fork count. Migrated template is cached by hash (`TEST_FRESH_TEMPLATE=1` rebuilds); `TEST_MAX_FORKS` caps parallelism. Don't run web + api suites at once
+- A file too slow to run alone gets split: cases module + `<name>.N.api.int.test.ts` shard files (`test/shard.ts`, e.g. mass-assignment)
 
 ## Parallel sessions
 Several Claude sessions work this repo at once. The SessionStart hook (`scripts/session-brief.sh`) prints worktrees, open PRs and taken migration numbers; trust it over any doc. Re-run it before picking a migration number.
@@ -29,7 +29,7 @@ Several Claude sessions work this repo at once. The SessionStart hook (`scripts/
 - On merge, add one line to `docs/HANDOFF.md` "Built"; nothing else there per session
 
 ## Token hygiene
-- Big files — grep or read a range, never whole: `docs/design.md` (100K), `docs/HANDOFF.md` (30K), `apps/web/src/styles.css`, `apps/api/test/mass-assignment.api.int.test.ts`, large migrations
+- Big files — grep or read a range, never whole: `docs/design.md` (100K), `docs/HANDOFF.md` (30K), `apps/web/src/styles.css`, `apps/api/test/mass-assignment.cases.ts`, large migrations
 - `docs/<area>-api.md` documents each module; read the one you need, not all
 - Pipe noisy output: `... 2>&1 | tail -40`, or `grep -E 'FAIL|Error'`
 - Never read `pnpm-lock.yaml`, `node_modules`, `dist`, `.terraform*`, `.terragrunt-cache`

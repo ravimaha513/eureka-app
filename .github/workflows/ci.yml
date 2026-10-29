@@ -35,6 +35,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r typecheck
+      # Throwaway database: trade durability for speed, and leave room for every parallel test file's pools.
+      - name: Tune Postgres for tests
+        run: |
+          psql postgres://postgres:postgres@127.0.0.1:5432/postgres -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "ALTER SYSTEM SET max_connections = 400"
+          docker restart ${{ job.services.postgres.id }}
+          until pg_isready -q -h 127.0.0.1 -U postgres; do sleep 1; done
       # Amazon RDS admin is not a true superuser: prove migrations apply as a plain CREATEROLE user.
       - name: Migrations apply as a non-superuser (RDS-like)
         run: |

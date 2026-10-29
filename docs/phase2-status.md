@@ -74,7 +74,7 @@ Line numbers are as of this commit.
 | First-placement detection | Built | `0022_placements.sql:310` | Whether a pre-join `bgc_failed` counts is an open question. |
 | State machine incl. `bgc_failed` after joining, assignment | Built | `0022_placements.sql:347`, `apps/api/test/placements.*.int.test.ts` | Assignment start date rule is an open question (built as the day marked joined). |
 | Notifications to HR, Accounts, Immigration | Built | `0022_placements.sql:66`, `0024_outbox_delivery.sql:79`, `apps/api/src/worker/jobs/outbox.ts:303`, `apps/api/test/outbox.int.test.ts` | Lead/Manager/Associate HR recipients and naming the candidate are open questions. |
-| Idempotency-Key on create | Built | `placements.service.ts`, `placements.api.int.test.ts` | — |
+| Idempotency-Key on create | Built | `placements.service.ts`, `placements.cases.ts` | — |
 | `paperwork_entity_id` (legal entity) | Missing (Phase 3 dependency) | `legal_entity` table absent | Needs the `legal_entity` list (AS-09) and its values; Phase 3 paperwork. |
 
 ## Dashboards

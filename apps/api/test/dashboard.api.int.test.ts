@@ -448,7 +448,8 @@ describe("expensive-query guards", () => {
 
   it("limits dashboard requests per user", async () => {
     const statuses: number[] = [];
-    for (let i = 0; i <= DASHBOARD_REQUESTS_PER_MINUTE; i++) {
+    // The fixed window l2 opened earlier may end mid-loop and restart the count, so allow for one more window.
+    for (let i = 0; i <= 2 * DASHBOARD_REQUESTS_PER_MINUTE; i++) {
       statuses.push((await get("l2", `/api/v1/dashboard?${PERIOD}`)).statusCode);
       if (statuses.at(-1) === 429) break;
     }
