@@ -34,6 +34,7 @@ like `/submissions`. Design references: B2.2 (`placement`, `placement_contact`,
 ### Lookups (for pickers; replace raw-ID inputs)
 - `GET /api/v1/lookups` (any signed-in user) returns
   `{ technologies: [{id,name}], clients: [{id,name}], vendors: [{id,name}], locations: [{id,name}], coaches: [{id,name}] }` (active rows only; coaches = active users holding `interview_coach`).
+- `POST /api/v1/lookups/technologies` (any signed-in user) adds a technology: see `docs/lookups-api.md`.
 
 ### Per-record allowed actions
 To stop the UI offering actions the server will refuse, read endpoints include what the caller may do on that record:

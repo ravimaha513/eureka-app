@@ -1,7 +1,10 @@
-import { Controller, Get, Injectable } from "@nestjs/common";
+import { Body, ConflictException, Controller, Get, HttpCode, Injectable, Post, UnprocessableEntityException } from "@nestjs/common";
+import { z } from "zod";
 import { can, type Permission, type UserAccess } from "@eureka/shared";
+import { AuditService } from "../../platform/audit.service.js";
 import { CurrentUser, type AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
+import { dbErrorMapper } from "../../platform/errors.js";
 
 type Item = { id: string; name: string };
 
@@ -11,6 +14,16 @@ export const COACH_PERMISSIONS: readonly Permission[] = ["interview:create", "in
 export const PARTY_PERMISSIONS: readonly Permission[] = ["submission:read", "submission:create", "placement:read"];
 
 const canAny = (access: UserAccess, perms: readonly Permission[]) => perms.some((p) => can(access, p));
+
+/** Same limits as authz.create_technology: 1–60 characters, no control characters. */
+export const CreateTechnology = z.object({
+  name: z.string().trim().min(1).max(60).regex(/^[^\p{Cc}]*$/u, "Must not contain control characters"),
+}).strict();
+
+const mapCreateTechnologyError = dbErrorMapper({
+  technology_inactive: () => new ConflictException("That technology has been retired"),
+  invalid_name: () => new UnprocessableEntityException("Name must be 1–60 characters"),
+});
 
 /**
  * Reference lists for pickers (docs/placements-api.md "Lookups"). Any
@@ -22,7 +35,7 @@ const canAny = (access: UserAccess, perms: readonly Permission[]) => perms.some(
  */
 @Injectable()
 export class LookupsService {
-  constructor(private readonly db: DbService) {}
+  constructor(private readonly db: DbService, private readonly audit: AuditService) {}
 
   async all(user: AuthedUser) {
     const coaches = canAny(user.access, COACH_PERMISSIONS);
@@ -48,6 +61,22 @@ export class LookupsService {
       };
     });
   }
+
+  /**
+   * Adds a technology (any active signed-in user). An existing active name
+   * (case-insensitive) is returned instead of a duplicate, with `created: false`.
+   */
+  async createTechnology(user: AuthedUser, name: string) {
+    return this.db.withUser(user.id, async (c) => {
+      const { rows } = await c.query<{ technology_id: string; technology_name: string; created: boolean }>(
+        `SELECT technology_id, technology_name, created FROM authz.create_technology($1)`, [name]);
+      const r = rows[0]!;
+      if (r.created) {
+        await this.audit.record(c, { actorId: user.id, action: "technology.created", entityType: "technology", entityId: r.technology_id });
+      }
+      return { id: r.technology_id, name: r.technology_name, created: r.created };
+    }).catch(mapCreateTechnologyError);
+  }
 }
 
 @Controller("api/v1/lookups")
@@ -57,5 +86,11 @@ export class LookupsController {
   @Get()
   all(@CurrentUser() user: AuthedUser) {
     return this.svc.all(user);
+  }
+
+  @Post("technologies")
+  @HttpCode(200)
+  createTechnology(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
+    return this.svc.createTechnology(user, CreateTechnology.parse(body).name);
   }
 }

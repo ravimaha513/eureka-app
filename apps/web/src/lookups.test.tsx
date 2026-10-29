@@ -62,8 +62,46 @@ describe("LookupPicker", () => {
   });
 
   it("an empty open list says there are no active entries, not that the role is restricted", () => {
-    renderWith({ ...FULL, technologies: [] }, <Harness kind="technologies" label="Technology" />);
-    expect(screen.getByLabelText("Technology")).toHaveAccessibleDescription("No active entries are available; paste the ID instead.");
+    renderWith({ ...FULL, locations: [] }, <Harness kind="locations" label="Location" />);
+    expect(screen.getByLabelText("Location")).toHaveAccessibleDescription("No active entries are available; paste the ID instead.");
+  });
+
+  const created = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+
+  it("an empty technology list offers to add one, which becomes the selection", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(created({ id: "t9", name: "AI-ML", created: true }));
+    const seen: string[] = [];
+    renderWith({ ...FULL, technologies: [] }, <Harness kind="technologies" label="Technology" onValue={(v) => seen.push(v)} />);
+    const input = screen.getByLabelText("Technology");
+    expect(input).toHaveAccessibleDescription("Adds it to the list for everyone.");
+    fireEvent.change(input, { target: { value: "  AI-ML " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(seen.at(-1)).toBe("t9"));
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(url).toBe("/api/v1/lookups/technologies");
+    expect(init).toMatchObject({ method: "POST", body: JSON.stringify({ name: "AI-ML" }) });
+    // The cached list now has it, so the picker turns into a select showing it.
+    await waitFor(() => expect(screen.getByLabelText("Technology").tagName).toBe("SELECT"));
+    expect(screen.getByLabelText("Technology")).toHaveValue("t9");
+  });
+
+  it("a loaded technology list has an add option; a blank name is refused locally", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(created({ id: "t0", name: "Go", created: true }));
+    renderWith(FULL, <Harness kind="technologies" label="Technology" />);
+    fireEvent.change(screen.getByLabelText("Technology"), { target: { value: "__add__" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByLabelText("New technology")).toHaveAccessibleDescription(/Enter a technology name\./);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("New technology"), { target: { value: "Go" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(screen.queryByLabelText("New technology")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Technology")).toHaveValue("t0");
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Choose…", "Go", "Java", "Add a new technology…"]);
+  });
+
+  it("restricted lists never offer to add", () => {
+    renderWith(FULL, <Harness kind="clients" label="Client" />);
+    expect(screen.queryByRole("option", { name: /Add a new/ })).not.toBeInTheDocument();
   });
 
   it("explains a failed load", async () => {

@@ -1,7 +1,7 @@
 /** Reference lists for pickers (GET /api/v1/lookups, docs/placements-api.md) and the picker control. */
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "./api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, ApiError } from "./api";
 import { Field } from "./sales/ui";
 
 export interface Named { id: string; name: string }
@@ -38,6 +38,63 @@ export function useLookupName(kind: LookupKind, id: string | null | undefined): 
 }
 
 const OTHER = "__other__";
+const ADD = "__add__";
+
+/** Lookup lists any signed-in user may add to (POST /api/v1/lookups/<path>, docs/lookups-api.md). */
+const ADDABLE: Partial<Record<LookupKind, { path: string; noun: string }>> = {
+  technologies: { path: "technologies", noun: "technology" },
+};
+
+/**
+ * Inline "add a new entry" row under a picker. On success the new row joins
+ * the cached list (sorted like the server) and becomes the selection; an
+ * existing name in any case comes back as that row instead of a duplicate.
+ */
+function AddEntry({ kind, label, onAdded, onCancel, autoFocus }: {
+  kind: LookupKind; label: string; onAdded: (id: string) => void; onCancel?: () => void; autoFocus?: boolean;
+}) {
+  const { path, noun } = ADDABLE[kind]!;
+  const qc = useQueryClient();
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string>();
+  const add = useMutation({
+    mutationFn: (n: string) => api<Named & { created: boolean }>(`/api/v1/lookups/${path}`, { method: "POST", body: JSON.stringify({ name: n }) }),
+    onSuccess: ({ id, name: saved }) => {
+      qc.setQueryData<Lookups>(lookupsKey, (old) => {
+        if (!old || old[kind].some((r) => r.id === id)) return old;
+        const rows = [...old[kind], { id, name: saved }].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+        return { ...old, [kind]: rows };
+      });
+      setName("");
+      onAdded(id);
+    },
+    onError: (e) => setError(e instanceof ApiError && e.status === 409
+      ? `That ${noun} has been retired; ask an admin to restore it.`
+      : e instanceof ApiError && e.status === 422 ? "Use 1–60 characters." : `Couldn't add the ${noun}. Try again.`),
+  });
+  const submit = () => {
+    const n = name.trim().replace(/\s+/g, " ");
+    if (!n) { setError(`Enter a ${noun} name.`); return; }
+    if (n.length > 60) { setError("Use 1–60 characters."); return; }
+    setError(undefined);
+    add.mutate(n);
+  };
+  return (
+    <div className="toolbar">
+      <Field label={label} error={error} hint={`Adds it to the list for everyone.`}>
+        {(p) => (
+          <input {...p} {...(autoFocus ? { "data-autofocus": true } : {})} value={name} maxLength={60} autoComplete="off"
+            placeholder={`New ${noun} name`} disabled={add.isPending}
+            onChange={(e) => { setName(e.target.value); setError(undefined); }}
+            // Inside a dialog form: Enter adds the entry instead of submitting the dialog.
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }} />
+        )}
+      </Field>
+      <button type="button" className="btn" disabled={add.isPending} onClick={submit}>{add.isPending ? "Adding…" : "Add"}</button>
+      {onCancel && <button type="button" className="btn ghost" disabled={add.isPending} onClick={onCancel}>Cancel</button>}
+    </div>
+  );
+}
 
 /**
  * A labelled select fed by the lookups endpoint. While the list loads the
@@ -52,21 +109,34 @@ export function LookupPicker({ kind, label, value, onChange, error, optional, pl
 }) {
   const q = useLookups();
   const [typing, setTyping] = useState(false);
+  const [adding, setAdding] = useState(false);
   const af = autoFocus ? { "data-autofocus": true } : {};
   const empty = placeholder ?? (optional ? "None" : "Choose…");
   const rows = q.data?.[kind] ?? [];
+  const addable = ADDABLE[kind];
 
   if (rows.length > 0) {
     return (
-      <Field label={label} error={error}>
-        {(p) => (
-          <select {...p} {...af} value={value} onChange={(e) => onChange(e.target.value)}>
-            <option value="" disabled={!optional}>{empty}</option>
-            {value && !rows.some((r) => r.id === value) && <option value={value}>Current selection</option>}
-            {rows.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-          </select>
+      <>
+        <Field label={label} error={adding ? undefined : error}>
+          {(p) => (
+            <select {...p} {...af} value={adding ? ADD : value} onChange={(e) => {
+              if (e.target.value === ADD) { setAdding(true); return; }
+              setAdding(false);
+              onChange(e.target.value);
+            }}>
+              <option value="" disabled={!optional}>{empty}</option>
+              {value && !rows.some((r) => r.id === value) && <option value={value}>Current selection</option>}
+              {rows.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              {addable && <option value={ADD}>Add a new {addable.noun}…</option>}
+            </select>
+          )}
+        </Field>
+        {adding && addable && (
+          <AddEntry kind={kind} label={`New ${addable.noun}`} autoFocus
+            onAdded={(id) => { setAdding(false); onChange(id); }} onCancel={() => setAdding(false)} />
         )}
-      </Field>
+      </>
     );
   }
 
@@ -76,6 +146,11 @@ export function LookupPicker({ kind, label, value, onChange, error, optional, pl
         {(p) => <select {...p} {...af} value="" disabled aria-busy="true"><option value="">Loading…</option></select>}
       </Field>
     );
+  }
+
+  // An empty list that anyone may add to: offer the add row, not a pasted ID.
+  if (q.data && addable) {
+    return <AddEntry kind={kind} label={label} autoFocus={autoFocus} onAdded={onChange} />;
   }
 
   // No list to choose from: offer what the screen already knows, then a typed ID.
