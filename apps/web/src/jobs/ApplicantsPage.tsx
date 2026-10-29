@@ -18,9 +18,11 @@ export function ApplicantsPage() {
   const { page } = pager;
   const [notice, setNotice] = useState("");
   useEffect(() => {
+    // Only a changed search resets paging; otherwise the mount-time run would undo an early Next.
+    if (searchText.trim() === search) return;
     const t = setTimeout(() => { setSearch(searchText.trim()); pager.reset(); }, 300);
     return () => clearTimeout(t);
-  }, [searchText]);
+  }, [searchText, search]);
   const filters = { search, cursor: pager.cursor ?? "", limit: 50 };
   const q = useQuery({ queryKey: [...applicationKeys.applicants, filters], queryFn: () => applicationsApi.applicants(filters), placeholderData: keepPreviousData });
   const items = q.data?.items ?? [];

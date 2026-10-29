@@ -43,9 +43,11 @@ export function SitesPage({ kind, me }: { kind: SiteKind; me: Pick<Me, "capabili
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
+    // Only a changed search resets paging; otherwise the mount-time run would undo an early Next.
+    if (text.trim() === search) return;
     const t = setTimeout(() => { setSearch(text.trim()); pager.reset(); }, 300);
     return () => clearTimeout(t);
-  }, [text]);
+  }, [text, search]);
 
   const filters = { q: search, limit: PAGE_SIZE, cursor: pager.cursor ?? "" };
   const list = useQuery({
