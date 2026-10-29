@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { CANDIDATE_STATUSES, PLACEMENT_STATUSES } from "@eureka/shared";
+import { CANDIDATE_STATUSES, PLACEMENT_STATUSES, VISA_CATEGORY_LIST } from "@eureka/shared";
 import { labelKey, validTimeZone } from "./normalize.js";
 
 /**
@@ -35,13 +35,27 @@ export const SalesColumns = z.object({
   phone: header.optional(),
   dob: header.optional(),
   technology: header,
-  location: header,
-  /** Email of the Eureka user who owns the row (recruiter, or lead for unassigned candidates). */
+  /** Office location; a blank cell falls back to the candidate's team location. */
+  location: header.optional(),
+  /**
+   * The Eureka user who owns the row (recruiter, or lead for unassigned
+   * candidates): an email, an `owners` alias, or a user's exact display name.
+   */
   owner: header,
+  /** The candidate's team ("Lead" column): a `teams` alias, a team name, or its lead's display name. Blank: the owner's team. */
+  team: header.optional(),
+  /** Who markets the candidate ("Marketing Teams"): a `sharedWithAll` label, the own team, or another team. */
+  sharedWith: header.optional(),
   status: header,
   rowColor: header.optional(),
   priority: header.optional(),
   marketingStartDate: header.optional(),
+  /** Marketed visa: a `visas` alias or a visa label/key ("Green card", "gc_ead"). */
+  visa: header.optional(),
+  /** Guest house ("GH"): a `guestHouses` alias, a location name, or "Remote". */
+  guestHouse: header.optional(),
+  /** In-person candidate: yes/no. */
+  inPerson: header.optional(),
 }).strict();
 
 export const InterviewColumns = z.object({
@@ -129,8 +143,18 @@ export const MappingConfig = z.object({
     interviews: keyed(z.enum(CALL_STATUSES)).default({}),
     placements: keyed(z.enum(PLACEMENT_STATUSES)).default({}),
   }).strict(),
-  /** Alias -> canonical technology name (must exist in the technology list). */
+  /** Alias -> canonical technology name (tried first; the cell itself is the fallback). */
   technologies: keyed(z.string().min(1)).default({}),
+  /** Owner cell label (a name as typed in the sheet) -> Eureka user email. */
+  owners: keyed(z.string().email()).default({}),
+  /** Team or sharedWith label as typed (e.g. "Rasheed") -> a team name or its lead's display name. */
+  teams: keyed(z.string().min(1)).default({}),
+  /** sharedWith labels meaning "open to all teams" (e.g. "All"). */
+  sharedWithAll: z.array(z.string().min(1)).transform((a) => a.map(labelKey)).default([]),
+  /** Visa label -> visa category key. Added to the built-in labels and keys. */
+  visas: keyed(z.enum(VISA_CATEGORY_LIST as [string, ...string[]])).default({}),
+  /** Guest house label -> location name, or "remote". */
+  guestHouses: keyed(z.string().min(1)).default({}),
   /** Abbreviation -> IANA zone, e.g. "CST" -> "America/Chicago". */
   timeZones: z.record(z.string(), z.string().refine(validTimeZone, "unknown IANA time zone"))
     .transform((m) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k.trim().toUpperCase(), v])))
