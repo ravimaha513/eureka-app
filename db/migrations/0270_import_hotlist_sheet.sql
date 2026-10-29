@@ -43,24 +43,20 @@ BEGIN
   RETURN CASE WHEN coalesce(pg_catalog.cardinality(ids), 0) = 1 AND coalesce(act, false) THEN ids[1] END;
 END $$;
 
--- Team cell: a "teams" alias (-> team name), a team name, or the display name
--- of its lead; the first rule with a match decides, and it must be one team.
+-- Team cell, or its "teams" alias: a team name, else the display name of its
+-- lead; the first rule with a match decides, and it must be one team.
 CREATE FUNCTION authz.import_team_for(p_map jsonb, p_cell text) RETURNS uuid
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
-  k constant text := authz.import_label(p_cell);
-  alias text; ids uuid[];
+  cell constant text := authz.import_label(p_cell);
+  k text; ids uuid[];
 BEGIN
-  IF k = '' THEN RETURN NULL; END IF;
-  alias := authz.import_map_entry(p_map -> 'teams', k) #>> '{}';
-  IF alias IS NOT NULL THEN
-    SELECT pg_catalog.array_agg(t.id) INTO ids FROM eureka.team t WHERE authz.import_label(t.name) = authz.import_label(alias);
-  ELSE
-    SELECT pg_catalog.array_agg(t.id) INTO ids FROM eureka.team t WHERE authz.import_label(t.name) = k;
-    IF ids IS NULL THEN
-      SELECT pg_catalog.array_agg(t.id) INTO ids FROM eureka.team t JOIN eureka.app_user u ON u.id = t.lead_id
-       WHERE authz.import_label(u.display_name) = k;
-    END IF;
+  IF cell = '' THEN RETURN NULL; END IF;
+  k := authz.import_label(coalesce(authz.import_map_entry(p_map -> 'teams', cell) #>> '{}', p_cell));
+  SELECT pg_catalog.array_agg(t.id) INTO ids FROM eureka.team t WHERE authz.import_label(t.name) = k;
+  IF ids IS NULL THEN
+    SELECT pg_catalog.array_agg(t.id) INTO ids FROM eureka.team t JOIN eureka.app_user u ON u.id = t.lead_id
+     WHERE authz.import_label(u.display_name) = k;
   END IF;
   RETURN CASE WHEN coalesce(pg_catalog.cardinality(ids), 0) = 1 THEN ids[1] END;
 END $$;

@@ -147,7 +147,7 @@ export const MappingConfig = z.object({
   technologies: keyed(z.string().min(1)).default({}),
   /** Owner cell label (a name as typed in the sheet) -> Eureka user email. */
   owners: keyed(z.string().email()).default({}),
-  /** Team cell label (e.g. a lead's name as typed) -> team name. Also used for sharedWith. */
+  /** Team or sharedWith label as typed (e.g. "Rasheed") -> a team name or its lead's display name. */
   teams: keyed(z.string().min(1)).default({}),
   /** sharedWith labels meaning "open to all teams" (e.g. "All"). */
   sharedWithAll: z.array(z.string().min(1)).transform((a) => a.map(labelKey)).default([]),

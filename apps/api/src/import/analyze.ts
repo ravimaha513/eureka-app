@@ -250,18 +250,16 @@ class RowNormalizer {
   }
 
   /**
-   * A team cell: a `teams` alias (-> team name), a team name, or the display
-   * name of its lead; the first rule that matches decides. Mirrored by
+   * A team cell, or its `teams` alias: a team name, else the display name of
+   * its lead; the first rule that matches decides. Mirrored by
    * authz.import_team_for (0270).
    */
   team(field: string, refs: Refs, cfg: MappingConfig): RefTeam | null {
     const v = clean(this.cell(field));
     if (!v) return null;
-    const alias = cfg.teams[labelKey(v)];
-    const hits = alias
-      ? refs.teams.filter((t) => labelKey(t.name) === labelKey(alias))
-      : [(t: RefTeam) => t.name, (t: RefTeam) => t.leadName]
-        .map((key) => refs.teams.filter((t) => labelKey(key(t)) === labelKey(v))).find((m) => m.length > 0) ?? [];
+    const k = labelKey(cfg.teams[labelKey(v)] || v);
+    const hits = [(t: RefTeam) => t.name, (t: RefTeam) => t.leadName]
+      .map((key) => refs.teams.filter((t) => labelKey(key(t)) === k)).find((m) => m.length > 0) ?? [];
     if (hits.length > 1) { this.reasons.push(`ambiguous_team:${field}`); return null; }
     if (hits.length === 0) { this.reasons.push(`unknown_team:${field}`); return null; }
     return hits[0]!;

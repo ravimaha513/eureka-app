@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "defaults": {
+    "dateOrder": "detect",
+    "twoDigitYearPivot": 30,
+    "timeZone": "America/Chicago",
+    "interviewMinutes": 60,
+    "phoneRegion": "US"
+  },
+  "sheets": {
+    "sales": {
+      "columns": {
+        "fullName": "Candidate Name",
+        "marketingEmail": "Marketing Email",
+        "phone": "Phone",
+        "technology": "Technology",
+        "location": "Location",
+        "owner": "Recruiter",
+        "team": "Lead",
+        "sharedWith": "Marketing Teams",
+        "status": "Marketing Status",
+        "priority": "Priority Level",
+        "marketingStartDate": "Marketing Start Date",
+        "visa": "VISA",
+        "guestHouse": "GH",
+        "inPerson": "In Person Candidate"
+      }
+    },
+    "interviews": {
+      "columns": {
+        "fullName": "Candidate Name",
+        "email": "Candidate Email",
+        "owner": "Recruiter Email",
+        "client": "Client",
+        "jobTitle": "Job Title",
+        "date": "Interview Date",
+        "startTime": "Start Time",
+        "callStatus": "Call Status"
+      }
+    },
+    "placements": {
+      "columns": {
+        "fullName": "Candidate Name",
+        "email": "Candidate Email",
+        "owner": "Recruiter Email",
+        "client": "Client",
+        "jobTitle": "Job Title",
+        "placementType": "Placement Type",
+        "workMode": "Work Mode",
+        "tentativeStart": "Tentative Start",
+        "status": "Status"
+      }
+    }
+  },
+  "statuses": {
+    "sales": {
+      "Active": { "status": "active" },
+      "Hold": { "status": "on_hold" },
+      "Stopped": { "status": "stopped" },
+      "Interviews are High": { "status": "full_of_interviews" },
+      "Project Confirmation": { "status": "confirmation" }
+    },
+    "interviews": {},
+    "placements": {}
+  },
+  "rowColors": { "sales": {}, "interviews": {}, "placements": {} },
+  "technologies": {
+    "Python": "Python Developer",
+    ".Net Developer": ".NET",
+    "BA": "Business Analyst",
+    "Data Scientiest": "Data Science",
+    "PY/DY - AIML": null
+  },
+  "owners": {
+    "_note": "Recruiter names as typed -> Eureka email, only where the name is not exactly one user's display name (first names, spelling variants)."
+  },
+  "teams": {
+    "_note": "Lead and Marketing Teams labels -> a Eureka team name or its lead's display name, where the label is neither exactly (short names such as \"Rasheed\" or \"Venu\").",
+    "Elite": "Elite Team"
+  },
+  "sharedWithAll": ["All"],
+  "visas": {
+    "GC": "green_card",
+    "GC-EAD": "gc_ead",
+    "GCEAD": "gc_ead",
+    "H1B": "h1b",
+    "G": null
+  },
+  "guestHouses": {
+    "_note": "GH labels -> Eureka location name (fill with the real guest-house locations). \"Remote\" needs no entry.",
+    "TN": null,
+    "KS": null,
+    "VA": null,
+    "PA": null,
+    "OH": null,
+    "NJ": null,
+    "TX-Austin": null,
+    "TX-Dallas": null
+  },
+  "placements": { "commit": false }
+}

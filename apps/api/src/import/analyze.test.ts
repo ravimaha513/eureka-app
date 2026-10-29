@@ -124,7 +124,7 @@ describe("keys and normalization", () => {
     Object.assign(m.sheets.sales.columns, {
       team: "Lead", sharedWith: "Marketing Teams", visa: "VISA", guestHouse: "GH", inPerson: "In Person Candidate",
     });
-    m.teams = { Venu: "Bravo Team" };
+    m.teams = { Venu: "Bravo Team", Jafar: "Jafar Ali" };
     m.sharedWithAll = ["All"];
     m.guestHouses = { "TX-Dallas": "Dallas" };
   });
@@ -142,6 +142,8 @@ describe("keys and normalization", () => {
   it("Marketing Teams: All, the own team, or another team (selected teams)", () => {
     expect(row({ "Marketing Teams": "all" }).norm).toMatchObject({ visibility: "all_teams", shareTeamIds: [] });
     expect(row({ "Marketing Teams": "Jafar Ali" }).norm).toMatchObject({ visibility: "team", shareTeamIds: [] });
+    // An alias may name the lead instead of the team.
+    expect(row({ "Marketing Teams": "jafar" }).norm).toMatchObject({ visibility: "team", shareTeamIds: [] });
     expect(row({ "Marketing Teams": "Venu" }).norm).toMatchObject({ visibility: "selected_teams", shareTeamIds: ["team-b"] });
     expect(row({ "Marketing Teams": "Venu", Lead: "" , Location: "Dallas" }).reasons).toEqual(["needs_team:sharedWith"]);
     expect(row({ "Marketing Teams": "Venu", Status: "Active/All Teams" }).reasons).toEqual(["visibility_conflict:sharedWith"]);
@@ -304,6 +306,29 @@ describe("resolveBatch", () => {
   it("flags a person whose email or phone a live candidate already uses", () => {
     const s = sales(2);
     expect(resolve([s], { live: new Set([key(s)]) })["sales 2"]!.reasons).toEqual(["matches_existing_candidate"]);
+  });
+});
+
+describe("the Hot List sheet mapping (mapping.hotlist-sheet.json)", () => {
+  const m = parseMapping(JSON.parse(readFileSync(DEFAULT_MAPPING_PATH.replace("mapping.default.json", "mapping.hotlist-sheet.json"), "utf8")));
+  const line = (o: Record<string, string>): RawRow => ({
+    sheet: "sales", rowNo: 2, cells: {
+      Lead: "Jafar Ali", "Candidate Name": "Asha Verma", Technology: "Java", "Marketing Status": "Active", Recruiter: "Ravi Kumar",
+      GH: "Remote", Location: "", "Priority Level": "P1", "Marketing Teams": "All", "In Person Candidate": "No", VISA: "GC",
+      "Marketing Email": "asha@m.example", Phone: "7723048509", ...o,
+    },
+  });
+
+  it("parses, and a typical line is clean", () => {
+    const r = normalizeRow(line({}), m, refs, h, TODAY);
+    expect(r.reasons).toEqual([]);
+    expect(r.norm).toMatchObject({ ownerId: "user-r1", teamId: "team-a", locationId: "loc-dallas", visibility: "all_teams",
+      status: "active", visaCategory: "green_card", ghRemote: true, inPersonOk: false });
+  });
+
+  it("unfilled guest houses and unknown labels go to review, never guessed", () => {
+    expect(normalizeRow(line({ GH: "TN", VISA: "G", Technology: "PY/DY - AIML" }), m, refs, h, TODAY).reasons.sort())
+      .toEqual(["unknown_location:guestHouse", "unknown_technology:technology", "unknown_visa:visa"]);
   });
 });
 
