@@ -672,6 +672,15 @@ const CASES: RejectCase[] = [
     }),
     forbidden: { id: LOC.austin, status: "inactive" },
   },
+  // lookups (migration 0250): id, active flag and creator are the server's
+  {
+    route: "POST /api/v1/lookups/technologies", actor: "admin",
+    prepare: async () => ({
+      url: "/api/v1/lookups/technologies", body: { name: `MA Tech ${++n}` },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.technology`),
+    }),
+    forbidden: { id: TECH_ID, active: false, createdBy: U.r1a, created: false },
+  },
   {
     route: "PUT /api/v1/admin/teams/:id/lead", actor: "admin",
     prepare: async () => ({
