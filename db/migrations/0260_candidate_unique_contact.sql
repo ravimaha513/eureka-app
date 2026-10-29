@@ -54,6 +54,8 @@ BEGIN
   RETURN NEW;
 END $$;
 REVOKE ALL ON FUNCTION authz.candidate_contact_unique() FROM PUBLIC;
+-- The trigger owner needs EXECUTE to create the triggers below (as non-superuser, rule 7).
+GRANT EXECUTE ON FUNCTION authz.candidate_contact_unique() TO eureka_owner;
 
 RESET ROLE;
 
