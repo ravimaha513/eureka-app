@@ -7,7 +7,9 @@
  * decisions and live-duplicate hits; nothing here touches the database.
  */
 import { createHash, createHmac } from "node:crypto";
-import { OPEN_PLACEMENT_STATUSES, type CandidateStatus, type PlacementStatus } from "@eureka/shared";
+import {
+  OPEN_PLACEMENT_STATUSES, VISA_CATEGORIES, type CandidateStatus, type PlacementStatus, type VisaCategory,
+} from "@eureka/shared";
 import type { CallStatus, MappingConfig, SalesTarget, Sheet } from "./mapping.js";
 import {
   clean, labelKey, lookupLabel, nameKey, normalizeColor, normalizeEmail, normalizeName, normalizePhone,
@@ -29,7 +31,11 @@ export interface Refs {
   partners: Map<string, string>;
   /** lower-case email -> user */
   users: Map<string, { id: string; active: boolean }>;
+  /** labelKey(display name) -> the users with that name (more than one is ambiguous) */
+  userNames: Map<string, { id: string; active: boolean }[]>;
+  teams: RefTeam[];
 }
+export interface RefTeam { id: string; name: string; leadName: string; locationId: string | null }
 
 export interface Ledger {
   /** `${sheet}:${rowKey}` of every loaded source row -> the entity it created */
@@ -49,8 +55,14 @@ export interface SalesNorm {
   phone: string | null; dob: string | null; technologyId: string | null; locationId: string | null;
   /** Keyed identity hashes recorded in the ledger when the person is loaded. */
   identities: string[];
-  ownerId: string | null; status: CandidateStatus | null; visibility: "team" | "all_teams";
+  ownerId: string | null; status: CandidateStatus | null;
+  /** null: the owner's team (decided when loading). */
+  teamId: string | null;
+  visibility: "team" | "all_teams" | "selected_teams";
+  /** Teams the candidate is shared with when visibility is selected_teams. */
+  shareTeamIds: string[];
   priority: "P1" | "P2" | "P3" | null; marketingStartDate: string | null;
+  visaCategory: VisaCategory | null; ghLocationId: string | null; ghRemote: boolean; inPersonOk: boolean | null;
 }
 export interface InterviewNorm {
   firstName: string | null; lastName: string | null; email: string | null; phone: string | null; dob: string | null;
@@ -151,6 +163,7 @@ export function redactCells(row: RawRow, cfg: MappingConfig, h: Hmac, today = to
 export const DROPPABLE_FIELDS = new Set([
   "phone", "personalEmail", "marketingEmail", "email", "dob", "priority", "marketingStartDate",
   "vendor", "implementationPartner", "rate", "projectCity", "projectState", "statusReason",
+  "visa", "guestHouse", "inPerson",
 ]);
 /** Row-level reasons a reviewer may approve. Must match authz.import_reason_approvable (0033). */
 export const APPROVABLE_REASONS = new Set([
@@ -167,7 +180,7 @@ export function approvable(reason: string): boolean {
 }
 
 const NORM_FIELD: Record<string, string> = {
-  vendor: "vendorId", implementationPartner: "partnerId",
+  vendor: "vendorId", implementationPartner: "partnerId", visa: "visaCategory", guestHouse: "ghLocationId", inPerson: "inPersonOk",
 };
 
 // ---------------------------------------------------------------------------
@@ -216,13 +229,42 @@ class RowNormalizer {
     return { first, last };
   }
 
-  owner(refs: Refs, requiredField: boolean): string | null {
-    const v = clean(this.cell("owner")).toLowerCase();
+  /**
+   * The owner cell: an `owners` alias (-> email), an email, or a user's exact
+   * display name. Mirrored by authz.import_owner_for (0270), which verification uses.
+   */
+  owner(refs: Refs, cfg: MappingConfig, requiredField: boolean): string | null {
+    const v = clean(this.cell("owner"));
     if (!v) return requiredField ? this.required("owner", null) : null;
-    const u = refs.users.get(v);
+    const alias = cfg.owners[labelKey(v)];
+    let u: { id: string; active: boolean } | undefined;
+    if (alias || v.includes("@")) u = refs.users.get((alias ?? v).toLowerCase());
+    else {
+      const byName = refs.userNames.get(labelKey(v)) ?? [];
+      if (byName.length > 1) { this.reasons.push("ambiguous_owner:owner"); return null; }
+      u = byName[0];
+    }
     if (!u) { this.reasons.push("unknown_owner:owner"); return null; }
     if (!u.active) { this.reasons.push("inactive_owner:owner"); return null; }
     return u.id;
+  }
+
+  /**
+   * A team cell: a `teams` alias (-> team name), a team name, or the display
+   * name of its lead; the first rule that matches decides. Mirrored by
+   * authz.import_team_for (0270).
+   */
+  team(field: string, refs: Refs, cfg: MappingConfig): RefTeam | null {
+    const v = clean(this.cell(field));
+    if (!v) return null;
+    const alias = cfg.teams[labelKey(v)];
+    const hits = alias
+      ? refs.teams.filter((t) => labelKey(t.name) === labelKey(alias))
+      : [(t: RefTeam) => t.name, (t: RefTeam) => t.leadName]
+        .map((key) => refs.teams.filter((t) => labelKey(key(t)) === labelKey(v))).find((m) => m.length > 0) ?? [];
+    if (hits.length > 1) { this.reasons.push(`ambiguous_team:${field}`); return null; }
+    if (hits.length === 0) { this.reasons.push(`unknown_team:${field}`); return null; }
+    return hits[0]!;
   }
 
   /** Status from the text column and the optional row colour (SRS Q6: never guessed). */
@@ -254,9 +296,68 @@ function technologyId(n: RowNormalizer, cfg: MappingConfig, refs: Refs): string 
   const v = clean(n.cell("technology"));
   if (!v) return n.required("technology", null);
   const alias = cfg.technologies[labelKey(v)];
-  const id = refs.technologies.get((alias ?? v).toLowerCase());
+  // The alias first, then the cell as typed (an alias may name a technology this database lacks).
+  const id = (alias ? refs.technologies.get(alias.toLowerCase()) : undefined) ?? refs.technologies.get(v.toLowerCase());
   if (!id) n.reasons.push("unknown_technology:technology");
   return id ?? null;
+}
+
+const VISA_LABELS: Record<string, VisaCategory> = Object.fromEntries(
+  (Object.entries(VISA_CATEGORIES) as [VisaCategory, string][]).flatMap(([k, label]) => [[labelKey(k), k], [labelKey(label), k]]));
+
+function visaCategory(n: RowNormalizer, cfg: MappingConfig): VisaCategory | null {
+  const k = labelKey(n.cell("visa"));
+  if (!k) return null;
+  const v = (cfg.visas[k] as VisaCategory | null | undefined) ?? VISA_LABELS[k];
+  if (!v) n.reasons.push("unknown_visa:visa");
+  return v ?? null;
+}
+
+function guestHouse(n: RowNormalizer, cfg: MappingConfig, refs: Refs): { ghLocationId: string | null; ghRemote: boolean } {
+  const v = clean(n.cell("guestHouse"));
+  if (!v) return { ghLocationId: null, ghRemote: false };
+  const name = cfg.guestHouses[labelKey(v)] ?? v;
+  if (labelKey(name) === "remote") return { ghLocationId: null, ghRemote: true };
+  const id = refs.locations.get(name.toLowerCase());
+  if (!id) n.reasons.push("unknown_location:guestHouse");
+  return { ghLocationId: id ?? null, ghRemote: false };
+}
+
+const YES = new Set(["yes", "y", "true", "1"]);
+const NO = new Set(["no", "n", "false", "0"]);
+function inPerson(n: RowNormalizer): boolean | null {
+  const k = labelKey(n.cell("inPerson"));
+  if (!k) return null;
+  if (YES.has(k)) return true;
+  if (NO.has(k)) return false;
+  n.reasons.push("invalid_boolean:inPerson");
+  return null;
+}
+
+/**
+ * Visibility from the sharedWith cell ("Marketing Teams"), else from the
+ * status mapping. Mirrored by authz.import_verify_batch (0270).
+ */
+function sharing(n: RowNormalizer, cfg: MappingConfig, refs: Refs, teamId: string | null, fromStatus: "team" | "all_teams"):
+  { visibility: SalesNorm["visibility"]; shareTeamIds: string[] } {
+  const k = labelKey(n.cell("sharedWith"));
+  if (!k) return { visibility: fromStatus, shareTeamIds: [] };
+  let out: { visibility: SalesNorm["visibility"]; shareTeamIds: string[] };
+  if (cfg.sharedWithAll.includes(k)) out = { visibility: "all_teams", shareTeamIds: [] };
+  else {
+    const t = n.team("sharedWith", refs, cfg);
+    if (!t) return { visibility: fromStatus, shareTeamIds: [] };
+    // Comparing with the own team needs it known: the owner's team is decided only when loading.
+    if (!teamId) { n.reasons.push("needs_team:sharedWith"); return { visibility: fromStatus, shareTeamIds: [] }; }
+    out = t.id === teamId ? { visibility: "team", shareTeamIds: [] } : { visibility: "selected_teams", shareTeamIds: [t.id] };
+  }
+  if (fromStatus === "all_teams" && out.visibility !== "all_teams") n.reasons.push("visibility_conflict:sharedWith");
+  return out;
+}
+
+/** A sales line with no name, email or phone (a placeholder row in the sheet): skipped, not reviewed. */
+function blankSalesRow(n: RowNormalizer): boolean {
+  return ["fullName", "firstName", "lastName", "personalEmail", "marketingEmail", "phone"].every((f) => !clean(n.cell(f)));
 }
 
 function identityOf(first: string | null, last: string | null, emails: (string | null)[], phone: string | null, dob: string | null): Identity {
@@ -297,15 +398,24 @@ export function normalizeRow(row: RawRow, cfg: MappingConfig, refs: Refs, h: Hma
       if (pr === "P1" || pr === "P2" || pr === "P3") priority = pr;
       else n.reasons.push("invalid_priority:priority");
     }
+    const team = n.team("team", refs, cfg);
+    // A blank office location falls back to the team's.
+    const locationId = clean(n.cell("location"))
+      ? n.ref("location", refs.locations, "unknown_location", true)
+      : n.required("location", team?.locationId ?? null);
     norm = {
       firstName: first, lastName: last, personalEmail, marketingEmail, phone, dob,
       technologyId: technologyId(n, cfg, refs),
-      locationId: n.ref("location", refs.locations, "unknown_location", true),
-      ownerId: n.owner(refs, true),
-      status: target?.status ?? null, visibility: target?.visibility ?? "team", priority,
+      locationId,
+      ownerId: n.owner(refs, cfg, true),
+      status: target?.status ?? null, teamId: team?.id ?? null,
+      ...sharing(n, cfg, refs, team?.id ?? null, target?.visibility ?? "team"),
+      priority,
       marketingStartDate: n.take("marketingStartDate", dateOf("marketingStartDate")),
+      visaCategory: visaCategory(n, cfg), ...guestHouse(n, cfg, refs), inPersonOk: inPerson(n),
       identities: [],
     } satisfies SalesNorm;
+    if (blankSalesRow(n)) n.reasons = ["no_candidate"];
     identity = identityOf(first, last, [marketingEmail, personalEmail], phone, dob);
     (norm as SalesNorm).identities = identityHashes(identity, h).strong;
     statusKey = labelKey(n.cell("status")) || "(blank)";
@@ -337,7 +447,7 @@ export function normalizeRow(row: RawRow, cfg: MappingConfig, refs: Refs, h: Hma
     const round = n.take("round", normalizeText(n.cell("round"), 40)) ?? "Not recorded";
     norm = {
       firstName: first, lastName: last, email, phone, dob,
-      ownerId: n.owner(refs, false),
+      ownerId: n.owner(refs, cfg, false),
       clientId: n.ref("client", refs.clients, "unknown_client", true),
       vendorId: n.ref("vendor", refs.vendors, "unknown_vendor", false),
       jobTitle: n.required("jobTitle", n.take("jobTitle", normalizeText(n.cell("jobTitle"), 200))),
@@ -352,7 +462,7 @@ export function normalizeRow(row: RawRow, cfg: MappingConfig, refs: Refs, h: Hma
     const email = n.take("email", normalizeEmail(n.cell("email")));
     norm = {
       firstName: first, lastName: last, email, phone, dob,
-      ownerId: n.owner(refs, false),
+      ownerId: n.owner(refs, cfg, false),
       clientId: n.ref("client", refs.clients, "unknown_client", true),
       vendorId: n.ref("vendor", refs.vendors, "unknown_vendor", false),
       partnerId: n.ref("implementationPartner", refs.partners, "unknown_partner", false),
@@ -407,9 +517,10 @@ export function resolveBatch(input: ResolveInput): StagedRow[] {
     if (r.sheet === "sales") r.identity = salesIdentity(r.norm as SalesNorm);
   };
 
-  // 1-3: exact duplicate rows, already-loaded rows, reviewer rejections.
+  // 1-3: placeholder lines, exact duplicate rows, already-loaded rows, reviewer rejections.
   const seen = new Set<string>();
   for (const r of out) {
+    if (r.sheet === "sales" && r.reasons.includes("no_candidate")) { setFinal(r, "skipped", ["no_candidate"]); continue; }
     const k = dkey(r.sheet, r.rowKey);
     if (seen.has(k)) { setFinal(r, "rejected", ["duplicate_row"]); continue; }
     seen.add(k);

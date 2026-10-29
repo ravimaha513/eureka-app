@@ -12,6 +12,7 @@ import type pg from "pg";
 import { parseCsv } from "./csv.js";
 import { xlsxToCsv } from "./xlsx.js";
 import { parseMapping, SHEETS, type MappingConfig, type Sheet } from "./mapping.js";
+import { labelKey } from "./normalize.js";
 import {
   normalizeRow, redactCells, resolveBatch, rowKeyOf, sha256, todayIso, type Decision, type Hmac, type Ledger,
   type RawRow, type Refs, type StagedRow,
@@ -50,12 +51,21 @@ async function loadRefs(c: pg.PoolClient): Promise<Refs> {
   const map = async (table: string) => new Map(
     (await c.query<{ id: string; name: string }>(`SELECT id, name FROM eureka.${table}`)).rows
       .map((r) => [r.name.trim().toLowerCase(), r.id] as const));
-  const users = new Map((await c.query<{ id: string; email: string; status: string }>(
-    `SELECT id, email::text AS email, status FROM eureka.app_user`)).rows
-    .map((u) => [u.email.toLowerCase(), { id: u.id, active: u.status === "active" }] as const));
+  const staff = (await c.query<{ id: string; email: string; status: string; display_name: string }>(
+    `SELECT id, email::text AS email, status, display_name FROM eureka.app_user`)).rows;
+  const users = new Map(staff.map((u) => [u.email.toLowerCase(), { id: u.id, active: u.status === "active" }] as const));
+  const userNames = new Map<string, { id: string; active: boolean }[]>();
+  for (const u of staff) {
+    const k = labelKey(u.display_name);
+    userNames.set(k, [...(userNames.get(k) ?? []), { id: u.id, active: u.status === "active" }]);
+  }
+  // Teams for the "team" and "sharedWith" columns: by name or by the lead's display name (0270 grants).
+  const teams = (await c.query<{ id: string; name: string; lead_name: string; location_id: string | null }>(
+    `SELECT t.id, t.name, u.display_name AS lead_name, t.location_id FROM eureka.team t JOIN eureka.app_user u ON u.id = t.lead_id`)).rows
+    .map((t) => ({ id: t.id, name: t.name, leadName: t.lead_name, locationId: t.location_id }));
   return {
     technologies: await map("technology"), locations: await map("location"), clients: await map("client"),
-    vendors: await map("vendor"), partners: await map("implementation_partner"), users,
+    vendors: await map("vendor"), partners: await map("implementation_partner"), users, userNames, teams,
   };
 }
 

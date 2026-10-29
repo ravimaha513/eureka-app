@@ -30,9 +30,12 @@ export const FIELD_DOCS: Record<Sheet, Record<string, string>> = {
   sales: {
     firstName: "Candidate first name", lastName: "Candidate last name", fullName: "Single candidate name cell (use instead of first/last)",
     personalEmail: "Candidate personal email", marketingEmail: "Email used for marketing the candidate", phone: "Candidate phone",
-    dob: "Date of birth", technology: "Primary technology / skill / stack", location: "Marketing or current location",
-    owner: "Email of the recruiter (or lead) who owns the row", status: "Marketing status text", rowColor: "Row colour label column",
+    dob: "Date of birth", technology: "Primary technology / skill / stack", location: "Office location (not the guest house)",
+    owner: "Recruiter (email or name) who owns the row", status: "Marketing status text", rowColor: "Row colour label column",
     priority: "Priority", marketingStartDate: "Date marketing started",
+    team: "Team lead or team the candidate belongs to", sharedWith: "Teams that market the candidate (e.g. All, a lead's name)",
+    visa: "Visa / work authorization the candidate is marketed on", guestHouse: "Guest house (GH) or Remote",
+    inPerson: "In-person candidate yes/no",
   },
   interviews: {
     firstName: "Candidate first name", lastName: "Candidate last name", fullName: "Candidate full name", email: "Candidate email",

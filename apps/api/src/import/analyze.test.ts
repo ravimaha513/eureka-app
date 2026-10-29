@@ -20,6 +20,14 @@ const refs: Refs = {
   clients: new Map([["northwind financial", "client-nw"]]),
   vendors: new Map(), partners: new Map(),
   users: new Map([["r1@x.example", { id: "user-r1", active: true }], ["gone@x.example", { id: "user-gone", active: false }]]),
+  userNames: new Map([
+    ["ravi kumar", [{ id: "user-r1", active: true }]],
+    ["sam", [{ id: "user-s1", active: true }, { id: "user-s2", active: true }]],
+  ]),
+  teams: [
+    { id: "team-a", name: "Alpha Team", leadName: "Jafar Ali", locationId: "loc-dallas" },
+    { id: "team-b", name: "Bravo Team", leadName: "Venu K", locationId: null },
+  ],
 };
 const sales = (rowNo: number, o: Record<string, string> = {}): RawRow => ({
   sheet: "sales", rowNo, cells: {
@@ -99,6 +107,68 @@ describe("keys and normalization", () => {
     const r = norm(sales(2, { Phone: "12", Technology: "Cobol", Location: "Mars", "Recruiter Email": "gone@x.example", Status: "Hot", Priority: "urgent" }));
     expect(r.reasons.sort()).toEqual(["inactive_owner:owner", "invalid_phone:phone", "invalid_priority:priority",
       "unconfirmed_status:status", "unknown_location:location", "unknown_technology:technology"]);
+  });
+
+  it("owner by alias, email or a unique display name", () => {
+    const c = cfg((m) => { m.owners = { "Ravi K": "R1@x.example" }; });
+    const owner = (v: string) => norm(sales(2, { "Recruiter Email": v }), c);
+    expect(owner("ravi k").norm).toMatchObject({ ownerId: "user-r1" });
+    expect(owner("Ravi  Kumar").norm).toMatchObject({ ownerId: "user-r1" });
+    expect(owner("Sam").reasons).toEqual(["ambiguous_owner:owner"]);
+    expect(owner("Nobody").reasons).toEqual(["unknown_owner:owner"]);
+    expect(() => cfg((m) => { m.owners = { x: "not-an-email" }; })).toThrow(/owners/);
+  });
+
+  // The company Hot List sheet: Lead, Marketing Teams, GH, VISA, In Person, often no office location.
+  const sheet = cfg((m) => {
+    Object.assign(m.sheets.sales.columns, {
+      team: "Lead", sharedWith: "Marketing Teams", visa: "VISA", guestHouse: "GH", inPerson: "In Person Candidate",
+    });
+    m.teams = { Venu: "Bravo Team" };
+    m.sharedWithAll = ["All"];
+    m.guestHouses = { "TX-Dallas": "Dallas" };
+  });
+  const row = (o: Record<string, string>) => norm(sales(2, { Location: "", Lead: "Jafar Ali", ...o }), sheet);
+
+  it("team from the Lead column (lead name, team name or alias); location falls back to the team's", () => {
+    expect(row({}).norm).toMatchObject({ teamId: "team-a", locationId: "loc-dallas", visibility: "team", shareTeamIds: [] });
+    expect(row({ Lead: "alpha team" }).norm).toMatchObject({ teamId: "team-a" });
+    expect(row({ Lead: "Venu" }).reasons).toEqual(["missing:location"]);
+    expect(row({ Lead: "Venu", Location: "Dallas" }).norm).toMatchObject({ teamId: "team-b", locationId: "loc-dallas" });
+    expect(row({ Lead: "Someone" }).reasons.sort()).toEqual(["missing:location", "unknown_team:team"]);
+    expect(norm(sales(2, { Location: "" }), sheet).reasons).toEqual(["missing:location"]);
+  });
+
+  it("Marketing Teams: All, the own team, or another team (selected teams)", () => {
+    expect(row({ "Marketing Teams": "all" }).norm).toMatchObject({ visibility: "all_teams", shareTeamIds: [] });
+    expect(row({ "Marketing Teams": "Jafar Ali" }).norm).toMatchObject({ visibility: "team", shareTeamIds: [] });
+    expect(row({ "Marketing Teams": "Venu" }).norm).toMatchObject({ visibility: "selected_teams", shareTeamIds: ["team-b"] });
+    expect(row({ "Marketing Teams": "Venu", Lead: "" , Location: "Dallas" }).reasons).toEqual(["needs_team:sharedWith"]);
+    expect(row({ "Marketing Teams": "Venu", Status: "Active/All Teams" }).reasons).toEqual(["visibility_conflict:sharedWith"]);
+  });
+
+  it("visa, guest house and in-person columns", () => {
+    expect(row({ VISA: "GC EAD", GH: "TX-Dallas", "In Person Candidate": "Yes" }).norm)
+      .toMatchObject({ visaCategory: "gc_ead", ghLocationId: "loc-dallas", ghRemote: false, inPersonOk: true });
+    expect(row({ VISA: "h-1b", GH: "Remote", "In Person Candidate": "no" }).norm)
+      .toMatchObject({ visaCategory: "h1b", ghLocationId: null, ghRemote: true, inPersonOk: false });
+    expect(row({ VISA: "G", GH: "Mars", "In Person Candidate": "maybe" }).reasons.sort())
+      .toEqual(["invalid_boolean:inPerson", "unknown_location:guestHouse", "unknown_visa:visa"]);
+  });
+
+  it("default mapping knows the sheet's statuses, visas and technologies", () => {
+    const st = (s: string) => norm(sales(2, { Status: s })).norm;
+    expect(st("Hold")).toMatchObject({ status: "on_hold" });
+    expect(st("Interviews are High")).toMatchObject({ status: "full_of_interviews" });
+    expect(st("Project Confirmation")).toMatchObject({ status: "confirmation" });
+    const withVisa = cfg((m) => { m.sheets.sales.columns.visa = "VISA"; });
+    for (const v of ["GC", "GC-EAD", "GCEAD", "H1B"]) {
+      expect(norm(sales(2, { VISA: v }), withVisa).reasons).toEqual([]);
+    }
+    const techRefs: Refs = { ...refs, technologies: new Map([["python developer", "tech-py"], ["python", "tech-py-demo"]]) };
+    expect(normalizeRow(sales(2, { Technology: "Python" }), cfg(), techRefs, h, TODAY).norm).toMatchObject({ technologyId: "tech-py" });
+    const demoRefs: Refs = { ...refs, technologies: new Map([["python", "tech-py-demo"]]) };
+    expect(normalizeRow(sales(2, { Technology: "Python" }), cfg(), demoRefs, h, TODAY).norm).toMatchObject({ technologyId: "tech-py-demo" });
   });
 
   it("row colour: placeholders and unmapped colours go to review; a confirmed colour must agree with the text", () => {
@@ -234,5 +304,15 @@ describe("resolveBatch", () => {
   it("flags a person whose email or phone a live candidate already uses", () => {
     const s = sales(2);
     expect(resolve([s], { live: new Set([key(s)]) })["sales 2"]!.reasons).toEqual(["matches_existing_candidate"]);
+  });
+});
+
+describe("placeholder lines", () => {
+  it("skips a sales line with a lead but no name, email or phone, instead of sending it to review", () => {
+    const blank = sales(3, { "First Name": "", "Last Name": "", "Marketing Email": "", Phone: "", Technology: "", Status: "" });
+    const r = resolve([sales(2), blank, { ...blank, rowNo: 4 }]);
+    expect(r["sales 2"]!.state).toBe("clean");
+    expect(r["sales 3"]).toMatchObject({ state: "skipped", reasons: ["no_candidate"] });
+    expect(r["sales 4"]).toMatchObject({ state: "skipped", reasons: ["no_candidate"] });
   });
 });
