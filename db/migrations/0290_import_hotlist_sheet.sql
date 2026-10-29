@@ -1,4 +1,4 @@
--- 0270: import the company Hot List sheet (docs/import.md "Hot List sheet").
+-- 0290: import the company Hot List sheet (docs/import.md "Hot List sheet").
 --
 -- The sheet names recruiters and leads, not emails, and carries the team
 -- (Lead), who markets the candidate (Marketing Teams), the guest house (GH),
@@ -63,7 +63,7 @@ END $$;
 
 -- ---------- 3. verification ----------
 -- What the database can check about a batch's rows, from the stored cells
--- and the batch's own mapping. Empty means verified. 0270: owners by alias or
+-- and the batch's own mapping. Empty means verified. 0290: owners by alias or
 -- name, the team column, and visibility from the Marketing Teams column.
 CREATE OR REPLACE FUNCTION authz.import_verify_batch(p_batch uuid) RETURNS TABLE (sheet text, row_no integer, problem text)
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
@@ -167,7 +167,7 @@ LANGUAGE sql IMMUTABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS
 $$;
 
 -- ---------- 4. loading ----------
--- 0270: the row's team, Marketing Teams shares, visa, guest house and in-person.
+-- 0290: the row's team, Marketing Teams shares, visa, guest house and in-person.
 CREATE OR REPLACE FUNCTION authz.import_load_person(p_batch uuid, p_row uuid, p_dry_run boolean) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
@@ -240,7 +240,7 @@ BEGIN
     s := anchor.norm;
     owner := (s ->> 'ownerId')::uuid;
     PERFORM authz.import_act_as(owner);
-    -- 0270: the sheet's team (verified against the team cell), else the owner's.
+    -- 0290: the sheet's team (verified against the team cell), else the owner's.
     -- The candidate insert policy still requires the owner may create there.
     team := coalesce((s ->> 'teamId')::uuid, authz.actor_team());
     IF team IS NULL THEN RAISE EXCEPTION 'owner_has_no_team' USING ERRCODE = 'check_violation'; END IF;
@@ -255,7 +255,7 @@ BEGIN
             (s ->> 'locationId')::uuid, vis)
     RETURNING id INTO cand;
     -- Visibility and shared teams are part of the approved batch (the sheet's
-    -- "Active/All Teams" status, or its Marketing Teams column; 0270).
+    -- "Active/All Teams" status, or its Marketing Teams column; 0290).
     nshares := 0;
     IF vis = 'selected_teams' THEN
       INSERT INTO eureka.candidate_team_share (candidate_id, team_id)

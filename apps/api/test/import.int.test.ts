@@ -639,7 +639,7 @@ describe("the database verifies what an approver signs (second review)", () => {
   });
 });
 
-describe("the company Hot List sheet (0270)", () => {
+describe("the company Hot List sheet (0290)", () => {
   // Fictional rows in the sheet's own layout: names instead of emails, the team in "Lead",
   // who markets the candidate in "Marketing Teams", a guest house, a visa, in-person, placeholder lines.
   const SHEET = [

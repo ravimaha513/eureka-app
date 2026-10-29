@@ -120,7 +120,7 @@ which queues `placement.created` outbox events for HR, Accounts and Immigration 
 
 The company Hot List sheet ("Main Hotlist" tab) has no emails for staff: it names the recruiter
 and the lead, and keeps who markets the candidate, the guest house, the visa and the in-person
-flag. `apps/api/src/import/mapping.hotlist-sheet.json` maps its headers (migration 0270). Copy it,
+flag. `apps/api/src/import/mapping.hotlist-sheet.json` maps its headers (migration 0290). Copy it,
 fill the aliases, have an admin review it, then `stage --mapping <copy>`.
 
 | Sheet column | Field | Resolved as |

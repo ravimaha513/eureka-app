@@ -85,7 +85,7 @@ describe("proposeMapping validation", () => {
 
   it("reports required fields the model could not place", async () => {
     const p = await proposeMapping(fake({ ...answer, columns: [answer.columns[0]!] }), { headers, rows });
-    // location is optional since 0270 (a blank cell falls back to the team's location).
+    // location is optional since 0290 (a blank cell falls back to the team's location).
     expect(p.missing).toEqual(["technology", "owner", "status"]);
   });
 

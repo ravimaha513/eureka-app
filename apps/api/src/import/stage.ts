@@ -59,7 +59,7 @@ async function loadRefs(c: pg.PoolClient): Promise<Refs> {
     const k = labelKey(u.display_name);
     userNames.set(k, [...(userNames.get(k) ?? []), { id: u.id, active: u.status === "active" }]);
   }
-  // Teams for the "team" and "sharedWith" columns: by name or by the lead's display name (0270 grants).
+  // Teams for the "team" and "sharedWith" columns: by name or by the lead's display name (0290 grants).
   const teams = (await c.query<{ id: string; name: string; lead_name: string; location_id: string | null }>(
     `SELECT t.id, t.name, u.display_name AS lead_name, t.location_id FROM eureka.team t JOIN eureka.app_user u ON u.id = t.lead_id`)).rows
     .map((t) => ({ id: t.id, name: t.name, leadName: t.lead_name, locationId: t.location_id }));

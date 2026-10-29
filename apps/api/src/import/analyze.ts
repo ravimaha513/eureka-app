@@ -231,7 +231,7 @@ class RowNormalizer {
 
   /**
    * The owner cell: an `owners` alias (-> email), an email, or a user's exact
-   * display name. Mirrored by authz.import_owner_for (0270), which verification uses.
+   * display name. Mirrored by authz.import_owner_for (0290), which verification uses.
    */
   owner(refs: Refs, cfg: MappingConfig, requiredField: boolean): string | null {
     const v = clean(this.cell("owner"));
@@ -252,7 +252,7 @@ class RowNormalizer {
   /**
    * A team cell, or its `teams` alias: a team name, else the display name of
    * its lead; the first rule that matches decides. Mirrored by
-   * authz.import_team_for (0270).
+   * authz.import_team_for (0290).
    */
   team(field: string, refs: Refs, cfg: MappingConfig): RefTeam | null {
     const v = clean(this.cell(field));
@@ -334,7 +334,7 @@ function inPerson(n: RowNormalizer): boolean | null {
 
 /**
  * Visibility from the sharedWith cell ("Marketing Teams"), else from the
- * status mapping. Mirrored by authz.import_verify_batch (0270).
+ * status mapping. Mirrored by authz.import_verify_batch (0290).
  */
 function sharing(n: RowNormalizer, cfg: MappingConfig, refs: Refs, teamId: string | null, fromStatus: "team" | "all_teams"):
   { visibility: SalesNorm["visibility"]; shareTeamIds: string[] } {
