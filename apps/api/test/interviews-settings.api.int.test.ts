@@ -471,13 +471,13 @@ describe("employees: contacts and export (EM-C1, EM-X1)", () => {
   let j: Joined;
   beforeAll(async () => {
     j = await joinedEmployee(db);
-    await db.admin.query(`UPDATE eureka.person SET personal_email = 'asha.iyer@example.com', phone_e164 = '+14695550143', first_name = '=HYPERLINK("x")' WHERE id = $1`, [j.personId]);
+    await db.admin.query(`UPDATE eureka.person SET personal_email = 'asha.iyer@example.com', phone_e164 = '+14695559143', first_name = '=HYPERLINK("x")' WHERE id = $1`, [j.personId]);
   });
   const item = async (k: Key) => ((await call(k, "GET", "/api/v1/employees?limit=200")).json().items as { id: string; contact: unknown }[])
     .find((i) => i.id === j.personId)!;
 
   it("HR (candidate.phone:read) sees the contact; Accounts and the CEO see it masked", async () => {
-    expect((await item("hr")).contact).toEqual({ email: "asha.iyer@example.com", phone: "+14695550143", masked: false });
+    expect((await item("hr")).contact).toEqual({ email: "asha.iyer@example.com", phone: "+14695559143", masked: false });
     for (const k of ["acct", "ceo"] as const) {
       expect((await item(k)).contact).toEqual({ email: "a•••@example.com", phone: "•••-•••-43", masked: true });
     }

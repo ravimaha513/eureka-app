@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { APPLICATION_STATUSES, APP_INTERVIEW_STATUSES, APP_INTERVIEW_ROUNDS, APP_INTERVIEW_TYPES, isSafeHttpsUrl } from "@eureka/shared";
 import { Cursor } from "../submissions/pipeline.js";
+import { Email, Phone } from "../candidates/candidates.schemas.js";
 
 /** docs/jobs-portal-api.md "Applications". Bodies are strict. */
 const uuid = z.string().uuid();
@@ -65,7 +66,10 @@ export const CreateCandidateFromApplication = z.object({
   technologyId: uuid,
   locationId: uuid,
   teamId: uuid.optional(),
-  confirmDuplicate: z.boolean().optional(),
+  /** Used when the application has none, or the caller may not read applicant phones (E.164). */
+  phone: Phone.optional(),
+  /** Used when the application has no email. */
+  email: Email.optional(),
 }).strict();
 export type CreateCandidateFromApplication = z.infer<typeof CreateCandidateFromApplication>;
 

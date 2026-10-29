@@ -273,3 +273,60 @@ describe("Hot List bulk actions", () => {
     expect(lastCall("POST", "/api/v1/hotlist/bulk/visibility")?.body).toEqual({ ids: [B], visibility: "selected_teams", teamIds: ["t3"] });
   });
 });
+
+// ---- the company sheet's columns (0290) ---------------------------------------------------------
+
+describe("Hot List sheet filters, sort and columns", () => {
+  beforeEach(() => {
+    routes["GET /api/v1/hotlist/filter-options"] = () => ({ body: {
+      teams: [{ id: "t1", name: "Team Rohit", lead: "Rohit Rao" }],
+      recruiters: [{ id: "r1", name: "Sanjana" }],
+      guestHouses: [{ id: "gh1", name: "Dallas GH" }],
+    } });
+    routes["GET /api/v1/hotlist"] = () => ({ body: { items: [
+      cand(A, "Asha Iyer", { team: { id: "t1", name: "Team Rohit", lead: "Rohit Rao" }, inPersonOk: true }),
+      cand(B, "Bala Rao", { inPersonOk: false }),
+    ], nextCursor: null } });
+  });
+
+  it("filters by priority, team, recruiter, in person and guest house, and sorts; the sort is not a filter", async () => {
+    wrap(<HotListPage me={meFor("recruiter")} />);
+    await rowOf("Asha Iyer");
+    const team = screen.getByLabelText("Team");
+    await within(team).findByRole("option", { name: "Team Rohit (Rohit Rao)" });
+    fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "priority" } });
+    await waitFor(() => expect(lastCall("GET", "/api/v1/hotlist")!.url.searchParams.get("sort")).toBe("priority"));
+    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Priority"), { target: { value: "P1" } });
+    fireEvent.change(team, { target: { value: "t1" } });
+    fireEvent.change(screen.getByLabelText("Recruiter"), { target: { value: "r1" } });
+    fireEvent.change(screen.getByLabelText("In person"), { target: { value: "yes" } });
+    fireEvent.change(screen.getByLabelText("Guest house"), { target: { value: "gh1" } });
+    await waitFor(() => {
+      const p = lastCall("GET", "/api/v1/hotlist")!.url.searchParams;
+      expect(Object.fromEntries(["priority", "teamId", "recruiterId", "inPerson", "ghLocationId", "sort"].map((k) => [k, p.get(k)])))
+        .toEqual({ priority: "P1", teamId: "t1", recruiterId: "r1", inPerson: "yes", ghLocationId: "gh1", sort: "priority" });
+    });
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
+  });
+
+  it("shows the team lead and in-person columns", async () => {
+    wrap(<HotListPage me={meFor("recruiter")} />);
+    const row = await rowOf("Asha Iyer");
+    expect(within(row).getByText("Rohit Rao")).toBeInTheDocument();
+    expect(within(row).getByText("Yes")).toBeInTheDocument();
+    expect(within(await rowOf("Bala Rao")).getByText("No")).toBeInTheDocument();
+  });
+
+  it("sets priority in bulk", async () => {
+    routes["POST /api/v1/hotlist/bulk/priority"] = () => ({ body: { succeeded: 2, failed: 0, results: [{ id: A, ok: true }, { id: B, ok: true }] } });
+    wrap(<HotListPage me={meFor("recruiter")} />);
+    await rowOf("Asha Iyer");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all candidates on this page" }));
+    const bulk = screen.getByRole("region", { name: "Bulk actions" });
+    expect(within(bulk).getByRole("button", { name: "Apply priority" })).toBeDisabled();
+    fireEvent.change(within(bulk).getByLabelText("Set priority"), { target: { value: "P1" } });
+    fireEvent.click(within(bulk).getByRole("button", { name: "Apply priority" }));
+    await waitFor(() => expect(lastCall("POST", "/api/v1/hotlist/bulk/priority")?.body).toEqual({ ids: [A, B], priority: "P1" }));
+  });
+});

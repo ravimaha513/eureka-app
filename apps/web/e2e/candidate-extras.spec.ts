@@ -1,10 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
-import { DALLAS, JAVA, apiAs, freshCandidate, login, screen, uniq, type Api } from "./support";
+import { DALLAS, JAVA, apiAs, freshCandidate, login, screen, uniq, uniqPhone, type Api } from "./support";
 
 /**
  * Candidate extras (FR-CAN-02, 09, 10; migrations 0026/0032): the batch filter
- * on Candidates, the timeline on the profile, and the duplicate warning when
- * creating a candidate. Each test creates its own batch and candidates.
+ * on Candidates, the timeline on the profile, and the refusal of a taken email
+ * or phone when a lead creates a candidate (CA-6). Each test creates its own batch and candidates.
  */
 
 /** A new planned batch in a month nobody else is likely to use (retries on a clash). */
@@ -54,7 +54,8 @@ test("batch filter on Candidates, and the batch and timeline on the profile", as
   await expect(events.filter({ hasText: "Candidate created" })).toHaveCount(1);
   await expect(events.first()).toContainText("Status changed from In training to Active");
   await expect(events.last()).toContainText("Candidate created");
-  await expect(events.last()).toContainText("r1a");
+  // Recruiters cannot add candidates (CA-6): their lead created it for them.
+  await expect(events.last()).toContainText("l1");
 
   // The other candidate has no batch and only its creation on the timeline.
   await page.getByRole("button", { name: /^← Back to / }).click();
@@ -73,50 +74,48 @@ async function openNewCandidate(page: Page) {
   return dialog;
 }
 
-test("duplicate warning on create: another team's match can be created anyway", async ({ page, playwright, baseURL }) => {
+test("a taken email on create: another team's candidate is named but not linked, and there is no override", async ({ page, playwright, baseURL }) => {
   const email = `e2e-dup-${uniq()}@example.test`;
-  // Team Vikram's lead holds a candidate with this email; r1a cannot open that profile.
+  // Team Vikram's lead holds a candidate with this email; l1 cannot open that profile.
   const l3 = await apiAs(playwright, baseURL, "l3@eureka.example");
   const existing = await freshCandidate(l3, "DupOther", { email });
   await l3.dispose();
 
-  await login(page, "r1a@eureka.example");
+  await login(page, "l1@eureka.example");
   const dialog = await openNewCandidate(page);
-  const last = uniq();
   await dialog.getByLabel("First name").fill("E2EDupNew");
-  await dialog.getByLabel("Last name").fill(last);
-  await dialog.getByLabel("Personal email (optional)").fill(email.toUpperCase());
+  await dialog.getByLabel("Last name").fill(uniq());
+  await dialog.getByLabel("Phone").fill(uniqPhone());
+  await dialog.getByLabel("Personal email").fill(email.toUpperCase());
   await dialog.getByRole("combobox", { name: "Technology", exact: true }).selectOption({ label: "Java" });
   await dialog.getByRole("combobox", { name: "Location", exact: true }).selectOption({ label: "Dallas" });
   await dialog.getByRole("button", { name: "Create candidate" }).click();
 
-  const warning = dialog.getByRole("alert").filter({ hasText: "Possible duplicate." });
+  const warning = dialog.getByRole("alert").filter({ hasText: "Already a candidate." });
   await expect(warning).toContainText("A candidate with the same email already exists.");
   await expect(warning).toContainText("Same email: Team Vikram, contact l3");
   await expect(warning.getByRole("button", { name: "Open existing profile" })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Create anyway" })).toHaveCount(0);
   expect((await page.request.get(`/api/v1/candidates/${existing.id}`)).status()).toBe(404);
-
-  await dialog.getByRole("button", { name: "Create anyway" }).click();
-  await expect(dialog).toBeHidden();
-  await expect(page.getByRole("heading", { level: 1, name: `E2EDupNew ${last}` })).toBeVisible();
 });
 
-test("duplicate warning on create: a teammate's match links to the existing profile", async ({ page, playwright, baseURL }) => {
+test("a taken email on create: a teammate's candidate links to the existing profile", async ({ page, playwright, baseURL }) => {
   const email = `e2e-dup-${uniq()}@example.test`;
   const r1b = await apiAs(playwright, baseURL, "r1b@eureka.example");
   const existing = await freshCandidate(r1b, "DupTeam", { email });
   await r1b.dispose();
 
-  await login(page, "r1a@eureka.example");
+  await login(page, "l1@eureka.example");
   const dialog = await openNewCandidate(page);
   await dialog.getByLabel("First name").fill("E2EDupNew");
   await dialog.getByLabel("Last name").fill(uniq());
-  await dialog.getByLabel("Personal email (optional)").fill(email);
+  await dialog.getByLabel("Phone").fill(uniqPhone());
+  await dialog.getByLabel("Personal email").fill(email);
   await dialog.getByRole("combobox", { name: "Technology", exact: true }).selectOption({ label: "Java" });
   await dialog.getByRole("combobox", { name: "Location", exact: true }).selectOption({ label: "Dallas" });
   await dialog.getByRole("button", { name: "Create candidate" }).click();
 
-  const warning = dialog.getByRole("alert").filter({ hasText: "Possible duplicate." });
+  const warning = dialog.getByRole("alert").filter({ hasText: "Already a candidate." });
   await expect(warning).toContainText("Same email: Team Rohit");
   await warning.getByRole("button", { name: "Open existing profile" }).click();
   await expect(dialog).toBeHidden();

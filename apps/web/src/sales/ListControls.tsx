@@ -1,15 +1,18 @@
 import { useId } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { DOCUMENTS_STATUSES, VISA_CATEGORIES } from "@eureka/shared";
+import { DOCUMENTS_STATUSES, LIST_SORTS, LIST_SORT_LABELS, VISA_CATEGORIES, type ListSort } from "@eureka/shared";
 import { useLookups } from "../lookups";
 import type { useCandidateList } from "./useCandidateList";
-import { statusLabel } from "./salesApi";
+import { statusLabel, type FilterOptions } from "./salesApi";
 
 type ListState = ReturnType<typeof useCandidateList>;
 
-/** Search / technology / status / visibility (and, when `batches` is given, batch) filters for a candidate list. */
-export function ListFilters({ s, label, statuses, batches }: {
-  s: ListState; label: string; statuses: readonly string[]; batches?: { id: string; label: string }[];
+/**
+ * Search / technology / status / visibility (and, when `batches` is given, batch) filters for a candidate list.
+ * With `options` (the Hot List): priority, team, recruiter, in person, guest house and the sort as well.
+ */
+export function ListFilters({ s, label, statuses, batches, options }: {
+  s: ListState; label: string; statuses: readonly string[]; batches?: { id: string; label: string }[]; options?: FilterOptions;
 }) {
   const id = useId();
   const locations = useLookups().data?.locations ?? [];
@@ -62,7 +65,23 @@ export function ListFilters({ s, label, statuses, batches }: {
       {sel("visa", "Visa", Object.entries(VISA_CATEGORIES), "Any visa")}
       {sel("documents", "Documents", [...Object.entries(DOCUMENTS_STATUSES), ["none", "Not recorded"]], "Any documents status")}
       {sel("resume", "Resume", [["yes", "Resume on file"], ["no", "No resume"]], "Any resume")}
-      {sel("stay", "Stay", [["guest_house", "Guest house"], ["remote", "Remote"]], "Guest house or remote")}
+      {sel("stay", "Stay", [["guest_house", "Guest house"], ["remote", "Remote"]], "Any stay")}
+      {options && (
+        <>
+          {sel("priority", "Priority", [["P1", "P1"], ["P2", "P2"], ["P3", "P3"]], "Any priority")}
+          {sel("teamId", "Team", (options.teams ?? []).map((t) => [t.id, t.lead ? `${t.name} (${t.lead})` : t.name]), "Any team")}
+          {sel("recruiterId", "Recruiter", (options.recruiters ?? []).map((r) => [r.id, r.name]), "Any recruiter")}
+          {sel("inPerson", "In person", [["yes", "In person"], ["no", "Not in person"]], "Any")}
+          {sel("ghLocationId", "Guest house", (options.guestHouses ?? []).map((g) => [g.id, g.name]), "Any guest house")}
+          <div className="field inline">
+            <label htmlFor={`${id}-sort`}>Sort by</label>
+            <select id={`${id}-sort`} value={s.extra.sort || "default"}
+              onChange={(e) => s.setExtra("sort", e.target.value === "default" ? "" : e.target.value as ListSort)}>
+              {LIST_SORTS.map((k) => <option key={k} value={k}>{LIST_SORT_LABELS[k]}</option>)}
+            </select>
+          </div>
+        </>
+      )}
       {s.hasFilters && <button type="button" className="btn" onClick={s.clear}>Clear filters</button>}
     </form>
   );

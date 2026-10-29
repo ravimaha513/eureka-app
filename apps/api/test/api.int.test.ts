@@ -239,12 +239,14 @@ describe("candidate endpoints", () => {
     await call("r1a", "POST", `/api/v1/candidates/${own().id}/transition`, { to: "active" });
   });
 
-  it("recruiter creates a candidate in their own team", async () => {
-    const r = await call("r1a", "POST", "/api/v1/candidates", { firstName: "New", lastName: "Hire", technologyId: TECH_ID, locationId: LOC.dallas });
-    expect(r.statusCode).toBe(201);
+  it("a lead creates a candidate in their own team; recruiters cannot create (CA-6)", async () => {
+    const body = { firstName: "New", lastName: "Hire", phone: "+14695558701", email: "new.hire@example.com", technologyId: TECH_ID, locationId: LOC.dallas };
+    expect((await call("r1a", "POST", "/api/v1/candidates", body)).statusCode).toBe(403);
+    const r = await call("l1", "POST", "/api/v1/candidates", body);
+    expect(r.statusCode, r.body).toBe(201);
     const back = await call("r1b", "GET", `/api/v1/candidates/${r.json().id}`);
     expect(back.json().team.id).toBe(T.t1);
-    expect((await call("r1a", "POST", "/api/v1/candidates", { firstName: "X", lastName: "Y", technologyId: TECH_ID, locationId: LOC.dallas, teamId: T.t3 })).statusCode).toBe(403);
+    expect((await call("l1", "POST", "/api/v1/candidates", { ...body, phone: "+14695558702", email: "x.y@example.com", teamId: T.t3 })).statusCode).toBe(403);
   });
 
   it("writes are audited with sensitive values redacted", async () => {

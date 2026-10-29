@@ -25,9 +25,12 @@ export interface Candidate {
   status: string;
   visibility: "team" | "all_teams" | "selected_teams";
   priority: "P1" | "P2" | "P3";
-  team: { id: string; name: string };
+  /** `lead`: the team lead's name (the sheet's "Lead"); absent on older servers. */
+  team: { id: string; name: string; lead?: string | null };
   recruiter: { id: string; name: string } | null;
   location: { id: string; name: string };
+  /** In-person candidate; null when not recorded. */
+  inPersonOk?: boolean | null;
   daysInMarket: number | null;
   technicalRating: number | null;
   phone: string | null;

@@ -1,6 +1,7 @@
 /** Typed client for the candidate, Hot List and submission API (apps/api/src/modules/candidates, submissions). */
 import { api, type Candidate } from "../api";
 import { fetchCsv, type ExportResult } from "../lib/download";
+import type { ListSort } from "@eureka/shared";
 
 export interface CandidateProfile extends Candidate {
   marketingStartDate: string | null;
@@ -120,6 +121,12 @@ export interface ListFilters {
   documents?: string;
   resume?: "yes" | "no" | "";
   stay?: "guest_house" | "remote" | "";
+  priority?: Priority | "";
+  teamId?: string;
+  recruiterId?: string;
+  inPerson?: "yes" | "no" | "";
+  ghLocationId?: string;
+  sort?: ListSort | "";
   cursor?: string | null;
   limit?: number;
 }
@@ -147,13 +154,12 @@ export interface CreateCandidate {
   firstName: string;
   lastName: string;
   /** E.164; the server normalizes formatting but needs the country code. */
-  phone?: string;
-  email?: string;
+  phone: string;
+  /** Personal email; with the phone, unique across candidates (409 duplicate_contact). */
+  email: string;
   technologyId: string;
   locationId: string;
   batchId?: string;
-  /** Create despite a 409 possible_duplicate. */
-  confirmDuplicate?: boolean;
 }
 
 export interface CreateSubmission {
@@ -238,8 +244,13 @@ export const salesApi = {
   complianceCompanies: () => api<{ items: { id: string; name: string; location: string }[] }>("/api/v1/candidate-companies"),
 };
 
-/** Hot List filters added for Eureka App 4 (also on the Candidates list, saved views and export). */
-export const EXTRA_FILTER_KEYS = ["locationId", "visa", "documents", "resume", "stay"] as const;
+/**
+ * Hot List filters added for Eureka App 4 and the company sheet (also on the
+ * Candidates list, saved views and export), and the sort.
+ */
+export const EXTRA_FILTER_KEYS = [
+  "locationId", "visa", "documents", "resume", "stay", "priority", "teamId", "recruiterId", "inPerson", "ghLocationId", "sort",
+] as const;
 
 /** Filters a saved view stores (the Hot List filters, no paging). */
 export interface ViewFilters {
@@ -252,6 +263,19 @@ export interface ViewFilters {
   documents?: string;
   resume?: "yes" | "no";
   stay?: "guest_house" | "remote";
+  priority?: Priority;
+  teamId?: string;
+  recruiterId?: string;
+  inPerson?: "yes" | "no";
+  ghLocationId?: string;
+  sort?: ListSort;
+}
+
+/** Choices for the team, recruiter and guest-house filters (GET /hotlist/filter-options). */
+export interface FilterOptions {
+  teams: { id: string; name: string; lead: string | null }[];
+  recruiters: { id: string; name: string }[];
+  guestHouses: { id: string; name: string }[];
 }
 
 export interface SavedView { id: string; name: string; filters: ViewFilters; createdAt: string; updatedAt: string }
@@ -276,6 +300,12 @@ export function viewFilters(f: ListFilters): ViewFilters {
   if (f.documents) out.documents = f.documents;
   if (f.resume) out.resume = f.resume;
   if (f.stay) out.stay = f.stay;
+  if (f.priority) out.priority = f.priority;
+  if (f.teamId) out.teamId = f.teamId;
+  if (f.recruiterId) out.recruiterId = f.recruiterId;
+  if (f.inPerson) out.inPerson = f.inPerson;
+  if (f.ghLocationId) out.ghLocationId = f.ghLocationId;
+  if (f.sort && f.sort !== "default") out.sort = f.sort;
   return out;
 }
 
@@ -288,6 +318,9 @@ export const hotlistApi = {
   deleteView: (id: string) => api<void>(`/api/v1/hotlist/views/${enc(id)}`, { method: "DELETE" }),
   bulkStatus: (ids: string[], to: string) =>
     api<BulkResponse>("/api/v1/hotlist/bulk/status", { method: "POST", ...json({ ids, to }) }),
+  bulkPriority: (ids: string[], priority: Priority) =>
+    api<BulkResponse>("/api/v1/hotlist/bulk/priority", { method: "POST", ...json({ ids, priority }) }),
+  filterOptions: () => api<FilterOptions>("/api/v1/hotlist/filter-options"),
   bulkVisibility: (ids: string[], visibility: Visibility, teamIds?: string[]) =>
     api<BulkResponse>("/api/v1/hotlist/bulk/visibility", {
       method: "POST", ...json(visibility === "selected_teams" ? { ids, visibility, teamIds } : { ids, visibility }) }),

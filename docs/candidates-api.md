@@ -46,12 +46,29 @@ branch's base: that role does not exist here (interview prep is the interview co
 | `documents` | `pending`, `partial`, `complete`, `none` | the documents status (`none`: not recorded) |
 | `resume` | `yes`, `no` | a current uploaded resume or a resume link |
 | `stay` | `guest_house`, `remote` | guest house location set / Remote |
+| `priority` | `P1`, `P2`, `P3` | the priority (0290) |
+| `teamId` | team id | the candidate's team (the sheet's "Lead") |
+| `recruiterId` | user id | the recruiter |
+| `inPerson` | `yes`, `no` | in-person recorded as yes / no (not recorded matches neither) |
+| `ghLocationId` | location id | that guest house |
+| `sort` | `default`, `priority`, `days`, `name` | order: id; P1 first; longest in market first (no start date last); name |
 
-Saved views (`POST/PATCH /hotlist/views`) and `POST /hotlist/export` accept the same keys. The
-export adds the columns Visa, Documents and Stay. Unknown values are 422.
+Paging stays keyset: with a sort the cursor is still the last row's id, and the next page starts
+after that row's (sort key, id). Both list paths (scoped SQL in `candidates.service.ts`, open
+`authz.hotlist_page`) order the same way.
+
+Saved views (`POST/PATCH /hotlist/views`) and `POST /hotlist/export` accept the same keys (the export
+is ordered by `sort` too). The export adds the columns Visa, Documents and Stay, and (0290) Lead
+and In person. Unknown values are 422.
 
 List rows add `statusLabel`, `stay`, `ghLocation` (`{ id?, name }`), `visaCategory`,
-`documentsStatus`, `hasResume`, and (Candidates list and team Hot List) `teamAssignedAt`.
+`documentsStatus`, `hasResume`, `inPersonOk`, `team.lead` (the lead's name), and (Candidates list
+and team Hot List) `teamAssignedAt`.
+
+`GET /api/v1/hotlist/filter-options` (`hotlist:read`): `{ teams: [{ id, name, lead }], recruiters:
+[{ id, name }], guestHouses: [{ id, name }] }` for the filter selects (current recruiter-role
+holders; locations of kind `gh`). `POST /api/v1/hotlist/bulk/priority` (`candidate:update`)
+`{ ids, priority }` runs `PATCH /candidates/:id { priority }` per record, like the other bulk actions.
 
 ## Profile fields (CA-3)
 
@@ -138,6 +155,33 @@ the definer (guard trigger sets `shared_by` / `shared_at`), readable wherever th
 the API loads it once per request (`UserAccess.sharedCandidateIds`). Shares count only while
 `visibility = 'selected_teams'`. Tests: `apps/api/test/candidate-team-share.{db,api}.int.test.ts`,
 `engine.test.ts` ("selected teams"), `apps/web/src/sales/Sales.test.tsx`.
+
+## Adding candidates: required, unique contact; lead or above (CA-6)
+
+Migrations `0260_candidate_unique_contact.sql` (trigger) and `0300_candidate_contact_required.sql` (one lock per transaction, import loader policies).
+
+- **Who:** `candidate:create` is a lead (team), manager / AD (hierarchy) or org grant. Recruiters no
+  longer hold it, so they get 403 on `POST /api/v1/candidates`, `POST /candidates/duplicate-check`
+  and `POST /applications/:id/candidate`, and the web hides "New candidate". A lead can still assign
+  one of their recruiters with `recruiterId`.
+- **Required:** `POST /api/v1/candidates` needs `phone` (normalized to E.164) and `email` (personal,
+  lower-cased); missing either is 422. The hire flow (`POST /applications/:id/candidate`) uses the
+  applicant's email and phone, and takes `phone` / `email` in the body when the applicant has none or
+  the caller may not read applicant phones; still missing is 422 `phone_required` / `email_required`.
+- **Unique:** another candidate with the same personal email (case-insensitive), marketing email or
+  phone is 409 `duplicate_contact`, with no override (`confirmDuplicate` is gone: 422 as an unknown
+  field). The dialog then calls `POST /candidates/duplicate-check` for the minimal details (team,
+  contact, the id only if readable) and links "Open existing profile".
+- **Backstop:** trigger `authz.candidate_contact_unique` (BEFORE INSERT on `candidate`, BEFORE UPDATE
+  OF `personal_email, phone_e164` on `person`) refuses a personal email or phone another candidate's
+  person holds (`duplicate_email` / `duplicate_phone`, unique_violation; the API maps both to 409).
+  One transaction advisory lock (0300) serializes concurrent creates; one per value exhausted the lock table on 50k-row bulk inserts. It covers every writer
+  (API, imports, seeds). Existing duplicates are left as they are (no unique index), and persons
+  without a candidate (employees only) are not checked.
+
+Tests: `candidate-extras.api.int.test.ts` ("duplicate check"), `api.int.test.ts`,
+`applications.api.int.test.ts`, `engine.test.ts` ("adding candidates"), web `CandidateExtras.test.tsx`,
+`Sales.test.tsx`, `Applications.test.tsx`, e2e `candidate-extras.spec.ts`.
 
 ## Technologies
 

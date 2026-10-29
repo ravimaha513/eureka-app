@@ -14,9 +14,9 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { toProblem } from "../../platform/errors.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
-import { CandidatesService } from "../candidates/candidates.service.js";
+import { CandidatesService, moreFilters } from "../candidates/candidates.service.js";
 import { toCsv } from "./csv.js";
-import type { BulkStatus, BulkVisibility, CreateView, HotlistFilters, UpdateView } from "./hotlist.schemas.js";
+import type { BulkPriority, BulkStatus, BulkVisibility, CreateView, HotlistFilters, UpdateView } from "./hotlist.schemas.js";
 import { likeContains } from "../../platform/sql.js";
 
 /** Row cap for a Hot List export (design A6.5 and B7: 50,000). */
@@ -47,6 +47,8 @@ interface ExportRow {
   documents_status: keyof typeof DOCUMENTS_STATUSES | null;
   gh_remote: boolean;
   gh_location_name: string | null;
+  lead_name: string | null;
+  in_person_ok: boolean | null;
 }
 
 export type BulkError = "not_found" | "forbidden" | "invalid_transition" | "placement_open" | "invalid_teams" | "failed";
@@ -58,6 +60,7 @@ const label = (s: string) => { const t = s.replace(/_/g, " "); return t.charAt(0
 export const filterSummary = (f: HotlistFilters) => ({
   status: f.status, technology: f.technology ? true : undefined, visibility: f.visibility, search: f.search ? true : undefined,
   locationId: f.locationId, visa: f.visa, documents: f.documents, resume: f.resume, stay: f.stay,
+  priority: f.priority, teamId: f.teamId, recruiterId: f.recruiterId, inPerson: f.inPerson, ghLocationId: f.ghLocationId, sort: f.sort,
 });
 
 
@@ -128,13 +131,37 @@ export class HotlistService {
     return this.bulk(user, "status", body.to, body.ids, (id) => this.candidates.transition(user, id, body.to));
   }
 
+  bulkPriority(user: AuthedUser, body: BulkPriority) {
+    return this.bulk(user, "priority", body.priority, body.ids, (id) => this.candidates.updateProfile(user, id, { priority: body.priority }));
+  }
+
+  /**
+   * Team, recruiter and guest-house choices for the Hot List filters: names
+   * only, the same staff names the list already shows. Recruiters are users
+   * holding a current recruiter role.
+   */
+  async filterOptions(user: AuthedUser) {
+    return this.db.withUser(user.id, async (c) => {
+      const teams = (await c.query<{ id: string; name: string; lead: string | null }>(
+        `SELECT t.id, t.name, u.display_name AS lead FROM eureka.team t LEFT JOIN eureka.app_user u ON u.id = t.lead_id
+          ORDER BY lower(t.name), t.id`)).rows;
+      const recruiters = (await c.query<{ id: string; name: string }>(
+        `SELECT DISTINCT u.id, u.display_name AS name FROM eureka.app_user u
+           JOIN eureka.user_role ur ON ur.user_id = u.id AND ur.role_key = 'recruiter' AND ur.valid @> now()
+          WHERE u.status = 'active' ORDER BY 2, 1`)).rows;
+      const guestHouses = (await c.query<{ id: string; name: string }>(
+        `SELECT id, name FROM eureka.location WHERE kind = 'gh' ORDER BY lower(name), id`)).rows;
+      return { teams, recruiters, guestHouses };
+    });
+  }
+
   /**
    * Each record goes through the same path as its single-record endpoint, in its
    * own transaction: read-before-write (404 / 403), the engine's scope check and
    * the database's own guard or definer function. One failure never stops or
    * undoes the others; every record reports its own outcome.
    */
-  private async bulk(user: AuthedUser, action: "visibility" | "status", value: string, ids: string[],
+  private async bulk(user: AuthedUser, action: "visibility" | "status" | "priority", value: string, ids: string[],
     one: (id: string) => Promise<unknown>) {
     if (!this.bulkLimiter.take(user.id)) {
       throw new HttpException("Too many bulk requests; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
@@ -173,9 +200,10 @@ export class HotlistService {
     const rows = await this.db.withUser(user.id, async (c) => {
       await c.query(`SET LOCAL statement_timeout = '60s'`); // design N9: separate export timeout
       const r = (await c.query<ExportRow>(
-        `SELECT * FROM authz.hotlist_export($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        `SELECT * FROM authz.hotlist_export($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [f.status ?? null, f.technology ?? null, f.visibility ?? null, f.search ? likeContains(f.search) : null, EXPORT_ROW_CAP + 1,
-          f.locationId ?? null, f.visa ?? null, f.documents ?? null, f.resume === undefined ? null : f.resume === "yes", f.stay ?? null],
+          f.locationId ?? null, f.visa ?? null, f.documents ?? null, f.resume === undefined ? null : f.resume === "yes", f.stay ?? null,
+          moreFilters(f)],
       )).rows;
       await this.audit.record(c, {
         actorId: user.id, action: "hotlist.export", entityType: "candidate",
@@ -187,17 +215,18 @@ export class HotlistService {
     const page = rows.slice(0, EXPORT_ROW_CAP);
     const now = Date.now();
     const csv = toCsv(
-      ["Candidate", "Technology", "Status", "Visibility", "Priority", "Team", "Recruiter", "Location", "Phone",
-        "Marketing since", "Days in market", "Technical rating", "Visa", "Documents", "Stay"],
+      ["Candidate", "Technology", "Status", "Visibility", "Priority", "Team", "Lead", "Recruiter", "Location", "Phone",
+        "Marketing since", "Days in market", "Technical rating", "Visa", "Documents", "Stay", "In person"],
       page.map((r) => [
         `${r.first_name} ${r.last_name}`, r.technology, label(r.marketing_status),
         r.visibility === "all_teams" ? "Open to all teams" : r.visibility === "selected_teams" ? "Selected teams" : "Team only", r.priority, r.team_name,
-        r.recruiter_name ?? "Unassigned", r.location_name, r.phone, r.marketing_start_date,
+        r.lead_name, r.recruiter_name ?? "Unassigned", r.location_name, r.phone, r.marketing_start_date,
         r.marketing_start_date ? Math.floor((now - Date.parse(r.marketing_start_date)) / 86_400_000) : null,
         r.technical_rating,
         r.visa_category ? VISA_CATEGORIES[r.visa_category] : null,
         r.documents_status ? DOCUMENTS_STATUSES[r.documents_status] : null,
         r.gh_remote ? "Remote" : r.gh_location_name ? `Guest house (${r.gh_location_name})` : null,
+        r.in_person_ok === null ? null : r.in_person_ok ? "Yes" : "No",
       ]),
     );
     return { csv, rows: page.length, truncated };
