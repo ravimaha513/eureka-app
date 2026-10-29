@@ -239,6 +239,8 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Hierarchy scope (PR #59, migrations 0210-0211): `team`/`hierarchy` grants follow reporting lines, not upward team
   membership (`authz.team_ids`, `actor_team` led team first, `scope_user_ids` never returns superiors; mirrored in
   `access.service.ts` and `engine.ts`); 0211 back-fills rows a lead stamped with a team they don't lead.
+- Search debounce paging fix (PR #67, no migrations): debounce effects skip when the trimmed input equals the applied
+  search, so the mount-time run no longer resets an early Next (UsersTab, SitesPage, ApplicantsPage).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
