@@ -2,19 +2,22 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { Phone as PhoneIcon, Users as UsersIcon } from "lucide-react";
 import { Person } from "../shell/ui";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, can } from "../api";
 import { adminApi, departmentLabel, type AdminUser, type BulkReport, type Department, type UserRole } from "./adminApi";
 import { csvToRows, tableToRows, type BulkRow } from "./csv";
 import { isXlsx, readUserSheet } from "./xlsx";
 import { saveBlob } from "../lib/download";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
-import { friendlyError } from "./errors";
+import { friendlyError, skipReason } from "./errors";
 import { departmentOptions, keys, useAccess, useDepartments, useMeta, usePeople } from "./shared";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { Loading } from "../ui/Loading";
 import { QueryError } from "../ui/QueryError";
 
 const PAGE_SIZE = 50;
+
+/** Filters another tab opens Users with (Teams tab "Assign them"). */
+export interface UsersPreset { team?: string; status?: "active" | "inactive" }
 
 type Modal =
   | { kind: "create" }
@@ -26,19 +29,30 @@ type Modal =
   | { kind: "deactivate"; user: AdminUser }
   | { kind: "password"; user: AdminUser }
   | { kind: "reactivate"; user: AdminUser }
-  | { kind: "revoke"; user: AdminUser; role: UserRole };
+  | { kind: "revoke"; user: AdminUser; role: UserRole }
+  | { kind: "addToTeam" }
+  | { kind: "moveToTeam" };
 
 const TINTS = ["indigo", "teal", "amber", "rose", "violet", "sky"] as const;
 
 const roleText = (r: { label: string; locationName: string | null }) => (r.locationName ? `${r.label} · ${r.locationName}` : r.label);
 
-export function UsersTab() {
+export function UsersTab({ preset }: { preset?: UsersPreset } = {}) {
   const { me, announce } = useAccess();
   const qc = useQueryClient();
+  const meta = useMeta();
+  const teams = useQuery({ queryKey: keys.teams, queryFn: adminApi.teams });
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<"" | "active" | "inactive">("");
+  const [status, setStatus] = useState<"" | "active" | "inactive">(preset?.status ?? "");
   const [departmentId, setDepartmentId] = useState("");
+  const [team, setTeam] = useState(preset?.team ?? "");
+  const [role, setRole] = useState("");
+  const [locationId, setLocationId] = useState("");
+  // Kept across pages and filters, so a bulk team action can span several searches.
+  const [selected, setSelected] = useState<Map<string, AdminUser>>(new Map());
+  // Presentation only: the API checks team:move_member over both teams (AD-8).
+  const canMove = can(me, "team:move_member");
   const departments = useDepartments();
   const pager = useCursorPager();
   const { page } = pager;
@@ -51,8 +65,11 @@ export function UsersTab() {
   }, [searchInput]);
 
   const q = useQuery({
-    queryKey: [...keys.users, { search, status, departmentId, cursor: pager.cursor }],
-    queryFn: () => adminApi.users({ search, status: status || undefined, departmentId: departmentId || undefined, cursor: pager.cursor, limit: PAGE_SIZE }),
+    queryKey: [...keys.users, { search, status, departmentId, team, role, locationId, cursor: pager.cursor }],
+    queryFn: () => adminApi.users({
+      search, status: status || undefined, departmentId: departmentId || undefined, team: team || undefined,
+      role: role || undefined, locationId: locationId || undefined, cursor: pager.cursor, limit: PAGE_SIZE,
+    }),
     placeholderData: keepPreviousData,
   });
 
@@ -69,6 +86,19 @@ export function UsersTab() {
     void qc.invalidateQueries({ queryKey: keys.teams });
   };
   const fmt = (e: unknown) => friendlyError(e);
+  const toggle = (u: AdminUser) => setSelected((prev) => {
+    const next = new Map(prev);
+    if (next.has(u.id)) next.delete(u.id); else next.set(u.id, u);
+    return next;
+  });
+  const pageRows = (q.data?.items ?? []).filter((u) => u.id !== me.id);
+  const allOnPage = pageRows.length > 0 && pageRows.every((u) => selected.has(u.id));
+  const togglePage = () => setSelected((prev) => {
+    const next = new Map(prev);
+    for (const u of pageRows) { if (allOnPage) next.delete(u.id); else next.set(u.id, u); }
+    return next;
+  });
+  const bulkDone = (msg: string) => { setSelected(new Map()); done(msg); };
 
   return (
     <>
@@ -103,6 +133,28 @@ export function UsersTab() {
             {departmentOptions(departments.data ?? []).map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
           </select>
         </div>
+        <div className="field inline">
+          <label htmlFor="user-team">Team</label>
+          <select id="user-team" value={team} onChange={(e) => { setTeam(e.target.value); pager.reset(); }}>
+            <option value="">All</option>
+            <option value="none">No team</option>
+            {teams.data?.items.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+        <div className="field inline">
+          <label htmlFor="user-role">Role</label>
+          <select id="user-role" value={role} onChange={(e) => { setRole(e.target.value); pager.reset(); }}>
+            <option value="">All</option>
+            {meta.data?.roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+          </select>
+        </div>
+        <div className="field inline">
+          <label htmlFor="user-location">Location</label>
+          <select id="user-location" value={locationId} onChange={(e) => { setLocationId(e.target.value); pager.reset(); }}>
+            <option value="">All</option>
+            {meta.data?.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+        </div>
         <button className="btn push" onClick={() => setModal({ kind: "departments" })}>Departments</button>
         <button className="btn" onClick={() => setModal({ kind: "bulk" })}>Import users</button>
         <button className="btn primary" onClick={() => setModal({ kind: "create" })}>New user</button>
@@ -111,12 +163,17 @@ export function UsersTab() {
       <div className="card">
         {q.isLoading ? <Loading /> : q.error ? <QueryError query={q} message={friendlyError(q.error)} /> : (
           <div className="tablewrap"><table aria-label="Users" aria-busy={q.isFetching || undefined}>
-            <thead><tr><th>User</th><th>Designation</th><th>Department</th>{contact && <th>Phone</th>}<th>Status</th><th>Roles</th><th>Teams</th><th>Manager</th><th><span className="sr-only">Actions</span></th></tr></thead>
+            <thead><tr>
+              <th className="selcol"><input type="checkbox" aria-label="Select all users on this page" checked={allOnPage} onChange={togglePage} disabled={pageRows.length === 0} /></th>
+              <th>User</th><th>Designation</th><th>Department</th>{contact && <th>Phone</th>}<th>Status</th><th>Roles</th><th>Teams</th><th>Manager</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {q.data!.items.map((u) => {
                 const self = u.id === me.id;
                 return (
-                  <tr key={u.id}>
+                  <tr key={u.id} className={selected.has(u.id) ? "selected" : undefined}>
+                    <td className="selcol">
+                      {!self && <input type="checkbox" aria-label={`Select ${u.displayName}`} checked={selected.has(u.id)} onChange={() => toggle(u)} />}
+                    </td>
                     <td><Person name={u.displayName}><b>{u.displayName}</b>{self && <span className="tag">you</span>}<small className="block">{u.email}</small></Person></td>
                     <td>{u.designation ?? "—"}</td>
                     <td>{u.department ? departmentLabel(u.department) : "—"}</td>
@@ -154,12 +211,26 @@ export function UsersTab() {
                   </tr>
                 );
               })}
-              {q.data!.items.length === 0 && <tr><td colSpan={contact ? 9 : 8} className="empty">No users match.</td></tr>}
+              {q.data!.items.length === 0 && <tr><td colSpan={contact ? 10 : 9} className="empty">No users match.</td></tr>}
             </tbody>
           </table></div>
         )}
       </div>
       <Pager pager={pager} label="Users pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
+      {selected.size > 0 && (
+        <div className="selectionbar" role="region" aria-label="Selected users">
+          <b>{selected.size} selected</b>
+          <button className="btn" onClick={() => setModal({ kind: "addToTeam" })}>Add to team…</button>
+          {canMove && <button className="btn" onClick={() => setModal({ kind: "moveToTeam" })}>Move to team…</button>}
+          <button className="btn" onClick={() => setSelected(new Map())}>Clear</button>
+        </div>
+      )}
+      {modal?.kind === "addToTeam" && (
+        <AddToTeamDialog users={[...selected.values()]} onClose={close} onDone={bulkDone} />
+      )}
+      {modal?.kind === "moveToTeam" && (
+        <MoveToTeamDialog users={[...selected.values()]} onClose={close} onDone={bulkDone} />
+      )}
 
       {modal?.kind === "create" && <CreateUserDialog passwordLogin={passwordLogin} onClose={close} onDone={(name) => done(`Created ${name}.`)} />}
       {modal?.kind === "bulk" && <BulkImportDialog onClose={close} onDone={(n) => done(`Created ${n} users.`)} />}
@@ -539,6 +610,109 @@ function ManagerDialog({ user, onClose, onDone }: { user: AdminUser; onClose: ()
             {options.map((p) => <option key={p.id} value={p.id}>{p.displayName} ({p.email})</option>)}
           </select></div>
         <DialogActions onCancel={onClose} submitLabel="Save manager" busy={busy} error={error} />
+      </form>
+    </Dialog>
+  );
+}
+
+/** Adds the selected users to one team (POST /admin/teams/:id/members/bulk); shows who was skipped and why. */
+function AddToTeamDialog({ users, onClose, onDone }: { users: AdminUser[]; onClose: () => void; onDone: (msg: string) => void }) {
+  const teams = useQuery({ queryKey: keys.teams, queryFn: adminApi.teams });
+  const [teamId, setTeamId] = useState("");
+  const [skipped, setSkipped] = useState<{ name: string; reason: string }[] | null>(null);
+  const [summary, setSummary] = useState("");
+  const { busy, error, run } = useSubmit((e) => friendlyError(e));
+  const name = teams.data?.items.find((t) => t.id === teamId)?.name ?? "";
+  if (skipped) {
+    return (
+      <Dialog key="result" title={`Added to ${name}`} onClose={() => onDone(summary)}>
+        <div className="dialogbody">
+          <p>{summary}</p>
+          <p>Skipped:</p>
+          <ul>{skipped.map((x) => <li key={x.name}>{x.name}: {x.reason}</li>)}</ul>
+        </div>
+        <div className="actions"><button className="btn primary" data-autofocus onClick={() => onDone(summary)}>Done</button></div>
+      </Dialog>
+    );
+  }
+  return (
+    <Dialog key="form" title={`Add ${users.length} ${users.length === 1 ? "person" : "people"} to a team`} onClose={onClose}>
+      <form onSubmit={(e) => {
+        e.preventDefault();
+        void run(async () => {
+          const res = await adminApi.addMembers(teamId, users.map((u) => u.id));
+          const msg = `${res.added.length} added to ${name}.`;
+          if (res.failed.length === 0) { onDone(msg); return; }
+          setSummary(`${msg} ${res.failed.length} skipped.`);
+          setSkipped(res.failed.map((f) => ({ name: users.find((u) => u.id === f.userId)?.displayName ?? "Unknown person", reason: skipReason(f.error) })));
+        });
+      }}>
+        <p className="hint">People already in a team are skipped. Use “Move to team…” for them.</p>
+        <div className="field"><label htmlFor="bt-team">Team</label>
+          <select id="bt-team" required data-autofocus value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+            <option value="" disabled>{teams.isLoading ? "Loading teams…" : "Choose a team…"}</option>
+            {teams.data?.items.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.lead.displayName})</option>)}
+          </select></div>
+        <DialogActions onCancel={onClose} submitLabel="Add to team" busy={busy} error={error} disabled={!teamId} />
+      </form>
+    </Dialog>
+  );
+}
+
+/**
+ * Moves each selected member to one team (AD-8, one request per person). Their
+ * candidates stay with the old team and go to its lead (the server default).
+ * People in no team, or already in the target, are skipped.
+ */
+function MoveToTeamDialog({ users, onClose, onDone }: { users: AdminUser[]; onClose: () => void; onDone: (msg: string) => void }) {
+  const teams = useQuery({ queryKey: keys.teams, queryFn: adminApi.teams });
+  const [toTeamId, setToTeamId] = useState("");
+  const [skipped, setSkipped] = useState<{ name: string; reason: string }[] | null>(null);
+  const [summary, setSummary] = useState("");
+  const [busy, setBusy] = useState(false);
+  const name = teams.data?.items.find((t) => t.id === toTeamId)?.name ?? "";
+  if (skipped) {
+    return (
+      <Dialog key="result" title={`Moved to ${name}`} onClose={() => onDone(summary)}>
+        <div className="dialogbody">
+          <p>{summary}</p>
+          {skipped.length > 0 && <><p>Skipped:</p><ul>{skipped.map((x) => <li key={x.name}>{x.name}: {x.reason}</li>)}</ul></>}
+        </div>
+        <div className="actions"><button className="btn primary" data-autofocus onClick={() => onDone(summary)}>Done</button></div>
+      </Dialog>
+    );
+  }
+  const submit = async () => {
+    setBusy(true);
+    let moved = 0, candidates = 0;
+    const skip: { name: string; reason: string }[] = [];
+    for (const u of users) {
+      const from = u.teams.find((t) => !t.asLead);
+      if (!from) { skip.push({ name: u.displayName, reason: "not in a team (use Add instead)" }); continue; }
+      if (from.id === toTeamId) { skip.push({ name: u.displayName, reason: "already in this team" }); continue; }
+      try {
+        candidates += (await adminApi.moveMember(from.id, { userId: u.id, toTeamId })).movedCandidates;
+        moved++;
+      } catch (e) {
+        skip.push({ name: u.displayName, reason: friendlyError(e) });
+      }
+    }
+    setBusy(false);
+    const msg = `${moved} moved to ${name}.${candidates ? ` ${candidates} candidate${candidates === 1 ? "" : "s"} stayed with their old teams' leads.` : ""}`;
+    if (skip.length === 0) { onDone(msg); return; }
+    setSummary(`${msg} ${skip.length} skipped.`);
+    setSkipped(skip);
+  };
+  return (
+    <Dialog key="form" title={`Move ${users.length} ${users.length === 1 ? "person" : "people"} to a team`} onClose={onClose}>
+      <form onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+        <p className="hint">Their candidates stay with their old team and go to that team's lead.</p>
+        <div className="field"><label htmlFor="bm-team">Move to team</label>
+          <select id="bm-team" required data-autofocus value={toTeamId} onChange={(e) => setToTeamId(e.target.value)}>
+            <option value="" disabled>{teams.isLoading ? "Loading teams…" : "Choose a team…"}</option>
+            {teams.data?.items.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.lead.displayName})</option>)}
+          </select></div>
+        <DialogActions onCancel={onClose} submitLabel="Move" busy={busy} disabled={!toTeamId} />
       </form>
     </Dialog>
   );

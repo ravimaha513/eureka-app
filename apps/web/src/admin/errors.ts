@@ -36,6 +36,17 @@ export const ERROR_MESSAGES: Record<string, string> = {
   unknown_role: "That role doesn't exist. Refresh and try again.",
 };
 
+/** Short reason a person was skipped by a bulk team add (AddMembersResult.failed). */
+export function skipReason(code: string): string {
+  switch (code) {
+    case "already_member": return "already in a team (use Move instead)";
+    case "user_inactive": return "inactive";
+    case "self_change": return "you can't add yourself";
+    case "user_not_found": return "no longer exists";
+    default: return ERROR_MESSAGES[code] ?? code;
+  }
+}
+
 /** What each operation's plain HTTP failures mean when the server sends no known code. */
 export type ErrorContext = "createUser" | "addMember" | "generic";
 

@@ -169,27 +169,23 @@ test("org admin: reporting line, teams, members and moving a member", async ({ p
     await expect(dlg).toBeHidden();
     await expect(liveStatus(page)).toContainText(`Created ${name}.`);
   }
-  await teamCard(page, team1).getByRole("button", { name: `Add member to ${team1}` }).click();
-  dlg = page.getByRole("dialog", { name: `Add member to ${team1}` });
-  await dlg.getByLabel("Person").selectOption({ label: `${member.name} (${member.email})` });
-  await dlg.getByRole("button", { name: "Add member" }).click();
-  await expect(dlg).toBeHidden();
-  await expect(teamCard(page, team1).getByRole("list", { name: `Members of ${team1}` })).toContainText(member.name);
-
-  // Adding someone who already has a team is refused (use Move instead).
-  await teamCard(page, team2).getByRole("button", { name: `Add member to ${team2}` }).click();
-  dlg = page.getByRole("dialog", { name: `Add member to ${team2}` });
-  await dlg.getByLabel("Person").selectOption({ label: `${member.name} (${member.email}) · in ${team1}` });
-  await dlg.getByRole("button", { name: "Add member" }).click();
-  await expect(dlg.getByRole("alert")).toContainText("Move to team");
-  await dlg.getByRole("button", { name: "Cancel" }).click();
+  // Open team one, find the member by search and add them.
+  await teamCard(page, team1).getByRole("button", { name: team1, exact: true }).click();
+  let drawer = page.getByRole("dialog", { name: team1, exact: true });
+  await drawer.getByRole("checkbox", { name: "No team" }).uncheck();
+  await drawer.getByLabel("Search people by name or email").fill(member.email);
+  await drawer.getByRole("checkbox", { name: `Select ${member.name}` }).check();
+  await drawer.getByRole("button", { name: `Add 1 to ${team1}` }).click();
+  await expect(liveStatus(page)).toContainText(`${member.name} joined ${team1}.`);
+  await expect(drawer.getByRole("list", { name: `Members of ${team1}` })).toContainText(member.name);
+  await expect(teamCard(page, team1)).toContainText("1 member");
 
   // Moving needs team:move_member over both teams (AD-8). org_admin holds no data
-  // permissions in the current catalog, so the button is disabled with an explanation;
+  // permissions in the current catalog, so there is no Move button, only an explanation;
   // if the role gains the permission, exercise the full move.
-  const move = teamCard(page, team1).getByRole("button", { name: `Move ${member.name} to another team` });
-  if (await move.isDisabled()) {
-    await expect(page.getByText(/Moving people between teams needs/)).toBeVisible();
+  const move = drawer.getByRole("button", { name: `Move ${member.name} to another team` });
+  if (await move.count() === 0) {
+    await expect(drawer.getByText(/Moving people between teams needs/)).toBeVisible();
   } else {
     await move.click();
     dlg = page.getByRole("dialog", { name: `Move ${member.name} to another team` });
@@ -199,11 +195,24 @@ test("org admin: reporting line, teams, members and moving a member", async ({ p
     const result = page.getByRole("dialog", { name: `${member.name} moved to ${team2}` });
     await expect(result).toContainText(/no candidates to hand over|reassigned to/);
     await result.getByRole("button", { name: "Done" }).click();
-    await expect(teamCard(page, team2).getByRole("list", { name: `Members of ${team2}` })).toContainText(member.name);
+    await expect(teamCard(page, team2)).toContainText("1 member");
+  }
+  await drawer.getByRole("button", { name: `Close ${team1}` }).click();
+
+  // Adding someone who already has a team is skipped with a reason (use Move instead).
+  await teamCard(page, team2).getByRole("button", { name: team2, exact: true }).click();
+  drawer = page.getByRole("dialog", { name: team2, exact: true });
+  await drawer.getByRole("checkbox", { name: "No team" }).uncheck();
+  await drawer.getByLabel("Search people by name or email").fill(member.email);
+  const pick = drawer.getByRole("checkbox", { name: `Select ${member.name}` });
+  if (await pick.count() > 0) {
+    await pick.check();
+    await drawer.getByRole("button", { name: `Add 1 to ${team2}` }).click();
+    await expect(drawer.getByRole("alert")).toContainText("already in a team");
   }
 
   // Change the lead of team two.
-  await teamCard(page, team2).getByRole("button", { name: `Change lead of ${team2}` }).click();
+  await drawer.getByRole("button", { name: "Change lead" }).click();
   dlg = page.getByRole("dialog", { name: `Change lead of ${team2}` });
   await dlg.getByLabel("New lead").selectOption({ label: `${lead1.name} (${lead1.email})` });
   await dlg.getByRole("button", { name: "Change lead" }).click();

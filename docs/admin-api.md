@@ -42,7 +42,7 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 - Departments cannot be deleted or moved yet.
 
 ### Users
-- `GET /api/v1/admin/users?search=&status=active|inactive&departmentId=<uuid>|none&cursor=&limit=` (default 50, max 200; `departmentId` matches that department and its sub-departments, `none` users without one) returns
+- `GET /api/v1/admin/users?search=&status=active|inactive&departmentId=<uuid>|none&team=<uuid>|none&role=&locationId=&cursor=&limit=` (default 50, max 200; `departmentId` matches that department and its sub-departments, `none` users without one; `team` the current members of that team, `none` users who neither lead nor belong to a team; `role` holders of that role key; `locationId` the primary location) returns
   `{ items: [{ id, email, displayName, designation, status, primaryLocation: {id,name}|null, department: { id, name, parent: {id,name}|null }|null, manager: {id,displayName}|null, roles: [{ key, label, locationId, locationName }], teams: [{ id, name, asLead: boolean }] }], nextCursor }`
   (interviews-settings, SD-1/ST-3: plus `contactVisible` and, for `staff.contact:read` holders, each item's `phone`).
 - `GET /api/v1/admin/users/summary` returns `{ active, inactive, roles: [{ key, label, count }] }`: active users per role, roles with users only (`docs/interviews-settings-api.md` SD-1).
@@ -67,11 +67,12 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 ### Teams
 - `GET /api/v1/admin/teams` returns
   `{ items: [{ id, name, location: {id,name}|null, lead: {id,displayName}, department: { id, name, parent }|null, members: [{ id, displayName }], coaches: [{ id, displayName }] }], coaches: [{ id, displayName, email, role: "interview_coach" | "interview_lead" }] }`
-  (`department`: the lead's department, AD-12; top-level `coaches`: the active users who can be assigned as coaches, AD-11).
+  (`department`: the lead's department, AD-12; top-level `coaches`: the active users who can be assigned as coaches, AD-11; top-level `unassignedCount`: active users who neither lead nor belong to a team).
 - `POST /api/v1/admin/teams` with `{ name, leadId, locationId? }` returns 201 `{ id }`.
 - `PATCH /api/v1/admin/teams/:id` with `{ name }` (1–120 chars, trimmed) renames the team and returns 204. 404 unknown team. The audit row (`admin.team.renamed`) does not carry the name.
 - `PUT /api/v1/admin/teams/:id/lead` with `{ leadId }` returns 204.
 - `POST /api/v1/admin/teams/:id/members` with `{ userId }` returns 204. A user who is already in another team gets a 409; use the move endpoint instead.
+- `POST /api/v1/admin/teams/:id/members/bulk` with `{ userIds }` (1–100) returns 200 `{ added: [userId], failed: [{ userId, error }] }`. Each person is added on its own (same function, checks and `admin.team.member_added` audit row as the single add), so one failure does not undo the others; `error` is the contract code (`already_member`, `user_inactive`, `self_change`, `user_not_found`). 404 unknown team. Used by the team drawer and the Users tab bulk "Add to team".
 - `POST /api/v1/admin/teams/:id/coaches` with `{ userId }` returns 204; `DELETE /api/v1/admin/teams/:id/coaches/:userId` returns 204 (AD-11). 404 unknown team or `not_assigned`, 409 `already_assigned`, 422 `not_a_coach` / `user_inactive`.
 - `GET /api/v1/teams/mine` (permission `team:add_member`, AD-10) returns `{ items: [{ id, name, lead: {id,displayName}, members: [{id,displayName}] }], addable: [{ id, displayName, email }] }`: the caller's teams and the active recruiters in no team (for team/hierarchy callers: only those with no manager yet or below the caller, or a lead of one of those teams, in the reporting line).
 - `POST /api/v1/teams/:id/members` with `{ userId }` (permission `team:add_member`, AD-10) returns 204. 404 unknown team, 403 `not_in_scope` for a team outside the caller's scope.

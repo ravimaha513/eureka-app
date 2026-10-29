@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
+import { ForbiddenException, HttpException, Inject, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import type pg from "pg";
 import { z } from "zod";
 import {
@@ -117,6 +117,18 @@ export class AdminService {
         params.push(q.departmentId);
         where.push(`u.department_id IN (SELECT d.id FROM eureka.department d WHERE d.id = $${params.length} OR d.parent_id = $${params.length})`);
       }
+      if (q.team === "none") {
+        where.push(`NOT EXISTS (SELECT 1 FROM eureka.team_member tm WHERE tm.user_id = u.id AND tm.valid @> now())
+          AND NOT EXISTS (SELECT 1 FROM eureka.team t WHERE t.lead_id = u.id)`);
+      } else if (q.team) {
+        params.push(q.team);
+        where.push(`EXISTS (SELECT 1 FROM eureka.team_member tm WHERE tm.user_id = u.id AND tm.team_id = $${params.length} AND tm.valid @> now())`);
+      }
+      if (q.role) {
+        params.push(q.role);
+        where.push(`EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.user_id = u.id AND ur.role_key = $${params.length} AND ur.valid @> now())`);
+      }
+      if (q.locationId) { params.push(q.locationId); where.push(`u.primary_location_id = $${params.length}`); }
       if (q.cursor) { params.push(q.cursor); where.push(`u.id > $${params.length}`); }
       params.push(q.limit + 1);
       const { rows } = await c.query<{
@@ -456,7 +468,13 @@ export class AdminService {
          JOIN eureka.app_user u ON u.id = tm.user_id WHERE tm.valid @> now() ORDER BY u.display_name`);
       const coached = await this.teamCoaches(c, null);
       const coaches = await this.coachUsers(c, null);
+      // Active users who neither lead nor belong to a team (Teams tab "Assign them" hint).
+      const unassigned = await c.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM eureka.app_user u WHERE u.status = 'active'
+           AND NOT EXISTS (SELECT 1 FROM eureka.team_member tm WHERE tm.user_id = u.id AND tm.valid @> now())
+           AND NOT EXISTS (SELECT 1 FROM eureka.team t WHERE t.lead_id = u.id)`);
       return {
+        unassignedCount: unassigned.rows[0]!.n,
         items: teams.rows.map((t) => ({
           id: t.id,
           name: t.name,
@@ -661,6 +679,31 @@ export class AdminService {
       await c.query(`SELECT authz.admin_add_team_member($1, $2)`, [teamId, userId]);
       await this.audit.record(c, { actorId: user.id, action: "admin.team.member_added", entityType: "team", entityId: teamId, changes: { userId } });
     });
+  }
+
+  /**
+   * Adds several people to one team. Each add runs on its own (authz.admin_add_team_member),
+   * so one person already in a team does not block the rest; failures come back per user
+   * with the contract error code. 404 if the team does not exist.
+   */
+  async addMembers(user: AuthedUser, teamId: string, userIds: string[]) {
+    const exists = await this.tx(user, async (c) =>
+      (await c.query(`SELECT 1 FROM eureka.team WHERE id = $1`, [teamId])).rowCount === 1);
+    if (!exists) throw new NotFoundException();
+    const added: string[] = [];
+    const failed: { userId: string; error: string }[] = [];
+    for (const userId of [...new Set(userIds)]) {
+      try {
+        await this.addMember(user, teamId, userId);
+        added.push(userId);
+      } catch (err) {
+        if (!(err instanceof HttpException)) throw err;
+        const res = err.getResponse();
+        const code = typeof res === "object" && res && "message" in res ? String((res as { message: unknown }).message) : err.message;
+        failed.push({ userId, error: err.getStatus() === 404 ? "user_not_found" : code });
+      }
+    }
+    return { added, failed };
   }
 
   /**

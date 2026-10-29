@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { Me } from "../api";
 import { AccessContext } from "./shared";
-import { UsersTab } from "./UsersTab";
+import { UsersTab, type UsersPreset } from "./UsersTab";
 import { ApprovalsTab } from "./ApprovalsTab";
 import { TeamsTab } from "./TeamsTab";
 import { LocationsTab } from "./LocationsTab";
@@ -17,6 +17,8 @@ type TabKey = (typeof TABS)[number]["key"];
 /** Users & Access (capability `access:manage`). The API enforces every rule; this screen explains them. */
 export function AccessPage({ me, initialTab = "users" }: { me: Me; initialTab?: TabKey }) {
   const [tab, setTab] = useState<TabKey>(initialTab);
+  // Teams tab "Assign them" opens Users filtered to people with no team.
+  const [usersPreset, setUsersPreset] = useState<UsersPreset | undefined>();
   const [message, setMessage] = useState("");
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   // Re-announce identical messages: clear first, then set shortly after.
@@ -46,12 +48,15 @@ export function AccessPage({ me, initialTab = "users" }: { me: Me; initialTab?: 
         {TABS.map((t, i) => (
           <button key={t.key} ref={(el) => { tabRefs.current[t.key] = el; }} className="tab" role="tab" id={`access-tab-${t.key}`}
             aria-selected={tab === t.key} aria-controls={`access-panel-${t.key}`} tabIndex={tab === t.key ? 0 : -1}
-            onClick={() => setTab(t.key)} onKeyDown={(e) => onTabKey(e, i)}>{t.label}</button>
+            onClick={() => { setTab(t.key); if (t.key === "users") setUsersPreset(undefined); }} onKeyDown={(e) => onTabKey(e, i)}>{t.label}</button>
         ))}
       </div>
       <div className="livemsg" role="status" aria-live="polite">{message}</div>
       <section role="tabpanel" id={`access-panel-${tab}`} aria-labelledby={`access-tab-${tab}`} className="panel">
-        {tab === "users" ? <UsersTab /> : tab === "approvals" ? <ApprovalsTab /> : tab === "teams" ? <TeamsTab /> : <LocationsTab />}
+        {tab === "users" ? <UsersTab key={usersPreset?.team ?? ""} preset={usersPreset} />
+          : tab === "approvals" ? <ApprovalsTab />
+          : tab === "teams" ? <TeamsTab onShowUnassigned={() => { setUsersPreset({ team: "none", status: "active" }); setTab("users"); }} />
+          : <LocationsTab />}
       </section>
     </AccessContext.Provider>
   );
