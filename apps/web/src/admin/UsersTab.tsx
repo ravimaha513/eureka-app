@@ -17,6 +17,8 @@ import { QueryError } from "../ui/QueryError";
 const PAGE_SIZE = 50;
 
 /** Filters another tab opens Users with (Teams tab "Assign them"). */
+const shortDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+
 export interface UsersPreset { team?: string; status?: "active" | "inactive" }
 
 type Modal =
@@ -29,6 +31,7 @@ type Modal =
   | { kind: "deactivate"; user: AdminUser }
   | { kind: "password"; user: AdminUser }
   | { kind: "reactivate"; user: AdminUser }
+  | { kind: "delete"; user: AdminUser }
   | { kind: "revoke"; user: AdminUser; role: UserRole }
   | { kind: "addToTeam" }
   | { kind: "moveToTeam" };
@@ -180,7 +183,7 @@ export function UsersTab({ preset }: { preset?: UsersPreset } = {}) {
                     <td>{u.designation ?? "—"}</td>
                     <td>{u.department ? departmentLabel(u.department) : "—"}</td>
                     {contact && <td>{u.phone ? <a className="contactlink" href={`tel:${u.phone}`}><PhoneIcon size={14} aria-hidden="true" />{u.phone}</a> : "—"}</td>}
-                    <td><span className={`badge ${u.status}`}>{u.status}</span></td>
+                    <td><span className={`badge ${u.status}`}>{u.status}</span>{u.deletesAt && <small className="block muted">Deletes {shortDate(u.deletesAt)}</small>}</td>
                     <td>
                       <ul className="chips" aria-label={`Roles of ${u.displayName}`}>
                         {u.roles.map((r) => (
@@ -206,7 +209,10 @@ export function UsersTab({ preset }: { preset?: UsersPreset } = {}) {
                           <button className="btn sm" aria-label={`Set department for ${u.displayName}`} onClick={() => setModal({ kind: "department", user: u })}>Department</button>
                           {u.status === "active"
                             ? <button className="btn sm danger" aria-label={`Deactivate ${u.displayName}`} onClick={() => setModal({ kind: "deactivate", user: u })}>Deactivate</button>
-                            : <button className="btn sm" aria-label={`Reactivate ${u.displayName}`} onClick={() => setModal({ kind: "reactivate", user: u })}>Reactivate</button>}
+                            : <>
+                              <button className="btn sm" aria-label={`Reactivate ${u.displayName}`} onClick={() => setModal({ kind: "reactivate", user: u })}>Reactivate</button>
+                              <button className="btn sm danger" aria-label={`Delete ${u.displayName}`} onClick={() => setModal({ kind: "delete", user: u })}>Delete now</button>
+                            </>}
                         </>
                       )}
                     </td>
@@ -260,6 +266,15 @@ export function UsersTab({ preset }: { preset?: UsersPreset } = {}) {
           action={() => adminApi.reactivate(modal.user.id)} onClose={close}
           onDone={() => done(`${modal.user.displayName} is active again. Grant roles to restore access.`)}>
           <p>This restores the account only. Their previous roles and teams are not restored; grant them again.</p>
+        </ConfirmDialog>
+      )}
+      {modal?.kind === "delete" && (
+        <ConfirmDialog title={`Delete ${modal.user.displayName} now?`} confirmLabel="Delete permanently" danger formatError={fmt}
+          action={() => adminApi.deleteUser(modal.user.id)} onClose={close}
+          onDone={() => done(`${modal.user.displayName} is deleted.`)}>
+          <p><b>This can't be undone.</b> Their name, email, password, phone and birthday are erased, and the email can be used for a new account.</p>
+          <p>Records they worked on (candidates, submissions, messages) stay and show “Deleted user”.
+            {modal.user.deletesAt && <> Otherwise they're deleted automatically on {shortDate(modal.user.deletesAt)}.</>}</p>
         </ConfirmDialog>
       )}
       {modal?.kind === "revoke" && (

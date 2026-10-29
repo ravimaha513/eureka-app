@@ -32,7 +32,7 @@ const USERS = [
     teams: [{ id: "t1", name: "Team Rohit", asLead: false }],
   }),
   user("u-lead", "Rohit Lead", { teams: [{ id: "t1", name: "Team Rohit", asLead: true }] }),
-  user("u-old", "Old Timer", { status: "inactive" }),
+  user("u-old", "Old Timer", { status: "inactive", deletesAt: "2026-11-05T12:00:00.000Z" }),
 ];
 const TEAMS = [
   { id: "t1", name: "Team Rohit", location: { id: "loc-dal", name: "Dallas" }, lead: { id: "u-lead", displayName: "Rohit Lead" },
@@ -243,6 +243,21 @@ describe("Users tab", () => {
     expect(lastWrite()).toMatchObject({ method: "POST", path: "/api/v1/admin/users/u-priya/deactivate" });
     expect(lastWrite().headers["x-csrf-token"]).toBe("tok");
     await waitFor(() => expect(status()).toHaveTextContent(/deactivated and signed out/));
+  });
+
+  it("deletes an inactive user now after an irreversible-action confirmation (AD-13)", async () => {
+    routes["DELETE /api/v1/admin/users/u-old"] = () => ({ status: 204 });
+    renderPage();
+    const old = within(await row("Old Timer"));
+    expect(old.getByText(/^Deletes /)).toBeInTheDocument();
+    expect(within(await row("Priya Rao")).queryByRole("button", { name: "Delete Priya Rao" })).not.toBeInTheDocument();
+    fireEvent.click(old.getByRole("button", { name: "Delete Old Timer" }));
+    const dlg = await screen.findByRole("dialog", { name: "Delete Old Timer now?" });
+    expect(dlg).toHaveAccessibleDescription(/can't be undone/i);
+    fireEvent.click(within(dlg).getByRole("button", { name: "Delete permanently" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(lastWrite()).toMatchObject({ method: "DELETE", path: "/api/v1/admin/users/u-old" });
+    await waitFor(() => expect(status()).toHaveTextContent(/Old Timer is deleted/));
   });
 
   it("maps self_change from the server to a friendly message", async () => {

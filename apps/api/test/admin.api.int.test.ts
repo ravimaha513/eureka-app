@@ -3,6 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { can, type Permission } from "@eureka/shared";
 import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
+import { userPurgeJob } from "../src/worker/jobs/user-purge.js";
+import { silentLogger } from "../src/worker/log.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, T, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 
@@ -70,6 +72,7 @@ const ADMIN_ENDPOINTS: { method: Method; url: string; body?: unknown; adminStatu
   { method: "POST", url: "/api/v1/admin/users/bulk", body: {}, adminStatus: 422 },
   { method: "POST", url: `/api/v1/admin/users/${NIL}/deactivate`, adminStatus: 404 },
   { method: "POST", url: `/api/v1/admin/users/${NIL}/reactivate`, adminStatus: 404 },
+  { method: "DELETE", url: `/api/v1/admin/users/${NIL}`, adminStatus: 404 },
   { method: "PUT", url: `/api/v1/admin/users/${U.r1a}/manager`, body: {}, adminStatus: 422 },
   // performance (migration 0111): designation through Users & Access.
   { method: "PUT", url: `/api/v1/admin/users/${U.r1a}/designation`, body: {}, adminStatus: 422 },
@@ -401,6 +404,7 @@ describe("users", () => {
   it.each([
     ["deactivate self", "POST", `/api/v1/admin/users/${U.admin}/deactivate`, undefined],
     ["reactivate self", "POST", `/api/v1/admin/users/${U.admin}/reactivate`, undefined],
+    ["delete self", "DELETE", `/api/v1/admin/users/${U.admin}`, undefined],
     ["own manager", "PUT", `/api/v1/admin/users/${U.admin}/manager`, { managerId: U.ceo }],
     ["someone to report to me", "PUT", `/api/v1/admin/users/${U.r1a}/manager`, { managerId: U.admin }],
     ["grant myself a role", "POST", "/api/v1/admin/role-requests", { userId: U.admin, role: "hr" }],
@@ -441,6 +445,62 @@ describe("users", () => {
     const me = (await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: fresh.cookie } })).json();
     expect(me.roles).toEqual([]);
     expect((await audits("admin.user.deactivated")).at(-1)).toMatchObject({ actor_id: U.admin, entity_id: U.acct });
+  });
+
+  describe("deleting users (AD-13)", () => {
+    const create = async (email: string) => {
+      const r = await call("admin", "POST", "/api/v1/admin/users", { email, displayName: "Leaving Soon", designation: "Recruiter" });
+      expect(r.statusCode, r.body).toBe(201);
+      return r.json().id as string;
+    };
+    const row = async (id: string) => (await db.admin.query(
+      `SELECT email::text, display_name, designation, status, deactivated_at, deleted_at FROM eureka.app_user WHERE id = $1`, [id])).rows[0];
+    const listed = async (status: string) =>
+      (await call("admin", "GET", `/api/v1/admin/users?status=${status}&limit=200`)).json().items as { id: string; deletesAt?: string }[];
+
+    it("an admin deletes a deactivated user now: anonymized, unlisted, email free again", async () => {
+      const id = await create("leaver@eureka.example");
+      const active = await call("admin", "DELETE", `/api/v1/admin/users/${id}`);
+      expect(active.statusCode).toBe(422);
+      expect(active.json().detail).toBe("user_active");
+
+      expect((await call("admin", "POST", `/api/v1/admin/users/${id}/deactivate`)).statusCode).toBe(204);
+      const inactive = (await listed("inactive")).find((u) => u.id === id)!;
+      const at = (await row(id)).deactivated_at as Date;
+      expect(Date.parse(inactive.deletesAt!) - at.getTime()).toBe(7 * 86_400_000);
+
+      expect((await call("admin", "DELETE", `/api/v1/admin/users/${id}`)).statusCode).toBe(204);
+      expect(await row(id)).toMatchObject({
+        email: `deleted-${id}@deleted.invalid`, display_name: "Deleted user", designation: null, status: "inactive",
+      });
+      expect((await row(id)).deleted_at).not.toBeNull();
+      expect((await listed("inactive")).some((u) => u.id === id)).toBe(false);
+      expect((await call("admin", "DELETE", `/api/v1/admin/users/${id}`)).statusCode).toBe(404);
+      expect((await call("admin", "POST", `/api/v1/admin/users/${id}/reactivate`)).statusCode).toBe(404);
+      expect((await audits("admin.user.deleted")).at(-1)).toMatchObject({ actor_id: U.admin, entity_id: id, changes: null });
+      await create("leaver@eureka.example");
+    });
+
+    it("the worker deletes users inactive for 7 days; reactivation resets the wait", async () => {
+      const old = await create("old-leaver@eureka.example");
+      const recent = await create("recent-leaver@eureka.example");
+      const back = await create("came-back@eureka.example");
+      for (const id of [old, recent, back]) {
+        expect((await call("admin", "POST", `/api/v1/admin/users/${id}/deactivate`)).statusCode).toBe(204);
+      }
+      await db.admin.query(`UPDATE eureka.app_user SET deactivated_at = now() - interval '8 days' WHERE id = ANY($1::uuid[])`, [[old, back]]);
+      expect((await call("admin", "POST", `/api/v1/admin/users/${back}/reactivate`)).statusCode).toBe(204);
+      expect((await row(back)).deactivated_at).toBeNull();
+
+      const out = await userPurgeJob().run("2026-10-29", { pool: db.worker, log: silentLogger, signal: new AbortController().signal, heartbeat() {} } as never);
+      expect(out).toMatchObject({ deleted: 1, days: 7 });
+      expect((await row(old)).deleted_at).not.toBeNull();
+      expect((await row(recent)).deleted_at).toBeNull();
+      expect(await row(back)).toMatchObject({ status: "active", deleted_at: null });
+      expect((await audits("system.user.purged")).map((a) => a.entity_id)).toEqual([old]);
+      await expect(db.worker.query(`SELECT authz.purge_inactive_users(1)`)).rejects.toThrow(/between 7 and 365/);
+      await expect(db.worker.query(`SELECT authz.anonymize_user($1)`, [recent])).rejects.toThrow(/permission denied/);
+    });
   });
 });
 

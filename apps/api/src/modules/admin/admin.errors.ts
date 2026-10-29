@@ -36,6 +36,7 @@ const CODES: Record<string, (code: string) => HttpException> = {
   invalid_lead: (c) => new UnprocessableEntityException(c),
   invalid_name: (c) => new UnprocessableEntityException(c),
   user_inactive: (c) => new UnprocessableEntityException(c),
+  user_active: (c) => new UnprocessableEntityException(c),
   not_a_member: (c) => new UnprocessableEntityException(c),
   not_a_recruiter: (c) => new UnprocessableEntityException(c),
   // AD-11: coach assignments (authz.assign_coach / unassign_coach)

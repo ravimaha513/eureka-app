@@ -11,12 +11,13 @@ AS $function$
 DECLARE was_admin boolean; actor uuid;
 BEGIN
   actor := authz.admin_guard(p_user);
-  PERFORM 1 FROM eureka.app_user u WHERE u.id = p_user FOR UPDATE;
+  -- Deleted users (migration 0280) are gone for every admin action.
+  PERFORM 1 FROM eureka.app_user u WHERE u.id = p_user AND u.deleted_at IS NULL FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'user_not_found' USING ERRCODE = 'no_data_found';
   END IF;
   IF p_active THEN
-    UPDATE eureka.app_user SET status = 'active', access_version = access_version + 1 WHERE id = p_user;
+    UPDATE eureka.app_user SET status = 'active', deactivated_at = NULL, access_version = access_version + 1 WHERE id = p_user;
     RETURN;
   END IF;
   IF EXISTS (SELECT 1 FROM eureka.team t WHERE t.lead_id = p_user) THEN
@@ -27,7 +28,9 @@ BEGIN
   END IF;
   was_admin := EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.user_id = p_user
                        AND ur.role_key = 'org_admin' AND ur.valid @> pg_catalog.now());
-  UPDATE eureka.app_user SET status = 'inactive', access_version = access_version + 1 WHERE id = p_user;
+  -- Re-deactivating keeps the first stamp, so the purge wait is not restarted.
+  UPDATE eureka.app_user SET status = 'inactive', deactivated_at = coalesce(deactivated_at, pg_catalog.now()),
+    access_version = access_version + 1 WHERE id = p_user;
   UPDATE eureka.user_role SET valid = authz.ended(valid)
     WHERE user_id = p_user AND (pg_catalog.upper_inf(valid) OR pg_catalog.upper(valid) > pg_catalog.now());
   UPDATE eureka.team_member SET valid = authz.ended(valid)

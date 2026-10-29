@@ -87,6 +87,13 @@ export class AdminController {
     await this.svc.setStatus(user, id, true);
   }
 
+  /** Deletes (anonymizes) a deactivated user now instead of after the 7-day wait. */
+  @Delete("users/:id")
+  @HttpCode(204)
+  async deleteUser(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string): Promise<void> {
+    await this.svc.deleteUser(user, id);
+  }
+
   @Put("users/:id/designation")
   setDesignation(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.setDesignation(user, id, SetDesignation.parse(body).designation, "admin");

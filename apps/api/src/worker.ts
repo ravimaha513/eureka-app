@@ -20,6 +20,7 @@ import { feedbackEmailJob, feedbackNotificationJob } from "./worker/jobs/feedbac
 import { idempotencyCleanupJob, outboxDeliveryJob, outboxPruneJob } from "./worker/jobs/outbox.js";
 import { benchTimeJob, notificationPruneJob } from "./worker/jobs/notifications.js";
 import { portalPruneJob } from "./worker/jobs/portal-prune.js";
+import { userPurgeJob } from "./worker/jobs/user-purge.js";
 import { loadWorkerConfig } from "./worker/config.js";
 import { auditExportJob } from "./worker/jobs/audit-export.js";
 import { createLogger, errorFields } from "./worker/log.js";
@@ -79,6 +80,8 @@ const jobs = [
   paymentDelayJob(),
   // jobs-portal: applicants who never confirmed their mailbox, after 30 days (ids and counts only in the log).
   portalPruneJob(30),
+  // Users & Access (migration 0280): users deactivated 7+ days ago are deleted (anonymized), ids only in the audit.
+  userPurgeJob(),
   // interview-alerts (migration 0087): the CEO's morning staff-birthday digest into the outbox.
   birthdayDigestJob(),
   // performance (migration 0112): recruiter activity below target, once per ended target period.

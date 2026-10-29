@@ -18,6 +18,7 @@ import { mapAdminError } from "./admin.errors.js";
 import type { BulkCreateUsers, CreateDepartment, CreateLocation, CreateRoleRequest, CreateTeam, CreateUser, MoveMember, UserListQuery } from "./admin.schemas.js";
 import { likeContains } from "../../platform/sql.js";
 import { buildUserImportTemplate } from "./user-import-template.js";
+import { USER_PURGE_DAYS } from "../../worker/jobs/user-purge.js";
 
 const EMAIL = z.string().email();
 
@@ -106,7 +107,8 @@ export class AdminService {
   async listUsers(user: AuthedUser, q: UserListQuery) {
     return this.tx(user, async (c) => {
       const params: unknown[] = [];
-      const where: string[] = [];
+      // Deleted users (migration 0280) are anonymized tombstones, never listed.
+      const where: string[] = ["u.deleted_at IS NULL"];
       if (q.search) {
         params.push(likeContains(q.search));
         where.push(`(u.display_name ILIKE $${params.length} OR u.email::text ILIKE $${params.length})`);
@@ -133,15 +135,15 @@ export class AdminService {
       params.push(q.limit + 1);
       const { rows } = await c.query<{
         id: string; email: string; display_name: string; designation: string | null; status: string;
-        location_id: string | null; location_name: string | null;
+        deactivated_at: Date | null; location_id: string | null; location_name: string | null;
         department_id: string | null; department_name: string | null; parent_id: string | null; parent_name: string | null;
       }>(
-        `SELECT u.id, u.email, u.display_name, u.designation, u.status,
+        `SELECT u.id, u.email, u.display_name, u.designation, u.status, u.deactivated_at,
                 u.primary_location_id AS location_id, l.name AS location_name,
                 d.id AS department_id, d.name AS department_name, p.id AS parent_id, p.name AS parent_name
          FROM eureka.app_user u LEFT JOIN eureka.location l ON l.id = u.primary_location_id
          LEFT JOIN eureka.department d ON d.id = u.department_id LEFT JOIN eureka.department p ON p.id = d.parent_id
-         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+         WHERE ${where.join(" AND ")}
          ORDER BY u.id LIMIT $${params.length}`, params);
       const page = rows.slice(0, q.limit);
       const ids = page.map((r) => r.id);
@@ -178,6 +180,9 @@ export class AdminService {
             designation: r.designation,
             ...(contact ? { phone: phones.rows.find((x) => x.user_id === r.id)?.phone_e164 ?? null } : {}),
             status: r.status,
+            // When the worker deletes this inactive user unless reactivated (USER_PURGE_DAYS after deactivation).
+            ...(r.status === "inactive" && r.deactivated_at
+              ? { deletesAt: new Date(r.deactivated_at.getTime() + USER_PURGE_DAYS * 86_400_000).toISOString() } : {}),
             primaryLocation: r.location_id ? { id: r.location_id, name: r.location_name } : null,
             department: departmentOf(r),
             manager: m ? { id: m.id, displayName: m.display_name } : null,
@@ -203,7 +208,7 @@ export class AdminService {
       const counts = new Map(rows.map((r) => [r.role_key, r.n]));
       const totals = (await c.query<{ active: number; inactive: number }>(
         `SELECT count(*) FILTER (WHERE status = 'active')::int AS active, count(*) FILTER (WHERE status = 'inactive')::int AS inactive
-         FROM eureka.app_user`)).rows[0]!;
+         FROM eureka.app_user WHERE deleted_at IS NULL`)).rows[0]!;
       return {
         active: totals.active,
         inactive: totals.inactive,
@@ -352,6 +357,15 @@ export class AdminService {
         actorId: user.id, action: active ? "admin.user.reactivated" : "admin.user.deactivated",
         entityType: "app_user", entityId: id,
       });
+    });
+  }
+
+  /** Deletes (anonymizes) a deactivated user now, without waiting for the purge (docs/admin-api.md, "Deleting users"). */
+  async deleteUser(user: AuthedUser, id: string) {
+    this.notSelf(user, id);
+    await this.tx(user, async (c) => {
+      await c.query(`SELECT authz.admin_delete_user($1)`, [id]);
+      await this.audit.record(c, { actorId: user.id, action: "admin.user.deleted", entityType: "app_user", entityId: id });
     });
   }
 

@@ -25,6 +25,8 @@ export interface AdminUser {
   /** Present only when the caller holds staff.contact:read (Settings profile phone). */
   phone?: string | null;
   status: "active" | "inactive";
+  /** Inactive users only: earliest time the daily purge deletes them (docs/admin-api.md AD-13). */
+  deletesAt?: string;
   primaryLocation: Place | null;
   department: UserDepartment | null;
   manager: Ref | null;
@@ -118,6 +120,7 @@ export const adminApi = {
     api<void>(`/api/v1/admin/users/${enc(id)}/password`, { method: "POST", ...json({ password }) }),
   deactivate: (id: string) => api<void>(`/api/v1/admin/users/${enc(id)}/deactivate`, { method: "POST" }),
   reactivate: (id: string) => api<void>(`/api/v1/admin/users/${enc(id)}/reactivate`, { method: "POST" }),
+  deleteUser: (id: string) => api<void>(`/api/v1/admin/users/${enc(id)}`, { method: "DELETE" }),
   setManager: (id: string, managerId: string | null) =>
     api<void>(`/api/v1/admin/users/${enc(id)}/manager`, { method: "PUT", ...json({ managerId }) }),
   setDepartment: (id: string, departmentId: string | null) =>
