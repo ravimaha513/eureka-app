@@ -696,6 +696,14 @@ const CASES: RejectCase[] = [
     }),
     forbidden: { teamId: T.t3, valid: false, role: "lead" },
   },
+  {
+    route: "POST /api/v1/admin/teams/:id/members/bulk", actor: "admin",
+    prepare: async () => ({
+      url: `/api/v1/admin/teams/${T.t2}/members/bulk`, body: { userIds: [U.r3a] },
+      state: () => rows(`SELECT * FROM eureka.team_member ORDER BY team_id, user_id`),
+    }),
+    forbidden: { teamId: T.t3, userId: U.r3a, valid: false, role: "lead" },
+  },
   // departments (docs/admin-api.md AD-11, migration 0230): id, created_at and user counts are the server's
   {
     route: "POST /api/v1/admin/departments", actor: "admin",

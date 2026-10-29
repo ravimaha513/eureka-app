@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Search } from "lucide-react";
 import { can } from "../api";
 import { adminApi, departmentLabel, type MoveResult, type Ref, type Team } from "./adminApi";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
@@ -7,20 +8,25 @@ import { friendlyError } from "./errors";
 import { keys, useAccess, useMeta, usePeople } from "./shared";
 import { Loading } from "../ui/Loading";
 import { QueryError } from "../ui/QueryError";
-import { CoachList } from "../team/Coaches";
+import { Avatar } from "../shell/ui";
+import { TeamDrawer } from "./TeamDrawer";
 
 type Modal =
   | { kind: "create" }
   | { kind: "rename"; team: Team }
   | { kind: "lead"; team: Team }
-  | { kind: "add"; team: Team }
   | { kind: "move"; team: Team; member: Ref };
 
-export function TeamsTab() {
+const STACK = 4;
+
+/** Team cards; clicking one opens its drawer (members, people search, bulk add). */
+export function TeamsTab({ onShowUnassigned }: { onShowUnassigned?: () => void }) {
   const { me, announce } = useAccess();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: keys.teams, queryFn: adminApi.teams });
   const [modal, setModal] = useState<Modal | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
   // Presentation only: the API checks team:move_member over both teams (AD-8).
   const canMove = can(me, "team:move_member");
 
@@ -30,69 +36,91 @@ export function TeamsTab() {
     void qc.invalidateQueries({ queryKey: keys.users });
   };
   const done = (msg: string) => { close(); announce(msg); refresh(); };
+  const changed = (msg: string) => { announce(msg); refresh(); };
+
+  const items = q.data?.items ?? [];
+  const needle = filter.trim().toLowerCase();
+  const shown = needle
+    ? items.filter((t) => t.name.toLowerCase().includes(needle) || t.lead.displayName.toLowerCase().includes(needle))
+    : items;
+  // Re-read from the list so the drawer shows members added a moment ago.
+  const open = items.find((t) => t.id === openId) ?? null;
+  const unassigned = q.data?.unassignedCount ?? 0;
 
   return (
     <>
       <div className="toolbar">
-        {!canMove && <p className="hint" id="move-hint">Moving people between teams needs the “move team member” permission over both teams. Your role doesn't hold it.</p>}
+        <div className="field inline searchfield">
+          <label htmlFor="team-filter" className="sr-only">Filter teams</label>
+          <Search size={15} aria-hidden="true" />
+          <input id="team-filter" type="search" placeholder="Filter teams or leads" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        </div>
+        {unassigned > 0 && (
+          <p className="hint">
+            {unassigned} active {unassigned === 1 ? "person has" : "people have"} no team.{" "}
+            {onShowUnassigned && <button type="button" className="linkbtn" onClick={onShowUnassigned}>Assign them</button>}
+          </p>
+        )}
         <button className="btn primary push" onClick={() => setModal({ kind: "create" })}>New team</button>
       </div>
       {q.isLoading ? <Loading /> : q.error ? <QueryError query={q} message={friendlyError(q.error)} /> : (
         <div className="teamgrid">
-          {q.data!.items.map((t) => (
-            <section key={t.id} className="card team" aria-labelledby={`team-${t.id}`}>
+          {shown.map((t) => (
+            <section key={t.id} className="card team clickable" aria-labelledby={`team-${t.id}`}>
               <header>
-                <h2 id={`team-${t.id}`}>{t.name}</h2>
+                <h2 id={`team-${t.id}`}>
+                  <button type="button" className="cardopen" aria-haspopup="dialog" onClick={() => setOpenId(t.id)}>{t.name}</button>
+                </h2>
                 {t.location && <span className="muted">{t.location.name}</span>}
-                {t.department && <span className="tag" title="Lead's department">{departmentLabel(t.department)}</span>}
               </header>
-              <p><span className="muted">Lead</span> <b>{t.lead.displayName}</b></p>
-              <ul className="members" aria-label={`Members of ${t.name}`}>
-                {t.members.map((m) => (
-                  <li key={m.id}>
-                    <span>{m.displayName}</span>
-                    <button className="btn sm" disabled={!canMove} aria-describedby={canMove ? undefined : "move-hint"}
-                      aria-label={`Move ${m.displayName} to another team`} onClick={() => setModal({ kind: "move", team: t, member: m })}>Move to team…</button>
-                  </li>
-                ))}
-                {t.members.length === 0 && <li className="muted">No members yet.</li>}
-              </ul>
-              <CoachList team={t} coaches={t.coaches} available={q.data!.coaches} via="admin" onChanged={(msg) => { announce(msg); refresh(); }} />
-              <div className="rowactions">
-                <button className="btn sm" aria-label={`Rename ${t.name}`} onClick={() => setModal({ kind: "rename", team: t })}>Rename</button>
-                <button className="btn sm" aria-label={`Change lead of ${t.name}`} onClick={() => setModal({ kind: "lead", team: t })}>Change lead</button>
-                <button className="btn sm" aria-label={`Add member to ${t.name}`} onClick={() => setModal({ kind: "add", team: t })}>Add member</button>
+              <p><span className="muted">Lead</span> <b>{t.lead.displayName}</b>
+                {t.department && <span className="tag" title="Lead's department">{departmentLabel(t.department)}</span>}</p>
+              <div className="teamfoot">
+                {t.members.length > 0 ? (
+                  <span className="avatarstack" aria-hidden="true">
+                    {t.members.slice(0, STACK).map((m) => <Avatar key={m.id} name={m.displayName} size="sm" />)}
+                    {t.members.length > STACK && <span className="avatar sm more" data-initials={`+${t.members.length - STACK}`} />}
+                  </span>
+                ) : <span className="muted">No members yet</span>}
+                <span className="badge">{t.members.length} {t.members.length === 1 ? "member" : "members"}</span>
               </div>
             </section>
           ))}
-          {q.data!.items.length === 0 && <p className="empty">No teams yet.</p>}
+          {items.length === 0 && <p className="empty">No teams yet.</p>}
+          {items.length > 0 && shown.length === 0 && <p className="empty">No teams match.</p>}
         </div>
       )}
 
+      {open && (
+        <TeamDrawer team={open} coaches={q.data!.coaches} canMove={canMove} suspended={modal !== null}
+          onClose={() => setOpenId(null)}
+          onRename={() => setModal({ kind: "rename", team: open })}
+          onLead={() => setModal({ kind: "lead", team: open })}
+          onMove={(member) => setModal({ kind: "move", team: open, member })}
+          onChanged={changed} />
+      )}
       {modal?.kind === "create" && <CreateTeamDialog onClose={close} onDone={done} />}
       {modal?.kind === "rename" && <RenameTeamDialog team={modal.team} onClose={close} onDone={done} />}
       {modal?.kind === "lead" && <LeadDialog team={modal.team} onClose={close} onDone={done} />}
-      {modal?.kind === "add" && <AddMemberDialog team={modal.team} onClose={close} onDone={done} />}
       {modal?.kind === "move" && (
-        <MoveMemberDialog team={modal.team} member={modal.member} teams={q.data?.items ?? []} onClose={close}
+        <MoveMemberDialog team={modal.team} member={modal.member} teams={items} onClose={close}
           onMoved={(msg) => { announce(msg); refresh(); }} />
       )}
     </>
   );
 }
 
-function PersonSelect({ id, label, value, onChange, exclude = [], required, describe }: {
-  id: string; label: string; value: string; onChange: (v: string) => void; exclude?: string[]; required?: boolean; describe?: (teams: string[]) => string;
+function PersonSelect({ id, label, value, onChange, exclude = [], required }: {
+  id: string; label: string; value: string; onChange: (v: string) => void; exclude?: string[]; required?: boolean;
 }) {
   const people = usePeople();
   return (
     <div className="field"><label htmlFor={id}>{label}</label>
       <select id={id} required={required} data-autofocus value={value} onChange={(e) => onChange(e.target.value)} disabled={people.isLoading}>
         <option value="" disabled>{people.isLoading ? "Loading people…" : "Choose a person…"}</option>
-        {(people.data ?? []).filter((p) => !exclude.includes(p.id)).map((p) => {
-          const extra = describe?.(p.teams.map((t) => t.name));
-          return <option key={p.id} value={p.id}>{p.displayName} ({p.email}){extra ? ` · ${extra}` : ""}</option>;
-        })}
+        {(people.data ?? []).filter((p) => !exclude.includes(p.id)).map((p) => (
+          <option key={p.id} value={p.id}>{p.displayName} ({p.email})</option>
+        ))}
       </select>
       {people.error && <p className="error" role="alert">{friendlyError(people.error)}</p>}
     </div>
@@ -166,30 +194,6 @@ function LeadDialog({ team, onClose, onDone }: { team: Team; onClose: () => void
         <p className="hint">Current lead: <b>{team.lead.displayName}</b>. Reporting lines are checked for loops when the lead changes.</p>
         <PersonSelect id="ld-lead" label="New lead" value={leadId} onChange={setLeadId} exclude={[team.lead.id]} required />
         <DialogActions onCancel={onClose} submitLabel="Change lead" busy={busy} error={error} disabled={!leadId} />
-      </form>
-    </Dialog>
-  );
-}
-
-function AddMemberDialog({ team, onClose, onDone }: { team: Team; onClose: () => void; onDone: (m: string) => void }) {
-  const [userId, setUserId] = useState("");
-  const { busy, error, run } = useSubmit((e) => friendlyError(e, "addMember"));
-  const people = usePeople();
-  return (
-    <Dialog title={`Add member to ${team.name}`} onClose={onClose}>
-      <form onSubmit={(e) => {
-        e.preventDefault();
-        void run(async () => {
-          await adminApi.addMember(team.id, userId);
-          const name = people.data?.find((p) => p.id === userId)?.displayName ?? "The person";
-          onDone(`${name} joined ${team.name}.`);
-        });
-      }}>
-        <PersonSelect id="am-user" label="Person" value={userId} onChange={setUserId} required
-          exclude={[team.lead.id, ...team.members.map((m) => m.id)]}
-          describe={(teams) => (teams.length ? `in ${teams.join(", ")}` : "")} />
-        <p className="hint">Someone already in another team has to be moved with “Move to team…” instead.</p>
-        <DialogActions onCancel={onClose} submitLabel="Add member" busy={busy} error={error} disabled={!userId} />
       </form>
     </Dialog>
   );

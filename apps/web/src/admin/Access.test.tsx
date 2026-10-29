@@ -394,31 +394,101 @@ describe("Approvals tab", () => {
   });
 });
 
+const MOVER_ME: Me = { ...ME, capabilities: [...ME.capabilities, "team:move_member"] };
+
+describe("Users tab bulk team actions", () => {
+  it("filters by team, role and location, then adds the selected people to a team", async () => {
+    routes["POST /api/v1/admin/teams/t2/members/bulk"] = () => ({ body: { added: ["u-old"], failed: [{ userId: "u-priya", error: "already_member" }] } });
+    renderPage();
+    await row("Priya Rao");
+    fireEvent.change(screen.getByLabelText("Team"), { target: { value: "none" } });
+    fireEvent.change(screen.getByLabelText("Role"), { target: { value: "recruiter" } });
+    fireEvent.change(screen.getByLabelText("Location"), { target: { value: "loc-dal" } });
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/admin/users" && c.url.searchParams.get("team") === "none"
+      && c.url.searchParams.get("role") === "recruiter" && c.url.searchParams.get("locationId") === "loc-dal")).toBe(true));
+    // You can't select yourself.
+    expect(within(await row("Ada Admin")).queryByRole("checkbox")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Priya Rao" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Old Timer" }));
+    const bar = screen.getByRole("region", { name: "Selected users" });
+    expect(bar).toHaveTextContent("2 selected");
+    expect(within(bar).queryByRole("button", { name: "Move to team…" })).not.toBeInTheDocument();
+    fireEvent.click(within(bar).getByRole("button", { name: "Add to team…" }));
+    const dlg = await screen.findByRole("dialog", { name: "Add 2 people to a team" });
+    await within(dlg).findByRole("option", { name: "Team Anjali (Anjali Lead)" });
+    fireEvent.change(within(dlg).getByLabelText("Team"), { target: { value: "t2" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Add to team" }));
+    const res = await screen.findByRole("dialog", { name: "Added to Team Anjali" });
+    expect(res).toHaveTextContent("1 added to Team Anjali. 1 skipped.");
+    expect(res).toHaveTextContent("Priya Rao: already in a team");
+    expect(lastWrite()).toMatchObject({ path: "/api/v1/admin/teams/t2/members/bulk", body: { userIds: ["u-priya", "u-old"] } });
+    fireEvent.click(within(res).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("region", { name: "Selected users" })).not.toBeInTheDocument();
+  });
+
+  it("moves selected members one by one, skipping people with no team", async () => {
+    routes["POST /api/v1/teams/t1/move-member"] = () => ({ body: { movedCandidates: 2, reassignedTo: { id: "u-lead", displayName: "Rohit Lead" } } });
+    renderPage("users", MOVER_ME);
+    fireEvent.click(within(await row("Priya Rao")).getByRole("checkbox"));
+    fireEvent.click(within(await row("Old Timer")).getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Move to team…" }));
+    const dlg = await screen.findByRole("dialog", { name: "Move 2 people to a team" });
+    await within(dlg).findByRole("option", { name: "Team Anjali (Anjali Lead)" });
+    fireEvent.change(within(dlg).getByLabelText("Move to team"), { target: { value: "t2" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Move" }));
+    const res = await screen.findByRole("dialog", { name: "Moved to Team Anjali" });
+    expect(res).toHaveTextContent("1 moved to Team Anjali. 2 candidates stayed with their old teams' leads. 1 skipped.");
+    expect(res).toHaveTextContent("Old Timer: not in a team");
+    expect(writes()).toHaveLength(1);
+    expect(lastWrite()).toMatchObject({ path: "/api/v1/teams/t1/move-member", body: { userId: "u-priya", toTeamId: "t2" } });
+  });
+});
+
 // ---- teams ---------------------------------------------------------------------------------------
 
 const MOVER: Me = { ...ME, capabilities: [...ME.capabilities, "team:move_member"] };
 const teamCard = async (name: string) => (await screen.findByRole("heading", { name })).closest("section")!;
+/** Opens a team's drawer from its card. */
+const openTeam = async (name: string) => {
+  fireEvent.click(within(await teamCard(name)).getByRole("button", { name }));
+  return screen.findByRole("dialog", { name });
+};
 
 describe("Teams tab", () => {
-  it("lists teams with lead and members", async () => {
+  it("cards show lead, member count and the people with no team", async () => {
+    routes["GET /api/v1/admin/teams"] = () => ({ body: { items: TEAMS, coaches: COACHES, unassignedCount: 7 } });
     renderPage("teams");
     const t = within(await teamCard("Team Rohit"));
     expect(t.getByText("Rohit Lead")).toBeInTheDocument();
-    expect(within(t.getByRole("list", { name: "Members of Team Rohit" })).getAllByRole("listitem")).toHaveLength(2);
-    expect(within(await teamCard("Team Anjali")).getByText("No members yet.")).toBeInTheDocument();
+    expect(t.getByText("2 members")).toBeInTheDocument();
+    expect(within(await teamCard("Team Anjali")).getByText("No members yet")).toBeInTheDocument();
+    expect(screen.getByText(/7 active people have no team/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Filter teams"), { target: { value: "anj" } });
+    expect(screen.queryByRole("heading", { name: "Team Rohit" })).not.toBeInTheDocument();
   });
 
-  it("disables Move to team when the role lacks team:move_member", async () => {
+  it("Assign them opens Users filtered to people with no team", async () => {
+    routes["GET /api/v1/admin/teams"] = () => ({ body: { items: TEAMS, coaches: COACHES, unassignedCount: 1 } });
+    routes["GET /api/v1/admin/users/summary"] = () => ({ body: { active: 3, inactive: 1, roles: [] } });
     renderPage("teams");
-    const btn = within(await teamCard("Team Rohit")).getByRole("button", { name: "Move Priya Rao to another team" });
-    expect(btn).toBeDisabled();
-    expect(btn).toHaveAccessibleDescription(/move team member/);
+    fireEvent.click(await screen.findByRole("button", { name: "Assign them" }));
+    expect(screen.getByRole("tab", { name: "Users" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Team")).toHaveValue("none");
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/admin/users" && c.url.searchParams.get("team") === "none")).toBe(true));
+  });
+
+  it("the drawer lists members; without team:move_member there is no Move", async () => {
+    renderPage("teams");
+    const dlg = await openTeam("Team Rohit");
+    expect(within(within(dlg).getByRole("list", { name: "Members of Team Rohit" })).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(dlg).queryByRole("button", { name: "Move Priya Rao to another team" })).not.toBeInTheDocument();
+    expect(dlg).toHaveTextContent(/move team member/);
   });
 
   it("moves a member with the default reassignment (old lead) and shows the result", async () => {
     routes["POST /api/v1/teams/t1/move-member"] = () => ({ body: { movedCandidates: 3, reassignedTo: { id: "u-lead", displayName: "Rohit Lead" } } });
     renderPage("teams", MOVER);
-    fireEvent.click(within(await teamCard("Team Rohit")).getByRole("button", { name: "Move Priya Rao to another team" }));
+    fireEvent.click(within(await openTeam("Team Rohit")).getByRole("button", { name: "Move Priya Rao to another team" }));
     const dlg = await screen.findByRole("dialog", { name: "Move Priya Rao to another team" });
     const reassign = within(dlg).getByLabelText("Reassign candidates to") as HTMLSelectElement;
     expect(reassign.selectedOptions[0]).toHaveTextContent("Rohit Lead (lead of Team Rohit, default)");
@@ -434,15 +504,16 @@ describe("Teams tab", () => {
     expect(lastWrite().body).not.toHaveProperty("reassignTo");
     await waitFor(() => expect(status()).toHaveTextContent(/Moved Priya Rao to Team Anjali/));
     fireEvent.click(within(res).getByRole("button", { name: "Done" }));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Priya Rao moved to Team Anjali" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Team Rohit" })).toBeInTheDocument();
   });
 
   it("sends an explicit reassignTo and maps invalid_reassign_target / not_in_scope", async () => {
     let detail = "invalid_reassign_target";
     routes["POST /api/v1/teams/t1/move-member"] = () => problem(422, detail);
     renderPage("teams", MOVER);
-    fireEvent.click(within(await teamCard("Team Rohit")).getByRole("button", { name: "Move Priya Rao to another team" }));
-    const dlg = await screen.findByRole("dialog");
+    fireEvent.click(within(await openTeam("Team Rohit")).getByRole("button", { name: "Move Priya Rao to another team" }));
+    const dlg = await screen.findByRole("dialog", { name: "Move Priya Rao to another team" });
     fireEvent.change(within(dlg).getByLabelText("Move to team"), { target: { value: "t2" } });
     fireEvent.change(within(dlg).getByLabelText("Reassign candidates to"), { target: { value: "u-sam" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Move" }));
@@ -454,25 +525,34 @@ describe("Teams tab", () => {
     await waitFor(() => expect(within(dlg).getByRole("alert")).toHaveTextContent(ERROR_MESSAGES.not_in_scope!));
   });
 
-  it("adds a member and maps already_member (409)", async () => {
-    routes["POST /api/v1/admin/teams/t2/members"] = () => problem(409, "already_member");
+  it("searches people on the server, adds several at once and lists the ones skipped", async () => {
+    routes["POST /api/v1/admin/teams/t2/members/bulk"] = () => ({
+      body: { added: ["u-old"], failed: [{ userId: "u-priya", error: "already_member" }] },
+    });
     renderPage("teams");
-    fireEvent.click(within(await teamCard("Team Anjali")).getByRole("button", { name: "Add member to Team Anjali" }));
-    const dlg = await screen.findByRole("dialog", { name: "Add member to Team Anjali" });
-    expect(await within(dlg).findByRole("option", { name: /Priya Rao .* · in Team Rohit/ })).toBeInTheDocument();
-    fireEvent.change(within(dlg).getByLabelText("Person"), { target: { value: "u-priya" } });
-    fireEvent.click(within(dlg).getByRole("button", { name: "Add member" }));
-    expect(await within(dlg).findByRole("alert")).toHaveTextContent(ERROR_MESSAGES.already_member!);
-    expect(lastWrite().body).toEqual({ userId: "u-priya" });
+    const dlg = await openTeam("Team Anjali");
+    // "No team" is on by default; you are never offered to yourself.
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/admin/users" && c.url.searchParams.get("team") === "none")).toBe(true));
+    const list = await within(dlg).findByRole("list", { name: "People to add" });
+    expect(within(list).queryByText("Ada Admin")).not.toBeInTheDocument();
+    expect(within(list).getByText("in Team Rohit")).toBeInTheDocument();
+    fireEvent.change(within(dlg).getByLabelText("Search people by name or email"), { target: { value: "pri" } });
+    await waitFor(() => expect(calls.some((c) => c.url.searchParams.get("search") === "pri")).toBe(true));
+    fireEvent.click(await within(dlg).findByRole("checkbox", { name: "Select Priya Rao" }));
+    fireEvent.change(within(dlg).getByLabelText("Search people by name or email"), { target: { value: "" } });
+    fireEvent.click(await within(dlg).findByRole("checkbox", { name: "Select Old Timer" }));
+    fireEvent.click(within(dlg).getByRole("button", { name: "Add 2 to Team Anjali" }));
+    await waitFor(() => expect(status()).toHaveTextContent("Old Timer joined Team Anjali."));
+    expect(lastWrite()).toMatchObject({ method: "POST", path: "/api/v1/admin/teams/t2/members/bulk", body: { userIds: ["u-priya", "u-old"] } });
+    expect(within(dlg).getByRole("alert")).toHaveTextContent("Priya Rao: already in a team");
   });
 
   it("assigns and removes interview coaches (AD-11)", async () => {
     routes["POST /api/v1/admin/teams/t2/coaches"] = () => ({ status: 204 });
     routes["DELETE /api/v1/admin/teams/t1/coaches/u-coach"] = () => ({ status: 204 });
     renderPage("teams");
-    const rohit = await teamCard("Team Rohit");
-    expect(within(within(rohit).getByRole("list", { name: "Coaches of Team Rohit" })).getByText("Cora Coach")).toBeInTheDocument();
-    fireEvent.click(within(await teamCard("Team Anjali")).getByRole("button", { name: "Add coach to Team Anjali" }));
+    let drawer = await openTeam("Team Anjali");
+    fireEvent.click(within(drawer).getByRole("button", { name: "Add coach to Team Anjali" }));
     const dlg = await screen.findByRole("dialog", { name: "Add coach to Team Anjali" });
     expect(within(dlg).getByRole("option", { name: /Ivy Lead .* · Interview Lead/ })).toBeInTheDocument();
     fireEvent.change(within(dlg).getByLabelText("Coach"), { target: { value: "u-coach" } });
@@ -480,7 +560,10 @@ describe("Teams tab", () => {
     await waitFor(() => expect(status()).toHaveTextContent("Cora Coach now coaches Team Anjali."));
     expect(lastWrite()).toMatchObject({ method: "POST", path: "/api/v1/admin/teams/t2/coaches", body: { userId: "u-coach" } });
 
-    fireEvent.click(within(await teamCard("Team Rohit")).getByRole("button", { name: "Remove coach Cora Coach from Team Rohit" }));
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close Team Anjali" }));
+    drawer = await openTeam("Team Rohit");
+    expect(within(within(drawer).getByRole("list", { name: "Coaches of Team Rohit" })).getByText("Cora Coach")).toBeInTheDocument();
+    fireEvent.click(within(drawer).getByRole("button", { name: "Remove coach Cora Coach from Team Rohit" }));
     await waitFor(() => expect(status()).toHaveTextContent("Cora Coach no longer coaches Team Rohit."));
     expect(lastWrite()).toMatchObject({ method: "DELETE", path: "/api/v1/admin/teams/t1/coaches/u-coach" });
   });
@@ -498,7 +581,7 @@ describe("Teams tab", () => {
     await waitFor(() => expect(status()).toHaveTextContent("Created Team Neo."));
     expect(lastWrite().body).toEqual({ name: "Team Neo", leadId: "u-lead" });
 
-    fireEvent.click(within(await teamCard("Team Anjali")).getByRole("button", { name: "Change lead of Team Anjali" }));
+    fireEvent.click(within(await openTeam("Team Anjali")).getByRole("button", { name: "Change lead" }));
     dlg = await screen.findByRole("dialog", { name: "Change lead of Team Anjali" });
     await within(dlg).findByRole("option", { name: /Priya Rao/ });
     fireEvent.change(within(dlg).getByLabelText("New lead"), { target: { value: "u-priya" } });
@@ -579,11 +662,11 @@ describe("departments", () => {
       },
     });
     renderPage();
-    expect(within(await row("Priya Rao")).getAllByRole("cell")[2]).toHaveTextContent("—");
+    expect(within(await row("Priya Rao")).getAllByRole("cell")[3]).toHaveTextContent("—");
     const filter = screen.getByLabelText("Department");
     await within(filter).findByRole("option", { name: "Sales › Interview Prep" });
     fireEvent.change(filter, { target: { value: "d-sales" } });
-    expect(within(await row("Kay Coach")).getAllByRole("cell")[2]).toHaveTextContent("Sales › Interview Prep");
+    expect(within(await row("Kay Coach")).getAllByRole("cell")[3]).toHaveTextContent("Sales › Interview Prep");
     expect(calls.filter((c) => c.path === "/api/v1/admin/users").at(-1)!.url.searchParams.get("departmentId")).toBe("d-sales");
   });
 

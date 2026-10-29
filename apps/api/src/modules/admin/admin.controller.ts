@@ -3,6 +3,7 @@ import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import {
   AddMember,
+  AddMembers,
   BulkCreateUsers,
   CreateDepartment,
   CreateLocation,
@@ -191,6 +192,12 @@ export class AdminController {
   @HttpCode(204)
   async addMember(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
     await this.svc.addMember(user, id, AddMember.parse(body).userId);
+  }
+
+  @Post("teams/:id/members/bulk")
+  @HttpCode(200)
+  addMembers(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.addMembers(user, id, AddMembers.parse(body).userIds);
   }
 
   // AD-11: interview coaches supporting the team

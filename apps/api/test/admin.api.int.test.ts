@@ -84,6 +84,7 @@ const ADMIN_ENDPOINTS: { method: Method; url: string; body?: unknown; adminStatu
   { method: "PATCH", url: `/api/v1/admin/teams/${T.t1}`, body: {}, adminStatus: 422 },
   { method: "PUT", url: `/api/v1/admin/teams/${T.t1}/lead`, body: {}, adminStatus: 422 },
   { method: "POST", url: `/api/v1/admin/teams/${T.t1}/members`, body: {}, adminStatus: 422 },
+  { method: "POST", url: `/api/v1/admin/teams/${T.t1}/members/bulk`, body: {}, adminStatus: 422 },
   { method: "POST", url: `/api/v1/admin/teams/${T.t1}/coaches`, body: {}, adminStatus: 422 },
   { method: "DELETE", url: `/api/v1/admin/teams/${T.t1}/coaches/${NIL}`, adminStatus: 404 },
 ];
@@ -489,6 +490,36 @@ describe("teams", () => {
     const t = (await call("admin", "GET", "/api/v1/admin/teams")).json().items.find((x: { id: string }) => x.id === id);
     expect(t).toEqual({ id, name: "Team New", location: { id: LOC.dallas, name: "Dallas" }, lead: { id: U.m2, displayName: "m2" }, department: null, members: [{ id: U.hr, displayName: "hr" }], coaches: [] });
     expect((await call("admin", "PUT", `/api/v1/admin/teams/${NIL}/lead`, { leadId: U.m2 })).statusCode).toBe(404);
+  });
+
+  it("bulk add: adds each person on its own and reports the ones it skipped", async () => {
+    const { id } = (await call("admin", "POST", "/api/v1/admin/teams", { name: "Team Bulk", leadId: U.l3 })).json() as { id: string };
+    const before = (await call("admin", "GET", "/api/v1/admin/teams")).json().unassignedCount as number;
+    const free = (await call("admin", "GET", "/api/v1/admin/users?status=active&team=none&limit=200")).json().items as { id: string; teams: unknown[] }[];
+    expect(free.length).toBe(before);
+    expect(free.every((u) => u.teams.length === 0)).toBe(true);
+    const pick = free.filter((u) => u.id !== U.admin).slice(0, 2).map((u) => u.id);
+    expect(pick).toHaveLength(2);
+    const r = await call("admin", "POST", `/api/v1/admin/teams/${id}/members/bulk`, { userIds: [...pick, U.r1a, NIL, U.admin] });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json()).toEqual({
+      added: pick,
+      failed: [{ userId: U.r1a, error: "already_member" }, { userId: NIL, error: "user_not_found" }, { userId: U.admin, error: "self_change" }],
+    });
+    const members = (await call("admin", "GET", `/api/v1/admin/users?team=${id}`)).json().items.map((u: { id: string }) => u.id);
+    expect(members.sort()).toEqual([...pick].sort());
+    expect((await call("admin", "GET", "/api/v1/admin/teams")).json().unassignedCount).toBe(before - 2);
+    expect((await audits("admin.team.member_added")).slice(-2).map((a) => (a.changes as { userId: string }).userId)).toEqual(pick);
+    expect((await call("admin", "POST", `/api/v1/admin/teams/${NIL}/members/bulk`, { userIds: [U.r3a] })).statusCode).toBe(404);
+    expect((await call("admin", "POST", `/api/v1/admin/teams/${id}/members/bulk`, { userIds: [] })).statusCode).toBe(422);
+  });
+
+  it("users filter by role and primary location", async () => {
+    const recruiters = (await call("admin", "GET", "/api/v1/admin/users?role=recruiter&limit=200")).json().items as { roles: { key: string }[] }[];
+    expect(recruiters.length).toBeGreaterThan(0);
+    expect(recruiters.every((u) => u.roles.some((x) => x.key === "recruiter"))).toBe(true);
+    const dallas = (await call("admin", "GET", `/api/v1/admin/users?locationId=${LOC.dallas}&limit=200`)).json().items as { primaryLocation: { id: string } | null }[];
+    expect(dallas.every((u) => u.primaryLocation?.id === LOC.dallas)).toBe(true);
   });
 
   it("renames a team; the audit row carries no name", async () => {

@@ -9,6 +9,10 @@ export const UserListQuery = z
     status: z.enum(["active", "inactive"]).optional(),
     // A department and its sub-departments, or "none" for users without one.
     departmentId: z.union([uuid, z.literal("none")]).optional(),
+    // Members of a team, or "none" for users who neither lead nor belong to a team.
+    team: z.union([uuid, z.literal("none")]).optional(),
+    role: z.string().max(64).optional(),
+    locationId: uuid.optional(),
     cursor: uuid.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })
@@ -105,6 +109,8 @@ export type CreateLocation = z.infer<typeof CreateLocation>;
 
 export const SetLead = z.object({ leadId: uuid }).strict();
 export const AddMember = z.object({ userId: uuid }).strict();
+/** Bulk add from the team drawer and the Users tab: each user is added on its own, failures are reported per user. */
+export const AddMembers = z.object({ userIds: z.array(uuid).min(1).max(100) }).strict();
 
 export const MoveMember = z
   .object({ userId: uuid, toTeamId: uuid, reassignTo: uuid.optional() })

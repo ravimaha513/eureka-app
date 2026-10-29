@@ -57,6 +57,14 @@ export interface BulkReport { dryRun: boolean; committed: boolean; created: numb
 
 export interface Team { id: string; name: string; location: Place | null; lead: Ref; /** The lead's department. */ department: UserDepartment | null; members: Ref[]; coaches: Ref[] }
 export interface MoveResult { movedCandidates: number; reassignedTo: Ref }
+/** Bulk add: each person is added on its own; `failed` carries the contract error code per person. */
+export interface AddMembersResult { added: string[]; failed: { userId: string; error: string }[] }
+
+/** Users list filters (GET /admin/users). `team`: a team id, or "none" for people who neither lead nor belong to a team. */
+export interface UserFilters {
+  search?: string; status?: "active" | "inactive"; departmentId?: string; team?: string; role?: string; locationId?: string;
+  cursor?: string | null; limit?: number;
+}
 
 const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
 const enc = encodeURIComponent;
@@ -64,11 +72,14 @@ const enc = encodeURIComponent;
 export const adminApi = {
   meta: () => api<AdminMeta>("/api/v1/admin/meta"),
 
-  users: (p: { search?: string; status?: "active" | "inactive"; departmentId?: string; cursor?: string | null; limit?: number }) => {
+  users: (p: UserFilters) => {
     const q = new URLSearchParams();
     if (p.search) q.set("search", p.search);
     if (p.status) q.set("status", p.status);
     if (p.departmentId) q.set("departmentId", p.departmentId);
+    if (p.team) q.set("team", p.team);
+    if (p.role) q.set("role", p.role);
+    if (p.locationId) q.set("locationId", p.locationId);
     if (p.cursor) q.set("cursor", p.cursor);
     q.set("limit", String(p.limit ?? 50));
     return api<UserPage>(`/api/v1/admin/users?${q}`);
@@ -109,7 +120,8 @@ export const adminApi = {
     api<{ id: string }>("/api/v1/admin/locations", { method: "POST", ...json(b) }),
 
   /** `coaches`: active holders of a coach role, who can be assigned to teams (AD-11). */
-  teams: () => api<{ items: Team[]; coaches: Coach[] }>("/api/v1/admin/teams"),
+  /** `unassignedCount`: active people who neither lead nor belong to a team. */
+  teams: () => api<{ items: Team[]; coaches: Coach[]; unassignedCount: number }>("/api/v1/admin/teams"),
   createTeam: (b: { name: string; leadId: string; locationId?: string }) =>
     api<{ id: string }>("/api/v1/admin/teams", { method: "POST", ...json(b) }),
   renameTeam: (teamId: string, name: string) =>
@@ -118,6 +130,8 @@ export const adminApi = {
     api<void>(`/api/v1/admin/teams/${enc(teamId)}/lead`, { method: "PUT", ...json({ leadId }) }),
   addMember: (teamId: string, userId: string) =>
     api<void>(`/api/v1/admin/teams/${enc(teamId)}/members`, { method: "POST", ...json({ userId }) }),
+  addMembers: (teamId: string, userIds: string[]) =>
+    api<AddMembersResult>(`/api/v1/admin/teams/${enc(teamId)}/members/bulk`, { method: "POST", ...json({ userIds }) }),
   moveMember: (fromTeamId: string, b: { userId: string; toTeamId: string; reassignTo?: string }) =>
     api<MoveResult>(`/api/v1/teams/${enc(fromTeamId)}/move-member`, { method: "POST", ...json(b) }),
 };
