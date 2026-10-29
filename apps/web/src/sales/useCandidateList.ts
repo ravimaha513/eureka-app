@@ -1,19 +1,33 @@
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useCursorPager } from "../ui/Pager";
-import { salesApi, salesKeys, type ListFilters, type ViewFilters, type Visibility } from "./salesApi";
+import type { ListSort } from "@eureka/shared";
+import { salesApi, salesKeys, type ListFilters, type Priority, type ViewFilters, type Visibility } from "./salesApi";
 
 export const PAGE_SIZE = 50;
 
-/** Select filters added for Eureka App 4: office location, visa, documents, resume, stay ("" = any). */
+/**
+ * Select filters added for Eureka App 4 (office location, visa, documents,
+ * resume, stay) and the company sheet (priority, team, recruiter, in person,
+ * guest house), plus the sort ("" = any / default order).
+ */
 export interface ExtraFilters {
   locationId: string;
   visa: string;
   documents: string;
   resume: "" | "yes" | "no";
   stay: "" | "guest_house" | "remote";
+  priority: "" | Priority;
+  teamId: string;
+  recruiterId: string;
+  inPerson: "" | "yes" | "no";
+  ghLocationId: string;
+  sort: "" | ListSort;
 }
-const NO_EXTRA: ExtraFilters = { locationId: "", visa: "", documents: "", resume: "", stay: "" };
+const NO_EXTRA: ExtraFilters = {
+  locationId: "", visa: "", documents: "", resume: "", stay: "",
+  priority: "", teamId: "", recruiterId: "", inPerson: "", ghLocationId: "", sort: "",
+};
 
 /**
  * Filter + cursor-pagination state shared by the Hot List and the Candidates list.
@@ -56,7 +70,9 @@ export function useCandidateList(kind: "hotlist" | "candidates") {
     visibility, setVisibility: (v: Visibility | "") => { setVisibilityRaw(v); reset(); },
     batchId, setBatchId: (v: string) => { setBatchIdRaw(v); reset(); },
     extra, setExtra: <K extends keyof ExtraFilters>(k: K, v: ExtraFilters[K]) => { setExtraRaw((e) => ({ ...e, [k]: v })); reset(); },
-    hasFilters: Boolean(search || technology || status || visibility || batchId || Object.values(extra).some(Boolean)),
+    // The sort is not a filter: it never empties the list.
+    hasFilters: Boolean(search || technology || status || visibility || batchId
+      || Object.entries(extra).some(([k, v]) => k !== "sort" && Boolean(v))),
     clear: () => {
       setSearchInput(""); setTechnologyInput(""); setSearch(""); setTechnology(""); setStatusRaw(""); setVisibilityRaw("");
       setBatchIdRaw(""); setExtraRaw(NO_EXTRA); reset();
@@ -68,6 +84,8 @@ export function useCandidateList(kind: "hotlist" | "candidates") {
       setStatusRaw(f.status ?? ""); setVisibilityRaw(f.visibility ?? "");
       setExtraRaw({
         locationId: f.locationId ?? "", visa: f.visa ?? "", documents: f.documents ?? "", resume: f.resume ?? "", stay: f.stay ?? "",
+        priority: f.priority ?? "", teamId: f.teamId ?? "", recruiterId: f.recruiterId ?? "", inPerson: f.inPerson ?? "",
+        ghLocationId: f.ghLocationId ?? "", sort: f.sort ?? "",
       });
       reset();
     },

@@ -145,8 +145,8 @@ describe("function hygiene (rule 2)", () => {
     "authz.compliance_company_options()",
     "authz.resume_candidate_ids()",
     "authz.resume_flags(uuid[])",
-    "authz.hotlist_page(text,text,text,text,uuid,integer,uuid,text,text,boolean,text)",
-    "authz.hotlist_export(text,text,text,text,integer,uuid,text,text,boolean,text)",
+    "authz.hotlist_page(text,text,text,text,uuid,integer,uuid,text,text,boolean,text,jsonb)",
+    "authz.hotlist_export(text,text,text,text,integer,uuid,text,text,boolean,text,jsonb)",
   ];
 
   it.each(fns)("%s: definer with a pinned search_path, executable by the API role only", async (fn) => {
@@ -169,7 +169,7 @@ describe("function hygiene (rule 2)", () => {
   it("the old six- and five-argument Hot List functions are gone (no ambiguous overloads)", async () => {
     const { rows } = await db.admin.query(`
       SELECT proname, pronargs FROM pg_proc WHERE proname IN ('hotlist_page', 'hotlist_export') ORDER BY proname`);
-    expect(rows).toEqual([{ proname: "hotlist_export", pronargs: 10 }, { proname: "hotlist_page", pronargs: 11 }]);
+    expect(rows).toEqual([{ proname: "hotlist_export", pronargs: 11 }, { proname: "hotlist_page", pronargs: 12 }]);
   });
 
   it("migration-time backfill policies were dropped", async () => {

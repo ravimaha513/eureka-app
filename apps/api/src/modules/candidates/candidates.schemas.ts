@@ -4,6 +4,7 @@ import {
   DOCUMENTS_FILTERS,
   DOCUMENTS_STATUS_LIST,
   ELIGIBILITY_LIST,
+  LIST_SORTS,
   MARKETING_LOCATIONS_MAX,
   PHONE_PROBLEM_MESSAGES,
   STAY_FILTERS,
@@ -27,6 +28,14 @@ export const ExtraListFilters = {
   documents: z.enum(DOCUMENTS_FILTERS).optional(),
   resume: z.enum(["yes", "no"]).optional(),
   stay: z.enum(STAY_FILTERS).optional(),
+  // Hot List sheet columns (0290): priority, team (the sheet's Lead), recruiter, in-person, which guest house.
+  priority: z.enum(["P1", "P2", "P3"]).optional(),
+  teamId: uuid.optional(),
+  recruiterId: uuid.optional(),
+  inPerson: z.enum(["yes", "no"]).optional(),
+  ghLocationId: uuid.optional(),
+  /** Row order; paging stays keyset (sort key, id). */
+  sort: z.enum(LIST_SORTS).optional(),
 };
 
 export const CandidateListQuery = z

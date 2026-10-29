@@ -48,6 +48,16 @@ export const DOCUMENTS_STATUS_LIST = Object.keys(DOCUMENTS_STATUSES) as Document
 
 /** Hot List "documents" filter: a status, or "none" for candidates with no status recorded. */
 export const DOCUMENTS_FILTERS = ["pending", "partial", "complete", "none"] as const satisfies readonly (DocumentsStatus | "none")[];
+/**
+ * Hot List / Candidates list order: "default" (stable id order), priority
+ * (P1 first), days in market (longest first; no start date last), name.
+ */
+export const LIST_SORTS = ["default", "priority", "days", "name"] as const;
+export type ListSort = (typeof LIST_SORTS)[number];
+export const LIST_SORT_LABELS: Record<ListSort, string> = {
+  default: "Default order", priority: "Priority (P1 first)", days: "Longest in market", name: "Name",
+};
+
 /** Hot List "stay" filter: in a guest house (gh_location_id set) or remote. */
 export const STAY_FILTERS = ["guest_house", "remote"] as const;
 export type StayFilter = (typeof STAY_FILTERS)[number];

@@ -5,8 +5,12 @@ import { FUNCTIONS_DIR, MIGRATIONS_DIR, sqlFiles } from "./migrate.js";
 
 /** Migrations up to this one may still define functions that now live in db/functions. */
 const LAST_COPYING_MIGRATION = "0180";
-/** Numbers used twice before this check existed; both files are applied in name order. */
-const KNOWN_DUPLICATE_PREFIXES = new Set(["0090"]);
+/**
+ * Numbers used twice; both files are applied in name order. 0090 predates this
+ * check; 0270 and 0280 were merged together on 2026-10-29 (renaming an applied
+ * migration would run it again under the new name).
+ */
+const KNOWN_DUPLICATE_PREFIXES = new Set(["0090", "0270", "0280"]);
 
 const migrations = sqlFiles(MIGRATIONS_DIR);
 const functionFiles = sqlFiles(FUNCTIONS_DIR);

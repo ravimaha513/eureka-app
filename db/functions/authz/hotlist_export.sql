@@ -1,15 +1,18 @@
 -- authz.hotlist_export: current definition (repeatable; db/functions/README.md).
 -- Earlier bodies: migrations 0025, 0030, 0038, 0140. Change this file, not a new migration.
+-- 0290 (signature dropped there): p_more carries the Hot List sheet filters and the sort
+-- (as authz.hotlist_page); returns the team lead and in-person.
 
 SET ROLE authz_definer;
-CREATE OR REPLACE FUNCTION authz.hotlist_export(p_status text, p_technology text, p_visibility text, p_search text, p_limit integer, p_location uuid DEFAULT NULL::uuid, p_visa text DEFAULT NULL::text, p_documents text DEFAULT NULL::text, p_resume boolean DEFAULT NULL::boolean, p_stay text DEFAULT NULL::text)
- RETURNS TABLE(id uuid, first_name text, last_name text, technology text, team_name text, recruiter_name text, location_name text, visibility text, marketing_status text, priority text, marketing_start_date text, technical_rating smallint, phone text, visa_category text, documents_status text, gh_remote boolean, gh_location_name text)
+CREATE OR REPLACE FUNCTION authz.hotlist_export(p_status text, p_technology text, p_visibility text, p_search text, p_limit integer, p_location uuid DEFAULT NULL::uuid, p_visa text DEFAULT NULL::text, p_documents text DEFAULT NULL::text, p_resume boolean DEFAULT NULL::boolean, p_stay text DEFAULT NULL::text, p_more jsonb DEFAULT NULL::jsonb)
+ RETURNS TABLE(id uuid, first_name text, last_name text, technology text, team_name text, recruiter_name text, location_name text, visibility text, marketing_status text, priority text, marketing_start_date text, technical_rating smallint, phone text, visa_category text, documents_status text, gh_remote boolean, gh_location_name text, lead_name text, in_person_ok boolean)
  LANGUAGE plpgsql
  STABLE SECURITY DEFINER
  SET search_path TO 'pg_catalog', 'pg_temp'
 AS $function$
 BEGIN
-  -- Same query as 0038; $6..$10 = p_location, p_visa, p_documents ('none' = not recorded), p_resume, p_stay.
+  -- Same query as 0038; $6..$10 = p_location, p_visa, p_documents ('none' = not recorded), p_resume, p_stay;
+  -- $11 = p_more (priority, teamId, recruiterId, inPerson, ghLocationId, sort), as authz.hotlist_page.
   RETURN QUERY EXECUTE $q$
   WITH s AS MATERIALIZED (
     SELECT authz.hotlist_open() AS open,
@@ -24,6 +27,11 @@ BEGIN
   ),
   picked AS (
     SELECT c.*, p.first_name, p.last_name, p.phone_e164, t.name AS technology_name,
+      CASE coalesce($11::jsonb ->> 'sort', 'default')
+        WHEN 'priority' THEN c.priority
+        WHEN 'days' THEN coalesce(c.marketing_start_date::text, '9999-12-31')
+        WHEN 'name' THEN lower(p.first_name || ' ' || p.last_name)
+        ELSE '' END AS sk,
       coalesce(s.ro OR c.recruiter_id = ANY (s.rr) OR c.team_id = ANY (s.rt) OR c.location_id = ANY (s.rl)
                OR (s.rat AND c.visibility = 'all_teams' AND c.marketing_status IN ('active', 'full_of_interviews'))
                OR c.id = ANY (s.rsh), false) AS can_read
@@ -48,7 +56,12 @@ BEGIN
              OR EXISTS (SELECT 1 FROM eureka.resume r WHERE r.candidate_id = c.id AND r.is_current)))
       AND ($10::text IS NULL OR ($10::text = 'remote' AND c.gh_remote)
              OR ($10::text = 'guest_house' AND c.gh_location_id IS NOT NULL))
-    ORDER BY c.id
+      AND ($11::jsonb ->> 'priority' IS NULL OR c.priority = $11::jsonb ->> 'priority')
+      AND ($11::jsonb ->> 'teamId' IS NULL OR c.team_id = ($11::jsonb ->> 'teamId')::uuid)
+      AND ($11::jsonb ->> 'recruiterId' IS NULL OR c.recruiter_id = ($11::jsonb ->> 'recruiterId')::uuid)
+      AND ($11::jsonb ->> 'inPerson' IS NULL OR c.in_person_ok IS NOT DISTINCT FROM ($11::jsonb ->> 'inPerson' = 'yes'))
+      AND ($11::jsonb ->> 'ghLocationId' IS NULL OR c.gh_location_id = ($11::jsonb ->> 'ghLocationId')::uuid)
+    ORDER BY sk, c.id
     LIMIT least(greatest(coalesce($5::int, 50000), 1), 50001)
   )
   SELECT h.id, h.first_name, h.last_name, h.technology_name,
@@ -57,18 +70,19 @@ BEGIN
          CASE WHEN h.can_read THEN h.technical_rating END,
          CASE WHEN h.phone_e164 IS NULL THEN NULL
               ELSE '•••-•••-' || lpad(right(regexp_replace(h.phone_e164, '\D', '', 'g'), 2), 2, '•') END,
-         h.visa_category, h.documents_status, h.gh_remote, gl.name
+         h.visa_category, h.documents_status, h.gh_remote, gl.name, lu.display_name, h.in_person_ok
   FROM picked h
   JOIN eureka.team tm ON tm.id = h.team_id
   JOIN eureka.location l ON l.id = h.location_id
   LEFT JOIN eureka.location gl ON gl.id = h.gh_location_id
   LEFT JOIN eureka.app_user u ON u.id = h.recruiter_id
-  ORDER BY h.id
+  LEFT JOIN eureka.app_user lu ON lu.id = tm.lead_id
+  ORDER BY h.sk, h.id
   $q$ USING p_status, p_technology, p_visibility, p_search, p_limit,
-            p_location, p_visa, p_documents, p_resume, p_stay;
+            p_location, p_visa, p_documents, p_resume, p_stay, p_more;
 END
 $function$;
 
-REVOKE ALL ON FUNCTION authz.hotlist_export(text, text, text, text, integer, uuid, text, text, boolean, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION authz.hotlist_export(text, text, text, text, integer, uuid, text, text, boolean, text) TO eureka_app;
+REVOKE ALL ON FUNCTION authz.hotlist_export(text, text, text, text, integer, uuid, text, text, boolean, text, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION authz.hotlist_export(text, text, text, text, integer, uuid, text, text, boolean, text, jsonb) TO eureka_app;
 RESET ROLE;

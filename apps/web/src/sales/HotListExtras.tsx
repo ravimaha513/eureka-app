@@ -12,6 +12,7 @@ import {
   viewFilters,
   type BulkError,
   type BulkResponse,
+  type Priority,
   type Visibility,
 } from "./salesApi";
 import type { useCandidateList } from "./useCandidateList";
@@ -167,16 +168,20 @@ export function BulkBar({ selected, items, canStatus, canVisibility, onDone }: {
   const id = useId();
   const qc = useQueryClient();
   const [to, setTo] = useState("");
+  const [pri, setPri] = useState<Priority | "">("");
   const [vis, setVis] = useState<Visibility | "">("");
   const [teams, setTeams] = useState<Set<string>>(() => new Set());
   const [names, setNames] = useState<Record<string, string>>({});
   const run = useMutation({
-    mutationFn: (a: { kind: "status"; to: string } | { kind: "visibility"; visibility: Visibility; teamIds?: string[] }) => {
+    mutationFn: (a: { kind: "status"; to: string } | { kind: "priority"; priority: Priority }
+      | { kind: "visibility"; visibility: Visibility; teamIds?: string[] }) => {
       const ids = [...selected];
       setNames(Object.fromEntries(items.filter((c) => selected.has(c.id)).map((c) => [c.id, c.name])));
-      return a.kind === "status" ? hotlistApi.bulkStatus(ids, a.to) : hotlistApi.bulkVisibility(ids, a.visibility, a.teamIds);
+      return a.kind === "status" ? hotlistApi.bulkStatus(ids, a.to)
+        : a.kind === "priority" ? hotlistApi.bulkPriority(ids, a.priority)
+        : hotlistApi.bulkVisibility(ids, a.visibility, a.teamIds);
     },
-    onSuccess: () => { setTo(""); setVis(""); setTeams(new Set()); onDone(); void qc.invalidateQueries({ queryKey: salesKeys.hotlist }); },
+    onSuccess: () => { setTo(""); setPri(""); setVis(""); setTeams(new Set()); onDone(); void qc.invalidateQueries({ queryKey: salesKeys.hotlist }); },
   });
   const r: BulkResponse | undefined = run.data;
   const n = selected.size;
@@ -197,6 +202,15 @@ export function BulkBar({ selected, items, canStatus, canVisibility, onDone }: {
             </div>
             <button type="button" className="btn primary" disabled={!n || !to || run.isPending}
               onClick={() => run.mutate({ kind: "status", to })}>Apply status</button>
+            <div className="field inline">
+              <label htmlFor={`${id}-pri`}>Set priority</label>
+              <select id={`${id}-pri`} value={pri} onChange={(e) => setPri(e.target.value as Priority | "")}>
+                <option value="">Choose a priority</option>
+                <option value="P1">P1</option><option value="P2">P2</option><option value="P3">P3</option>
+              </select>
+            </div>
+            <button type="button" className="btn primary" disabled={!n || !pri || run.isPending}
+              onClick={() => pri && run.mutate({ kind: "priority", priority: pri })}>Apply priority</button>
           </>
         )}
         {canVisibility && (

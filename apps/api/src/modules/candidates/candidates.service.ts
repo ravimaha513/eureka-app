@@ -26,6 +26,7 @@ import {
   type CandidateRef,
   type CandidateVisibility,
   type EffectiveScope,
+  type ListSort,
   type Permission,
   type UserAccess,
 } from "@eureka/shared";
@@ -75,6 +76,8 @@ interface CandidateRow {
   gh_location_id: string | null;
   gh_location_name: string | null;
   team_assigned_at: Date;
+  lead_name: string | null;
+  in_person_ok: boolean | null;
   /** A resume link is recorded (the link itself is owner-only, profileExtras). */
   resume_link: boolean;
 }
@@ -102,7 +105,33 @@ export function extraFilterPredicates(q: CandidateListQuery, params: unknown[], 
   }
   if (q.stay === "remote") where.push(`${alias}.gh_remote`);
   if (q.stay === "guest_house") where.push(`${alias}.gh_location_id IS NOT NULL`);
+  if (q.priority) where.push(`${alias}.priority = ${p(q.priority)}`);
+  if (q.teamId) where.push(`${alias}.team_id = ${p(q.teamId)}`);
+  if (q.recruiterId) where.push(`${alias}.recruiter_id = ${p(q.recruiterId)}`);
+  if (q.inPerson) where.push(`${alias}.in_person_ok IS ${q.inPerson === "yes" ? "TRUE" : "FALSE"}`);
+  if (q.ghLocationId) where.push(`${alias}.gh_location_id = ${p(q.ghLocationId)}`);
   return where;
+}
+
+/** The 0290 filters and sort for authz.hotlist_page / hotlist_export (one jsonb argument, so new keys need no new signature). */
+export function moreFilters(q: Pick<CandidateListQuery, "priority" | "teamId" | "recruiterId" | "inPerson" | "ghLocationId" | "sort">) {
+  return {
+    priority: q.priority ?? null, teamId: q.teamId ?? null, recruiterId: q.recruiterId ?? null,
+    inPerson: q.inPerson ?? null, ghLocationId: q.ghLocationId ?? null, sort: q.sort ?? null,
+  };
+}
+
+/**
+ * Order key of a list sort (null: id order). Paging is keyset on (key, id),
+ * the cursor row's key read back by id. Mirrored by authz.hotlist_page (0290).
+ */
+export function sortKey(sort: ListSort | undefined, c = "c", p = "p"): string | null {
+  switch (sort) {
+    case "priority": return `${c}.priority`;
+    case "days": return `coalesce(${c}.marketing_start_date, 'infinity'::date)`;
+    case "name": return `lower(${p}.first_name || ' ' || ${p}.last_name)`;
+    default: return null;
+  }
 }
 
 /** "Java · Dallas · Nov 2026" from a batch's technology, location and start month (YYYY-MM-DD). */
@@ -240,6 +269,8 @@ interface HotlistRow {
   gh_remote: boolean;
   gh_location_name: string | null;
   has_resume: boolean;
+  lead_name: string | null;
+  in_person_ok: boolean | null;
 }
 
 /**
@@ -292,13 +323,15 @@ export class CandidatesService implements OnModuleInit {
            c.marketing_start_date::text, c.technical_rating, c.row_version,
            c.batch_id, b.start_month::text AS batch_month, bt.name AS batch_technology, bl.name AS batch_location,
            c.visa_category, c.documents_status, c.gh_remote, c.gh_location_id, gl.name AS gh_location_name,
-           c.team_assigned_at, (c.resume_url IS NOT NULL) AS resume_link
+           c.team_assigned_at, (c.resume_url IS NOT NULL) AS resume_link,
+           lu.display_name AS lead_name, c.in_person_ok
     FROM eureka.candidate c
     JOIN eureka.person p ON p.id = c.person_id
     JOIN eureka.technology t ON t.id = c.technology_id
     JOIN eureka.team tm ON tm.id = c.team_id
     JOIN eureka.location l ON l.id = c.location_id
     LEFT JOIN eureka.app_user u ON u.id = c.recruiter_id
+    LEFT JOIN eureka.app_user lu ON lu.id = tm.lead_id
     LEFT JOIN eureka.batch b ON b.id = c.batch_id
     LEFT JOIN eureka.technology bt ON bt.id = b.technology_id
     LEFT JOIN eureka.location bl ON bl.id = b.location_id
@@ -321,8 +354,9 @@ export class CandidatesService implements OnModuleInit {
       statusLabel: marketingStatusLabel(r.marketing_status, r.visibility, r.gh_remote),
       visibility: r.visibility,
       priority: r.priority,
-      team: { id: r.team_id, name: r.team_name },
+      team: { id: r.team_id, name: r.team_name, lead: r.lead_name },
       teamAssignedAt: r.team_assigned_at.toISOString(),
+      inPersonOk: r.in_person_ok,
       recruiter: r.recruiter_id ? { id: r.recruiter_id, name: r.recruiter_name } : null,
       location: { id: r.location_id, name: r.location_name },
       ghLocation: r.gh_location_id && r.gh_location_name ? { id: r.gh_location_id, name: r.gh_location_name } : null,
@@ -366,9 +400,17 @@ export class CandidatesService implements OnModuleInit {
       params.push(likeContains(q.search));
       where.push(`(p.first_name || ' ' || p.last_name) ILIKE $${params.length}`);
     }
-    if (q.cursor) { params.push(q.cursor); where.push(`c.id > $${params.length}`); }
+    const key = sortKey(q.sort);
+    if (q.cursor) {
+      params.push(q.cursor);
+      const cur = `$${params.length}::uuid`;
+      where.push(key
+        ? `(${key}, c.id) > (SELECT ${sortKey(q.sort, "cc", "pp")}, cc.id FROM eureka.candidate cc
+             JOIN eureka.person pp ON pp.id = cc.person_id WHERE cc.id = ${cur})`
+        : `c.id > ${cur}`);
+    }
     params.push(q.limit + 1);
-    const sql = `${this.baseSelect} WHERE ${where.join(" AND ")} ORDER BY c.id LIMIT $${params.length}`;
+    const sql = `${this.baseSelect} WHERE ${where.join(" AND ")} ORDER BY ${key ? `${key}, ` : ""}c.id LIMIT $${params.length}`;
     const { rows, withResume } = await this.db.withUser(user.id, async (c) => {
       const r = (await c.query<CandidateRow>(sql, params)).rows;
       const ids = r.slice(0, q.limit).map((x) => x.id);
@@ -397,6 +439,8 @@ export class CandidatesService implements OnModuleInit {
         filters: {
           status: q.status, technology: q.technology, visibility: q.visibility, search: q.search ? true : undefined,
           locationId: q.locationId, visa: q.visa, documents: q.documents, resume: q.resume, stay: q.stay,
+          priority: q.priority, teamId: q.teamId, recruiterId: q.recruiterId, inPerson: q.inPerson,
+          ghLocationId: q.ghLocationId, sort: q.sort,
         },
         rows: n, firstId: r[0]?.id ?? null, lastId: r[n - 1]?.id ?? null,
       },
@@ -412,10 +456,10 @@ export class CandidatesService implements OnModuleInit {
     const search = q.search ? likeContains(q.search) : null;
     const rows = await this.db.withUser(user.id, async (c) => {
       const r = (await c.query<HotlistRow>(
-        `SELECT * FROM authz.hotlist_page($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        `SELECT * FROM authz.hotlist_page($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [q.status ?? null, q.technology ?? null, q.visibility ?? null, search, q.cursor ?? null, q.limit + 1,
           q.locationId ?? null, q.visa ?? null, q.documents ?? null, q.resume === undefined ? null : q.resume === "yes",
-          q.stay ?? null],
+          q.stay ?? null, moreFilters(q)],
       )).rows;
       await this.auditHotlistPage(c, user, q, r);
       return r;
@@ -434,7 +478,8 @@ export class CandidatesService implements OnModuleInit {
           statusLabel: marketingStatusLabel(r.marketing_status, r.visibility, r.gh_remote),
           visibility: r.visibility,
           priority: r.priority,
-          team: { id: r.team_id, name: r.team_name },
+          team: { id: r.team_id, name: r.team_name, lead: r.lead_name },
+          inPersonOk: r.in_person_ok,
           recruiter: r.recruiter_id ? { id: r.recruiter_id, name: r.recruiter_name } : null,
           location: { id: r.location_id, name: r.location_name },
           ghLocation: r.gh_location_name ? { name: r.gh_location_name } : null,

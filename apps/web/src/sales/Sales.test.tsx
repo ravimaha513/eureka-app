@@ -95,7 +95,7 @@ describe("Hot List", () => {
     wrap(<HotListPage me={RECRUITER} onOpenProfile={() => undefined} />);
     const foreign = await rowOf("Divya Menon");
     // The recruiter may change status, so the first column holds the row-selection checkbox.
-    const phoneCell = within(foreign).getAllByRole("cell")[10]!;
+    const phoneCell = within(foreign).getAllByRole("cell")[12]!;
     expect(phoneCell).toHaveClass("masked");
     expect(within(phoneCell).getByText("•••-•••-42")).toHaveAttribute("aria-hidden", "true");
     expect(within(phoneCell).getByText(/Phone hidden, ends in 42\. Not your team's candidate\./)).toHaveClass("sr-only");
