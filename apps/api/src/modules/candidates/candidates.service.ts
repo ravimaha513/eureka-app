@@ -40,6 +40,7 @@ import type {
   ComplianceUpdate,
   CreateBatch,
   CreateCandidate,
+  DuplicateCheck,
   ProfileUpdate,
   TimelineQuery,
 } from "./candidates.schemas.js";
@@ -148,6 +149,13 @@ export function auditSafeProfile(body: ProfileUpdate): Record<string, unknown> {
 
 /** Maps the batch functions' and trigger's coded errors (migration 0026) to problem details. */
 const mapBatchError: (err: unknown) => never = dbErrorMapper(BATCH_ERRORS);
+
+/** Create errors: batch codes, and a contact another candidate took meanwhile (0260). */
+const mapCreateError: (err: unknown) => never = dbErrorMapper({
+  ...BATCH_ERRORS,
+  duplicate_email: () => new ConflictException("duplicate_contact"),
+  duplicate_phone: () => new ConflictException("duplicate_contact"),
+});
 
 
 /**
@@ -656,14 +664,14 @@ export class CandidatesService implements OnModuleInit {
       || (scope.recruiterIds.has(user.id) && user.access.teamIds[0] === team));
     if (!teamAllowed) throw new ForbiddenException("Not permitted to create candidates in this team");
 
-    // Duplicate check first (FR-CAN-09), in its own transaction so its audit
-    // row stays even when the create is refused. The 409 carries no details;
-    // the caller asks POST /candidates/duplicate-check for the minimal info.
-    let duplicates = 0;
-    if (body.email !== undefined || body.phone !== undefined) {
-      duplicates = (await this.duplicates(user, body)).length;
-      if (duplicates > 0 && body.confirmDuplicate !== true) throw new ConflictException("possible_duplicate");
-    }
+    // Email and phone are each unique across candidates (CA-6). The check runs
+    // in its own transaction so its audit row stays when the create is refused;
+    // the 409 carries no details, the caller asks POST /candidates/duplicate-check
+    // for the minimal info. authz.candidate_contact_unique (0260) is the
+    // race-safe backstop.
+    if (!body.email) throw new UnprocessableEntityException("email_required");
+    if (!body.phone) throw new UnprocessableEntityException("phone_required");
+    if ((await this.duplicates(user, body)).length > 0) throw new ConflictException("duplicate_contact");
 
     return this.db.withUser(user.id, async (c) => {
       const recruiter = body.recruiterId === undefined
@@ -673,15 +681,12 @@ export class CandidatesService implements OnModuleInit {
       // generated here rather than read back with RETURNING (RLS would hide it).
       const personId = randomUUID();
       await c.query(`INSERT INTO eureka.person (id, first_name, last_name, phone_e164, personal_email) VALUES ($1,$2,$3,$4,$5)`,
-        [personId, body.firstName, body.lastName, body.phone ?? null, body.email ?? null]);
+        [personId, body.firstName, body.lastName, body.phone, body.email]);
       const cand = await c.query<{ id: string }>(
         `INSERT INTO eureka.candidate (person_id, technology_id, team_id, recruiter_id, location_id, batch_id)
          VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-        [personId, body.technologyId, team, recruiter, body.locationId, body.batchId ?? null]).catch(mapBatchError);
-      await this.audit.record(c, {
-        actorId: user.id, action: "candidate.created", entityType: "candidate", entityId: cand.rows[0]!.id,
-        ...(duplicates > 0 ? { changes: { duplicateConfirmed: true } } : {}),
-      });
+        [personId, body.technologyId, team, recruiter, body.locationId, body.batchId ?? null]).catch(mapCreateError);
+      await this.audit.record(c, { actorId: user.id, action: "candidate.created", entityType: "candidate", entityId: cand.rows[0]!.id });
       if (then) await then(c, cand.rows[0]!.id);
       return { id: cand.rows[0]!.id };
     });
@@ -694,7 +699,7 @@ export class CandidatesService implements OnModuleInit {
    * caller can read it. Rate-limited per user; every call is audited without
    * the values checked.
    */
-  async duplicates(user: AuthedUser, body: Pick<CreateCandidate, "firstName" | "lastName" | "email" | "phone">) {
+  async duplicates(user: AuthedUser, body: DuplicateCheck) {
     if (!this.duplicateLimiter.take(user.id)) {
       this.log.warn(`Duplicate check rate limit exceeded by user ${user.id}`);
       throw new HttpException("Too many duplicate checks; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);

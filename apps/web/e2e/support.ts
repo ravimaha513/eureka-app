@@ -51,14 +51,17 @@ export async function expectMaskedPhone(phoneCell: Locator) {
 }
 
 export interface Api {
-  me: { id: string; csrfToken: string; capabilities: string[] };
+  me: { id: string; email: string; csrfToken: string; capabilities: string[] };
   get(path: string): Promise<any>;
   send(method: "POST" | "PATCH" | "PUT", path: string, data: unknown, status?: number, headers?: Record<string, string>): Promise<any>;
   dispose(): Promise<void>;
+  /** Another user's session on the same server. */
+  as(email: string): Promise<Api>;
 }
 
 /** A separate API session (own cookies) for setting up data as another user. */
 export async function apiAs(playwright: PlaywrightWorkerArgs["playwright"], baseURL: string | undefined, email: string): Promise<Api> {
+  const as = (other: string) => apiAs(playwright, baseURL, other);
   const ctx: APIRequestContext = await playwright.request.newContext({ baseURL });
   const r = await ctx.post("/api/auth/dev-login", { data: { email } });
   expect(r.ok(), `dev-login ${email}`).toBeTruthy();
@@ -78,14 +81,34 @@ export async function apiAs(playwright: PlaywrightWorkerArgs["playwright"], base
       return text ? JSON.parse(text) : undefined;
     },
     dispose: () => ctx.dispose(),
+    as,
   };
 }
 
-/** A fresh Dallas Java candidate created by `api`'s user (no phone or email, so no duplicate check). */
+/** A phone number no other e2e candidate is likely to hold (phones are unique across candidates, CA-6). */
+export const uniqPhone = () => `+1555${String(Math.floor(Math.random() * 1e7)).padStart(7, "0")}`;
+
+/** Sales recruiters' team leads in the dev seed. */
+const LEAD_OF: Record<string, string> = { r1a: "l1", r1b: "l1", r2a: "l2", r3a: "l3" };
+
+/**
+ * A fresh Dallas Java candidate with a unique phone and email, owned by `api`'s
+ * user. Only a lead or above adds candidates (CA-6), so a recruiter's
+ * candidate is created by their team lead with the recruiter assigned.
+ */
 export async function freshCandidate(api: Api, tag: string, extra: Record<string, unknown> = {}) {
   const firstName = `E2E${tag}`;
   const lastName = uniq();
-  const { id } = await api.send("POST", "/api/v1/candidates", { firstName, lastName, technologyId: JAVA, locationId: DALLAS, ...extra }, 201);
+  const body = { firstName, lastName, phone: uniqPhone(), email: `e2e-${lastName}@example.test`, technologyId: JAVA, locationId: DALLAS, ...extra };
+  let id: string;
+  if (api.me.capabilities.includes("candidate:create")) {
+    ({ id } = await api.send("POST", "/api/v1/candidates", body, 201));
+  } else {
+    const local = api.me.email.split("@")[0]!;
+    const lead = await api.as(`${LEAD_OF[local] ?? "l1"}@eureka.example`);
+    ({ id } = await lead.send("POST", "/api/v1/candidates", { ...body, recruiterId: api.me.id }, 201));
+    await lead.dispose();
+  }
   const c = await api.get(`/api/v1/candidates/${id}`);
   return { id: id as string, name: c.name as string };
 }

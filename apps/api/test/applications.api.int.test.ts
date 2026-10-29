@@ -263,13 +263,15 @@ describe("withdraw, hire and create candidate (JP-26, JP-30)", () => {
       .rejects.toThrow(/not_permitted/);
     expect((await call("hr", "POST", `/api/v1/applications/${appId}/candidate`, body)).statusCode).toBe(403);
     expect((await call("l1", "POST", `/api/v1/applications/${appId}/candidate`, body)).statusCode).toBe(404);
-    const c = await call("l2", "POST", `/api/v1/applications/${appId}/candidate`, body);
+    // l2 may not read applicant phones, so the phone (required, CA-6) comes in the body.
+    const noPhone = await call("l2", "POST", `/api/v1/applications/${appId}/candidate`, body);
+    expect([noPhone.statusCode, noPhone.json().detail]).toEqual([422, "phone_required"]);
+    const c = await call("l2", "POST", `/api/v1/applications/${appId}/candidate`, { ...body, phone: "+1 212 555 0199" });
     expect(c.statusCode, c.body).toBe(201);
     const cand = (await call("l2", "GET", `/api/v1/candidates/${c.json().candidateId}`)).json();
     expect(cand).toMatchObject({ name: "Asha Iyer", team: { id: T.t2 } });
-    // l2 may not read applicant phones: the candidate was created without one.
     expect((await db.admin.query(`SELECT p.phone_e164, p.personal_email FROM eureka.candidate c JOIN eureka.person p ON p.id = c.person_id WHERE c.id = $1`, [c.json().candidateId])).rows[0])
-      .toEqual({ phone_e164: null, personal_email: "applicant-a@example.com" });
+      .toEqual({ phone_e164: "+12125550199", personal_email: "applicant-a@example.com" });
     expect((await call("l2", "GET", `/api/v1/applications/${appId}`)).json().candidateId).toBe(c.json().candidateId);
     expect((await call("l2", "POST", `/api/v1/applications/${appId}/candidate`, body)).json().detail).toBe("candidate_exists");
   });
