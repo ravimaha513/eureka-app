@@ -141,7 +141,7 @@ the API loads it once per request (`UserAccess.sharedCandidateIds`). Shares coun
 
 ## Adding candidates: required, unique contact; lead or above (CA-6)
 
-Migration `0260_candidate_unique_contact.sql`.
+Migrations `0260_candidate_unique_contact.sql` (trigger) and `0300_candidate_contact_required.sql` (one lock per transaction, import loader policies).
 
 - **Who:** `candidate:create` is a lead (team), manager / AD (hierarchy) or org grant. Recruiters no
   longer hold it, so they get 403 on `POST /api/v1/candidates`, `POST /candidates/duplicate-check`
@@ -158,7 +158,7 @@ Migration `0260_candidate_unique_contact.sql`.
 - **Backstop:** trigger `authz.candidate_contact_unique` (BEFORE INSERT on `candidate`, BEFORE UPDATE
   OF `personal_email, phone_e164` on `person`) refuses a personal email or phone another candidate's
   person holds (`duplicate_email` / `duplicate_phone`, unique_violation; the API maps both to 409).
-  A transaction advisory lock per value serializes concurrent creates. It covers every writer
+  One transaction advisory lock (0300) serializes concurrent creates; one per value exhausted the lock table on 50k-row bulk inserts. It covers every writer
   (API, imports, seeds). Existing duplicates are left as they are (no unique index), and persons
   without a candidate (employees only) are not checked.
 
