@@ -144,6 +144,8 @@ export const adminApi = {
   location: (id: string) => api<LocationDetail>(`/api/v1/admin/locations/${enc(id)}`),
   createLocation: (b:{ name: string; kind: LocationKind; state?: string; timezone?: string }) =>
     api<{ id: string }>("/api/v1/admin/locations", { method: "POST", ...json(b) }),
+  renameLocation: (id: string, name: string) =>
+    api<void>(`/api/v1/admin/locations/${enc(id)}`, { method: "PATCH", ...json({ name }) }),
 
   /** `coaches`: active holders of a coach role, who can be assigned to teams (AD-11). */
   /** `unassignedCount`: active people who neither lead nor belong to a team. */
