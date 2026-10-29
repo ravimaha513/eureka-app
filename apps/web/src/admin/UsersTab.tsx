@@ -60,9 +60,11 @@ export function UsersTab({ preset }: { preset?: UsersPreset } = {}) {
   const passwordLogin = usePasswordLogin();
 
   useEffect(() => {
+    // Only a changed search resets paging; otherwise the mount-time run would undo an early Next.
+    if (searchInput.trim() === search) return;
     const t = setTimeout(() => { setSearch(searchInput.trim()); pager.reset(); }, 250);
     return () => clearTimeout(t);
-  }, [searchInput]);
+  }, [searchInput, search]);
 
   const q = useQuery({
     queryKey: [...keys.users, { search, status, departmentId, team, role, locationId, cursor: pager.cursor }],

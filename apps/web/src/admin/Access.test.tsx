@@ -187,6 +187,9 @@ describe("Users tab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() => expect(calls.some((c) => c.url.searchParams.get("cursor") === "c2")).toBe(true));
     await waitFor(() => expect(screen.getByText("Page 2")).toBeInTheDocument());
+    // The search debounce must not bounce an early Next back to page 1.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(screen.getByText("Page 2")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Previous" }));
     expect(screen.getByText("Page 1")).toBeInTheDocument();
