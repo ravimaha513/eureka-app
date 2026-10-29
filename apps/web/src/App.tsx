@@ -120,6 +120,61 @@ export function ChangePassword({ onDone, onSignOut }: { onDone: () => void; onSi
   );
 }
 
+/**
+ * /set-password#token=…: a new user opens the emailed link (staging/local),
+ * picks a password and is signed in. The token is read from the fragment once
+ * and then cleared from the address bar.
+ */
+export function SetPassword({ onDone }: { onDone: () => void }) {
+  const [token] = useState(() => {
+    const t = new URLSearchParams(window.location.hash.slice(1)).get("token") ?? "";
+    if (window.location.hash) window.history.replaceState(null, "", window.location.pathname);
+    return t;
+  });
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [dead, setDead] = useState(!/^[A-Za-z0-9_-]{43}$/.test(token));
+  return (
+    <div className="loginpage"><main className="loginpanel"><div className="loginbox">
+      <h1>Set your password</h1>
+      {dead ? (
+        <>
+          <p className="sub">This link is invalid, expired or already used. Ask an administrator to send a new one.</p>
+          <button type="button" className="btn primary block" onClick={() => navigate("/")}>Go to sign-in</button>
+        </>
+      ) : (
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          if (next !== again) { setErr("The passwords do not match."); return; }
+          setBusy(true); setErr("");
+          try {
+            await api("/api/auth/password/setup", { method: "POST", body: JSON.stringify({ token, newPassword: next }) });
+            navigate("/");
+            onDone();
+          } catch (er) {
+            const d = er instanceof ApiError ? er.detail : undefined;
+            if (d === "invalid_link") setDead(true);
+            else setErr(d === "password_weak" ? "Use 10 to 72 characters with at least one letter and one number."
+              : d === "too_many_attempts" ? "Too many attempts. Wait a few minutes and try again."
+              : er instanceof Error ? er.message : "Could not set the password.");
+          } finally { setBusy(false); }
+        }}>
+          <p className="sub">Choose a password for your Eureka account. You'll use it with your email to sign in.</p>
+          <div className="field"><label htmlFor="sp-new">New password</label>
+            <input id="sp-new" type="password" autoComplete="new-password" required minLength={10} maxLength={72} value={next} onChange={(e) => setNext(e.target.value)} /></div>
+          <div className="field"><label htmlFor="sp-again">Repeat password</label>
+            <input id="sp-again" type="password" autoComplete="new-password" required value={again} onChange={(e) => setAgain(e.target.value)} /></div>
+          <p className="hint">10 to 72 characters with at least one letter and one number.</p>
+          <button type="submit" className="btn primary block" disabled={busy}>Set password and sign in</button>
+        </form>
+      )}
+      {err && <p className="error" role="alert">{err}</p>}
+    </div></main></div>
+  );
+}
+
 export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedIn: () => void; devMode?: boolean }) {
   const [who, setWho] = useState<string>(DEV_USERS[0][0]);
   const [err, setErr] = useState("");
@@ -385,6 +440,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
 
 export default function App() {
   const qc = useQueryClient();
+  const pathname = usePathname();
   const me = useQuery({
     queryKey: ["me"],
     queryFn: async () => {
@@ -398,6 +454,7 @@ export default function App() {
       }
     },
   });
+  if (pathname === "/set-password") return <SetPassword onDone={() => void qc.invalidateQueries()} />;
   if (me.isLoading) return <Loading page />;
   if (!me.data) return <Login onSignedIn={() => qc.invalidateQueries()} />;
   const signOut = async () => {
