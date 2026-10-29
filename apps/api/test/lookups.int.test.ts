@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { can, type Permission } from "@eureka/shared";
 import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
-import { createTestDb, type TestDb } from "./db-harness.js";
+import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { CLIENT_ID, LOC, U, seedFixtures, toUserAccess } from "./fixtures.js";
 
 /**
@@ -36,10 +36,14 @@ afterAll(async () => {
 type Key = keyof typeof U;
 const users = Object.keys(U) as Key[];
 
+async function login(key: Key) {
+  const res = await app.inject({ method: "POST", url: "/api/auth/dev-login", payload: { email: `${key}@eureka.example` } });
+  expect(res.statusCode).toBe(204);
+  return String(res.headers["set-cookie"]).split(";")[0]!;
+}
+
 async function lookups(key: Key) {
-  const login = await app.inject({ method: "POST", url: "/api/auth/dev-login", payload: { email: `${key}@eureka.example` } });
-  expect(login.statusCode).toBe(204);
-  const cookie = String(login.headers["set-cookie"]).split(";")[0]!;
+  const cookie = await login(key);
   const res = await app.inject({ method: "GET", url: "/api/v1/lookups", headers: { cookie } });
   expect(res.statusCode, res.body).toBe(200);
   return res.json() as Record<string, { id: string; name: string }[]>;
@@ -95,5 +99,70 @@ describe("lookups", () => {
 
   it("requires a session", async () => {
     expect((await app.inject({ method: "GET", url: "/api/v1/lookups" })).statusCode).toBe(401);
+    expect((await app.inject({ method: "POST", url: "/api/v1/lookups/technologies", payload: { name: "Go" } })).statusCode).toBe(401);
+  });
+});
+
+describe("POST /api/v1/lookups/technologies", () => {
+  const add = async (key: Key, payload: Record<string, unknown>) => {
+    const cookie = await login(key);
+    const me = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie } });
+    const csrf = me.json().csrfToken as string;
+    return app.inject({ method: "POST", url: "/api/v1/lookups/technologies", headers: { cookie, "x-csrf-token": csrf }, payload });
+  };
+
+  const ADDERS = new Set<Key>(["l1", "l2", "l3", "m1", "m2", "ad", "ceo", "admin", "admin2"]);
+
+  it("only Sales leads and above (manager, associate director, CEO) and org admins hold technology:create", () => {
+    for (const key of users) expect(can(toUserAccess(key), "technology:create"), key).toBe(ADDERS.has(key));
+  });
+
+  it.each(users.filter((k) => !ADDERS.has(k)))("refuses %s with 403 and writes nothing", async (key) => {
+    const res = await add(key, { name: `Nope ${key}` });
+    expect(res.statusCode, res.body).toBe(403);
+    const { rows } = await db.admin.query(`SELECT count(*)::int AS n FROM eureka.technology WHERE name = $1`, [`Nope ${key}`]);
+    expect(rows[0].n).toBe(0);
+  });
+
+  it("the database refuses a caller without technology:create even past the API", async () => {
+    await expect(asUser(db.app, U.r1a, (c) => c.query(`SELECT * FROM authz.create_technology('Go')`)))
+      .rejects.toMatchObject({ code: "42501" });
+  });
+
+  it("lets a lead add one, and everyone then sees it", async () => {
+    const res = await add("l1", { name: "  Rust   Systems " });
+    expect(res.statusCode, res.body).toBe(200);
+    const made = res.json() as { id: string; name: string; created: boolean };
+    expect(made).toMatchObject({ name: "Rust Systems", created: true });
+    expect((await lookups("r1a")).technologies).toContainEqual({ id: made.id, name: "Rust Systems" });
+
+    const audit = await db.admin.query(`SELECT actor_id, changes FROM eureka.audit_event WHERE action = 'technology.created' AND entity_id = $1`, [made.id]);
+    expect(audit.rows).toEqual([{ actor_id: U.l1, changes: null }]);
+  });
+
+  it("returns the existing row for the same name in any case", async () => {
+    const res = await add("admin", { name: "jAVA" });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({ name: "Java", created: false });
+    const { rows } = await db.admin.query(`SELECT count(*)::int AS n FROM eureka.technology WHERE lower(name) = 'java'`);
+    expect(rows[0].n).toBe(1);
+  });
+
+  it("refuses a retired name and bad input", async () => {
+    expect((await add("l2", { name: "cobol" })).statusCode).toBe(409);
+    expect((await add("l2", { name: "   " })).statusCode).toBe(422);
+    expect((await add("l2", { name: "x".repeat(61) })).statusCode).toBe(422);
+    expect((await add("l2", { name: "a\u0007b" })).statusCode).toBe(422);
+    expect((await add("l2", { name: "Go", active: false })).statusCode).toBe(422);
+  });
+
+  it("the app role can only write through the function", async () => {
+    await expect(asUser(db.app, U.r1a, (c) => c.query(`INSERT INTO eureka.technology (name) VALUES ('Direct')`)))
+      .rejects.toMatchObject({ code: "42501" });
+  });
+
+  it("refuses a caller with no user context", async () => {
+    await expect(asUser(db.app, "00000000-0000-4000-8000-000000000000", (c) => c.query(`SELECT * FROM authz.create_technology('Go')`)))
+      .rejects.toMatchObject({ code: "42501" });
   });
 });
