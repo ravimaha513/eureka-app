@@ -78,6 +78,8 @@ const ADMIN_ENDPOINTS: { method: Method; url: string; body?: unknown; adminStatu
   { method: "POST", url: `/api/v1/admin/role-requests/${NIL}/approve`, adminStatus: 404 },
   { method: "POST", url: `/api/v1/admin/role-requests/${NIL}/reject`, adminStatus: 404 },
   { method: "DELETE", url: `/api/v1/admin/users/${U.r1a}/roles/bogus`, adminStatus: 422 },
+  { method: "GET", url: "/api/v1/admin/locations", adminStatus: 200 },
+  { method: "GET", url: `/api/v1/admin/locations/${NIL}`, adminStatus: 404 },
   { method: "POST", url: "/api/v1/admin/locations", body: {}, adminStatus: 422 },
   { method: "GET", url: "/api/v1/admin/teams", adminStatus: 200 },
   { method: "POST", url: "/api/v1/admin/teams", body: {}, adminStatus: 422 },
@@ -216,7 +218,52 @@ describe("locations", () => {
     expect((await call("admin", "POST", "/api/v1/admin/locations", { name: "Nowhere", kind: "remote", timezone: "Mars/Olympus" })).statusCode).toBe(422);
   });
 
+  it("lists people, teams and role holders per location; the detail carries the reporting tree", async () => {
+    // A fresh location so the shared fixtures stay untouched: a manager based there,
+    // a lead (team at the location, no primary location), a member and an incharge
+    // whose manager is based elsewhere. An inactive user based there is left out.
+    const plano = (await call("admin", "POST", "/api/v1/admin/locations", { name: "Plano", kind: "office", state: "TX" })).json().id as string;
+    const pid = (n: number) => `00000000-0000-0000-0000-0000000f00${String(n).padStart(2, "0")}`;
+    const [mgr, lead, member, incharge, gone] = [1, 2, 3, 4, 5].map(pid) as [string, string, string, string, string];
+    for (const [id, name, loc, status] of [
+      [mgr, "Plano Manager", plano, "active"], [lead, "Plano Lead", null, "active"], [member, "Plano Member", null, "active"],
+      [incharge, "Plano Incharge", null, "active"], [gone, "Plano Gone", plano, "inactive"],
+    ] as const) {
+      await db.admin.query(`INSERT INTO eureka.app_user (id, email, display_name, primary_location_id, status) VALUES ($1,$2,$3,$4,$5)`,
+        [id, `${name.replace(" ", ".").toLowerCase()}@eureka.example`, name, loc, status]);
+    }
+    await db.admin.query(`INSERT INTO eureka.user_role (user_id, role_key, location_id) VALUES ($1,'location_incharge',$2)`, [incharge, plano]);
+    await db.admin.query(`INSERT INTO eureka.reporting_line (user_id, manager_id) VALUES ($1,$2),($3,$1),($4,$5)`, [lead, mgr, member, incharge, U.m1]);
+    const team = "00000000-0000-0000-0000-0000000f0100";
+    await db.admin.query(`INSERT INTO eureka.team (id, name, lead_id, location_id) VALUES ($1,'Team Plano',$2,$3)`, [team, lead, plano]);
+    await db.admin.query(`INSERT INTO eureka.team_member (team_id, user_id) VALUES ($1,$2)`, [team, member]);
+
+    const list = (await call("admin", "GET", "/api/v1/admin/locations")).json();
+    expect(list.items.find((l: { id: string }) => l.id === plano)).toEqual({
+      id: plano, name: "Plano", kind: "office", state: "TX", timezone: "America/New_York", peopleCount: 4, teamCount: 1,
+      roleHolders: [{ userId: incharge, displayName: "Plano Incharge", role: "location_incharge", label: "Location Incharge" }],
+    });
+    expect(list.items.find((l: { id: string }) => l.id === LOC.dallas).roleHolders)
+      .toEqual([{ userId: U.locD, displayName: "locD", role: "location_ops_admin", label: "Location Ops Admin" }]);
+
+    const r = await call("admin", "GET", `/api/v1/admin/locations/${plano}`);
+    expect(r.statusCode).toBe(200);
+    const d = r.json();
+    expect(d.location).toEqual({ id: plano, name: "Plano", kind: "office", state: "TX", timezone: "America/New_York" });
+    expect(d.people.map((p: { displayName: string }) => p.displayName)).toEqual(["Plano Incharge", "Plano Lead", "Plano Manager", "Plano Member"]);
+    const byId = Object.fromEntries(d.people.map((p: { id: string }) => [p.id, p]));
+    expect(byId[mgr]).toMatchObject({ managerId: null, primaryLocation: { id: plano, name: "Plano" }, roles: [], teams: [] });
+    expect(byId[lead]).toMatchObject({ managerId: mgr, primaryLocation: null, teams: [{ id: team, name: "Team Plano", asLead: true }] });
+    expect(byId[member]).toMatchObject({ managerId: lead, teams: [{ id: team, asLead: false }] });
+    expect(byId[incharge]).toMatchObject({
+      managerId: U.m1, roles: [{ key: "location_incharge", label: "Location Incharge", locationId: plano, locationName: "Plano" }],
+    });
+    expect(d.outsideManagers).toEqual([{ id: U.m1, displayName: "m1", locationName: null }]);
+    expect(d.teams).toEqual([{ id: team, name: "Team Plano", lead: { id: lead, displayName: "Plano Lead" }, memberIds: [member], coaches: [] }]);
+  });
+
   it("is refused to every other role", async () => {
+    expect((await call("m1", "GET", "/api/v1/admin/locations")).statusCode).toBe(403);
     expect((await call("m1", "POST", "/api/v1/admin/locations", { name: "Sneaky", kind: "remote" })).statusCode).toBe(403);
     expect((await call("r1b", "POST", "/api/v1/admin/locations", { name: "Sneaky", kind: "remote" })).statusCode).toBe(403);
   });

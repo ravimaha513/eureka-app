@@ -30,6 +30,8 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 `{ roles: [{ key, label, restricted, locationBound }], locations: [{ id, name }] }`
 
 ### Locations
+- `GET /api/v1/admin/locations` returns `{ items: [{ id, name, kind, state, timezone, peopleCount, teamCount, roleHolders: [{ userId, displayName, role, label }] }] }` ordered by name. A location's people are the active users whose primary location it is, who are current members or the lead of a team at it, or who hold a current role for it (`roleHolders`: the location-bound role grants).
+- `GET /api/v1/admin/locations/:id` returns `{ location: { id, name, kind, state, timezone }, people: [{ id, displayName, designation, primaryLocation, managerId, roles, teams }], outsideManagers: [{ id, displayName, locationName }], teams: [{ id, name, lead, memberIds, coaches }] }`. `managerId` is the current reporting line; managers who are not themselves people of the location come back in `outsideManagers` so the client can draw the full tree. `teams` are the teams whose location this is. 404 unknown location. Read-only, `access:manage` like the rest of this controller.
 - `POST /api/v1/admin/locations` with `{ name, kind, state?, timezone? }` returns 201 `{ id }`. `kind` is one of `training`, `gh`, `office`, `remote`; `timezone` is an IANA name (default `America/New_York`). Only `org_admin` (`access:manage`, org scope) can create one. The write goes through `authz.admin_create_location` (migration 0091) and is audited as `admin.location.created`. A duplicate name is 409 `location_exists`. Locations cannot be edited or deleted here yet.
 
 ### Departments (AD-12)

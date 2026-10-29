@@ -1,31 +1,29 @@
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { adminApi, LOCATION_KINDS, type LocationKind } from "./adminApi";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { friendlyError } from "./errors";
-import { keys, useAccess, useMeta } from "./shared";
+import { keys, useAccess } from "./shared";
 import { Loading } from "../ui/Loading";
 import { QueryError } from "../ui/QueryError";
-
-const KIND_LABELS: Record<LocationKind, string> = {
-  training: "Training",
-  gh: "GH",
-  office: "Office",
-  remote: "Remote",
-};
+import { KIND_LABELS, LocationDetailView } from "./LocationDetail";
 
 /** Locations are reference data (org_admin only to create). Teams and roles pick from this list. */
 export function LocationsTab() {
   const { announce } = useAccess();
   const qc = useQueryClient();
-  const meta = useMeta();
+  const q = useQuery({ queryKey: keys.locations, queryFn: () => adminApi.locations().then((r) => r.items) });
   const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
 
   const done = (msg: string) => {
     setOpen(false);
     announce(msg);
     void qc.invalidateQueries({ queryKey: keys.meta });
+    void qc.invalidateQueries({ queryKey: keys.locations });
   };
+
+  if (selected) return <LocationDetailView id={selected} onBack={() => setSelected(null)} />;
 
   return (
     <>
@@ -33,10 +31,24 @@ export function LocationsTab() {
         <p className="hint">Teams and location-bound roles use these locations. Creating one here does not change anyone's access.</p>
         <button className="btn primary push" onClick={() => setOpen(true)}>New location</button>
       </div>
-      {meta.isLoading ? <Loading /> : meta.error ? <QueryError query={meta} message={friendlyError(meta.error)} /> : (
-        <ul className="list" aria-label="Locations">
-          {meta.data!.locations.map((l) => <li key={l.id}>{l.name}</li>)}
-          {meta.data!.locations.length === 0 && <li className="empty">No locations yet.</li>}
+      {q.isLoading ? <Loading /> : q.error ? <QueryError query={q} message={friendlyError(q.error)} /> : (
+        <ul className="teamgrid loccards" aria-label="Locations">
+          {q.data!.map((l) => {
+            const incharge = l.roleHolders.filter((h) => h.role === "location_incharge");
+            return (
+              <li key={l.id}>
+                <button type="button" className="card loccard" onClick={() => setSelected(l.id)}>
+                  <span className="loccardhead"><b>{l.name}</b><span className="chip">{KIND_LABELS[l.kind] ?? l.kind}</span></span>
+                  <span className="muted">{[l.state, l.timezone].filter(Boolean).join(" · ")}</span>
+                  <span className="loccounts"><span><b>{l.peopleCount}</b> people</span><span><b>{l.teamCount}</b> teams</span></span>
+                  {incharge.length
+                    ? <span className="muted">Incharge · {incharge.map((h) => h.displayName).join(", ")}</span>
+                    : <span className="warntext">No incharge</span>}
+                </button>
+              </li>
+            );
+          })}
+          {q.data!.length === 0 && <li className="empty">No locations yet.</li>}
         </ul>
       )}
 

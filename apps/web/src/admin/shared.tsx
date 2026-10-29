@@ -10,6 +10,7 @@ export const keys = {
   requests: ["admin", "role-requests"] as const,
   teams: ["admin", "teams"] as const,
   departments: ["admin", "departments"] as const,
+  locations: ["admin", "locations"] as const,
 };
 
 export interface AccessCtx {

@@ -40,6 +40,26 @@ const TEAMS = [
     coaches: [{ id: "u-coach", displayName: "Cora Coach" }] },
   { id: "t2", name: "Team Anjali", location: null, lead: { id: "u-anj", displayName: "Anjali Lead" }, members: [], coaches: [] },
 ];
+const LOCATIONS = [
+  { id: "loc-dal", name: "Dallas", kind: "office", state: "TX", timezone: "America/Chicago", peopleCount: 4, teamCount: 1,
+    roleHolders: [{ userId: "u-ira", displayName: "Ira Incharge", role: "location_incharge", label: "Location Incharge" }] },
+  { id: "loc-hyd", name: "Hyderabad", kind: "training", state: null, timezone: "Asia/Kolkata", peopleCount: 0, teamCount: 0, roleHolders: [] },
+];
+const person = (id: string, displayName: string, managerId: string | null, extra: object = {}) =>
+  ({ id, displayName, designation: null, primaryLocation: null, managerId, roles: [], teams: [], ...extra });
+const DALLAS = {
+  location: { id: "loc-dal", name: "Dallas", kind: "office", state: "TX", timezone: "America/Chicago" },
+  people: [
+    person("u-ira", "Ira Incharge", "u-mira", { roles: [{ key: "location_incharge", label: "Location Incharge", locationId: "loc-dal", locationName: "Dallas" }] }),
+    person("u-priya", "Priya Rao", "u-lead", { roles: [{ key: "recruiter", label: "Recruiter", locationId: null, locationName: null }],
+      teams: [{ id: "t1", name: "Team Rohit", asLead: false }] }),
+    person("u-lead", "Rohit Lead", "u-mira", { roles: [{ key: "lead", label: "Lead (Sales)", locationId: null, locationName: null }],
+      teams: [{ id: "t1", name: "Team Rohit", asLead: true }] }),
+    person("u-solo", "Solo Person", null),
+  ],
+  outsideManagers: [{ id: "u-mira", displayName: "Mira Manager", locationName: "Hyderabad" }],
+  teams: [{ id: "t1", name: "Team Rohit", lead: { id: "u-lead", displayName: "Rohit Lead" }, memberIds: ["u-priya"], coaches: [] }],
+};
 const COACHES = [
   { id: "u-coach", displayName: "Cora Coach", email: "u-coach@eureka.example", role: "interview_coach" },
   { id: "u-il", displayName: "Ivy Lead", email: "u-il@eureka.example", role: "interview_lead" },
@@ -92,6 +112,8 @@ beforeEach(() => {
     },
     "GET /api/v1/admin/role-requests": () => ({ body: { items: REQUESTS } }),
     "GET /api/v1/admin/teams": () => ({ body: { items: TEAMS, coaches: COACHES } }),
+    "GET /api/v1/admin/locations": () => ({ body: { items: LOCATIONS } }),
+    "GET /api/v1/admin/locations/loc-dal": () => ({ body: DALLAS }),
   };
   mockFetch();
 });
@@ -524,6 +546,46 @@ describe("Locations tab", () => {
     await waitFor(() => expect(status()).toHaveTextContent("Created Houston."));
     expect(lastWrite()).toMatchObject({ method: "POST", path: "/api/v1/admin/locations",
       body: { name: "Houston", kind: "office", state: "TX", timezone: "America/Chicago" } });
+  });
+
+  it("location cards show counts and a missing incharge", async () => {
+    renderPage("locations");
+    const list = await screen.findByRole("list", { name: "Locations" });
+    const dal = within(list).getByRole("button", { name: /Dallas/ });
+    expect(dal).toHaveTextContent("4 people");
+    expect(dal).toHaveTextContent("Incharge · Ira Incharge");
+    expect(within(list).getByRole("button", { name: /Hyderabad/ })).toHaveTextContent("No incharge");
+  });
+
+  it("a location opens to its roles and reporting tree, by team and by role, and a person drawer", async () => {
+    renderPage("locations");
+    fireEvent.click(within(await screen.findByRole("list", { name: "Locations" })).getByRole("button", { name: /Dallas/ }));
+    expect(await screen.findByRole("heading", { name: "Dallas" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Location roles" }).parentElement).toHaveTextContent("Ira Incharge Location Incharge");
+
+    const tree = screen.getByRole("list", { name: "Reporting hierarchy" });
+    // The manager based elsewhere heads the tree; the lead and member nest below.
+    expect(tree).toHaveTextContent(/Mira Manager.*based in Hyderabad.*Rohit Lead.*Priya Rao/);
+    expect(screen.getByText("Not in a reporting line (1)").parentElement).toHaveTextContent("Solo Person");
+    fireEvent.click(within(tree).getAllByRole("button", { name: "Collapse" })[0]!);
+    expect(tree).not.toHaveTextContent("Priya Rao");
+    fireEvent.change(screen.getByLabelText("Find a person"), { target: { value: "priya" } });
+    expect(tree).toHaveTextContent("Priya Rao");
+    expect(screen.queryByText(/Not in a reporting line \(/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Find a person"), { target: { value: "" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "By team" }));
+    expect(screen.getByRole("region", { name: "Team Rohit" })).toHaveTextContent(/Rohit Lead.*Priya Rao/);
+    expect(screen.getByRole("region", { name: "No team here" })).toHaveTextContent(/Ira Incharge.*Solo Person/);
+    fireEvent.click(screen.getByRole("button", { name: "By role" }));
+    expect(screen.getByRole("region", { name: "Recruiter" })).toHaveTextContent("Priya Rao");
+
+    fireEvent.click(within(screen.getByRole("region", { name: "Recruiter" })).getByRole("button", { name: "Priya Rao" }));
+    const drawer = await screen.findByRole("dialog", { name: "Priya Rao" });
+    expect(drawer).toHaveTextContent(/Mira Manager \(other location\).*Rohit Lead.*Priya Rao/);
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close person" }));
+    fireEvent.click(screen.getByRole("button", { name: "Locations" }));
+    expect(await screen.findByRole("list", { name: "Locations" })).toBeInTheDocument();
   });
 
   it("shows the duplicate-name error inside the dialog", async () => {

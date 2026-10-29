@@ -58,6 +58,28 @@ export interface BulkReport { dryRun: boolean; committed: boolean; created: numb
 export interface Team { id: string; name: string; location: Place | null; lead: Ref; /** The lead's department. */ department: UserDepartment | null; members: Ref[]; coaches: Ref[] }
 export interface MoveResult { movedCandidates: number; reassignedTo: Ref }
 
+export interface LocationSummary {
+  id: string; name: string; kind: LocationKind; state: string | null; timezone: string;
+  peopleCount: number; teamCount: number;
+  roleHolders: { userId: string; displayName: string; role: string; label: string }[];
+}
+export interface LocationPerson {
+  id: string;
+  displayName: string;
+  designation: string | null;
+  primaryLocation: Place | null;
+  /** May point at someone in outsideManagers (based at another location). */
+  managerId: string | null;
+  roles: UserRole[];
+  teams: { id: string; name: string; asLead: boolean }[];
+}
+export interface LocationDetail {
+  location: { id: string; name: string; kind: LocationKind; state: string | null; timezone: string };
+  people: LocationPerson[];
+  outsideManagers: { id: string; displayName: string; locationName: string | null }[];
+  teams: { id: string; name: string; lead: Ref; memberIds: string[]; coaches: Ref[] }[];
+}
+
 const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
 const enc = encodeURIComponent;
 
@@ -105,7 +127,9 @@ export const adminApi = {
   revokeRole: (userId: string, role: string, locationId: string | null) =>
     api<void>(`/api/v1/admin/users/${enc(userId)}/roles/${enc(role)}${locationId ? `?locationId=${enc(locationId)}` : ""}`, { method: "DELETE" }),
 
-  createLocation: (b: { name: string; kind: LocationKind; state?: string; timezone?: string }) =>
+  locations: () => api<{ items: LocationSummary[] }>("/api/v1/admin/locations"),
+  location: (id: string) => api<LocationDetail>(`/api/v1/admin/locations/${enc(id)}`),
+  createLocation: (b:{ name: string; kind: LocationKind; state?: string; timezone?: string }) =>
     api<{ id: string }>("/api/v1/admin/locations", { method: "POST", ...json(b) }),
 
   /** `coaches`: active holders of a coach role, who can be assigned to teams (AD-11). */
