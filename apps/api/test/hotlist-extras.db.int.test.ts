@@ -170,7 +170,7 @@ describe("authz.hotlist_export (differential against the engine)", () => {
 
   it("never returns DOB, email or a raw phone column", async () => {
     const { rows } = await db.admin.query<{ cols: string[] }>(`
-      SELECT proargnames AS cols FROM pg_proc WHERE oid = 'authz.hotlist_export(text,text,text,text,int,uuid,text,text,boolean,text)'::regprocedure`);
+      SELECT proargnames AS cols FROM pg_proc WHERE oid = 'authz.hotlist_export(text,text,text,text,int,uuid,text,text,boolean,text,jsonb)'::regprocedure`);
     const cols = rows[0]!.cols.join(",");
     expect(cols).not.toMatch(/dob|email|phone_e164/);
   });
@@ -199,9 +199,9 @@ describe("authz.hotlist_export (differential against the engine)", () => {
     expect(await exportAs(U.ceo, 0)).toHaveLength(1);
     const { rows } = await db.admin.query<{ lang: string; src: string }>(`
       SELECT l.lanname AS lang, p.prosrc AS src FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
-      WHERE p.oid = 'authz.hotlist_export(text,text,text,text,int,uuid,text,text,boolean,text)'::regprocedure`);
+      WHERE p.oid = 'authz.hotlist_export(text,text,text,text,int,uuid,text,text,boolean,text,jsonb)'::regprocedure`);
     expect(rows[0]!.lang).toBe("plpgsql");
-    expect(rows[0]!.src).toMatch(/RETURN QUERY EXECUTE \$q\$[\s\S]*\$q\$ USING p_status, p_technology, p_visibility, p_search, p_limit,\s+p_location, p_visa, p_documents, p_resume, p_stay;/);
+    expect(rows[0]!.src).toMatch(/RETURN QUERY EXECUTE \$q\$[\s\S]*\$q\$ USING p_status, p_technology, p_visibility, p_search, p_limit,\s+p_location, p_visa, p_documents, p_resume, p_stay, p_more;/);
   });
 
   it("a deactivated user exports nothing", async () => {
@@ -215,8 +215,8 @@ describe("authz.hotlist_export (differential against the engine)", () => {
 
   it("is executable only by the app role", async () => {
     const { rows } = await db.admin.query(`
-      SELECT has_function_privilege('eureka_worker', 'authz.hotlist_export(text,text,text,text,int,uuid,text,text,boolean,text)', 'EXECUTE') w,
-             has_function_privilege('eureka_app', 'authz.hotlist_export(text,text,text,text,int,uuid,text,text,boolean,text)', 'EXECUTE') a`);
+      SELECT has_function_privilege('eureka_worker', 'authz.hotlist_export(text,text,text,text,int,uuid,text,text,boolean,text,jsonb)', 'EXECUTE') w,
+             has_function_privilege('eureka_app', 'authz.hotlist_export(text,text,text,text,int,uuid,text,text,boolean,text,jsonb)', 'EXECUTE') a`);
     expect(rows[0]).toEqual({ w: false, a: true });
   });
 });

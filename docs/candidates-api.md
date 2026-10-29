@@ -46,12 +46,29 @@ branch's base: that role does not exist here (interview prep is the interview co
 | `documents` | `pending`, `partial`, `complete`, `none` | the documents status (`none`: not recorded) |
 | `resume` | `yes`, `no` | a current uploaded resume or a resume link |
 | `stay` | `guest_house`, `remote` | guest house location set / Remote |
+| `priority` | `P1`, `P2`, `P3` | the priority (0290) |
+| `teamId` | team id | the candidate's team (the sheet's "Lead") |
+| `recruiterId` | user id | the recruiter |
+| `inPerson` | `yes`, `no` | in-person recorded as yes / no (not recorded matches neither) |
+| `ghLocationId` | location id | that guest house |
+| `sort` | `default`, `priority`, `days`, `name` | order: id; P1 first; longest in market first (no start date last); name |
 
-Saved views (`POST/PATCH /hotlist/views`) and `POST /hotlist/export` accept the same keys. The
-export adds the columns Visa, Documents and Stay. Unknown values are 422.
+Paging stays keyset: with a sort the cursor is still the last row's id, and the next page starts
+after that row's (sort key, id). Both list paths (scoped SQL in `candidates.service.ts`, open
+`authz.hotlist_page`) order the same way.
+
+Saved views (`POST/PATCH /hotlist/views`) and `POST /hotlist/export` accept the same keys (the export
+is ordered by `sort` too). The export adds the columns Visa, Documents and Stay, and (0290) Lead
+and In person. Unknown values are 422.
 
 List rows add `statusLabel`, `stay`, `ghLocation` (`{ id?, name }`), `visaCategory`,
-`documentsStatus`, `hasResume`, and (Candidates list and team Hot List) `teamAssignedAt`.
+`documentsStatus`, `hasResume`, `inPersonOk`, `team.lead` (the lead's name), and (Candidates list
+and team Hot List) `teamAssignedAt`.
+
+`GET /api/v1/hotlist/filter-options` (`hotlist:read`): `{ teams: [{ id, name, lead }], recruiters:
+[{ id, name }], guestHouses: [{ id, name }] }` for the filter selects (current recruiter-role
+holders; locations of kind `gh`). `POST /api/v1/hotlist/bulk/priority` (`candidate:update`)
+`{ ids, priority }` runs `PATCH /candidates/:id { priority }` per record, like the other bulk actions.
 
 ## Profile fields (CA-3)
 
