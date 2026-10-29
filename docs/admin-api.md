@@ -32,7 +32,8 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 ### Locations
 - `GET /api/v1/admin/locations` returns `{ items: [{ id, name, kind, state, timezone, peopleCount, teamCount, roleHolders: [{ userId, displayName, role, label }] }] }` ordered by name. A location's people are the active users whose primary location it is, who are current members or the lead of a team at it, or who hold a current role for it (`roleHolders`: the location-bound role grants).
 - `GET /api/v1/admin/locations/:id` returns `{ location: { id, name, kind, state, timezone }, people: [{ id, displayName, designation, primaryLocation, managerId, roles, teams }], outsideManagers: [{ id, displayName, locationName }], teams: [{ id, name, lead, memberIds, coaches }] }`. `managerId` is the current reporting line; managers who are not themselves people of the location come back in `outsideManagers` so the client can draw the full tree. `teams` are the teams whose location this is. 404 unknown location. Read-only, `access:manage` like the rest of this controller.
-- `POST /api/v1/admin/locations` with `{ name, kind, state?, timezone? }` returns 201 `{ id }`. `kind` is one of `training`, `gh`, `office`, `remote`; `timezone` is an IANA name (default `America/New_York`). Only `org_admin` (`access:manage`, org scope) can create one. The write goes through `authz.admin_create_location` (migration 0091) and is audited as `admin.location.created`. A duplicate name is 409 `location_exists`. Locations cannot be edited or deleted here yet.
+- `POST /api/v1/admin/locations` with `{ name, kind, state?, timezone? }` returns 201 `{ id }`. `kind` is one of `training`, `gh`, `office`, `remote`; `timezone` is an IANA name (default `America/New_York`). Only `org_admin` (`access:manage`, org scope) can create one. The write goes through `authz.admin_create_location` (migration 0091) and is audited as `admin.location.created`. A duplicate name is 409 `location_exists`.
+- `PATCH /api/v1/admin/locations/:id` with `{ name }` returns 204. Same gate as create; the write goes through `authz.admin_rename_location` (`db/functions/authz/`, column grant in migration 0280) and is audited as `admin.location.renamed` with the id only (no name, rule 5). 404 unknown location, 409 `location_exists`, 422 `invalid_name`. Kind, state and time zone cannot be edited, and locations cannot be deleted, here yet.
 
 ### Departments (AD-12)
 - `GET /api/v1/admin/departments` returns `{ items: [{ id, name, parentId: uuid|null, userCount }] }` (flat, ordered by name; `userCount` counts active users whose department is exactly this one).
@@ -84,7 +85,7 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 `self_change`, `second_approver_required`, `restricted_role`, `location_required`, `location_not_allowed`, `already_member`, `not_in_scope`, `invalid_reassign_target`, `cycle`.
 
 Added during implementation:
-- 404: `department_not_found` (as a plain 404)
+- 404: `department_not_found`, `location_not_found` (as a plain 404)
 - 409: `department_exists`, `email_exists`, `role_already_held`, `request_pending`, `request_not_pending`, `request_expired`, `last_admin`, `requester_not_admin`
 - 404: `not_assigned`; 409: `already_assigned`; 422: `not_a_coach` (AD-11)
 - 422: `invalid_parent`, `invalid_name`, `invalid_designation`, `email_domain`, `unknown_role`, `invalid_manager`, `invalid_lead`, `user_inactive`, `not_a_member`, `same_team`, `lead_of_team`, `has_reports`, `separation_of_duties`
@@ -99,3 +100,18 @@ Added during implementation:
 - `DELETE /admin/users/:id/roles/:role` without `locationId` revokes the role at every location.
 - Moving members needs `team:move_member`, which `org_admin` does not hold (least privilege: moves reassign candidates, which is business data). The Teams tab shows the action disabled for admins; managers and associate directors will move members from a team view (Phase 2).
 - The first admins come from the bootstrap CLI (`authz.bootstrap_admins`, migration 0037; infra/README.md "First admin"), never from the API: break-glass only: it refuses while an active `org_admin` exists (and, after a first bootstrap, without `--recover`), creates two so restricted roles can be approved (AD-3), and is executable only by the migration user.
+
+## Password invite (staging/local, migration 0270)
+
+Only when `PASSWORD_LOGIN=on` (404 otherwise). Instead of choosing a temporary password, an admin emails the user a one-time link.
+
+| Route | Who | Body | Result |
+|---|---|---|---|
+| `POST /api/v1/admin/users/:id/password-invite` | access:manage, not oneself, active user, no restricted role | none | 204; 403 `restricted_target`/`self_change`; 422 `user_inactive`; 502 `mail_failed` (link stays valid; send again) |
+| `POST /api/v1/admin/users` | as create | `sendPasswordInvite: true` (not with `temporaryPassword`, 422 `password_or_invite`) | 201 `{ id, invite: "sent" \| "failed" }` |
+| `POST /api/auth/password/setup` | public, rate-limited per IP | `{ token, newPassword }` | 200 `{ mustChangePassword: false }` + session cookie; 400 `invalid_link` (unknown, used, expired, replaced, user inactive or restricted); 422 `password_weak` (link stays open) |
+
+- Link: `${PUBLIC_BASE_URL}/set-password#token=<43 chars base64url>`. The token is in the fragment so it never reaches server or proxy logs; the page clears it from the address bar.
+- Stored: SHA-256 of the token only (`authz.password_setup_token`). Valid 72 h, once; a newer link closes any open one. Using it ends every other session of the user (as any new password does).
+- Mail goes through the API mail port (SES from `PORTAL_FROM_EMAIL`, or the dev mailbox).
+- Audit: `admin.user.password_invite` (`{ ttlHours }`), `auth.password_setup` (`{}`). No token or email.

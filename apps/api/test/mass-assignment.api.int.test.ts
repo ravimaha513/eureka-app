@@ -673,6 +673,17 @@ const CASES: RejectCase[] = [
     forbidden: { id: LOC.austin, status: "inactive" },
   },
   {
+    route: "PATCH /api/v1/admin/locations/:id", actor: "admin",
+    prepare: async () => {
+      const l = await ok("admin", "POST", "/api/v1/admin/locations", { name: `MA Loc ${++maDept}`, kind: "office" });
+      return {
+        url: `/api/v1/admin/locations/${l.id}`, body: { name: `MA Loc ${++maDept}` },
+        state: () => rows(`SELECT * FROM eureka.location ORDER BY id`),
+      };
+    },
+    forbidden: { id: LOC.austin, kind: "gh", timezone: "UTC", peopleCount: 9 },
+  },
+  {
     route: "PUT /api/v1/admin/teams/:id/lead", actor: "admin",
     prepare: async () => ({
       url: `/api/v1/admin/teams/${T.t2}/lead`, body: { leadId: U.l1 },
@@ -1937,6 +1948,28 @@ const IGNORED: IgnoreCase[] = [
     run: async () => {
       const res = await call("admin", "POST", `/api/v1/admin/users/${U.r1b}/password`,
         { ...SERVER_MANAGED, password: "Temp-pass-123", userId: U.hr, mustChange: false, failedCount: 9, lockedUntil: PAST, passwordHash: "x" });
+      expect([400, 422]).toContain(res.statusCode);
+      expect(await rows(`SELECT count(*)::int AS n FROM authz.user_credential`)).toEqual([{ n: 0 }]);
+    },
+  },
+  // set-password links (migration 0270)
+  {
+    route: "POST /api/v1/admin/users/:id/password-invite",
+    run: async () => {
+      // No body is read: the user, expiry and issuer come from the path, the server and the session.
+      const res = await call("admin", "POST", `/api/v1/admin/users/${U.r1b}/password-invite`,
+        { ...SERVER_MANAGED, userId: U.hr, ttlHours: 9999, expiresAt: "2099-01-01T00:00:00Z", createdBy: U.r1a, tokenHash: "AA==", email: "x@evil.example" });
+      expect(res.statusCode, res.body).toBe(204);
+      const t = await rows(`SELECT user_id, created_by, expires_at < now() + interval '73 hours' AS capped FROM authz.password_setup_token`);
+      expect(t).toEqual([{ user_id: U.r1b, created_by: U.admin, capped: true }]);
+      await rows(`DELETE FROM authz.password_setup_token`);
+    },
+  },
+  {
+    route: "POST /api/auth/password/setup",
+    run: async () => {
+      const res = await call(null, "POST", "/api/auth/password/setup",
+        { ...SERVER_MANAGED, token: "A".repeat(43), newPassword: "another-password-2", userId: U.hr, mustChange: false }, {});
       expect([400, 422]).toContain(res.statusCode);
       expect(await rows(`SELECT count(*)::int AS n FROM authz.user_credential`)).toEqual([{ n: 0 }]);
     },

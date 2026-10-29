@@ -67,6 +67,7 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
       {creating === "candidate" && (
         <CreateCandidateDialog
           locations={uniqueLocations(items)}
+          canAddTechnology={caps.includes("technology:create")}
           onClose={() => setCreating(null)}
           onOpenProfile={onOpenProfile && ((id) => { setCreating(null); onOpenProfile(id); })}
           onCreated={(id) => {
@@ -80,6 +81,7 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
       )}
       {creating === "batch" && (
         <CreateBatchDialog
+          canAddTechnology={caps.includes("technology:create")}
           onClose={() => setCreating(null)}
           onCreated={() => {
             setCreating(null);

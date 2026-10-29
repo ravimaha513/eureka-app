@@ -107,8 +107,8 @@ export const adminApi = {
     return api<UserPage>(`/api/v1/admin/users?${q}`);
   },
   userSummary: () => api<UserSummary>("/api/v1/admin/users/summary"),
-  createUser: (b: { email: string; displayName: string; designation?: string; primaryLocationId?: string; temporaryPassword?: string }) =>
-    api<{ id: string }>("/api/v1/admin/users", { method: "POST", ...json(b) }),
+  createUser: (b: { email: string; displayName: string; designation?: string; primaryLocationId?: string; temporaryPassword?: string; sendPasswordInvite?: boolean }) =>
+    api<{ id: string; invite?: "sent" | "failed" }>("/api/v1/admin/users", { method: "POST", ...json(b) }),
   bulkCreateUsers: (b: { dryRun: boolean; rows: { email: string; displayName: string; designation?: string; location?: string; roles?: string[] }[] }) =>
     api<BulkReport>("/api/v1/admin/users/bulk", { method: "POST", ...json(b) }),
   /** The .xlsx template with role and location dropdowns. */
@@ -116,6 +116,8 @@ export const adminApi = {
   /** Staging/local: a temporary password the user must change at first sign-in (not for restricted-role users). */
   setPassword: (id: string, password: string) =>
     api<void>(`/api/v1/admin/users/${enc(id)}/password`, { method: "POST", ...json({ password }) }),
+  /** Staging/local: emails a one-time link to set their own password (replaces any open link). */
+  sendPasswordInvite: (id: string) => api<void>(`/api/v1/admin/users/${enc(id)}/password-invite`, { method: "POST" }),
   deactivate: (id: string) => api<void>(`/api/v1/admin/users/${enc(id)}/deactivate`, { method: "POST" }),
   reactivate: (id: string) => api<void>(`/api/v1/admin/users/${enc(id)}/reactivate`, { method: "POST" }),
   setManager: (id: string, managerId: string | null) =>
@@ -142,6 +144,8 @@ export const adminApi = {
   location: (id: string) => api<LocationDetail>(`/api/v1/admin/locations/${enc(id)}`),
   createLocation: (b:{ name: string; kind: LocationKind; state?: string; timezone?: string }) =>
     api<{ id: string }>("/api/v1/admin/locations", { method: "POST", ...json(b) }),
+  renameLocation: (id: string, name: string) =>
+    api<void>(`/api/v1/admin/locations/${enc(id)}`, { method: "PATCH", ...json({ name }) }),
 
   /** `coaches`: active holders of a coach role, who can be assigned to teams (AD-11). */
   /** `unassignedCount`: active people who neither lead nor belong to a team. */

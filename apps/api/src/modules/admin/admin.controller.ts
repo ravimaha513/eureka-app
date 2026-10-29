@@ -10,6 +10,7 @@ import {
   CreateRoleRequest,
   CreateTeam,
   RenameDepartment,
+  RenameLocation,
   RenameTeam,
   CreateUser,
   MoveMember,
@@ -73,6 +74,12 @@ export class AdminController {
   @HttpCode(204)
   async setPassword(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
     await this.svc.setPassword(user, id, SetPassword.parse(body).password);
+  }
+
+  @Post("users/:id/password-invite")
+  @HttpCode(204)
+  async sendPasswordInvite(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string): Promise<void> {
+    await this.svc.sendPasswordInvite(user, id);
   }
 
   @Post("users/:id/deactivate")
@@ -154,6 +161,12 @@ export class AdminController {
   @Post("locations")
   createLocation(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createLocation(user, CreateLocation.parse(body));
+  }
+
+  @Patch("locations/:id")
+  @HttpCode(204)
+  async renameLocation(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
+    await this.svc.renameLocation(user, id, RenameLocation.parse(body).name);
   }
 
   // ---------- departments ----------

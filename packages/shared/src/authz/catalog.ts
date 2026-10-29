@@ -165,6 +165,9 @@ export const PERMISSIONS = [
   "training.progress:update",
   /** Create training batches anywhere (docs/training-api.md TR-1a); editing them needs training:manage. */
   "training.batch:create",
+  // reference data
+  /** Add a technology to the pickers (docs/lookups-api.md); reading the list is open to everyone. */
+  "technology:create",
   // interviews-settings
   /** Staff contact details (phone, bio) entered in Settings; read by HR and in Users & Access. */
   "staff.contact:read",
@@ -259,6 +262,8 @@ export const GRANTS: Record<Role, Grants> = {
     "vendor.preferred:read": "team",
     // interview-alerts: block the support calendar for the team's interviews
     "calendar:block": "team",
+    // reference data: add technologies (docs/lookups-api.md)
+    "technology:create": "org",
     // market-reports
     "report.market:read": "team",
     // datahub
@@ -275,6 +280,8 @@ export const GRANTS: Record<Role, Grants> = {
     "invoice:read": "team",
   },
   manager: {
+    // reference data: add technologies (docs/lookups-api.md)
+    "technology:create": "org",
     ...salesLine("hierarchy", "hierarchy"),
     "calendar:block": "hierarchy",
     "candidate:assign": "hierarchy",
@@ -305,6 +312,8 @@ export const GRANTS: Record<Role, Grants> = {
     "invoice:read": "hierarchy",
   },
   assoc_director: {
+    // reference data: add technologies (docs/lookups-api.md)
+    "technology:create": "org",
     ...salesLine("hierarchy", "hierarchy"),
     "calendar:block": "hierarchy",
     "candidate:assign": "hierarchy",
@@ -334,6 +343,8 @@ export const GRANTS: Record<Role, Grants> = {
     "invoice:read": "hierarchy",
   },
   ceo: {
+    // reference data: add technologies (docs/lookups-api.md)
+    "technology:create": "org",
     "candidate:read": "org",
     "assignment:read": "org",
     "hotlist:read": "org",
@@ -592,6 +603,8 @@ export const GRANTS: Record<Role, Grants> = {
     "audit:read": "org",
     // interviews-settings: staff directory data (work phone), not business data.
     "staff.contact:read": "org",
+    // reference data: add technologies (docs/lookups-api.md)
+    "technology:create": "org",
     // chat
     "chat:use": "own",
   },

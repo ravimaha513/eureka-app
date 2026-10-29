@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, ChevronDown, ChevronRight, Pencil } from "lucide-react";
 import { adminApi, type LocationDetail as Detail, type LocationPerson } from "./adminApi";
 import { friendlyError } from "./errors";
-import { keys } from "./shared";
+import { keys, useAccess } from "./shared";
+import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { Loading } from "../ui/Loading";
 import { QueryError } from "../ui/QueryError";
 import { Drawer } from "../sales/ui";
@@ -13,12 +14,15 @@ export const KIND_LABELS: Record<string, string> = { training: "Training", gh: "
 
 type View = "hierarchy" | "team" | "role";
 
-/** One location: its location roles and its people as a reporting tree, by team or by role. Read-only. */
+/** One location: its location roles and its people as a reporting tree, by team or by role. Only the name is editable. */
 export function LocationDetailView({ id, onBack }: { id: string; onBack: () => void }) {
   const q = useQuery({ queryKey: [...keys.locations, id], queryFn: () => adminApi.location(id) });
   const [view, setView] = useState<View>("hierarchy");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const { announce } = useAccess();
+  const qc = useQueryClient();
 
   if (q.isLoading) return <Loading />;
   if (q.error) return <QueryError query={q} message={friendlyError(q.error)} />;
@@ -36,7 +40,16 @@ export function LocationDetailView({ id, onBack }: { id: string; onBack: () => v
         <h2>{loc.name}</h2>
         <span className="chip">{KIND_LABELS[loc.kind] ?? loc.kind}</span>
         <span className="muted">{[loc.state, loc.timezone].filter(Boolean).join(" · ")}</span>
+        <button type="button" className="btn sm push" onClick={() => setRenaming(true)}><Pencil size={14} aria-hidden="true" /> Rename</button>
       </header>
+      {renaming && (
+        <RenameLocationDialog id={loc.id} name={loc.name} onClose={() => setRenaming(false)} onDone={(msg) => {
+          setRenaming(false);
+          announce(msg);
+          // Users, teams and pickers all show location names.
+          for (const k of [keys.meta, keys.locations, keys.users, keys.teams]) void qc.invalidateQueries({ queryKey: k });
+        }} />
+      )}
 
       <ul className="locstats" aria-label={`${loc.name} at a glance`}>
         <li><span className="muted">People</span><b>{d.people.length}</b></li>
@@ -261,5 +274,26 @@ function PersonDrawer({ d, id, onClose, onOpen }: { d: Detail; id: string; onClo
         )}
       </section>
     </Drawer>
+  );
+}
+
+function RenameLocationDialog({ id, name: current, onClose, onDone }: { id: string; name: string; onClose: () => void; onDone: (m: string) => void }) {
+  const [name, setName] = useState(current);
+  const { busy, error, run } = useSubmit((e) => friendlyError(e));
+  const next = name.trim();
+  return (
+    <Dialog title={`Rename ${current}`} onClose={onClose}>
+      <form onSubmit={(e) => {
+        e.preventDefault();
+        void run(async () => {
+          await adminApi.renameLocation(id, next);
+          onDone(`Renamed ${current} to ${next}.`);
+        });
+      }}>
+        <div className="field"><label htmlFor="rl-name">Location name</label>
+          <input id="rl-name" required maxLength={120} data-autofocus value={name} onChange={(e) => setName(e.target.value)} /></div>
+        <DialogActions onCancel={onClose} submitLabel="Rename location" busy={busy} error={error} disabled={!next || next === current} />
+      </form>
+    </Dialog>
   );
 }

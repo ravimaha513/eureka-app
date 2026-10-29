@@ -241,6 +241,10 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   `access.service.ts` and `engine.ts`); 0211 back-fills rows a lead stamped with a team they don't lead.
 - Search debounce paging fix (PR #67, no migrations): debounce effects skip when the trimmed input equals the applied
   search, so the mount-time run no longer resets an early Next (UsersTab, SitesPage, ApplicantsPage).
+- Password invite (PR #70, migration 0270): staging/local admins email a one-time `/set-password#token=` link
+  (Users tab "Email invite" / on create) instead of a temporary password; SHA-256-only tokens, 72 h, docs/admin-api.md.
+- Location rename (PR #73, migration 0280): `PATCH /admin/locations/:id` via `authz.admin_rename_location`; Rename
+  button on the location detail header; audited with the id only.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

@@ -81,6 +81,7 @@ const ADMIN_ENDPOINTS: { method: Method; url: string; body?: unknown; adminStatu
   { method: "GET", url: "/api/v1/admin/locations", adminStatus: 200 },
   { method: "GET", url: `/api/v1/admin/locations/${NIL}`, adminStatus: 404 },
   { method: "POST", url: "/api/v1/admin/locations", body: {}, adminStatus: 422 },
+  { method: "PATCH", url: `/api/v1/admin/locations/${NIL}`, body: {}, adminStatus: 422 },
   { method: "GET", url: "/api/v1/admin/teams", adminStatus: 200 },
   { method: "POST", url: "/api/v1/admin/teams", body: {}, adminStatus: 422 },
   { method: "PATCH", url: `/api/v1/admin/teams/${T.t1}`, body: {}, adminStatus: 422 },
@@ -217,6 +218,19 @@ describe("locations", () => {
     expect((await call("admin", "POST", "/api/v1/admin/locations", { name: "Houston", kind: "office" })).statusCode).toBe(409);
     expect((await call("admin", "POST", "/api/v1/admin/locations", { name: "Nowhere", kind: "warehouse" })).statusCode).toBe(422);
     expect((await call("admin", "POST", "/api/v1/admin/locations", { name: "Nowhere", kind: "remote", timezone: "Mars/Olympus" })).statusCode).toBe(422);
+  });
+
+  it("org_admin renames a location; the audit row has the id only", async () => {
+    const { id } = (await call("admin", "POST", "/api/v1/admin/locations", { name: "Irving", kind: "office" })).json();
+    expect((await call("admin", "PATCH", `/api/v1/admin/locations/${id}`, { name: "  Irving North " })).statusCode).toBe(204);
+    expect((await db.admin.query(`SELECT name FROM eureka.location WHERE id = $1`, [id])).rows[0]).toEqual({ name: "Irving North" });
+    const renamed = (await audits("admin.location.renamed")).at(-1);
+    expect(renamed).toMatchObject({ actor_id: U.admin, entity_id: id, changes: null });
+
+    expect((await call("admin", "PATCH", `/api/v1/admin/locations/${id}`, { name: "Houston" })).json()).toMatchObject({ status: 409, detail: "location_exists" });
+    expect((await call("admin", "PATCH", `/api/v1/admin/locations/${NIL}`, { name: "X" })).statusCode).toBe(404);
+    expect((await call("admin", "PATCH", `/api/v1/admin/locations/${id}`, { name: " " })).statusCode).toBe(422);
+    expect((await call("admin", "PATCH", `/api/v1/admin/locations/${id}`, { name: "Y", kind: "gh" })).statusCode).toBe(422);
   });
 
   it("lists people, teams and role holders per location; the detail carries the reporting tree", async () => {

@@ -28,6 +28,7 @@ type Modal =
   | { kind: "departments" }
   | { kind: "deactivate"; user: AdminUser }
   | { kind: "password"; user: AdminUser }
+  | { kind: "invite"; user: AdminUser }
   | { kind: "reactivate"; user: AdminUser }
   | { kind: "revoke"; user: AdminUser; role: UserRole }
   | { kind: "addToTeam" }
@@ -201,6 +202,7 @@ export function UsersTab({ preset }: { preset?: UsersPreset } = {}) {
                       {self ? <span className="muted">Your own account: ask another admin.</span> : (
                         <>
                           {u.status === "active" && <button className="btn sm" aria-label={`Grant role to ${u.displayName}`} onClick={() => setModal({ kind: "grant", user: u })}>Grant role</button>}
+                          {passwordLogin && u.status === "active" && <button className="btn sm" aria-label={`Email password link to ${u.displayName}`} onClick={() => setModal({ kind: "invite", user: u })}>Email invite</button>}
                           {passwordLogin && u.status === "active" && <button className="btn sm" aria-label={`Set password for ${u.displayName}`} onClick={() => setModal({ kind: "password", user: u })}>Set password</button>}
                           <button className="btn sm" aria-label={`Set manager for ${u.displayName}`} onClick={() => setModal({ kind: "manager", user: u })}>Manager</button>
                           <button className="btn sm" aria-label={`Set department for ${u.displayName}`} onClick={() => setModal({ kind: "department", user: u })}>Department</button>
@@ -234,11 +236,19 @@ export function UsersTab({ preset }: { preset?: UsersPreset } = {}) {
         <MoveToTeamDialog users={[...selected.values()]} onClose={close} onDone={bulkDone} />
       )}
 
-      {modal?.kind === "create" && <CreateUserDialog passwordLogin={passwordLogin} onClose={close} onDone={(name) => done(`Created ${name}.`)} />}
+      {modal?.kind === "create" && <CreateUserDialog passwordLogin={passwordLogin} onClose={close} onDone={done} />}
       {modal?.kind === "bulk" && <BulkImportDialog onClose={close} onDone={(n) => done(`Created ${n} users.`)} />}
       {modal?.kind === "grant" && <GrantRoleDialog user={modal.user} onClose={close} onDone={done} />}
       {modal?.kind === "password" && <SetPasswordDialog user={modal.user} onClose={close}
         onDone={() => done(`Temporary password set for ${modal.user.displayName}. They must change it at first sign-in.`)} />}
+      {modal?.kind === "invite" && (
+        <ConfirmDialog title={`Email a password link to ${modal.user.displayName}?`} confirmLabel="Send link" formatError={fmt}
+          action={() => adminApi.sendPasswordInvite(modal.user.id)} onClose={close}
+          onDone={() => done(`Sent a set-password link to ${modal.user.email}.`)}>
+          <p>They get an email with a one-time link to choose their own password and sign in. It expires in 72 hours.</p>
+          <p>Any earlier link stops working. Their current password, if any, keeps working until they use the link.</p>
+        </ConfirmDialog>
+      )}
       {modal?.kind === "manager" && <ManagerDialog user={modal.user} onClose={close} onDone={done} />}
       {modal?.kind === "department" && <DepartmentDialog user={modal.user} departments={departments.data ?? []} onClose={close} onDone={done} />}
       {modal?.kind === "departments" && <DepartmentsDialog departments={departments.data ?? []} onClose={close} onChanged={(msg) => {
@@ -298,9 +308,10 @@ function SetPasswordDialog({ user, onClose, onDone }: { user: AdminUser; onClose
   );
 }
 
-function CreateUserDialog({ onClose, onDone, passwordLogin }: { onClose: () => void; onDone: (name: string) => void; passwordLogin: boolean }) {
+function CreateUserDialog({ onClose, onDone, passwordLogin }: { onClose: () => void; onDone: (message: string) => void; passwordLogin: boolean }) {
   const meta = useMeta();
   const [f, setF] = useState({ email: "", displayName: "", designation: "", primaryLocationId: "", temporaryPassword: "" });
+  const [invite, setInvite] = useState(true);
   const { busy, error, run } = useSubmit((e) => friendlyError(e, "createUser"));
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
   return (
@@ -308,13 +319,17 @@ function CreateUserDialog({ onClose, onDone, passwordLogin }: { onClose: () => v
       <form onSubmit={(e) => {
         e.preventDefault();
         void run(async () => {
-          await adminApi.createUser({
-            email: f.email.trim(), displayName: f.displayName.trim(),
+          const name = f.displayName.trim();
+          const r = await adminApi.createUser({
+            email: f.email.trim(), displayName: name,
             ...(f.designation.trim() ? { designation: f.designation.trim() } : {}),
             ...(f.primaryLocationId ? { primaryLocationId: f.primaryLocationId } : {}),
-            ...(passwordLogin && f.temporaryPassword ? { temporaryPassword: f.temporaryPassword } : {}),
+            ...(passwordLogin && invite ? { sendPasswordInvite: true } : {}),
+            ...(passwordLogin && !invite && f.temporaryPassword ? { temporaryPassword: f.temporaryPassword } : {}),
           });
-          onDone(f.displayName.trim());
+          onDone(r.invite === "sent" ? `Created ${name} and emailed them a link to set their password.`
+            : r.invite === "failed" ? `Created ${name}, but the invite email could not be sent. Use Email invite to try again.`
+            : `Created ${name}.`);
         });
       }}>
         <div className="field"><label htmlFor="nu-email">Email</label>
@@ -329,6 +344,9 @@ function CreateUserDialog({ onClose, onDone, passwordLogin }: { onClose: () => v
             {meta.data?.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select></div>
         {passwordLogin && (
+          <label className="check"><input type="checkbox" checked={invite} onChange={(e) => setInvite(e.target.checked)} /> Email them a link to set their password</label>
+        )}
+        {passwordLogin && !invite && (
           <div className="field"><label htmlFor="nu-pw">Temporary password <span className="muted">(optional; they change it at first sign-in)</span></label>
             <input id="nu-pw" type="text" autoComplete="off" minLength={10} maxLength={72} value={f.temporaryPassword} onChange={set("temporaryPassword")} /></div>
         )}
