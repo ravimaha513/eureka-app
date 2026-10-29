@@ -15,7 +15,7 @@ BEGIN
   UPDATE eureka.app_user
      SET email = 'deleted-' || p_user::text || '@deleted.invalid',
          display_name = 'Deleted user', designation = NULL, google_sub = NULL,
-         primary_location_id = NULL, department_id = NULL, deleted_at = pg_catalog.now(),
+         primary_location_id = NULL, deleted_at = pg_catalog.now(),
          access_version = access_version + 1
    WHERE id = p_user AND status = 'inactive' AND deleted_at IS NULL;
   IF NOT FOUND THEN

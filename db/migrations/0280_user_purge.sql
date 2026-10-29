@@ -5,7 +5,7 @@
 --     of removing it: about 110 foreign keys (candidates, submissions, chat, audit
 --     actors, ...) reference app_user and stay valid, shown as "Deleted user".
 -- Deletion (authz.anonymize_user, db/functions/authz/) scrubs the email (freed for
--- reuse), name, designation, Google link, location and department, removes the
+-- reuse), name, designation, Google link and location, removes the
 -- password credential and clears the Settings profile (phone, bio, birthday).
 -- Two callers, both in db/functions/authz/:
 --   admin_delete_user: an admin, any time after deactivation (skips the wait).
