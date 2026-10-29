@@ -100,3 +100,18 @@ Added during implementation:
 - `DELETE /admin/users/:id/roles/:role` without `locationId` revokes the role at every location.
 - Moving members needs `team:move_member`, which `org_admin` does not hold (least privilege: moves reassign candidates, which is business data). The Teams tab shows the action disabled for admins; managers and associate directors will move members from a team view (Phase 2).
 - The first admins come from the bootstrap CLI (`authz.bootstrap_admins`, migration 0037; infra/README.md "First admin"), never from the API: break-glass only: it refuses while an active `org_admin` exists (and, after a first bootstrap, without `--recover`), creates two so restricted roles can be approved (AD-3), and is executable only by the migration user.
+
+## Password invite (staging/local, migration 0270)
+
+Only when `PASSWORD_LOGIN=on` (404 otherwise). Instead of choosing a temporary password, an admin emails the user a one-time link.
+
+| Route | Who | Body | Result |
+|---|---|---|---|
+| `POST /api/v1/admin/users/:id/password-invite` | access:manage, not oneself, active user, no restricted role | none | 204; 403 `restricted_target`/`self_change`; 422 `user_inactive`; 502 `mail_failed` (link stays valid; send again) |
+| `POST /api/v1/admin/users` | as create | `sendPasswordInvite: true` (not with `temporaryPassword`, 422 `password_or_invite`) | 201 `{ id, invite: "sent" \| "failed" }` |
+| `POST /api/auth/password/setup` | public, rate-limited per IP | `{ token, newPassword }` | 200 `{ mustChangePassword: false }` + session cookie; 400 `invalid_link` (unknown, used, expired, replaced, user inactive or restricted); 422 `password_weak` (link stays open) |
+
+- Link: `${PUBLIC_BASE_URL}/set-password#token=<43 chars base64url>`. The token is in the fragment so it never reaches server or proxy logs; the page clears it from the address bar.
+- Stored: SHA-256 of the token only (`authz.password_setup_token`). Valid 72 h, once; a newer link closes any open one. Using it ends every other session of the user (as any new password does).
+- Mail goes through the API mail port (SES from `PORTAL_FROM_EMAIL`, or the dev mailbox).
+- Audit: `admin.user.password_invite` (`{ ttlHours }`), `auth.password_setup` (`{}`). No token or email.

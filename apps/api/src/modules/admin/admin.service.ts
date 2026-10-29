@@ -1,4 +1,5 @@
-import { ForbiddenException, HttpException, Inject, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
+import { createHash, randomBytes } from "node:crypto";
+import { BadGatewayException, ForbiddenException, HttpException, Inject, Injectable, Logger, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import type pg from "pg";
 import { z } from "zod";
 import {
@@ -14,12 +15,15 @@ import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, parseEmailList, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
+import { MAIL_PORT, type MailPort } from "../../platform/mail.js";
 import { mapAdminError } from "./admin.errors.js";
 import type { BulkCreateUsers, CreateDepartment, CreateLocation, CreateRoleRequest, CreateTeam, CreateUser, MoveMember, UserListQuery } from "./admin.schemas.js";
 import { likeContains } from "../../platform/sql.js";
 import { buildUserImportTemplate } from "./user-import-template.js";
 
 const EMAIL = z.string().email();
+/** How long an emailed set-password link stays open. */
+export const PASSWORD_INVITE_TTL_HOURS = 72;
 
 /** Thrown inside the transaction to roll it back while still returning the per-row report. */
 class BulkOutcome extends Error {
@@ -62,10 +66,13 @@ const ROW_ROLE_ERRORS = new Set(["separation_of_duties", "location_required", "l
  */
 @Injectable()
 export class AdminService {
+  private readonly log = new Logger("AdminService");
+
   constructor(
     private readonly db: DbService,
     private readonly audit: AuditService,
     @Inject(CONFIG) private readonly config: AppConfig,
+    @Inject(MAIL_PORT) private readonly mail: MailPort,
   ) {}
 
   /** Runs fn as the user and maps database error codes to contract errors. */
@@ -230,12 +237,46 @@ export class AdminService {
     await this.tx(user, async (c) => { await c.query(`SELECT authz.admin_set_password($1, $2)`, [id, password]); });
   }
 
+  /**
+   * An org admin emails a user a one-time set-password link (staging/local,
+   * migration 0270). Only the token's SHA-256 is stored; the token travels in
+   * the link's fragment so it never reaches server or proxy logs. A newer link
+   * replaces any open one. 502 when the mail could not be sent (the link stays
+   * valid; sending again replaces it).
+   */
+  async sendPasswordInvite(user: AuthedUser, id: string): Promise<void> {
+    if (this.config.PASSWORD_LOGIN !== "on") throw new NotFoundException();
+    const token = randomBytes(32).toString("base64url");
+    const email = await this.tx(user, async (c) => (await c.query<{ email: string }>(
+      `SELECT authz.admin_issue_password_setup($1, $2, $3) AS email`,
+      [id, createHash("sha256").update(token).digest(), PASSWORD_INVITE_TTL_HOURS])).rows[0]!.email);
+    const link = `${this.config.PUBLIC_BASE_URL.replace(/\/+$/, "")}/set-password#token=${token}`;
+    try {
+      await this.mail.send({
+        to: email,
+        subject: "Set your Eureka password",
+        text: [
+          "An administrator added you to Eureka.",
+          "",
+          "Choose your password and sign in here:",
+          link,
+          "",
+          `The link works once and expires in ${PASSWORD_INVITE_TTL_HOURS} hours. If you did not expect this email, you can ignore it.`,
+        ].join("\n"),
+      });
+    } catch (err) {
+      this.log.warn(`password invite mail failed (${(err as { name?: string })?.name ?? "error"})`);
+      throw new BadGatewayException("mail_failed");
+    }
+  }
+
   async createUser(user: AuthedUser, body: CreateUser) {
     if (!this.emailAllowed(body.email)) throw new UnprocessableEntityException("email_domain");
-    if (body.temporaryPassword !== undefined && this.config.PASSWORD_LOGIN !== "on") {
+    if ((body.temporaryPassword !== undefined || body.sendPasswordInvite) && this.config.PASSWORD_LOGIN !== "on") {
       throw new UnprocessableEntityException("password_login_disabled");
     }
-    return this.tx(user, async (c) => {
+    if (body.temporaryPassword !== undefined && body.sendPasswordInvite) throw new UnprocessableEntityException("password_or_invite");
+    const created = await this.tx(user, async (c) => {
       const { rows } = await c.query<{ id: string }>(
         `SELECT authz.admin_create_user($1, $2, $3, $4) AS id`,
         [body.email, body.displayName, body.designation ?? null, body.primaryLocationId ?? null]);
@@ -247,6 +288,14 @@ export class AdminService {
       });
       return { id };
     });
+    if (!body.sendPasswordInvite) return created;
+    // The user exists either way; the admin can resend from the Users tab.
+    try {
+      await this.sendPasswordInvite(user, created.id);
+      return { ...created, invite: "sent" as const };
+    } catch {
+      return { ...created, invite: "failed" as const };
+    }
   }
 
   /**

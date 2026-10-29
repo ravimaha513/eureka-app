@@ -76,6 +76,12 @@ export class AdminController {
     await this.svc.setPassword(user, id, SetPassword.parse(body).password);
   }
 
+  @Post("users/:id/password-invite")
+  @HttpCode(204)
+  async sendPasswordInvite(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string): Promise<void> {
+    await this.svc.sendPasswordInvite(user, id);
+  }
+
   @Post("users/:id/deactivate")
   @HttpCode(204)
   async deactivate(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string): Promise<void> {
