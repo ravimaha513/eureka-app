@@ -684,6 +684,26 @@ describe("Locations tab", () => {
     expect(await within(dlg).findByRole("alert")).toHaveTextContent(ERROR_MESSAGES.location_exists!);
     expect(lastWrite().body).toEqual({ name: "Dallas", kind: "office" });
   });
+
+  it("renames a location from its detail, showing a duplicate name inside the dialog", async () => {
+    let dup = true;
+    routes["PATCH /api/v1/admin/locations/loc-dal"] = () => (dup ? problem(409, "location_exists") : { status: 204 });
+    renderPage("locations");
+    fireEvent.click(within(await screen.findByRole("list", { name: "Locations" })).getByRole("button", { name: /Dallas/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    const dlg = await screen.findByRole("dialog", { name: "Rename Dallas" });
+    const save = within(dlg).getByRole("button", { name: "Rename location" });
+    expect(save).toBeDisabled();
+    fireEvent.change(within(dlg).getByLabelText("Location name"), { target: { value: " Houston " } });
+    fireEvent.click(save);
+    expect(await within(dlg).findByRole("alert")).toHaveTextContent(ERROR_MESSAGES.location_exists!);
+    dup = false;
+    fireEvent.change(within(dlg).getByLabelText("Location name"), { target: { value: "Dallas North" } });
+    fireEvent.click(save);
+    await waitFor(() => expect(status()).toHaveTextContent("Renamed Dallas to Dallas North."));
+    expect(lastWrite()).toMatchObject({ method: "PATCH", path: "/api/v1/admin/locations/loc-dal", body: { name: "Dallas North" } });
+    expect(screen.queryByRole("dialog", { name: "Rename Dallas" })).not.toBeInTheDocument();
+  });
 });
 
 // ---- error mapping -------------------------------------------------------------------------------

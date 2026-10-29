@@ -673,6 +673,17 @@ const CASES: RejectCase[] = [
     forbidden: { id: LOC.austin, status: "inactive" },
   },
   {
+    route: "PATCH /api/v1/admin/locations/:id", actor: "admin",
+    prepare: async () => {
+      const l = await ok("admin", "POST", "/api/v1/admin/locations", { name: `MA Loc ${++maDept}`, kind: "office" });
+      return {
+        url: `/api/v1/admin/locations/${l.id}`, body: { name: `MA Loc ${++maDept}` },
+        state: () => rows(`SELECT * FROM eureka.location ORDER BY id`),
+      };
+    },
+    forbidden: { id: LOC.austin, kind: "gh", timezone: "UTC", peopleCount: 9 },
+  },
+  {
     route: "PUT /api/v1/admin/teams/:id/lead", actor: "admin",
     prepare: async () => ({
       url: `/api/v1/admin/teams/${T.t2}/lead`, body: { leadId: U.l1 },

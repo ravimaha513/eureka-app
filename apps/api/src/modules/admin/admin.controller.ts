@@ -10,6 +10,7 @@ import {
   CreateRoleRequest,
   CreateTeam,
   RenameDepartment,
+  RenameLocation,
   RenameTeam,
   CreateUser,
   MoveMember,
@@ -154,6 +155,12 @@ export class AdminController {
   @Post("locations")
   createLocation(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createLocation(user, CreateLocation.parse(body));
+  }
+
+  @Patch("locations/:id")
+  @HttpCode(204)
+  async renameLocation(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
+    await this.svc.renameLocation(user, id, RenameLocation.parse(body).name);
   }
 
   // ---------- departments ----------
