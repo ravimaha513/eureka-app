@@ -221,10 +221,12 @@ const salesLine = (s: Scope, submitScope: Scope): Grants => ({
   "document:upload": s,
 });
 
+const withoutCandidateCreate = ({ "candidate:create": _, ...rest }: Grants): Grants => rest;
+
 export const GRANTS: Record<Role, Grants> = {
   recruiter: {
-    ...salesLine("team", "team"),
-    "candidate:create": "own",
+    // CA-6: only a lead or above adds candidates, so no candidate:create.
+    ...withoutCandidateCreate(salesLine("team", "team")),
     "candidate:update": "own",
     "assignment:read": "own",
     "submission:read": "own",

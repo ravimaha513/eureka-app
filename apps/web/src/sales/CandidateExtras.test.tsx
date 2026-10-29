@@ -75,7 +75,7 @@ const wrap = (ui: React.ReactNode) =>
 const writes = () => calls.filter((c) => c.method !== "GET");
 const lastGet = (path: string) => calls.filter((c) => c.method === "GET" && c.path === path).at(-1)!;
 
-async function openCreate(me: Me = RECRUITER, onOpenProfile = vi.fn()) {
+async function openCreate(me: Me = LEAD, onOpenProfile = vi.fn()) {
   wrap(<CandidatesPage me={me} onOpenProfile={onOpenProfile} />);
   fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
   const dlg = screen.getByRole("dialog", { name: "New candidate" });
@@ -146,8 +146,8 @@ describe("Create candidate: contacts, batch and duplicate check", () => {
     expect(within(batchSel).getAllByRole("option").map((o) => o.textContent)).toEqual(["No batch", "Java · Dallas · Nov 2026"]);
     expect(lastGet("/api/v1/batches").url.searchParams.get("locationId")).toBe(LOC);
     fireEvent.change(batchSel, { target: { value: B1 } });
-    fireEvent.change(within(dlg).getByLabelText("Phone (optional)"), { target: { value: "+1 (469) 555-0199" } });
-    fireEvent.change(within(dlg).getByLabelText("Personal email (optional)"), { target: { value: " ravi@example.com " } });
+    fireEvent.change(within(dlg).getByLabelText("Phone"), { target: { value: "+1 (469) 555-0199" } });
+    fireEvent.change(within(dlg).getByLabelText("Personal email"), { target: { value: " ravi@example.com " } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
     await waitFor(() => expect(onOpenProfile).toHaveBeenCalledWith("new-id"));
     expect(writes()[0]!.body).toEqual({
@@ -157,30 +157,36 @@ describe("Create candidate: contacts, batch and duplicate check", () => {
 
   it("refuses a phone without a country code before sending", async () => {
     const { dlg } = await openCreate();
-    fireEvent.change(within(dlg).getByLabelText("Phone (optional)"), { target: { value: "469 555 0199" } });
+    fireEvent.change(within(dlg).getByLabelText("Phone"), { target: { value: "469 555 0199" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
     expect(writes()).toHaveLength(0);
-    const phone = within(dlg).getByLabelText("Phone (optional)");
+    const phone = within(dlg).getByLabelText("Phone");
     expect(phone).toHaveAttribute("aria-invalid", "true");
     // Focus after a failed submit is HANDOFF task 7 (older dialogs), not asserted here.
     expect(phone).toHaveAccessibleDescription(expect.stringContaining("Include the country code"));
   });
 
-  it("on a likely duplicate shows only team and contact, links a readable profile, and creates on confirmation", async () => {
-    routes["POST /api/v1/candidates"] = (_u, b) => ((b as { confirmDuplicate?: boolean }).confirmDuplicate
-      ? { status: 201, body: { id: "new-id" } }
-      : problem(409, { title: "Conflict", detail: "possible_duplicate" }));
+  it("requires both the phone and the email before sending", async () => {
+    const { dlg } = await openCreate();
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
+    expect(writes()).toHaveLength(0);
+    expect(within(dlg).getByLabelText("Phone")).toHaveAccessibleDescription(expect.stringContaining("Enter a phone number."));
+    expect(within(dlg).getByLabelText("Personal email")).toHaveAccessibleDescription(expect.stringContaining("Enter a personal email."));
+  });
+
+  it("on a taken email or phone shows only team and contact, links a readable profile, and offers no override", async () => {
+    routes["POST /api/v1/candidates"] = () => problem(409, { title: "Conflict", detail: "duplicate_contact" });
     routes["POST /api/v1/candidates/duplicate-check"] = () => ({ body: { duplicates: [
       { candidateId: OTHER, team: "Team Rohit", contact: "Rohit Lead", matchedOn: ["phone"] },
       { candidateId: null, team: "Team Vikram", contact: "Vikram Lead", matchedOn: ["email", "phone"] },
     ] } });
-    const { dlg, onOpenProfile } = await openCreate();
-    fireEvent.change(within(dlg).getByLabelText("Phone (optional)"), { target: { value: "+14695550001" } });
-    fireEvent.change(within(dlg).getByLabelText("Personal email (optional)"), { target: { value: "asha@example.com" } });
+    const { dlg } = await openCreate();
+    fireEvent.change(within(dlg).getByLabelText("Phone"), { target: { value: "+14695550001" } });
+    fireEvent.change(within(dlg).getByLabelText("Personal email"), { target: { value: "asha@example.com" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
 
     const warn = await within(dlg).findByRole("alert");
-    expect(warn).toHaveTextContent("Possible duplicate.");
+    expect(warn).toHaveTextContent("Already a candidate.");
     expect(warn).toHaveTextContent("Same phone: Team Rohit, contact Rohit Lead");
     expect(warn).toHaveTextContent("Same email and phone: Team Vikram, contact Vikram Lead");
     expect(within(warn).getAllByRole("button", { name: "Open existing profile" })).toHaveLength(1);
@@ -188,17 +194,15 @@ describe("Create candidate: contacts, batch and duplicate check", () => {
       ["/api/v1/candidates", { firstName: "Ravi", lastName: "Kumar", technologyId: TECH, locationId: LOC, phone: "+14695550001", email: "asha@example.com" }],
       ["/api/v1/candidates/duplicate-check", { firstName: "Ravi", lastName: "Kumar", phone: "+14695550001", email: "asha@example.com" }],
     ]);
-
-    fireEvent.click(within(dlg).getByRole("button", { name: "Create anyway" }));
-    await waitFor(() => expect(onOpenProfile).toHaveBeenCalledWith("new-id"));
-    expect(writes()[2]!.body).toMatchObject({ confirmDuplicate: true });
+    expect(within(dlg).queryByRole("button", { name: "Create anyway" })).not.toBeInTheDocument();
   });
 
   it("opens the existing readable profile from the warning", async () => {
-    routes["POST /api/v1/candidates"] = () => problem(409, { detail: "possible_duplicate" });
+    routes["POST /api/v1/candidates"] = () => problem(409, { detail: "duplicate_contact" });
     routes["POST /api/v1/candidates/duplicate-check"] = () => ({ body: { duplicates: [{ candidateId: OTHER, team: "Team Rohit", contact: "l1", matchedOn: ["email"] }] } });
     const { dlg, onOpenProfile } = await openCreate();
-    fireEvent.change(within(dlg).getByLabelText("Personal email (optional)"), { target: { value: "asha@example.com" } });
+    fireEvent.change(within(dlg).getByLabelText("Phone"), { target: { value: "+14695550003" } });
+    fireEvent.change(within(dlg).getByLabelText("Personal email"), { target: { value: "asha@example.com" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
     fireEvent.click(await within(dlg).findByRole("button", { name: "Open existing profile" }));
     expect(onOpenProfile).toHaveBeenCalledWith(OTHER);
@@ -206,15 +210,15 @@ describe("Create candidate: contacts, batch and duplicate check", () => {
   });
 
   it("editing the phone after a warning clears it (a new check is needed)", async () => {
-    routes["POST /api/v1/candidates"] = () => problem(409, { detail: "possible_duplicate" });
+    routes["POST /api/v1/candidates"] = () => problem(409, { detail: "duplicate_contact" });
     routes["POST /api/v1/candidates/duplicate-check"] = () => ({ body: { duplicates: [{ candidateId: null, team: "Team Vikram", contact: "l3", matchedOn: ["phone"] }] } });
     const { dlg } = await openCreate();
-    fireEvent.change(within(dlg).getByLabelText("Phone (optional)"), { target: { value: "+14695550001" } });
+    fireEvent.change(within(dlg).getByLabelText("Phone"), { target: { value: "+14695550001" } });
+    fireEvent.change(within(dlg).getByLabelText("Personal email"), { target: { value: "asha@example.com" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
-    await within(dlg).findByRole("button", { name: "Create anyway" });
-    fireEvent.change(within(dlg).getByLabelText("Phone (optional)"), { target: { value: "+14695550002" } });
-    expect(within(dlg).queryByText(/Possible duplicate/)).not.toBeInTheDocument();
-    expect(within(dlg).getByRole("button", { name: "Create candidate" })).toBeInTheDocument();
+    await within(dlg).findByText(/Already a candidate/);
+    fireEvent.change(within(dlg).getByLabelText("Phone"), { target: { value: "+14695550002" } });
+    expect(within(dlg).queryByText(/Already a candidate/)).not.toBeInTheDocument();
   });
 });
 

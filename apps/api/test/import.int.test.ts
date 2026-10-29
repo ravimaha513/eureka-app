@@ -369,11 +369,14 @@ describe("commit", () => {
       AND i.call_status NOT IN ('cancelled','rescheduled','no_invite') AND p.personal_email IS NOT NULL`, [imported]);
     expect(wouldBeDue.rows.length).toBeGreaterThan(0);
     // Control: an app-created past interview of a candidate with an email is due.
-    const control = await asUser(db.app, U.r1a, async (c) => {
+    // A lead adds the candidate (CA-6); its recruiter r1a submits it.
+    const cid = await asUser(db.app, U.l1, async (c) => {
       const pid = (await c.query(`SELECT gen_random_uuid() AS id`)).rows[0].id;
       await c.query(`INSERT INTO eureka.person (id, first_name, last_name, personal_email) VALUES ($1,'Control','Person','control.p@example.com')`, [pid]);
-      const cid = (await c.query(`INSERT INTO eureka.candidate (person_id, technology_id, team_id, recruiter_id, location_id)
-        VALUES ($1,$2,(SELECT authz.actor_team()),$3,$4) RETURNING id`, [pid, TECH_ID, U.r1a, LOC.dallas])).rows[0].id;
+      return (await c.query(`INSERT INTO eureka.candidate (person_id, technology_id, team_id, recruiter_id, location_id)
+        VALUES ($1,$2,$3,$4,$5) RETURNING id`, [pid, TECH_ID, T.t1, U.r1a, LOC.dallas])).rows[0].id as string;
+    }, true);
+    const control = await asUser(db.app, U.r1a, async (c) => {
       const sid = (await c.query(`INSERT INTO eureka.submission (candidate_id, job_title, client_id) VALUES ($1,'Dev',(SELECT id FROM eureka.client LIMIT 1)) RETURNING id`, [cid])).rows[0].id;
       return (await c.query(`INSERT INTO eureka.interview (submission_id, round, starts_at, ends_at)
         VALUES ($1,'L1', now() - interval '3 hours', now() - interval '2 hours') RETURNING id`, [sid])).rows[0].id as string;

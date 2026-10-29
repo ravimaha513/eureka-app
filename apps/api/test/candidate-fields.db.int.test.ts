@@ -70,7 +70,8 @@ describe("candidate_profile_guard", () => {
   });
 
   it("an API insert cannot set compliance columns; team_assigned_at is the server's time", async () => {
-    const out = await asUser(db.app, U.r1a, async (c) => {
+    // A lead adds candidates (CA-6); r1a stays the assigned recruiter.
+    const out = await asUser(db.app, U.l1, async (c) => {
       const person = "11111111-2222-4333-8444-555555555555";
       await c.query(`INSERT INTO eureka.person (id, first_name, last_name) VALUES ($1, 'New', 'Person')`, [person]);
       await expect(c.query(`SAVEPOINT a; INSERT INTO eureka.candidate (person_id, technology_id, team_id, recruiter_id, location_id, documents_status)

@@ -335,6 +335,13 @@ describe("Hot List visibility policy (OD-01)", () => {
   });
 });
 
+describe("adding candidates (CA-6)", () => {
+  it("is a lead or above: recruiters have no candidate:create", () => {
+    expect(resolveScope(R1a, "candidate:create")).toBeNull();
+    expect([L1, M].map((u) => resolveScope(u, "candidate:create") !== null)).toEqual([true, true]);
+  });
+});
+
 describe("batch planning (canCreateBatch)", () => {
   it("is Sales leadership only: leads and managers yes; recruiters, location, coaches, HR and admins no", () => {
     expect([L1, M].map(canCreateBatch)).toEqual([true, true]);
