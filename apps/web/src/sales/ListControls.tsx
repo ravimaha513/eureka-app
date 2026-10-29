@@ -69,10 +69,10 @@ export function ListFilters({ s, label, statuses, batches, options }: {
       {options && (
         <>
           {sel("priority", "Priority", [["P1", "P1"], ["P2", "P2"], ["P3", "P3"]], "Any priority")}
-          {sel("teamId", "Team", options.teams.map((t) => [t.id, t.lead ? `${t.name} (${t.lead})` : t.name]), "Any team")}
-          {sel("recruiterId", "Recruiter", options.recruiters.map((r) => [r.id, r.name]), "Any recruiter")}
+          {sel("teamId", "Team", (options.teams ?? []).map((t) => [t.id, t.lead ? `${t.name} (${t.lead})` : t.name]), "Any team")}
+          {sel("recruiterId", "Recruiter", (options.recruiters ?? []).map((r) => [r.id, r.name]), "Any recruiter")}
           {sel("inPerson", "In person", [["yes", "In person"], ["no", "Not in person"]], "Any")}
-          {sel("ghLocationId", "Guest house", options.guestHouses.map((g) => [g.id, g.name]), "Any guest house")}
+          {sel("ghLocationId", "Guest house", (options.guestHouses ?? []).map((g) => [g.id, g.name]), "Any guest house")}
           <div className="field inline">
             <label htmlFor={`${id}-sort`}>Sort by</label>
             <select id={`${id}-sort`} value={s.extra.sort || "default"}
