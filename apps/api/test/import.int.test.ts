@@ -15,7 +15,7 @@ import { listReview } from "../src/import/review.js";
 import { recompute, stage } from "../src/import/stage.js";
 import { loadConfig } from "../src/platform/config.js";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
-import { TECH_ID, LOC, U, USERS, seedFixtures, toUserAccess } from "./fixtures.js";
+import { TECH_ID, LOC, T, U, USERS, seedFixtures, toUserAccess } from "./fixtures.js";
 
 const DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures/import");
 const FILES = { sales: join(DIR, "sales.csv"), interviews: join(DIR, "interviews.csv"), placements: join(DIR, "placements.csv") };
@@ -636,6 +636,80 @@ describe("the database verifies what an approver signs (second review)", () => {
     }
     const ok = await commitBatch(imp, s.batchId, { dryRun: false });
     expect([ok.failures, ok.loaded.candidates]).toEqual([[], 1]);
+  });
+});
+
+describe("the company Hot List sheet (0270)", () => {
+  // Fictional rows in the sheet's own layout: names instead of emails, the team in "Lead",
+  // who markets the candidate in "Marketing Teams", a guest house, a visa, in-person, placeholder lines.
+  const SHEET = [
+    "Lead,Candidate Name,Technology,Marketing Status,Recruiter,GH,Location,Priority,Marketing Teams,In Person Candidate,VISA,Marketing Email,Phone",
+    "Rohit,Gita Nair,Java,Active,r1a,Remote,Dallas,P1,Rohit,Yes,GC,gita.n@mktg.example,(214) 555-0191",
+    "Rohit,Hari Om,Java,Hold,Recruiter One,Dallas,Dallas,P2,Anjali,No,GC-EAD,hari.o@mktg.example,(214) 555-0192",
+    "Rohit,Ivy Lee,Java,Active,r1b,,Dallas,,All,,,ivy.l@mktg.example,(214) 555-0193",
+    "Rohit,,,,,,,,,,,,",
+    "Rohit,Jay Pal,Java,Interviews are High,r1a,TN,Dallas,P1,,,G,jay.p@mktg.example,(214) 555-0194",
+    "Nobody,Kay Dee,Java,Active,Someone Else,,Dallas,P1,,,,kay.d@mktg.example,(214) 555-0195",
+  ].join("\n");
+  const mapping = () => {
+    const m = JSON.parse(MAPPING);
+    m.sheets.sales.columns = {
+      fullName: "Candidate Name", marketingEmail: "Marketing Email", phone: "Phone", technology: "Technology",
+      location: "Location", owner: "Recruiter", team: "Lead", sharedWith: "Marketing Teams", status: "Marketing Status",
+      priority: "Priority", visa: "VISA", guestHouse: "GH", inPerson: "In Person Candidate",
+    };
+    m.statuses.sales = { ...m.statuses.sales, Active: { status: "active" }, Hold: { status: "on_hold" }, "Interviews are High": { status: "full_of_interviews" } };
+    m.owners = { "Recruiter One": "r1a@eureka.example" };
+    m.teams = { Rohit: "Team Rohit", Anjali: "Team Anjali" };
+    m.sharedWithAll = ["All"];
+    m.visas = { GC: "green_card", "GC-EAD": "gc_ead" };
+    return JSON.stringify(m);
+  };
+
+  it("resolves names, teams and sharing, skips placeholder lines, and loads the new fields", async () => {
+    const file = join(TMP, "hotlist_sheet.csv");
+    writeFileSync(file, SHEET);
+    const s = await stage(imp, { sales: file }, mapping(), { hmac, ticket: await ticket("admin") });
+    const r = await rows(s.batchId);
+    expect([2, 3, 4].map((n) => r.get(`sales ${n}`)!.state)).toEqual(["clean", "clean", "clean"]);
+    expect(r.get("sales 5")).toMatchObject({ state: "skipped", reasons: ["no_candidate"] });
+    expect(r.get("sales 6")).toMatchObject({ state: "review" });
+    expect(r.get("sales 6")!.reasons.sort()).toEqual(["unknown_location:guestHouse", "unknown_visa:visa"]);
+    expect(r.get("sales 7")!.reasons.sort()).toEqual(["unknown_owner:owner", "unknown_team:team"]);
+
+    // Verification recomputes the team and the shares from the cells.
+    const norm = (await imp.query<{ norm: Record<string, unknown> }>(
+      `SELECT norm FROM eureka.import_row WHERE batch_id = $1 AND row_no = 3`, [s.batchId])).rows[0]!.norm;
+    expect(norm).toMatchObject({ ownerId: U.r1a, teamId: T.t1, visibility: "selected_teams", shareTeamIds: [T.t2], visaCategory: "gc_ead" });
+    const preview = async () => (await call("admin2", "GET", `/api/v1/imports/${s.batchId}/preview`)).json();
+    expect((await preview()).problems).toEqual([]);
+    await imp.query(`UPDATE eureka.import_row SET norm = norm || jsonb_build_object('teamId', $2::text, 'shareTeamIds', jsonb_build_array($3::text))
+      WHERE batch_id = $1 AND row_no = 2`, [s.batchId, T.t2, T.t3]);
+    expect((await preview()).problems.map((x: { problem: string }) => x.problem).sort()).toEqual(["team_mismatch", "visibility_mismatch"]);
+    await imp.query(`UPDATE eureka.import_row SET norm = norm || jsonb_build_object('teamId', $2::text, 'shareTeamIds', '[]'::jsonb)
+      WHERE batch_id = $1 AND row_no = 2`, [s.batchId, T.t1]);
+
+    expect((await approve("admin2", s.batchId)).statusCode).toBe(200);
+    const c = await commitBatch(imp, s.batchId, { dryRun: false });
+    expect([c.failures, c.loaded.candidates]).toEqual([[], 3]);
+    const live = (await db.admin.query<Record<string, unknown>>(
+      `SELECT p.first_name, c.team_id, c.recruiter_id, c.visibility, c.marketing_status, c.priority, c.visa_category,
+              c.gh_remote, c.gh_location_id, c.in_person_ok,
+              (SELECT array_agg(s.team_id) FROM eureka.candidate_team_share s WHERE s.candidate_id = c.id) AS shares
+         FROM eureka.candidate c JOIN eureka.person p ON p.id = c.person_id
+        WHERE p.first_name IN ('Gita', 'Hari', 'Ivy') ORDER BY p.first_name`)).rows;
+    expect(live).toEqual([
+      { first_name: "Gita", team_id: T.t1, recruiter_id: U.r1a, visibility: "team", marketing_status: "active", priority: "P1",
+        visa_category: "green_card", gh_remote: true, gh_location_id: null, in_person_ok: true, shares: null },
+      { first_name: "Hari", team_id: T.t1, recruiter_id: U.r1a, visibility: "selected_teams", marketing_status: "on_hold", priority: "P2",
+        visa_category: "gc_ead", gh_remote: false, gh_location_id: LOC.dallas, in_person_ok: false, shares: [T.t2] },
+      { first_name: "Ivy", team_id: T.t1, recruiter_id: U.r1b, visibility: "all_teams", marketing_status: "active", priority: "P2",
+        visa_category: null, gh_remote: false, gh_location_id: null, in_person_ok: null, shares: null },
+    ]);
+    // Audit rows name the fields, never their values (rule 5).
+    const audit = (await db.admin.query<{ changes: unknown }>(
+      `SELECT changes FROM eureka.audit_event WHERE action IN ('candidate.created', 'candidate.updated') AND changes::text ~ 'sharedTeams|visaCategory'`)).rows;
+    expect(JSON.stringify(audit)).not.toMatch(/gc_ead|green_card|mktg\.example|555/);
   });
 });
 

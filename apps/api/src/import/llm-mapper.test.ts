@@ -21,7 +21,7 @@ describe("field catalog", () => {
     expect(Object.keys(FIELD_DOCS.sales).sort()).toEqual(Object.keys(SalesColumns.shape).sort());
     expect(Object.keys(FIELD_DOCS.interviews).sort()).toEqual(Object.keys(InterviewColumns.shape).sort());
     expect(Object.keys(FIELD_DOCS.placements).sort()).toEqual(Object.keys(PlacementColumns.shape).sort());
-    expect(requiredFields("sales").sort()).toEqual(["location", "owner", "status", "technology"]);
+    expect(requiredFields("sales").sort()).toEqual(["owner", "status", "technology"]);
   });
 });
 
@@ -85,7 +85,8 @@ describe("proposeMapping validation", () => {
 
   it("reports required fields the model could not place", async () => {
     const p = await proposeMapping(fake({ ...answer, columns: [answer.columns[0]!] }), { headers, rows });
-    expect(p.missing).toEqual(["technology", "location", "owner", "status"]);
+    // location is optional since 0270 (a blank cell falls back to the team's location).
+    expect(p.missing).toEqual(["technology", "owner", "status"]);
   });
 
   it("flags a missing name and prefers the surer name form", async () => {

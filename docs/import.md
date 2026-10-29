@@ -116,6 +116,36 @@ When text and colour are both mapped they must agree.
 the mapping later does not change an open batch. Loading a placement runs `authz.create_placement`,
 which queues `placement.created` outbox events for HR, Accounts and Immigration (open question).
 
+## Hot List sheet
+
+The company Hot List sheet ("Main Hotlist" tab) has no emails for staff: it names the recruiter
+and the lead, and keeps who markets the candidate, the guest house, the visa and the in-person
+flag. `apps/api/src/import/mapping.hotlist-sheet.json` maps its headers (migration 0270). Copy it,
+fill the aliases, have an admin review it, then `stage --mapping <copy>`.
+
+| Sheet column | Field | Resolved as |
+|---|---|---|
+| Recruiter | `owner` | an `owners` alias (label -> email), an email, or the exact display name of one user (case and spacing ignored). Two users with that name: `ambiguous_owner` |
+| Lead | `team` | a team name, else its lead's display name, after the `teams` alias (label -> team or lead name). Blank: the owner's team |
+| Location | `location` | the office location; blank falls back to the team's location |
+| Marketing Teams | `sharedWith` | a `sharedWithAll` label (`"All"`): open to all teams; the own team: team only; another team: selected teams (shared with that one). Naming another team needs the Lead column; contradicting an `Active/All Teams` status goes to review |
+| GH | `guestHouse` | a `guestHouses` alias (label -> location name), a location name, or `Remote` |
+| VISA | `visa` | a `visas` alias, or a visa label/key (`Green card`, `gc_ead`) |
+| In Person Candidate | `inPerson` | yes/no |
+| Marketing Status | `status` | `Hold` -> on hold, `Interviews are High` -> full of interviews, `Project Confirmation` -> confirmation (needs an open placement in the batch, else `status_requires_placement`) |
+
+Lines with no name, email or phone (placeholders under a lead) are `skipped` (`no_candidate`).
+Visa, guest house and in-person problems are approvable (the value is dropped); owner, team and
+sharing problems are not. Verification (`authz.import_verify_batch`) re-derives the owner, the team,
+the visibility and the shared teams from the stored cells with the same rules
+(`authz.import_owner_for`, `authz.import_team_for`), so they must stay in step with `analyze.ts`.
+The loader puts the candidate in the row's team (the insert policy still requires the owner may
+create there) and writes the share rows directly, as it does for `all_teams`.
+
+A counts-only dry run of the October 2026 sheet (302 lines) with every alias filled: 194 clean,
+27 placeholders skipped, 81 review (50 `Project Confirmation` without a placement sheet, 14 office
+locations that are states rather than offices, duplicates, unmatched names).
+
 ## Normalization and matching
 
 | Field | Rule |
@@ -141,7 +171,7 @@ goes to review (`matches_imported_person`).
 Field reasons are `<code>:<field>`, for example `ambiguous_date:dob` or `unknown_client:client`.
 **approve** is accepted only when every reason on the row is approvable: problems in optional
 fields (phone, emails, DOB, priority, marketing start date, vendor, implementation partner,
-rate, project city or state, status reason; the value is dropped) and `probable_duplicate`,
+rate, project city or state, status reason, visa, guest house, in person; the value is dropped) and `probable_duplicate`,
 `possible_duplicate_name`, `matches_existing_candidate`, `matches_imported_person`,
 `name_only_match`, `name_dob_match` (the suggestion is accepted). The decision records the
 reasons it accepted; re-analysis clears only those, so a new problem stays in review. Everything
@@ -151,7 +181,7 @@ an interview or placement row to a sales row (or marks a sales row as a duplicat
 
 Rows end in exactly one state: `clean`, `held` (fine, but its person cannot load, or placements
 are off), `review`, `rejected` (`duplicate_row`, `rejected_by_reviewer`, `merged_into_row`),
-`skipped` (`already_imported`, `person_already_imported`) or `committed`.
+`skipped` (`already_imported`, `person_already_imported`, `no_candidate`) or `committed`.
 
 ## What the commit does
 

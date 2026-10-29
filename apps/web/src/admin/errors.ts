@@ -26,6 +26,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   request_not_pending: "This request has already been decided.",
   request_expired: "This request expired. Ask for the role again.",
   user_inactive: "This person is deactivated. Reactivate them first.",
+  user_active: "Deactivate this person before deleting them.",
   invalid_manager: "Pick an active manager.",
   invalid_lead: "Pick an active person as the lead.",
   not_a_member: "This person isn't in that team any more. Refresh and try again.",
