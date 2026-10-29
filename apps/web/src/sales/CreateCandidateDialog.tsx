@@ -23,8 +23,10 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * (owning team and contact; a link only when the user can open that profile)
  * and offers "Create anyway".
  */
-export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenProfile }: {
+export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenProfile, canAddTechnology = false }: {
   locations: { id: string; name: string }[]; onClose: () => void; onCreated: (id: string) => void;
+  /** technology:create: the Technology picker offers "Add a new technology…". */
+  canAddTechnology?: boolean;
   onOpenProfile?: (id: string) => void;
 }) {
   const [v, setV] = useState({ firstName: "", lastName: "", phone: "", email: "", technologyId: "", locationId: "", batchId: "" });
@@ -111,7 +113,7 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
         <Field label="Personal email (optional)" hint="Used with the phone to spot duplicates." error={errors.email}>
           {(p) => <input {...p} type="email" autoComplete="off" value={v.email} onChange={set("email")} />}
         </Field>
-        <LookupPicker kind="technologies" label="Technology" value={v.technologyId} error={errors.technologyId}
+        <LookupPicker kind="technologies" label="Technology" value={v.technologyId} error={errors.technologyId} canAdd={canAddTechnology}
           onChange={(id) => setV((s) => ({ ...s, technologyId: id }))} />
         <LookupPicker kind="locations" label="Location" value={v.locationId} error={errors.locationId} fallback={locations}
           onChange={(id) => setV((s) => ({ ...s, locationId: id, batchId: "" }))} />

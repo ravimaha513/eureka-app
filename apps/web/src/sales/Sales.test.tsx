@@ -243,22 +243,28 @@ describe("Candidates list and create", () => {
     expect(await within(dlg).findByRole("alert")).toHaveTextContent("You can't create candidates in that team.");
   });
 
-  it("falls back to known locations and typed IDs when the lookup list is unavailable", async () => {
+  it("when the lookup list is unavailable: technology stays a dropdown, locations fall back to known ones", async () => {
     routes["GET /api/v1/lookups"] = () => problem(503, { title: "Unavailable" });
-    routes["POST /api/v1/candidates"] = () => ({ status: 201, body: { id: "new-id" } });
     wrap(<CandidatesPage me={RECRUITER} />);
     fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
     const dlg = screen.getByRole("dialog", { name: "New candidate" });
-    await waitFor(() => expect(within(dlg).getByLabelText("Technology").tagName).toBe("INPUT"));
-    expect(within(dlg).getByLabelText("Technology")).toHaveAccessibleDescription(expect.stringContaining("paste the ID"));
+    await waitFor(() => expect(within(dlg).getByLabelText("Technology")).toHaveAccessibleDescription("The list couldn't be loaded; reload the page to try again."));
+    expect(within(dlg).getByLabelText("Technology").tagName).toBe("SELECT");
     // Locations seen on the list are offered, with a typed ID as the last resort.
     fireEvent.change(within(dlg).getByLabelText("Location"), { target: { value: "__other__" } });
-    fireEvent.change(within(dlg).getByLabelText("Location ID"), { target: { value: LOC } });
-    fireEvent.change(within(dlg).getByLabelText("First name"), { target: { value: "A" } });
-    fireEvent.change(within(dlg).getByLabelText("Last name"), { target: { value: "B" } });
-    fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
+    expect(within(dlg).getByLabelText("Location ID").tagName).toBe("INPUT");
     fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
-    await waitFor(() => expect(writes()[0]!.body).toEqual({ firstName: "A", lastName: "B", technologyId: TECH, locationId: LOC }));
+    expect(await within(dlg).findByText("Choose a technology.")).toBeInTheDocument();
+    expect(writes()).toEqual([]);
+  });
+
+  it.each([[RECRUITER, false], [LEAD, true]] as const)("offers to add a technology only with technology:create (%#)", async (me, offered) => {
+    wrap(<CandidatesPage me={me} />);
+    fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
+    const dlg = screen.getByRole("dialog", { name: "New candidate" });
+    await waitFor(() => expect(within(dlg).getByLabelText("Technology").tagName).toBe("SELECT"));
+    await waitFor(() => expect(within(dlg).getAllByRole("option").length).toBeGreaterThan(1));
+    expect(!!within(dlg).queryByRole("option", { name: "Add a new technology…" })).toBe(offered);
   });
 });
 
