@@ -247,6 +247,8 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   passes (edited in place, never applied anywhere); mass-assignment case for POST /api/v1/lookups/technologies.
 - Location rename (PR #73, migration 0280): `PATCH /admin/locations/:id` via `authz.admin_rename_location`; Rename
   button on the location detail header; audited with the id only.
+- Duplicate migration numbers 0270/0280 allowlisted in migrate.test (already applied on staging and production by
+  name; renaming would re-run them). Renumber any future clash before it deploys.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
