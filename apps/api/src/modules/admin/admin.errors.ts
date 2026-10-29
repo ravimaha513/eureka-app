@@ -25,6 +25,7 @@ const CODES: Record<string, (code: string) => HttpException> = {
   invalid_designation: (c) => new UnprocessableEntityException(c),
   team_not_found: () => new NotFoundException(),
   department_not_found: () => new NotFoundException(),
+  location_not_found: () => new NotFoundException(),
   invalid_parent: (c) => new UnprocessableEntityException(c),
   request_not_found: () => new NotFoundException(),
   role_not_held: () => new NotFoundException(),

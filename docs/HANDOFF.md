@@ -245,6 +245,8 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   (Users tab "Email invite" / on create) instead of a temporary password; SHA-256-only tokens, 72 h, docs/admin-api.md.
 - Migration 0260 grant fix (PR #74): `GRANT EXECUTE ... candidate_contact_unique() TO eureka_owner` so CREATE TRIGGER
   passes (edited in place, never applied anywhere); mass-assignment case for POST /api/v1/lookups/technologies.
+- Location rename (PR #73, migration 0280): `PATCH /admin/locations/:id` via `authz.admin_rename_location`; Rename
+  button on the location detail header; audited with the id only.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

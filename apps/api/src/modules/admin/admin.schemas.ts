@@ -108,6 +108,7 @@ export const CreateLocation = z
   })
   .strict();
 export type CreateLocation = z.infer<typeof CreateLocation>;
+export const RenameLocation = z.object({ name: departmentName }).strict();
 
 export const SetLead = z.object({ leadId: uuid }).strict();
 export const AddMember = z.object({ userId: uuid }).strict();
