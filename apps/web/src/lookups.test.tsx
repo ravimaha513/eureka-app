@@ -15,11 +15,11 @@ const WITHHELD: Lookups = { ...FULL, clients: [], vendors: [], implementationPar
 
 afterEach(() => vi.restoreAllMocks());
 
-function Harness({ kind, label, optional, fallback, onValue }: {
-  kind: LookupKind; label: string; optional?: boolean; fallback?: Named[]; onValue?: (v: string) => void;
+function Harness({ kind, label, optional, fallback, onValue, canAdd }: {
+  kind: LookupKind; label: string; optional?: boolean; fallback?: Named[]; onValue?: (v: string) => void; canAdd?: boolean;
 }) {
   const [v, setV] = useState("");
-  return <LookupPicker kind={kind} label={label} optional={optional} fallback={fallback} value={v}
+  return <LookupPicker kind={kind} label={label} optional={optional} fallback={fallback} value={v} canAdd={canAdd}
     onChange={(id) => { setV(id); onValue?.(id); }} />;
 }
 
@@ -68,11 +68,26 @@ describe("LookupPicker", () => {
 
   const created = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 
-  it("an empty technology list offers to add one, which becomes the selection", async () => {
+  it("an empty technology list is still a dropdown; without the permission it says who can add", () => {
+    renderWith({ ...FULL, technologies: [] }, <Harness kind="technologies" label="Technology" />);
+    const sel = screen.getByLabelText("Technology");
+    expect(sel.tagName).toBe("SELECT");
+    expect(sel).toHaveAccessibleDescription("Ask a lead, manager or admin to add one.");
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["No technologies yet"]);
+  });
+
+  it("a loaded technology list hides the add option without the permission", () => {
+    renderWith(FULL, <Harness kind="technologies" label="Technology" />);
+    expect(screen.queryByRole("option", { name: /Add a new/ })).not.toBeInTheDocument();
+  });
+
+  it("with the permission, an empty list offers to add one, which becomes the selection", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(created({ id: "t9", name: "AI-ML", created: true }));
     const seen: string[] = [];
-    renderWith({ ...FULL, technologies: [] }, <Harness kind="technologies" label="Technology" onValue={(v) => seen.push(v)} />);
-    const input = screen.getByLabelText("Technology");
+    renderWith({ ...FULL, technologies: [] }, <Harness kind="technologies" label="Technology" canAdd onValue={(v) => seen.push(v)} />);
+    expect(screen.getByLabelText("Technology")).toHaveAccessibleDescription("Choose “Add a new technology…” to create the first one.");
+    fireEvent.change(screen.getByLabelText("Technology"), { target: { value: "__add__" } });
+    const input = screen.getByLabelText("New technology");
     expect(input).toHaveAccessibleDescription("Adds it to the list for everyone.");
     fireEvent.change(input, { target: { value: "  AI-ML " } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -80,14 +95,13 @@ describe("LookupPicker", () => {
     const [url, init] = fetchSpy.mock.calls[0]!;
     expect(url).toBe("/api/v1/lookups/technologies");
     expect(init).toMatchObject({ method: "POST", body: JSON.stringify({ name: "AI-ML" }) });
-    // The cached list now has it, so the picker turns into a select showing it.
-    await waitFor(() => expect(screen.getByLabelText("Technology").tagName).toBe("SELECT"));
+    await waitFor(() => expect(screen.queryByLabelText("New technology")).not.toBeInTheDocument());
     expect(screen.getByLabelText("Technology")).toHaveValue("t9");
   });
 
-  it("a loaded technology list has an add option; a blank name is refused locally", async () => {
+  it("with the permission, a loaded list adds via the last option; a blank name is refused locally", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(created({ id: "t0", name: "Go", created: true }));
-    renderWith(FULL, <Harness kind="technologies" label="Technology" />);
+    renderWith(FULL, <Harness kind="technologies" label="Technology" canAdd />);
     fireEvent.change(screen.getByLabelText("Technology"), { target: { value: "__add__" } });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getByLabelText("New technology")).toHaveAccessibleDescription(/Enter a technology name\./);
@@ -100,7 +114,7 @@ describe("LookupPicker", () => {
   });
 
   it("restricted lists never offer to add", () => {
-    renderWith(FULL, <Harness kind="clients" label="Client" />);
+    renderWith(FULL, <Harness kind="clients" label="Client" canAdd />);
     expect(screen.queryByRole("option", { name: /Add a new/ })).not.toBeInTheDocument();
   });
 

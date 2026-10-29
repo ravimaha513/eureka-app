@@ -1,5 +1,6 @@
 -- authz.create_technology: current definition (repeatable; db/functions/README.md).
--- Any active signed-in user adds a technology for the pickers (docs/lookups-api.md).
+-- Sales leads and above (manager, associate director, CEO) and org admins
+-- (technology:create) add a technology for the pickers (docs/lookups-api.md).
 -- Names match case-insensitively: an existing active one is returned instead of a
 -- duplicate (created = false); an inactive one is refused, since only an admin
 -- retired it. Table privileges in 0250. Change this file, not a new migration.
@@ -13,11 +14,9 @@ CREATE OR REPLACE FUNCTION authz.create_technology(p_name text)
 AS $function$
 DECLARE
   v_name text := pg_catalog.regexp_replace(pg_catalog.btrim(p_name), '\s+', ' ', 'g');
-  v_user uuid := authz.current_user_id();
   v_active boolean;
 BEGIN
-  IF v_user IS NULL
-     OR NOT EXISTS (SELECT 1 FROM eureka.app_user u WHERE u.id = v_user AND u.status = 'active') THEN
+  IF authz.current_user_id() IS NULL OR NOT coalesce(authz.has_perm('technology:create'), false) THEN
     RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
   END IF;
   IF coalesce(pg_catalog.length(v_name), 0) NOT BETWEEN 1 AND 60 OR v_name ~ '[[:cntrl:]]' THEN

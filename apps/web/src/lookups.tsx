@@ -40,9 +40,13 @@ export function useLookupName(kind: LookupKind, id: string | null | undefined): 
 const OTHER = "__other__";
 const ADD = "__add__";
 
-/** Lookup lists any signed-in user may add to (POST /api/v1/lookups/<path>, docs/lookups-api.md). */
-const ADDABLE: Partial<Record<LookupKind, { path: string; noun: string }>> = {
-  technologies: { path: "technologies", noun: "technology" },
+/**
+ * Lists that can be added to from the picker (POST /api/v1/lookups/<path>,
+ * docs/lookups-api.md; technology:create). These are always a dropdown, never a
+ * pasted ID: the add option is shown only to callers the screen says may add.
+ */
+const ADDABLE: Partial<Record<LookupKind, { path: string; noun: string; plural: string }>> = {
+  technologies: { path: "technologies", noun: "technology", plural: "technologies" },
 };
 
 /**
@@ -50,9 +54,7 @@ const ADDABLE: Partial<Record<LookupKind, { path: string; noun: string }>> = {
  * the cached list (sorted like the server) and becomes the selection; an
  * existing name in any case comes back as that row instead of a duplicate.
  */
-function AddEntry({ kind, label, onAdded, onCancel, autoFocus }: {
-  kind: LookupKind; label: string; onAdded: (id: string) => void; onCancel?: () => void; autoFocus?: boolean;
-}) {
+function AddEntry({ kind, onAdded, onCancel }: { kind: LookupKind; onAdded: (id: string) => void; onCancel: () => void }) {
   const { path, noun } = ADDABLE[kind]!;
   const qc = useQueryClient();
   const [name, setName] = useState("");
@@ -81,9 +83,9 @@ function AddEntry({ kind, label, onAdded, onCancel, autoFocus }: {
   };
   return (
     <div className="toolbar">
-      <Field label={label} error={error} hint={`Adds it to the list for everyone.`}>
+      <Field label={`New ${noun}`} error={error} hint="Adds it to the list for everyone.">
         {(p) => (
-          <input {...p} {...(autoFocus ? { "data-autofocus": true } : {})} value={name} maxLength={60} autoComplete="off"
+          <input {...p} autoFocus value={name} maxLength={60} autoComplete="off"
             placeholder={`New ${noun} name`} disabled={add.isPending}
             onChange={(e) => { setName(e.target.value); setError(undefined); }}
             // Inside a dialog form: Enter adds the entry instead of submitting the dialog.
@@ -91,7 +93,7 @@ function AddEntry({ kind, label, onAdded, onCancel, autoFocus }: {
         )}
       </Field>
       <button type="button" className="btn" disabled={add.isPending} onClick={submit}>{add.isPending ? "Adding…" : "Add"}</button>
-      {onCancel && <button type="button" className="btn ghost" disabled={add.isPending} onClick={onCancel}>Cancel</button>}
+      <button type="button" className="btn ghost" disabled={add.isPending} onClick={onCancel}>Cancel</button>
     </div>
   );
 }
@@ -101,11 +103,13 @@ function AddEntry({ kind, label, onAdded, onCancel, autoFocus }: {
  * select is disabled. If the list can't be loaded, or comes back empty (the
  * server withholds restricted lists from roles that may not see them), the
  * picker falls back to `fallback` options (if any) plus a typed ID so the
- * form is never blocked; the hint says why.
+ * form is never blocked; the hint says why. Lists in ADDABLE stay a dropdown
+ * even when empty, and end with "Add a new …" when `canAdd` (the caller holds
+ * the create permission; the API checks again).
  */
-export function LookupPicker({ kind, label, value, onChange, error, optional, placeholder, fallback = [], autoFocus }: {
+export function LookupPicker({ kind, label, value, onChange, error, optional, placeholder, fallback = [], autoFocus, canAdd = false }: {
   kind: LookupKind; label: string; value: string; onChange: (id: string) => void; error?: string;
-  optional?: boolean; placeholder?: string; fallback?: Named[]; autoFocus?: boolean;
+  optional?: boolean; placeholder?: string; fallback?: Named[]; autoFocus?: boolean; canAdd?: boolean;
 }) {
   const q = useLookups();
   const [typing, setTyping] = useState(false);
@@ -115,32 +119,7 @@ export function LookupPicker({ kind, label, value, onChange, error, optional, pl
   const rows = q.data?.[kind] ?? [];
   const addable = ADDABLE[kind];
 
-  if (rows.length > 0) {
-    return (
-      <>
-        <Field label={label} error={adding ? undefined : error}>
-          {(p) => (
-            <select {...p} {...af} value={adding ? ADD : value} onChange={(e) => {
-              if (e.target.value === ADD) { setAdding(true); return; }
-              setAdding(false);
-              onChange(e.target.value);
-            }}>
-              <option value="" disabled={!optional}>{empty}</option>
-              {value && !rows.some((r) => r.id === value) && <option value={value}>Current selection</option>}
-              {rows.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-              {addable && <option value={ADD}>Add a new {addable.noun}…</option>}
-            </select>
-          )}
-        </Field>
-        {adding && addable && (
-          <AddEntry kind={kind} label={`New ${addable.noun}`} autoFocus
-            onAdded={(id) => { setAdding(false); onChange(id); }} onCancel={() => setAdding(false)} />
-        )}
-      </>
-    );
-  }
-
-  if (q.isPending) {
+  if (q.isPending && rows.length === 0) {
     return (
       <Field label={label} error={error}>
         {(p) => <select {...p} {...af} value="" disabled aria-busy="true"><option value="">Loading…</option></select>}
@@ -148,9 +127,34 @@ export function LookupPicker({ kind, label, value, onChange, error, optional, pl
     );
   }
 
-  // An empty list that anyone may add to: offer the add row, not a pasted ID.
-  if (q.data && addable) {
-    return <AddEntry kind={kind} label={label} autoFocus={autoFocus} onAdded={onChange} />;
+  if (rows.length > 0 || addable) {
+    const offerAdd = !!addable && canAdd && !!q.data;
+    const first = rows.length > 0 ? empty : !q.data ? "Couldn't load the list" : `No ${addable!.plural} yet`;
+    const hint = rows.length > 0 || adding ? undefined
+      : !q.data ? "The list couldn't be loaded; reload the page to try again."
+        : offerAdd ? `Choose “Add a new ${addable!.noun}…” to create the first one.`
+          : "Ask a lead, manager or admin to add one.";
+    return (
+      <>
+        <Field label={label} error={adding ? undefined : error} hint={hint}>
+          {(p) => (
+            <select {...p} {...af} value={adding ? ADD : value} onChange={(e) => {
+              if (e.target.value === ADD) { setAdding(true); return; }
+              setAdding(false);
+              onChange(e.target.value);
+            }}>
+              <option value="" disabled={!optional}>{first}</option>
+              {value && !rows.some((r) => r.id === value) && <option value={value}>Current selection</option>}
+              {rows.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              {offerAdd && <option value={ADD}>Add a new {addable!.noun}…</option>}
+            </select>
+          )}
+        </Field>
+        {adding && offerAdd && (
+          <AddEntry kind={kind} onAdded={(id) => { setAdding(false); onChange(id); }} onCancel={() => setAdding(false)} />
+        )}
+      </>
+    );
   }
 
   // No list to choose from: offer what the screen already knows, then a typed ID.

@@ -61,7 +61,8 @@ describe("catalog integrity", () => {
   it("org_admin holds no data permissions (no self-escalation into data)", () => {
     // staff.contact:read is the staff directory's own data (work phone), and chat:use only lets the admin take
     // part in their own conversations (no admin read access to chats; docs/chat-api.md CH-9): neither is business data.
-    expect(Object.keys(GRANTS.org_admin).sort()).toEqual(["access:manage", "audit:read", "chat:use", "staff.contact:read"]);
+    // technology:create only adds a name to the technology picker list (docs/lookups-api.md): reference data, no read.
+    expect(Object.keys(GRANTS.org_admin).sort()).toEqual(["access:manage", "audit:read", "chat:use", "staff.contact:read", "technology:create"]);
   });
 
   it("every role may chat, at own scope only (internal staff chat; docs/chat-api.md CH-1)", () => {

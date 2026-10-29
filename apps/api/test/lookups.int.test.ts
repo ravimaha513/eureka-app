@@ -111,19 +111,37 @@ describe("POST /api/v1/lookups/technologies", () => {
     return app.inject({ method: "POST", url: "/api/v1/lookups/technologies", headers: { cookie, "x-csrf-token": csrf }, payload });
   };
 
-  it("lets any signed-in user add one, and everyone then sees it", async () => {
-    const res = await add("coach", { name: "  Rust   Systems " });
+  const ADDERS = new Set<Key>(["l1", "l2", "l3", "m1", "m2", "ad", "ceo", "admin", "admin2"]);
+
+  it("only Sales leads and above (manager, associate director, CEO) and org admins hold technology:create", () => {
+    for (const key of users) expect(can(toUserAccess(key), "technology:create"), key).toBe(ADDERS.has(key));
+  });
+
+  it.each(users.filter((k) => !ADDERS.has(k)))("refuses %s with 403 and writes nothing", async (key) => {
+    const res = await add(key, { name: `Nope ${key}` });
+    expect(res.statusCode, res.body).toBe(403);
+    const { rows } = await db.admin.query(`SELECT count(*)::int AS n FROM eureka.technology WHERE name = $1`, [`Nope ${key}`]);
+    expect(rows[0].n).toBe(0);
+  });
+
+  it("the database refuses a caller without technology:create even past the API", async () => {
+    await expect(asUser(db.app, U.r1a, (c) => c.query(`SELECT * FROM authz.create_technology('Go')`)))
+      .rejects.toMatchObject({ code: "42501" });
+  });
+
+  it("lets a lead add one, and everyone then sees it", async () => {
+    const res = await add("l1", { name: "  Rust   Systems " });
     expect(res.statusCode, res.body).toBe(200);
     const made = res.json() as { id: string; name: string; created: boolean };
     expect(made).toMatchObject({ name: "Rust Systems", created: true });
     expect((await lookups("r1a")).technologies).toContainEqual({ id: made.id, name: "Rust Systems" });
 
     const audit = await db.admin.query(`SELECT actor_id, changes FROM eureka.audit_event WHERE action = 'technology.created' AND entity_id = $1`, [made.id]);
-    expect(audit.rows).toEqual([{ actor_id: U.coach, changes: null }]);
+    expect(audit.rows).toEqual([{ actor_id: U.l1, changes: null }]);
   });
 
   it("returns the existing row for the same name in any case", async () => {
-    const res = await add("r2a", { name: "jAVA" });
+    const res = await add("admin", { name: "jAVA" });
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json()).toMatchObject({ name: "Java", created: false });
     const { rows } = await db.admin.query(`SELECT count(*)::int AS n FROM eureka.technology WHERE lower(name) = 'java'`);
@@ -131,11 +149,11 @@ describe("POST /api/v1/lookups/technologies", () => {
   });
 
   it("refuses a retired name and bad input", async () => {
-    expect((await add("r1a", { name: "cobol" })).statusCode).toBe(409);
-    expect((await add("r1a", { name: "   " })).statusCode).toBe(422);
-    expect((await add("r1a", { name: "x".repeat(61) })).statusCode).toBe(422);
-    expect((await add("r1a", { name: "a\u0007b" })).statusCode).toBe(422);
-    expect((await add("r1a", { name: "Go", active: false })).statusCode).toBe(422);
+    expect((await add("l2", { name: "cobol" })).statusCode).toBe(409);
+    expect((await add("l2", { name: "   " })).statusCode).toBe(422);
+    expect((await add("l2", { name: "x".repeat(61) })).statusCode).toBe(422);
+    expect((await add("l2", { name: "a\u0007b" })).statusCode).toBe(422);
+    expect((await add("l2", { name: "Go", active: false })).statusCode).toBe(422);
   });
 
   it("the app role can only write through the function", async () => {
@@ -143,7 +161,7 @@ describe("POST /api/v1/lookups/technologies", () => {
       .rejects.toMatchObject({ code: "42501" });
   });
 
-  it("refuses a caller who is not an active user", async () => {
+  it("refuses a caller with no user context", async () => {
     await expect(asUser(db.app, "00000000-0000-4000-8000-000000000000", (c) => c.query(`SELECT * FROM authz.create_technology('Go')`)))
       .rejects.toMatchObject({ code: "42501" });
   });

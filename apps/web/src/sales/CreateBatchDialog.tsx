@@ -12,7 +12,11 @@ const FIELDS = ["locationId", "technologyId", "startMonth", "sizePlanned"] as co
  * New training batch (POST /api/v1/batches, FR-CAN-02). Offered to Sales
  * leadership (the list's `canCreate` hint); the server decides.
  */
-export function CreateBatchDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+export function CreateBatchDialog({ onClose, onCreated, canAddTechnology = false }: {
+  onClose: () => void; onCreated: (id: string) => void;
+  /** technology:create: the Technology picker offers "Add a new technology…". */
+  canAddTechnology?: boolean;
+}) {
   const [v, setV] = useState({ locationId: "", technologyId: "", startMonth: "", sizePlanned: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
@@ -51,7 +55,7 @@ export function CreateBatchDialog({ onClose, onCreated }: { onClose: () => void;
       <form onSubmit={submit} noValidate>
         <LookupPicker kind="locations" label="Location" value={v.locationId} error={errors.locationId} autoFocus
           onChange={(id) => setV((s) => ({ ...s, locationId: id }))} />
-        <LookupPicker kind="technologies" label="Technology" value={v.technologyId} error={errors.technologyId}
+        <LookupPicker kind="technologies" label="Technology" value={v.technologyId} error={errors.technologyId} canAdd={canAddTechnology}
           onChange={(id) => setV((s) => ({ ...s, technologyId: id }))} />
         <Field label="Start month" hint="The month training starts." error={errors.startMonth}>
           {(p) => <input {...p} type="month" value={v.startMonth} onChange={(e) => setV((s) => ({ ...s, startMonth: e.target.value }))} />}

@@ -1,4 +1,4 @@
-import { Body, ConflictException, Controller, Get, HttpCode, Injectable, Post, UnprocessableEntityException } from "@nestjs/common";
+import { Body, ConflictException, Controller, ForbiddenException, Get, HttpCode, Injectable, Post, UnprocessableEntityException } from "@nestjs/common";
 import { z } from "zod";
 import { can, type Permission, type UserAccess } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
@@ -63,10 +63,11 @@ export class LookupsService {
   }
 
   /**
-   * Adds a technology (any active signed-in user). An existing active name
-   * (case-insensitive) is returned instead of a duplicate, with `created: false`.
+   * Adds a technology (technology:create: Sales leads and above, org admins). An existing
+   * active name (case-insensitive) is returned instead of a duplicate, with `created: false`.
    */
   async createTechnology(user: AuthedUser, name: string) {
+    if (!can(user.access, "technology:create")) throw new ForbiddenException("Not permitted");
     return this.db.withUser(user.id, async (c) => {
       const { rows } = await c.query<{ technology_id: string; technology_name: string; created: boolean }>(
         `SELECT technology_id, technology_name, created FROM authz.create_technology($1)`, [name]);
