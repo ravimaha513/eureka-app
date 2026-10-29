@@ -44,3 +44,6 @@ export type BulkVisibility = z.infer<typeof BulkVisibility>;
 export const BULK_STATUSES = ["active", "on_hold", "full_of_interviews", "stopped"] as const;
 export const BulkStatus = z.object({ ids: Ids, to: z.enum(BULK_STATUSES) }).strict();
 export type BulkStatus = z.infer<typeof BulkStatus>;
+
+export const BulkPriority = z.object({ ids: Ids, priority: z.enum(["P1", "P2", "P3"]) }).strict();
+export type BulkPriority = z.infer<typeof BulkPriority>;

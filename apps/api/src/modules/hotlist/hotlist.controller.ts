@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { BulkStatus, BulkVisibility, CreateView, HotlistFilters, UpdateView } from "./hotlist.schemas.js";
+import { BulkPriority, BulkStatus, BulkVisibility, CreateView, HotlistFilters, UpdateView } from "./hotlist.schemas.js";
 import { HotlistService } from "./hotlist.service.js";
 
 @Controller("api/v1/hotlist")
@@ -45,6 +45,20 @@ export class HotlistController {
   @RequirePermission("candidate:update")
   bulkStatus(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.bulkStatus(user, BulkStatus.parse(body));
+  }
+
+  @Post("bulk/priority")
+  @HttpCode(200)
+  @RequirePermission("candidate:update")
+  bulkPriority(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
+    return this.svc.bulkPriority(user, BulkPriority.parse(body));
+  }
+
+  /** Choices for the team, recruiter and guest-house filters (names only). */
+  @Get("filter-options")
+  @RequirePermission("hotlist:read")
+  filterOptions(@CurrentUser() user: AuthedUser) {
+    return this.svc.filterOptions(user);
   }
 
   /** POST, not GET: it is audited and needs the CSRF token (a cross-site link cannot start it). */
