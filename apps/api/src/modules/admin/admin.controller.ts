@@ -140,6 +140,16 @@ export class AdminController {
 
   // ---------- locations ----------
 
+  @Get("locations")
+  listLocations(@CurrentUser() user: AuthedUser) {
+    return this.svc.listLocations(user);
+  }
+
+  @Get("locations/:id")
+  locationDetail(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
+    return this.svc.locationDetail(user, id);
+  }
+
   @Post("locations")
   createLocation(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createLocation(user, CreateLocation.parse(body));

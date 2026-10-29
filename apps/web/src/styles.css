@@ -231,6 +231,38 @@ td.rowactions > button + button { margin-left: 6px; }
 .team header { display: flex; justify-content: space-between; align-items: baseline; }
 .team h2 { font-size: 15px; }
 .members { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+/* Locations tab: cards and location detail (people tree) */
+.loccards { list-style: none; padding: 0; }
+.loccard { width: 100%; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.loccard:hover { border-color: var(--pri-200); }
+.loccard:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; }
+.loccardhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 15px; }
+.loccounts { display: flex; gap: 16px; color: var(--muted); font-size: 12.5px; }
+.loccounts b { color: var(--text); }
+.warntext { color: var(--warn-fg); font-size: 12.5px; font-weight: 600; }
+.locdetail { display: flex; flex-direction: column; gap: 14px; }
+.lochead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lochead h2 { font-size: 20px; }
+.locstats { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.locstats li { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+.locstats b { font-size: 22px; color: var(--text); }
+.locstats li.warn b { color: var(--warn-fg); }
+.locdetail h3 { font-size: 14.5px; }
+.locpeople { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.locpeople > li { display: flex; align-items: center; gap: 8px; }
+.locpeople.indent { padding-left: 18px; }
+.personline { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.personline.outside { opacity: .75; }
+.orgtree, .orgtree ul { list-style: none; margin: 0; padding: 0; }
+.orgtree ul { margin-left: 15px; padding-left: 14px; border-left: 1px solid var(--line-strong); }
+.treerow { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 8px; }
+.treerow:hover { background: var(--hover); }
+.treespacer { width: 30px; flex: none; }
+.looseppl { border-top: 1px solid var(--line2); padding-top: 10px; }
+.team.dashed { border-style: dashed; }
+.team h4 { font-size: 14px; }
+.drawersub { font-size: 13px; margin-bottom: 8px; }
+.chain { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; color: var(--text2); }
 .members li { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--line2); color: var(--text2); }
 .backdrop { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; z-index: 50; padding: 16px; }
 .dialog { background: var(--surface); border-radius: 16px; border: 1px solid var(--line); width: min(460px, 100%); padding: 22px 24px; box-shadow: 0 20px 50px rgba(15, 23, 42, .25); max-height: 90vh; overflow: auto; }
