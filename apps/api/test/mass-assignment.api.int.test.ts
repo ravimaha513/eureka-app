@@ -853,9 +853,10 @@ const CASES: RejectCase[] = [
   },
   // candidates
   {
-    route: "POST /api/v1/candidates", actor: "r1a",
+    route: "POST /api/v1/candidates", actor: "l1",
     prepare: async () => ({
-      url: "/api/v1/candidates", body: { firstName: "Mass", lastName: "Assign", technologyId: TECH_ID, locationId: LOC.dallas },
+      url: "/api/v1/candidates",
+      body: { firstName: "Mass", lastName: "Assign", phone: "+14695558801", email: "mass.assign@example.com", technologyId: TECH_ID, locationId: LOC.dallas },
       state: () => rows(`SELECT (SELECT count(*) FROM eureka.candidate)::int AS c, (SELECT count(*) FROM eureka.person)::int AS p`),
     }),
     forbidden: {
@@ -864,7 +865,7 @@ const CASES: RejectCase[] = [
     },
   },
   {
-    route: "POST /api/v1/candidates/duplicate-check", actor: "r1a",
+    route: "POST /api/v1/candidates/duplicate-check", actor: "l1",
     prepare: async () => ({ url: "/api/v1/candidates/duplicate-check", body: { firstName: "A", lastName: "B", phone: "+14695550001" }, state: async () => null }),
     forbidden: { teamId: T.t3, candidateId: FOREIGN_ID, scope: "org", includeHidden: true },
   },
@@ -1607,7 +1608,7 @@ const CASES: RejectCase[] = [
       url: `/api/v1/applications/${FOREIGN_ID}/candidate`, body: { technologyId: TECH_ID, locationId: LOC.dallas },
       state: () => rows(`SELECT count(*)::int AS n FROM eureka.candidate`),
     }),
-    forbidden: { firstName: "X", lastName: "Y", email: "x@example.com", phone: "+12125550100", recruiterId: U.r1a, candidateId: FOREIGN_ID, status: "active" },
+    forbidden: { firstName: "X", lastName: "Y", recruiterId: U.r1a, candidateId: FOREIGN_ID, status: "active" },
   },
   {
     route: "POST /api/v1/applications/export", actor: "hr",

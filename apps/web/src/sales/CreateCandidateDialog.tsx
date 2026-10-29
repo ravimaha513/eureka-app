@@ -17,11 +17,11 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * Technology and location come from the lookups pickers; `locations` (the ones
  * the user has already seen) are the fallback when the lookup list is unavailable.
  *
- * Duplicate check (FR-CAN-09): when an email or phone is given the server
- * compares them with every candidate and answers 409 `possible_duplicate`. The
- * dialog then asks the duplicate check for the minimal details it may show
- * (owning team and contact; a link only when the user can open that profile)
- * and offers "Create anyway".
+ * Email and phone are required and unique across candidates (CA-6): the
+ * server answers 409 `duplicate_contact` when another candidate has either.
+ * The dialog then asks the duplicate check for the minimal details it may show
+ * (owning team and contact; a link only when the user can open that profile).
+ * There is no "Create anyway": the email or phone has to change.
  */
 export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenProfile }: {
   locations: { id: string; name: string }[]; onClose: () => void; onCreated: (id: string) => void;
@@ -51,9 +51,13 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
     const e: Record<string, string> = {};
     if (!v.firstName.trim()) e.firstName = "Enter a first name.";
     if (!v.lastName.trim()) e.lastName = "Enter a last name.";
-    const pp = v.phone.trim() ? phoneProblem(v.phone) : null;
-    if (pp) e.phone = PHONE_PROBLEM_MESSAGES[pp];
-    if (v.email.trim() && !EMAIL.test(v.email.trim())) e.email = "Enter a valid email address.";
+    if (!v.phone.trim()) e.phone = "Enter a phone number.";
+    else {
+      const pp = phoneProblem(v.phone);
+      if (pp) e.phone = PHONE_PROBLEM_MESSAGES[pp];
+    }
+    if (!v.email.trim()) e.email = "Enter a personal email.";
+    else if (!EMAIL.test(v.email.trim())) e.email = "Enter a valid email address.";
     if (!UUID_RE.test(v.technologyId.trim())) e.technologyId = "Choose a technology.";
     if (!UUID_RE.test(v.locationId.trim())) e.locationId = "Choose a location.";
     return e;
@@ -64,21 +68,18 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
     const e = validate();
     setErrors(e); setFormError("");
     if (Object.keys(e).length) { failed(); return; }
-    const phone = v.phone.trim() ? normalizePhoneE164(v.phone)! : "";
     const body: CreateCandidate = {
       firstName: v.firstName.trim(), lastName: v.lastName.trim(),
       technologyId: v.technologyId.trim(), locationId: v.locationId.trim(),
-      ...(phone ? { phone } : {}),
-      ...(v.email.trim() ? { email: v.email.trim() } : {}),
+      phone: normalizePhoneE164(v.phone)!, email: v.email.trim(),
       ...(v.batchId && openBatches.some((b) => b.id === v.batchId) ? { batchId: v.batchId } : {}),
-      ...(duplicates?.length ? { confirmDuplicate: true } : {}),
     };
     setBusy(true);
     try {
       const { id } = await salesApi.create(body);
       onCreated(id);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409 && err.detail === "possible_duplicate") {
+      if (err instanceof ApiError && err.status === 409 && err.detail === "duplicate_contact") {
         try {
           const r = await salesApi.duplicateCheck({ firstName: body.firstName, lastName: body.lastName, phone: body.phone, email: body.email });
           setDuplicates(r.duplicates.length ? r.duplicates : [{ candidateId: null, team: "another team", contact: null, matchedOn: [] }]);
@@ -105,11 +106,11 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
         <Field label="Last name" error={errors.lastName}>
           {(p) => <input {...p} autoComplete="off" value={v.lastName} onChange={set("lastName")} />}
         </Field>
-        <Field label="Phone (optional)" hint="With the country code, e.g. +1 469 555 0142" error={errors.phone}>
-          {(p) => <input {...p} type="tel" value={v.phone} onChange={set("phone")} />}
+        <Field label="Phone" hint="With the country code, e.g. +1 469 555 0142. One candidate per phone." error={errors.phone}>
+          {(p) => <input {...p} type="tel" required value={v.phone} onChange={set("phone")} />}
         </Field>
-        <Field label="Personal email (optional)" hint="Used with the phone to spot duplicates." error={errors.email}>
-          {(p) => <input {...p} type="email" autoComplete="off" value={v.email} onChange={set("email")} />}
+        <Field label="Personal email" hint="One candidate per email." error={errors.email}>
+          {(p) => <input {...p} type="email" required autoComplete="off" value={v.email} onChange={set("email")} />}
         </Field>
         <LookupPicker kind="technologies" label="Technology" value={v.technologyId} error={errors.technologyId}
           onChange={(id) => setV((s) => ({ ...s, technologyId: id }))} />
@@ -126,7 +127,7 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
           </Field>
         )}
         {duplicates && <DuplicateWarning duplicates={duplicates} onOpenProfile={onOpenProfile} />}
-        <DialogActions onCancel={onClose} submitLabel={duplicates?.length ? "Create anyway" : "Create candidate"} busy={busy} error={formError} />
+        <DialogActions onCancel={onClose} submitLabel="Create candidate" busy={busy} error={formError} />
       </form>
     </Dialog>
   );
@@ -136,7 +137,7 @@ function DuplicateWarning({ duplicates, onOpenProfile }: { duplicates: Duplicate
   const on = (d: Duplicate) => d.matchedOn.length === 2 ? "email and phone" : d.matchedOn[0] ?? "details";
   return (
     <div className="note warn" role="alert">
-      <p><b>Possible duplicate.</b> A candidate with the same {on(duplicates[0]!)} already exists. Check before creating another record.</p>
+      <p><b>Already a candidate.</b> A candidate with the same {on(duplicates[0]!)} already exists. Use a different email and phone, or open the existing profile.</p>
       <ul>
         {duplicates.map((d, i) => (
           <li key={d.candidateId ?? i}>

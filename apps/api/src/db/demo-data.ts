@@ -196,10 +196,14 @@ export async function loadDemoData(adminUrl: string, appUrl: string, env: NodeJS
       const rid = ids.get(u.key);
       const teamId = rid ? teamOf.get(rid) : undefined;
       if (!rid || !teamId) throw new Error(`demo recruiter ${u.key} is missing or has no team`);
-      const loc = locIds.get(DEMO_TEAMS.find((t) => t.members.includes(u.key))!.location)!;
+      const team = DEMO_TEAMS.find((t) => t.members.includes(u.key))!;
+      const loc = locIds.get(team.location)!;
+      // Only a lead or above adds candidates (CA-6): the team lead creates them for the recruiter.
+      const leadId = ids.get(team.lead);
+      if (!leadId) throw new Error(`demo lead ${team.lead} is missing`);
       await app.query("BEGIN");
       try {
-        await app.query("SELECT set_config('eureka.user_id', $1, true)", [rid]);
+        await app.query("SELECT set_config('eureka.user_id', $1, true)", [leadId]);
         const have = (await app.query<{ n: number }>(
           "SELECT count(*)::int AS n FROM eureka.candidate WHERE recruiter_id = $1", [rid])).rows[0]!.n;
         if (have > 0) { await app.query("ROLLBACK"); n += PER_RECRUITER; continue; }
@@ -211,7 +215,7 @@ export async function loadDemoData(adminUrl: string, appUrl: string, env: NodeJS
           const cand = (await app.query<{ id: string }>(
             `INSERT INTO eureka.candidate (person_id, technology_id, team_id, recruiter_id, location_id)
              VALUES ($1,$2,$3,$4,$5) RETURNING id`, [personId, techIds[n % techIds.length], teamId, rid, loc])).rows[0]!.id;
-          await app.query(`INSERT INTO eureka.audit_event (actor_id, action, entity_type, entity_id) VALUES ($1,'candidate.created','candidate',$2)`, [rid, cand]);
+          await app.query(`INSERT INTO eureka.audit_event (actor_id, action, entity_type, entity_id) VALUES ($1,'candidate.created','candidate',$2)`, [leadId, cand]);
           candidatesCreated++;
           if (k >= ACTIVE) continue; // stays in training
           await app.query("SELECT authz.transition_candidate($1, 'active')", [cand]);

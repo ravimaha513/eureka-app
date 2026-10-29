@@ -147,13 +147,12 @@ export interface CreateCandidate {
   firstName: string;
   lastName: string;
   /** E.164; the server normalizes formatting but needs the country code. */
-  phone?: string;
-  email?: string;
+  phone: string;
+  /** Personal email; with the phone, unique across candidates (409 duplicate_contact). */
+  email: string;
   technologyId: string;
   locationId: string;
   batchId?: string;
-  /** Create despite a 409 possible_duplicate. */
-  confirmDuplicate?: boolean;
 }
 
 export interface CreateSubmission {

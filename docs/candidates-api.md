@@ -139,6 +139,33 @@ the API loads it once per request (`UserAccess.sharedCandidateIds`). Shares coun
 `visibility = 'selected_teams'`. Tests: `apps/api/test/candidate-team-share.{db,api}.int.test.ts`,
 `engine.test.ts` ("selected teams"), `apps/web/src/sales/Sales.test.tsx`.
 
+## Adding candidates: required, unique contact; lead or above (CA-6)
+
+Migration `0260_candidate_unique_contact.sql`.
+
+- **Who:** `candidate:create` is a lead (team), manager / AD (hierarchy) or org grant. Recruiters no
+  longer hold it, so they get 403 on `POST /api/v1/candidates`, `POST /candidates/duplicate-check`
+  and `POST /applications/:id/candidate`, and the web hides "New candidate". A lead can still assign
+  one of their recruiters with `recruiterId`.
+- **Required:** `POST /api/v1/candidates` needs `phone` (normalized to E.164) and `email` (personal,
+  lower-cased); missing either is 422. The hire flow (`POST /applications/:id/candidate`) uses the
+  applicant's email and phone, and takes `phone` / `email` in the body when the applicant has none or
+  the caller may not read applicant phones; still missing is 422 `phone_required` / `email_required`.
+- **Unique:** another candidate with the same personal email (case-insensitive), marketing email or
+  phone is 409 `duplicate_contact`, with no override (`confirmDuplicate` is gone: 422 as an unknown
+  field). The dialog then calls `POST /candidates/duplicate-check` for the minimal details (team,
+  contact, the id only if readable) and links "Open existing profile".
+- **Backstop:** trigger `authz.candidate_contact_unique` (BEFORE INSERT on `candidate`, BEFORE UPDATE
+  OF `personal_email, phone_e164` on `person`) refuses a personal email or phone another candidate's
+  person holds (`duplicate_email` / `duplicate_phone`, unique_violation; the API maps both to 409).
+  A transaction advisory lock per value serializes concurrent creates. It covers every writer
+  (API, imports, seeds). Existing duplicates are left as they are (no unique index), and persons
+  without a candidate (employees only) are not checked.
+
+Tests: `candidate-extras.api.int.test.ts` ("duplicate check"), `api.int.test.ts`,
+`applications.api.int.test.ts`, `engine.test.ts` ("adding candidates"), web `CandidateExtras.test.tsx`,
+`Sales.test.tsx`, `Applications.test.tsx`, e2e `candidate-extras.spec.ts`.
+
 ## Technologies
 
 The load seed uses the spec list (Java, DE/PY, Python Developer, .NET, DevOps, AI/ML, Networking,
