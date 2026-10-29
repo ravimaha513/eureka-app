@@ -282,11 +282,12 @@ describe("export", () => {
   });
 
   it(`is capped at ${EXPORT_ROW_CAP.toLocaleString("en-US")} rows and says so`, async () => {
-    // 50,001 extra Hot List candidates in team t3 (CEO exports at org scope).
+    // 50,001 extra Hot List candidates in team t3 (CEO exports at org scope). No contact
+    // values: the per-row uniqueness check (0300) makes a 50k insert with phones take minutes.
     await db.admin.query(`
       WITH p AS (
-        INSERT INTO eureka.person (first_name, last_name, phone_e164)
-        SELECT 'Bulk' || g, 'Row', '+1555' || lpad(g::text, 7, '0') FROM generate_series(1, ${EXPORT_ROW_CAP + 1}) g
+        INSERT INTO eureka.person (first_name, last_name)
+        SELECT 'Bulk' || g, 'Row' FROM generate_series(1, ${EXPORT_ROW_CAP + 1}) g
         RETURNING id)
       INSERT INTO eureka.candidate (person_id, technology_id, team_id, location_id, marketing_status)
       SELECT p.id, $1, $2, l.id, 'active' FROM p, (SELECT id FROM eureka.location ORDER BY id LIMIT 1) l`, [TECH_ID, T.t3]);

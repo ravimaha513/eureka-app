@@ -826,9 +826,18 @@ const CASES: RejectCase[] = [
     forbidden: { teamId: T.t2, recruiterId: U.r2a, visibility: "all_teams", marketingStatus: "stopped", force: true },
   },
   {
+    route: "POST /api/v1/hotlist/bulk/priority", actor: "l1",
+    prepare: async () => ({
+      url: "/api/v1/hotlist/bulk/priority", body: { ids: [own().id], priority: "P1" },
+      state: () => rows(`SELECT * FROM eureka.candidate WHERE id = $1`, [own().id]),
+    }),
+    forbidden: { teamId: T.t2, recruiterId: U.r2a, visibility: "all_teams", status: "stopped", force: true },
+  },
+  {
     route: "POST /api/v1/hotlist/export", actor: "l1",
     prepare: async () => ({ url: "/api/v1/hotlist/export", body: { status: "active" }, state: async () => null }),
-    forbidden: { teamId: T.t2, recruiterId: U.r2a, scope: "org", limit: 1_000_000, unmasked: true, includePhones: true },
+    // teamId and recruiterId are filters here (0290), not foreign fields.
+    forbidden: { ownerId: U.r2a, scope: "org", limit: 1_000_000, unmasked: true, includePhones: true },
   },
   // submissions
   {
