@@ -247,6 +247,8 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   passes (edited in place, never applied anywhere); mass-assignment case for POST /api/v1/lookups/technologies.
 - Location rename (PR #73, migration 0280): `PATCH /admin/locations/:id` via `authz.admin_rename_location`; Rename
   button on the location detail header; audited with the id only.
+- Deleting inactive users (PR #71, `db/migrations/*_user_purge.sql`, docs/admin-api.md AD-13): worker job
+  `user-purge-inactive` anonymizes users inactive 7+ days; `DELETE /admin/users/:id` ("Delete now") skips the wait.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
