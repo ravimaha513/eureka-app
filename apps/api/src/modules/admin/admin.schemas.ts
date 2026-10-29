@@ -27,6 +27,8 @@ export const CreateUser = z
     primaryLocationId: uuid.optional(),
     // Staging/local password sign-in only: a temporary password the user must change at first sign-in.
     temporaryPassword: z.string().min(10).max(72).optional(),
+    // Staging/local password sign-in only: email the user a one-time set-password link instead.
+    sendPasswordInvite: z.boolean().optional(),
   })
   .strict();
 export type CreateUser = z.infer<typeof CreateUser>;

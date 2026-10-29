@@ -1,5 +1,6 @@
-import { Body, Controller, ForbiddenException, Get, HttpCode, HttpException, HttpStatus, Inject, NotFoundException, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, HttpException, HttpStatus, Inject, NotFoundException, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { AllowPasswordChange, CurrentUser, Public, type AuthedUser } from "../../platform/auth.guard.js";
 import { clientInfo } from "../../platform/client-info.js";
@@ -10,6 +11,7 @@ import { RateLimiter } from "../../platform/rate-limit.js";
 import { SESSION_COOKIE, SessionService } from "../../platform/session.service.js";
 
 const PasswordLogin = z.object({ email: z.string().trim().email().max(254), password: z.string().min(1).max(200) }).strict();
+const SetupPassword = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/), newPassword: z.string().min(1).max(200) }).strict();
 const ChangePassword = z.object({ currentPassword: z.string().min(1).max(200), newPassword: z.string().min(1).max(200) }).strict();
 
 /**
@@ -63,6 +65,34 @@ export class PasswordController {
       maxAge: this.config.SESSION_ABSOLUTE_HOURS * 3600,
     });
     return { mustChangePassword: r.must_change };
+  }
+
+  /**
+   * A new user opens an emailed set-password link (migration 0270), picks a
+   * password and is signed in. 400 for a link that is unknown, used, expired
+   * or no longer usable (one message for all of them); 422 password_weak keeps
+   * the link open.
+   */
+  @Public()
+  @Post("password/setup")
+  @HttpCode(200)
+  async setup(@Body() body: unknown, @Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply) {
+    this.enabled();
+    if (!this.perIp.take(ipKey(clientIp(req, this.config)))) throw new HttpException("too_many_attempts", HttpStatus.TOO_MANY_REQUESTS);
+    const parsed = SetupPassword.safeParse(body);
+    if (!parsed.success) throw new BadRequestException("invalid_link");
+    const { token, newPassword } = parsed.data;
+    const r = await this.db.system(async (c) => (await c.query<{ user_id: string | null; outcome: string }>(
+      `SELECT user_id, outcome FROM authz.password_setup_redeem($1, $2)`,
+      [createHash("sha256").update(token).digest(), newPassword])).rows[0]!);
+    if (r.outcome === "weak") throw new HttpException("password_weak", HttpStatus.UNPROCESSABLE_ENTITY);
+    if (r.outcome !== "ok" || !r.user_id) throw new BadRequestException("invalid_link");
+    const sid = await this.sessions.create(r.user_id, new Date(), clientInfo(req, this.config));
+    void reply.setCookie(SESSION_COOKIE, sid, {
+      httpOnly: true, secure: this.config.NODE_ENV === "production", sameSite: "lax", path: "/",
+      maxAge: this.config.SESSION_ABSOLUTE_HOURS * 3600,
+    });
+    return { mustChangePassword: false };
   }
 
   /** The signed-in user changes their own password (also the way out of a temporary one). */
