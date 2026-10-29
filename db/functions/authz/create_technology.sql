@@ -1,5 +1,5 @@
 -- authz.create_technology: current definition (repeatable; db/functions/README.md).
--- Sales leads and above (manager, associate director, CEO) and org admins
+-- Sales leads and above, BU heads, interview leads and org admins
 -- (technology:create) add a technology for the pickers (docs/lookups-api.md).
 -- Names match case-insensitively: an existing active one is returned instead of a
 -- duplicate (created = false); an inactive one is refused, since only an admin

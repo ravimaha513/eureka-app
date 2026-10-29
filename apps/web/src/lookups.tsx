@@ -133,7 +133,7 @@ export function LookupPicker({ kind, label, value, onChange, error, optional, pl
     const hint = rows.length > 0 || adding ? undefined
       : !q.data ? "The list couldn't be loaded; reload the page to try again."
         : offerAdd ? `Choose “Add a new ${addable!.noun}…” to create the first one.`
-          : "Ask a lead, manager or admin to add one.";
+          : "Ask a lead or an admin to add one.";
     return (
       <>
         <Field label={label} error={adding ? undefined : error} hint={hint}>

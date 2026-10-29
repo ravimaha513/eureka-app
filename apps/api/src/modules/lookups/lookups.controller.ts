@@ -63,7 +63,7 @@ export class LookupsService {
   }
 
   /**
-   * Adds a technology (technology:create: Sales leads and above, org admins). An existing
+   * Adds a technology (technology:create: Sales leads and above, BU heads, interview leads, org admins). An existing
    * active name (case-insensitive) is returned instead of a duplicate, with `created: false`.
    */
   async createTechnology(user: AuthedUser, name: string) {

@@ -1,6 +1,6 @@
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { can, type Permission } from "@eureka/shared";
+import { can, grantFor, ROLES, type Permission } from "@eureka/shared";
 import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
@@ -111,9 +111,11 @@ describe("POST /api/v1/lookups/technologies", () => {
     return app.inject({ method: "POST", url: "/api/v1/lookups/technologies", headers: { cookie, "x-csrf-token": csrf }, payload });
   };
 
-  const ADDERS = new Set<Key>(["l1", "l2", "l3", "m1", "m2", "ad", "ceo", "admin", "admin2"]);
+  const ADDERS = new Set<Key>(["l1", "l2", "l3", "m1", "m2", "ad", "ceo", "il", "admin", "admin2"]);
 
-  it("only Sales leads and above (manager, associate director, CEO) and org admins hold technology:create", () => {
+  it("only Sales leads and above, BU heads, interview leads and org admins hold technology:create", () => {
+    expect(ROLES.filter((r) => grantFor(r, "technology:create")).sort())
+      .toEqual(["assoc_director", "bu_head", "ceo", "interview_lead", "lead", "manager", "org_admin"]);
     for (const key of users) expect(can(toUserAccess(key), "technology:create"), key).toBe(ADDERS.has(key));
   });
 

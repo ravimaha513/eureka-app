@@ -545,6 +545,8 @@ export const GRANTS: Record<Role, Grants> = {
   // by anyone in their reporting subtree, or by themself) and assigns their
   // coaches to sales teams (AD-11).
   interview_lead: {
+    // reference data: add technologies (docs/lookups-api.md)
+    "technology:create": "org",
     "candidate:read": "coached_hierarchy",
     "hotlist:read": "coached_hierarchy",
     "interview:read": "coached_hierarchy",
@@ -586,6 +588,8 @@ export const GRANTS: Record<Role, Grants> = {
     "chat:use": "own",
   },
   bu_head: {
+    // reference data: add technologies (docs/lookups-api.md)
+    "technology:create": "org",
     "assignment:read": "org",
     "employee:read": "org",
     "placement:read": "org",

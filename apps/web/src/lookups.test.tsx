@@ -72,7 +72,7 @@ describe("LookupPicker", () => {
     renderWith({ ...FULL, technologies: [] }, <Harness kind="technologies" label="Technology" />);
     const sel = screen.getByLabelText("Technology");
     expect(sel.tagName).toBe("SELECT");
-    expect(sel).toHaveAccessibleDescription("Ask a lead, manager or admin to add one.");
+    expect(sel).toHaveAccessibleDescription("Ask a lead or an admin to add one.");
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["No technologies yet"]);
   });
 

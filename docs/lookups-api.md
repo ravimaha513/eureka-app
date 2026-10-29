@@ -7,7 +7,7 @@ problem details; writes need the session cookie and `x-csrf-token`. Reading the 
 ## Add a technology (migration 0250, 2026-10-29)
 
 `POST /api/v1/lookups/technologies` — `technology:create` (org scope): Sales `lead`, `manager`,
-`assoc_director`, `ceo`, and `org_admin`. Everyone else gets 403; the definer function checks
+`assoc_director`, `ceo`, plus `bu_head`, `interview_lead` and `org_admin`. Everyone else gets 403; the definer function checks
 the permission again.
 
 Body `{ name }`: trimmed, inner whitespace collapsed, 1–60 characters, no control characters;
@@ -29,8 +29,7 @@ Web: the technology picker (`LookupPicker`, `apps/web/src/lookups.tsx`) is alway
 never a paste-an-ID input, even when the list is empty or failed to load. Callers pass
 `canAdd` from `me.capabilities` (`technology:create`); then the dropdown ends with
 "Add a new technology…", which opens a name field. The new row joins the cached lookups and
-becomes the selection. Without the permission an empty list says to ask a lead, manager or
-admin.
+becomes the selection. Without the permission an empty list says to ask a lead or an admin.
 
 Why: a database built from scratch (staging, rebuilt 2026-10-15) had no technologies, because
 seeds run only in dev and 0140 only topped up databases that already had some.
