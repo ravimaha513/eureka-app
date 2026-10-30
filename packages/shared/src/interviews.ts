@@ -16,10 +16,21 @@ export const INTERVIEW_DURATION_MIN = 15;
 export const INTERVIEW_DURATION_MAX = 240;
 export const INTERVIEW_DURATIONS = [15, 30, 45, 60, 90, 120, 180, 240] as const;
 
-/** Suggested rounds (the round stays free text up to 40 characters). */
+/** Suggested rounds (the round stays free text up to 40 characters). L1/L2/L3 keep the funnel's stages exact. */
 export const INTERVIEW_ROUNDS = [
-  "Initial Screening", "Technical Screening", "Technical Round 2", "Manager Round", "Client Round", "Final Round", "HR Round",
+  "Initial Screening", "L1", "L2", "L3", "Technical Screening", "Technical Round 2", "Manager Round", "Client Round", "Final Round", "HR Round",
 ] as const;
+
+/**
+ * Funnel stage of an interview, derived by the API from the free-text round
+ * (submissions module, `interviewStageSql`): screening, L1, L2, L3 and beyond,
+ * final; anything else (manager, client, HR rounds without a number) is `other`.
+ */
+export const INTERVIEW_STAGES = ["screening", "l1", "l2", "l3", "final", "other"] as const;
+export type InterviewStage = (typeof INTERVIEW_STAGES)[number];
+export const INTERVIEW_STAGE_LABELS: Record<InterviewStage, string> = {
+  screening: "Screening", l1: "L1", l2: "L2", l3: "L3+", final: "Final", other: "Other round",
+};
 
 /** At most this many panel members per interview. */
 export const PANEL_MAX = 10;

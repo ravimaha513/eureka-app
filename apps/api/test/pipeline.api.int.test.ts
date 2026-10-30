@@ -12,6 +12,7 @@ import {
 } from "@eureka/shared";
 import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
+import { interviewStageSql } from "../src/modules/submissions/pipeline.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
 import { CLIENT_ID, LOC, T, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtures.js";
 import { at, seedPipeline, type PipelineSeed } from "./pipeline-seed.js";
@@ -241,6 +242,30 @@ describe("submission filters and pagination", () => {
     const one = (await call("m1", "GET", `/api/v1/submissions/summary?candidateId=${cand}`)).json();
     expect(one.total).toBe(all.filter((i) => (i as unknown as { candidateId: string }).candidateId === cand).length);
     expect((await call("m1", "GET", "/api/v1/submissions/summary?cursor=x")).statusCode).toBe(422);
+
+    // Funnel: every seeded interview is round "L1", none cleared, no placements yet.
+    expect(sum.funnel).toMatchObject({ submitted: all.length, interviewed: all.length, selected: 0, placed: 0 });
+    expect(sum.funnel.stages.l1).toEqual({ held: all.length, cleared: 0 });
+    expect(sum.funnel.stages.l2).toEqual({ held: 0, cleared: 0 });
+    const l1 = (await call("m1", "GET", "/api/v1/submissions?limit=200&stage=l1")).json().items;
+    expect(l1).toHaveLength(all.length);
+    expect(l1[0].interviews[0]).toMatchObject({ stage: "l1", round: "L1", result: "pending", callStatus: "scheduled" });
+    expect(l1[0].placementStatus).toBeNull();
+    expect((await call("m1", "GET", "/api/v1/submissions?stage=l2")).json().items).toEqual([]);
+    expect((await call("m1", "GET", "/api/v1/submissions?stage=placed")).json().items).toEqual([]);
+    expect((await call("m1", "GET", "/api/v1/submissions?stage=l9")).statusCode).toBe(422);
+    expect((await call("m1", "GET", "/api/v1/submissions/summary?stage=l1")).statusCode).toBe(422);
+  });
+
+  it("classifies free-text rounds into funnel stages", async () => {
+    const cases: [string, string][] = [
+      ["L1", "l1"], ["Technical round 1", "l1"], ["R1", "l1"], ["Tech 1", "l1"], ["Initial Screening", "screening"],
+      ["Technical Screening", "screening"], ["L2", "l2"], ["Technical Round 2", "l2"], ["2nd round", "l2"], ["Level 2", "l2"],
+      ["L-3", "l3"], ["Round 4", "l3"], ["Final Round", "final"], ["Client round", "other"], ["HR Round", "other"],
+    ];
+    const { rows } = await db.admin.query<{ r: string; stage: string }>(
+      `SELECT r, ${interviewStageSql("r")} AS stage FROM unnest($1::text[]) r`, [cases.map(([r]) => r)]);
+    expect(rows.map((x) => [x.r, x.stage])).toEqual(cases);
   });
 
   it("small pages walk the same set as one large page", async () => {

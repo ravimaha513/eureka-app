@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException, UnprocessableEntityE
 import type pg from "pg";
 import { z } from "zod";
 import {
+  INTERVIEW_STAGES,
   activityVisible,
   candidateVisible,
   ownsActivity,
@@ -21,6 +22,7 @@ import {
   QueryInstant,
   SUBMISSION_STATUSES,
   fromMicros,
+  interviewStageSql,
   mapPipelineError,
   splitCursor,
   submissionTransitionAllowed,
@@ -53,13 +55,15 @@ export const SubmissionListQuery = z
     search: z.string().trim().min(1).max(100).optional(),
     /** "true": only submissions that got an interview (see INTERVIEWED). */
     interviewed: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
+    /** Only submissions that reached this funnel stage (a live interview of that stage), or `placed`. */
+    stage: z.enum([...INTERVIEW_STAGES, "placed"]).optional(),
     cursor: Cursor.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })
   .strict();
 export type SubmissionListQuery = z.infer<typeof SubmissionListQuery>;
 
-export const SubmissionSummaryQuery = SubmissionListQuery.omit({ status: true, interviewed: true, cursor: true, limit: true }).strict();
+export const SubmissionSummaryQuery = SubmissionListQuery.omit({ status: true, interviewed: true, stage: true, cursor: true, limit: true }).strict();
 export type SubmissionSummaryQuery = z.infer<typeof SubmissionSummaryQuery>;
 
 export const StatusChange = z
@@ -84,6 +88,14 @@ const LIVE_INTERVIEW = `i.submission_id = s.id AND i.call_status NOT IN ('cancel
  */
 const INTERVIEWED = `(s.status IN ('interview_requested','interview_scheduled','interview_completed','selected')
   OR EXISTS (SELECT 1 FROM eureka.interview i WHERE ${LIVE_INTERVIEW}))`;
+/** A live interview of this funnel stage (parameter placeholder). */
+const REACHED_STAGE = (ph: string) =>
+  `EXISTS (SELECT 1 FROM eureka.interview i WHERE ${LIVE_INTERVIEW} AND ${interviewStageSql("i.round")} = ${ph})`;
+/** A placement that has not fallen through (backout, failed BGC, joining issue). */
+const PLACED = `EXISTS (SELECT 1 FROM eureka.placement pl WHERE pl.submission_id = s.id
+  AND pl.status NOT IN ('backout','bgc_failed','joining_issue'))`;
+
+export interface TrailStep { stage: string; round: string; result: string; callStatus: string; startsAt: string }
 
 interface SubmissionRow {
   id: string;
@@ -110,6 +122,8 @@ interface SubmissionRow {
   visibility: CandidateRef["visibility"] | null;
   marketing_status: string | null;
   interview_count: number;
+  trail: TrailStep[] | null;
+  placement_status: string | null;
   last_interview_at: Date | null;
 }
 
@@ -120,14 +134,20 @@ const SELECT = `
          CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name END AS candidate_name,
          c.recruiter_id AS c_recruiter, c.team_id AS c_team, c.location_id AS c_location,
          c.visibility, c.marketing_status,
-         iv.n AS interview_count, iv.last_at AS last_interview_at
+         iv.n AS interview_count, iv.last_at AS last_interview_at, iv.trail,
+         (SELECT pl.status FROM eureka.placement pl WHERE pl.submission_id = s.id
+           ORDER BY pl.created_at DESC LIMIT 1) AS placement_status
   FROM eureka.submission s
   JOIN eureka.client cl ON cl.id = s.client_id
   LEFT JOIN eureka.app_user ru ON ru.id = s.recruiter_id
   LEFT JOIN eureka.candidate c ON c.id = s.candidate_id
   LEFT JOIN eureka.person p ON p.id = c.person_id
-  CROSS JOIN LATERAL (SELECT count(*)::int AS n, max(i.starts_at) AS last_at
-                      FROM eureka.interview i WHERE ${LIVE_INTERVIEW}) iv`;
+  CROSS JOIN LATERAL (
+    SELECT count(*) FILTER (WHERE i.call_status NOT IN ('cancelled','no_invite'))::int AS n,
+           max(i.starts_at) FILTER (WHERE i.call_status NOT IN ('cancelled','no_invite')) AS last_at,
+           jsonb_agg(jsonb_build_object('stage', ${interviewStageSql("i.round")}, 'round', i.round, 'result', i.result,
+             'callStatus', i.call_status, 'startsAt', i.starts_at) ORDER BY i.starts_at, i.id) AS trail
+    FROM eureka.interview i WHERE i.submission_id = s.id) iv`;
 
 const activityRef = (r: SubmissionRow) => ({
   recruiterId: r.recruiter_id,
@@ -195,6 +215,10 @@ export class SubmissionsService {
       /** Interviews the caller can see (not cancelled / no invite); lastInterviewAt is the latest start. */
       interviewCount: r.interview_count,
       lastInterviewAt: r.last_interview_at,
+      /** Every visible interview in time order with its funnel stage and result (cancelled ones included). */
+      interviews: r.trail ?? [],
+      /** Status of the latest placement made from this submission, or null. */
+      placementStatus: r.placement_status,
       /** Hints for the UI (docs/placements-api.md); every write is checked again. */
       actions: submissionActions(access, activityRef(r), r.status, visibleCandidate(r)),
     };
@@ -230,7 +254,7 @@ export class SubmissionsService {
   }
 
   /** WHERE terms shared by the list and its summary. */
-  private filters(user: AuthedUser, q: SubmissionSummaryQuery & Pick<SubmissionListQuery, "status" | "interviewed">) {
+  private filters(user: AuthedUser, q: SubmissionSummaryQuery & Partial<Pick<SubmissionListQuery, "status" | "interviewed" | "stage">>) {
     const scope = resolveScope(user.access, "submission:read");
     if (!scope) throw new ForbiddenException();
     const params: unknown[] = [];
@@ -246,28 +270,47 @@ export class SubmissionsService {
       where.push(`(s.job_title ILIKE ${pat} ESCAPE '\\' OR cl.name ILIKE ${pat} ESCAPE '\\')`);
     }
     if (q.interviewed !== undefined) where.push(q.interviewed ? INTERVIEWED : `NOT ${INTERVIEWED}`);
+    if (q.stage) where.push(q.stage === "placed" ? PLACED : REACHED_STAGE(p(q.stage)));
     return { params, p, where };
   }
 
   /**
-   * Counts for the filtered set (all statuses): total, per status and how many
-   * got an interview. Lets a candidate's 140 submissions be read at a glance.
+   * Counts for the filtered set (all statuses): total, per status, how many got
+   * an interview, and the funnel: submissions that reached each interview stage
+   * (held = a live interview of that stage, cleared = one with a cleared result)
+   * and placements. Lets 1000 submissions read as 5 interviews, 2 L1s, 1 placement.
    */
   async summary(user: AuthedUser, q: SubmissionSummaryQuery) {
     const { params, where } = this.filters(user, q);
     const sql = `
-      SELECT s.status, count(*)::int AS n, count(*) FILTER (WHERE ${INTERVIEWED})::int AS interviewed
-      FROM eureka.submission s
-      JOIN eureka.client cl ON cl.id = s.client_id
-      LEFT JOIN eureka.candidate c ON c.id = s.candidate_id
-      WHERE ${where.join(" AND ")}
-      GROUP BY s.status`;
-    const rows = await this.db.withUser(user.id, async (c) =>
-      (await c.query<{ status: string; n: number; interviewed: number }>(sql, params)).rows);
-    const byStatus = Object.fromEntries(SUBMISSION_STATUSES.map((st) => [st, 0])) as Record<string, number>;
-    let total = 0, interviewed = 0;
-    for (const r of rows) { byStatus[r.status] = r.n; total += r.n; interviewed += r.interviewed; }
-    return { total, interviewed, byStatus };
+      WITH s AS (
+        SELECT s.id, s.status, ${INTERVIEWED} AS interviewed, ${PLACED} AS placed
+        FROM eureka.submission s
+        JOIN eureka.client cl ON cl.id = s.client_id
+        LEFT JOIN eureka.candidate c ON c.id = s.candidate_id
+        WHERE ${where.join(" AND ")}),
+      st AS (
+        SELECT DISTINCT i.submission_id, ${interviewStageSql("i.round")} AS stage, i.result = 'cleared' AS cleared
+        FROM eureka.interview i JOIN s ON s.id = i.submission_id
+        WHERE i.call_status NOT IN ('cancelled','no_invite'))
+      SELECT
+        (SELECT coalesce(jsonb_object_agg(status, n), '{}') FROM (SELECT status, count(*)::int AS n FROM s GROUP BY status) x) AS by_status,
+        (SELECT count(*)::int FROM s) AS total,
+        (SELECT count(*) FILTER (WHERE interviewed)::int FROM s) AS interviewed,
+        (SELECT count(*) FILTER (WHERE placed)::int FROM s) AS placed,
+        (SELECT coalesce(jsonb_object_agg(stage, jsonb_build_object('held', held, 'cleared', cleared)), '{}') FROM (
+           SELECT stage, count(DISTINCT submission_id)::int AS held,
+                  count(DISTINCT submission_id) FILTER (WHERE cleared)::int AS cleared
+           FROM st GROUP BY stage) y) AS stages`;
+    const row = await this.db.withUser(user.id, async (c) =>
+      (await c.query<{ by_status: Record<string, number>; total: number; interviewed: number; placed: number;
+        stages: Record<string, { held: number; cleared: number }> }>(sql, params)).rows[0]!);
+    const byStatus = Object.fromEntries(SUBMISSION_STATUSES.map((st) => [st, row.by_status[st] ?? 0])) as Record<string, number>;
+    const stages = Object.fromEntries(INTERVIEW_STAGES.map((st) => [st, row.stages[st] ?? { held: 0, cleared: 0 }]));
+    return {
+      total: row.total, interviewed: row.interviewed, byStatus,
+      funnel: { submitted: row.total, interviewed: row.interviewed, stages, selected: byStatus.selected ?? 0, placed: row.placed },
+    };
   }
 
   async list(user: AuthedUser, q: SubmissionListQuery) {

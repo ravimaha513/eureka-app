@@ -12,7 +12,7 @@ import {
   ISO_DAY, SUBMISSION_STATUSES, dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Submission,
 } from "./pipelineApi";
 import { ScheduleInterviewDialog } from "./ScheduleInterviewDialog";
-import { InterviewCell, InterviewFilter, PipelineStatus, StatusChips } from "./ui";
+import { PipelineFunnel, PipelineStatus, ReachedFilter, StageTrail, StatusChips, parseReached, reachedValue, type Reached } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
@@ -29,8 +29,9 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
   const [statusParam, setStatusRaw] = useSearchParam("status");
   const [fromParam, setFromRaw] = useSearchParam("from");
   const [toParam, setToRaw] = useSearchParam("to");
-  const [interviewedParam, setInterviewedRaw] = useSearchParam("interviewed");
-  const interviewed: "true" | "false" | "" = interviewedParam === "true" || interviewedParam === "false" ? interviewedParam : "";
+  // ?reached=true|false|stage:l1|stage:placed (how far the submission got)
+  const [reachedParam, setReachedRaw] = useSearchParam("reached");
+  const reached = parseReached(reachedParam);
   const [searchInput, setSearchInput] = useState("");
   const search = useDebounced(searchInput.trim());
   const status = (SUBMISSION_STATUSES as readonly string[]).includes(statusParam) ? statusParam : "";
@@ -43,14 +44,14 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
   const setFrom = (v: string) => { setFromRaw(v); reset(); };
   const setTo = (v: string) => { setToRaw(v); reset(); };
   const setCandidate = (v: string) => { setCandidateRaw(v); reset(); };
-  const setInterviewed = (v: string) => { setInterviewedRaw(v); reset(); };
+  const setReached = (v: Reached) => { setReachedRaw(reachedValue(v)); reset(); };
   useEffect(() => { reset(); }, [search, reset]);
   const invalidRange = Boolean(from && to && from > to);
   const [openId, setOpenId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
 
   const filters = {
-    status, candidateId, interviewed, search,
+    status, candidateId, ...reached, search,
     from: from ? dayBoundary(from) : "", to: to ? dayBoundary(to, true) : "",
     cursor: pager.cursor ?? "", limit: PAGE_SIZE,
   };
@@ -60,9 +61,17 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
     placeholderData: keepPreviousData,
     enabled: !invalidRange,
   });
+  // Funnel for the same filters except status and "reached" (those are what the funnel breaks down).
+  const sumFilters = { candidateId, search, from: filters.from, to: filters.to };
+  const summary = useQuery({
+    queryKey: [...pipelineKeys.submissions, "summary", sumFilters],
+    queryFn: () => pipelineApi.submissionSummary(sumFilters),
+    placeholderData: keepPreviousData,
+    enabled: !invalidRange,
+  });
   const items = q.data?.items ?? [];
   const showRate = items.some((s) => "rate" in s);
-  const hasFilters = Boolean(status || from || to || candidateId || interviewed || search);
+  const hasFilters = Boolean(status || from || to || candidateId || reached.interviewed || reached.stage || search);
   const open = items.find((s) => s.id === openId) ?? null;
   const n = items.length;
   const countMsg = q.isLoading || q.error || invalidRange ? ""
@@ -92,15 +101,17 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
             <label htmlFor={`${id}-job`}>Job or client</label>
             <input id={`${id}-job`} type="search" placeholder="e.g. Java, Meta" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
           </div>
-          <InterviewFilter value={interviewed} onChange={setInterviewed} />
+          <ReachedFilter value={reached} onChange={setReached} />
           {hasFilters && (
-            <button type="button" className="btn" onClick={() => { setStatusRaw(""); setFromRaw(""); setToRaw(""); setCandidateRaw(""); setInterviewedRaw(""); setSearchInput(""); reset(); }}>
+            <button type="button" className="btn" onClick={() => { setStatusRaw(""); setFromRaw(""); setToRaw(""); setCandidateRaw(""); setReachedRaw(""); setSearchInput(""); reset(); }}>
               Clear filters
             </button>
           )}
         </div>
         {invalidRange && <p id={`${id}-range`} className="error" role="alert">“Submitted through” must be on or after “Submitted from”.</p>}
       </form>
+
+      {!invalidRange && summary.data && <PipelineFunnel summary={summary.data} value={reached} onPick={setReached} />}
 
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
 
@@ -111,7 +122,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
           ) : (
             <div className="tablewrap"><table aria-label="Submissions" aria-busy={q.isFetching || undefined}>
               <thead><tr>
-                <th>Candidate</th><th>Job / client</th><th>Status</th><th>Interviews</th><th>Submitted</th><th>Recruiter</th>
+                <th>Candidate</th><th>Job / client</th><th>Status</th><th>Interview rounds</th><th>Submitted</th><th>Recruiter</th>
                 {showRate && <th>Rate</th>}
                 <th><span className="sr-only">Actions</span></th>
               </tr></thead>
@@ -121,7 +132,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
                     <td><b>{s.candidateName ?? "Candidate"}</b></td>
                     <td>{s.jobTitle}<span className="block">{s.client}</span></td>
                     <td><PipelineStatus status={s.status} /></td>
-                    <td><InterviewCell s={s} /></td>
+                    <td><StageTrail s={s} /></td>
                     <td>{fmtDateTime(s.submittedAt)}</td>
                     <td>{s.recruiterName ?? "—"}</td>
                     {showRate && <td>{"rate" in s ? fmtRate(s.rate) : <span className="muted">—</span>}</td>}

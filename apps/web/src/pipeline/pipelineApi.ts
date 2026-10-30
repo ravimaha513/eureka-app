@@ -2,6 +2,7 @@
  * Typed client for submissions (apps/api/src/modules/submissions), interviews
  * (create only) and placements (docs/placements-api.md).
  */
+import type { InterviewStage } from "@eureka/shared";
 import { api } from "../api";
 import type { Interview } from "../interviews/InterviewsPage";
 import { fetchCsv } from "../lib/download";
@@ -40,6 +41,10 @@ export interface Submission {
   /** Booked or held interviews the caller can see (cancelled / no-invite calls excluded). */
   interviewCount?: number;
   lastInterviewAt?: string | null;
+  /** Every visible interview in time order with its funnel stage (cancelled ones included). */
+  interviews?: TrailStep[];
+  /** Status of the latest placement made from this submission. */
+  placementStatus?: string | null;
   actions?: SubmissionActions;
 }
 
@@ -52,12 +57,23 @@ export interface SubmissionFilters {
   search?: string;
   /** "true": only submissions that got an interview; "false": only those that didn't. */
   interviewed?: "true" | "false" | "";
+  /** Reached this funnel stage (an interview of that stage), or "placed". */
+  stage?: string;
   cursor?: string;
   limit?: number;
 }
 
 /** GET /api/v1/submissions/summary: counts for the filtered set across every status. */
-export interface SubmissionSummary { total: number; interviewed: number; byStatus: Record<string, number> }
+export interface SubmissionSummary {
+  total: number; interviewed: number; byStatus: Record<string, number>;
+  /** Submissions reaching each step; stages count submissions with a live interview of that stage (held) and a cleared one. */
+  funnel?: {
+    submitted: number; interviewed: number; selected: number; placed: number;
+    stages: Record<InterviewStage, { held: number; cleared: number }>;
+  };
+}
+
+export interface TrailStep { stage: InterviewStage; round: string; result: string; callStatus: string; startsAt: string }
 
 export const PLACEMENT_STATUSES = ["confirmed", "paperwork", "bgc", "ready", "joined", "backout", "bgc_failed", "joining_issue"] as const;
 export type PlacementType = "c2c" | "w2" | "1099";
@@ -161,7 +177,7 @@ const qs = (f: object) => {
 
 export const pipelineApi = {
   submissions: (f: SubmissionFilters) => api<Page<Submission>>(`/api/v1/submissions?${qs({ limit: 50, ...f })}`),
-  submissionSummary: (f: Omit<SubmissionFilters, "status" | "interviewed" | "cursor" | "limit">) =>
+  submissionSummary: (f: Omit<SubmissionFilters, "status" | "interviewed" | "stage" | "cursor" | "limit">) =>
     api<SubmissionSummary>(`/api/v1/submissions/summary?${qs(f)}`),
   submission: (id: string) => api<Submission>(`/api/v1/submissions/${enc(id)}`),
   changeSubmissionStatus: (id: string, to: string, rejectionReason?: string) =>

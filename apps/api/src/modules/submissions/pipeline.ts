@@ -76,3 +76,21 @@ export function mapPipelineError(err: unknown): never {
   if (e.code === "23514" && e.constraint === "submission_rejection_reason") throw new UnprocessableEntityException("rejection_reason_required");
   throw err;
 }
+
+/**
+ * SQL for the funnel stage of an interview round (free text, e.g. "L1",
+ * "Technical Round 2", "Initial Screening", "Final Round"); see INTERVIEW_STAGES.
+ * Final and screening win over a number ("Final round 2" is final).
+ */
+export const interviewStageSql = (round: string) => {
+  const r = `lower(${round})`;
+  const n = `coalesce(
+      substring(${r} from '(?:\\ml|level|round|\\mr|tech(?:nical)?)\\s*-?\\s*(?:round\\s*)?([0-9])'),
+      substring(${r} from '([0-9])\\s*(?:st|nd|rd|th)?\\s*(?:round|level)'))::int`;
+  return `CASE WHEN ${r} ~ '\\mfinal\\M' THEN 'final'
+    WHEN ${r} ~ 'screen' THEN 'screening'
+    WHEN ${n} = 1 THEN 'l1'
+    WHEN ${n} = 2 THEN 'l2'
+    WHEN ${n} >= 3 THEN 'l3'
+    ELSE 'other' END`;
+};
