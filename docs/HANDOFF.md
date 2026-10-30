@@ -261,6 +261,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   Placements status/from/to/vendorId/clientId/technologyId/locationId survive; another screen starts fresh.
 - Applications URL filters (no migrations): status, jobId and the applied applicant search (`q`) via `useSearchParam`.
 - "/" shortcut (no migrations): focuses the first visible `.content input[type="search"]`; ignored while typing or in a dialog.
+- Candidate create team picker (no migrations): `GET /candidate-create-teams` + Team select in New candidate; `ceo` holds `candidate:create` at org (docs/candidates-api.md CA-6).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
