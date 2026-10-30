@@ -23,7 +23,7 @@ export function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((c) => c.trim() !== ""));
 }
 
-export interface BulkRow { email: string; displayName: string; designation?: string; location?: string; roles?: string[] }
+export interface BulkRow { email: string; displayName: string; designation?: string; location?: string; manager?: string; team?: string; roles?: string[] }
 
 type Field = Exclude<keyof BulkRow, "roles"> | "role";
 const HEADERS: Record<string, Field> = {
@@ -31,6 +31,8 @@ const HEADERS: Record<string, Field> = {
   name: "displayName", displayname: "displayName", "display name": "displayName", "full name": "displayName",
   designation: "designation", title: "designation",
   location: "location", "primary location": "location", primarylocation: "location",
+  manager: "manager", "manager email": "manager", "reports to": "manager",
+  team: "team", "team name": "team",
   role: "role", "role 1": "role", "role 2": "role", "role 3": "role", "role 4": "role", "role 5": "role",
 };
 
