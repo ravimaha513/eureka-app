@@ -1,6 +1,6 @@
 -- authz.import_load_person: current definition (repeatable; db/functions/README.md).
 -- Earlier bodies: migrations 0033, 0041, 0270. Change this file, not a new migration.
--- 0310: the owner becomes the candidate's recruiter when their role has the
+-- 0311: the owner becomes the candidate's recruiter when their role has the
 -- recruiter trait (docs/roles-api.md), not when its key is 'recruiter'.
 
 SET ROLE authz_definer;

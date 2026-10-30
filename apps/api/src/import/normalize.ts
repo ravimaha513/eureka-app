@@ -236,16 +236,6 @@ export function parseTime(s: string | null | undefined): Norm<string | null> {
   return ok(`${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`);
 }
 
-/** True if the IANA time zone is known to this runtime. */
-export function validTimeZone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Lookup key for status text and other mapped labels: lower case, single
  * spaces, no spaces around "/" or "-": "Active / All Teams" -> "active/all teams".

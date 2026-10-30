@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { parseIfMatch } from "../work-authorization/work-authorization.schemas.js";
+import { parseIfMatch } from "../../platform/http/if-match.js";
 import {
   ApplicantExport, ApplicantListQuery, ApplicationExport, ApplicationListQuery, CreateCandidateFromApplication, InterviewStatus,
   ScheduleInterview, Scorecard, SetPeople, StatusChange,

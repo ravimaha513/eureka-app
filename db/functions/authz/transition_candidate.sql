@@ -43,6 +43,8 @@ END $function$;
 
 REVOKE ALL ON FUNCTION authz.transition_candidate(uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION authz.transition_candidate(uuid, text) TO eureka_app;
-GRANT EXECUTE ON FUNCTION authz.transition_candidate(uuid, text) TO eureka_owner;
 GRANT EXECUTE ON FUNCTION authz.transition_candidate(uuid, text) TO eureka_worker;
+-- eureka_owner never calls it (apps/api and db/seed callers use eureka_app; the import definers are
+-- authz_definer, which owns it). REVOKE rather than drop the grant: existing ACLs survive CREATE OR REPLACE.
+REVOKE EXECUTE ON FUNCTION authz.transition_candidate(uuid, text) FROM eureka_owner;
 RESET ROLE;

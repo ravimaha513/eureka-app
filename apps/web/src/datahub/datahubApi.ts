@@ -3,6 +3,7 @@ import {
   DATAHUB_MAX_BYTES, datahubFileNameProblem, type DatahubLevel, type DocumentContentType,
 } from "@eureka/shared";
 import { ApiError, api } from "../api";
+import { UPLOAD_FAILED_MESSAGE } from "../lib/uploadErrors";
 import { documentTypeOf } from "../documents/documentsApi";
 import type { UploadTicket } from "../sales/resumesApi";
 
@@ -147,7 +148,7 @@ export function scanStatusText(v: Pick<Version, "status">): string {
 export function datahubError(e: unknown): string {
   if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";
   switch (e.detail) {
-    case "upload_failed": return "The file could not be sent to storage. Try again; the link is valid for 2 minutes.";
+    case "upload_failed": return UPLOAD_FAILED_MESSAGE;
     case "name_taken": return "A folder with this name already exists here.";
     case "folder_not_empty": return "Delete or move the files and subfolders first.";
     case "too_many_pending": return "Ten of your uploads are still being scanned. Wait for them to finish.";

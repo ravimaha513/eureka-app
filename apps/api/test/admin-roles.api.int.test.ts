@@ -6,7 +6,7 @@ import { loadConfig } from "../src/platform/config.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
 import { T, U, seedFixtures } from "./fixtures.js";
 
-/** Custom roles, traits and ladders (docs/roles-api.md; migration 0310). */
+/** Custom roles, traits and ladders (docs/roles-api.md; migration 0311). */
 let db: TestDb;
 let app: NestFastifyApplication;
 const SECRET = "test-secret-test-secret-test-secret-123";

@@ -2122,7 +2122,7 @@ const IGNORED: IgnoreCase[] = [
       await ok("admin", "POST", "/api/v1/admin/org-chart/apply", { moves: [{ userId: U.r1b, managerId: U.l1 }] }, 200);
     },
   },
-  // role definitions (docs/roles-api.md, migration 0310): key, is_system, is_restricted, holders and timestamps are the
+  // role definitions (docs/roles-api.md, migration 0311): key, is_system, is_restricted, holders and timestamps are the
   // server's. Cases run in shards, so each one clones its own role.
   {
     route: "POST /api/v1/admin/roles",

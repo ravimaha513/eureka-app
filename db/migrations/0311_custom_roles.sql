@@ -1,4 +1,4 @@
--- Custom roles, traits and ladders (docs/roles-api.md). Follows 0300.
+-- Custom roles, traits and ladders (docs/roles-api.md). Follows 0310 (perf indexes).
 --
 --   1. eureka.role grows what a role used to mean by its key alone: traits
 --      (is_admin, is_recruiter, is_coach next to is_sales, is_location_bound),

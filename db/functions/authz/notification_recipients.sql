@@ -4,7 +4,7 @@
 -- their own migration silently dropped each other's branches (repaired in 0180); a new event type
 -- adds its branch here, and notification_entity.sql gets its entity mapping.
 
--- 0310: group recipients are the holders of the event's notify.*:receive permission (docs/roles-api.md);
+-- 0311: group recipients are the holders of the event's notify.*:receive permission (docs/roles-api.md);
 -- the reason returned is that permission key.
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.notification_recipients(p_event uuid, p_user uuid DEFAULT NULL::uuid)

@@ -35,9 +35,9 @@ import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
+import type { BatchStatus } from "../training/training.schemas.js";
 import type {
   BatchListQuery,
-  BatchStatus,
   CandidateListQuery,
   ComplianceUpdate,
   CreateBatch,

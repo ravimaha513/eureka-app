@@ -841,10 +841,6 @@ for (const [permission, roles] of Object.entries(NOTIFY_RECIPIENTS) as [Permissi
   for (const role of roles) GRANTS[role][permission] = "org";
 }
 
-export function grantFor(role: Role, permission: Permission): Scope | undefined {
-  return GRANTS[role][permission];
-}
-
 /** A role assignment as the engine sees it, built from the catalog (tests, seeds). */
 export function assignmentFor(role: Role, locationId?: string): {
   role: Role; locationId?: string; grants: Grants; traits: RoleTraits;

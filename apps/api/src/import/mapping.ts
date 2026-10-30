@@ -3,7 +3,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { CANDIDATE_STATUSES, PLACEMENT_STATUSES, VISA_CATEGORY_LIST } from "@eureka/shared";
-import { labelKey, validTimeZone } from "./normalize.js";
+import { validTimeZone } from "../platform/time-zone.js";
+import { labelKey } from "./normalize.js";
 
 /**
  * Import mapping configuration (docs/import.md). design.md does not fix the

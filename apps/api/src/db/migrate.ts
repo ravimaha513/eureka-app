@@ -122,7 +122,7 @@ export async function applyFunctions(client: pg.Client | pg.PoolClient): Promise
 export async function seedCatalog(client: pg.Client | pg.PoolClient, opts: { production?: boolean } = {}): Promise<void> {
   await client.query("BEGIN");
   try {
-    // Permissions first: role_permission references them (0310). Flags drive role.is_restricted.
+    // Permissions first: role_permission references them (0311). Flags drive role.is_restricted.
     for (const key of PERMISSIONS) {
       await client.query(
         `INSERT INTO eureka.permission (key, is_restricted, is_org_sensitive) VALUES ($1,$2,$3)

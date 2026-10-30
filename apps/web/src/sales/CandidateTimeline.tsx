@@ -1,8 +1,8 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { salesError } from "./errors";
 import { describeEvent, salesApi, salesKeys } from "./salesApi";
+import { fmtDateTime } from "../lib/format";
 
-const fmt = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 /**
  * Candidate timeline (GET /api/v1/candidates/:id/timeline, FR-CAN-10), newest
@@ -30,7 +30,7 @@ export function CandidateTimeline({ id }: { id: string }) {
               <li key={e.id}>
                 <span>{describeEvent(e)}</span>
                 <small className="muted">
-                  {" "}· <time dateTime={e.at}>{fmt(e.at)}</time>{e.actor?.name ? ` · ${e.actor.name}` : ""}
+                  {" "}· <time dateTime={e.at}>{fmtDateTime(e.at)}</time>{e.actor?.name ? ` · ${e.actor.name}` : ""}
                 </small>
               </li>
             ))}

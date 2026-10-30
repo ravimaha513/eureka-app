@@ -2,18 +2,21 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { RESUME_CONTENT_TYPES } from "@eureka/shared";
 import { ApiError } from "../api";
+import { UPLOAD_FAILED_MESSAGE } from "../lib/uploadErrors";
+import { CONNECTION_MESSAGE, GENERIC_ERROR_MESSAGE } from "../lib/errorText";
 import {
   browser, fmtBytes, postToStorage, resumeFileProblem, resumeKeys, resumeStatusText, resumeTypeOf, resumesApi, type Resume,
 } from "./resumesApi";
+import { fmtDateTime } from "../lib/format";
 
-const fmt = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const ACCEPT = [".pdf", ".docx", ...Object.keys(RESUME_CONTENT_TYPES)].join(",");
 /** While an upload is scanning, the list is refreshed this often. */
 export const RESUME_POLL_MS = 3000;
 
 function resumeError(e: unknown, action: "upload" | "download" | "load"): string {
-  if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";
-  if (e.detail === "upload_failed") return "The file could not be sent to storage. Try again; the link is valid for 5 minutes.";
+  if (e instanceof TypeError) return CONNECTION_MESSAGE;
+  if (!(e instanceof ApiError)) return e instanceof Error ? e.message : GENERIC_ERROR_MESSAGE;
+  if (e.detail === "upload_failed") return UPLOAD_FAILED_MESSAGE;
   switch (e.status) {
     case 401: return "Your session ended. Sign in again.";
     case 403: return action === "upload" ? "You can't upload resumes for this candidate." : "You can't open resumes for this candidate.";
@@ -23,7 +26,7 @@ function resumeError(e: unknown, action: "upload" | "download" | "load"): string
       : "This resume isn't available for download (it is still being scanned or did not pass).";
     case 422: return "The server refused this file. Choose a PDF or Word (.docx) file up to 15 MB.";
     case 429: return e.detail ?? "Too many requests. Try again in a minute.";
-    default: return e.detail ?? "Something went wrong.";
+    default: console.debug("Resume request failed", e.status, e.detail); return GENERIC_ERROR_MESSAGE;
   }
 }
 
@@ -116,7 +119,7 @@ export function CandidateResumes({ candidateId, pollMs = RESUME_POLL_MS }: { can
           <div className="resumecurrent">
             <p>
               <strong>Current: version {current.version}</strong>{" "}
-              <span className="muted">· {RESUME_CONTENT_TYPES[current.contentType].label} · {fmtBytes(current.sizeBytes)} · uploaded {fmt(current.createdAt)}
+              <span className="muted">· {RESUME_CONTENT_TYPES[current.contentType].label} · {fmtBytes(current.sizeBytes)} · uploaded {fmtDateTime(current.createdAt)}
                 {current.uploadedBy.name ? ` by ${current.uploadedBy.name}` : ""}</span>
             </p>
             <button type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === current.id || undefined}
@@ -148,7 +151,7 @@ export function CandidateResumes({ candidateId, pollMs = RESUME_POLL_MS }: { can
               <tr key={r.id}>
                 <td>{r.version ? `v${r.version}${r.isCurrent ? " (current)" : ""}` : "—"}</td>
                 <td><span className={`badge resume-${r.status}`}>{resumeStatusText(r)}</span></td>
-                <td><time dateTime={r.createdAt}>{fmt(r.createdAt)}</time>{r.uploadedBy.name ? ` · ${r.uploadedBy.name}` : ""}</td>
+                <td><time dateTime={r.createdAt}>{fmtDateTime(r.createdAt)}</time>{r.uploadedBy.name ? ` · ${r.uploadedBy.name}` : ""}</td>
                 <td>{fmtBytes(r.sizeBytes)}</td>
                 <td>
                   {r.status === "clean" && (

@@ -1,7 +1,8 @@
 import { Body, Controller, Delete, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query } from "@nestjs/common";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
+import { parseIfMatch } from "../../platform/http/if-match.js";
 import {
-  AccessLogQuery, FileListQuery, FolderCreate, FolderUpdate, PeopleQuery, SearchQuery, UploadRequest, parseIfMatch,
+  AccessLogQuery, FileListQuery, FolderCreate, FolderUpdate, PeopleQuery, SearchQuery, UploadRequest,
 } from "./datahub.schemas.js";
 import { DatahubService } from "./datahub.service.js";
 

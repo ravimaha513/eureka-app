@@ -1,7 +1,7 @@
 -- authz.request_role: current definition (repeatable; db/functions/README.md).
 -- Earlier bodies: migrations 0013, 0018, 0084. Change this file, not a new migration.
 
--- 0310: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
+-- 0311: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.request_role(p_user uuid, p_role text, p_location uuid)
  RETURNS TABLE(request_id uuid, request_status text)

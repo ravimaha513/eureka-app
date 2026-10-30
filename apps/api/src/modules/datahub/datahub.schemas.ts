@@ -103,14 +103,6 @@ export const AccessLogQuery = z
   .object({ cursor: Cursor.optional(), limit: z.coerce.number().int().min(1).max(200).default(50) })
   .strict();
 
-/** Idempotency-Key header: printable ASCII, as the idempotency_key CHECK (0022). */
-export const IdempotencyKey = z.string().regex(/^[\x21-\x7e]{1,200}$/);
-
-/** `If-Match: "3"` (or 3, or W/"3") -> 3; anything else -> null. */
-export function parseIfMatch(v: string | undefined): number | null {
-  const m = v === undefined ? null : /^\s*(?:W\/)?"?([1-9][0-9]{0,8})"?\s*$/.exec(v);
-  return m ? Number(m[1]) : null;
-}
 
 export function encodeCursor(v: unknown): string {
   return Buffer.from(JSON.stringify(v), "utf8").toString("base64url");

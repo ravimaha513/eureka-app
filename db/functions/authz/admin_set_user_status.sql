@@ -1,7 +1,7 @@
 -- authz.admin_set_user_status: current definition (repeatable; db/functions/README.md).
 -- Earlier bodies: migrations 0013, 0014, 0018. Change this file, not a new migration.
 
--- 0310: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
+-- 0311: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.admin_set_user_status(p_user uuid, p_active boolean)
  RETURNS void

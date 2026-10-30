@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { BATCH_STATUSES } from "../training/training.schemas.js";
 import {
+  CANDIDATE_STATUSES,
   CANDIDATE_VISIBILITIES,
   DOCUMENTS_FILTERS,
   DOCUMENTS_STATUS_LIST,
@@ -40,7 +42,7 @@ export const ExtraListFilters = {
 
 export const CandidateListQuery = z
   .object({
-    status: z.string().max(40).optional(),
+    status: z.enum(CANDIDATE_STATUSES).optional(),
     technology: z.string().max(80).optional(),
     visibility: z.enum(CANDIDATE_VISIBILITIES).optional(),
     search: z.string().max(80).optional(),
@@ -171,11 +173,6 @@ export const TimelineQuery = z
   })
   .strict();
 export type TimelineQuery = z.infer<typeof TimelineQuery>;
-
-export const BATCH_STATUSES = ["planned", "in_training", "completed", "cancelled"] as const;
-export type BatchStatus = (typeof BATCH_STATUSES)[number];
-/** Target of PUT /batches/:id/status ("planned" is only ever the starting state). */
-export const BatchStatusChange = z.object({ to: z.enum(["in_training", "completed", "cancelled"]) }).strict();
 
 export const BatchListQuery = z
   .object({

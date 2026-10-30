@@ -3,7 +3,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { CalendarPlus } from "lucide-react";
 import {
   INTERVIEW_DURATIONS, INTERVIEW_ROUNDS, INTERVIEW_TYPES, INTERVIEW_TYPE_LABELS, PANEL_MAX, SCORECARD_CRITERIA, SCORECARD_KINDS,
-  SCORECARD_LABELS, type InterviewType, type Scorecard,
+  SCORECARD_LABELS, isSafeHttpsUrl, type InterviewType, type Scorecard,
 } from "@eureka/shared";
 import { api, can, type Me } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
@@ -330,22 +330,36 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
   const qc = useQueryClient(); const [from, setFrom] = useState(localInput(new Date().toISOString()).slice(0, 10)); const [to, setTo] = useState(""); const [status, setStatus] = useState(""); const [cleared, setCleared] = useState(""); const [locationId, setLocationId] = useState("");
   // Interview location (B2.3): narrows the board within the caller's scope; the server applies the scope.
   const locations = useLookups().data?.locations ?? [];
-  const [schedule, setSchedule] = useState(false); const [edit, setEdit] = useState<Interview | null>(null); const [feedback, setFeedback] = useState<Interview | null>(null); const [details, setDetails] = useState<Interview | null>(null); const [notice, setNotice] = useState("");
+  const [schedule, setSchedule] = useState(false);
+  const [edit, setEdit] = useState<Interview | null>(null);
+  const [feedback, setFeedback] = useState<Interview | null>(null);
+  // Only the open interview's id is kept here; its record is read from the query data (see `details` below).
+  const [detailsId, setDetailsId] = useState<string | null>(initialOpenId);
+  const [notice, setNotice] = useState("");
   const invalidRange = Boolean(from && to && from > to);
   const q = useInfiniteQuery({ queryKey: ["interviews", from, to, status, cleared, locationId, clientFilter?.id], initialPageParam: "", enabled: !invalidRange, queryFn: ({ pageParam }) => {
     const p = new URLSearchParams({ limit: "50" }); if (from) p.set("from", dateBoundary(from)); if (to) p.set("to", dateBoundary(to, true)); if (status) p.set("status", status); if (cleared) p.set("cleared", cleared); if (locationId) p.set("locationId", locationId); if (clientFilter) p.set("clientId", clientFilter.id); if (pageParam) p.set("cursor", pageParam);
     return api<Page<Interview>>(`/api/v1/interviews?${p}`);
   }, getNextPageParam: p => p.nextCursor || undefined });
-  const done = () => { setSchedule(false); setEdit(null); setNotice("Interview saved."); void qc.invalidateQueries({ queryKey: ["interviews"] }); void qc.invalidateQueries({ queryKey: ["interview"] }); };
+  const done = () => {
+    setSchedule(false);
+    setEdit(null);
+    setNotice("Interview saved.");
+    void qc.invalidateQueries({ queryKey: ["interviews"] });
+    void qc.invalidateQueries({ queryKey: ["interview"] });
+  };
   // interview-alerts: opened from an inbox entry: load that interview and show its details.
   // Also the URL's interview (/interviews/<id>), so back/forward open and close the details.
-  const initial = useQuery({ queryKey: ["interview", initialOpenId], queryFn: () => api<InterviewDetail>(`/api/v1/interviews/${encodeURIComponent(initialOpenId!)}`), enabled: initialOpenId !== null && details?.id !== initialOpenId });
-  useEffect(() => {
-    if (initialOpenId === null) setDetails(null);
-    else if (initial.data?.id === initialOpenId) setDetails(initial.data);
-  }, [initial.data, initialOpenId]);
-  const showDetails = (i: Interview | null) => { setDetails(i); onOpenChange?.(i?.id ?? null); };
+  const initial = useQuery({
+    queryKey: ["interview", initialOpenId],
+    queryFn: () => api<InterviewDetail>(`/api/v1/interviews/${encodeURIComponent(initialOpenId!)}`),
+    enabled: initialOpenId !== null,
+  });
+  useEffect(() => { setDetailsId(initialOpenId); }, [initialOpenId]);
   const items = q.data?.pages.flatMap(p => p.items) ?? [];
+  // Read from the list or the URL's detail load, so a save (which refreshes both) shows the new values.
+  const details = items.find(i => i.id === detailsId) ?? (initial.data?.id === detailsId ? initial.data : undefined);
+  const showDetails = (id: string | null) => { setDetailsId(id); onOpenChange?.(id); };
   return <section className="panel"><div className="pagehead"><div><h1>Interviews</h1><p className="sub">Schedule, clear and review interviews. Board times in {displayZone}. Date filters and scheduling use {zone}.</p></div>{can(me, "interview:create") && <button className="btn primary push" onClick={() => setSchedule(true)}>Schedule interview</button>}</div>
     <div className="toolbar"><Field title="Display timezone"><select value={displayZone} onChange={e => setDisplayZone(e.target.value)}><option value={zone}>{zone} (local)</option>{zone !== "America/New_York" && <option value="America/New_York">America/New_York (EST/EDT)</option>}</select></Field><Field title="From date"><input type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field title="Through date"><input type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>
       <Field title="Call status filter"><select value={status} onChange={e => setStatus(e.target.value)}><option value="">All statuses</option>{STATUSES.map(s => <option key={s} value={s}>{label(s)}</option>)}</select></Field>
@@ -365,8 +379,8 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
       <td>{i.team?.name ?? "—"}<span className="block">{i.location?.name ?? "No location"}</span><span className="block">Coach: {i.coach?.name ?? "Unassigned"}</span></td>
       <td>{i.cleared ? <span className="badge cleared">Cleared</span> : "Not cleared"}<span className="block">{i.inviteReceived ? "Invite received" : "Awaiting invite"}</span><span className="block">{i.consentCaptured ? "Consent captured" : "Consent pending"}</span>{i.systemName && <span className="block">{i.systemName}</span>}</td>
       <td><CandidateFeedbackCell f={i.candidateFeedback} /></td>
-      <td>{i.consentCaptured ? <>{i.otterUrl?.startsWith("https://") && <a href={i.otterUrl} target="_blank" rel="noopener noreferrer">Otter</a>} {i.recordingUrl?.startsWith("https://") && <a href={i.recordingUrl} target="_blank" rel="noopener noreferrer">Recording</a>}{!i.otterUrl && !i.recordingUrl && "—"}</> : "Consent required"}</td>
-      <td><div className="rowactions"><button className="btn" aria-label={`Details of the interview with ${i.candidate.name ?? "the candidate"}`} onClick={() => showDetails(i)}>Details</button>{i.editableFields.length > 0 && <button className="btn" onClick={() => setEdit(i)}>Edit interview</button>}<button className="btn" onClick={() => setFeedback(i)}>Feedback</button></div></td>
+      <td>{i.consentCaptured ? <>{i.otterUrl && (isSafeHttpsUrl(i.otterUrl) ? <a href={i.otterUrl} target="_blank" rel="noopener noreferrer">Otter</a> : "Otter")} {i.recordingUrl && (isSafeHttpsUrl(i.recordingUrl) ? <a href={i.recordingUrl} target="_blank" rel="noopener noreferrer">Recording</a> : "Recording")}{!i.otterUrl && !i.recordingUrl && "—"}</> : "Consent required"}</td>
+      <td><div className="rowactions"><button className="btn" aria-label={`Details of the interview with ${i.candidate.name ?? "the candidate"}`} onClick={() => showDetails(i.id)}>Details</button>{i.editableFields.length > 0 && <button className="btn" onClick={() => setEdit(i)}>Edit interview</button>}<button className="btn" onClick={() => setFeedback(i)}>Feedback</button></div></td>
     </tr>)}</tbody></table>{!q.isPending && !q.isError && !items.length && <p className="empty">No interviews match these filters.</p>}</div>}
     {q.hasNextPage && <button className="btn" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Load more interviews</button>}
     {schedule && <Schedule onClose={() => setSchedule(false)} onDone={done} />}{edit && <Edit item={edit} onClose={() => setEdit(null)} onDone={done} />}{feedback && <Feedback item={feedback} onClose={() => setFeedback(null)} />}

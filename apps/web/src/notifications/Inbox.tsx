@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Bell } from "lucide-react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { fmtDateTime } from "../lib/format";
 
 /** One inbox entry (GET /api/v1/notifications; migration 0046). */
 export interface InboxItem {
@@ -20,7 +21,6 @@ export const inboxKeys = { all: ["notifications"] as const, unread: ["notificati
 /** How often the bell asks for the unread count (no websockets; design A7). */
 export const UNREAD_POLL_MS = 60_000;
 
-const fmt = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const countLabel = (n: number, capped: boolean) => (capped || n > 99 ? "99+" : String(n));
 
 /**
@@ -141,7 +141,7 @@ function InboxPanel({ id, headingRef, unread, onClose, onOpen, canOpen }: {
                   ) : <strong>{item.title}</strong>}
                 </div>
                 <p>{item.body}</p>
-                <small className="muted"><time dateTime={item.createdAt}>{fmt(item.createdAt)}</time></small>
+                <small className="muted"><time dateTime={item.createdAt}>{fmtDateTime(item.createdAt)}</time></small>
                 <button type="button" className="btn sm" disabled={busy}
                   aria-label={`${item.readAt ? "Mark unread" : "Mark read"}: ${item.title}`}
                   onClick={() => void mark(item, !item.readAt)}>

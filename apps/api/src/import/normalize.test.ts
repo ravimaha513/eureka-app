@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   clean, labelKey, lookupLabel, nameKey, normalizeColor, normalizeEmail, normalizeName, normalizePhone,
   normalizePlacementType, normalizeState, normalizeText, normalizeWorkMode, parseDate, parseRate, parseTime,
-  plausibleDob, splitFullName, validTimeZone,
+  plausibleDob, splitFullName,
 } from "./normalize.js";
+import { validTimeZone } from "../platform/time-zone.js";
 
 const v = <T>(r: { ok: true; value: T } | { ok: false; reason: string }) => (r.ok ? r.value : `!${r.reason}`);
 

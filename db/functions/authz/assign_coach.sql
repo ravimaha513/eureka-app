@@ -5,7 +5,7 @@
 -- never themself. Any team. The API writes the audit row in the same transaction.
 -- Change this file, not a new migration.
 
--- 0310: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
+-- 0311: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.assign_coach(p_coach uuid, p_team uuid)
  RETURNS void

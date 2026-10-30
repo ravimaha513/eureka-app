@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { Phone as PhoneIcon, Users as UsersIcon } from "lucide-react";
 import { Person } from "../shell/ui";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, can } from "../api";
+import { can } from "../api";
 import { adminApi, departmentLabel, type AdminUser, type BulkReport, type Department, type UserRole } from "./adminApi";
 import { csvToRows, tableToRows, type BulkRow } from "./csv";
 import { isXlsx, readUserSheet } from "./xlsx";
@@ -11,6 +11,7 @@ import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { friendlyError, skipReason } from "./errors";
 import { departmentOptions, keys, useAccess, useDepartments, useMeta, usePeople } from "./shared";
 import { Pager, useCursorPager } from "../ui/Pager";
+import { useAuthMethods } from "../shell/useAuthMethods";
 import { Loading } from "../ui/Loading";
 import { QueryError } from "../ui/QueryError";
 
@@ -300,12 +301,7 @@ export function UsersTab({ preset }: { preset?: UsersPreset } = {}) {
 
 /** Whether the server offers password sign-in (staging/local); then admins can set temporary passwords. */
 function usePasswordLogin(): boolean {
-  const m = useQuery({
-    queryKey: ["auth-methods"],
-    queryFn: () => api<{ password: boolean }>("/api/auth/methods").catch(() => null),
-    staleTime: Infinity,
-  });
-  return m.data?.password === true;
+  return useAuthMethods().data?.password === true;
 }
 
 function SetPasswordDialog({ user, onClose, onDone }: { user: AdminUser; onClose: () => void; onDone: () => void }) {

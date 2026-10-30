@@ -736,7 +736,9 @@ describe("friendlyError", () => {
     expect(friendlyError(new ApiError(422, "x"), "createUser")).toMatch(/Google domain/);
     expect(friendlyError(new ApiError(409, "Conflict"), "addMember")).toBe(ERROR_MESSAGES.already_member);
     expect(friendlyError(new ApiError(403, "Forbidden"))).toMatch(/permission/);
-    expect(friendlyError(new ApiError(500, "boom", "boom"))).toBe("boom");
+    // An unknown server code is not shown: the user gets a generic message (the code goes to the console).
+    expect(friendlyError(new ApiError(500, "boom", "boom"))).toBe("Something went wrong. Try again.");
+    expect(friendlyError(new TypeError("Failed to fetch"))).toMatch(/Can't reach the server/);
     expect(friendlyError(new Error("offline"))).toBe("offline");
   });
 });

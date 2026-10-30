@@ -1,6 +1,7 @@
 import { isIP } from "node:net";
 import type { FastifyRequest } from "fastify";
 import type { AppConfig } from "./config.js";
+import { clientIp } from "./client-ip.js";
 
 /**
  * Client facts kept for Login activity (interviews-settings ST-6): only the
@@ -10,17 +11,6 @@ import type { AppConfig } from "./config.js";
 export type DeviceClass = "desktop" | "mobile" | "tablet" | "unknown";
 export type BrowserFamily = "Chrome" | "Edge" | "Firefox" | "Safari" | "Opera" | "Other";
 export interface ClientInfo { deviceClass: DeviceClass; browser: BrowserFamily; ipMasked: string | null }
-
-/**
- * The viewer's IP. Behind CloudFront (ORIGIN_VERIFY_SECRET set, so the origin
- * guard admitted only CloudFront) the edge function's x-eureka-viewer-ip;
- * otherwise the socket address (trustProxy stays off, X-Forwarded-For is
- * client-controlled).
- */
-export function clientIp(req: FastifyRequest, config: Pick<AppConfig, "ORIGIN_VERIFY_SECRET">): string {
-  const viewer = req.headers["x-eureka-viewer-ip"];
-  return config.ORIGIN_VERIFY_SECRET && typeof viewer === "string" && isIP(viewer) ? viewer : req.ip;
-}
 
 /** IPv4: first two octets ("23.127.xx.xx"); IPv6: first two groups ("2001:db8:x:x"). Null if not an IP. */
 export function maskIp(ip: string | undefined | null): string | null {

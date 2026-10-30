@@ -1,6 +1,6 @@
 -- authz.is_interview_coach: current definition (repeatable; db/functions/README.md).
 -- Earlier body: migration 0130. Change this file, not a new migration.
--- 0310: an active user whose role has the coach trait (docs/roles-api.md); the
+-- 0311: an active user whose role has the coach trait (docs/roles-api.md); the
 -- eureka.interview_coach_guard trigger (0130) and the API call it.
 
 SET ROLE authz_definer;

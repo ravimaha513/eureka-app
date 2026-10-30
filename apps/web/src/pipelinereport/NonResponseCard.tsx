@@ -1,6 +1,8 @@
 import { useId, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fmtDate } from "../sales/ui";
+import { Loading } from "../ui/Loading";
+import { QueryError } from "../ui/QueryError";
 import { NONRESPONSE_REASONS, REASON_LABELS, RESOLUTION_LABELS, pvApi, pvError, pvKeys } from "./pipelineReportApi";
 
 /**
@@ -17,7 +19,14 @@ export function NonResponseCard({ candidateId }: { candidateId: string }) {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const d = q.data;
-  if (q.isLoading) return null;
+  if (q.isLoading || q.error) {
+    return (
+      <section className="card pad" aria-labelledby={`${id}-h`}>
+        <h2 id={`${id}-h`}>Responsiveness</h2>
+        {q.error ? <QueryError query={q} message={pvError(q.error)} /> : <Loading />}
+      </section>
+    );
+  }
   if (!d) return null;
   if (!d.current && !d.actions.flag && d.history.length === 0) return null;
 

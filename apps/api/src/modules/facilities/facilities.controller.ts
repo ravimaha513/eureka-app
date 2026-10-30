@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { parseIfMatch } from "../work-authorization/work-authorization.schemas.js";
+import { parseIfMatch } from "../../platform/http/if-match.js";
 import { BillsService } from "./bills.service.js";
 import { KINDS, type OwnerKind } from "./facilities.common.js";
 import {

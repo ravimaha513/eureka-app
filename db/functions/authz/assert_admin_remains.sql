@@ -1,7 +1,7 @@
 -- authz.assert_admin_remains: current definition (repeatable; db/functions/README.md).
 -- Earlier bodies: migrations 0014, 0018, 0039. Change this file, not a new migration.
 
--- 0310: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
+-- 0311: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.assert_admin_remains()
  RETURNS void

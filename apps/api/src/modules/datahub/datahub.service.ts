@@ -23,9 +23,10 @@ import { RateLimiter } from "../../platform/rate-limit.js";
 import { documentQuarantineKey, documentStoredKey } from "../../platform/storage/content.js";
 import { DOCUMENT_STORAGE, type DocumentStorage } from "../../platform/storage/document-storage.js";
 import {
-  IdempotencyKey, decodeCursor, encodeCursor, likeEscape,
+  decodeCursor, encodeCursor, likeEscape,
   type FolderCreate, type FolderUpdate, type UploadRequest,
 } from "./datahub.schemas.js";
+import { IdempotencyKey } from "../../platform/idempotency.js";
 import { dbErrorMapper } from "../../platform/errors.js";
 
 /** Presigned POST lifetime (as documents; the database upload window is 5 minutes). */

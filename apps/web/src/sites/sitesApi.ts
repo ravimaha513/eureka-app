@@ -5,7 +5,9 @@
  * presentation only.
  */
 import { ApiError, api } from "../api";
+import { UPLOAD_FAILED_MESSAGE } from "../lib/uploadErrors";
 import type { UploadTicket } from "../sales/resumesApi";
+import { formatUsd } from "../lib/format";
 
 /** The two kinds of site; also the path segment of their endpoints. */
 export type SiteKind = "companies" | "facilities";
@@ -210,10 +212,9 @@ export const siteKeys = {
 
 // ---- presentation helpers -----------------------------------------------------------------------
 
-const USD = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const USD0 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 export const num = (m: Money | null | undefined) => (m === null || m === undefined || m === "" ? 0 : Number(m));
-export const fmtMoney = (m: Money | null | undefined) => (m === null || m === undefined || m === "" ? "—" : USD.format(Number(m)));
+export const fmtMoney = (m: Money | null | undefined) => (m === null || m === undefined || m === "" ? "—" : formatUsd(Number(m)));
 /** Short money for chart axes: $950, $12k, $1.2M. */
 export function fmtMoneyShort(n: number): string {
   const a = Math.abs(n);
@@ -262,7 +263,7 @@ const ERRORS: Record<string, string> = {
 /** Plain-language text for the API's problems (the code is in `detail`). */
 export function sitesError(e: unknown, what = "record"): string {
   if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";
-  if (e.detail === "upload_failed") return "The file could not be sent to storage. Try again; the link is valid for 2 minutes.";
+  if (e.detail === "upload_failed") return UPLOAD_FAILED_MESSAGE;
   if (e.detail && ERRORS[e.detail]) return ERRORS[e.detail]!;
   switch (e.status) {
     case 401: return "Your session ended. Sign in again.";

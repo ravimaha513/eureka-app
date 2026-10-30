@@ -2,6 +2,9 @@ import { Inject, Injectable, type OnModuleDestroy } from "@nestjs/common";
 import pg from "pg";
 import { CONFIG, type AppConfig } from "./config.js";
 
+/** A failed ROLLBACK leaves the connection in an unknown state: the pool destroys a client released with an error. */
+const toError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
+
 /**
  * Database access for the API. Every business query runs inside withUser(),
  * which opens a transaction and passes ONLY the user id to PostgreSQL
@@ -20,6 +23,7 @@ export class DbService implements OnModuleDestroy {
 
   async withUser<T>(userId: string, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
     const c = await this.pool.connect();
+    let broken: Error | undefined;
     try {
       await c.query("BEGIN");
       await c.query("SELECT set_config('eureka.user_id', $1, true)", [userId]);
@@ -27,10 +31,27 @@ export class DbService implements OnModuleDestroy {
       await c.query("COMMIT");
       return out;
     } catch (err) {
-      await c.query("ROLLBACK").catch(() => undefined);
+      await c.query("ROLLBACK").catch((rollbackErr: unknown) => { broken = toError(rollbackErr); });
       throw err;
     } finally {
-      c.release();
+      c.release(broken);
+    }
+  }
+
+  /** Same-transaction write under system scope (no user id set): the change and its audit row commit or roll back together. */
+  async withSystemTx<T>(fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
+    const c = await this.pool.connect();
+    let broken: Error | undefined;
+    try {
+      await c.query("BEGIN");
+      const out = await fn(c);
+      await c.query("COMMIT");
+      return out;
+    } catch (err) {
+      await c.query("ROLLBACK").catch((rollbackErr: unknown) => { broken = toError(rollbackErr); });
+      throw err;
+    } finally {
+      c.release(broken);
     }
   }
 
@@ -41,6 +62,7 @@ export class DbService implements OnModuleDestroy {
    */
   async withApplicant<T>(applicantId: string, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
     const c = await this.pool.connect();
+    let broken: Error | undefined;
     try {
       await c.query("BEGIN");
       await c.query("SET LOCAL ROLE eureka_portal");
@@ -49,10 +71,10 @@ export class DbService implements OnModuleDestroy {
       await c.query("COMMIT");
       return out;
     } catch (err) {
-      await c.query("ROLLBACK").catch(() => undefined);
+      await c.query("ROLLBACK").catch((rollbackErr: unknown) => { broken = toError(rollbackErr); });
       throw err;
     } finally {
-      c.release();
+      c.release(broken);
     }
   }
 

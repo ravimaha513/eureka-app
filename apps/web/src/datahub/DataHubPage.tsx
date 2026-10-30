@@ -17,9 +17,9 @@ import {
   datahubApi, datahubError, datahubFileProblem, datahubKeys, newIdempotencyKey, scanStatusText, storage,
   type FileItem, type Folder, type FolderInput, type Person, type Version,
 } from "./datahubApi";
+import { fmtDateTime } from "../lib/format";
 
 export const DATAHUB_POLL_MS = 3000;
-const fmt = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const ACCEPT = [".pdf", ".docx", ".png", ".jpg", ".jpeg", ...Object.keys(DOCUMENT_CONTENT_TYPES)].join(",");
 const LEVEL_ICONS = { internal: Globe, confidential: Lock, restricted: Shield } as const;
 const levelOption = (l: DatahubLevel) => `${DATAHUB_LEVEL_LABELS[l].label} – ${DATAHUB_LEVEL_LABELS[l].audience}`;
@@ -308,7 +308,7 @@ function VersionsDialog({ file, onClose, onDownload }: { file: FileItem; onClose
               {q.data!.items.map((v) => (
                 <tr key={v.id}>
                   <td>v{v.version}</td>
-                  <td><time dateTime={v.createdAt}>{fmt(v.createdAt)}</time>{v.uploadedBy.name ? ` · ${v.uploadedBy.name}` : ""}</td>
+                  <td><time dateTime={v.createdAt}>{fmtDateTime(v.createdAt)}</time>{v.uploadedBy.name ? ` · ${v.uploadedBy.name}` : ""}</td>
                   <td>{fmtBytes(v.sizeBytes)}</td>
                   <td><StatusPill v={v} /></td>
                   <td>{v.status === "clean" && (
@@ -377,7 +377,7 @@ function AccessLogDialog({ folder, onClose }: { folder: Folder; onClose: () => v
             <tbody>
               {q.data.items.map((a) => (
                 <tr key={a.id}>
-                  <td><time dateTime={a.at}>{fmt(a.at)}</time></td>
+                  <td><time dateTime={a.at}>{fmtDateTime(a.at)}</time></td>
                   <td>{a.user.name ?? a.user.id}</td>
                   <td>{a.fileName ?? "Hidden file"} · v{a.version}</td>
                   <td>{a.steppedUp ? "Signed in again" : "—"}</td>
@@ -625,7 +625,7 @@ export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
                             <td>v{f.latestVersion.version}</td>
                             <td>{fmtBytes(f.latestVersion.sizeBytes)}</td>
                             <td>{f.latestVersion.uploadedBy.name ?? "—"}</td>
-                            <td><time dateTime={f.latestVersion.createdAt}>{fmt(f.latestVersion.createdAt)}</time></td>
+                            <td><time dateTime={f.latestVersion.createdAt}>{fmtDateTime(f.latestVersion.createdAt)}</time></td>
                             <td><StatusPill v={f.latestVersion} /></td>
                             <td className="rowactions">
                               <button type="button" className="iconbtn" aria-label={`Download ${f.name}`} title="Download"
