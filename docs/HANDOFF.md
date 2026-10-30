@@ -270,6 +270,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - In-app document viewer (web only, no migrations): View beside Download on paperwork documents and resumes; `documents/documentRender.ts` fetches the signed link and renders in the app CSP (pdf.js canvases, mammoth DOCX to DOMPurify-sanitized HTML, images as data: URLs). No blob:/frame-src needed; each view is one audited link.
 - Restricted files open without step-up (0350): `authz.document_download` / `authz.datahub_download` moved to `db/functions/authz/`, record a live grant when held but no longer refuse; `document_access_step_up` / `datahub_access_step_up` checks dropped. Google sends no `auth_time` to unverified apps, so Google users could never step up. Work-authorization reveal and utility secrets still require step-up.
 - Remove team members (no migrations, AD-14): Remove + confirm in the Users & Access team drawer (`access:manage`) and on My team (`team:add_member`: lead, manager/AD above); `authz.team_remove_member` ends the membership and hands their team candidates to the lead.
+- Candidate profile Submissions tab (totals, per-status counts, got-an-interview filter, job/client search); `interviewed`/`search` filters + `/submissions/summary` (docs/submissions-api.md).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
