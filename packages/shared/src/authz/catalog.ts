@@ -560,6 +560,8 @@ export const GRANTS: Record<Role, Grants> = {
     "assignment:read": "org",
     "hotlist:read": "org",
     "submission:read": "org",
+    // Anyone above lead logs submissions; the CEO for any candidate
+    "submission:create": "org",
     "interview:read": "org",
     "placement:read": "org",
     "rate:read": "org",
