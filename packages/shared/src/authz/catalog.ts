@@ -348,6 +348,8 @@ export const GRANTS: Record<Role, Grants> = {
     // reference data: add technologies (docs/lookups-api.md)
     "technology:create": "org",
     "candidate:read": "org",
+    // Hot List visibility: lead and above (same as lead / manager / AD), org-wide
+    "candidate.visibility:update": "org",
     "assignment:read": "org",
     "hotlist:read": "org",
     "submission:read": "org",

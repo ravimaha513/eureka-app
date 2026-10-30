@@ -126,6 +126,14 @@ describe("catalog integrity", () => {
       expect(GRANTS[role]["document.restricted:read"]).toBeUndefined();
     }
   });
+
+  it("Hot List visibility: lead and above may change it (lead team, manager / AD hierarchy, CEO org); recruiters may not", () => {
+    expect(GRANTS.lead["candidate.visibility:update"]).toBe("team");
+    expect(GRANTS.manager["candidate.visibility:update"]).toBe("hierarchy");
+    expect(GRANTS.assoc_director["candidate.visibility:update"]).toBe("hierarchy");
+    expect(GRANTS.ceo["candidate.visibility:update"]).toBe("org");
+    expect(GRANTS.recruiter["candidate.visibility:update"]).toBeUndefined();
+  });
 });
 
 describe("resolveScope", () => {
