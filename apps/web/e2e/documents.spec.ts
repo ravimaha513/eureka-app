@@ -38,7 +38,7 @@ test("HR opens a restricted document with step-up; the opening is in the access 
   await expect(row).toContainText("Restricted");
 
   // Opening needs a fresh confirmation (step-up) first.
-  await row.getByRole("button", { name: "Open Form I-9" }).click();
+  await row.getByRole("button", { name: "Download Form I-9" }).click();
   const dialog = page.getByRole("dialog", { name: "Confirm it's you" });
   await expect(dialog).toBeVisible();
   const download = page.waitForEvent("download");
@@ -50,7 +50,7 @@ test("HR opens a restricted document with step-up; the opening is in the access 
 
   // Within the step-up window a second opening needs no new confirmation.
   const again = page.waitForEvent("download");
-  await row.getByRole("button", { name: "Open Form I-9" }).click();
+  await row.getByRole("button", { name: "Download Form I-9" }).click();
   await again;
   await expect(page.getByRole("dialog", { name: "Confirm it's you" })).toHaveCount(0);
 

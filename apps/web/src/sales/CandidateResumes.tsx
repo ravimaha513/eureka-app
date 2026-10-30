@@ -8,6 +8,7 @@ import {
   browser, fmtBytes, postToStorage, resumeFileProblem, resumeKeys, resumeStatusText, resumeTypeOf, resumesApi, type Resume,
 } from "./resumesApi";
 import { fmtDateTime } from "../lib/format";
+import { DocumentViewer } from "../documents/DocumentViewer";
 
 const ACCEPT = [".pdf", ".docx", ...Object.keys(RESUME_CONTENT_TYPES)].join(",");
 /** While an upload is scanning, the list is refreshed this often. */
@@ -46,6 +47,7 @@ export function CandidateResumes({ candidateId, pollMs = RESUME_POLL_MS }: { can
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<{ resume: Resume; url: string } | null>(null);
   /** Upload ids this page started, to announce their scan result once. */
   const watching = useRef(new Set<string>());
 
@@ -93,12 +95,13 @@ export function CandidateResumes({ candidateId, pollMs = RESUME_POLL_MS }: { can
     }
   };
 
-  const download = async (r: Resume) => {
+  /** View in the app or download; each takes a fresh signed link. */
+  const download = async (r: Resume, view = false) => {
     setMessage(""); setError(""); setBusy(r.id);
     try {
       const { url } = await resumesApi.downloadLink(candidateId, r.id);
-      browser.download(url);
-      setMessage(`Downloading resume version ${r.version}.`);
+      if (view) setViewing({ resume: r, url });
+      else { browser.download(url); setMessage(`Downloading resume version ${r.version}.`); }
     } catch (err) {
       setError(resumeError(err, "download"));
     } finally {
@@ -122,10 +125,15 @@ export function CandidateResumes({ candidateId, pollMs = RESUME_POLL_MS }: { can
               <span className="muted">· {RESUME_CONTENT_TYPES[current.contentType].label} · {fmtBytes(current.sizeBytes)} · uploaded {fmtDateTime(current.createdAt)}
                 {current.uploadedBy.name ? ` by ${current.uploadedBy.name}` : ""}</span>
             </p>
-            <button type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === current.id || undefined}
-              onClick={() => void download(current)}>
-              Download current version
-            </button>
+            <div className="rowactions">
+              <button type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === current.id || undefined}
+                onClick={() => void download(current, true)}>
+                View current version
+              </button>
+              <button type="button" className="btn sm" disabled={busy !== null} onClick={() => void download(current)}>
+                Download current version
+              </button>
+            </div>
           </div>
         ) : <p className="muted">No resume yet.</p>}
 
@@ -153,18 +161,25 @@ export function CandidateResumes({ candidateId, pollMs = RESUME_POLL_MS }: { can
                 <td><span className={`badge resume-${r.status}`}>{resumeStatusText(r)}</span></td>
                 <td><time dateTime={r.createdAt}>{fmtDateTime(r.createdAt)}</time>{r.uploadedBy.name ? ` · ${r.uploadedBy.name}` : ""}</td>
                 <td>{fmtBytes(r.sizeBytes)}</td>
-                <td>
-                  {r.status === "clean" && (
+                <td className="rowactions">
+                  {r.status === "clean" && (<>
                     <button type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === r.id || undefined}
-                      onClick={() => void download(r)}>
+                      onClick={() => void download(r, true)}>
+                      View<span className="sr-only"> version {r.version}</span>
+                    </button>
+                    <button type="button" className="btn sm" disabled={busy !== null} onClick={() => void download(r)}>
                       Download<span className="sr-only"> version {r.version}</span>
                     </button>
-                  )}
+                  </>)}
                 </td>
               </tr>
             ))}
           </tbody>
         </table></div>
+      )}
+      {viewing && (
+        <DocumentViewer title={`Resume version ${viewing.resume.version}`} url={viewing.url} contentType={viewing.resume.contentType}
+          onClose={() => setViewing(null)} onDownload={() => { const r = viewing.resume; setViewing(null); void download(r); }} />
       )}
     </section>
   );

@@ -930,3 +930,16 @@ form.stack { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .skiplink { position: absolute; left: 12px; top: -60px; z-index: 100; padding: 10px 14px; border-radius: 10px; background: var(--pri-btn); color: #fff; font-weight: 600; text-decoration: none; }
 .skiplink:focus { top: 12px; outline: 2px solid var(--pri); outline-offset: 2px; }
 .content:focus { outline: none; }
+
+/* Document viewer (documents/DocumentViewer.tsx): PDF pages, images and Word files in the app */
+.dialog.docviewer { width: min(940px, 100%); max-height: 94vh; display: flex; flex-direction: column; }
+.docview { flex: 1; min-height: 240px; overflow: auto; background: var(--surface2, var(--bg)); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+.docview img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.docpages { display: flex; flex-direction: column; gap: 12px; }
+.docpage { display: block; width: 100%; height: auto; background: #fff; box-shadow: 0 1px 4px rgba(15, 23, 42, .15); }
+.docx { background: #fff; color: #111; padding: 32px 40px; max-width: 800px; margin: 0 auto; line-height: 1.5; box-shadow: 0 1px 4px rgba(15, 23, 42, .15); }
+.docx img { max-width: 100%; height: auto; }
+.docx table { border-collapse: collapse; }
+.docx td, .docx th { border: 1px solid #ccc; padding: 4px 6px; }
+.docx p { margin: 0 0 .6em; }
+@media (max-width: 640px) { .docx { padding: 16px; } }

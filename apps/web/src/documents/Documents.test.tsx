@@ -56,7 +56,7 @@ const listing = (items: unknown[], flags: Record<string, boolean> = {}) => () =>
 });
 
 describe("Paperwork documents section", () => {
-  it("lists documents with a Restricted label; Open only for clean files; an access log for restricted ones", async () => {
+  it("lists documents with a Restricted label; View and Download only for clean files; an access log for restricted ones", async () => {
     routes[`GET ${BASE}`] = listing([doc(D1), i9(D2, { placementId: PID }), doc(D3, { status: "infected", reason: "THREATS_FOUND" })]);
     wrap();
     const table = await screen.findByRole("table", { name: "Paperwork documents, newest first" });
@@ -67,7 +67,7 @@ describe("Paperwork documents section", () => {
     expect(within(rows[1]!).getByRole("button", { name: "Access log for Form I-9" })).toBeInTheDocument();
     expect(within(rows[0]!).queryByRole("button", { name: /Access log/ })).toBeNull();
     expect(within(rows[2]!).getByText("Blocked: malware found")).toBeInTheDocument();
-    expect(within(rows[2]!).queryByRole("button", { name: /Open/ })).toBeNull();
+    expect(within(rows[2]!).queryByRole("button", { name: /View|Download/ })).toBeNull();
   });
 
   it("hides itself when the server refuses the list (403/404)", async () => {
@@ -124,13 +124,40 @@ describe("Paperwork documents section", () => {
     routes["GET /api/auth/step-up"] = () => ({ body: { active: false, expiresAt: null, method: null, mode: "dev", ttlMinutes: 10 } });
     routes["POST /api/auth/step-up/dev"] = () => { stepped = true; return { body: { active: true, expiresAt: "2026-09-20T10:10:00Z" } }; };
     wrap();
-    fireEvent.click(await screen.findByRole("button", { name: "Open Form I-9" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Download Form I-9" }));
     const dialog = await screen.findByRole("dialog", { name: "Confirm it's you" });
     expect(within(dialog).getByText(/next 10 minutes/)).toBeInTheDocument();
     fireEvent.click(await within(dialog).findByRole("button", { name: "Confirm (development)" }));
     await waitFor(() => expect(assign).toHaveBeenCalledWith("/api/local-storage/object?policy=x&signature=y"));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(calls.filter((c) => c.path === `/api/v1/documents/${D2}/download`)).toHaveLength(2);
+  });
+
+  it("View shows an image in the app; Download from the viewer takes a fresh link", async () => {
+    const assign = vi.spyOn(browser, "download").mockImplementation(() => undefined);
+    routes[`GET ${BASE}`] = listing([doc(D1, { docType: "other", docTypeLabel: "Photo ID scan", contentType: "image/png" })]);
+    let n = 0;
+    routes[`POST /api/v1/documents/${D1}/download`] = () => ({ body: { url: `/api/local-storage/object?policy=p${++n}&signature=s`, expiresAt: "2026-09-20T10:05:00Z" } });
+    routes["GET /api/local-storage/object?policy=p1&signature=s"] = () => ({ body: "png-bytes" });
+    wrap();
+    fireEvent.click(await screen.findByRole("button", { name: "View Photo ID scan" }));
+    const viewer = await screen.findByRole("dialog", { name: "Photo ID scan" });
+    const img = await within(viewer).findByRole("img", { name: "Photo ID scan" });
+    expect(img.getAttribute("src")).toMatch(/^data:image\/png;base64,/);
+    expect(assign).not.toHaveBeenCalled();
+    fireEvent.click(within(viewer).getByRole("button", { name: "Download" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/api/local-storage/object?policy=p2&signature=s"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("the viewer says so when the link has expired", async () => {
+    routes[`GET ${BASE}`] = listing([doc(D1)]);
+    routes[`POST /api/v1/documents/${D1}/download`] = () => ({ body: { url: "/api/local-storage/object?policy=old&signature=s", expiresAt: "2026-09-20T10:05:00Z" } });
+    routes["GET /api/local-storage/object?policy=old&signature=s"] = () => problem(403, "Invalid or expired link");
+    wrap();
+    fireEvent.click(await screen.findByRole("button", { name: "View Offer letter" }));
+    const viewer = await screen.findByRole("dialog", { name: "Offer letter" });
+    expect(await within(viewer).findByRole("alert")).toHaveTextContent("The link expired");
   });
 
   it("with Google, confirming sends the browser to Google and back to this page", async () => {
@@ -144,7 +171,7 @@ describe("Paperwork documents section", () => {
       return { body: { redirectUrl: "https://accounts.google.com/o/oauth2/v2/auth?max_age=0" } };
     };
     wrap();
-    fireEvent.click(await screen.findByRole("button", { name: "Open Form I-9" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View Form I-9" }));
     fireEvent.click(await screen.findByRole("button", { name: "Continue with Google" }));
     await waitFor(() => expect(nav).toHaveBeenCalledWith("https://accounts.google.com/o/oauth2/v2/auth?max_age=0"));
     window.history.replaceState(null, "", "/");

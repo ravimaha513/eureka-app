@@ -9,11 +9,13 @@ import {
   type DocumentItem, type DocumentOwner,
 } from "./documentsApi";
 import { StepUpDialog } from "../ui/StepUpDialog";
+import { DocumentViewer } from "./DocumentViewer";
 import { UPLOAD_FAILED_MESSAGE } from "../lib/uploadErrors";
 import { fmtDateTime } from "../lib/format";
 
 const ACCEPT = [".pdf", ".docx", ".png", ".jpg", ".jpeg", ...Object.keys(DOCUMENT_CONTENT_TYPES)].join(",");
 export const DOCUMENT_POLL_MS = 3000;
+type OpenMode = "view" | "download";
 
 function documentError(e: unknown, action: "upload" | "download" | "load"): string {
   if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";
@@ -81,7 +83,8 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [stepUpFor, setStepUpFor] = useState<DocumentItem | null>(null);
+  const [stepUpFor, setStepUpFor] = useState<{ doc: DocumentItem; mode: OpenMode } | null>(null);
+  const [viewing, setViewing] = useState<{ doc: DocumentItem; url: string } | null>(null);
   const [logFor, setLogFor] = useState<DocumentItem | null>(null);
   const watching = useRef(new Set<string>());
 
@@ -135,15 +138,16 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
     }
   };
 
-  const download = async (d: DocumentItem) => {
+  /** View in the app or download; both take a fresh signed link (one access-log row each). */
+  const open = async (d: DocumentItem, mode: OpenMode) => {
     setMessage(""); setError(""); setBusy(d.id);
     try {
       const { url } = await documentsApi.downloadLink(d.id);
-      browser.download(url);
-      setMessage(`Opening ${d.docTypeLabel}.`);
+      if (mode === "view") setViewing({ doc: d, url });
+      else { browser.download(url); setMessage(`Downloading ${d.docTypeLabel}.`); }
       if (d.classification === "restricted") void qc.invalidateQueries({ queryKey: documentKeys.accessLog(d.id) });
     } catch (err) {
-      if (isStepUpRequired(err)) setStepUpFor(d);
+      if (isStepUpRequired(err)) setStepUpFor({ doc: d, mode });
       else setError(documentError(err, "download"));
     } finally {
       setBusy(null);
@@ -174,11 +178,14 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
                   <td><time dateTime={d.createdAt}>{fmtDateTime(d.createdAt)}</time>{d.uploadedBy.name ? ` · ${d.uploadedBy.name}` : ""}</td>
                   <td>{fmtBytes(d.sizeBytes)}</td>
                   <td className="rowactions">
-                    {d.status === "clean" && (
-                      <button type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === d.id || undefined} onClick={() => void download(d)}>
-                        Open<span className="sr-only"> {d.docTypeLabel}</span>
+                    {d.status === "clean" && (<>
+                      <button type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === d.id || undefined} onClick={() => void open(d, "view")}>
+                        View<span className="sr-only"> {d.docTypeLabel}</span>
                       </button>
-                    )}
+                      <button type="button" className="btn sm" disabled={busy !== null} onClick={() => void open(d, "download")}>
+                        Download<span className="sr-only"> {d.docTypeLabel}</span>
+                      </button>
+                    </>)}
                     {d.classification === "restricted" && (
                       <button type="button" className="btn sm" onClick={() => setLogFor(d)}>
                         Access log<span className="sr-only"> for {d.docTypeLabel}</span>
@@ -217,7 +224,11 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
 
       {stepUpFor && (
         <StepUpDialog onClose={() => setStepUpFor(null)}
-          onConfirmed={() => { const d = stepUpFor; setStepUpFor(null); void qc.invalidateQueries({ queryKey: documentKeys.stepUp }); void download(d); }} />
+          onConfirmed={() => { const { doc, mode } = stepUpFor; setStepUpFor(null); void qc.invalidateQueries({ queryKey: documentKeys.stepUp }); void open(doc, mode); }} />
+      )}
+      {viewing && (
+        <DocumentViewer title={viewing.doc.docTypeLabel} url={viewing.url} contentType={viewing.doc.contentType}
+          onClose={() => setViewing(null)} onDownload={() => { const d = viewing.doc; setViewing(null); void open(d, "download"); }} />
       )}
       {logFor && <AccessLogDialog doc={logFor} onClose={() => setLogFor(null)} />}
     </section>
