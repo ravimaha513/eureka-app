@@ -249,6 +249,23 @@ describe("candidate endpoints", () => {
     expect((await call("l1", "POST", "/api/v1/candidates", { ...body, phone: "+14695558702", email: "x.y@example.com", teamId: T.t3 })).statusCode).toBe(403);
   });
 
+  it("the create-team picker lists the candidate:create scope; the CEO adds to any team it names", async () => {
+    expect((await call("r1a", "GET", "/api/v1/candidate-create-teams")).statusCode).toBe(403);
+    const lead = (await call("l1", "GET", "/api/v1/candidate-create-teams")).json();
+    expect(lead.items.map((t: { id: string }) => t.id)).toEqual([T.t1]);
+    expect(lead.defaultTeamId).toBe(T.t1);
+    const ceo = (await call("ceo", "GET", "/api/v1/candidate-create-teams")).json();
+    expect(ceo.items.map((t: { id: string }) => t.id)).toEqual(expect.arrayContaining([T.t1, T.t2, T.t3]));
+    expect(ceo.defaultTeamId).toBeNull();
+
+    const body = { firstName: "Ceo", lastName: "Pick", phone: "+14695558711", email: "ceo.pick@example.com", technologyId: TECH_ID, locationId: LOC.dallas };
+    // No team of their own, so the CEO has to name one.
+    expect((await call("ceo", "POST", "/api/v1/candidates", body)).statusCode).toBe(403);
+    const r = await call("ceo", "POST", "/api/v1/candidates", { ...body, teamId: T.t3 });
+    expect(r.statusCode, r.body).toBe(201);
+    expect((await call("ceo", "GET", `/api/v1/candidates/${r.json().id}`)).json().team.id).toBe(T.t3);
+  });
+
   it("writes are audited with sensitive values redacted", async () => {
     const { rows } = await db.admin.query(`SELECT action, changes FROM eureka.audit_event WHERE action = 'candidate.updated' ORDER BY seq DESC LIMIT 1`);
     expect(rows[0].changes).toEqual({ priority: "P1" });

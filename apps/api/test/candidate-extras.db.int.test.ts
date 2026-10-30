@@ -316,10 +316,11 @@ describe("authz.candidate_duplicates", () => {
     await expect(check(U.l1, "X", "Y", null, null)).rejects.toThrow(/name_and_contact_required/);
     await expect(check(U.l1, "X", "Y", null, "4695550001")).rejects.toThrow(/invalid_contact/);
     await expect(check(U.l1, "X", "Y", "not-an-email", null)).rejects.toThrow(/invalid_contact/);
-    // Recruiters too: only a lead or above adds candidates (CA-6).
-    for (const key of ["r1a", "r1b", "hr", "locD", "coach", "admin", "ceo"] as const) {
+    // Recruiters too: only a lead or above (the CEO included) adds candidates (CA-6).
+    for (const key of ["r1a", "r1b", "hr", "locD", "coach", "admin"] as const) {
       await expect(check(U[key], "X", "Y", null, "+14695550001")).rejects.toThrow(/not_permitted/);
     }
+    await expect(check(U.ceo, "X", "Y", null, "+14695550001")).resolves.toBeDefined();
     await expect(db.app.query(`SELECT * FROM authz.candidate_duplicates('X','Y',NULL,'+14695550001')`)).rejects.toThrow(/not_permitted/);
   });
 });

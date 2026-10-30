@@ -80,6 +80,13 @@ export class CandidatesController {
     return this.svc.complianceCompanies(user);
   }
 
+  /** Teams for the New candidate dialog's team picker (candidate:create scope). */
+  @Get("candidate-create-teams")
+  @RequirePermission("candidate:create")
+  createTeams(@CurrentUser() user: AuthedUser) {
+    return this.svc.createTeams(user);
+  }
+
   /** Teams for the "Selected teams" picker (0240). */
   @Get("candidate-share-teams")
   @RequirePermission("candidate.visibility:update")

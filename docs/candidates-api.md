@@ -163,7 +163,13 @@ Migrations `0260_candidate_unique_contact.sql` (trigger) and `0300_candidate_con
 - **Who:** `candidate:create` is a lead (team), manager / AD (hierarchy) or org grant. Recruiters no
   longer hold it, so they get 403 on `POST /api/v1/candidates`, `POST /candidates/duplicate-check`
   and `POST /applications/:id/candidate`, and the web hides "New candidate". A lead can still assign
-  one of their recruiters with `recruiterId`.
+  one of their recruiters with `recruiterId`. The CEO holds it at org scope.
+- **Team:** `POST /api/v1/candidates` takes optional `teamId`, defaulting to the caller's first team
+  (403 when they have none, or the team is outside their scope).
+  `GET /api/v1/candidate-create-teams` (`candidate:create`) returns
+  `{ items: [{ id, name, lead }], defaultTeamId }`: the teams in scope (all for org), own team first;
+  `defaultTeamId` is the caller's team when listed, else null. The dialog shows a Team picker when
+  there is more than one, and a note when there are none.
 - **Required:** `POST /api/v1/candidates` needs `phone` (normalized to E.164) and `email` (personal,
   lower-cased); missing either is 422. The hire flow (`POST /applications/:id/candidate`) uses the
   applicant's email and phone, and takes `phone` / `email` in the body when the applicant has none or

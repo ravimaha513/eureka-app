@@ -8,12 +8,14 @@ import { UUID_RE, fieldErrors, salesError } from "./errors";
 import { OPEN_BATCH_STATUSES, salesApi, salesKeys, type CreateCandidate, type Duplicate } from "./salesApi";
 import { Field, useFocusAfterFailure } from "./ui";
 
-const FIELDS = ["firstName", "lastName", "phone", "email", "technologyId", "locationId", "batchId"] as const;
+const FIELDS = ["firstName", "lastName", "phone", "email", "teamId", "technologyId", "locationId", "batchId"] as const;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * New candidate (POST /api/v1/candidates). The team defaults server-side to the
- * creator's team and a recruiter becomes the candidate's recruiter.
+ * New candidate (POST /api/v1/candidates). The Team picker lists the teams in
+ * the caller's candidate:create scope (GET /candidate-create-teams), preset to
+ * their own team; it is hidden when there is only one. A recruiter creator
+ * becomes the candidate's recruiter.
  * Technology and location come from the lookups pickers; `locations` (the ones
  * the user has already seen) are the fallback when the lookup list is unavailable.
  *
@@ -49,8 +51,15 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
   });
   const openBatches = (batches.data?.items ?? []).filter((b) => OPEN_BATCH_STATUSES.includes(b.status));
 
+  const teams = useQuery({ queryKey: ["candidate-create-teams"], queryFn: () => salesApi.createTeams(), staleTime: 300_000 });
+  const teamItems = teams.data?.items ?? [];
+  const [pickedTeam, setPickedTeam] = useState<string | null>(null);
+  const teamId = pickedTeam ?? teams.data?.defaultTeamId ?? (teamItems.length === 1 ? teamItems[0]!.id : "");
+  const noTeams = teams.isSuccess && teamItems.length === 0;
+
   const validate = () => {
     const e: Record<string, string> = {};
+    if (teams.isSuccess && !teamItems.some((t) => t.id === teamId)) e.teamId = "Choose a team.";
     if (!v.firstName.trim()) e.firstName = "Enter a first name.";
     if (!v.lastName.trim()) e.lastName = "Enter a last name.";
     if (!v.phone.trim()) e.phone = "Enter a phone number.";
@@ -75,6 +84,7 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
       technologyId: v.technologyId.trim(), locationId: v.locationId.trim(),
       phone: normalizePhoneE164(v.phone)!, email: v.email.trim(),
       ...(v.batchId && openBatches.some((b) => b.id === v.batchId) ? { batchId: v.batchId } : {}),
+      ...(teamId ? { teamId } : {}),
     };
     setBusy(true);
     try {
@@ -114,6 +124,19 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
         <Field label="Personal email" hint="One candidate per email." error={errors.email}>
           {(p) => <input {...p} type="email" required autoComplete="off" value={v.email} onChange={set("email")} />}
         </Field>
+        {noTeams && (
+          <p className="note warn" role="alert">You aren't on a team you can add candidates to. Ask an admin to add you to a team.</p>
+        )}
+        {teamItems.length > 1 && (
+          <Field label="Team" error={errors.teamId}>
+            {(p) => (
+              <select {...p} required value={teamId} onChange={(e) => setPickedTeam(e.target.value)}>
+                {!teamItems.some((t) => t.id === teamId) && <option value="">Choose a team</option>}
+                {teamItems.map((t) => <option key={t.id} value={t.id}>{t.lead ? `${t.name} (${t.lead})` : t.name}</option>)}
+              </select>
+            )}
+          </Field>
+        )}
         <LookupPicker kind="technologies" label="Technology" value={v.technologyId} error={errors.technologyId} canAdd={canAddTechnology}
           onChange={(id) => setV((s) => ({ ...s, technologyId: id }))} />
         <LookupPicker kind="locations" label="Location" value={v.locationId} error={errors.locationId} fallback={locations}

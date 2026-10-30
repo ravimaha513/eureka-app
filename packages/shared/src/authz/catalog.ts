@@ -555,6 +555,8 @@ export const GRANTS: Record<Role, Grants> = {
     // reference data: add technologies (docs/lookups-api.md)
     "technology:create": "org",
     "candidate:read": "org",
+    // CA-6: adds candidates to any team (picked in the New candidate dialog)
+    "candidate:create": "org",
     "assignment:read": "org",
     "hotlist:read": "org",
     "submission:read": "org",
