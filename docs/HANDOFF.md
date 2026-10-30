@@ -251,6 +251,8 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   `user-purge-inactive` anonymizes users inactive 7+ days; `DELETE /admin/users/:id` ("Delete now") skips the wait.
 - New candidates: lead or above only, email and phone required and unique (PRs #69, #76, migrations 0260/0300,
   docs/candidates-api.md CA-6): 409 `duplicate_contact`, no override; trigger `authz.candidate_contact_unique` backstop.
+- Screen switcher (no migrations): Ctrl/Cmd+K or the top-bar search button opens "Go to screen" (`shell/QuickJump.tsx`,
+  the role's screens + Settings, combobox/listbox); the browser tab title names the current screen.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

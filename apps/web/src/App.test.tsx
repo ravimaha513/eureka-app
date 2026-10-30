@@ -172,3 +172,52 @@ describe("Hot List", () => {
     expect(screen.getByText("Unassigned")).toBeInTheDocument();
   });
 });
+
+describe("screen switcher and tab titles", () => {
+  const items = () => vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ items: [] }), { status: 200 }));
+
+  it("names the browser tab after the current screen", async () => {
+    items();
+    window.history.replaceState(null, "", "/submissions");
+    wrap(<Shell me={meFor("recruiter")} onSignOut={() => undefined} />);
+    await waitFor(() => expect(document.title).toBe("Submissions | Eureka"));
+  });
+
+  it("Ctrl+K opens the switcher, filters to the role's screens and Enter navigates", async () => {
+    items();
+    window.history.replaceState(null, "", "/hotlist");
+    wrap(<Shell me={meFor("recruiter")} onSignOut={() => undefined} />);
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+    const dialog = await screen.findByRole("dialog", { name: "Go to screen" });
+    const input = within(dialog).getByRole("combobox", { name: "Screen name" });
+    expect(input).toHaveFocus();
+    // Screens this role lacks are never offered.
+    expect(within(dialog).queryByRole("option", { name: /Users & Access/ })).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "plac" } });
+    expect(within(dialog).getAllByRole("option").map((o) => o.textContent)).toEqual(["PlacementsWorkspace"]);
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(window.location.pathname).toBe("/placements"));
+    expect(screen.queryByRole("dialog", { name: "Go to screen" })).not.toBeInTheDocument();
+  });
+
+  it("arrow keys move the active option and the search button opens it too", async () => {
+    items();
+    window.history.replaceState(null, "", "/hotlist");
+    wrap(<Shell me={meFor("recruiter")} onSignOut={() => undefined} />);
+    fireEvent.click(screen.getByRole("button", { name: "Go to screen" }));
+    const dialog = await screen.findByRole("dialog", { name: "Go to screen" });
+    const input = within(dialog).getByRole("combobox", { name: "Screen name" });
+    const options = within(dialog).getAllByRole("option");
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(options[1]).toHaveAttribute("aria-selected", "true");
+    expect(input).toHaveAttribute("aria-activedescendant", options[1]!.id);
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(options[options.length - 1]).toHaveAttribute("aria-selected", "true");
+    fireEvent.change(input, { target: { value: "zzz" } });
+    expect(within(dialog).getByRole("status")).toHaveTextContent("No screen matches");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Go to screen" })).not.toBeInTheDocument());
+  });
+});
