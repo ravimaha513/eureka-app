@@ -21,6 +21,7 @@ import { SettingsController } from "./modules/identity/settings.controller.js";
 import { SettingsService } from "./modules/identity/settings.service.js";
 import { CandidatesController } from "./modules/candidates/candidates.controller.js";
 import { CandidatesService } from "./modules/candidates/candidates.service.js";
+import { CandidateMetricsService } from "./modules/candidates/candidate-metrics.service.js";
 import { SubmissionsController, SubmissionsService } from "./modules/submissions/submissions.controller.js";
 import { InterviewsController } from "./modules/interviews/interviews.controller.js";
 import { InterviewsService } from "./modules/interviews/interviews.service.js";
@@ -128,7 +129,7 @@ export class AppModule {
       providers: [
         { provide: CONFIG, useValue: config },
         DbService, SessionService, AccessService, AuditService, OidcService, SettingsService,
-        CandidatesService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
+        CandidatesService, CandidateMetricsService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
         PaperworkService,
         ResumesService, NotificationsService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
         WorkAuthorizationService, OwnersService, UtilitiesService, BillsService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },

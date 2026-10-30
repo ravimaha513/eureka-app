@@ -223,6 +223,27 @@ Not removed: stored objects in S3 (resume and document files stay in the bucket,
 unreachable once their rows are gone; the API role has no delete on the bucket),
 staged import rows (`import_row`), and outbox events (ids only).
 
+## Metrics
+
+`GET /api/v1/candidates/:id/metrics` (`candidate:read`; 404 when the candidate
+isn't readable). Counts only, no rates, clients or notes. Each section is present
+only with its read permission and counts what the caller could list there (the
+activity rule: actor snapshot or candidate owned through scope, never the
+all-teams rule), so another team seeing an Open-to-all-teams candidate gets zeros.
+
+- `submissions` (`submission:read`): `total`, `last30Days`, `withInterview`
+  (submissions with an interview the caller can see), `clients` (distinct),
+  `firstAt`, `lastAt`, `byStatus` (status → count).
+- `interviews` (`interview:read`): `total`, `upcoming` (scheduled/rescheduled, in
+  the future), `completed` (completed or cleared), `cleared`, `notCleared`
+  (completed, not cleared), `cancelled` (cancelled or no invite), `lastAt`,
+  `nextAt`, `byRound` (round → count).
+- `placements` (`placement:read`): `total`, `active` (confirmed through ready),
+  `joined`, `fellThrough` (backout, BGC failed, joining issue).
+
+The profile's Overview tab shows these as the Metrics card, with submission →
+interview, interview clear and submission → selection rates.
+
 ## Technologies
 
 The load seed uses the spec list (Java, DE/PY, Python Developer, .NET, DevOps, AI/ML, Networking,

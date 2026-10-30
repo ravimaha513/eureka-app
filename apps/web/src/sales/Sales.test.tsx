@@ -65,6 +65,7 @@ beforeEach(() => {
     [`GET /api/v1/candidates/${CID}`]: () => ({ body: PROFILE }),
     "GET /api/v1/lookups": () => ({ body: LOOKUPS }),
     [`GET /api/v1/candidates/${CID}/timeline`]: () => ({ body: { items: [], nextCursor: null } }),
+    [`GET /api/v1/candidates/${CID}/metrics`]: () => ({ body: {} }),
     [`GET /api/v1/candidates/${CID}/non-response`]: () => ({ body: { current: null, history: [], actions: { flag: false, resolve: false } } }),
     "GET /api/v1/batches": () => ({ body: { items: [], canCreate: false } }),
   };
@@ -308,6 +309,24 @@ const renderProfile = (me: Me, onBack = () => undefined) => wrap(<CandidateProfi
 const openStatusMenu = async () => fireEvent.click(await screen.findByRole("button", { name: "Change status" }));
 
 describe("Candidate profile", () => {
+  it("shows submission, interview and placement metrics", async () => {
+    routes[`GET /api/v1/candidates/${CID}/metrics`] = () => ({ body: {
+      submissions: { total: 4, last30Days: 2, withInterview: 3, clients: 3, firstAt: "2030-01-02T10:00:00Z", lastAt: "2030-01-20T10:00:00Z",
+        byStatus: { submitted: 1, interview_scheduled: 1, selected: 1, rejected: 1 } },
+      interviews: { total: 5, upcoming: 1, completed: 4, cleared: 3, notCleared: 1, cancelled: 0, lastAt: "2030-01-19T10:00:00Z",
+        nextAt: "2030-01-25T10:00:00Z", byRound: { L2: 2, L1: 3 } },
+    } });
+    renderProfile(RECRUITER);
+    const card = await screen.findByRole("region", { name: "Metrics" });
+    const tiles = await within(card).findByRole("list", { name: "Candidate metrics" });
+    expect(within(tiles).getByText("Submissions").parentElement).toHaveTextContent("Submissions42 in last 30 days · 3 clients");
+    expect(within(tiles).getByText("Cleared").parentElement).toHaveTextContent("Cleared375% of 4 completed interviews");
+    expect(within(tiles).getByText("Rejected").parentElement).toHaveTextContent("Rejected1");
+    expect(within(tiles).queryByText("Placements")).not.toBeInTheDocument();
+    expect(within(card).getByText("Submission to interview").nextElementSibling).toHaveTextContent("75%");
+    expect(within(card).getAllByRole("listitem").map((li) => li.textContent).slice(-2)).toEqual(["L1 3", "L2 2"]);
+  });
+
   it("shows the profile with actions for a recruiter only", async () => {
     renderProfile(RECRUITER);
     const h1 = await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });

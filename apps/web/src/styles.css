@@ -351,13 +351,21 @@ h1:focus { outline: none; }
 .cp-blank[open] summary { margin-bottom: 8px; }
 .cp-docs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .cp-wide { grid-column: 1 / -1; min-width: 0; }
+.cp-metrics { margin-bottom: 16px; }
+.cp-metrics .tiles { grid-template-columns: repeat(auto-fill, minmax(min(170px, 100%), 1fr)); gap: 10px; margin: 0 0 14px; }
+.cp-metrics .tile { padding: 12px 14px; gap: 6px; border: 1px solid var(--line); border-radius: 12px; }
+.cp-metrics .tilevalue { font-size: 24px; }
+.cp-rates { grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr); column-gap: 20px; }
+.cp-breakdown { display: flex; flex-wrap: wrap; gap: 12px 40px; margin-top: 12px; }
+.cp-breakdown h3 { font-size: 12.5px; color: var(--muted); margin: 0 0 6px; }
+.cp-breakdown li { display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
 .cp-statusmenu { position: relative; }
 .cp-statuspop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 220px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 8px; }
 .cp-statuspop [role="group"] { display: flex; flex-direction: column; gap: 6px; }
 .cp-statuspop .btn { justify-content: flex-start; }
 @media (max-width: 900px) {
   .cp-overview, .cp-docs { grid-template-columns: minmax(0, 1fr); }
-  .cp-facts .facts { grid-template-columns: max-content minmax(0, 1fr); }
+  .cp-facts .facts, .cp-rates { grid-template-columns: max-content minmax(0, 1fr); }
 }
 .timeline { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid var(--line2); display: flex; flex-direction: column; gap: 8px; color: var(--text2); }
 .timeline li { font-size: 13px; }

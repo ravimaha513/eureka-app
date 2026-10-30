@@ -69,6 +69,22 @@ export interface CreateBatch { locationId: string; technologyId: string; startMo
 /** Batches a candidate can join: planned or in training. */
 export const OPEN_BATCH_STATUSES: readonly BatchStatus[] = ["planned", "in_training"];
 
+/**
+ * Pipeline counts for one candidate (GET /api/v1/candidates/:id/metrics). Each
+ * section is present only with its read permission and counts what the caller can list.
+ */
+export interface CandidateMetrics {
+  submissions?: {
+    total: number; last30Days: number; withInterview: number; clients: number;
+    firstAt: string | null; lastAt: string | null; byStatus: Record<string, number>;
+  };
+  interviews?: {
+    total: number; upcoming: number; completed: number; cleared: number; notCleared: number; cancelled: number;
+    lastAt: string | null; nextAt: string | null; byRound: Record<string, number>;
+  };
+  placements?: { total: number; active: number; joined: number; fellThrough: number };
+}
+
 /** One timeline entry (GET /api/v1/candidates/:id/timeline): ids and state identifiers only. */
 export interface TimelineEvent {
   id: string;
@@ -239,6 +255,7 @@ export const salesApi = {
     api<{ id: string; duplicateWarning: boolean }>("/api/v1/submissions", { method: "POST", ...json(b) }),
   duplicateCheck: (b: Pick<CreateCandidate, "firstName" | "lastName" | "phone" | "email">) =>
     api<{ duplicates: Duplicate[] }>("/api/v1/candidates/duplicate-check", { method: "POST", ...json(b) }),
+  metrics: (id: string) => api<CandidateMetrics>(`/api/v1/candidates/${enc(id)}/metrics`),
   timeline: (id: string, cursor?: string | null) =>
     api<Page<TimelineEvent>>(`/api/v1/candidates/${enc(id)}/timeline?limit=50${cursor ? `&cursor=${enc(cursor)}` : ""}`),
   batches: (locationId?: string) =>
@@ -339,6 +356,7 @@ export const salesKeys = {
   candidate: (id: string) => ["candidate", id] as const,
   hotlistViews: ["hotlist-views"] as const,
   timeline: (id: string) => ["candidate", id, "timeline"] as const,
+  metrics: (id: string) => ["candidate", id, "metrics"] as const,
   batches: ["batches"] as const,
 };
 

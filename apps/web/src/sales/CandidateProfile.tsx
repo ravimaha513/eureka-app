@@ -5,6 +5,7 @@ import { ApiError, type Me } from "../api";
 import { ConfirmDialog } from "../ui/Dialog";
 import { CandidateResumes } from "./CandidateResumes";
 import { DocumentsSection } from "../documents/DocumentsSection";
+import { CandidateMetrics } from "./CandidateMetrics";
 import { CandidateTimeline } from "./CandidateTimeline";
 import { NonResponseCard } from "../pipelinereport/NonResponseCard";
 import { CandidateWorkAuthorization } from "../workauth/CandidateWorkAuthorization";
@@ -199,6 +200,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
       </div>
 
       <div role="tabpanel" id={`${tabsId}-p-${current}`} aria-labelledby={`${tabsId}-t-${current}`}>
+        {current === "overview" && <CandidateMetrics candidateId={c.id} />}
         {current === "overview" && (
           <div className="cp-overview">
             <section className="card pad" aria-labelledby="facts-h">

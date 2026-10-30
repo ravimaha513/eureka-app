@@ -15,11 +15,12 @@ import {
   Transition,
   VisibilityUpdate,
 } from "./candidates.schemas.js";
+import { CandidateMetricsService } from "./candidate-metrics.service.js";
 import { CandidatesService } from "./candidates.service.js";
 
 @Controller("api/v1")
 export class CandidatesController {
-  constructor(private readonly svc: CandidatesService) {}
+  constructor(private readonly svc: CandidatesService, private readonly metricsSvc: CandidateMetricsService) {}
 
   @Get("hotlist")
   @RequirePermission("hotlist:read")
@@ -44,6 +45,13 @@ export class CandidatesController {
   @RequirePermission("candidate:read")
   timeline(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Query() q: unknown) {
     return this.svc.timeline(user, id, TimelineQuery.parse(q));
+  }
+
+  /** Submission, interview and placement counts, each under its own read scope (docs/candidates-api.md "Metrics"). */
+  @Get("candidates/:id/metrics")
+  @RequirePermission("candidate:read")
+  metrics(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
+    return this.metricsSvc.metrics(user, id);
   }
 
   @Post("candidates")
