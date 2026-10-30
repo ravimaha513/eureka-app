@@ -433,8 +433,8 @@ describe("bench alert POC", () => {
       { candidateId: j.candidateId, benchSince: today, benchDays: 31, thresholdDays: 30 });
     const who = (await db.worker.query(`SELECT recipient_id, reason FROM authz.notification_recipients($1) ORDER BY reason, recipient_id`, [ev])).rows;
     expect(who).toEqual([
-      { recipient_id: U.ceo, reason: "ceo" }, { recipient_id: U.l1, reason: "lead" }, { recipient_id: U.m1, reason: "manager" },
-      { recipient_id: U.r1b, reason: "poc" }, { recipient_id: U.r1a, reason: "recruiter" },
+      { recipient_id: U.l1, reason: "lead" }, { recipient_id: U.m1, reason: "manager" },
+      { recipient_id: U.ceo, reason: "notify.bench_time:receive" }, { recipient_id: U.r1b, reason: "poc" }, { recipient_id: U.r1a, reason: "recruiter" },
     ]);
   });
 });

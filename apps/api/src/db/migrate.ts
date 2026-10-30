@@ -3,7 +3,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { GRANTS, HOTLIST_VISIBILITY, LOCATION_ROLES, ROLES, ROLE_LABELS, SALES_ROLES, isRestrictedRole } from "@eureka/shared";
+import {
+  GRANTS, HOTLIST_VISIBILITY, ORG_SENSITIVE_PERMISSIONS, PERMISSIONS, RESTRICTED_PERMISSIONS, ROLES, ROLE_LABELS, ROLE_LADDER,
+  ROLE_TRAITS,
+} from "@eureka/shared";
 
 export const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../../db/migrations");
 export const FUNCTIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../../db/functions");
@@ -119,15 +122,29 @@ export async function applyFunctions(client: pg.Client | pg.PoolClient): Promise
 export async function seedCatalog(client: pg.Client | pg.PoolClient, opts: { production?: boolean } = {}): Promise<void> {
   await client.query("BEGIN");
   try {
-    for (const role of ROLES) {
+    // Permissions first: role_permission references them (0311). Flags drive role.is_restricted.
+    for (const key of PERMISSIONS) {
       await client.query(
-        `INSERT INTO eureka.role (key, label, is_sales, is_location_bound, is_restricted) VALUES ($1,$2,$3,$4,$5)
-         ON CONFLICT (key) DO UPDATE SET label = EXCLUDED.label, is_sales = EXCLUDED.is_sales,
-           is_location_bound = EXCLUDED.is_location_bound, is_restricted = EXCLUDED.is_restricted`,
-        [role, ROLE_LABELS[role], SALES_ROLES.includes(role), LOCATION_ROLES.includes(role), isRestrictedRole(role)],
+        `INSERT INTO eureka.permission (key, is_restricted, is_org_sensitive) VALUES ($1,$2,$3)
+         ON CONFLICT (key) DO UPDATE SET is_restricted = EXCLUDED.is_restricted, is_org_sensitive = EXCLUDED.is_org_sensitive`,
+        [key, RESTRICTED_PERMISSIONS.includes(key), ORG_SENSITIVE_PERMISSIONS.includes(key)],
       );
     }
-    await client.query("DELETE FROM eureka.role_permission");
+    // System roles: label, traits and ladder position come from the catalog on every run
+    // (docs/roles-api.md); custom roles (is_system = false) are the admins' and stay untouched.
+    for (const role of ROLES) {
+      const t = ROLE_TRAITS[role];
+      const l = ROLE_LADDER[role];
+      await client.query(
+        `INSERT INTO eureka.role (key, label, is_system, is_sales, is_location_bound, is_admin, is_recruiter, is_coach, track, level)
+         VALUES ($1,$2,true,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (key) DO UPDATE SET label = EXCLUDED.label, is_system = true, is_sales = EXCLUDED.is_sales,
+           is_location_bound = EXCLUDED.is_location_bound, is_admin = EXCLUDED.is_admin, is_recruiter = EXCLUDED.is_recruiter,
+           is_coach = EXCLUDED.is_coach, track = EXCLUDED.track, level = EXCLUDED.level, archived_at = NULL`,
+        [role, ROLE_LABELS[role], t.sales, t.locationBound, t.admin, t.recruiter, t.coach, l.track, l.level],
+      );
+    }
+    await client.query("DELETE FROM eureka.role_permission WHERE role_key = ANY ($1)", [[...ROLES]]);
     for (const role of ROLES) {
       for (const [permission, scope] of Object.entries(GRANTS[role])) {
         await client.query(
@@ -136,6 +153,12 @@ export async function seedCatalog(client: pg.Client | pg.PoolClient, opts: { pro
         );
       }
     }
+    // A permission dropped from the catalog goes once no custom role holds it; a held one stays
+    // (its grant is dead, nothing checks it) and is listed by the Roles screen as unknown.
+    await client.query(
+      `DELETE FROM eureka.permission p WHERE NOT (p.key = ANY ($1))
+         AND NOT EXISTS (SELECT 1 FROM eureka.role_permission rp WHERE rp.permission = p.key)`, [[...PERMISSIONS]]);
+    await client.query("SELECT eureka.role_refresh_restricted(NULL)");
     const policy = await client.query(
       `INSERT INTO authz.policy_setting (key, value) VALUES ('hotlist_visibility', $1)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [HOTLIST_VISIBILITY]);

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ROLES } from "@eureka/shared";
+import { SCOPES } from "@eureka/shared";
 
 const uuid = z.string().uuid();
 
@@ -62,7 +62,8 @@ export type BulkCreateUsers = z.infer<typeof BulkCreateUsers>;
 
 export const SetManager = z.object({ managerId: uuid.nullable() }).strict();
 
-export const RoleKey = z.enum(ROLES);
+/** A system or custom role key (docs/roles-api.md); the database knows which exist. */
+export const RoleKey = z.string().regex(/^[a-z][a-z0-9_]{0,63}$/);
 
 export const CreateRoleRequest = z
   .object({ userId: uuid, role: RoleKey, locationId: uuid.optional() })
@@ -74,6 +75,41 @@ export const RoleRequestListQuery = z
   .strict();
 
 export const RevokeRoleQuery = z.object({ locationId: uuid.optional() }).strict();
+
+// ---------- role definitions (docs/roles-api.md) ----------
+const roleLabel = z.string().trim().min(1).max(80);
+const roleDescription = z.string().trim().max(500);
+const roleTrack = z.string().regex(/^[a-z][a-z0-9_]{0,39}$/);
+const roleLevel = z.number().int().min(1).max(20);
+const roleTraits = z
+  .object({ sales: z.boolean(), locationBound: z.boolean(), admin: z.boolean(), recruiter: z.boolean(), coach: z.boolean() })
+  .partial()
+  .strict();
+
+export const RoleListQuery = z.object({ includeArchived: z.enum(["true", "false"]).optional() }).strict();
+
+export const CreateRole = z
+  .object({
+    label: roleLabel, cloneFrom: RoleKey, description: roleDescription.optional(), departmentId: uuid.optional(),
+    track: roleTrack.optional(), level: roleLevel.optional(),
+  })
+  .strict();
+export type CreateRole = z.infer<typeof CreateRole>;
+
+export const UpdateRole = z
+  .object({
+    label: roleLabel, description: roleDescription.nullable(), track: roleTrack, level: roleLevel, departmentId: uuid.nullable(),
+    traits: roleTraits,
+  })
+  .partial()
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, "Nothing to change.");
+export type UpdateRole = z.infer<typeof UpdateRole>;
+
+export const SetRoleGrants = z
+  .object({ grants: z.record(z.string().regex(/^[a-z][a-z0-9_.]*:[a-z_]+$/), z.enum(SCOPES).nullable()) })
+  .strict();
+export type SetRoleGrants = z.infer<typeof SetRoleGrants>;
 
 export const CreateTeam = z
   .object({ name: z.string().trim().min(1).max(120), leadId: uuid, locationId: uuid.optional() })
@@ -134,3 +170,16 @@ export const SetDesignation = z
   })
   .strict();
 export type SetDesignation = z.infer<typeof SetDesignation>;
+
+// ---------- org chart (docs/roles-api.md, "Org chart") ----------
+export const OrgChartPreviewQuery = z.object({ userId: uuid, managerId: uuid.or(z.literal("")).optional() }).strict();
+
+export const OrgChartApply = z
+  .object({
+    moves: z.array(z.object({ userId: uuid, managerId: uuid.nullable() }).strict()).max(100).default([]),
+    teamAdds: z.array(z.object({ userId: uuid, teamId: uuid }).strict()).max(100).default([]),
+  })
+  .strict()
+  .refine((v) => v.moves.length + v.teamAdds.length > 0, "Nothing to apply.")
+  .refine((v) => v.moves.length + v.teamAdds.length <= 100, "At most 100 changes per batch.");
+export type OrgChartApply = z.infer<typeof OrgChartApply>;

@@ -5,7 +5,43 @@ import type { Coach } from "../team/coachApi";
 export interface Ref { id: string; displayName: string }
 export interface Place { id: string; name: string }
 
-export interface RoleMeta { key: string; label: string; restricted: boolean; locationBound: boolean }
+export interface RoleMeta {
+  key: string; label: string; restricted: boolean; locationBound: boolean;
+  isSystem: boolean; track: string; level: number; recruiter: boolean; department: Place | null;
+}
+
+// ---- org chart (docs/roles-api.md, "Org chart") ---------------------------------------------------
+export interface OrgPerson {
+  id: string; displayName: string; designation: string | null; managerId: string | null;
+  roles: { key: string; label: string; track: string; level: number }[];
+  team: { id: string; name: string; asLead: boolean } | null;
+  canMove: boolean;
+}
+export interface OrgChart { people: OrgPerson[]; teams: { id: string; name: string; leadId: string }[] }
+export interface OrgPreview { loses: Ref[]; gains: Ref[]; warnings: string[] }
+
+// ---- role definitions (docs/roles-api.md) -----------------------------------------------------
+export interface RoleTraits { sales: boolean; locationBound: boolean; admin: boolean; recruiter: boolean; coach: boolean }
+export interface RoleDef {
+  key: string; label: string; description: string | null; isSystem: boolean; restricted: boolean;
+  traits: RoleTraits; track: string; level: number; department: Place | null; clonedFrom: string | null;
+  holders: number; archivedAt: string | null; grants: Record<string, string>;
+}
+export interface PermissionDef { key: string; area: string; description: string; restricted: boolean; orgSensitive: boolean }
+export interface PermissionCatalog { scopes: string[]; items: PermissionDef[] }
+export const SCOPE_LABELS: Record<string, string> = {
+  own: "Own records", team: "Own team", coached: "Coached teams", coached_hierarchy: "Coached teams + below",
+  hierarchy: "Reporting hierarchy", location: "Their location", org: "Whole organisation",
+};
+export const TRAIT_LABELS: Record<keyof RoleTraits, { label: string; hint: string }> = {
+  sales: { label: "Sales", hint: "Sees candidates marked open to all teams; client requirements; counted in performance." },
+  locationBound: { label: "Location-bound", hint: "Each grant is tied to one location." },
+  admin: { label: "Administrator", hint: "Users & Access admin. Never held together with a business role; always restricted." },
+  recruiter: { label: "Recruiter", hint: "Owns the candidates they add; can be added to a team as a member." },
+  coach: { label: "Interview coach", hint: "Can be assigned to coach sales teams and train batches." },
+};
+/** "interview_prep" → "Interview prep". */
+export const trackLabel = (t: string) => t.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 export const LOCATION_KINDS = ["training", "gh", "office", "remote"] as const;
 export type LocationKind = (typeof LOCATION_KINDS)[number];
 export interface AdminMeta { roles: RoleMeta[]; locations: Place[]; singleAdminMode?: boolean }
@@ -144,6 +180,23 @@ export const adminApi = {
   reject: (id: string) => api<{ status: "rejected" }>(`/api/v1/admin/role-requests/${enc(id)}/reject`, { method: "POST" }),
   revokeRole: (userId: string, role: string, locationId: string | null) =>
     api<void>(`/api/v1/admin/users/${enc(userId)}/roles/${enc(role)}${locationId ? `?locationId=${enc(locationId)}` : ""}`, { method: "DELETE" }),
+
+  orgChart: () => api<OrgChart>("/api/v1/admin/org-chart"),
+  orgChartPreview: (userId: string, managerId: string | null) =>
+    api<OrgPreview>(`/api/v1/admin/org-chart/preview?userId=${enc(userId)}&managerId=${enc(managerId ?? "")}`),
+  orgChartApply: (b: { moves: { userId: string; managerId: string | null }[]; teamAdds: { userId: string; teamId: string }[] }) =>
+    api<{ applied: number; warnings: { userId: string; code: string }[] }>("/api/v1/admin/org-chart/apply", { method: "POST", ...json(b) }),
+
+  roles: (includeArchived = false) => api<{ items: RoleDef[] }>(`/api/v1/admin/roles${includeArchived ? "?includeArchived=true" : ""}`),
+  permissions: () => api<PermissionCatalog>("/api/v1/admin/permissions"),
+  createRole: (b: { label: string; cloneFrom: string; description?: string; departmentId?: string; track?: string; level?: number }) =>
+    api<{ key: string }>("/api/v1/admin/roles", { method: "POST", ...json(b) }),
+  updateRole: (key: string, b: { label?: string; description?: string | null; track?: string; level?: number; departmentId?: string | null; traits?: Partial<RoleTraits> }) =>
+    api<void>(`/api/v1/admin/roles/${enc(key)}`, { method: "PATCH", ...json(b) }),
+  setRoleGrants: (key: string, grants: Record<string, string | null>) =>
+    api<void>(`/api/v1/admin/roles/${enc(key)}/grants`, { method: "PUT", ...json({ grants }) }),
+  archiveRole: (key: string) => api<void>(`/api/v1/admin/roles/${enc(key)}/archive`, { method: "POST" }),
+  restoreRole: (key: string) => api<void>(`/api/v1/admin/roles/${enc(key)}/restore`, { method: "POST" }),
 
   locations: () => api<{ items: LocationSummary[] }>("/api/v1/admin/locations"),
   location: (id: string) => api<LocationDetail>(`/api/v1/admin/locations/${enc(id)}`),

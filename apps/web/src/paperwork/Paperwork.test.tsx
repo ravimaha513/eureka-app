@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PaperworkPage } from "./PaperworkPage";
-import { meFor, mockApi, problem, wrap, type Handler } from "../pipeline/testkit";
+import { EMPTY_LOOKUPS, meFor, mockApi, problem, wrap, type Handler } from "../pipeline/testkit";
 import type { PaperworkDetail, QueueRow } from "./paperworkApi";
 
 const HR = { ...meFor("hr"), roles: [{ key: "hr", label: "HR", locationId: null }] };
@@ -40,7 +40,7 @@ const base = (): Record<string, Handler> => ({
     { at: "2026-01-02T10:00:00Z", actor: { id: "u-me", name: "Test User" }, from: null, to: null, changed: ["due_on", "notes"], reason: null },
   ] } }),
 });
-beforeEach(() => { api = mockApi(base()); });
+beforeEach(() => { api = mockApi({ "GET /api/v1/lookups": () => ({ body: EMPTY_LOOKUPS }), ...base() }); });
 afterEach(() => vi.restoreAllMocks());
 
 const lastQueue = () => api.gets("/api/v1/paperwork").at(-1)!.url.searchParams;

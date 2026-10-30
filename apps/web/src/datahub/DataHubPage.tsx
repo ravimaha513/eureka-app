@@ -4,13 +4,13 @@ import {
   Download, FolderOpen, FolderPlus, Globe, History, Lock, Search, Settings2, Shield, Trash2, Upload, Users, X, ScrollText,
 } from "lucide-react";
 import {
-  DATAHUB_LEVELS, DATAHUB_LEVEL_LABELS, DOCUMENT_CONTENT_TYPES, ROLES, ROLE_LABELS, datahubFolderNameProblem,
-  type DatahubLevel, type Role,
+  DATAHUB_LEVELS, DATAHUB_LEVEL_LABELS, DOCUMENT_CONTENT_TYPES, datahubFolderNameProblem,
+  type DatahubLevel,
 } from "@eureka/shared";
 import { ConfirmDialog, Dialog, DialogActions } from "../ui/Dialog";
 import { documentKeys, documentTypeOf, isStepUpRequired } from "../documents/documentsApi";
 import { StepUpDialog } from "../ui/StepUpDialog";
-import { useLookups } from "../lookups";
+import { RoleName, useLookups } from "../lookups";
 import { browser, fmtBytes } from "../sales/resumesApi";
 import { Field, useFocusAfterFailure } from "../sales/ui";
 import {
@@ -36,11 +36,14 @@ const StatusPill = ({ v }: { v: Pick<Version, "status"> }) => <span className={`
 
 // ---------------------------------------------------------------- pickers
 
-/** Searchable multi-select of catalog roles (Confidential folders). */
-function RolePicker({ value, onChange, error }: { value: Role[]; onChange: (r: Role[]) => void; error?: string }) {
+/** Searchable multi-select of live business roles (Confidential folders; docs/roles-api.md). */
+function RolePicker({ value, onChange, error }: { value: string[]; onChange: (r: string[]) => void; error?: string }) {
   const [q, setQ] = useState("");
   const listId = useId();
-  const matches = ROLES.filter((r) => r !== "org_admin" && ROLE_LABELS[r].toLowerCase().includes(q.trim().toLowerCase()));
+  const lookups = useLookups();
+  const roles = lookups.data?.roles ?? [];
+  const labelOf = (k: string) => roles.find((r) => r.id === k)?.name ?? k;
+  const matches = roles.filter((r) => r.name.toLowerCase().includes(q.trim().toLowerCase())).map((r) => r.id);
   return (
     <Field label="Role" error={error} hint="People holding any of these roles can open the folder.">
       {(p) => (
@@ -48,8 +51,8 @@ function RolePicker({ value, onChange, error }: { value: Role[]; onChange: (r: R
           {value.length > 0 && (
             <ul className="chips" aria-label="Chosen roles">
               {value.map((r) => (
-                <li key={r} className="chip">{ROLE_LABELS[r]}
-                  <button type="button" className="chipx" aria-label={`Remove ${ROLE_LABELS[r]}`} onClick={() => onChange(value.filter((x) => x !== r))}>×</button>
+                <li key={r} className="chip">{labelOf(r)}
+                  <button type="button" className="chipx" aria-label={`Remove ${labelOf(r)}`} onClick={() => onChange(value.filter((x) => x !== r))}>×</button>
                 </li>
               ))}
             </ul>
@@ -62,7 +65,7 @@ function RolePicker({ value, onChange, error }: { value: Role[]; onChange: (r: R
               <li key={r}><label className="check">
                 <input type="checkbox" checked={value.includes(r)}
                   onChange={(e) => onChange(e.target.checked ? [...value, r] : value.filter((x) => x !== r))} />
-                {ROLE_LABELS[r]}
+                {labelOf(r)}
               </label></li>
             ))}
             {matches.length === 0 && <li className="muted">No role matches.</li>}
@@ -130,7 +133,7 @@ function FolderDialog({ folder, parent, createScope, onClose, onSaved }: {
   const lookups = useLookups();
   const [name, setName] = useState(folder?.name ?? "");
   const [level, setLevel] = useState<DatahubLevel>(folder?.level ?? "internal");
-  const [roles, setRoles] = useState<Role[]>(folder?.roleKeys ?? []);
+  const [roles, setRoles] = useState<string[]>(folder?.roleKeys ?? []);
   const [people, setPeople] = useState<Person[]>([]);
   const [description, setDescription] = useState(folder?.description ?? "");
   const [membersCanUpload, setMembersCanUpload] = useState(folder?.membersCanUpload ?? false);
@@ -589,7 +592,7 @@ export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
                     <div>
                       <h2 id="dh-files-h" ref={filesHeading}>{selected.name}</h2>
                       <p className="muted">{levelOption(selected.level)}
-                        {selected.level === "confidential" && ` · ${selected.roleKeys.map((r) => ROLE_LABELS[r] ?? r).join(", ")}`}
+                        {selected.level === "confidential" && <> · {selected.roleKeys.map((r, i) => <span key={r}>{i > 0 && ", "}<RoleName k={r} /></span>)}</>}
                         {selected.memberCount !== null && ` · ${selected.memberCount} ${selected.memberCount === 1 ? "member" : "members"}`}
                       </p>
                       {selected.description && <p className="dh-desc">{selected.description}</p>}

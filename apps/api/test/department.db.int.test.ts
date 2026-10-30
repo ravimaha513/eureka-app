@@ -93,11 +93,15 @@ describe("department functions", () => {
 });
 
 describe("descriptive only", () => {
-  it("no authz function other than the admin department writers, and no policy, reads a department", async () => {
+  it("no authz function other than the admin department writers and the role binding, and no policy, reads a department", async () => {
+    // Custom roles may be bound to a department (docs/roles-api.md): role_create / role_update store the
+    // binding and role_grantable (via request_role, approve_role_request) refuses a grant outside it.
+    // That narrows who may hold a role; it never widens anyone's scope.
     const fns = await db.admin.query<{ sig: string }>(`
       SELECT p.oid::regprocedure::text AS sig FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname IN ('authz', 'eureka') AND p.prosrc ILIKE '%department%'
-        AND p.proname NOT IN ('admin_create_department', 'admin_rename_department', 'admin_set_user_department')`);
+        AND p.proname NOT IN ('admin_create_department', 'admin_rename_department', 'admin_set_user_department',
+                              'role_create', 'role_update', 'role_grantable', 'request_role', 'approve_role_request')`);
     expect(fns.rows).toEqual([]);
     const policies = await db.admin.query<{ policyname: string }>(`
       SELECT policyname FROM pg_policies WHERE coalesce(qual, '') ILIKE '%department%' OR coalesce(with_check, '') ILIKE '%department%'`);

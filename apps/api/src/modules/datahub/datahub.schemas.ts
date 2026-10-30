@@ -1,8 +1,8 @@
 import { z } from "zod";
 import {
   DATAHUB_DESCRIPTION_MAX, DATAHUB_LEVELS, DATAHUB_MAX_BYTES, DATAHUB_MAX_MEMBERS, DATAHUB_MAX_ROLES,
-  DOCUMENT_CONTENT_TYPE_LIST, ROLES, datahubFileNameProblem, datahubFolderNameProblem,
-  type DocumentContentType, type Role,
+  DOCUMENT_CONTENT_TYPE_LIST, datahubFileNameProblem, datahubFolderNameProblem,
+  type DocumentContentType,
 } from "@eureka/shared";
 
 /**
@@ -20,7 +20,7 @@ const description = z.string().max(DATAHUB_DESCRIPTION_MAX * 2)
   .refine((s) => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(s), "Remove control characters.")
   .transform((s) => (s === "" ? null : s));
 const level = z.enum(DATAHUB_LEVELS);
-const roleKeys = z.array(z.enum(ROLES as unknown as [Role, ...Role[]])).max(DATAHUB_MAX_ROLES)
+const roleKeys = z.array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/)).max(DATAHUB_MAX_ROLES)
   .refine((a) => new Set(a).size === a.length, "Each role once.");
 const memberIds = z.array(z.string().uuid()).max(DATAHUB_MAX_MEMBERS)
   .refine((a) => new Set(a).size === a.length, "Each person once.");

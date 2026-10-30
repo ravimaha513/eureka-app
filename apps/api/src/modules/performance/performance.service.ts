@@ -3,7 +3,7 @@ import {
 } from "@nestjs/common";
 import type pg from "pg";
 import { z } from "zod";
-import { SALES_ROLES, resolveScope, type EffectiveScope, type Permission, type UserAccess } from "@eureka/shared";
+import { resolveScope, type EffectiveScope, type Permission, type UserAccess } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
@@ -24,8 +24,13 @@ export const LIST_LIMIT = 500;
 /** Target periods are calendar days in the zone the business runs on (as the worker's reminder jobs). */
 export const TARGET_TIME_ZONE = "America/New_York";
 
-/** People whose performance is reported: the Sales line below the CEO. */
-const SUBJECT_ROLES = SALES_ROLES.filter((r) => r !== "ceo");
+/**
+ * People whose performance is reported: holders of a Sales role with performance:read
+ * below org scope (the Sales line below the CEO; docs/roles-api.md traits).
+ */
+const SUBJECT_ROLES_SQL = `SELECT r.key FROM eureka.role r
+  WHERE r.is_sales AND NOT EXISTS (SELECT 1 FROM eureka.role_permission rp
+                                   WHERE rp.role_key = r.key AND rp.permission = 'performance:read' AND rp.scope = 'org')`;
 
 /** Interviews that happen (or happened): not cancelled, rescheduled or without an invite (as the dashboard). */
 const LIVE_INTERVIEW_SQL = `NOT IN ('cancelled', 'rescheduled', 'no_invite')`;
@@ -161,10 +166,10 @@ export class PerformanceService {
     const { rows } = await c.query<{ id: string }>(
       `SELECT u.id FROM eureka.app_user u
         WHERE u.status = 'active'
-          AND EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.user_id = u.id AND ur.role_key = ANY ($1::text[])
+          AND EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.user_id = u.id AND ur.role_key IN (${SUBJECT_ROLES_SQL})
                        AND ur.valid @> now())
-          AND ($2::boolean OR u.id = ANY ((SELECT authz.scope_user_ids('performance:read'))::uuid[]))`,
-      [SUBJECT_ROLES, perf.all]);
+          AND ($1::boolean OR u.id = ANY ((SELECT authz.scope_user_ids('performance:read'))::uuid[]))`,
+      [perf.all]);
     return rows.map((r) => r.id);
   }
 

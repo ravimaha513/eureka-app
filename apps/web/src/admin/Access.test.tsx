@@ -119,7 +119,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-const renderPage = (tab?: "users" | "approvals" | "teams" | "locations", me: Me = ME) =>
+const renderPage = (tab?: "users" | "approvals" | "teams" | "locations" | "roles" | "orgchart", me: Me = ME) =>
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <AccessPage me={me} initialTab={tab} />
@@ -815,5 +815,208 @@ describe("departments", () => {
     renderPage("teams");
     const card = (await screen.findByRole("heading", { name: "Team Rohit" })).closest("section")!;
     expect(within(card).getByText("Sales")).toBeInTheDocument();
+  });
+});
+
+// ---- roles (docs/roles-api.md) ---------------------------------------------------------------------
+
+const ROLE_DEFS = [
+  { key: "recruiter", label: "Recruiter", description: null, isSystem: true, restricted: false, holders: 12, archivedAt: null, clonedFrom: null,
+    traits: { sales: true, locationBound: false, admin: false, recruiter: true, coach: false }, track: "sales", level: 1, department: null,
+    grants: { "candidate:read": "team", "hotlist:read": "team" } },
+  { key: "lead", label: "Lead (Sales)", description: null, isSystem: true, restricted: false, holders: 3, archivedAt: null, clonedFrom: null,
+    traits: { sales: true, locationBound: false, admin: false, recruiter: false, coach: false }, track: "sales", level: 2, department: null,
+    grants: { "candidate:read": "team", "candidate:create": "team", "hotlist:read": "team" } },
+  { key: "c_senior_lead", label: "Senior Lead", description: "Leads with rates", isSystem: false, restricted: true, holders: 0, archivedAt: null, clonedFrom: "lead",
+    traits: { sales: true, locationBound: false, admin: false, recruiter: false, coach: false }, track: "sales", level: 3, department: { id: "d1", name: "Healthcare" },
+    grants: { "candidate:read": "team", "rate:read": "org" } },
+  { key: "hr", label: "HR", description: null, isSystem: true, restricted: true, holders: 2, archivedAt: null, clonedFrom: null,
+    traits: { sales: false, locationBound: false, admin: false, recruiter: false, coach: false }, track: "hr", level: 2, department: null,
+    grants: { "document:read": "org" } },
+];
+const PERMISSIONS = {
+  scopes: ["own", "team", "coached", "coached_hierarchy", "hierarchy", "location", "org"],
+  items: [
+    { key: "candidate:read", area: "Candidates", description: "See candidates and their profiles", restricted: false, orgSensitive: false },
+    { key: "candidate:create", area: "Candidates", description: "Add candidates", restricted: false, orgSensitive: false },
+    { key: "hotlist:read", area: "Candidates", description: "See the Hot List", restricted: false, orgSensitive: false },
+    { key: "rate:read", area: "Placements", description: "See bill and pay rates", restricted: false, orgSensitive: true },
+    { key: "document:read", area: "Documents", description: "See candidate documents", restricted: false, orgSensitive: true },
+    { key: "visa:read", area: "Documents", description: "See visa details (restricted)", restricted: true, orgSensitive: false },
+  ],
+};
+
+describe("Roles tab", () => {
+  beforeEach(() => {
+    routes["GET /api/v1/admin/roles"] = () => ({ body: { items: ROLE_DEFS } });
+    routes["GET /api/v1/admin/permissions"] = () => ({ body: PERMISSIONS });
+    routes["GET /api/v1/admin/departments"] = () => ({ body: { items: [{ id: "d1", name: "Healthcare", parentId: null, userCount: 4 }] } });
+  });
+
+  it("lists roles per track in ladder order with built-in, restricted and holder marks", async () => {
+    renderPage("roles");
+    const sales = await screen.findByRole("table", { name: "Sales roles" });
+    const names = within(sales).getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[1]!.textContent);
+    expect(names).toEqual(["RecruiterBuilt-in", "Lead (Sales)Built-in", "Senior LeadRestricted · Healthcare"]);
+    expect(within(sales).getAllByRole("row")[1]).toHaveTextContent("Sales, Recruiter");
+    expect(within(sales).getAllByRole("row")[2]).toHaveTextContent("3");
+    expect(screen.getByRole("table", { name: "Hr roles" })).toBeInTheDocument();
+  });
+
+  it("opens a built-in role read-only, with the permission grid grouped by area", async () => {
+    renderPage("roles");
+    const sales = await screen.findByRole("table", { name: "Sales roles" });
+    fireEvent.click(within(within(sales).getAllByRole("row")[2]!).getByRole("button", { name: "Open" }));
+    const drawer = await screen.findByRole("dialog", { name: "Lead (Sales)" });
+    expect(within(drawer).getByText(/Built-in roles can't be changed/)).toBeInTheDocument();
+    expect(within(drawer).getByLabelText("Name")).toBeDisabled();
+    expect(within(drawer).getByRole("checkbox", { name: /^Sales/ })).toBeChecked();
+    expect(within(drawer).getByRole("checkbox", { name: /^Sales/ })).toBeDisabled();
+    const candidates = within(drawer).getByRole("table", { name: "Candidates permissions" });
+    expect(within(candidates).getByRole("combobox", { name: "Add candidates" })).toHaveValue("team");
+    expect(within(candidates).getByRole("combobox", { name: "Add candidates" })).toBeDisabled();
+    expect(within(drawer).getByRole("combobox", { name: "See bill and pay rates" })).toHaveValue("");
+    expect(within(drawer).queryByRole("button", { name: "Save permissions" })).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
+  });
+
+  it("edits a custom role's grants and details, and archives it", async () => {
+    routes["PUT /api/v1/admin/roles/c_senior_lead/grants"] = () => ({ status: 204 });
+    routes["PATCH /api/v1/admin/roles/c_senior_lead"] = () => ({ status: 204 });
+    routes["POST /api/v1/admin/roles/c_senior_lead/archive"] = () => ({ status: 204 });
+    renderPage("roles");
+    const sales = await screen.findByRole("table", { name: "Sales roles" });
+    fireEvent.click(within(within(sales).getAllByRole("row")[3]!).getByRole("button", { name: "Open" }));
+    const drawer = await screen.findByRole("dialog", { name: "Senior Lead" });
+    expect(within(drawer).getByText(/Cloned from lead/)).toBeInTheDocument();
+    // Grid: switch a scope, add one, remove one; the whole set is sent, "Off" as null.
+    const save = within(drawer).getByRole("button", { name: "Save permissions" });
+    expect(save).toBeDisabled();
+    fireEvent.change(within(drawer).getByRole("combobox", { name: "See candidates and their profiles" }), { target: { value: "hierarchy" } });
+    fireEvent.change(within(drawer).getByRole("combobox", { name: "Add candidates" }), { target: { value: "team" } });
+    fireEvent.change(within(drawer).getByRole("combobox", { name: "See bill and pay rates" }), { target: { value: "" } });
+    const rates = within(drawer).getByRole("combobox", { name: "See bill and pay rates" });
+    expect(within(rates).getByRole("option", { name: "Their location" })).toBeDisabled(); // not location-bound
+    fireEvent.click(save);
+    await waitFor(() => expect(lastWrite().path).toBe("/api/v1/admin/roles/c_senior_lead/grants"));
+    expect(lastWrite().body).toEqual({ grants: {
+      "candidate:read": "hierarchy", "candidate:create": "team", "hotlist:read": null, "rate:read": null, "document:read": null, "visa:read": null,
+    } });
+    await waitFor(() => expect(status()).toHaveTextContent("Saved the permissions of Senior Lead."));
+    // Details: only changed fields travel.
+    fireEvent.change(within(drawer).getByLabelText("Level"), { target: { value: "4" } });
+    fireEvent.click(within(drawer).getByRole("checkbox", { name: /^Recruiter/ }));
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save details" }));
+    await waitFor(() => expect(lastWrite().method).toBe("PATCH"));
+    expect(lastWrite().body).toEqual({ level: 4, traits: { recruiter: true } });
+    // Nobody holds it: archive is offered.
+    fireEvent.click(within(drawer).getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(lastWrite().path).toBe("/api/v1/admin/roles/c_senior_lead/archive"));
+    await waitFor(() => expect(status()).toHaveTextContent("Archived Senior Lead."));
+  });
+
+  it("clones a role from the list and explains server refusals", async () => {
+    routes["POST /api/v1/admin/roles"] = (_u, init) => (JSON.parse(String(init.body)).label === "Lead (Sales)"
+      ? problem(409, "role_exists") : { status: 201, body: { key: "c_team_lead" } });
+    renderPage("roles");
+    const sales = await screen.findByRole("table", { name: "Sales roles" });
+    fireEvent.click(within(within(sales).getAllByRole("row")[2]!).getByRole("button", { name: "Clone" }));
+    const dialog = await screen.findByRole("dialog", { name: "New role from Lead (Sales)" });
+    expect(within(dialog).getByText(/starts with Lead \(Sales\)'s 3 permissions/)).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("Role name"), { target: { value: "Lead (Sales)" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create role" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(ERROR_MESSAGES.role_exists!);
+    fireEvent.change(within(dialog).getByLabelText("Role name"), { target: { value: "Team Lead" } });
+    fireEvent.change(within(dialog).getByLabelText(/Business unit/), { target: { value: "d1" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create role" }));
+    await waitFor(() => expect(lastWrite().body).toEqual({ label: "Team Lead", cloneFrom: "lead", departmentId: "d1" }));
+    await waitFor(() => expect(status()).toHaveTextContent("Created Team Lead from Lead (Sales)."));
+  });
+});
+
+// ---- org chart (docs/roles-api.md, "Org chart") ----------------------------------------------
+
+const ORG_META = {
+  ...META,
+  roles: [
+    { key: "ceo", label: "CEO", restricted: true, locationBound: false, isSystem: true, track: "sales", level: 5, recruiter: false, department: null },
+    { key: "manager", label: "Manager (Sales)", restricted: false, locationBound: false, isSystem: true, track: "sales", level: 3, recruiter: false, department: null },
+    { key: "lead", label: "Lead (Sales)", restricted: false, locationBound: false, isSystem: true, track: "sales", level: 2, recruiter: false, department: null },
+    { key: "recruiter", label: "Recruiter", restricted: false, locationBound: false, isSystem: true, track: "sales", level: 1, recruiter: true, department: null },
+    { key: "org_admin", label: "Org Admin", restricted: true, locationBound: false, isSystem: true, track: "administration", level: 1, recruiter: false, department: null },
+  ],
+};
+const op = (id: string, displayName: string, role: [string, string, number], managerId: string | null, team: { id: string; name: string; asLead: boolean } | null = null) =>
+  ({ id, displayName, designation: null, managerId, roles: [{ key: role[0], label: role[1], track: "sales", level: role[2] }], team, canMove: id !== "me" });
+const ORG = {
+  people: [
+    op("u-ceo", "Ravi CEO", ["ceo", "CEO", 5], null),
+    op("u-mgr", "Mira Manager", ["manager", "Manager (Sales)", 3], "u-ceo"),
+    op("u-lead", "Rohit Lead", ["lead", "Lead (Sales)", 2], "u-mgr", { id: "t1", name: "Team Rohit", asLead: true }),
+    op("u-lead2", "Anjali Lead", ["lead", "Lead (Sales)", 2], "u-mgr", { id: "t2", name: "Team Anjali", asLead: true }),
+    op("u-priya", "Priya Rao", ["recruiter", "Recruiter", 1], "u-lead", { id: "t1", name: "Team Rohit", asLead: false }),
+    op("u-new", "Noor New", ["recruiter", "Recruiter", 1], "u-lead2"),
+    { ...op("me", "Ada Admin", ["org_admin", "Org Admin", 1], null), roles: [{ key: "org_admin", label: "Org Admin", track: "administration", level: 1 }] },
+  ],
+  teams: [{ id: "t1", name: "Team Rohit", leadId: "u-lead" }, { id: "t2", name: "Team Anjali", leadId: "u-lead2" }],
+};
+
+describe("Org chart tab", () => {
+  beforeEach(() => {
+    routes["GET /api/v1/admin/meta"] = () => ({ body: ORG_META });
+    routes["GET /api/v1/admin/org-chart"] = () => ({ body: ORG });
+    routes["GET /api/v1/admin/org-chart/preview"] = (u) => ({ body: u.searchParams.get("managerId") === "u-lead2"
+      ? { loses: [{ id: "u-lead", displayName: "Rohit Lead" }], gains: [{ id: "u-lead2", displayName: "Anjali Lead" }], warnings: [] }
+      : { loses: [], gains: [], warnings: ["ladder_level"] } });
+    routes["POST /api/v1/admin/org-chart/apply"] = () => ({ body: { applied: 2, warnings: [{ userId: "u-priya", code: "ladder_level" }] } });
+  });
+
+  it("draws the reporting tree with team strips and the unassigned recruiters", async () => {
+    renderPage("orgchart");
+    const chart = await screen.findByRole("region", { name: "Org chart" });
+    expect(within(chart).getByLabelText("Ravi CEO, CEO")).toHaveTextContent("5 below");
+    expect(within(chart).getByLabelText("Rohit Lead, Lead (Sales)")).toHaveTextContent("leads Team Rohit");
+    expect(within(chart).getByText("Team Rohit · 1 member")).toBeInTheDocument();
+    expect(within(chart).getByText("Noor New", { selector: ".chip" })).toBeInTheDocument(); // unassigned bin
+    expect(within(chart).getByLabelText("Ada Admin, Org Admin")).toHaveTextContent("you");
+  });
+
+  it("queues a manager change from the panel with the preview, then applies the batch", async () => {
+    renderPage("orgchart");
+    const chart = await screen.findByRole("region", { name: "Org chart" });
+    fireEvent.click(within(chart).getByLabelText("Priya Rao, Recruiter"));
+    const sel = screen.getByRole("combobox", { name: "Reports to" });
+    expect(sel).toHaveValue("u-lead");
+    // Her own subtree is not offered; same-level people are marked.
+    expect(within(sel).queryByRole("option", { name: /Priya Rao/ })).not.toBeInTheDocument();
+    expect(within(sel).getByRole("option", { name: /Noor New/ })).toHaveTextContent("same or lower level");
+    fireEvent.change(sel, { target: { value: "u-lead2" } });
+    const pending = await screen.findByRole("list", { name: "Pending changes" });
+    expect(pending).toHaveTextContent("Priya Rao: reports to Anjali Lead (was Rohit Lead).");
+    await waitFor(() => expect(pending).toHaveTextContent("Loses: Rohit Lead. Gains: Anjali Lead."));
+    expect(within(chart).getByLabelText("Anjali Lead, Lead (Sales)")).toHaveTextContent("2 below"); // the chart shows the pending state
+    // A same-level manager is allowed with a warning.
+    fireEvent.click(within(chart).getByLabelText("Noor New, Recruiter"));
+    fireEvent.change(screen.getByRole("combobox", { name: "Reports to" }), { target: { value: "u-priya" } });
+    expect(screen.getByTestId("orgstatus")).toHaveTextContent("not above level 1. Allowed, but check the ladder.");
+    await waitFor(() => expect(pending).toHaveTextContent("Below on the ladder."));
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+    await waitFor(() => expect(lastWrite().path).toBe("/api/v1/admin/org-chart/apply"));
+    expect(lastWrite().body).toEqual({ moves: [{ userId: "u-priya", managerId: "u-lead2" }, { userId: "u-new", managerId: "u-priya" }], teamAdds: [] });
+    await waitFor(() => expect(status()).toHaveTextContent("Applied 2 changes. Warnings: Priya Rao (below on the ladder)."));
+  });
+
+  it("adds an unassigned recruiter to a team, undoes a line, and keeps the admin's own card locked", async () => {
+    renderPage("orgchart");
+    const chart = await screen.findByRole("region", { name: "Org chart" });
+    fireEvent.click(within(chart).getByText("Noor New", { selector: ".chip" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Team" }), { target: { value: "t1" } });
+    const pending = await screen.findByRole("list", { name: "Pending changes" });
+    expect(pending).toHaveTextContent("Noor New joins Team Rohit.");
+    expect(within(chart).getByText("Team Rohit · 2 members")).toBeInTheDocument();
+    fireEvent.click(within(pending).getByRole("button", { name: "Undo change 1" }));
+    expect(screen.queryByRole("list", { name: "Pending changes" })).not.toBeInTheDocument();
+    fireEvent.click(within(chart).getByLabelText("Ada Admin, Org Admin"));
+    expect(screen.getByRole("combobox", { name: "Reports to" })).toBeDisabled();
   });
 });

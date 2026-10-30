@@ -623,12 +623,27 @@ export function specOf(type: string): EventSpec {
   return spec;
 }
 
-/** Why a recipient gets the email, from the reasons authz.notification_recipients returned. */
-const GROUP_LABELS: Record<string, string> = { hr: "HR", accounts: "Accounts", immigration: "Immigration" };
+/**
+ * Why a recipient gets the email, from the reasons authz.notification_recipients returned:
+ * a notify.*:receive permission their role holds (docs/roles-api.md), or their relation
+ * to the record.
+ */
+const GROUP_LABELS: Record<string, string> = {
+  "notify.placement_hr:receive": "HR", "notify.placement_accounts:receive": "Accounts",
+  "notify.placement_immigration:receive": "Immigration",
+};
 const OTHER_LABELS: Record<string, string> = {
-  ceo: "the CEO", bu_head: "a BU Head", recruiter: "the recruiter", lead: "the team lead",
+  "notify.work_authorization:receive": "a recipient of work authorisation alerts",
+  "notify.employee_exit:receive": "a recipient of employee bench and exit notices",
+  "notify.assignment_ending:receive": "a recipient of assignment ending notices",
+  "notify.bench_time:receive": "a recipient of bench time alerts",
+  "notify.application:receive": "a recipient of job applications",
+  "notify.interview_request:receive": "an interview coordinator",
+  "notify.contract:receive": "a recipient of new contracts",
+  "notify.birthdays:receive": "a recipient of the birthdays digest",
+  recruiter: "the recruiter", lead: "the team lead",
   manager: "the team lead's manager", documents_team: "the assigned Documents Team member", chat: "a chat member",
-  hiring_manager: "the job's hiring manager", interview_coordinator: "an interview coordinator", associate_hr: "a member of Associate HR",
+  hiring_manager: "the job's hiring manager",
   // 0150: bench-time POC.
   poc: "the recruiter who placed the candidate on their last project",
 };

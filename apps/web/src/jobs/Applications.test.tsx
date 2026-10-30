@@ -88,7 +88,7 @@ describe("Applications (staff)", () => {
       actions: { transition: [], scheduleInterview: false, createCandidate: true } });
     api.routes["GET /api/v1/applications/ap1"] = () => ({ body: hired });
     api.routes["GET /api/v1/lookups"] = () => ({ body: { technologies: [{ id: "t1", name: "Java" }], locations: [{ id: "l1", name: "Dallas" }],
-      clients: [], vendors: [], implementationPartners: [], coaches: [] } });
+      clients: [], vendors: [], implementationPartners: [], roles: [], coaches: [] } });
     api.routes["POST /api/v1/applications/ap1/candidate"] = () => ({ status: 201, body: { candidateId: "c1" } });
     wrap(<ApplicationsPage me={meFor("lead")} />);
     fireEvent.click(await screen.findByRole("button", { name: "Open application of Rakesh Uvsn" }));

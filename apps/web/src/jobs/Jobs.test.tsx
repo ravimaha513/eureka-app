@@ -155,7 +155,7 @@ describe("Log submission job picker", () => {
   it("fills title and client from an open client requirement and sends jobId", async () => {
     const CL = "11111111-1111-4111-8111-111111111111";
     api.routes["GET /api/v1/jobs"] = () => ({ body: { items: [job("j1", { client: { id: CL, name: "Northwind Financial" } })], nextCursor: null } });
-    api.routes["GET /api/v1/lookups"] = () => ({ body: { technologies: [], clients: [{ id: CL, name: "Northwind Financial" }], vendors: [], implementationPartners: [], locations: [], coaches: [] } });
+    api.routes["GET /api/v1/lookups"] = () => ({ body: { technologies: [], clients: [{ id: CL, name: "Northwind Financial" }], vendors: [], implementationPartners: [], roles: [], locations: [], coaches: [] } });
     api.routes["POST /api/v1/submissions"] = () => ({ status: 201, body: { id: "s1", duplicateWarning: false } });
     const onLogged = vi.fn();
     wrap(<LogSubmissionDialog candidate={{ id: "c1", name: "Asha" }} onClose={() => undefined} onLogged={onLogged} />);

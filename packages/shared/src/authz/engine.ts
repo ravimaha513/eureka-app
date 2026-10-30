@@ -2,9 +2,11 @@ import {
   GRANTS,
   HOTLIST_STATUSES,
   HOTLIST_VISIBILITY,
-  SALES_ROLES,
+  ROLE_TRAITS,
+  type Grants,
   type Permission,
   type Role,
+  type RoleTraits,
   type Scope,
 } from "./catalog.js";
 
@@ -16,9 +18,35 @@ import {
  */
 
 export interface RoleAssignment {
-  role: Role;
+  /** Role key: a system role of the catalog or a custom role (docs/roles-api.md). */
+  role: string;
   /** Required for location-bound roles. */
   locationId?: string;
+  /**
+   * The role's grants and traits as stored in eureka.role / role_permission
+   * (AccessService loads them). When absent the key must be a system role and
+   * the catalog is used: tests and seeds build assignments by key alone.
+   */
+  grants?: Grants;
+  traits?: RoleTraits;
+  /** Display label as stored; presentation only. */
+  label?: string;
+}
+
+const NO_GRANTS: Grants = {};
+const NO_TRAITS: RoleTraits = { sales: false, locationBound: false, admin: false, recruiter: false, coach: false };
+
+export function grantsOf(a: RoleAssignment): Grants {
+  return a.grants ?? GRANTS[a.role as Role] ?? NO_GRANTS;
+}
+
+export function traitsOf(a: RoleAssignment): RoleTraits {
+  return a.traits ?? ROLE_TRAITS[a.role as Role] ?? NO_TRAITS;
+}
+
+/** True when any of the user's roles has the trait. */
+export function hasTrait(user: Pick<UserAccess, "roles">, trait: keyof RoleTraits): boolean {
+  return user.roles.some((a) => traitsOf(a)[trait]);
 }
 
 /** Everything about a user that scope resolution needs, loaded once per request. */
@@ -86,10 +114,10 @@ export function resolveScope(
   let allTeams = false;
 
   for (const assignment of user.roles) {
-    const scope = GRANTS[assignment.role][permission];
+    const scope = grantsOf(assignment)[permission];
     if (!scope) continue;
     granted = true;
-    if (ALL_TEAMS_PERMISSIONS.has(permission) && SALES_ROLES.includes(assignment.role)) {
+    if (ALL_TEAMS_PERMISSIONS.has(permission) && traitsOf(assignment).sales) {
       allTeams = true;
     }
     switch (scope) {
@@ -141,7 +169,7 @@ export function resolveScopeFor(
 ): EffectiveScope | null {
   const kinds = new Set<Scope>(scopes);
   const roles = user.roles.filter((a) => {
-    const s = GRANTS[a.role][permission];
+    const s = grantsOf(a)[permission];
     return s !== undefined && kinds.has(s);
   });
   if (roles.length === 0) return null;
@@ -273,7 +301,7 @@ export function capabilities(
   const perms = new Set<Permission>();
   if (hotlistVisibility === "everyone") perms.add("hotlist:read");
   for (const a of user.roles) {
-    for (const p of Object.keys(GRANTS[a.role]) as Permission[]) perms.add(p);
+    for (const p of Object.keys(grantsOf(a)) as Permission[]) perms.add(p);
   }
   return [...perms].sort();
 }

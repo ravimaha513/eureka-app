@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PlacementsPage } from "./PlacementsPage";
-import { meFor, mockApi, plc, problem, wrap, type Handler } from "./testkit";
+import { EMPTY_LOOKUPS, ROLE_LOOKUPS, meFor, mockApi, plc, problem, wrap, type Handler } from "./testkit";
 
 const RECRUITER = meFor("recruiter");
 const P1 = plc("p1");
@@ -21,6 +21,7 @@ const FULL_P2 = { ...P2, contacts: [], assignment: { assignmentNo: 2, startDate:
 
 let api: ReturnType<typeof mockApi>;
 const base = (): Record<string, Handler> => ({
+  "GET /api/v1/lookups": () => ({ body: EMPTY_LOOKUPS }),
   "GET /api/v1/placements": () => ({ body: { items: [P1, P2], nextCursor: null } }),
   "GET /api/v1/placements/p1": () => ({ body: FULL_P1 }),
   "GET /api/v1/placements/p2": () => ({ body: FULL_P2 }),
@@ -209,7 +210,7 @@ describe("Placement detail", () => {
 describe("Placements report (migration 0160)", () => {
   const LOOKUPS = {
     technologies: [{ id: "tech1", name: "Java" }], clients: [{ id: "cl1", name: "Northwind Financial" }],
-    vendors: [{ id: "v1", name: "Contoso Staffing" }], implementationPartners: [], locations: [{ id: "loc", name: "Dallas" }], coaches: [],
+    vendors: [{ id: "v1", name: "Contoso Staffing" }], implementationPartners: [], roles: ROLE_LOOKUPS, locations: [{ id: "loc", name: "Dallas" }], coaches: [],
   };
 
   it("filters by vendor, end client, technology and location", async () => {

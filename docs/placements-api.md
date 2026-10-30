@@ -33,7 +33,7 @@ like `/submissions`. Design references: B2.2 (`placement`, `placement_contact`,
 
 ### Lookups (for pickers; replace raw-ID inputs)
 - `GET /api/v1/lookups` (any signed-in user) returns
-  `{ technologies: [{id,name}], clients: [{id,name}], vendors: [{id,name}], locations: [{id,name}], coaches: [{id,name}] }` (active rows only; coaches = active users holding `interview_coach`).
+  `{ technologies: [{id,name}], clients: [{id,name}], vendors: [{id,name}], locations: [{id,name}], coaches: [{id,name}], roles: [{id,name}] }` (active rows only; coaches = active users whose role has the coach trait without `coach:assign`, i.e. interview coaches not their lead; roles = live non-admin roles, key as `id`, label as `name`, in ladder order: docs/roles-api.md).
 - `POST /api/v1/lookups/technologies` (Sales lead and above, org admin: `technology:create`) adds a technology: see `docs/lookups-api.md`.
 
 ### Per-record allowed actions

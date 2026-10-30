@@ -40,7 +40,7 @@ const SUMMARY: BillsSummary = {
   byType: [{ utilityType: "electricity", amount: "412.40", count: 2 }, { utilityType: "water", amount: "100.00", count: 1 }],
   byOwner: [{ id: C1, name: "Eureka Info Tech", amount: "512.40", count: 3 }],
 };
-const LOOKUPS = { technologies: [], clients: [], vendors: [], implementationPartners: [], locations: [LOC], coaches: [] };
+const LOOKUPS = { technologies: [], clients: [], vendors: [], implementationPartners: [], roles: [], locations: [LOC], coaches: [] };
 
 const opsAdmin = meFor("location_ops_admin");
 /** Read-only: can see companies, facilities, utilities and bills, but manage nothing and reveal nothing. */

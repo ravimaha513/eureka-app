@@ -1,6 +1,7 @@
 -- authz.assert_admin_remains: current definition (repeatable; db/functions/README.md).
 -- Earlier bodies: migrations 0014, 0018, 0039. Change this file, not a new migration.
 
+-- 0311: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.assert_admin_remains()
  RETURNS void
@@ -16,7 +17,8 @@ BEGIN
   PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('eureka.org_admin_count'));
   IF NOT EXISTS (
       SELECT 1 FROM eureka.user_role ur JOIN eureka.app_user u ON u.id = ur.user_id
-      WHERE ur.role_key = 'org_admin' AND ur.valid @> pg_catalog.now() AND u.status = 'active') THEN
+      JOIN eureka.role r ON r.key = ur.role_key
+      WHERE r.is_admin AND ur.valid @> pg_catalog.now() AND u.status = 'active') THEN
     RAISE EXCEPTION 'last_admin' USING ERRCODE = 'object_not_in_prerequisite_state';
   END IF;
 END $function$;

@@ -247,7 +247,7 @@ describe("contracts (CT-1..CT-6)", () => {
       expect(t).not.toMatch(/4471|Net 30|Rate card|PlCand|Placed|Northwind/);
       expect(t).toContain("Purchase order");
     }
-    expect(r.mails.find((m) => m.to.startsWith("ahr"))!.text).toContain("You receive this email as a member of Associate HR.");
+    expect(r.mails.find((m) => m.to.startsWith("ahr"))!.text).toContain("You receive this email as a recipient of new contracts.");
     expect(r.mails.find((m) => m.to.startsWith("acct"))!.text).toContain(`Placement reference: ${placementId}`);
     // Audit: kind and dates, never the title, reference or notes.
     const a = await audits("contract.created");
@@ -317,7 +317,7 @@ describe("staff birthdays and the CEO digest (BD-1..BD-5)", () => {
     expect(r.mails.map((m) => m.to)).toEqual(["ceo@eureka.example"]);
     expect(r.mails[0]!.subject).toBe("Eureka: 2 staff birthdays today");
     expect(r.mails[0]!.text).toContain("Birthdays today: ceo, imm.");
-    expect(r.mails[0]!.text).toContain("You receive this email as the CEO.");
+    expect(r.mails[0]!.text).toContain("You receive this email as a recipient of the birthdays digest.");
     // A day without birthdays writes nothing; a future day is refused.
     expect((await db.worker.query("SELECT authz.emit_birthdays('2025-07-04'::date) AS n")).rows[0]!.n).toBe(0);
     await expect(db.worker.query("SELECT authz.emit_birthdays(($1::date + 1)::date)", [day])).rejects.toThrow();

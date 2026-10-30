@@ -1,5 +1,5 @@
 import { Controller, Get, Inject } from "@nestjs/common";
-import { ROLE_LABELS, capabilities } from "@eureka/shared";
+import { capabilities } from "@eureka/shared";
 import { AllowPasswordChange, CurrentUser, type AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
@@ -24,7 +24,7 @@ export class MeController {
       id: user.id,
       email: profile?.email,
       displayName: profile?.display_name,
-      roles: user.access.roles.map((r) => ({ key: r.role, label: ROLE_LABELS[r.role], locationId: r.locationId ?? null })),
+      roles: user.access.roles.map((r) => ({ key: r.role, label: r.label ?? r.role, locationId: r.locationId ?? null })),
       capabilities: capabilities(user.access),
       mustChangePassword,
       csrfToken: this.sessions.csrfToken(user.sessionHash),

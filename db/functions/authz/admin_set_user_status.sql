@@ -1,6 +1,7 @@
 -- authz.admin_set_user_status: current definition (repeatable; db/functions/README.md).
 -- Earlier bodies: migrations 0013, 0014, 0018. Change this file, not a new migration.
 
+-- 0311: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.admin_set_user_status(p_user uuid, p_active boolean)
  RETURNS void
@@ -26,8 +27,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM eureka.reporting_line rl WHERE rl.manager_id = p_user AND rl.valid @> pg_catalog.now()) THEN
     RAISE EXCEPTION 'has_reports' USING ERRCODE = 'check_violation';
   END IF;
-  was_admin := EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.user_id = p_user
-                       AND ur.role_key = 'org_admin' AND ur.valid @> pg_catalog.now());
+  was_admin := authz.user_has_trait(p_user, 'admin');
   -- Re-deactivating keeps the first stamp, so the purge wait is not restarted.
   UPDATE eureka.app_user SET status = 'inactive', deactivated_at = coalesce(deactivated_at, pg_catalog.now()),
     access_version = access_version + 1 WHERE id = p_user;

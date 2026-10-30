@@ -17,7 +17,7 @@ const CID = "11111111-1111-4111-8111-111111111111";
 const LOC = "44444444-4444-4444-8444-444444444444";
 const CO1 = "77777777-7777-4777-8777-777777777777";
 const CO2 = "88888888-8888-4888-8888-888888888888";
-const LOOKUPS = { technologies: [], clients: [], vendors: [], implementationPartners: [], locations: [{ id: LOC, name: "Dallas" }], coaches: [] };
+const LOOKUPS = { technologies: [], clients: [], vendors: [], implementationPartners: [], roles: [], locations: [{ id: LOC, name: "Dallas" }], coaches: [] };
 
 const ROW = {
   id: CID, name: "Asha Iyer", technology: "Java", status: "active", statusLabel: "Active/Remote", visibility: "team", priority: "P2",

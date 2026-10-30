@@ -811,6 +811,60 @@ tbody tr.row-cleared td:first-child { box-shadow: inset 3px 0 0 var(--ok-fg); }
 .badge.st-marketing, .badge.st-submitted, .badge.st-interviewing, .badge.st-assessment { background: var(--pri-50); color: var(--pri-700); }
 ul.plain { list-style: none; padding: 0; margin: 4px 0 8px; display: flex; flex-direction: column; gap: 6px; }
 form.stack { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+
+/* Users & Access › Roles (docs/roles-api.md) */
+.rolegroup { margin-bottom: 18px; }
+.traits { display: grid; gap: 6px; margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.traits legend { font-weight: 700; padding: 0 4px; }
+.traits .check { font-weight: 500; align-items: baseline; }
+.rolegrid td:first-child { max-width: 520px; }
+.rolegrid tr.muted td { color: var(--muted); }
+
+/* Users & Access › Org chart (docs/roles-api.md, "Org chart") */
+.orglayout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 14px; align-items: start; }
+@media (max-width: 960px) { .orglayout { grid-template-columns: 1fr; } }
+.orgchart { min-width: 0; overflow-x: auto; }
+.orgchart .tip { margin-bottom: 10px; }
+.orgtree, .orgtree ul { list-style: none; margin: 0; padding: 0; }
+.orgtree ul { margin-left: 26px; border-left: 2px solid var(--line); padding-left: 14px; }
+.orgitem { margin: 6px 0; }
+.orgnode { display: flex; align-items: center; gap: 10px; background: var(--surface2); border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; cursor: grab; user-select: none; }
+.orgnode.static { cursor: default; margin-bottom: 8px; }
+.orgnode.dragging { opacity: .45; }
+.orgnode.over, .orgteam.over, .orgbin.over { border-color: var(--pri); box-shadow: 0 0 0 3px var(--pri-100); background: var(--pri-50); }
+.orgnode.over.bad, .orgteam.over.bad, .orgbin.over.bad { border-color: var(--warn-fg); box-shadow: 0 0 0 3px var(--warn-line); background: var(--warn-bg); }
+.orgnode.changed, .chip.changed { border-color: var(--warn-line); background: var(--warn-bg); }
+.orgnode.me { outline: 2px solid var(--line-strong); cursor: default; }
+.orgnode .who { min-width: 0; flex: 1; }
+.orgnode .who b, .orgnode .who small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.orgnode .who small { color: var(--muted); }
+.orgnode .grip { color: var(--faint); font-size: 16px; line-height: 1; }
+.orgnode .lvl, .orgladder .lvl { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-variant-numeric: tabular-nums; }
+.orgnode .count { color: var(--muted); font-size: 12px; margin-left: auto; }
+.orgnode .toggle { border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; padding: 0 4px; }
+.orgteam { margin: 6px 0 6px 26px; border: 1px dashed var(--ok-line); background: var(--ok-bg); border-radius: 10px; padding: 8px 10px; }
+.orgteam .teamhead { display: flex; gap: 8px; align-items: center; font-size: 12.5px; color: var(--ok-fg); font-weight: 600; margin-bottom: 6px; }
+.orgteam .chips, .orgbin .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.orgteam .chip, .orgbin .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px 3px 4px; font-weight: 500; }
+.orgbin .chip { cursor: grab; }
+.chip.dragging { opacity: .45; }
+.orgbins { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-top: 14px; }
+.orgbin { border: 1px dashed var(--line-strong); border-radius: 10px; padding: 10px; background: var(--surface2); }
+.orgbin h3 { margin: 0 0 4px; font-size: 13px; }
+.orgbin p { margin: 0; font-size: 12px; }
+.orgside { display: grid; gap: 16px; min-width: 0; }
+.orgside h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.orgchanges { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
+.orgchanges li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--surface2); font-size: 13px; }
+.orgchanges li small { grid-column: 1; font-size: 12px; }
+.orgchanges li .btn { grid-column: 2; grid-row: 1 / span 3; }
+.orgstatus { min-height: 18px; font-size: 13px; color: var(--text2); margin: 6px 0 0; }
+.orgstatus.bad { color: var(--warn-fg); }
+.orgstatus.ok { color: var(--ok-fg); }
+.orgladder { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; }
+.orgladder li { display: flex; justify-content: space-between; font-size: 12.5px; padding: 3px 8px; border-radius: 6px; background: var(--surface2); border: 1px solid var(--line); }
+.orgladder li.current { border-color: var(--pri); background: var(--pri-50); }
+
 /* Phones: denser filters, readable tables, touch-sized controls, no zoom on focus */
 @media (max-width: 768px) {
   /* Filter bars: selects and dates pair up two per row; search inputs, chips, checks and hints keep the full width */

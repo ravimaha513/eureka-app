@@ -4,6 +4,8 @@
 -- their own migration silently dropped each other's branches (repaired in 0180); a new event type
 -- adds its branch here, and notification_entity.sql gets its entity mapping.
 
+-- 0311: group recipients are the holders of the event's notify.*:receive permission (docs/roles-api.md);
+-- the reason returned is that permission key.
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.notification_recipients(p_event uuid, p_user uuid DEFAULT NULL::uuid)
  RETURNS TABLE(recipient_id uuid, reason text)
@@ -15,7 +17,7 @@ AS $function$
 DECLARE
   v_type    text;
   v_payload jsonb;
-  v_roles   text[] := '{}';
+  v_perms   text[] := '{}';  -- notify.*:receive permissions of the event (docs/roles-api.md)
   v_rec     uuid;
   v_team    uuid;
   v_lead    uuid;
@@ -33,18 +35,18 @@ BEGIN
   END IF;
 
   IF v_type IN ('placement.created', 'placement.state_changed') THEN
-    v_roles := ARRAY(
-      SELECT DISTINCT g FROM pg_catalog.jsonb_array_elements_text(
+    v_perms := ARRAY(
+      SELECT DISTINCT 'notify.placement_' || g || ':receive' FROM pg_catalog.jsonb_array_elements_text(
         CASE WHEN pg_catalog.jsonb_typeof(v_payload -> 'notify') = 'array' THEN v_payload -> 'notify' ELSE '[]'::jsonb END) g
        WHERE g IN ('hr', 'accounts', 'immigration'));
   ELSIF v_type = 'work_authorization.expiring' THEN
-    v_roles := ARRAY['hr', 'immigration'];
+    v_perms := ARRAY['notify.work_authorization:receive'];
   ELSIF v_type IN ('employee.benched', 'employee.exited') THEN
-    v_roles := ARRAY['hr', 'accounts', 'immigration', 'bu_head', 'ceo'];
+    v_perms := ARRAY['notify.employee_exit:receive'];
   ELSIF v_type = 'assignment.ending_soon' THEN
-    v_roles := ARRAY['hr', 'accounts'];
+    v_perms := ARRAY['notify.assignment_ending:receive'];
   ELSIF v_type = 'employee.bench_time' THEN
-    v_roles := ARRAY['ceo'];
+    v_perms := ARRAY['notify.bench_time:receive'];
     SELECT c.recruiter_id, c.team_id INTO v_rec, v_team
       FROM eureka.candidate c WHERE c.id = (v_payload ->> 'candidateId')::uuid;
     -- 0150: the POC, the recruiter who placed the candidate on their latest assignment.
@@ -66,7 +68,7 @@ BEGIN
        AND ci.assignee_id = (v_payload ->> 'assigneeId')::uuid;
   ELSIF v_type = 'application.received' THEN
     -- jobs-portal (0062): HR and the job's current hiring manager.
-    v_roles := ARRAY['hr'];
+    v_perms := ARRAY['notify.application:receive'];
     SELECT j.hiring_manager_id INTO v_hiring FROM eureka.job_application a JOIN eureka.job j ON j.id = a.job_id
      WHERE a.id = (v_payload ->> 'applicationId')::uuid AND a.job_id = (v_payload ->> 'jobId')::uuid;
   ELSIF v_type = 'chat.direct_message' THEN
@@ -77,13 +79,13 @@ BEGIN
        AND m.user_id = (v_payload ->> 'recipientId')::uuid;
   ELSIF v_type = 'interview.requested' THEN
     -- interview-alerts (0089): the support team that coordinates interviews.
-    v_roles := ARRAY['interview_coordinator'];
+    v_perms := ARRAY['notify.interview_request:receive'];
   ELSIF v_type = 'contract.created' THEN
     -- interview-alerts (0086): invoicing and the closure documents.
-    v_roles := ARRAY['hr', 'associate_hr', 'accounts'];
+    v_perms := ARRAY['notify.contract:receive'];
   ELSIF v_type = 'staff.birthdays_today' THEN
     -- interview-alerts (0087): the CEO's morning digest.
-    v_roles := ARRAY['ceo'];
+    v_perms := ARRAY['notify.birthdays:receive'];
   ELSIF v_type IN ('payment.first_received', 'payment.delayed') THEN
     -- 0100: FR-NTF-07 (recruiter, TL, manager) and FR-NTF-08 (recruiter, TL).
     SELECT p.recruiter_id, p.team_id INTO v_rec, v_team
@@ -128,14 +130,16 @@ BEGIN
 
   RETURN QUERY
   WITH r(uid, why) AS (
-    SELECT ur.user_id, ur.role_key FROM eureka.user_role ur
-     WHERE ur.role_key = ANY (v_roles) AND ur.valid @> pg_catalog.now()
+    SELECT ur.user_id, rp.permission FROM eureka.user_role ur
+     JOIN eureka.role_permission rp ON rp.role_key = ur.role_key AND rp.permission = ANY (v_perms)
+     WHERE ur.valid @> pg_catalog.now()
     UNION ALL SELECT v_rec, 'recruiter' WHERE v_rec IS NOT NULL
     UNION ALL SELECT v_lead, 'lead' WHERE v_lead IS NOT NULL
     UNION ALL SELECT v_mgr, 'manager' WHERE v_mgr IS NOT NULL
+    -- The assignee, when they verify documents (the Documents Team's permission).
     UNION ALL SELECT ur.user_id, 'documents_team' FROM eureka.user_role ur
-     WHERE v_assign IS NOT NULL AND ur.user_id = v_assign AND ur.role_key = 'documents_team'
-       AND ur.valid @> pg_catalog.now()
+     JOIN eureka.role_permission rp ON rp.role_key = ur.role_key AND rp.permission = 'document:verify'
+     WHERE v_assign IS NOT NULL AND ur.user_id = v_assign AND ur.valid @> pg_catalog.now()
     UNION ALL SELECT v_hiring, 'hiring_manager' WHERE v_hiring IS NOT NULL
     UNION ALL SELECT v_chat, 'chat' WHERE v_chat IS NOT NULL
     UNION ALL SELECT v_poc, 'poc' WHERE v_poc IS NOT NULL

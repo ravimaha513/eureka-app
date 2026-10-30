@@ -5,6 +5,7 @@
 -- never themself. Any team. The API writes the audit row in the same transaction.
 -- Change this file, not a new migration.
 
+-- 0311: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.assign_coach(p_coach uuid, p_team uuid)
  RETURNS void
@@ -20,9 +21,7 @@ BEGIN
   IF authz.admin_user_status(p_coach) IS DISTINCT FROM 'active' THEN
     RAISE EXCEPTION 'user_inactive' USING ERRCODE = 'check_violation';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM eureka.user_role ur
-                 WHERE ur.user_id = p_coach AND ur.role_key IN ('interview_coach', 'interview_lead')
-                   AND ur.valid @> pg_catalog.now()) THEN
+  IF NOT authz.user_has_trait(p_coach, 'coach') THEN
     RAISE EXCEPTION 'not_a_coach' USING ERRCODE = 'check_violation';
   END IF;
   -- Serialize assignments of one coach so two concurrent calls cannot both insert.

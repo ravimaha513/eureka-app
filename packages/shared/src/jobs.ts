@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { GRANTS, SALES_ROLES } from "./authz/catalog.js";
-import { resolveScope, type UserAccess } from "./authz/engine.js";
+
+import { grantsOf, resolveScope, traitsOf, type RoleAssignment, type UserAccess } from "./authz/engine.js";
 
 /**
  * Jobs, the applicant portal and applications (jobs-portal package; migrations
@@ -104,7 +104,7 @@ export interface JobRef {
   hiringManagerId: string | null;
 }
 
-const isSales = (role: string) => (SALES_ROLES as readonly string[]).includes(role);
+const isSales = (a: RoleAssignment) => traitsOf(a).sales;
 
 /**
  * Who may read or manage a job (docs/jobs-portal-api.md JP-1, JP-2; the RLS
@@ -118,7 +118,7 @@ const isSales = (role: string) => (SALES_ROLES as readonly string[]).includes(ro
  */
 export function jobAllowed(access: UserAccess, perm: "job:read" | "job:manage", j: JobRef): boolean {
   if (perm === "job:read" && j.hiringManagerId !== null && j.hiringManagerId === access.userId) return true;
-  const roles = access.roles.filter((a) => GRANTS[a.role][perm] !== undefined && isSales(a.role) === (j.kind === "client_requirement"));
+  const roles = access.roles.filter((a) => grantsOf(a)[perm] !== undefined && isSales(a) === (j.kind === "client_requirement"));
   if (roles.length === 0) return false;
   const scope = resolveScope({ ...access, roles }, perm);
   if (!scope) return false;
@@ -129,9 +129,9 @@ export function jobAllowed(access: UserAccess, perm: "job:read" | "job:manage", 
 /** Which kinds of job the user may create (presentation and validation). */
 export function creatableJobKinds(access: UserAccess): JobKind[] {
   const out: JobKind[] = [];
-  const holders = access.roles.filter((a) => GRANTS[a.role]["job:manage"] !== undefined);
-  if (holders.some((a) => isSales(a.role))) out.push("client_requirement");
-  if (holders.some((a) => !isSales(a.role) && GRANTS[a.role]["job:manage"] === "org")) out.push("internal_opening");
+  const holders = access.roles.filter((a) => grantsOf(a)["job:manage"] !== undefined);
+  if (holders.some((a) => isSales(a))) out.push("client_requirement");
+  if (holders.some((a) => !isSales(a) && grantsOf(a)["job:manage"] === "org")) out.push("internal_opening");
   return out;
 }
 

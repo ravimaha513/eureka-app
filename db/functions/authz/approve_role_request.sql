@@ -1,6 +1,7 @@
 -- authz.approve_role_request: current definition (repeatable; db/functions/README.md).
 -- Earlier bodies: migrations 0013, 0018, 0084. Change this file, not a new migration.
 
+-- 0311: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.approve_role_request(p_id uuid)
  RETURNS text
@@ -25,19 +26,14 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM eureka.app_user u WHERE u.id = q.user_id AND u.status = 'active' FOR SHARE) THEN
     RAISE EXCEPTION 'user_inactive' USING ERRCODE = 'check_violation';
   END IF;
-  -- The requester must still hold access:manage.
-  IF NOT EXISTS (SELECT 1 FROM eureka.user_role ur JOIN eureka.app_user u ON u.id = ur.user_id
-                 WHERE ur.user_id = q.requested_by AND ur.role_key = 'org_admin'
-                   AND ur.valid @> pg_catalog.now() AND u.status = 'active') THEN
+  -- The requester must still be an admin.
+  IF NOT authz.user_has_trait(q.requested_by, 'admin') THEN
     RAISE EXCEPTION 'requester_not_admin' USING ERRCODE = 'object_not_in_prerequisite_state';
   END IF;
-  -- Separation of duties: org_admin holds no data role and vice versa.
-  IF (q.role_key = 'org_admin' AND EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.user_id = q.user_id
-        AND ur.role_key <> 'org_admin' AND ur.valid @> pg_catalog.now()))
-     OR (q.role_key <> 'org_admin' AND EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.user_id = q.user_id
-        AND ur.role_key = 'org_admin' AND ur.valid @> pg_catalog.now())) THEN
-    RAISE EXCEPTION 'separation_of_duties' USING ERRCODE = 'check_violation';
-  END IF;
+  -- The role may have been archived or bound to a department since the request.
+  PERFORM authz.role_grantable(q.role_key, q.user_id);
+  -- Separation of duties: an admin role is held with no data role and vice versa.
+  PERFORM authz.role_separation(q.role_key, q.user_id);
   IF actor = q.user_id OR (actor = q.requested_by AND NOT authz.single_admin_mode()) THEN
     RAISE EXCEPTION 'second_approver_required' USING ERRCODE = 'insufficient_privilege';
   END IF;

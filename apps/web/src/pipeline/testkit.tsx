@@ -36,6 +36,14 @@ export function mockApi(initial: Record<string, Handler>) {
   };
 }
 
+/** Live roles as GET /api/v1/lookups lists them (key as id, label as name; docs/roles-api.md). */
+export const ROLE_LOOKUPS = [
+  { id: "recruiter", name: "Recruiter" }, { id: "lead", name: "Lead (Sales)" }, { id: "manager", name: "Manager (Sales)" },
+  { id: "hr", name: "HR" }, { id: "accounts", name: "Accounts" }, { id: "immigration", name: "Immigration" },
+  { id: "documents_team", name: "Documents Team" },
+];
+export const EMPTY_LOOKUPS = { technologies: [], clients: [], vendors: [], implementationPartners: [], locations: [], coaches: [], roles: ROLE_LOOKUPS };
+
 export const problem = (status: number, extra: Record<string, unknown> = {}): Reply =>
   ({ status, body: { type: "about:blank", title: "Error", status, ...extra } });
 

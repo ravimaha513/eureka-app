@@ -151,7 +151,8 @@ describe("metadata and listings", () => {
   it("meta lists roles with restricted and location-bound flags, and locations", async () => {
     const r = (await call("admin", "GET", "/api/v1/admin/meta")).json();
     const byKey = Object.fromEntries(r.roles.map((x: { key: string }) => [x.key, x]));
-    expect(byKey.hr).toEqual({ key: "hr", label: "HR", restricted: true, locationBound: false });
+    expect(byKey.hr).toEqual({ key: "hr", label: "HR", restricted: true, locationBound: false, isSystem: true, track: "hr", level: 2, recruiter: false, department: null });
+    expect(byKey.recruiter.recruiter).toBe(true);
     expect(byKey.org_admin.restricted).toBe(true);
     expect(byKey.recruiter.restricted).toBe(false);
     expect(byKey.location_incharge).toMatchObject({ restricted: false, locationBound: true });

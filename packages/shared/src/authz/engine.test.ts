@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { GRANTS, HOTLIST_VISIBILITY, PERMISSIONS, ROLES, LOCATION_ROLES, RESTRICTED_PERMISSIONS, ORG_SENSITIVE_PERMISSIONS, isRestrictedRole } from "./catalog.js";
+import { GRANTS, HOTLIST_VISIBILITY, NOTIFY_RECIPIENTS, PERMISSIONS, ROLES, LOCATION_ROLES, RESTRICTED_PERMISSIONS, ORG_SENSITIVE_PERMISSIONS, assignmentFor, isRestrictedRole } from "./catalog.js";
 import {
   activityVisible,
   applyCandidateFieldPolicy,
   candidateVisible,
   capabilities,
+  hasTrait,
   hotlistVisible,
   resolveScope,
   type CandidateRef,
@@ -390,5 +391,42 @@ describe("Hot List visibility default (team; Eureka App 4)", () => {
     expect(resolveScope(COORD, "candidate:read")).toBeNull();
     expect(resolveScope(COORD, "hotlist:read")).toBeNull();
     expect(candidateVisible(resolveScope(COORD, "candidate:read"), cand({}))).toBe(false);
+  });
+
+  describe("custom roles (docs/roles-api.md)", () => {
+    it("an assignment carrying its own grants and traits is resolved without the catalog", () => {
+      const custom = base({
+        userId: "X", teamIds: ["T1"],
+        roles: [{ role: "c_senior_recruiter", grants: { "candidate:read": "team", "rate:read": "org" }, traits: { ...assignmentFor("recruiter").traits, sales: false } }],
+      });
+      expect(resolveScope(custom, "candidate:read")?.teamIds.has("T1")).toBe(true);
+      expect(resolveScope(custom, "candidate:read")?.allTeams).toBe(false);
+      expect(resolveScope(custom, "rate:read")?.all).toBe(true);
+      expect(resolveScope(custom, "submission:read")).toBeNull();
+      expect(capabilities(custom)).toEqual(["candidate:read", "rate:read"]);
+      expect(hasTrait(custom, "recruiter")).toBe(true);
+      expect(hasTrait(custom, "sales")).toBe(false);
+    });
+
+    it("an unknown key without grants holds nothing", () => {
+      const ghost = base({ userId: "G", roles: [{ role: "c_gone" }] });
+      expect(capabilities(ghost)).toEqual([]);
+      expect(hasTrait(ghost, "admin")).toBe(false);
+    });
+
+    it("a system key without grants falls back to the catalog, like assignmentFor", () => {
+      const byKey = base({ userId: "L", roles: [{ role: "lead" }], teamIds: ["T1"] });
+      const explicit = base({ userId: "L", roles: [assignmentFor("lead")], teamIds: ["T1"] });
+      expect(capabilities(byKey)).toEqual(capabilities(explicit));
+      expect(hasTrait(byKey, "sales")).toBe(true);
+    });
+
+    it("notification permissions are held at org scope by exactly the listed system roles", () => {
+      for (const [perm, roles] of Object.entries(NOTIFY_RECIPIENTS)) {
+        const holders = ROLES.filter((r) => GRANTS[r][perm as keyof typeof GRANTS.hr] !== undefined);
+        expect([...holders].sort()).toEqual([...roles].sort());
+        for (const r of roles) expect(GRANTS[r][perm as keyof typeof GRANTS.hr]).toBe("org");
+      }
+    });
   });
 });

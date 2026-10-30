@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ROLE_LOOKUPS } from "../pipeline/testkit";
 import { setCsrf } from "../api";
 import { visibleNav } from "../nav";
 import { browser } from "../sales/resumesApi";
@@ -41,7 +42,7 @@ beforeEach(() => {
   setCsrf("tok");
   calls = [];
   routes = {
-    "GET /api/v1/lookups": () => ({ body: { technologies: [], clients: [], vendors: [], implementationPartners: [], locations: [{ id: "loc-d", name: "Dallas" }], coaches: [] } }),
+    "GET /api/v1/lookups": () => ({ body: { technologies: [], clients: [], vendors: [], implementationPartners: [], roles: ROLE_LOOKUPS, locations: [{ id: "loc-d", name: "Dallas" }], coaches: [] } }),
   };
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init = {}) => {
     const url = new URL(String(input), "http://localhost");

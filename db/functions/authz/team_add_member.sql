@@ -3,6 +3,7 @@
 -- AD-10, team:add_member). The admin path stays authz.admin_add_team_member (0013).
 -- Change this file, not a new migration.
 
+-- 0311: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.team_add_member(p_team uuid, p_user uuid)
  RETURNS void
@@ -34,8 +35,7 @@ BEGIN
   IF authz.admin_user_status(p_user) IS DISTINCT FROM 'active' THEN
     RAISE EXCEPTION 'user_inactive' USING ERRCODE = 'check_violation';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM eureka.user_role ur
-                 WHERE ur.user_id = p_user AND ur.role_key = 'recruiter' AND ur.valid @> pg_catalog.now()) THEN
+  IF NOT authz.user_has_trait(p_user, 'recruiter') THEN
     RAISE EXCEPTION 'not_a_recruiter' USING ERRCODE = 'check_violation';
   END IF;
   IF EXISTS (SELECT 1 FROM eureka.team_member tm WHERE tm.user_id = p_user AND tm.valid @> pg_catalog.now()) THEN

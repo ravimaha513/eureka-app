@@ -41,7 +41,7 @@ const base = (): Record<string, Handler> => ({
   "DELETE /api/v1/training/batches/b2": () => ({ status: 204 }),
   "POST /api/v1/training/batches": () => ({ status: 201, body: { id: "b1" } }),
   "GET /api/v1/training/trainers": () => ({ body: { items: [{ id: "u-c", name: "Coach One" }] } }),
-  "GET /api/v1/lookups": () => ({ body: { technologies: [{ id: "t1", name: ".NET" }], locations: [{ id: "l1", name: "Dallas" }], clients: [], vendors: [], implementationPartners: [], coaches: [] } }),
+  "GET /api/v1/lookups": () => ({ body: { technologies: [{ id: "t1", name: ".NET" }], locations: [{ id: "l1", name: "Dallas" }], clients: [], vendors: [], implementationPartners: [], roles: [], coaches: [] } }),
 });
 beforeEach(() => { api = mockApi(base()); });
 afterEach(() => vi.restoreAllMocks());
