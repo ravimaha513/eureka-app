@@ -890,3 +890,14 @@ form.stack { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
   :root input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]), :root select, :root textarea { font-size: 16px; }
   .rolecounts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 }
+
+/* Go to screen (Ctrl/Cmd+K) */
+.dialog.quickjump { width: min(520px, 100%); align-self: start; margin-top: 10vh; }
+.quickjump input[role="combobox"] { width: 100%; }
+.qjlist { list-style: none; margin: 10px 0 0; padding: 0; max-height: 50vh; overflow: auto; }
+.qjlist li { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; cursor: pointer; color: var(--text2); }
+.qjlist li:hover { background: var(--hover); }
+.qjlist li[aria-selected="true"] { background: var(--pri-50); color: var(--pri-700); }
+.qjlabel { flex: 1; min-width: 0; font-weight: 500; }
+.qjsec { font-size: 12px; color: var(--muted); }
+.qjhint { font-size: 12px; margin: 10px 0 0; }

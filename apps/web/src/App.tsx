@@ -7,12 +7,13 @@ import { navigate, usePathname } from "./lib/router";
 import { HotListPage } from "./sales/HotListPage";
 import { NotificationBell, type InboxItem } from "./notifications/Inbox";
 import { ChatNavBadge } from "./chat/ChatNavBadge";
-import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sparkles, Sun } from "lucide-react";
+import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, Sparkles, Sun } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
 import { Loading } from "./ui/Loading";
 import { QueryError } from "./ui/QueryError";
 import { useAuthMethods } from "./shell/useAuthMethods";
+import { QuickJump, isQuickJumpKey } from "./shell/QuickJump";
 
 // Every screen but the default landing (the Hot List) is its own chunk, loaded on first visit.
 const SettingsPage = lazyNamed(() => import("./settings/SettingsPage"), "SettingsPage");
@@ -329,6 +330,24 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // Desktop: the sidebar can shrink to icons; remembered on this device.
   const [collapsed, setCollapsedState] = useState(() => { try { return localStorage.getItem("eureka-nav") === "collapsed"; } catch { return false; } });
   const setCollapsed = (c: boolean) => { setCollapsedState(c); try { localStorage.setItem("eureka-nav", c ? "collapsed" : "open"); } catch { /* not remembered */ } };
+  // The browser tab names the screen, so several open tabs can be told apart.
+  useEffect(() => {
+    document.title = current ? `${current.label} | Eureka` : "Eureka";
+    return () => { document.title = "Eureka"; };
+  }, [current]);
+  // Ctrl/Cmd+K opens the screen switcher, unless another dialog is already open.
+  const [jumpOpen, setJumpOpen] = useState(false);
+  const jumpItems = useMemo(() => [...items, SETTINGS_NAV], [items]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!isQuickJumpKey(e) || document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      e.preventDefault();
+      setNavOpen(false);
+      setJumpOpen(true);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   const menuBtn = useRef<HTMLButtonElement>(null);
   const sideRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -368,6 +387,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         {items.some((i) => i.key === "chat") && <ChatNavBadge id="chat-nav-unread" part="text" />}
         <ThemeSwitch theme={theme} onChange={setTheme} />
       </aside>
+      {jumpOpen && <QuickJump items={jumpItems} onGo={(key) => go(key)} onClose={() => setJumpOpen(false)} />}
       {navOpen && <div className="navscrim" aria-hidden="true" onClick={() => setNavOpen(false)} />}
       <main className="main">
         <div className="top">
@@ -375,6 +395,8 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             onClick={() => setNavOpen((o) => !o)}><Menu size={19} aria-hidden="true" /></button>
           <span className="topbrand"><span className="logo"><Sparkles size={14} aria-hidden="true" /></span>Eureka</span>
           <div className="topright">
+            <button type="button" className="bell" aria-label="Go to screen" aria-keyshortcuts="Control+K Meta+K" title="Go to screen (Ctrl+K)"
+              onClick={() => setJumpOpen(true)}><Search size={18} aria-hidden="true" /></button>
             <NotificationBell onOpen={openEntity} canOpen={canOpenEntity} />
             <UserMenu name={me.displayName} roles={me.roles.map((r) => r.label).join(", ")} onSignOut={onSignOut}
               onSettings={() => { go(SETTINGS_NAV.key); setNavOpen(false); }} />
