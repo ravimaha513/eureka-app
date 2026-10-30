@@ -7,7 +7,7 @@ import {
 } from "@eureka/shared";
 import { can, type Me } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
-import { useRoutedId } from "../lib/router";
+import { useRoutedId, useSearchParam } from "../lib/router";
 import { useLookups } from "../lookups";
 import { Drawer, Field, fmtDate } from "../sales/ui";
 import { Person } from "../shell/ui";
@@ -38,15 +38,18 @@ export function ApplicationsPage({ me, initialOpenId, onOpenChange }: {
   onOpenChange?: (id: string | null) => void;
 }) {
   const id = useId();
-  const [status, setStatus] = useState("");
-  const [jobId, setJobId] = useState("");
-  const [searchText, setSearchText] = useState("");
-  const [search, setSearch] = useState("");
+  // Filters live in the address bar (?status=&jobId=&q=), so a refresh, a shared link or opening an application keeps them.
+  const [statusParam, setStatus] = useSearchParam("status");
+  const status = (APPLICATION_STATUSES as readonly string[]).includes(statusParam) ? statusParam : "";
+  const [jobId, setJobId] = useSearchParam("jobId");
+  const [search, setSearch] = useSearchParam("q");
+  const [searchText, setSearchText] = useState(search);
   const pager = useCursorPager();
   const { page, reset } = pager;
   const [openId, setOpenId] = useRoutedId(initialOpenId ?? null, onOpenChange);
   const [notice, setNotice] = useState("");
   useEffect(() => {
+    if (searchText.trim() === search) return;
     const t = setTimeout(() => { setSearch(searchText.trim()); reset(); }, 300);
     return () => clearTimeout(t);
   }, [searchText]);
