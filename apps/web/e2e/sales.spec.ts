@@ -104,7 +104,8 @@ test("recruiter filters the Hot List, opens an own candidate and logs submission
   await expect(dlg.getByLabel("Job title")).toHaveAttribute("aria-invalid", "true");
   await dlg.getByLabel("Job title").fill(job);
   await dlg.getByRole("combobox", { name: "Client", exact: true }).selectOption(CLIENT_ID);
-  await dlg.getByLabel("Rate per hour (optional)").fill("65");
+  await dlg.getByRole("combobox", { name: "Vendor", exact: true }).selectOption({ index: 1 });
+  await dlg.getByLabel("Rate per hour").fill("65");
   await dlg.getByRole("button", { name: "Log submission" }).click();
 
   // On a fresh database the first one is clean; on a repeat run it's already a duplicate.
@@ -119,6 +120,8 @@ test("recruiter filters the Hot List, opens an own candidate and logs submission
   dlg = page.getByRole("dialog", { name: `Log submission for ${name}` });
   await dlg.getByLabel("Job title").fill(`${job} (again)`);
   await dlg.getByRole("combobox", { name: "Client", exact: true }).selectOption(CLIENT_ID);
+  await dlg.getByRole("combobox", { name: "Vendor", exact: true }).selectOption({ index: 1 });
+  await dlg.getByLabel("Rate per hour").fill("65");
   await dlg.getByRole("button", { name: "Log submission" }).click();
   await expect(done.getByRole("alert")).toContainText("already submitted to this client in the last 90 days");
   await page.screenshot({ path: "e2e-artifacts/recruiter-duplicate-submission.png", fullPage: true });

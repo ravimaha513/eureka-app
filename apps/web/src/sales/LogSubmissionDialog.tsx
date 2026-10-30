@@ -53,11 +53,10 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged, canAddClient
     if (!v.jobTitle.trim()) e.jobTitle = "Enter the job title.";
     else if (v.jobTitle.trim().length > 160) e.jobTitle = "Keep the job title under 160 characters.";
     if (!UUID_RE.test(v.clientId.trim())) e.clientId = "Choose a client.";
-    if (v.vendorId.trim() && !UUID_RE.test(v.vendorId.trim())) e.vendorId = "Choose a vendor or leave it empty.";
-    if (v.rate.trim()) {
-      const r = Number(v.rate);
-      if (!Number.isFinite(r) || r <= 0 || r > 1000) e.rate = "Enter an hourly rate between 0 and 1000.";
-    }
+    if (!UUID_RE.test(v.vendorId.trim())) e.vendorId = "Choose a vendor.";
+    const r = Number(v.rate);
+    if (!v.rate.trim()) e.rate = "Enter the hourly rate.";
+    else if (!Number.isFinite(r) || r <= 0 || r > 1000) e.rate = "Enter an hourly rate between 0 and 1000.";
     return e;
   };
 
@@ -68,8 +67,7 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged, canAddClient
     if (Object.keys(e).length) { failed(); return; }
     const body: CreateSubmission = {
       candidateId: candidate.id, jobTitle: v.jobTitle.trim(), clientId: v.clientId.trim(),
-      ...(v.vendorId.trim() ? { vendorId: v.vendorId.trim() } : {}),
-      ...(v.rate.trim() ? { rate: Number(v.rate) } : {}),
+      vendorId: v.vendorId.trim(), rate: Number(v.rate),
       ...(v.jobId ? { jobId: v.jobId } : {}),
     };
     setBusy(true);
@@ -113,8 +111,8 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged, canAddClient
           {(p) => <input {...p} value={v.jobTitle} onChange={set("jobTitle")} maxLength={200} {...(openJobs.length ? {} : { "data-autofocus": true })} />}
         </Field>
         <LookupPicker kind="clients" label="Client" value={v.clientId} onChange={pick("clientId")} error={errors.clientId} canAdd={canAddClient} />
-        <LookupPicker kind="vendors" label="Vendor (optional)" optional placeholder="No vendor" value={v.vendorId} onChange={pick("vendorId")} error={errors.vendorId} canAdd={canAddVendor} />
-        <Field label="Rate per hour (optional)" error={errors.rate}>
+        <LookupPicker kind="vendors" label="Vendor" value={v.vendorId} onChange={pick("vendorId")} error={errors.vendorId} canAdd={canAddVendor} />
+        <Field label="Rate per hour" error={errors.rate}>
           {(p) => <input {...p} type="number" inputMode="decimal" min="0" max="1000" step="0.01" value={v.rate} onChange={set("rate")} />}
         </Field>
         {conflict && <p className="note warn">{DUPLICATE_WARNING}</p>}

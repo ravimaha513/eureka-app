@@ -154,14 +154,17 @@ describe("rich text", () => {
 describe("Log submission job picker", () => {
   it("fills title and client from an open client requirement and sends jobId", async () => {
     const CL = "11111111-1111-4111-8111-111111111111";
+    const VN = "22222222-2222-4222-8222-222222222222";
     api.routes["GET /api/v1/jobs"] = () => ({ body: { items: [job("j1", { client: { id: CL, name: "Northwind Financial" } })], nextCursor: null } });
-    api.routes["GET /api/v1/lookups"] = () => ({ body: { technologies: [], clients: [{ id: CL, name: "Northwind Financial" }], vendors: [], implementationPartners: [], roles: [], locations: [], coaches: [] } });
+    api.routes["GET /api/v1/lookups"] = () => ({ body: { technologies: [], clients: [{ id: CL, name: "Northwind Financial" }], vendors: [{ id: VN, name: "Contoso Staffing" }], implementationPartners: [], roles: [], locations: [], coaches: [] } });
     api.routes["POST /api/v1/submissions"] = () => ({ status: 201, body: { id: "s1", duplicateWarning: false } });
     const onLogged = vi.fn();
     wrap(<LogSubmissionDialog candidate={{ id: "c1", name: "Asha" }} onClose={() => undefined} onLogged={onLogged} />);
     const picker = await screen.findByRole("combobox", { name: "Job (optional)" });
     fireEvent.change(picker, { target: { value: "j1" } });
     expect(screen.getByLabelText("Job title")).toHaveValue("Java Developer");
+    fireEvent.change(screen.getByLabelText("Vendor"), { target: { value: VN } });
+    fireEvent.change(screen.getByLabelText("Rate per hour"), { target: { value: "70" } });
     fireEvent.click(screen.getByRole("button", { name: "Log submission" }));
     await waitFor(() => expect(onLogged).toHaveBeenCalled());
     expect(api.writes()[0]!.body).toMatchObject({ candidateId: "c1", clientId: CL, jobTitle: "Java Developer", jobId: "j1" });

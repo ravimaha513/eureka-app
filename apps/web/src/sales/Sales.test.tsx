@@ -552,7 +552,8 @@ describe("Log submission", () => {
   const fill = (dlg: HTMLElement) => {
     fireEvent.change(within(dlg).getByLabelText("Job title"), { target: { value: "Senior Java Developer" } });
     fireEvent.change(within(dlg).getByLabelText("Client"), { target: { value: CLIENT } });
-    fireEvent.change(within(dlg).getByLabelText("Rate per hour (optional)"), { target: { value: "65" } });
+    fireEvent.change(within(dlg).getByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(within(dlg).getByLabelText("Rate per hour"), { target: { value: "65" } });
   };
 
   it("validates, posts, and closes when there is no duplicate", async () => {
@@ -562,11 +563,12 @@ describe("Log submission", () => {
     expect(writes()).toHaveLength(0);
     expect(within(dlg).getByLabelText("Job title")).toHaveAccessibleDescription("Enter the job title.");
     expect(within(dlg).getByLabelText("Client")).toHaveAttribute("aria-invalid", "true");
+    expect(within(dlg).getByLabelText("Vendor")).toHaveAccessibleDescription("Choose a vendor.");
+    expect(within(dlg).getByLabelText("Rate per hour")).toHaveAccessibleDescription("Enter the hourly rate.");
     fill(dlg);
     fireEvent.click(within(dlg).getByRole("button", { name: "Log submission" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(writes()[0]).toMatchObject({ path: "/api/v1/submissions", body: { candidateId: CID, jobTitle: "Senior Java Developer", clientId: CLIENT, rate: 65 } });
-    expect(writes()[0]!.body).not.toHaveProperty("vendorId");
+    expect(writes()[0]).toMatchObject({ path: "/api/v1/submissions", body: { candidateId: CID, jobTitle: "Senior Java Developer", clientId: CLIENT, vendorId: VENDOR, rate: 65 } });
     expect(screen.getByRole("status")).toHaveTextContent("Submission logged.");
     expect(screen.queryByText(DUPLICATE_WARNING)).not.toBeInTheDocument();
   });
@@ -575,8 +577,7 @@ describe("Log submission", () => {
     routes["POST /api/v1/submissions"] = () => ({ status: 201, body: { id: "s3", duplicateWarning: false } });
     const dlg = await openDialog();
     fill(dlg);
-    expect(within(within(dlg).getByLabelText("Vendor (optional)")).getAllByRole("option").map((o) => o.textContent)).toEqual(["No vendor", "Contoso Staffing", "Add a new vendor…"]);
-    fireEvent.change(within(dlg).getByLabelText("Vendor (optional)"), { target: { value: VENDOR } });
+    expect(within(within(dlg).getByLabelText("Vendor")).getAllByRole("option").map((o) => o.textContent)).toEqual(["Choose…", "Contoso Staffing", "Add a new vendor…"]);
     fireEvent.click(within(dlg).getByRole("button", { name: "Log submission" }));
     await waitFor(() => expect(writes()[0]!.body).toMatchObject({ clientId: CLIENT, vendorId: VENDOR }));
   });
@@ -701,12 +702,15 @@ describe("Focus after a failed submit: Log submission", () => {
   const fillAll = (dlg: HTMLElement) => {
     fireEvent.change(within(dlg).getByLabelText("Job title"), { target: { value: "Senior Java Developer" } });
     fireEvent.change(within(dlg).getByLabelText("Client"), { target: { value: CLIENT } });
+    fireEvent.change(within(dlg).getByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(within(dlg).getByLabelText("Rate per hour"), { target: { value: "65" } });
   };
 
   it("moves focus to the first invalid field after client-side validation", async () => {
     const dlg = await openLog();
     fireEvent.change(within(dlg).getByLabelText("Job title"), { target: { value: "Senior Java Developer" } });
-    fireEvent.change(within(dlg).getByLabelText("Rate per hour (optional)"), { target: { value: "5000" } });
+    fireEvent.change(within(dlg).getByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.change(within(dlg).getByLabelText("Rate per hour"), { target: { value: "5000" } });
     submitWith(dlg, "Log submission");
     const clientSel = within(dlg).getByLabelText("Client");
     await waitFor(() => expect(clientSel).toHaveFocus());
@@ -714,7 +718,7 @@ describe("Focus after a failed submit: Log submission", () => {
 
     fireEvent.change(clientSel, { target: { value: CLIENT } });
     submitWith(dlg, "Log submission");
-    const rate = within(dlg).getByLabelText("Rate per hour (optional)");
+    const rate = within(dlg).getByLabelText("Rate per hour");
     await waitFor(() => expect(rate).toHaveFocus());
     expect(rate).toHaveAccessibleDescription("Enter an hourly rate between 0 and 1000.");
     expect(writes()).toHaveLength(0);
