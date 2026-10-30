@@ -288,7 +288,9 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const routed = route.key !== null && (route.key === SETTINGS_NAV.key || has(route.key));
   const active = routed ? route.key : landing;
   useEffect(() => { if (!routed && landing) navigate(screenPath(landing), { replace: true }); }, [routed, landing]);
-  const go = (key: string, id?: string | null) => navigate(screenPath(key, id));
+  // Within a screen (opening or closing a record, re-clicking its nav item) the query string, which
+  // holds that screen's filters, is kept; moving to another screen starts it fresh.
+  const go = (key: string, id?: string | null) => navigate(screenPath(key, id) + (key === active ? window.location.search : ""));
   const recordId = routed ? route.id : null;
   const onCandidateScreen = active === "hotlist" || active === "candidates";
   // Open candidate profile (/hotlist/<id> or /candidates/<id>). The list stays mounted (hidden)

@@ -176,6 +176,9 @@ export const pipelineKeys = {
   placement: (id: string) => ["placements", "detail", id] as const,
 };
 
+/** A `YYYY-MM-DD` day as a date input gives it (for validating filter values read from a link). */
+export const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
 /** Local midnight of a YYYY-MM-DD day (or of the following day) as an ISO instant. */
 export function dayBoundary(day: string, next = false) {
   const d = new Date(`${day}T00:00:00`);

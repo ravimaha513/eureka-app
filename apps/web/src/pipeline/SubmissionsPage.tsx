@@ -9,7 +9,7 @@ import { AssessmentsSection } from "../pipelinereport/AssessmentsSection";
 import { CreatePlacementDialog } from "./CreatePlacementDialog";
 import { pipelineError } from "./errors";
 import {
-  SUBMISSION_STATUSES, dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Submission,
+  ISO_DAY, SUBMISSION_STATUSES, dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Submission,
 } from "./pipelineApi";
 import { ScheduleInterviewDialog } from "./ScheduleInterviewDialog";
 import { PipelineStatus, StatusChips } from "./ui";
@@ -20,7 +20,6 @@ import { useSearchParam } from "../lib/router";
 
 const PAGE_SIZE = 50;
 const CLOSING = new Set(["rejected", "withdrawn"]);
-const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Submissions list (GET /api/v1/submissions) with a detail drawer for status changes and next steps. */
 export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabilities">; onOpenPlacement?: (id: string) => void }) {
