@@ -61,7 +61,7 @@ export function QuickJump({ items, onGo, onClose }: { items: readonly NavItem[];
         })}
       </ul>
       {hits.length === 0 && <p className="empty" role="status">No screen matches “{query.trim()}”.</p>}
-      <p className="muted qjhint">↑ ↓ to move · Enter to open · Esc to close</p>
+      <p className="muted qjhint">↑ ↓ to move · Enter to open · Esc to close · “/” on a screen jumps to its search</p>
     </Dialog>
   );
 }

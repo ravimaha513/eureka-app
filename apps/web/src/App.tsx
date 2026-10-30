@@ -366,6 +366,22 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     if (target && !target.hasAttribute("tabindex")) target.tabIndex = -1;
     target?.focus();
   };
+  // "/" jumps to the current screen's search box (as in many web apps), unless the user is typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']")) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      const box = [...document.querySelectorAll<HTMLInputElement>('.content input[type="search"]')].find((el) => !el.disabled && !el.closest("[hidden]"));
+      if (!box) return;
+      e.preventDefault();
+      box.focus();
+      box.select();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   // Ctrl/Cmd+K opens the screen switcher, unless another dialog is already open.
   const [jumpOpen, setJumpOpen] = useState(false);
   const jumpItems = useMemo(() => [...items, SETTINGS_NAV], [items]);
