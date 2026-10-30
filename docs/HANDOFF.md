@@ -255,6 +255,8 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   the role's screens + Settings, combobox/listbox); the browser tab title names the current screen.
 - Offline banner + Submissions URL filters (no migrations): `shell/OfflineBanner.tsx` warns while the browser is
   offline; `useSearchParam` (lib/router.ts) keeps Submissions status/from/to in `?status=&from=&to=` (invalid values ignored).
+- Skip link + screen-change focus (no migrations): "Skip to main content" is the first Tab stop; switching screens focuses
+  the new screen's h1 (waits for lazy chunks, 5 s cap), so keyboard/screen-reader users land at the top.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
