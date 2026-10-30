@@ -8,6 +8,10 @@ CREATE OR REPLACE FUNCTION eureka.candidate_extras_write_guard()
  SET search_path TO 'pg_catalog', 'pg_temp'
 AS $function$
 BEGIN
+  -- Candidate delete (authz.delete_candidate, migration 0330) removes these rows.
+  IF TG_OP = 'DELETE' AND current_user = 'authz_definer' THEN
+    IF authz.candidate_purging() THEN RETURN OLD; END IF;
+  END IF;
   IF current_user IS DISTINCT FROM 'authz_definer' THEN
     RAISE EXCEPTION '% rows are written only by definer functions', TG_TABLE_NAME
       USING ERRCODE = 'insufficient_privilege';

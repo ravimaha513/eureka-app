@@ -712,6 +712,20 @@ export class CandidatesService implements OnModuleInit {
     });
   }
 
+  /** Cascade delete (authz.delete_candidate re-checks scope); placed candidates keep their records. */
+  async remove(user: AuthedUser, id: string) {
+    await this.db.withUser(user.id, async (c) => {
+      const row = await this.loadForWrite(c, user, id, "candidate:delete");
+      try {
+        await c.query(`SELECT authz.delete_candidate($1)`, [id]);
+      } catch (err) {
+        if ((err as { message?: string }).message === "candidate_placed") throw new ConflictException("candidate_placed");
+        throw err;
+      }
+      await this.audit.record(c, { actorId: user.id, action: "candidate.delete", entityType: "candidate", entityId: id, changes: { teamId: row.team_id } });
+    });
+  }
+
   /**
    * `then` runs in the same transaction after the candidate row exists (jobs-portal:
    * linking the hired application), so both commit or neither does.

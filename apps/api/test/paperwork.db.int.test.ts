@@ -531,7 +531,10 @@ describe("closed write paths and hardening", () => {
       ]) {
         await c.query("BEGIN");
         await c.query("SET LOCAL ROLE authz_definer");
-        await expect(c.query(sql), sql).rejects.toThrow(/immutable|never deleted|append-only|permission denied/);
+        // A DELETE outside a candidate delete (migration 0330) matches no rows under RLS.
+        const r = await c.query(sql).then((x) => x.rowCount, (e: Error) => e);
+        if (typeof r === "number") expect(sql.startsWith("DELETE") && r === 0, `${sql} changed ${r} rows`).toBe(true);
+        else expect(r?.message, sql).toMatch(/immutable|never deleted|append-only|permission denied/);
         await c.query("ROLLBACK");
       }
     } finally {

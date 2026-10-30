@@ -155,8 +155,9 @@ describe("per-record actions match what the server allows (candidates)", () => {
     for (const cand of sample(key)) {
       const res = await call(key, "GET", `/api/v1/candidates/${cand.id}`);
       expect(res.statusCode, res.body).toBe(200);
-      const actions = res.json().actions as { edit: boolean; transition: string[]; visibility: boolean; rating: boolean; logSubmission: boolean };
-      expect(Object.keys(actions).sort()).toEqual(["edit", "logSubmission", "rating", "transition", "visibility"]);
+      const actions = res.json().actions as { edit: boolean; transition: string[]; visibility: boolean; rating: boolean; logSubmission: boolean; delete: boolean };
+      expect(Object.keys(actions).sort()).toEqual(["delete", "edit", "logSubmission", "rating", "transition", "visibility"]);
+      // delete is not exercised here (it would remove the shared fixtures): candidate-delete.api.int.test.ts.
       for (const to of TARGETS) {
         const r = await call(key, "POST", `/api/v1/candidates/${cand.id}/transition`, { to });
         const ok = actions.transition.includes(to);

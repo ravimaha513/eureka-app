@@ -463,7 +463,7 @@ describe("Candidate profile", () => {
 
   it("follows the record's actions over capabilities when the server sends them", async () => {
     routes[`GET /api/v1/candidates/${CID}`] = () => ({
-      body: { ...PROFILE, actions: { edit: false, transition: ["confirmation", "terminated"], visibility: true, rating: false, logSubmission: false } },
+      body: { ...PROFILE, actions: { edit: false, transition: ["confirmation", "terminated"], visibility: true, rating: false, logSubmission: false, delete: false } },
     });
     renderProfile(RECRUITER);
     await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
@@ -480,12 +480,37 @@ describe("Candidate profile", () => {
 
   it("hides every action when the record allows none", async () => {
     routes[`GET /api/v1/candidates/${CID}`] = () => ({
-      body: { ...PROFILE, actions: { edit: false, transition: [], visibility: false, rating: false, logSubmission: false } },
+      body: { ...PROFILE, actions: { edit: false, transition: [], visibility: false, rating: false, logSubmission: false, delete: false } },
     });
     renderProfile(LEAD);
     await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
     expect(screen.queryByRole("heading", { name: "Manage" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Edit profile|Log submission|Move to/ })).not.toBeInTheDocument();
+  });
+
+  it("deletes the candidate after confirming and goes back; explains a placed candidate", async () => {
+    routes[`GET /api/v1/candidates/${CID}`] = () => ({
+      body: { ...PROFILE, actions: { edit: true, transition: [], visibility: false, rating: false, logSubmission: false, delete: true } },
+    });
+    routes[`DELETE /api/v1/candidates/${CID}`] = () => problem(409, { detail: "candidate_placed" });
+    const onBack = vi.fn();
+    renderProfile(RECRUITER, onBack);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete…" }));
+    const dlg = screen.getByRole("dialog", { name: "Delete Asha Iyer?" });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Delete candidate" }));
+    expect(await within(dlg).findByRole("alert")).toHaveTextContent("placement or employee record");
+    expect(onBack).not.toHaveBeenCalled();
+
+    routes[`DELETE /api/v1/candidates/${CID}`] = () => ({ status: 204 });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Delete candidate" }));
+    await waitFor(() => expect(onBack).toHaveBeenCalled());
+    expect(writes().filter((c) => c.method === "DELETE").map((c) => c.path)).toEqual([`/api/v1/candidates/${CID}`, `/api/v1/candidates/${CID}`]);
+  });
+
+  it("without hints, shows Delete to candidate:delete holders only", async () => {
+    renderProfile(RECRUITER);
+    await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
+    expect(screen.queryByRole("button", { name: "Delete…" })).not.toBeInTheDocument();
   });
 
   it("explains a 403 on an Open-to-all-teams candidate the user can see but not change", async () => {

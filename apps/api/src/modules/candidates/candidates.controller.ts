@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query } from "@nestjs/common";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { BatchStatusChange } from "../training/training.schemas.js";
 import {
@@ -64,6 +64,14 @@ export class CandidatesController {
   @RequirePermission("candidate:update")
   update(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.updateProfile(user, id, ProfileUpdate.parse(body));
+  }
+
+  /** Hard delete with everything recorded about the candidate; 409 candidate_placed once placed (docs/candidates-api.md). */
+  @Delete("candidates/:id")
+  @HttpCode(204)
+  @RequirePermission("candidate:delete")
+  async remove(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
+    await this.svc.remove(user, id);
   }
 
   /** E-Verify, offer letter and 1099 company links and the documents status (HR, Accounts, Immigration, Documents team). */

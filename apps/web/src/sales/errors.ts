@@ -1,6 +1,6 @@
 import { ApiError } from "../api";
 
-export type SalesErrorContext = "profile" | "submission" | "create" | "transition" | "generic";
+export type SalesErrorContext = "profile" | "submission" | "create" | "transition" | "delete" | "generic";
 
 /** Plain-language text for a failed candidate or submission call (RFC 9457 problem). */
 export function salesError(e: unknown, ctx: SalesErrorContext = "generic"): string {
@@ -13,9 +13,10 @@ export function salesError(e: unknown, ctx: SalesErrorContext = "generic"): stri
     case 404: return ctx === "submission"
       ? "This candidate isn't available for submission from your account."
       : "This candidate doesn't exist or belongs to another team.";
-    case 409: return ctx === "submission"
-      ? "A conflicting submission already exists for this candidate and client."
-      : "A conflicting record exists. Refresh and try again.";
+    case 409:
+      if (ctx === "submission") return "A conflicting submission already exists for this candidate and client.";
+      if (ctx === "delete") return "This candidate has a placement or employee record, so they can't be deleted.";
+      return "A conflicting record exists. Refresh and try again.";
     case 422:
       if (e.errors?.length) return "Some fields need attention. Check the highlighted fields.";
       if (e.detail === "batch_not_allowed") return "That batch is at another location or no longer open. Choose another batch.";

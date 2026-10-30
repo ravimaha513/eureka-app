@@ -30,7 +30,7 @@ const PROFILE = {
   ...ROW, dobMasked: null, rowVersion: 3, inPersonOk: null, eligibility: ["in_person"], marketingLocations: ["Dallas, TX"],
   linkedinUrl: "https://www.linkedin.com/in/asha", resumeUrl: null, confirmations: 2,
   companies: { everify: { id: CO1, name: "Eureka Payroll LLC" }, offerLetter: null, form1099: null },
-  actions: { edit: true, transition: [], visibility: false, rating: false, logSubmission: false },
+  actions: { edit: true, transition: [], visibility: false, rating: false, logSubmission: false, delete: false },
 };
 
 type Reply = { status?: number; body?: unknown };
