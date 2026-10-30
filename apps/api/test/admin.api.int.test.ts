@@ -401,6 +401,62 @@ describe("users", () => {
       expect(await count("bulk.r%good%")).toBe(0);
     });
 
+    it("sets managers (existing users or rows in the same file) and teams", async () => {
+      const rows = [
+        { email: "bulk.mrec@eureka.example", displayName: "Managed Rec", manager: "bulk.mlead@eureka.example", team: "team rohit", roles: ["Recruiter"] },
+        { email: "bulk.mlead@eureka.example", displayName: "New Lead", manager: "M1@eureka.example" },
+      ];
+      const dry = (await bulk(true, rows)).json();
+      expect(dry).toMatchObject({ committed: false, failed: 0 });
+      expect(dry.rows[0]).toMatchObject({ manager: "New Lead", team: "Team Rohit" });
+      expect(await count("bulk.m%")).toBe(0);
+
+      const version = async () =>
+        (await db.admin.query(`SELECT access_version FROM eureka.app_user WHERE id = $1`, [U.r3a])).rows[0].access_version as number;
+      const v0 = await version();
+      const r = await bulk(false, rows);
+      expect(r.statusCode, r.body).toBe(200);
+      const body = r.json();
+      expect(body).toMatchObject({ committed: true, created: 2, failed: 0 });
+      // Roles, reporting lines and team rows all changed, but sessions are invalidated by one bump per transaction.
+      expect(await version()).toBe(v0 + 1);
+      const [rec, lead] = [body.rows[0].id, body.rows[1].id];
+      const lines = (await db.admin.query(
+        `SELECT user_id, manager_id FROM eureka.reporting_line WHERE user_id = ANY ($1) AND valid @> now() ORDER BY user_id = $2`,
+        [[rec, lead], lead])).rows;
+      expect(lines).toEqual([{ user_id: rec, manager_id: lead }, { user_id: lead, manager_id: U.m1 }]);
+      const member = (await db.admin.query(
+        `SELECT team_id FROM eureka.team_member WHERE user_id = $1 AND valid @> now()`, [rec])).rows;
+      expect(member).toEqual([{ team_id: T.t1 }]);
+      expect((await audits("admin.user.manager")).at(-1)).toMatchObject({ entity_id: lead, changes: { managerId: U.m1, bulk: true } });
+      expect((await audits("admin.team.member_added")).at(-1)).toMatchObject({ entity_id: T.t1, changes: { userId: rec, bulk: true } });
+      expect((await audits("admin.user.bulk_created")).at(-1)).toMatchObject({ changes: { count: 2, managers: 2, teams: 1 } });
+    });
+
+    it("names manager and team problems per row and creates nobody", async () => {
+      await db.admin.query(`INSERT INTO eureka.team (name, lead_id) VALUES ('Bulk Twin', $1), ('bulk twin', $2)`, [U.l1, U.l2]);
+      const r = await bulk(false, [
+        { email: "bulk.lgood@eureka.example", displayName: "Good", manager: "l1@eureka.example", team: "Team Anjali" },
+        { email: "bulk.l1@eureka.example", displayName: "Unknown", manager: "nobody@eureka.example" },
+        { email: "bulk.l2@eureka.example", displayName: "Self", manager: "bulk.l2@eureka.example" },
+        { email: "bulk.l3@eureka.example", displayName: "Loop A", manager: "bulk.l4@eureka.example" },
+        { email: "bulk.l4@eureka.example", displayName: "Loop B", manager: "bulk.l3@eureka.example" },
+        { email: "bulk.l5@eureka.example", displayName: "Bad row" , location: "Mars" },
+        { email: "bulk.l6@eureka.example", displayName: "Under bad row", manager: "bulk.l5@eureka.example" },
+        { email: "bulk.l7@eureka.example", displayName: "No team", team: "Team Nobody" },
+        { email: "bulk.l8@eureka.example", displayName: "Twin team", team: "BULK TWIN" },
+        { email: "bulk.l9@eureka.example", displayName: "Admin as manager", manager: "admin@eureka.example" },
+      ]);
+      expect(r.statusCode, r.body).toBe(200);
+      const body = r.json();
+      expect(body).toMatchObject({ committed: false, created: 0, failed: 9 });
+      expect(body.rows.map((x: { error?: string }) => x.error)).toEqual([
+        undefined, "unknown_manager", "cycle", "cycle", "cycle", "unknown_location", "manager_row_failed", "unknown_team", "ambiguous_team", "self_change",
+      ]);
+      expect(await count("bulk.l%")).toBe(0);
+      await db.admin.query(`DELETE FROM eureka.team WHERE lower(name) = 'bulk twin'`);
+    });
+
     it("serves the template as an .xlsx to admins only", async () => {
       const r = await call("admin", "GET", "/api/v1/admin/users/bulk/template");
       expect(r.statusCode).toBe(200);
@@ -434,6 +490,7 @@ describe("users", () => {
   });
 
   it("reporting line changes rebuild the closure; cycles are 422", async () => {
+    const before = (await audits("admin.user.manager")).length;
     expect((await call("admin", "PUT", `/api/v1/admin/users/${U.r1a}/manager`, { managerId: U.l2 })).statusCode).toBe(204);
     const { rows } = await db.admin.query(`SELECT 1 FROM eureka.reporting_closure WHERE ancestor_id = $1 AND descendant_id = $2`, [U.l2, U.r1a]);
     expect(rows).toHaveLength(1);
@@ -441,7 +498,7 @@ describe("users", () => {
     expect(cyc.statusCode).toBe(422);
     expect(cyc.json().detail).toBe("cycle");
     expect((await call("admin", "PUT", `/api/v1/admin/users/${U.r1a}/manager`, { managerId: U.l1 })).statusCode).toBe(204);
-    expect((await audits("admin.user.manager")).length).toBe(2);
+    expect((await audits("admin.user.manager")).length).toBe(before + 2);
   });
 
   it("deactivation ends the user's existing session on the next request (AD-5)", async () => {
