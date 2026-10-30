@@ -259,6 +259,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   the new screen's h1 (waits for lazy chunks, 5 s cap), so keyboard/screen-reader users land at the top.
 - Placements URL filters (no migrations): Shell `go()` keeps the query string within a screen (record open/close), so
   Placements status/from/to/vendorId/clientId/technologyId/locationId survive; another screen starts fresh.
+- Applications URL filters (no migrations): status, jobId and the applied applicant search (`q`) via `useSearchParam`.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
