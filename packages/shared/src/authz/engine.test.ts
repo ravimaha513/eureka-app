@@ -341,6 +341,10 @@ describe("adding candidates (CA-6)", () => {
     expect(resolveScope(R1a, "candidate:create")).toBeNull();
     expect([L1, M].map((u) => resolveScope(u, "candidate:create") !== null)).toEqual([true, true]);
   });
+
+  it("the CEO adds candidates to any team (org scope)", () => {
+    expect(resolveScope(base({ userId: "CEO", roles: [{ role: "ceo" }] }), "candidate:create")?.all).toBe(true);
+  });
 });
 
 describe("batch planning (canCreateBatch)", () => {

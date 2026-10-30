@@ -160,6 +160,8 @@ export interface CreateCandidate {
   technologyId: string;
   locationId: string;
   batchId?: string;
+  /** One of GET /candidate-create-teams; the server defaults to the creator's team. */
+  teamId?: string;
 }
 
 export interface CreateSubmission {
@@ -226,6 +228,7 @@ export const salesApi = {
     api<{ id: string; visibility: Visibility }>(`/api/v1/candidates/${enc(id)}/visibility`, {
       method: "PUT", ...json(visibility === "selected_teams" ? { visibility, teamIds } : { visibility }) }),
   shareTeams: () => api<{ items: ShareTeam[] }>("/api/v1/candidate-share-teams"),
+  createTeams: () => api<{ items: ShareTeam[]; defaultTeamId: string | null }>("/api/v1/candidate-create-teams"),
   setRating: (id: string, rating: number) =>
     api<{ id: string; technicalRating: number }>(`/api/v1/candidates/${enc(id)}/technical-rating`, { method: "PUT", ...json({ rating }) }),
   transition: (id: string, to: string) =>

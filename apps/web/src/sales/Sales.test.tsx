@@ -249,6 +249,33 @@ describe("Candidates list and create", () => {
     expect(await within(dlg).findByRole("alert")).toHaveTextContent("You can't create candidates in that team.");
   });
 
+  it("offers a Team picker when several teams are in scope and sends the picked team", async () => {
+    routes["GET /api/v1/candidate-create-teams"] = () => ({ body: { defaultTeamId: null, items: [
+      { id: "11111111-1111-4111-8111-111111111111", name: "Alpha", lead: "Lena Lead" },
+      { id: "22222222-2222-4222-8222-222222222222", name: "Beta", lead: null },
+    ] } });
+    routes["POST /api/v1/candidates"] = () => ({ status: 201, body: { id: "new-id" } });
+    wrap(<CandidatesPage me={LEAD} onOpenProfile={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
+    const dlg = screen.getByRole("dialog", { name: "New candidate" });
+    fireEvent.change(within(dlg).getByLabelText("First name"), { target: { value: "A" } });
+    fireEvent.change(within(dlg).getByLabelText("Last name"), { target: { value: "B" } });
+    fireEvent.change(within(dlg).getByLabelText("Phone"), { target: { value: "+14695550199" } });
+    fireEvent.change(within(dlg).getByLabelText("Personal email"), { target: { value: "a.b@example.com" } });
+    const team = await within(dlg).findByRole("combobox", { name: "Team" });
+    await within(dlg).findByRole("option", { name: "Dallas" });
+    fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
+    fireEvent.change(within(dlg).getByLabelText("Location"), { target: { value: LOC } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
+    expect(team).toHaveAccessibleDescription("Choose a team.");
+    expect(writes()).toEqual([]);
+
+    fireEvent.change(team, { target: { value: "22222222-2222-4222-8222-222222222222" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0]!.body).toMatchObject({ teamId: "22222222-2222-4222-8222-222222222222" });
+  });
+
   it("when the lookup list is unavailable: technology stays a dropdown, locations fall back to known ones", async () => {
     routes["GET /api/v1/lookups"] = () => problem(503, { title: "Unavailable" });
     wrap(<CandidatesPage me={LEAD} />);

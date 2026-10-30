@@ -654,6 +654,20 @@ export class CandidatesService implements OnModuleInit {
     return { items: rows.map((r) => ({ id: r.id, name: r.name, lead: r.lead_name })) };
   }
 
+  /** Teams the New candidate dialog offers: the caller's candidate:create scope, their own team first. */
+  async createTeams(user: AuthedUser) {
+    const scope = resolveScope(user.access, "candidate:create");
+    if (!scope) throw new ForbiddenException();
+    const own = user.access.teamIds[0] ?? null;
+    const ids = scope.all ? null : [...scope.teamIds];
+    const rows = await this.db.withUser(user.id, async (c) => (await c.query<{ id: string; name: string; lead_name: string | null }>(
+      `SELECT t.id, t.name, u.display_name AS lead_name
+         FROM eureka.team t LEFT JOIN eureka.app_user u ON u.id = t.lead_id
+        WHERE $1::uuid[] IS NULL OR t.id = ANY ($1::uuid[])
+        ORDER BY t.id IS DISTINCT FROM $2::uuid, lower(t.name), t.id`, [ids, own])).rows);
+    return { items: rows.map((r) => ({ id: r.id, name: r.name, lead: r.lead_name })), defaultTeamId: rows.some((r) => r.id === own) ? own : null };
+  }
+
   async setVisibility(user: AuthedUser, id: string, visibility: CandidateVisibility, teamIds: string[] = []) {
     return this.db.withUser(user.id, async (c) => {
       await this.loadForWrite(c, user, id, "candidate.visibility:update");
