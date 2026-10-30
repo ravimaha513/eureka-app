@@ -273,6 +273,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Candidate profile Submissions tab (totals, per-status counts, got-an-interview filter, job/client search); `interviewed`/`search` filters + `/submissions/summary` (docs/submissions-api.md).
 - Candidate profile Metrics card on Overview (no migrations): submissions, interviews (upcoming/cleared/not cleared/by round), placements and conversion rates via `GET /candidates/:id/metrics`, each section under its own read scope (docs/candidates-api.md "Metrics").
 - Interview result (0360): per-round Pending/Cleared/Rejected (Sales: recruiter, lead and above), Result column + filter on the board; Placements → Cleared interviews tab (latest first, by team) and Team filter (`GET /placements/teams`).
+- Submission funnel (submitted → interview → screening/L1/L2/L3+/final → placed) on Submissions page + candidate tab; per-row interview-round trail; `stage` filter (docs/submissions-api.md).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
