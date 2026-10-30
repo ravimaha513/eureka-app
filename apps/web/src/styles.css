@@ -901,3 +901,7 @@ form.stack { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .qjlabel { flex: 1; min-width: 0; font-weight: 500; }
 .qjsec { font-size: 12px; color: var(--muted); }
 .qjhint { font-size: 12px; margin: 10px 0 0; }
+
+/* Shown while the browser is offline */
+.offline-banner { display: flex; align-items: center; gap: 8px; margin: 12px 32px 0; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--warn-fg); font-size: 14px; font-weight: 500; }
+@media (max-width: 768px) { .offline-banner { margin: 10px 14px 0; } }
