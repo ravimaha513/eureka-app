@@ -5,6 +5,8 @@ import { FUNCTIONS_DIR, MIGRATIONS_DIR, sqlFiles } from "./migrate.js";
 
 /** Migrations up to this one may still define functions that now live in db/functions. */
 const LAST_COPYING_MIGRATION = "0180";
+/** Functions moved to db/functions after their last migrated body (migration: function). */
+const MOVED_LATER = new Set(["0270_import_hotlist_sheet.sql: authz.import_load_person"]);
 /**
  * Numbers used twice; both files are applied in name order. 0090 predates this
  * check; 0270 and 0280 were merged together on 2026-10-29 (renaming an applied
@@ -35,7 +37,8 @@ describe("migration files", () => {
     const managed = new Set(functionFiles.map((f) => f.replace(/\.sql$/, "").replace("/", ".")));
     const offenders = migrations
       .filter((f) => f.slice(0, 4) > LAST_COPYING_MIGRATION)
-      .flatMap((f) => defines(read(MIGRATIONS_DIR, f)).filter((fn) => managed.has(fn)).map((fn) => `${f}: ${fn}`));
+      .flatMap((f) => defines(read(MIGRATIONS_DIR, f)).filter((fn) => managed.has(fn)).map((fn) => `${f}: ${fn}`))
+      .filter((x) => !MOVED_LATER.has(x));
     expect(offenders, "change db/functions/<schema>/<name>.sql instead").toEqual([]);
   });
 });

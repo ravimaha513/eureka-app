@@ -1,6 +1,7 @@
 -- authz.request_role: current definition (repeatable; db/functions/README.md).
 -- Earlier bodies: migrations 0013, 0018, 0084. Change this file, not a new migration.
 
+-- 0310: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.request_role(p_user uuid, p_role text, p_location uuid)
  RETURNS TABLE(request_id uuid, request_status text)
@@ -16,13 +17,10 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'unknown_role' USING ERRCODE = 'check_violation';
   END IF;
-  -- Separation of duties: org_admin holds no data role and vice versa.
-  IF (p_role = 'org_admin' AND EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.user_id = p_user
-        AND ur.role_key <> 'org_admin' AND ur.valid @> pg_catalog.now()))
-     OR (p_role <> 'org_admin' AND EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.user_id = p_user
-        AND ur.role_key = 'org_admin' AND ur.valid @> pg_catalog.now())) THEN
-    RAISE EXCEPTION 'separation_of_duties' USING ERRCODE = 'check_violation';
-  END IF;
+  -- Archived roles and department-bound roles outside the user's department (docs/roles-api.md).
+  PERFORM authz.role_grantable(p_role, p_user);
+  -- Separation of duties: an admin role is held with no data role and vice versa.
+  PERFORM authz.role_separation(p_role, p_user);
   IF r.is_location_bound AND p_location IS NULL THEN
     RAISE EXCEPTION 'location_required' USING ERRCODE = 'check_violation';
   END IF;

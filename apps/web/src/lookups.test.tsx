@@ -7,11 +7,11 @@ import { LookupPicker, lookupsKey, type LookupKind, type Lookups, type Named } f
 const ID = "77777777-7777-4777-8777-777777777777";
 const FULL: Lookups = {
   technologies: [{ id: "t1", name: "Java" }], clients: [{ id: "c1", name: "Northwind Financial" }],
-  vendors: [{ id: "v1", name: "Contoso Staffing" }], implementationPartners: [{ id: "i1", name: "Prime IP" }],
+  vendors: [{ id: "v1", name: "Contoso Staffing" }], implementationPartners: [{ id: "i1", name: "Prime IP" }], roles: [],
   locations: [{ id: "l1", name: "Dallas" }], coaches: [{ id: "k1", name: "Coach One" }],
 };
 /** What the server returns to e.g. org_admin: restricted lists withheld as []. */
-const WITHHELD: Lookups = { ...FULL, clients: [], vendors: [], implementationPartners: [], coaches: [] };
+const WITHHELD: Lookups = { ...FULL, clients: [], vendors: [], implementationPartners: [], roles: [], coaches: [] };
 
 afterEach(() => vi.restoreAllMocks());
 

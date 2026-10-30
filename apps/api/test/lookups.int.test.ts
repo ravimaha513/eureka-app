@@ -65,7 +65,7 @@ describe("lookups", () => {
 
   it.each(users)("returns only the lists the caller may see (%s)", async (key) => {
     const j = await lookups(key);
-    expect(Object.keys(j).sort()).toEqual(["clients", "coaches", "implementationPartners", "locations", "technologies", "vendors"]);
+    expect(Object.keys(j).sort()).toEqual(["clients", "coaches", "implementationPartners", "locations", "roles", "technologies", "vendors"]);
     for (const list of Object.values(j)) {
       expect(Array.isArray(list)).toBe(true);
       for (const item of list) expect(Object.keys(item).sort()).toEqual(["id", "name"]);
@@ -74,6 +74,12 @@ describe("lookups", () => {
     // Open to everyone.
     expect(j.technologies!.map((t) => t.name)).toEqual(["Java"]); // inactive Cobol hidden
     expect(j.locations!.map((l) => l.id).sort()).toEqual([LOC.austin, LOC.dallas].sort());
+    // Live business roles in ladder order (docs/roles-api.md): no admin role, key as id, label as name.
+    expect(j.roles!.map((r) => r.id)).not.toContain("org_admin");
+    const ids = j.roles!.map((r) => r.id);
+    expect(ids.indexOf("recruiter")).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf("recruiter")).toBeLessThan(ids.indexOf("lead")); // level 1 before level 2 within the sales track
+    expect(j.roles!.find((r) => r.id === "lead")).toEqual({ id: "lead", name: "Lead (Sales)" });
 
     // Interview schedulers/editors only.
     expect(j.coaches).toEqual(SEES_COACHES.has(key) ? [{ id: U.coach, name: "coach" }] : []);

@@ -1,7 +1,8 @@
 import { useId, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BGC_HISTORY_YEARS, PLACEMENT_STATUSES, ROLES, ROLE_LABELS, type Role } from "@eureka/shared";
+import { BGC_HISTORY_YEARS, PLACEMENT_STATUSES } from "@eureka/shared";
 import { ApiError, type Me } from "../api";
+import { RoleName, RoleOptions } from "../lookups";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { Drawer, Field, fmtDate } from "../sales/ui";
 import { PLACEMENT_TYPE_LABELS, fmtDateTime, pipelineLabel, type PlacementType } from "../pipeline/pipelineApi";
@@ -20,7 +21,6 @@ import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
 
 const PAGE_SIZE = 50;
-const roleLabel = (r: string) => ROLE_LABELS[r as Role] ?? paperworkLabel(r);
 
 export function paperworkError(e: unknown): string {
   if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";
@@ -97,7 +97,7 @@ function WorkQueue({ me }: { me: Pick<Me, "id" | "roles" | "capabilities"> }) {
           <label className="field inline">Owner role
             <select value={ownerRole} onChange={(e) => set(setOwnerRaw)(e.target.value)}>
               <option value="">Any role</option>
-              {ROLES.filter((r) => r !== "org_admin").map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+              <RoleOptions />
             </select>
           </label>
           <label className="field inline">BGC status
@@ -219,7 +219,7 @@ function PaperworkDrawer({ placementId, me, onClose }: { placementId: string; me
                           <td>{docTypeLabel(i.docType)}<span className="block">{i.required ? "Required" : "Optional"}
                             {i.assignee && ` · ${i.assignee.name ?? "assigned"}`}{i.documentId && " · document linked"}</span>
                             {i.notes && <span className="block note">{i.notes}</span>}</td>
-                          <td>{roleLabel(i.ownerRole)}</td>
+                          <td><RoleName k={i.ownerRole} /></td>
                           <td><span className={`badge cl-${i.status}`}>{paperworkLabel(i.status)}</span>
                             {i.statusReason && <span className="block muted">{i.statusReason}</span>}</td>
                           <td>{i.dueOn ? fmtDate(i.dueOn) : <span className="muted">—</span>}{i.overdue && <> <span className="badge overdue">Overdue</span></>}</td>
@@ -401,7 +401,7 @@ function ItemDialog({ item, me, candidateId, placementId, onClose, onDone }: {
             <Field label="Owner role">
               {(p) => (
                 <select {...p} value={ownerRole} onChange={(e) => setOwnerRole(e.target.value)}>
-                  {ROLES.filter((r) => r !== "org_admin").map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+                  <RoleOptions />
                 </select>
               )}
             </Field>
@@ -554,7 +554,9 @@ function TemplatesPanel({ templates, canPublish }: { templates: TemplateVersion[
                   <tr key={type}>
                     <td>{PLACEMENT_TYPE_LABELS[type]}</td>
                     <td>{t ? `v${t.version} · ${fmtDate(t.publishedAt)}` : <span className="muted">None</span>}</td>
-                    <td>{t && t.items.length ? t.items.map((i) => `${docTypeLabel(i.docType)} (${roleLabel(i.ownerRole)}${i.required ? "" : ", optional"})`).join("; ") : <span className="muted">No documents</span>}</td>
+                    <td>{t && t.items.length
+                      ? t.items.map((i, k) => <span key={i.docType}>{k > 0 && "; "}{docTypeLabel(i.docType)} (<RoleName k={i.ownerRole} />{i.required ? "" : ", optional"})</span>)
+                      : <span className="muted">No documents</span>}</td>
                     <td className="rowactions">{canPublish && (
                       <button type="button" className="btn sm" onClick={() => setEditing({ kind, placementType: type, current: t })}
                         aria-label={`New ${paperworkLabel(kind).toLowerCase()} version for ${PLACEMENT_TYPE_LABELS[type]}`}>New version</button>
@@ -608,7 +610,7 @@ function TemplateDialog({ kind, placementType, current, onClose, onDone }: {
               <Field label={`Owner role ${k + 1}`}>
                 {(p) => (
                   <select {...p} value={it.ownerRole} onChange={(e) => update(k, { ownerRole: e.target.value })}>
-                    {ROLES.filter((r) => r !== "org_admin").map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+                    <RoleOptions />
                   </select>
                 )}
               </Field>

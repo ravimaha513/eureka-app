@@ -1,5 +1,5 @@
-import { GRANTS, type Permission } from "./catalog.js";
-import { ownsCandidate, resolveScope, type CandidateRef, type UserAccess } from "./engine.js";
+import { type Permission } from "./catalog.js";
+import { grantsOf, ownsCandidate, resolveScope, type CandidateRef, type UserAccess } from "./engine.js";
 import { canCreateBatch } from "./actions.js";
 
 /**
@@ -25,7 +25,7 @@ export interface TrainingBatchRef {
  */
 export function trainingBatchCovered(user: UserAccess, perm: TrainingPermission, b: TrainingBatchRef): boolean {
   for (const a of user.roles) {
-    const scope = GRANTS[a.role][perm as Permission];
+    const scope = grantsOf(a)[perm as Permission];
     if (scope === "org") return true;
     if (scope === "location" && a.locationId === b.locationId) return true;
     if (scope === "coached" && b.trainerId !== null && b.trainerId === user.userId) return true;

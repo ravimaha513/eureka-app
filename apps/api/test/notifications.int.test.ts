@@ -138,23 +138,23 @@ describe("recipients per event type (authz.notification_recipients)", () => {
     const { placementId } = await placement();
     const a = await newId(db);
     const wa = await emitEvent(db, "work_authorization.expiring", "work_authorization", await newId(db), PAYLOADS.workAuth(cand, await newId(db)));
-    expect(await recipients(wa)).toEqual(ids([[U.hr, "hr"], [U.imm, "immigration"]]));
+    expect(await recipients(wa)).toEqual(ids([[U.hr, "notify.work_authorization:receive"], [U.imm, "notify.work_authorization:receive"]]));
     const ex = await emitEvent(db, "employee.benched", "employee", a, PAYLOADS.projectExit(a, placementId, cand));
-    expect(await recipients(ex)).toEqual(ids([[U.hr, "hr"], [U.acct, "accounts"], [U.imm, "immigration"], [X.bu!, "bu_head"], [U.ceo, "ceo"]]));
+    expect(await recipients(ex)).toEqual(ids([[U.hr, "notify.employee_exit:receive"], [U.acct, "notify.employee_exit:receive"], [U.imm, "notify.employee_exit:receive"], [X.bu!, "notify.employee_exit:receive"], [U.ceo, "notify.employee_exit:receive"]]));
     const left = await emitEvent(db, "employee.exited", "employee", a, PAYLOADS.exited(a, a, cand));
-    expect(await recipients(left)).toEqual(ids([[U.hr, "hr"], [U.acct, "accounts"], [U.imm, "immigration"], [X.bu!, "bu_head"], [U.ceo, "ceo"]]));
+    expect(await recipients(left)).toEqual(ids([[U.hr, "notify.employee_exit:receive"], [U.acct, "notify.employee_exit:receive"], [U.imm, "notify.employee_exit:receive"], [X.bu!, "notify.employee_exit:receive"], [U.ceo, "notify.employee_exit:receive"]]));
     const es = await emitEvent(db, "assignment.ending_soon", "assignment", a, PAYLOADS.endingSoon(a, placementId, cand));
-    expect(await recipients(es)).toEqual(ids([[U.hr, "hr"], [U.acct, "accounts"]]));
+    expect(await recipients(es)).toEqual(ids([[U.hr, "notify.assignment_ending:receive"], [U.acct, "notify.assignment_ending:receive"]]));
   });
 
   it("bench-time reaches the candidate's recruiter, team lead, the lead's manager and the CEO", async () => {
     const t1 = await benchCandidate("2026-05-01");
     const ev = await emitEvent(db, "employee.bench_time", "candidate", t1, PAYLOADS.benchTime(t1));
-    expect(await recipients(ev)).toEqual(ids([[U.r1a, "recruiter"], [U.l1, "lead"], [U.m1, "manager"], [U.ceo, "ceo"]]));
+    expect(await recipients(ev)).toEqual(ids([[U.r1a, "recruiter"], [U.l1, "lead"], [U.m1, "manager"], [U.ceo, "notify.bench_time:receive"]]));
     // Another team: its own lead and manager; an unassigned recruiter adds nobody.
     const t3 = await benchCandidate("2026-05-01", T.t3, null);
     const ev3 = await emitEvent(db, "employee.bench_time", "candidate", t3, PAYLOADS.benchTime(t3));
-    expect(await recipients(ev3)).toEqual(ids([[U.l3, "lead"], [U.m2, "manager"], [U.ceo, "ceo"]]));
+    expect(await recipients(ev3)).toEqual(ids([[U.l3, "lead"], [U.m2, "manager"], [U.ceo, "notify.bench_time:receive"]]));
   });
 
   it("team-assigned reaches the new team's lead and that lead's manager only", async () => {
@@ -183,7 +183,7 @@ describe("recipients per event type (authz.notification_recipients)", () => {
     const { placementId } = await placement();
     const pc = (await rows<{ id: string }>(
       "SELECT id FROM eureka.outbox_event WHERE aggregate_id = $1 AND type = 'placement.created'", [placementId]))[0]!.id;
-    expect(await recipients(pc)).toEqual(ids([[U.hr, "hr"], [U.acct, "accounts"], [U.imm, "immigration"]]));
+    expect(await recipients(pc)).toEqual(ids([[U.hr, "notify.placement_hr:receive"], [U.acct, "notify.placement_accounts:receive"], [U.imm, "notify.placement_immigration:receive"]]));
     const unknown = await emitEvent(db, "something.else", "candidate", placementId, { candidateId: placementId });
     expect(await recipients(unknown)).toEqual([]);
     expect(await recipients(await newId(db))).toEqual([]);
@@ -249,8 +249,8 @@ describe("delivery: inbox and email channels", () => {
     const ceo = mail.sent.find((m) => m.to === "ceo@eureka.example")!;
     expect(ceo.subject).toBe("Eureka: project assignment ended");
     expect(ceo.text).toContain(`Placement reference: ${placementId}`);
-    expect(ceo.text).toContain("You receive this email as the CEO.");
-    expect(mail.sent.find((m) => m.to === "hr@eureka.example")!.text).toContain("as a member of HR.");
+    expect(ceo.text).toContain("You receive this email as a recipient of employee bench and exit notices.");
+    expect(mail.sent.find((m) => m.to === "hr@eureka.example")!.text).toContain("as a recipient of employee bench and exit notices.");
   });
 
   it("email stays at most once per recipient for the new types: unknown outcome is in doubt and never resent", async () => {
@@ -481,7 +481,7 @@ describe("no personal data in outbox payloads, emails or inbox rows", () => {
     const ev = { id: "x", type: "employee.bench_time", aggregate_id: "00000000-0000-4000-8000-000000000001",
       payload: { candidateId: "00000000-0000-4000-8000-000000000001", benchSince: "2026-01-01", benchDays: 40, thresholdDays: 30 } };
     expect(() => renderEmail(ev, ORIGIN, ["org_admin"])).toThrow(/no known reason/);
-    expect(() => renderEmail({ ...ev, type: "x.y" }, ORIGIN, ["ceo"])).toThrow(/not delivered/);
+    expect(() => renderEmail({ ...ev, type: "x.y" }, ORIGIN, ["notify.bench_time:receive"])).toThrow(/not delivered/);
     expect(renderEmail(ev, ORIGIN, ["lead", "recruiter"]).text).toContain("as the team lead and the recruiter.");
   });
 });

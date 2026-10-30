@@ -2107,6 +2107,68 @@ const IGNORED: IgnoreCase[] = [
       expect((await call(null, "GET", "/api/v1/me", undefined, {}, victim)).statusCode).toBe(200);
     },
   },
+  // role definitions (docs/roles-api.md, migration 0310): key, is_system, is_restricted, holders and timestamps are the
+  // server's. Cases run in shards, so each one clones its own role.
+  {
+    route: "POST /api/v1/admin/roles",
+    run: async () => {
+      const r = await call("admin", "POST", "/api/v1/admin/roles", {
+        label: "MA Role Create", cloneFrom: "lead", ...SERVER_MANAGED, key: "org_admin", isSystem: true, restricted: false, holders: 9,
+      });
+      expect(r.statusCode, r.body).toBe(422);
+      const made = await ok("admin", "POST", "/api/v1/admin/roles", { label: "MA Role Create", cloneFrom: "lead" });
+      expect(made.key).toBe("c_ma_role_create");
+      expect(await rows(`SELECT is_system, is_admin, cloned_from FROM eureka.role WHERE key = 'c_ma_role_create'`))
+        .toEqual([{ is_system: false, is_admin: false, cloned_from: "lead" }]);
+    },
+  },
+  {
+    route: "PATCH /api/v1/admin/roles/:key",
+    run: async () => {
+      const { key } = await ok("admin", "POST", "/api/v1/admin/roles", { label: "MA Role Patch", cloneFrom: "lead" });
+      const r = await call("admin", "PATCH", `/api/v1/admin/roles/${key}`, {
+        label: "MA Role Patched", ...SERVER_MANAGED, key: "org_admin", isSystem: true, restricted: false, holders: 9, archivedAt: PAST, grants: { "rate:read": "org" },
+      });
+      expect(r.statusCode, r.body).toBe(422);
+      await ok("admin", "PATCH", `/api/v1/admin/roles/${key}`, { label: "MA Role Patched", traits: { recruiter: true } }, 204);
+      expect(await rows(`SELECT key, label, is_system, is_recruiter, archived_at FROM eureka.role WHERE key = $1`, [key]))
+        .toEqual([{ key, label: "MA Role Patched", is_system: false, is_recruiter: true, archived_at: null }]);
+      expect(await rows(`SELECT 1 FROM eureka.role_permission WHERE role_key = $1 AND permission = 'rate:read'`, [key])).toEqual([]);
+    },
+  },
+  {
+    route: "PUT /api/v1/admin/roles/:key/grants",
+    run: async () => {
+      const { key } = await ok("admin", "POST", "/api/v1/admin/roles", { label: "MA Role Grants", cloneFrom: "lead" });
+      const r = await call("admin", "PUT", `/api/v1/admin/roles/${key}/grants`, {
+        grants: { "candidate:read": "team" }, ...SERVER_MANAGED, label: "Hijacked", traits: { admin: true }, isSystem: true,
+      });
+      expect(r.statusCode, r.body).toBe(422);
+      await ok("admin", "PUT", `/api/v1/admin/roles/${key}/grants`, { grants: { "candidate:read": "team" } }, 204);
+      expect(await rows(`SELECT permission, scope FROM eureka.role_permission WHERE role_key = $1`, [key])).toEqual([{ permission: "candidate:read", scope: "team" }]);
+      expect(await rows(`SELECT label, is_admin FROM eureka.role WHERE key = $1`, [key])).toEqual([{ label: "MA Role Grants", is_admin: false }]);
+    },
+  },
+  {
+    route: "POST /api/v1/admin/roles/:key/archive",
+    run: async () => {
+      const { key } = await ok("admin", "POST", "/api/v1/admin/roles", { label: "MA Role Archive", cloneFrom: "lead" });
+      const r = await call("admin", "POST", `/api/v1/admin/roles/${key}/archive`, { ...SERVER_MANAGED, key: "lead", label: "Hijacked", isSystem: true });
+      expect(r.statusCode, r.body).toBe(204);
+      expect(await rows(`SELECT key, label, archived_at IS NOT NULL AS archived FROM eureka.role WHERE key IN ($1, 'lead') ORDER BY key`, [key]))
+        .toEqual([{ key, label: "MA Role Archive", archived: true }, { key: "lead", label: "Lead (Sales)", archived: false }]);
+    },
+  },
+  {
+    route: "POST /api/v1/admin/roles/:key/restore",
+    run: async () => {
+      const { key } = await ok("admin", "POST", "/api/v1/admin/roles", { label: "MA Role Restore", cloneFrom: "lead" });
+      await ok("admin", "POST", `/api/v1/admin/roles/${key}/archive`, undefined, 204);
+      const r = await call("admin", "POST", `/api/v1/admin/roles/${key}/restore`, { ...SERVER_MANAGED, key: "lead", label: "Hijacked", archivedAt: PAST });
+      expect(r.statusCode, r.body).toBe(204);
+      expect(await rows(`SELECT label, archived_at FROM eureka.role WHERE key = $1`, [key])).toEqual([{ label: "MA Role Restore", archived_at: null }]);
+    },
+  },
   {
     route: "POST /api/v1/admin/users/:id/deactivate",
     run: async () => {

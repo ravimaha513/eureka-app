@@ -1,7 +1,7 @@
 import { ForbiddenException, HttpException, HttpStatus, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import type pg from "pg";
 import { z } from "zod";
-import { GRANTS, resolveScope, type EffectiveScope, type Permission, type UserAccess } from "@eureka/shared";
+import { grantsOf, resolveScope, type EffectiveScope, type Permission, type UserAccess } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
@@ -75,7 +75,7 @@ const SCOPE_RANK = { own: 0, coached: 0, coached_hierarchy: 0, team: 0, hierarch
 export function defaultGroupBy(access: UserAccess): GroupBy {
   let rank = 0;
   for (const a of access.roles) {
-    const s = GRANTS[a.role]["report:read"];
+    const s = grantsOf(a)["report:read"];
     if (s) rank = Math.max(rank, SCOPE_RANK[s]);
   }
   return rank === 3 ? "location" : rank === 2 ? "candidate" : rank === 1 ? "team" : "recruiter";

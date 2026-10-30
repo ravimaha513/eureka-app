@@ -152,7 +152,7 @@ describe("Employees contacts and export", () => {
       emp("e1", "Asha Iyer", { email: "asha@example.com", phone: "+14695550142", masked: false }),
       emp("e2", "Divya Menon", { email: "d•••@example.com", phone: "•••-•••-43", masked: true }),
     ], nextCursor: null } }),
-    "GET /api/v1/lookups": () => ({ body: { technologies: [], clients: [], vendors: [], implementationPartners: [], locations: [], coaches: [] } }),
+    "GET /api/v1/lookups": () => ({ body: { technologies: [], clients: [], vendors: [], implementationPartners: [], roles: [], locations: [], coaches: [] } }),
     "POST /api/v1/employees/export": () => ({ body: "csv" }),
   });
 

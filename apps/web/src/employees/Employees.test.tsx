@@ -34,7 +34,7 @@ const base = (): Record<string, Handler> => ({
   "GET /api/v1/employees": () => ({ body: { items: [E1, E2], nextCursor: null } }),
   "GET /api/v1/employees/e1": () => ({ body: detail(E1) }),
   "GET /api/v1/employees/e2": () => ({ body: detail(E2) }),
-  "GET /api/v1/lookups": () => ({ body: { technologies: [], clients: [{ id: "cl1", name: "Northwind Financial" }], vendors: [{ id: "v1", name: "Prime Vendor Co" }], implementationPartners: [], locations: [{ id: "loc", name: "Dallas" }], coaches: [] } }),
+  "GET /api/v1/lookups": () => ({ body: { technologies: [], clients: [{ id: "cl1", name: "Northwind Financial" }], vendors: [{ id: "v1", name: "Prime Vendor Co" }], implementationPartners: [], roles: [], locations: [{ id: "loc", name: "Dallas" }], coaches: [] } }),
   // 0150
   "GET /api/v1/employees/payroll-companies": () => ({ body: { items: [
     { id: "co1", name: "Eureka Payroll LLC", status: "active" }, { id: "co2", name: "Old Entity", status: "inactive" }] } }),

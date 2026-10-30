@@ -98,7 +98,7 @@ describe("interview board", () => {
   it("highlights cleared rows green and shows the candidate feedback column", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
       const path = String(url);
-      if (path.includes("/lookups")) return json({ technologies: [], clients: [], vendors: [], implementationPartners: [], coaches: [], locations: [] });
+      if (path.includes("/lookups")) return json({ technologies: [], clients: [], vendors: [], implementationPartners: [], roles: [], coaches: [], locations: [] });
       return json({ items: [row, { ...row, id: "i2", candidate: { id: "d", name: "Bo Lee" }, cleared: false, candidateFeedback: null }], nextCursor: null });
     });
     wrap(<InterviewsPage me={{ id: "u", email: "a@example.com", displayName: "R", roles: [], capabilities: ["interview:read"], csrfToken: "t" }} />);

@@ -35,6 +35,19 @@ export const ERROR_MESSAGES: Record<string, string> = {
   password_weak: "Use 10 to 72 characters with at least one letter and one number.",
   password_login_disabled: "Password sign-in is not enabled in this environment.",
   unknown_role: "That role doesn't exist. Refresh and try again.",
+  // Role definitions (docs/roles-api.md)
+  system_role: "Built-in roles can't be changed. Clone it into a new role and edit that.",
+  role_archived: "This role is archived. Restore it first.",
+  role_in_use: "People hold this role. Traits, department, archiving and new restricted permissions need a role nobody holds: clone it, adjust the copy and move people over.",
+  role_exists: "A role with this name already exists.",
+  invalid_label: "Give the role a name of up to 80 characters.",
+  invalid_track: "Tracks are lowercase words joined by underscores, e.g. sales or interview_prep.",
+  invalid_level: "Levels run from 1 (bottom) to 20.",
+  unknown_permission: "One of the permissions isn't known. Refresh and try again.",
+  invalid_scope: "That scope isn't allowed.",
+  location_scope_needs_location: "Only a location-bound role can use the “Their location” scope.",
+  unknown_department: "That department doesn't exist any more. Refresh and try again.",
+  role_department_mismatch: "This role is limited to one department; the person isn't in it. Set their department first.",
 };
 
 /** Short reason a person was skipped by a bulk team add (AddMembersResult.failed). */

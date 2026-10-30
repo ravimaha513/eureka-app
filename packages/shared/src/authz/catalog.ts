@@ -1,8 +1,12 @@
 /**
- * Authorization catalog: the single source of truth for roles, permissions and
- * scoped grants. The database seed (role_permission), the design document's
- * grants table and the authorization matrix tests are all generated from this
- * file, so they cannot drift apart. Changes here require code review.
+ * Authorization catalog: the single source of truth for permissions, scopes and
+ * the system roles (templates an admin clones into custom roles; docs/roles-api.md).
+ * The database seed (eureka.permission, the system rows of role and
+ * role_permission), the design document's grants table and the authorization
+ * matrix tests are all generated from this file, so they cannot drift apart.
+ * Custom roles live only in the database; at runtime the engine reads every
+ * role's grants and traits from there (AccessService), never from this file.
+ * Changes here require code review.
  */
 
 /**
@@ -69,17 +73,77 @@ export const ROLE_LABELS: Record<Role, string> = {
   org_admin: "Org Admin",
 };
 
+/**
+ * How the system treats a role's holders, independent of its grants (docs/roles-api.md).
+ * Code branches on these, never on the role key, so a custom role cloned from a
+ * system role behaves like it. Stored in eureka.role; editable on custom roles.
+ */
+export interface RoleTraits {
+  /** Sees candidates marked "Open to all teams" (design AS-07); client-requirement jobs; performance subject. */
+  sales: boolean;
+  /** Grants carry a location id. */
+  locationBound: boolean;
+  /** Users & Access administrator: separation of duties, last-admin guard, restricted by definition. */
+  admin: boolean;
+  /** Owns candidates by default (candidate.recruiter_id); may be added to a team as a member (AD-10). */
+  recruiter: boolean;
+  /** May be assigned to coach sales teams (AD-11) and train batches. */
+  coach: boolean;
+}
+
+const traits = (over: Partial<RoleTraits> = {}): RoleTraits => ({
+  sales: false, locationBound: false, admin: false, recruiter: false, coach: false, ...over,
+});
+
+export const ROLE_TRAITS: Record<Role, RoleTraits> = {
+  recruiter: traits({ sales: true, recruiter: true }),
+  lead: traits({ sales: true }),
+  manager: traits({ sales: true }),
+  assoc_director: traits({ sales: true }),
+  ceo: traits({ sales: true }),
+  location_incharge: traits({ locationBound: true }),
+  location_ops_admin: traits({ locationBound: true }),
+  hr: traits(),
+  associate_hr: traits(),
+  accounts: traits(),
+  immigration: traits(),
+  interview_coach: traits({ coach: true }),
+  interview_lead: traits({ coach: true }),
+  interview_coordinator: traits(),
+  documents_team: traits(),
+  bu_head: traits(),
+  org_admin: traits({ admin: true }),
+};
+
+/**
+ * Ladder position (docs/roles-api.md): `track` groups roles that form a reporting
+ * line, `level` orders them bottom-up. Presentation and promotion only; grants nothing.
+ */
+export const ROLE_LADDER: Record<Role, { track: string; level: number }> = {
+  recruiter: { track: "sales", level: 1 },
+  lead: { track: "sales", level: 2 },
+  manager: { track: "sales", level: 3 },
+  assoc_director: { track: "sales", level: 4 },
+  ceo: { track: "sales", level: 5 },
+  interview_coach: { track: "interview_prep", level: 1 },
+  interview_lead: { track: "interview_prep", level: 2 },
+  interview_coordinator: { track: "interview_prep", level: 1 },
+  location_ops_admin: { track: "location", level: 1 },
+  location_incharge: { track: "location", level: 2 },
+  associate_hr: { track: "hr", level: 1 },
+  hr: { track: "hr", level: 2 },
+  accounts: { track: "operations", level: 1 },
+  immigration: { track: "operations", level: 1 },
+  documents_team: { track: "operations", level: 1 },
+  bu_head: { track: "operations", level: 2 },
+  org_admin: { track: "administration", level: 1 },
+};
+
 /** Sales roles can see candidates marked "Open to all teams" (design AS-07). */
-export const SALES_ROLES: readonly Role[] = [
-  "recruiter",
-  "lead",
-  "manager",
-  "assoc_director",
-  "ceo",
-];
+export const SALES_ROLES: readonly Role[] = ROLES.filter((r) => ROLE_TRAITS[r].sales);
 
 /** Location-bound roles: their grants carry a location id. */
-export const LOCATION_ROLES: readonly Role[] = ["location_incharge", "location_ops_admin"];
+export const LOCATION_ROLES: readonly Role[] = ROLES.filter((r) => ROLE_TRAITS[r].locationBound);
 
 export const PERMISSIONS = [
   // candidates
@@ -182,8 +246,151 @@ export const PERMISSIONS = [
   "applicant.phone:read",
   "application:read",
   "application:manage",
+  // notifications: who receives an event (authz.notification_recipients); docs/roles-api.md
+  "notify.placement_hr:receive",
+  "notify.placement_accounts:receive",
+  "notify.placement_immigration:receive",
+  "notify.work_authorization:receive",
+  "notify.employee_exit:receive",
+  "notify.assignment_ending:receive",
+  "notify.bench_time:receive",
+  "notify.application:receive",
+  "notify.interview_request:receive",
+  "notify.contract:receive",
+  "notify.birthdays:receive",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
+
+/** Grid headings of the Roles screen, by the permission key's first segment. */
+export const PERMISSION_AREAS: Record<string, string> = {
+  candidate: "Candidates",
+  hotlist: "Candidates",
+  submission: "Marketing",
+  interview: "Interviews",
+  calendar: "Interviews",
+  placement: "Placements",
+  rate: "Placements",
+  document: "Documents",
+  bgc: "Documents",
+  visa: "Documents",
+  employee: "Employees",
+  assignment: "Employees",
+  invoice: "Finance",
+  bill: "Finance",
+  report: "Insight",
+  performance: "Insight",
+  vendor: "Vendors",
+  company: "Companies & facilities",
+  facility: "Companies & facilities",
+  utility: "Companies & facilities",
+  team: "Organisation",
+  designation: "Organisation",
+  coach: "Organisation",
+  staff: "Organisation",
+  access: "Administration",
+  audit: "Administration",
+  technology: "Administration",
+  datahub: "Data Hub",
+  training: "Training",
+  chat: "Chat",
+  job: "Jobs portal",
+  applicant: "Jobs portal",
+  application: "Jobs portal",
+  notify: "Notifications",
+};
+
+export function permissionArea(p: Permission): string {
+  return PERMISSION_AREAS[p.split(/[.:]/)[0]!] ?? "Other";
+}
+
+/** One line per permission for the Roles screen. */
+export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
+  "candidate:read": "See candidates and their profiles",
+  "candidate:create": "Add candidates",
+  "candidate:update": "Edit candidates",
+  "candidate:assign": "Move candidates between recruiters and teams",
+  "candidate.visibility:update": "Open a candidate to all or selected teams",
+  "candidate.rating:update": "Rate candidates",
+  "candidate.phone:read": "See candidate phone numbers",
+  "candidate.dob:read": "See candidate dates of birth (restricted)",
+  "candidate.compliance:update": "E-Verify, offer letter and 1099 links; documents status",
+  "hotlist:read": "See the Hot List",
+  "submission:read": "See submissions",
+  "submission:create": "Submit candidates to clients",
+  "submission:update": "Edit submissions",
+  "interview:read": "See interviews",
+  "interview:create": "Schedule interviews",
+  "interview:update": "Edit interviews and outcomes",
+  "interview.feedback:create": "Record interview feedback",
+  "calendar:block": "Block the support team's calendar",
+  "placement:read": "See placements",
+  "placement:create": "Create placements",
+  "placement:update": "Edit placements",
+  "placement.bgc_status:update": "Update background-check status",
+  "rate:read": "See bill and pay rates",
+  "document:read": "See candidate documents",
+  "document:upload": "Upload candidate documents",
+  "document:verify": "Verify documents",
+  "document.restricted:read": "Open restricted documents (restricted)",
+  "bgc:update": "Edit background-check details",
+  "visa:read": "See visa and work-authorisation details (restricted)",
+  "visa:update": "Edit visa and work-authorisation details (restricted)",
+  "employee:read": "See employees and their assignments",
+  "assignment:read": "See client assignments",
+  "assignment:update": "Edit client assignments",
+  "invoice:read": "See invoices and payments",
+  "invoice:update": "Record invoices and payments",
+  "report:read": "See reports and the dashboard",
+  "report:export": "Export reports",
+  "performance:read": "See recruiter performance",
+  "performance.target:manage": "Set recruiter targets",
+  "report.market:read": "See market reports",
+  "vendor.preferred:create": "Add preferred vendors",
+  "vendor.preferred:read": "See preferred vendors",
+  "company:read": "See own companies",
+  "company:manage": "Edit own companies",
+  "facility:read": "See facilities (guest houses)",
+  "facility:manage": "Edit facilities",
+  "utility:read": "See utility accounts",
+  "utility:manage": "Edit utility accounts",
+  "utility.secret:read": "Reveal utility portal passwords (restricted)",
+  "bill:read": "See bills",
+  "bill:manage": "Edit bills",
+  "team:move_member": "Move people between teams",
+  "team:add_member": "Add unassigned recruiters to a team",
+  "designation:change": "Change designations",
+  "coach:assign": "Assign interview coaches to teams",
+  "access:manage": "Users & Access administration",
+  "audit:read": "Read the audit log",
+  "datahub:read": "Read Data Hub folders",
+  "datahub:manage": "Manage Data Hub folders (restricted)",
+  "datahub:create": "Create Data Hub folders",
+  "training:read": "See training batches",
+  "training:manage": "Edit training batches",
+  "training.progress:update": "Update trainee progress",
+  "training.batch:create": "Create training batches",
+  "technology:create": "Add technologies to the pickers",
+  "staff.contact:read": "See staff contact details",
+  "staff.birthday:manage": "Manage staff birthdays",
+  "chat:use": "Use chat",
+  "job:read": "See jobs",
+  "job:manage": "Edit jobs",
+  "applicant:read": "See applicants",
+  "applicant.phone:read": "See applicant phone numbers",
+  "application:read": "See applications",
+  "application:manage": "Process applications",
+  "notify.placement_hr:receive": "Placement notifications addressed to HR",
+  "notify.placement_accounts:receive": "Placement notifications addressed to Accounts",
+  "notify.placement_immigration:receive": "Placement notifications addressed to Immigration",
+  "notify.work_authorization:receive": "Work authorisation expiring",
+  "notify.employee_exit:receive": "Employee benched or exited",
+  "notify.assignment_ending:receive": "Assignment ending soon",
+  "notify.bench_time:receive": "Bench time alerts",
+  "notify.application:receive": "New job applications",
+  "notify.interview_request:receive": "Interview requests to coordinate",
+  "notify.contract:receive": "New contracts",
+  "notify.birthdays:receive": "Staff birthdays digest",
+};
 
 /** Permissions that expose restricted data; granting them needs a second approver. */
 export const RESTRICTED_PERMISSIONS: readonly Permission[] = [
@@ -196,7 +403,7 @@ export const RESTRICTED_PERMISSIONS: readonly Permission[] = [
   "datahub:manage",
 ];
 
-type Grants = Partial<Record<Permission, Scope>>;
+export type Grants = Partial<Record<Permission, Scope>>;
 
 const salesLine = (s: Scope, submitScope: Scope): Grants => ({
   "candidate:read": s,
@@ -612,8 +819,37 @@ export const GRANTS: Record<Role, Grants> = {
   },
 };
 
+/**
+ * Notification audiences (docs/roles-api.md): authz.notification_recipients sends
+ * an event to the holders of its permission; these are the system roles that hold
+ * each one, merged into GRANTS at "org" scope.
+ */
+export const NOTIFY_RECIPIENTS: Record<Extract<Permission, `notify.${string}`>, readonly Role[]> = {
+  "notify.placement_hr:receive": ["hr"],
+  "notify.placement_accounts:receive": ["accounts"],
+  "notify.placement_immigration:receive": ["immigration"],
+  "notify.work_authorization:receive": ["hr", "immigration"],
+  "notify.employee_exit:receive": ["hr", "accounts", "immigration", "bu_head", "ceo"],
+  "notify.assignment_ending:receive": ["hr", "accounts"],
+  "notify.bench_time:receive": ["ceo"],
+  "notify.application:receive": ["hr"],
+  "notify.interview_request:receive": ["interview_coordinator"],
+  "notify.contract:receive": ["hr", "associate_hr", "accounts"],
+  "notify.birthdays:receive": ["ceo"],
+};
+for (const [permission, roles] of Object.entries(NOTIFY_RECIPIENTS) as [Permission, readonly Role[]][]) {
+  for (const role of roles) GRANTS[role][permission] = "org";
+}
+
 export function grantFor(role: Role, permission: Permission): Scope | undefined {
   return GRANTS[role][permission];
+}
+
+/** A role assignment as the engine sees it, built from the catalog (tests, seeds). */
+export function assignmentFor(role: Role, locationId?: string): {
+  role: Role; locationId?: string; grants: Grants; traits: RoleTraits;
+} {
+  return { role, ...(locationId === undefined ? {} : { locationId }), grants: GRANTS[role], traits: ROLE_TRAITS[role] };
 }
 
 /**

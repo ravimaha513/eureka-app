@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type pg from "pg";
-import { ROLES, type Role, type UserAccess } from "@eureka/shared";
+import type { Grants, RoleTraits, UserAccess } from "@eureka/shared";
 
 /** Loads the access facts the engine needs (design B4.3), from current rows. */
 @Injectable()
@@ -8,12 +8,21 @@ export class AccessService {
   async load(c: pg.PoolClient, userId: string): Promise<UserAccess> {
     // One round trip: this runs before every authenticated request.
     const { rows: [r] } = await c.query<{
-      roles: { role_key: string; location_id: string | null }[];
+      roles: { role_key: string; label: string; location_id: string | null; grants: Grants; traits: RoleTraits }[];
       teams: string[]; subs: string[]; subtree: string[]; coached: string[]; subtree_coached: string[]; shared: string[];
     }>(
       `SELECT
-         COALESCE((SELECT json_agg(json_build_object('role_key', role_key, 'location_id', location_id))
-                   FROM eureka.user_role WHERE user_id = $1 AND valid @> now()), '[]') AS roles,
+         -- Each current role with its grants and traits as stored (docs/roles-api.md): system and
+         -- custom roles alike; the catalog is not consulted at runtime. An archived role still
+         -- held (revoked by archive rules, so never) would carry its grants like any other.
+         COALESCE((SELECT json_agg(json_build_object(
+                     'role_key', ur.role_key, 'label', r.label, 'location_id', ur.location_id,
+                     'grants', COALESCE((SELECT json_object_agg(rp.permission, rp.scope)
+                                         FROM eureka.role_permission rp WHERE rp.role_key = ur.role_key), '{}'::json),
+                     'traits', json_build_object('sales', r.is_sales, 'locationBound', r.is_location_bound, 'admin', r.is_admin,
+                                                 'recruiter', r.is_recruiter, 'coach', r.is_coach)))
+                   FROM eureka.user_role ur JOIN eureka.role r ON r.key = ur.role_key
+                   WHERE ur.user_id = $1 AND ur.valid @> now()), '[]') AS roles,
          -- A lead's team is the one they lead, never one they are a member of
          -- (e.g. their manager's team); mirrors authz.team_ids / actor_team (0210).
          ARRAY(SELECT id FROM (
@@ -38,9 +47,9 @@ export class AccessService {
     );
     return {
       userId,
-      roles: r!.roles
-        .filter((x) => (ROLES as readonly string[]).includes(x.role_key))
-        .map((x) => ({ role: x.role_key as Role, locationId: x.location_id ?? undefined })),
+      roles: r!.roles.map((x) => ({
+        role: x.role_key, label: x.label, locationId: x.location_id ?? undefined, grants: x.grants, traits: x.traits,
+      })),
       teamIds: r!.teams,
       subordinateUserIds: r!.subs,
       subtreeTeamIds: r!.subtree,

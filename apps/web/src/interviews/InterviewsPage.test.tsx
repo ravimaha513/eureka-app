@@ -6,7 +6,7 @@ import type { Me } from "../api";
 const me: Me = { id: "u", email: "a@example.com", displayName: "Recruiter", roles: [], capabilities: ["interview:read", "interview:create"], csrfToken: "t" };
 const row: Interview = { id: "i1", submissionId: "s1", candidate: { id: "c", name: "Alex Doe" }, recruiter: { id: "u", name: "Recruiter" }, team: null, location: null, client: null, round: "Technical", startsAt: "2026-10-01T14:00:00Z", endsAt: "2026-10-01T15:00:00Z", coach: null, inviteReceived: false, callStatus: "scheduled", cleared: false, consentCaptured: false, otterUrl: "https://example.com/secret", recordingUrl: null, systemName: null, editableFields: ["cleared", "consentCaptured", "systemName", "callStatus"], feedbackKinds: ["location"] };
 const json = (value: unknown) => new Response(JSON.stringify(value));
-const lookups = (locations: { id: string; name: string }[]) => ({ technologies: [], clients: [], vendors: [], implementationPartners: [], coaches: [], locations });
+const lookups = (locations: { id: string; name: string }[]) => ({ technologies: [], clients: [], vendors: [], implementationPartners: [], roles: [], coaches: [], locations });
 function setup(item = row, capabilities = me.capabilities, locations = [{ id: "dal", name: "Dallas" }], feedbackItems: unknown[] = [], busy: { startsAt: string; endsAt: string }[] = [], block: unknown = null) {
  const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
    const path = String(url);

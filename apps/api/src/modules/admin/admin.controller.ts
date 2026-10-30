@@ -7,8 +7,12 @@ import {
   BulkCreateUsers,
   CreateDepartment,
   CreateLocation,
+  CreateRole,
   CreateRoleRequest,
   CreateTeam,
+  RoleListQuery,
+  SetRoleGrants,
+  UpdateRole,
   RenameDepartment,
   RenameLocation,
   RenameTeam,
@@ -127,6 +131,47 @@ export class AdminController {
     @Query() q: unknown,
   ): Promise<void> {
     await this.svc.revokeRole(user, id, RoleKey.parse(role), RevokeRoleQuery.parse(q).locationId);
+  }
+
+  // ---------- role definitions (docs/roles-api.md) ----------
+
+  @Get("roles")
+  listRoles(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
+    return this.svc.listRoles(user, RoleListQuery.parse(q).includeArchived === "true");
+  }
+
+  @Get("permissions")
+  listPermissions() {
+    return this.svc.listPermissions();
+  }
+
+  @Post("roles")
+  createRole(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
+    return this.svc.createRole(user, CreateRole.parse(body));
+  }
+
+  @Patch("roles/:key")
+  @HttpCode(204)
+  async updateRole(@CurrentUser() user: AuthedUser, @Param("key") key: string, @Body() body: unknown): Promise<void> {
+    await this.svc.updateRole(user, RoleKey.parse(key), UpdateRole.parse(body));
+  }
+
+  @Put("roles/:key/grants")
+  @HttpCode(204)
+  async setRoleGrants(@CurrentUser() user: AuthedUser, @Param("key") key: string, @Body() body: unknown): Promise<void> {
+    await this.svc.setRoleGrants(user, RoleKey.parse(key), SetRoleGrants.parse(body));
+  }
+
+  @Post("roles/:key/archive")
+  @HttpCode(204)
+  async archiveRole(@CurrentUser() user: AuthedUser, @Param("key") key: string): Promise<void> {
+    await this.svc.archiveRole(user, RoleKey.parse(key), false);
+  }
+
+  @Post("roles/:key/restore")
+  @HttpCode(204)
+  async restoreRole(@CurrentUser() user: AuthedUser, @Param("key") key: string): Promise<void> {
+    await this.svc.archiveRole(user, RoleKey.parse(key), true);
   }
 
   // ---------- role requests ----------

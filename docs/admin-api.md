@@ -59,6 +59,9 @@ problem details. Writes need the session cookie and `x-csrf-token`.
 - `PUT /api/v1/admin/users/:id/designation` with `{ designation: string | null }` returns 200 `{ id, designation }` (migration 0111; `authz.set_designation`; not yourself; at most 120 characters, no control characters, 422 `invalid_designation`; audited as `user.designation_changed`). Managers and associate directors change designations in their hierarchy through `PUT /api/v1/users/:id/designation` (`designation:change`, `docs/performance-api.md` PF-7).
 
 ### Roles
+Role definitions (system templates, custom roles, traits, ladders, the permission grid) are in
+`docs/roles-api.md`: `GET/POST /admin/roles`, `PATCH /admin/roles/:key`, `PUT /admin/roles/:key/grants`,
+`POST /admin/roles/:key/archive|restore`, `GET /admin/permissions`. Grants below accept any live role key.
 - `POST /api/v1/admin/role-requests` with `{ userId, role, locationId? }` returns 201 `{ id, status: "applied" | "pending_approval" }`.
 - `GET /api/v1/admin/role-requests?status=pending|approved|rejected|expired` returns
   `{ items: [{ id, user: {id,displayName,email}, role, roleLabel, locationId, requestedBy: {id,displayName}, requestedAt, status, decidedBy: {id,displayName}|null, decidedAt }] }`.

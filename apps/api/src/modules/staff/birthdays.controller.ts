@@ -1,5 +1,4 @@
 import { Body, Controller, ForbiddenException, Get, Injectable, NotFoundException, Param, ParseUUIDPipe, Put, UnprocessableEntityException } from "@nestjs/common";
-import { ROLE_LABELS, type Role } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
@@ -25,7 +24,8 @@ export class StaffBirthdaysService {
     return this.db.withUser(user.id, async (c) => {
       const { rows } = await c.query<StaffRow>(
         `SELECT u.id, u.display_name, u.email::text AS email, u.designation, l.name AS location,
-                ARRAY(SELECT ur.role_key FROM eureka.user_role ur WHERE ur.user_id = u.id AND ur.valid @> now() ORDER BY ur.role_key) AS roles,
+                ARRAY(SELECT r.label FROM eureka.user_role ur JOIN eureka.role r ON r.key = ur.role_key
+                       WHERE ur.user_id = u.id AND ur.valid @> now() ORDER BY r.label) AS roles,
                 p.birth_month, p.birth_day
            FROM eureka.app_user u
            LEFT JOIN eureka.location l ON l.id = u.primary_location_id
@@ -34,7 +34,7 @@ export class StaffBirthdaysService {
       return {
         items: rows.map((r) => ({
           id: r.id, name: r.display_name, email: r.email, designation: r.designation, location: r.location,
-          roles: (r.roles ?? []).map((k) => ROLE_LABELS[k as Role] ?? k),
+          roles: r.roles ?? [],
           birthday: r.birth_month !== null && r.birth_day !== null ? { month: r.birth_month, day: r.birth_day } : null,
         })),
       };

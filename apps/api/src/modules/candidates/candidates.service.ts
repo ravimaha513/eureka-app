@@ -21,6 +21,7 @@ import {
   candidateActions,
   candidateTransitionAllowed,
   ownsCandidate,
+  hasTrait,
   resolveScope,
   type CandidateCompanyLink,
   type CandidateRef,
@@ -720,7 +721,7 @@ export class CandidatesService implements OnModuleInit {
 
     return this.db.withUser(user.id, async (c) => {
       const recruiter = body.recruiterId === undefined
-        ? (user.access.roles.some((r) => r.role === "recruiter") ? user.id : null)
+        ? (hasTrait(user.access, "recruiter") ? user.id : null)
         : body.recruiterId;
       // The person row becomes visible only through its candidate, so its id is
       // generated here rather than read back with RETURNING (RLS would hide it).

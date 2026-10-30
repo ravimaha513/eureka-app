@@ -1,6 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ROLE_LABELS, type Role } from "@eureka/shared";
 import { can, type Me } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { DocumentsSection } from "../documents/DocumentsSection";
@@ -9,7 +8,7 @@ import { docTypeLabel } from "../lib/format";
 import { useRoutedId } from "../lib/router";
 import { ContractsSection } from "./ContractsSection";
 import { Drawer, Field, fmtDate } from "../sales/ui";
-import { useLookups, type Named } from "../lookups";
+import { RoleName, useLookups, type Named } from "../lookups";
 import { pipelineError } from "./errors";
 import {
   CONTACT_KIND_LABELS, PLACEMENT_EXPORT_ROW_CAP, PLACEMENT_STATUSES, PLACEMENT_TYPE_LABELS, WORK_MODE_LABELS,
@@ -309,7 +308,7 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
                         {p.checklist.map((c) => (
                           <tr key={c.docType}>
                             <td>{docTypeLabel(c.docType)}</td>
-                            <td>{ROLE_LABELS[c.ownerRole as Role] ?? pipelineLabel(c.ownerRole)}</td>
+                            <td><RoleName k={c.ownerRole} /></td>
                             <td>{c.required ? "Required" : "Optional"}</td>
                             <td>{pipelineLabel(c.status)}</td>
                             <td>{c.dueOn ? fmtDate(c.dueOn) : "—"}{c.overdue && <> <span className="badge overdue">Overdue</span></>}</td>

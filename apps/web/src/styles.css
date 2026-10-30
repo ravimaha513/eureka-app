@@ -811,3 +811,11 @@ tbody tr.row-cleared td:first-child { box-shadow: inset 3px 0 0 var(--ok-fg); }
 .badge.st-marketing, .badge.st-submitted, .badge.st-interviewing, .badge.st-assessment { background: var(--pri-50); color: var(--pri-700); }
 ul.plain { list-style: none; padding: 0; margin: 4px 0 8px; display: flex; flex-direction: column; gap: 6px; }
 form.stack { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+
+/* Users & Access › Roles (docs/roles-api.md) */
+.rolegroup { margin-bottom: 18px; }
+.traits { display: grid; gap: 6px; margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.traits legend { font-weight: 700; padding: 0 4px; }
+.traits .check { font-weight: 500; align-items: baseline; }
+.rolegrid td:first-child { max-width: 520px; }
+.rolegrid tr.muted td { color: var(--muted); }

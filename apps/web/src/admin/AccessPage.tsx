@@ -5,12 +5,14 @@ import { UsersTab, type UsersPreset } from "./UsersTab";
 import { ApprovalsTab } from "./ApprovalsTab";
 import { TeamsTab } from "./TeamsTab";
 import { LocationsTab } from "./LocationsTab";
+import { RolesTab } from "./RolesTab";
 
 const TABS = [
   { key: "users", label: "Users" },
   { key: "approvals", label: "Approvals" },
   { key: "teams", label: "Teams" },
   { key: "locations", label: "Locations" },
+  { key: "roles", label: "Roles" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
@@ -42,7 +44,7 @@ export function AccessPage({ me, initialTab = "users" }: { me: Me; initialTab?: 
     <AccessContext.Provider value={ctx}>
       <div>
         <h1>Users &amp; Access</h1>
-        <p className="sub">Create people, grant and revoke roles, and manage teams. You can't change your own access; restricted roles need a second admin.</p>
+        <p className="sub">Create people, grant and revoke roles, manage teams and define roles. You can't change your own access; restricted roles need a second admin.</p>
       </div>
       <div className="tabs" role="tablist" aria-label="Users & Access sections">
         {TABS.map((t, i) => (
@@ -56,7 +58,8 @@ export function AccessPage({ me, initialTab = "users" }: { me: Me; initialTab?: 
         {tab === "users" ? <UsersTab key={usersPreset?.team ?? ""} preset={usersPreset} />
           : tab === "approvals" ? <ApprovalsTab />
           : tab === "teams" ? <TeamsTab onShowUnassigned={() => { setUsersPreset({ team: "none", status: "active" }); setTab("users"); }} />
-          : <LocationsTab />}
+          : tab === "locations" ? <LocationsTab />
+          : <RolesTab />}
       </section>
     </AccessContext.Provider>
   );

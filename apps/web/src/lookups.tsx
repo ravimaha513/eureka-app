@@ -18,6 +18,8 @@ export interface Lookups {
   implementationPartners: Named[];
   locations: Named[];
   coaches: Named[];
+  /** Live non-admin roles in ladder order (docs/roles-api.md): key as `id`, label as `name`. */
+  roles: Named[];
 }
 export type LookupKind = keyof Lookups;
 
@@ -35,6 +37,18 @@ export function useLookupName(kind: LookupKind, id: string | null | undefined): 
   const q = useLookups();
   if (!id) return undefined;
   return q.data?.[kind]?.find((r) => r.id === id)?.name;
+}
+
+/** A role's label from the lookups, the key while they load. */
+export function RoleName({ k }: { k: string }) {
+  const q = useLookups();
+  return <>{q.data?.roles.find((r) => r.id === k)?.name ?? k}</>;
+}
+
+/** `<option>`s for a role select: every live business role (docs/roles-api.md). */
+export function RoleOptions() {
+  const q = useLookups();
+  return <>{(q.data?.roles ?? []).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</>;
 }
 
 const OTHER = "__other__";

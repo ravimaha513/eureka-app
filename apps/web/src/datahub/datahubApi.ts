@@ -1,6 +1,6 @@
 /** Typed client for DataHub (apps/api/src/modules/datahub; docs/datahub-api.md). */
 import {
-  DATAHUB_MAX_BYTES, datahubFileNameProblem, type DatahubLevel, type DocumentContentType, type Role,
+  DATAHUB_MAX_BYTES, datahubFileNameProblem, type DatahubLevel, type DocumentContentType,
 } from "@eureka/shared";
 import { ApiError, api } from "../api";
 import { documentTypeOf } from "../documents/documentsApi";
@@ -13,7 +13,7 @@ export interface Folder {
   name: string;
   description: string | null;
   level: DatahubLevel;
-  roleKeys: Role[];
+  roleKeys: string[];
   membersCanUpload: boolean;
   locationId: string | null;
   fileCount: number;
@@ -55,7 +55,7 @@ export interface FolderInput {
   name: string;
   description?: string | null;
   level: DatahubLevel;
-  roleKeys?: Role[];
+  roleKeys?: string[];
   memberIds?: string[];
   membersCanUpload?: boolean;
   parentId?: string | null;

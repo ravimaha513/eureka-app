@@ -22,7 +22,7 @@ const TECH = "33333333-3333-4333-8333-333333333333";
 const LOC = "44444444-4444-4444-8444-444444444444";
 const B1 = "77777777-7777-4777-8777-777777777777";
 const B2 = "88888888-8888-4888-8888-888888888888";
-const LOOKUPS = { technologies: [{ id: TECH, name: "Java" }], clients: [], vendors: [], implementationPartners: [], locations: [{ id: LOC, name: "Dallas" }], coaches: [] };
+const LOOKUPS = { technologies: [{ id: TECH, name: "Java" }], clients: [], vendors: [], implementationPartners: [], roles: [], locations: [{ id: LOC, name: "Dallas" }], coaches: [] };
 
 const batch = (id: string, label: string, status = "planned") => ({
   id, label, location: { id: LOC, name: "Dallas" }, technology: { id: TECH, name: "Java" }, startMonth: "2026-11", sizePlanned: 20, status, candidatesInScope: 1,

@@ -192,11 +192,12 @@ describe("folder writes", () => {
     expect((await db.admin.query(`SELECT count(*)::int n FROM eureka.audit_event WHERE entity_id = $1 AND action = 'datahub.member_added'`, [id])).rows[0].n).toBe(1);
     expect((await q<{ c: boolean }>(U.ceo, `SELECT authz.datahub_set_member($1, $2, true) AS c`, [id, U.ceo]))[0]!.c).toBe(false);
     // Losing the grant loses the folders.
-    await db.admin.query(`UPDATE eureka.role_permission SET permission = 'datahub:create_off' WHERE role_key = 'ceo' AND permission = 'datahub:create'`);
+    // permission references the catalog table (0310), so the grant is removed and put back rather than renamed.
+    await db.admin.query(`DELETE FROM eureka.role_permission WHERE role_key = 'ceo' AND permission = 'datahub:create'`);
     try {
       expect(await managed(U.ceo)).not.toContain(id);
     } finally {
-      await db.admin.query(`UPDATE eureka.role_permission SET permission = 'datahub:create' WHERE role_key = 'ceo' AND permission = 'datahub:create_off'`);
+      await db.admin.query(`INSERT INTO eureka.role_permission (role_key, permission, scope) VALUES ('ceo', 'datahub:create', 'org')`);
     }
     await q(U.ceo, `SELECT authz.datahub_set_member($1, $2, false)`, [id, U.ceo]);
     await q(U.ceo, `SELECT authz.datahub_delete_folder($1, 1)`, [id]);

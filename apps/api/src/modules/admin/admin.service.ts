@@ -3,13 +3,14 @@ import { BadGatewayException, ForbiddenException, HttpException, Inject, Injecta
 import type pg from "pg";
 import { z } from "zod";
 import {
-  LOCATION_ROLES,
-  ROLES,
-  ROLE_LABELS,
-  isRestrictedRole,
+  PERMISSIONS,
+  PERMISSION_DESCRIPTIONS,
+  ORG_SENSITIVE_PERMISSIONS,
+  RESTRICTED_PERMISSIONS,
+  SCOPES,
+  permissionArea,
   resolveScope,
   resolveScopeFor,
-  type Role,
 } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
@@ -17,7 +18,10 @@ import { CONFIG, parseEmailList, type AppConfig } from "../../platform/config.js
 import { DbService } from "../../platform/db.service.js";
 import { MAIL_PORT, type MailPort } from "../../platform/mail.js";
 import { mapAdminError } from "./admin.errors.js";
-import type { BulkCreateUsers, CreateDepartment, CreateLocation, CreateRoleRequest, CreateTeam, CreateUser, MoveMember, UserListQuery } from "./admin.schemas.js";
+import type {
+  BulkCreateUsers, CreateDepartment, CreateLocation, CreateRole, CreateRoleRequest, CreateTeam, CreateUser, MoveMember, SetRoleGrants,
+  UpdateRole, UserListQuery,
+} from "./admin.schemas.js";
 import { likeContains } from "../../platform/sql.js";
 import { buildUserImportTemplate } from "./user-import-template.js";
 import { USER_PURGE_DAYS } from "../../worker/jobs/user-purge.js";
@@ -37,7 +41,27 @@ const departmentOf = (r: { department_id: string | null; department_name: string
     ? { id: r.department_id, name: r.department_name!, parent: r.parent_id ? { id: r.parent_id, name: r.parent_name! } : null }
     : null;
 
-const label = (key: string) => ROLE_LABELS[key as Role] ?? key;
+/** Roles as stored (docs/roles-api.md): system and custom, live and archived. */
+type RoleRow = {
+  key: string; label: string; description: string | null; is_system: boolean; is_restricted: boolean;
+  is_sales: boolean; is_location_bound: boolean; is_admin: boolean; is_recruiter: boolean; is_coach: boolean;
+  track: string; level: number; department_id: string | null; department_name: string | null; cloned_from: string | null;
+  archived_at: Date | null; holders: number;
+};
+const ROLE_ROWS_SQL = `
+  SELECT r.key, r.label, r.description, r.is_system, r.is_restricted, r.is_sales, r.is_location_bound, r.is_admin,
+         r.is_recruiter, r.is_coach, r.track, r.level, r.department_id, d.name AS department_name, r.cloned_from, r.archived_at,
+         (SELECT count(DISTINCT ur.user_id) FROM eureka.user_role ur JOIN eureka.app_user u ON u.id = ur.user_id
+           WHERE ur.role_key = r.key AND ur.valid @> now() AND u.status = 'active')::int AS holders
+  FROM eureka.role r LEFT JOIN eureka.department d ON d.id = r.department_id`;
+const roleItem = (r: RoleRow, grants?: Record<string, string>) => ({
+  key: r.key, label: r.label, description: r.description, isSystem: r.is_system, restricted: r.is_restricted,
+  traits: { sales: r.is_sales, locationBound: r.is_location_bound, admin: r.is_admin, recruiter: r.is_recruiter, coach: r.is_coach },
+  track: r.track, level: r.level,
+  department: r.department_id ? { id: r.department_id, name: r.department_name! } : null,
+  clonedFrom: r.cloned_from, holders: r.holders, archivedAt: r.archived_at,
+  ...(grants ? { grants } : {}),
+});
 
 /**
  * `lp (location_id, user_id)`: who belongs to a location. Primary location,
@@ -51,12 +75,14 @@ const LOCATION_PEOPLE_CTE = `lp AS (
   UNION SELECT ur.location_id, ur.user_id FROM eureka.user_role ur WHERE ur.location_id IS NOT NULL AND ur.valid @> now()
 )`;
 
-/** A role from a key or its label, case-insensitive; null when it names no role. */
-const ROLE_BY_TEXT = new Map<string, Role>(ROLES.flatMap((k) => [[k, k], [ROLE_LABELS[k].toLowerCase(), k]] as [string, Role][]));
-const roleFromText = (text: string): Role | null => ROLE_BY_TEXT.get(text.toLowerCase()) ?? null;
+/** Live roles by key and by label, case-insensitive, for the bulk import's role column. */
+const roleIndex = (roles: RoleRow[]) =>
+  new Map<string, RoleRow>(roles.filter((r) => !r.archived_at).flatMap((r) => [[r.key, r], [r.label.toLowerCase(), r]] as [string, RoleRow][]));
 
 /** request_role failures that are a problem with one row, not with the import. */
-const ROW_ROLE_ERRORS = new Set(["separation_of_duties", "location_required", "location_not_allowed", "role_already_held"]);
+const ROW_ROLE_ERRORS = new Set([
+  "separation_of_duties", "location_required", "location_not_allowed", "role_already_held", "role_archived", "role_department_mismatch",
+]);
 
 /**
  * Admin and team operations (docs/admin-api.md). The controllers check the
@@ -89,21 +115,42 @@ export class AdminService {
     if (target && target === user.id) throw new ForbiddenException("self_change");
   }
 
+  private async roleRows(c: pg.PoolClient): Promise<RoleRow[]> {
+    return (await c.query<RoleRow>(`${ROLE_ROWS_SQL} ORDER BY r.track, r.level, r.label, r.key`)).rows;
+  }
+
+  /** Role key -> label, for lists that show a user's roles. */
+  private async roleLabels(c: pg.PoolClient): Promise<Map<string, string>> {
+    return new Map((await c.query<{ key: string; label: string }>(`SELECT key, label FROM eureka.role`)).rows.map((r) => [r.key, r.label]));
+  }
+
+  private async roleRow(c: pg.PoolClient, key: string): Promise<RoleRow> {
+    const { rows } = await c.query<RoleRow>(`${ROLE_ROWS_SQL} WHERE r.key = $1`, [key]);
+    if (!rows[0]) throw new NotFoundException();
+    return rows[0];
+  }
+
   // ---------- metadata ----------
 
   async meta(user: AuthedUser) {
-    const { locations, singleAdminMode } = await this.tx(user, async (c) => ({
+    const { locations, singleAdminMode, roles } = await this.tx(user, async (c) => ({
       locations: (await c.query<{ id: string; name: string }>(`SELECT id, name FROM eureka.location ORDER BY name`)).rows,
+      roles: await this.roleRows(c),
       // Migration 0084/0085: one admin may grant restricted roles without a second approver.
       singleAdminMode: (await c.query<{ on: boolean }>(`SELECT authz.single_admin_mode() AS "on"`)).rows[0]!.on,
     }));
     return {
       singleAdminMode,
-      roles: ROLES.map((key) => ({
-        key,
-        label: ROLE_LABELS[key],
-        restricted: isRestrictedRole(key),
-        locationBound: LOCATION_ROLES.includes(key),
+      // Live roles in ladder order: what the grant pickers offer (docs/roles-api.md).
+      roles: roles.filter((r) => !r.archived_at).map((r) => ({
+        key: r.key,
+        label: r.label,
+        restricted: r.is_restricted,
+        locationBound: r.is_location_bound,
+        isSystem: r.is_system,
+        track: r.track,
+        level: r.level,
+        department: r.department_id ? { id: r.department_id, name: r.department_name! } : null,
       })),
       locations,
     };
@@ -159,6 +206,7 @@ export class AdminService {
         `SELECT rl.user_id, m.id, m.display_name FROM eureka.reporting_line rl
          JOIN eureka.app_user m ON m.id = rl.manager_id
          WHERE rl.user_id = ANY($1::uuid[]) AND rl.valid @> now()`, [ids]);
+      const labels = await this.roleLabels(c);
       const roles = await c.query<{ user_id: string; role_key: string; location_id: string | null; location_name: string | null }>(
         `SELECT ur.user_id, ur.role_key, ur.location_id, l.name AS location_name FROM eureka.user_role ur
          LEFT JOIN eureka.location l ON l.id = ur.location_id
@@ -194,7 +242,7 @@ export class AdminService {
             department: departmentOf(r),
             manager: m ? { id: m.id, displayName: m.display_name } : null,
             roles: roles.rows.filter((x) => x.user_id === r.id).map((x) => ({
-              key: x.role_key, label: label(x.role_key), locationId: x.location_id, locationName: x.location_name,
+              key: x.role_key, label: labels.get(x.role_key) ?? x.role_key, locationId: x.location_id, locationName: x.location_name,
             })),
             teams: teams.rows.filter((x) => x.user_id === r.id).map((x) => ({ id: x.id, name: x.name, asLead: x.as_lead })),
           };
@@ -213,13 +261,14 @@ export class AdminService {
          WHERE ur.valid @> now() AND u.status = 'active'
          GROUP BY ur.role_key HAVING count(*) > 0`);
       const counts = new Map(rows.map((r) => [r.role_key, r.n]));
+      const roles = await this.roleRows(c);
       const totals = (await c.query<{ active: number; inactive: number }>(
         `SELECT count(*) FILTER (WHERE status = 'active')::int AS active, count(*) FILTER (WHERE status = 'inactive')::int AS inactive
          FROM eureka.app_user WHERE deleted_at IS NULL`)).rows[0]!;
       return {
         active: totals.active,
         inactive: totals.inactive,
-        roles: ROLES.filter((k) => counts.has(k)).map((key) => ({ key, label: ROLE_LABELS[key], count: counts.get(key)! })),
+        roles: roles.filter((r) => counts.has(r.key)).map((r) => ({ key: r.key, label: r.label, count: counts.get(r.key)! })),
       };
     });
   }
@@ -312,12 +361,13 @@ export class AdminService {
    * restricted roles still wait for a second approver (AD-3).
    */
   async bulkCreateUsers(user: AuthedUser, body: BulkCreateUsers) {
-    type RoleResult = { role: Role; label: string; status: "applied" | "pending_approval" };
+    type RoleResult = { role: string; label: string; status: "applied" | "pending_approval" };
     type Row = { row: number; email: string; displayName: string; status: "ok" | "error"; error?: string; id?: string; roles: RoleResult[] };
     try {
       return await this.tx(user, async (c) => {
         const locs = (await c.query<{ id: string; name: string }>(`SELECT id, name FROM eureka.location`)).rows;
         const byName = new Map(locs.map((l) => [l.name.trim().toLowerCase(), l.id]));
+        const byRole = roleIndex(await this.roleRows(c));
         const seen = new Set<string>();
         const results: Row[] = [];
         for (const [i, r] of body.rows.entries()) {
@@ -335,12 +385,12 @@ export class AdminService {
           seen.add(email.toLowerCase());
           const locationId = locName ? byName.get(locName.toLowerCase()) : null;
           if (locName && !locationId) { fail("unknown_location"); continue; }
-          const roles = (r.roles ?? []).map((x) => x.trim()).filter(Boolean).map(roleFromText);
+          const roles = (r.roles ?? []).map((x) => x.trim()).filter(Boolean).map((x) => byRole.get(x.toLowerCase()) ?? null);
           if (roles.includes(null)) { fail("unknown_role"); continue; }
-          const wanted = roles as Role[];
-          if (new Set(wanted).size !== wanted.length) { fail("duplicate_role"); continue; }
-          if (wanted.includes("org_admin") && wanted.length > 1) { fail("separation_of_duties"); continue; }
-          if (wanted.some((k) => LOCATION_ROLES.includes(k)) && !locationId) { fail("location_required"); continue; }
+          const wanted = roles as RoleRow[];
+          if (new Set(wanted.map((x) => x.key)).size !== wanted.length) { fail("duplicate_role"); continue; }
+          if (wanted.some((x) => x.is_admin) && wanted.some((x) => !x.is_admin)) { fail("separation_of_duties"); continue; }
+          if (wanted.some((x) => x.is_location_bound) && !locationId) { fail("location_required"); continue; }
           await c.query("SAVEPOINT bulk_row");
           try {
             const { rows } = await c.query<{ id: string }>(
@@ -350,8 +400,8 @@ export class AdminService {
               actorId: user.id, action: "admin.user.created", entityType: "app_user", entityId: res.id,
               changes: { email, displayName, designation: designation ?? undefined, primaryLocationId: locationId ?? undefined, bulk: true },
             });
-            for (const role of wanted) {
-              const roleLocation = LOCATION_ROLES.includes(role) ? locationId! : null;
+            for (const { key: role, label, is_location_bound } of wanted) {
+              const roleLocation = is_location_bound ? locationId! : null;
               const q = (await c.query<{ request_id: string; request_status: "applied" | "pending_approval" }>(
                 `SELECT * FROM authz.request_role($1, $2, $3)`, [res.id, role, roleLocation])).rows[0]!;
               await this.audit.record(c, {
@@ -360,7 +410,7 @@ export class AdminService {
                 entityType: "app_user", entityId: res.id,
                 changes: { requestId: q.request_id, role, locationId: roleLocation, bulk: true },
               });
-              res.roles.push({ role, label: ROLE_LABELS[role], status: q.request_status });
+              res.roles.push({ role, label, status: q.request_status });
             }
             await c.query("RELEASE SAVEPOINT bulk_row");
           } catch (err) {
@@ -393,9 +443,11 @@ export class AdminService {
 
   /** The bulk import template (docs/admin-api.md): an .xlsx with role and location dropdowns. */
   async bulkTemplate(user: AuthedUser): Promise<Buffer> {
-    const locations = await this.tx(user, async (c) =>
-      (await c.query<{ name: string }>(`SELECT name FROM eureka.location ORDER BY name`)).rows.map((l) => l.name));
-    return buildUserImportTemplate(ROLES.map((k) => ROLE_LABELS[k]), locations);
+    const { locations, roles } = await this.tx(user, async (c) => ({
+      locations: (await c.query<{ name: string }>(`SELECT name FROM eureka.location ORDER BY name`)).rows.map((l) => l.name),
+      roles: (await this.roleRows(c)).filter((r) => !r.archived_at).map((r) => r.label),
+    }));
+    return buildUserImportTemplate(roles, locations);
   }
 
   async setStatus(user: AuthedUser, id: string, active: boolean) {
@@ -429,18 +481,87 @@ export class AdminService {
     });
   }
 
-  // ---------- roles ----------
+  // ---------- role definitions (docs/roles-api.md) ----------
 
-  private checkLocation(role: Role, locationId: string | undefined): void {
-    const bound = LOCATION_ROLES.includes(role);
-    if (bound && !locationId) throw new UnprocessableEntityException("location_required");
-    if (!bound && locationId) throw new UnprocessableEntityException("location_not_allowed");
+  async listRoles(user: AuthedUser, includeArchived: boolean) {
+    return this.tx(user, async (c) => {
+      const roles = (await this.roleRows(c)).filter((r) => includeArchived || !r.archived_at);
+      const grants = (await c.query<{ role_key: string; permission: string; scope: string }>(
+        `SELECT role_key, permission, scope FROM eureka.role_permission ORDER BY permission`)).rows;
+      return {
+        items: roles.map((r) => roleItem(r, Object.fromEntries(grants.filter((g) => g.role_key === r.key).map((g) => [g.permission, g.scope])))),
+      };
+    });
   }
+
+  listPermissions() {
+    return {
+      scopes: [...SCOPES],
+      items: PERMISSIONS.map((key) => ({
+        key, area: permissionArea(key), description: PERMISSION_DESCRIPTIONS[key],
+        restricted: RESTRICTED_PERMISSIONS.includes(key), orgSensitive: ORG_SENSITIVE_PERMISSIONS.includes(key),
+      })),
+    };
+  }
+
+  async createRole(user: AuthedUser, body: CreateRole) {
+    return this.tx(user, async (c) => {
+      const { rows } = await c.query<{ key: string }>(`SELECT authz.role_create($1, $2, $3, $4, $5, $6) AS key`,
+        [body.label, body.cloneFrom, body.description ?? null, body.departmentId ?? null, body.track ?? null, body.level ?? null]);
+      const key = rows[0]!.key;
+      // Labels and descriptions are free text: the audit row keeps keys only (rule 5); entity_id is a
+      // uuid column, so the role key travels in changes.
+      await this.audit.record(c, {
+        actorId: user.id, action: "admin.role.created", entityType: "role",
+        changes: { key, clonedFrom: body.cloneFrom, departmentId: body.departmentId ?? null },
+      });
+      return { key };
+    });
+  }
+
+  async updateRole(user: AuthedUser, key: string, body: UpdateRole) {
+    await this.tx(user, async (c) => {
+      await this.roleRow(c, key);
+      const { rows } = await c.query<{ changed: string[] }>(`SELECT authz.role_update($1, $2::jsonb) AS changed`, [key, JSON.stringify(body)]);
+      if (rows[0]!.changed.length === 0) return;
+      await this.audit.record(c, {
+        actorId: user.id, action: "admin.role.updated", entityType: "role",
+        changes: { key, fields: rows[0]!.changed, ...(rows[0]!.changed.includes("traits") ? { traits: body.traits } : {}) },
+      });
+    });
+  }
+
+  async setRoleGrants(user: AuthedUser, key: string, body: SetRoleGrants) {
+    await this.tx(user, async (c) => {
+      await this.roleRow(c, key);
+      const { rows } = await c.query<{ d: { added: string[]; removed: string[]; changed: string[] } }>(
+        `SELECT authz.role_set_grants($1, $2::jsonb) AS d`, [key, JSON.stringify(body.grants)]);
+      const d = rows[0]!.d;
+      if (d.added.length + d.removed.length + d.changed.length === 0) return;
+      await this.audit.record(c, {
+        actorId: user.id, action: "admin.role.grants_changed", entityType: "role",
+        changes: { key, added: d.added, removed: d.removed, changed: d.changed },
+      });
+    });
+  }
+
+  async archiveRole(user: AuthedUser, key: string, restore: boolean) {
+    await this.tx(user, async (c) => {
+      const r = await this.roleRow(c, key);
+      if (restore ? !r.archived_at : !!r.archived_at) return;
+      await c.query(restore ? `SELECT authz.role_restore($1)` : `SELECT authz.role_archive($1)`, [key]);
+      await this.audit.record(c, {
+        actorId: user.id, action: restore ? "admin.role.restored" : "admin.role.archived", entityType: "role", changes: { key },
+      });
+    });
+  }
+
+  // ---------- roles ----------
 
   async requestRole(user: AuthedUser, body: CreateRoleRequest) {
     this.notSelf(user, body.userId);
-    this.checkLocation(body.role, body.locationId);
     return this.tx(user, async (c) => {
+      // authz.request_role raises unknown_role, location_required and location_not_allowed itself.
       const { rows } = await c.query<{ request_id: string; request_status: "applied" | "pending_approval" }>(
         `SELECT * FROM authz.request_role($1, $2, $3)`, [body.userId, body.role, body.locationId ?? null]);
       const r = rows[0]!;
@@ -472,12 +593,13 @@ export class AdminService {
            LEFT JOIN eureka.app_user d ON d.id = q.decided_by) s
          WHERE $1::text IS NULL OR s.status = $1
          ORDER BY s.requested_at DESC, s.id LIMIT 500`, [status ?? null]);
+      const labels = await this.roleLabels(c);
       return {
         items: rows.map((r) => ({
           id: r.id,
           user: { id: r.user_id, displayName: r.user_name, email: r.user_email },
           role: r.role_key,
-          roleLabel: label(r.role_key),
+          roleLabel: labels.get(r.role_key) ?? r.role_key,
           locationId: r.location_id,
           requestedBy: { id: r.requested_by, displayName: r.requested_by_name },
           requestedAt: r.requested_at,
@@ -500,10 +622,12 @@ export class AdminService {
     });
   }
 
-  async revokeRole(user: AuthedUser, userId: string, role: Role, locationId: string | undefined) {
+  async revokeRole(user: AuthedUser, userId: string, role: string, locationId: string | undefined) {
     this.notSelf(user, userId);
-    if (locationId && !LOCATION_ROLES.includes(role)) throw new UnprocessableEntityException("location_not_allowed");
     await this.tx(user, async (c) => {
+      const bound = (await c.query<{ b: boolean }>(`SELECT is_location_bound AS b FROM eureka.role WHERE key = $1`, [role])).rows[0]?.b;
+      if (bound === undefined) throw new UnprocessableEntityException("unknown_role");
+      if (locationId && !bound) throw new UnprocessableEntityException("location_not_allowed");
       await c.query(`SELECT authz.revoke_role($1, $2, $3)`, [userId, role, locationId ?? null]);
       await this.audit.record(c, {
         actorId: user.id, action: "admin.role.revoked", entityType: "app_user", entityId: userId,
@@ -634,12 +758,13 @@ export class AdminService {
          JOIN eureka.app_user u ON u.id = ur.user_id
          WHERE ur.location_id IS NOT NULL AND ur.valid @> now() AND u.status = 'active'
          ORDER BY ur.role_key, u.display_name`);
+      const labels = await this.roleLabels(c);
       return {
         items: rows.map((l) => ({
           id: l.id, name: l.name, kind: l.kind, state: l.state, timezone: l.timezone,
           peopleCount: l.people_count, teamCount: l.team_count,
           roleHolders: holders.rows.filter((h) => h.location_id === l.id)
-            .map((h) => ({ userId: h.user_id, displayName: h.display_name, role: h.role_key, label: label(h.role_key) })),
+            .map((h) => ({ userId: h.user_id, displayName: h.display_name, role: h.role_key, label: labels.get(h.role_key) ?? h.role_key })),
         })),
       };
     });
@@ -669,6 +794,7 @@ export class AdminService {
         `SELECT rl.user_id, m.id AS manager_id, m.display_name, l.name AS location_name FROM eureka.reporting_line rl
          JOIN eureka.app_user m ON m.id = rl.manager_id LEFT JOIN eureka.location l ON l.id = m.primary_location_id
          WHERE rl.user_id = ANY($1::uuid[]) AND rl.valid @> now()`, [ids]);
+      const labels = await this.roleLabels(c);
       const roles = await c.query<{ user_id: string; role_key: string; location_id: string | null; location_name: string | null }>(
         `SELECT ur.user_id, ur.role_key, ur.location_id, l.name AS location_name FROM eureka.user_role ur
          LEFT JOIN eureka.location l ON l.id = ur.location_id
@@ -702,7 +828,7 @@ export class AdminService {
           primaryLocation: p.location_id ? { id: p.location_id, name: p.location_name } : null,
           managerId: managers.rows.find((m) => m.user_id === p.id)?.manager_id ?? null,
           roles: roles.rows.filter((r) => r.user_id === p.id).map((r) => ({
-            key: r.role_key, label: label(r.role_key), locationId: r.location_id, locationName: r.location_name,
+            key: r.role_key, label: labels.get(r.role_key) ?? r.role_key, locationId: r.location_id, locationName: r.location_name,
           })),
           teams: memberships.rows.filter((t) => t.user_id === p.id).map((t) => ({ id: t.id, name: t.name, asLead: t.as_lead })),
         })),
@@ -819,13 +945,14 @@ export class AdminService {
        ORDER BY u.display_name, u.id`, [coachIds])).rows;
   }
 
-  /** Active users holding a coach role (interview_coach, interview_lead), limited to the given ids (null: everyone). */
+  /** Active users whose role has the coach trait, limited to the given ids (null: everyone). */
   private async coachUsers(c: pg.PoolClient, ids: string[] | null) {
     const { rows } = await c.query<{ id: string; display_name: string; email: string; lead: boolean }>(
       `SELECT u.id, u.display_name, u.email,
-              bool_or(ur.role_key = 'interview_lead') AS lead
-       FROM eureka.app_user u JOIN eureka.user_role ur ON ur.user_id = u.id
-       WHERE u.status = 'active' AND ur.valid @> now() AND ur.role_key IN ('interview_coach', 'interview_lead')
+              -- A coach who assigns other coaches (coach:assign) is a lead of the interview prep line.
+              bool_or(EXISTS (SELECT 1 FROM eureka.role_permission rp WHERE rp.role_key = r.key AND rp.permission = 'coach:assign')) AS lead
+       FROM eureka.app_user u JOIN eureka.user_role ur ON ur.user_id = u.id JOIN eureka.role r ON r.key = ur.role_key
+       WHERE u.status = 'active' AND ur.valid @> now() AND r.is_coach
          AND ($1::uuid[] IS NULL OR u.id = ANY ($1::uuid[]))
        GROUP BY u.id ORDER BY u.display_name, u.id`, [ids]);
     return rows.map((u) => ({ id: u.id, displayName: u.display_name, email: u.email, role: u.lead ? "interview_lead" : "interview_coach" }));

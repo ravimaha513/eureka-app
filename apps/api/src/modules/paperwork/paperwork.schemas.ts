@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { BGC_HISTORY_YEARS, BGC_STATUSES, CHECKLIST_ITEM_STATUSES, PLACEMENT_STATUSES, ROLES } from "@eureka/shared";
+import { BGC_HISTORY_YEARS, BGC_STATUSES, CHECKLIST_ITEM_STATUSES, PLACEMENT_STATUSES } from "@eureka/shared";
+
+const RoleKey = z.string().regex(/^[a-z][a-z0-9_]{0,63}$/);
 import { Cursor } from "../submissions/pipeline.js";
 
 const uuid = z.string().uuid();
@@ -19,7 +21,7 @@ export const UpdateChecklistItem = z
   .object({
     status: z.enum(CHECKLIST_ITEM_STATUSES).optional(),
     reason: reason.optional(),
-    ownerRole: z.enum(ROLES).optional(),
+    ownerRole: RoleKey.optional(),
     assigneeId: uuid.nullable().optional(),
     dueOn: day.nullable().optional(),
     notes: notes.nullable().optional(),
@@ -61,7 +63,7 @@ export type UpdateBgc = z.infer<typeof UpdateBgc>;
 export const TemplateItem = z
   .object({
     docType: z.string().regex(/^[a-z][a-z0-9_]{0,59}$/, "snake_case, up to 60 characters"),
-    ownerRole: z.enum(ROLES),
+    ownerRole: RoleKey,
     required: z.boolean().optional(),
   })
   .strict();
@@ -85,7 +87,7 @@ const flag = z.enum(["true", "false"]).transform((v) => v === "true");
 export const PaperworkQueueQuery = z
   .object({
     view: z.enum(["outstanding", "overdue", "all"]).default("outstanding"),
-    ownerRole: z.enum(ROLES).optional(),
+    ownerRole: RoleKey.optional(),
     /** Items assigned to the caller. */
     mine: flag.optional(),
     bgcStatus: z.enum(BGC_STATUSES).optional(),

@@ -55,9 +55,15 @@ export class LookupsService {
           ? await q(
             `SELECT DISTINCT u.id, u.display_name AS name
              FROM eureka.app_user u JOIN eureka.user_role ur ON ur.user_id = u.id
-             WHERE u.status = 'active' AND ur.role_key = 'interview_coach' AND ur.valid @> now()
+             JOIN eureka.role r ON r.key = ur.role_key
+             WHERE u.status = 'active' AND r.is_coach AND NOT EXISTS (
+               SELECT 1 FROM eureka.role_permission rp WHERE rp.role_key = r.key AND rp.permission = 'coach:assign')
+               AND ur.valid @> now()
              ORDER BY name, u.id`)
           : none,
+        // Live business roles for owner / folder-role pickers (docs/roles-api.md): key as id, label as name.
+        roles: await q(`SELECT key AS id, label AS name FROM eureka.role
+                        WHERE archived_at IS NULL AND NOT is_admin ORDER BY track, level, label, key`),
       };
     });
   }
