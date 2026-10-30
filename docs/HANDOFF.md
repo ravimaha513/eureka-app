@@ -268,6 +268,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Candidate cascade delete (0330): `candidate:delete` (lead team, manager/AD hierarchy, CEO org); `authz.delete_candidate` wipes the subtree, 409 `candidate_placed` if placed/employee; guards open only via `eureka.candidate_purge` (docs/candidates-api.md CA-7). S3 files not removed.
 - Candidate profile tabs (web only): header "Change status" popover; Overview / Documents / Training / Activity tabs; unset Details fields fold under "Not recorded (n)"; selected-teams picker hidden while Open to all teams is on.
 - In-app document viewer (web only, no migrations): View beside Download on paperwork documents and resumes; `documents/documentRender.ts` fetches the signed link and renders in the app CSP (pdf.js canvases, mammoth DOCX to DOMPurify-sanitized HTML, images as data: URLs). No blob:/frame-src needed; each view is one audited link.
+- Remove team members (no migrations, AD-14): Remove + confirm in the Users & Access team drawer (`access:manage`) and on My team (`team:add_member`: lead, manager/AD above); `authz.team_remove_member` ends the membership and hands their team candidates to the lead.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
