@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Download, FolderOpen, FolderPlus, Globe, History, Lock, Search, Settings2, Shield, Trash2, Upload, Users, X, ScrollText,
+  Download, Eye, FolderOpen, FolderPlus, Globe, History, Lock, Search, Settings2, Shield, Trash2, Upload, Users, X, ScrollText,
 } from "lucide-react";
 import {
   DATAHUB_LEVELS, DATAHUB_LEVEL_LABELS, DOCUMENT_CONTENT_TYPES, datahubFolderNameProblem,
@@ -10,6 +10,7 @@ import {
 import { ConfirmDialog, Dialog, DialogActions } from "../ui/Dialog";
 import { documentKeys, documentTypeOf, isStepUpRequired } from "../documents/documentsApi";
 import { StepUpDialog } from "../ui/StepUpDialog";
+import { DocumentViewer } from "../documents/DocumentViewer";
 import { RoleName, useLookups } from "../lookups";
 import { browser, fmtBytes } from "../sales/resumesApi";
 import { Field, useFocusAfterFailure } from "../sales/ui";
@@ -295,7 +296,9 @@ function UploadDialog({ folders, initialFolderId, onClose, onUploaded }: {
 
 // ---------------------------------------------------------------- small dialogs
 
-function VersionsDialog({ file, onClose, onDownload }: { file: FileItem; onClose: () => void; onDownload: (v: Version) => void }) {
+function VersionsDialog({ file, onClose, onDownload, onView }: {
+  file: FileItem; onClose: () => void; onDownload: (v: Version) => void; onView: (v: Version) => void;
+}) {
   const q = useQuery({ queryKey: datahubKeys.versions(file.id), queryFn: () => datahubApi.versions(file.id) });
   return (
     <Dialog title={`Version history: ${file.name}`} onClose={onClose}>
@@ -311,9 +314,10 @@ function VersionsDialog({ file, onClose, onDownload }: { file: FileItem; onClose
                   <td><time dateTime={v.createdAt}>{fmtDateTime(v.createdAt)}</time>{v.uploadedBy.name ? ` · ${v.uploadedBy.name}` : ""}</td>
                   <td>{fmtBytes(v.sizeBytes)}</td>
                   <td><StatusPill v={v} /></td>
-                  <td>{v.status === "clean" && (
+                  <td className="rowactions">{v.status === "clean" && (<>
+                    <button type="button" className="btn sm" onClick={() => onView(v)}>View<span className="sr-only"> version {v.version}</span></button>
                     <button type="button" className="btn sm" onClick={() => onDownload(v)}>Download<span className="sr-only"> version {v.version}</span></button>
-                  )}</td>
+                  </>)}</td>
                 </tr>
               ))}
             </tbody>
@@ -402,7 +406,8 @@ type Modal =
   | { kind: "log"; folder: Folder }
   | { kind: "deleteFile"; file: FileItem }
   | { kind: "deleteFolder"; folder: Folder }
-  | { kind: "stepUp"; versionId: string; label: string };
+  | { kind: "stepUp"; v: Version; label: string; view: boolean }
+  | { kind: "view"; v: Version; label: string; url: string };
 
 /**
  * DataHub (docs/datahub-api.md): organisation folders on the left, the
@@ -469,14 +474,15 @@ export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
     await qc.invalidateQueries({ queryKey: ["datahub", "search"] });
   };
 
-  const download = async (versionId: string, label: string) => {
-    setMessage(""); setError(""); setBusy(versionId);
+  /** View in the app or download; each takes a fresh signed link (one access-log row each). */
+  const download = async (v: Version, label: string, view = false) => {
+    setMessage(""); setError(""); setBusy(v.id);
     try {
-      const { url } = await datahubApi.downloadLink(versionId);
-      browser.download(url);
-      setMessage(`Downloading ${label}.`);
+      const { url } = await datahubApi.downloadLink(v.id);
+      if (view) setModal({ kind: "view", v, label, url });
+      else { browser.download(url); setMessage(`Downloading ${label}.`); }
     } catch (e) {
-      if (isStepUpRequired(e)) setModal({ kind: "stepUp", versionId, label });
+      if (isStepUpRequired(e)) setModal({ kind: "stepUp", v, label, view });
       else setError(datahubError(e));
     } finally {
       setBusy(null);
@@ -542,10 +548,12 @@ export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
                           <td><button type="button" className="linkish" onClick={() => select(f.folderId)}><LevelIcon level={f.level} /> {f.folderName}</button></td>
                           <td>v{f.latestVersion.version}</td>
                           <td><StatusPill v={f.latestVersion} /></td>
-                          <td className="rowactions">{f.latestVersion.status === "clean" && (
-                            <button type="button" className="btn sm" disabled={busy !== null} onClick={() => void download(f.latestVersion.id, f.name)}>
+                          <td className="rowactions">{f.latestVersion.status === "clean" && (<>
+                            <button type="button" className="btn sm" disabled={busy !== null} onClick={() => void download(f.latestVersion, f.name, true)}>
+                              <Eye size={14} aria-hidden="true" /> View<span className="sr-only"> {f.name}</span></button>
+                            <button type="button" className="btn sm" disabled={busy !== null} onClick={() => void download(f.latestVersion, f.name)}>
                               <Download size={14} aria-hidden="true" /> Download<span className="sr-only"> {f.name}</span></button>
-                          )}</td>
+                          </>)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -628,8 +636,12 @@ export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
                             <td><time dateTime={f.latestVersion.createdAt}>{fmtDateTime(f.latestVersion.createdAt)}</time></td>
                             <td><StatusPill v={f.latestVersion} /></td>
                             <td className="rowactions">
+                              <button type="button" className="iconbtn" aria-label={`View ${f.name}`} title="View"
+                                disabled={!f.actions.download || busy !== null} onClick={() => void download(f.latestVersion, f.name, true)}>
+                                <Eye size={16} aria-hidden="true" />
+                              </button>
                               <button type="button" className="iconbtn" aria-label={`Download ${f.name}`} title="Download"
-                                disabled={!f.actions.download || busy !== null} onClick={() => void download(f.latestVersion.id, f.name)}>
+                                disabled={!f.actions.download || busy !== null} onClick={() => void download(f.latestVersion, f.name)}>
                                 <Download size={16} aria-hidden="true" />
                               </button>
                               <button type="button" className="iconbtn" aria-label={`Version history of ${f.name}`} title="Version history"
@@ -674,7 +686,8 @@ export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
       )}
       {modal?.kind === "versions" && (
         <VersionsDialog file={modal.file} onClose={() => setModal(null)}
-          onDownload={(v) => { const label = `${modal.file.name} (version ${v.version})`; setModal(null); void download(v.id, label); }} />
+          onDownload={(v) => { const label = `${modal.file.name} (version ${v.version})`; setModal(null); void download(v, label); }}
+          onView={(v) => { const label = `${modal.file.name} (version ${v.version})`; void download(v, label, true); }} />
       )}
       {modal?.kind === "members" && <MembersDialog folder={modal.folder} onClose={() => setModal(null)} />}
       {modal?.kind === "log" && <AccessLogDialog folder={modal.folder} onClose={() => setModal(null)} />}
@@ -692,13 +705,17 @@ export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
           <p>Only an empty folder can be deleted.</p>
         </ConfirmDialog>
       )}
+      {modal?.kind === "view" && (
+        <DocumentViewer title={modal.label} url={modal.url} contentType={modal.v.contentType}
+          onClose={() => setModal(null)} onDownload={() => { const { v, label } = modal; setModal(null); void download(v, label); }} />
+      )}
       {modal?.kind === "stepUp" && (
         <StepUpDialog message="This file is in a restricted folder." onClose={() => setModal(null)}
           onConfirmed={() => {
-            const { versionId, label } = modal;
+            const { v, label, view } = modal;
             setModal(null);
             void qc.invalidateQueries({ queryKey: documentKeys.stepUp });
-            void download(versionId, label).then(() => qc.invalidateQueries({ queryKey: ["datahub", "log"] }));
+            void download(v, label, view).then(() => qc.invalidateQueries({ queryKey: ["datahub", "log"] }));
           }} />
       )}
     </div>

@@ -239,6 +239,25 @@ describe("DataHub page", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("View after a restricted step-up opens the file in the app instead of downloading it", async () => {
+    const dl = vi.spyOn(browser, "download").mockImplementation(() => undefined);
+    routes["GET /api/v1/datahub/folders"] = folderList([folder(F3, "Payroll exports", { level: "restricted", isMember: true })]);
+    routes[`GET /api/v1/datahub/folders/${F3}/files`] = () => ({ body: { items: [file({ folderId: F3, name: "Badge.png" }, { contentType: "image/png" })], nextCursor: null } });
+    routes["GET /api/auth/step-up"] = () => ({ body: { active: false, expiresAt: null, method: null, mode: "dev", ttlMinutes: 10 } });
+    let stepped = false;
+    routes[`POST /api/v1/datahub/versions/${V1}/download`] = () => (stepped ? { body: { url: "/api/local-storage/object?policy=b&signature=s", expiresAt: "x" } } : problem(403, "step_up_required"));
+    routes["GET /api/local-storage/object?policy=b&signature=s"] = () => ({ body: "png-bytes" });
+    routes["POST /api/auth/step-up/dev"] = () => { stepped = true; return { body: { active: true, expiresAt: "x" } }; };
+    wrap();
+    fireEvent.click(await screen.findByRole("button", { name: /Payroll exports/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "View Badge.png" }));
+    const confirm = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    fireEvent.click(await within(confirm).findByRole("button", { name: "Confirm (development)" }));
+    const viewer = await screen.findByRole("dialog", { name: "Badge.png" });
+    expect((await within(viewer).findByRole("img", { name: "Badge.png" })).getAttribute("src")).toMatch(/^data:image\/png;base64,/);
+    expect(dl).not.toHaveBeenCalled();
+  });
+
   it("version history downloads an older clean version", async () => {
     const dl = vi.spyOn(browser, "download").mockImplementation(() => undefined);
     routes["GET /api/v1/datahub/folders"] = folderList([folder(F1, "Company policies")]);
