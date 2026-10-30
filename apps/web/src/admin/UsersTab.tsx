@@ -381,6 +381,13 @@ const BULK_ERRORS: Record<string, string> = {
   location_required: "This role needs a location",
   location_not_allowed: "This role cannot have a location",
   role_already_held: "The user already holds this role",
+  unknown_manager: "No user or row in this file has the manager's email",
+  invalid_manager: "The manager is not an active user",
+  manager_row_failed: "The manager's row in this file has a problem",
+  cycle: "The reporting lines in this file form a loop",
+  self_change: "You cannot make yourself their manager",
+  unknown_team: "No team with this name",
+  ambiguous_team: "More than one team has this name; set the team in Users & Access instead",
 };
 
 function BulkImportDialog({ onClose, onDone }: { onClose: () => void; onDone: (created: number) => void }) {
@@ -431,8 +438,8 @@ function BulkImportDialog({ onClose, onDone }: { onClose: () => void; onDone: (c
       }}>
         <p className="hint">
           <button type="button" className="linkbtn" onClick={() => void downloadTemplate()}>Download the Excel template</button>,
-          fill in one user per row (<b>email</b> and <b>name</b> required; <b>designation</b>, <b>location</b> and up to three <b>roles</b> from
-          the dropdowns), then choose the file. CSV with the same columns works too. Restricted roles are sent for a second
+          fill in one user per row (<b>email</b> and <b>name</b> required; <b>designation</b>, <b>location</b>, <b>manager email</b>, <b>team</b> and
+          up to three <b>roles</b> from the dropdowns), then choose the file. A manager may be another row of the same file. CSV with the same columns works too. Restricted roles are sent for a second
           admin's approval. Nothing is created unless every row is valid.
         </p>
         {templateError && <p className="error" role="alert">{templateError}</p>}
@@ -451,11 +458,11 @@ function BulkImportDialog({ onClose, onDone }: { onClose: () => void; onDone: (c
             </p>
             <div className="tablewrap" style={{ maxHeight: "40vh", overflow: "auto" }}>
               <table aria-label="Import preview">
-                <thead><tr><th>Row</th><th>Name</th><th>Email</th><th>Roles</th><th>Result</th></tr></thead>
+                <thead><tr><th>Row</th><th>Name</th><th>Email</th><th>Manager</th><th>Team</th><th>Roles</th><th>Result</th></tr></thead>
                 <tbody>
                   {report.rows.map((r) => (
                     <tr key={r.row}>
-                      <td>{r.row}</td><td>{r.displayName || "—"}</td><td>{r.email}</td>
+                      <td>{r.row}</td><td>{r.displayName || "—"}</td><td>{r.email}</td><td>{r.manager ?? "—"}</td><td>{r.team ?? "—"}</td>
                       <td>{(r.roles ?? []).length === 0 ? "—" : (
                         <ul className="chips">{r.roles.map((x) => (
                           <li key={x.role} className="chip">{x.label}{x.status === "pending_approval" ? " · needs approval" : ""}</li>

@@ -26,6 +26,16 @@ describe("csvToRows", () => {
       { email: "bo@x.com", displayName: "Bo" },
     ]);
   });
+  it("reads the manager email and team columns", () => {
+    expect(tableToRows([
+      ["Email", "Name", "Manager Email", "Team", "Role 1"],
+      ["asha@x.com", "Asha", "lead@x.com", "Team Rohit", "Recruiter"],
+      ["bo@x.com", "Bo", "", "", ""],
+    ])).toEqual([
+      { email: "asha@x.com", displayName: "Asha", manager: "lead@x.com", team: "Team Rohit", roles: ["Recruiter"] },
+      { email: "bo@x.com", displayName: "Bo" },
+    ]);
+  });
   it("rejects a file without the required columns", () => {
     expect(() => csvToRows("email\na@x.com")).toThrow(/email and name/);
     expect(() => csvToRows("")).toThrow(/empty/);

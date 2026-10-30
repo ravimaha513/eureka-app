@@ -47,6 +47,10 @@ export const BulkCreateUsers = z
             location: z.string().max(120).optional(),
             // Role keys or labels (the template's dropdowns use labels). Location-bound roles use `location`.
             roles: z.array(z.string().max(120)).max(5).optional(),
+            // The manager's email: an active user, or another row of this file.
+            manager: z.string().max(254).optional(),
+            // A team name; the user joins it as a member.
+            team: z.string().max(120).optional(),
           })
           .strict(),
       )
