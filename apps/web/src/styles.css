@@ -811,3 +811,28 @@ tbody tr.row-cleared td:first-child { box-shadow: inset 3px 0 0 var(--ok-fg); }
 .badge.st-marketing, .badge.st-submitted, .badge.st-interviewing, .badge.st-assessment { background: var(--pri-50); color: var(--pri-700); }
 ul.plain { list-style: none; padding: 0; margin: 4px 0 8px; display: flex; flex-direction: column; gap: 6px; }
 form.stack { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+/* Phones: denser filters, readable tables, touch-sized controls, no zoom on focus */
+@media (max-width: 768px) {
+  /* Filter bars: selects and dates pair up two per row; search inputs, chips, checks and hints keep the full width */
+  .toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: end; }
+  .toolbar > * { grid-column: 1 / -1; min-width: 0; }
+  .toolbar > .field:has(> select), .toolbar > .field:has(> input[type="date"]), .toolbar > .btn { grid-column: auto; }
+  .toolbar > .field { margin-bottom: 0; }
+  .toolbar > .btn { white-space: normal; height: auto; min-height: 38px; padding-block: 6px; line-height: 1.25; }
+  /* Scrolling tables: the first column (the record's name) stays in view; an empty table drops its header so the message fits */
+  .tablewrap > table:not(.mini) > * > tr > :first-child:not(.selcol, .empty) { position: sticky; left: 0; z-index: 1; }
+  :where(.tablewrap > table:not(.mini)) td:first-child:not(.selcol, .empty) { background: var(--surface); box-shadow: inset -1px 0 0 var(--line2); }
+  .tablewrap > table:not(.mini):has(> tbody > tr:only-child > td.empty) { min-width: 0; }
+  .tablewrap > table:has(> tbody > tr:only-child > td.empty) > thead { display: none; }
+  td.empty { white-space: normal; }
+  /* Touch targets */
+  .tab { min-height: 38px; }
+  .pager > button, .pager-page { height: 40px; }
+  .btn.sm { height: 34px; }
+  .iconbtn { width: 38px; height: 38px; }
+  .iconbtn.sm { width: 34px; height: 34px; }
+  .filterrow select { height: 36px; }
+  /* 16px text inputs: iOS Safari zooms the page on focus below that */
+  :root input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]), :root select, :root textarea { font-size: 16px; }
+  .rolecounts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+}
