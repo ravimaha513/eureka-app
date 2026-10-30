@@ -305,6 +305,7 @@ describe("Candidates list and create", () => {
 // ---- Profile -----------------------------------------------------------------------------------
 
 const renderProfile = (me: Me, onBack = () => undefined) => wrap(<CandidateProfile id={CID} me={me} onBack={onBack} backLabel="Back to Hot List" />);
+const openStatusMenu = async () => fireEvent.click(await screen.findByRole("button", { name: "Change status" }));
 
 describe("Candidate profile", () => {
   it("shows the profile with actions for a recruiter only", async () => {
@@ -314,6 +315,7 @@ describe("Candidate profile", () => {
     expect(screen.getByText("•• / •• / 1994")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit profile" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Log submission" })).toBeInTheDocument();
+    await openStatusMenu();
     expect(screen.getByRole("button", { name: "Move to On hold" })).toBeInTheDocument();
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Rating (1 to 5)")).not.toBeInTheDocument();
@@ -378,9 +380,11 @@ describe("Candidate profile", () => {
     let n = 0;
     routes[`POST /api/v1/candidates/${CID}/transition`] = () => (++n === 1 ? { body: { id: CID, status: "on_hold" } } : problem(422, { title: "Unprocessable", detail: "Request violates a data rule" }));
     renderProfile(RECRUITER);
-    fireEvent.click(await screen.findByRole("button", { name: "Move to On hold" }));
+    await openStatusMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Move to On hold" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Status changed to On hold."));
     expect(writes()[0]!.body).toEqual({ to: "on_hold" });
+    await openStatusMenu();
     fireEvent.click(screen.getByRole("button", { name: "Move to Stopped" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("That status change isn't allowed");
   });
@@ -396,14 +400,15 @@ describe("Candidate profile", () => {
 
   it("offers Add to Hot List only for in-training candidates", async () => {
     renderProfile(RECRUITER);
-    await screen.findByRole("button", { name: "Move to On hold" });
+    await screen.findByRole("button", { name: "Change status" });
     expect(screen.queryByRole("button", { name: "Add to Hot List" })).not.toBeInTheDocument();
   });
 
   it("confirms before terminating", async () => {
     routes[`POST /api/v1/candidates/${CID}/transition`] = () => ({ body: { id: CID, status: "terminated" } });
     renderProfile(RECRUITER);
-    fireEvent.click(await screen.findByRole("button", { name: "Terminate…" }));
+    await openStatusMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Terminate…" }));
     const dlg = screen.getByRole("dialog", { name: "Terminate Asha Iyer?" });
     expect(writes()).toHaveLength(0);
     fireEvent.click(within(dlg).getByRole("button", { name: "Terminate" }));
@@ -488,6 +493,7 @@ describe("Candidate profile", () => {
     expect(screen.queryByRole("button", { name: "Move to On hold" })).not.toBeInTheDocument();
     // ...and these follow the hints even without the capability.
     expect(screen.getByRole("switch", { name: "Open to all teams" })).toBeInTheDocument();
+    await openStatusMenu();
     const group = screen.getByRole("group", { name: "Status" });
     expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(["Move to Confirmation", "Terminate…"]);
     expect(screen.queryByLabelText("Rating (1 to 5)")).not.toBeInTheDocument();
@@ -499,8 +505,8 @@ describe("Candidate profile", () => {
     });
     renderProfile(LEAD);
     await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
-    expect(screen.queryByRole("heading", { name: "Manage" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Edit profile|Log submission|Move to/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Sharing and rating" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Edit profile|Log submission|Change status/ })).not.toBeInTheDocument();
   });
 
   it("deletes the candidate after confirming and goes back; explains a placed candidate", async () => {

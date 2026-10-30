@@ -99,10 +99,11 @@ describe("profile", () => {
   it("shows the new fields and the companies section; compliance editors change a company", async () => {
     wrap(<CandidateProfile id={CID} me={meFor("hr")} onBack={() => undefined} />);
     await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
-    expect(screen.getByText("Partially received")).toBeInTheDocument();
-    expect(screen.getByText("Eureka Payroll LLC")).toBeInTheDocument();
     expect(screen.getByText("In person")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open profile" })).toHaveAttribute("href", "https://www.linkedin.com/in/asha");
+    fireEvent.click(screen.getByRole("tab", { name: "Documents" }));
+    expect(screen.getByText("Partially received")).toBeInTheDocument();
+    expect(screen.getByText("Eureka Payroll LLC")).toBeInTheDocument();
     // HR has no edit hint from the server here: canEditCompliance is absent, so no button.
     expect(screen.queryByRole("button", { name: "Edit companies and documents" })).not.toBeInTheDocument();
   });
@@ -110,7 +111,8 @@ describe("profile", () => {
   it("the compliance dialog sends only what changed", async () => {
     routes[`GET /api/v1/candidates/${CID}`] = () => ({ body: { ...PROFILE, canEditCompliance: true } });
     wrap(<CandidateProfile id={CID} me={meFor("hr")} onBack={() => undefined} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Edit companies and documents" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Documents" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit companies and documents" }));
     const dialog = await screen.findByRole("dialog");
     await waitFor(() => expect(within(dialog).getAllByRole("option", { name: "Eureka Consulting (Dallas)" }).length).toBe(3));
     fireEvent.change(within(dialog).getByLabelText("Offer letter company"), { target: { value: CO2 } });

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isSafeHttpsUrl } from "@eureka/shared";
 import { ApiError, type Me } from "../api";
@@ -19,6 +19,9 @@ import { OpenToAllBadge, Phone, Priority, SharedBadge, StatusBadge, fmtDate } fr
 import { Loading } from "../ui/Loading";
 import { TeamChecklist } from "./TeamChecklist";
 
+const BLANK = new Set(["Not recorded", "—", "Not rated", "No batch"]);
+
+type Tab = "overview" | "documents" | "training" | "activity";
 type Modal = { kind: "edit" } | { kind: "submit" } | { kind: "terminate" } | { kind: "compliance" } | { kind: "delete" };
 
 /**
@@ -39,6 +42,8 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
   const pendingWarning = useRef("");
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("overview");
+  const tabsId = useId();
 
   const q = useQuery({ queryKey: salesKeys.candidate(id), queryFn: () => salesApi.candidate(id) });
 
@@ -91,6 +96,53 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
   // The Hot List is the active statuses, so "In training" -> Active is what puts a candidate on it.
   const canAddToHotList = c.status === "in_training" && next.includes("active");
 
+  type Fact = { label: string; value: ReactNode; className?: string };
+  const link = (url: string | null, text: string) =>
+    url ? (isSafeHttpsUrl(url) ? <a href={url} target="_blank" rel="noopener noreferrer">{text}</a> : url) : "—";
+  const facts: (Fact | false)[] = [
+    { label: "Technology", value: c.technology },
+    { label: "Team", value: c.team.name },
+    !!c.teamAssignedAt && { label: "Added to team", value: fmtDate(c.teamAssignedAt) },
+    { label: "Recruiter", value: c.recruiter?.name ?? "Unassigned" },
+    { label: "Location", value: c.location.name },
+    { label: "Phone", value: <Phone c={c} /> },
+    !!c.dobMasked && { label: "Date of birth", value: c.dobMasked, className: "masked" },
+    c.stay !== undefined && { label: "Stay", value: stayLabel(c) },
+    c.marketingLocations !== undefined && { label: "Marketing locations", value: c.marketingLocations.length ? c.marketingLocations.join("; ") : "Not recorded" },
+    c.visaCategory !== undefined && { label: "Visa (marketed)", value: visaLabel(c.visaCategory) },
+    c.eligibility !== undefined && { label: "Eligibility", value: eligibilityLabel(c.eligibility) },
+    c.confirmations !== undefined && { label: "Confirmations", value: c.confirmations },
+    c.linkedinUrl !== undefined && { label: "LinkedIn", value: link(c.linkedinUrl, "Open profile") },
+    c.resumeUrl !== undefined && { label: "Resume link", value: link(c.resumeUrl, "Open resume") },
+    c.batch !== undefined && { label: "Batch", value: c.batch?.label ?? "No batch" },
+    { label: "Marketing since", value: fmtDate(c.marketingStartDate) },
+    { label: "Days in market", value: c.daysInMarket ?? "—" },
+    { label: "Technical rating", value: c.technicalRating ? `${c.technicalRating} / 5` : "Not rated" },
+    { label: "Visibility", value: `${VISIBILITY_LABELS[c.visibility]}${c.sharedTeams?.length ? `: ${c.sharedTeams.map((t) => t.name).join(", ")}` : ""}` },
+    c.inPersonOk !== undefined && { label: "In-person interviews", value: c.inPersonOk === null ? "Not recorded" : c.inPersonOk ? "Open to in-person" : "Remote only" },
+    c.marketingEmail !== undefined && { label: "Marketing email", value: c.marketingEmail ?? "—" },
+    c.vitelNumber !== undefined && { label: "VITEL number", value: c.vitelNumber ?? "—" },
+  ];
+  const shown = facts.filter((f): f is Fact => !!f);
+  // Unset fields fold under "Not recorded (n)" so the filled ones are easy to scan.
+  const isBlank = (f: Fact) => typeof f.value === "string" && BLANK.has(f.value);
+  const filled = shown.filter((f) => !isBlank(f));
+  const blank = shown.filter(isBlank);
+  const factList = (list: Fact[]) => (
+    <dl className="facts">
+      {list.map((f) => <Fragment key={f.label}><dt>{f.label}</dt><dd className={f.className}>{f.value}</dd></Fragment>)}
+    </dl>
+  );
+
+  const hasDocs = caps.has("document:read") || caps.has("visa:read") || c.companies !== undefined || c.documentsStatus !== undefined;
+  const tabs: { key: Tab; label: string }[] = [
+    { key: "overview", label: "Overview" },
+    ...(hasDocs ? [{ key: "documents" as const, label: "Documents" }] : []),
+    ...(caps.has("training:read") ? [{ key: "training" as const, label: "Training" }] : []),
+    { key: "activity", label: "Activity" },
+  ];
+  const current = tabs.some((t) => t.key === tab) ? tab : "overview";
+
   return (
     <>
       {back}
@@ -112,7 +164,12 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
               Add to Hot List
             </button>
           )}
-          {canUpdate &&<button type="button" className="btn" onClick={() => setModal({ kind: "edit" })}>Edit profile</button>}
+          {showStatus && (
+            <StatusMenu from={c.status} next={next} busy={busy}
+              onPick={(to) => to === "terminated" ? setModal({ kind: "terminate" })
+                : void act(`to:${to}`, () => salesApi.transition(c.id, to), `Status changed to ${statusLabel(to)}.`, "transition")} />
+          )}
+          {canUpdate && <button type="button" className="btn" onClick={() => setModal({ kind: "edit" })}>Edit profile</button>}
           {canSubmit && <button type="button" className="btn primary" onClick={() => { pendingWarning.current = ""; setWarning(""); setModal({ kind: "submit" }); }}>Log submission</button>}
           {canDelete && <button type="button" className="btn danger" onClick={() => setModal({ kind: "delete" })}>Delete…</button>}
         </div>
@@ -122,99 +179,86 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
       {warning && <p className="note warn" role="alert">{warning}</p>}
       {actionError && <p className="banner error" role="alert">{actionError}</p>}
 
-      <div className="profilegrid">
-        <section className="card pad" aria-labelledby="facts-h">
-          <h2 id="facts-h">Details</h2>
-          <dl className="facts">
-            <dt>Technology</dt><dd>{c.technology}</dd>
-            <dt>Team</dt><dd>{c.team.name}</dd>
-            {c.teamAssignedAt && <><dt>Added to team</dt><dd>{fmtDate(c.teamAssignedAt)}</dd></>}
-            <dt>Recruiter</dt><dd>{c.recruiter?.name ?? "Unassigned"}</dd>
-            <dt>Location</dt><dd>{c.location.name}</dd>
-            {c.stay !== undefined && <><dt>Stay</dt><dd>{stayLabel(c)}</dd></>}
-            {c.marketingLocations !== undefined && <><dt>Marketing locations</dt><dd>{c.marketingLocations.length ? c.marketingLocations.join("; ") : "Not recorded"}</dd></>}
-            {c.visaCategory !== undefined && <><dt>Visa (marketed)</dt><dd>{visaLabel(c.visaCategory)}</dd></>}
-            {c.eligibility !== undefined && <><dt>Eligibility</dt><dd>{eligibilityLabel(c.eligibility)}</dd></>}
-            {c.confirmations !== undefined && <><dt>Confirmations</dt><dd>{c.confirmations}</dd></>}
-            {c.linkedinUrl !== undefined && (
-              <><dt>LinkedIn</dt><dd>{c.linkedinUrl ? (isSafeHttpsUrl(c.linkedinUrl) ? <a href={c.linkedinUrl} target="_blank" rel="noopener noreferrer">Open profile</a> : c.linkedinUrl) : "—"}</dd></>
-            )}
-            {c.resumeUrl !== undefined && (
-              <><dt>Resume link</dt><dd>{c.resumeUrl ? (isSafeHttpsUrl(c.resumeUrl) ? <a href={c.resumeUrl} target="_blank" rel="noopener noreferrer">Open resume</a> : c.resumeUrl) : "—"}</dd></>
-            )}
-            {c.batch !== undefined && <><dt>Batch</dt><dd>{c.batch?.label ?? "No batch"}</dd></>}
-            <dt>Phone</dt><dd><Phone c={c} /></dd>
-            {c.dobMasked && <><dt>Date of birth</dt><dd className="masked">{c.dobMasked}</dd></>}
-            <dt>Marketing since</dt><dd>{fmtDate(c.marketingStartDate)}</dd>
-            <dt>Days in market</dt><dd>{c.daysInMarket ?? "—"}</dd>
-            <dt>Technical rating</dt><dd>{c.technicalRating ? `${c.technicalRating} / 5` : "Not rated"}</dd>
-            <dt>Visibility</dt><dd>{VISIBILITY_LABELS[c.visibility]}{c.sharedTeams?.length ? `: ${c.sharedTeams.map((t) => t.name).join(", ")}` : ""}</dd>
-            {c.inPersonOk !== undefined && <><dt>In-person interviews</dt><dd>{c.inPersonOk === null ? "Not recorded" : c.inPersonOk ? "Open to in-person" : "Remote only"}</dd></>}
-            {c.marketingEmail !== undefined && <><dt>Marketing email</dt><dd>{c.marketingEmail ?? "—"}</dd></>}
-            {c.vitelNumber !== undefined && <><dt>VITEL number</dt><dd>{c.vitelNumber ?? "—"}</dd></>}
-          </dl>
-        </section>
+      <div className="tabs cp-tabs" role="tablist" aria-label="Candidate sections">
+        {tabs.map((t) => (
+          <button key={t.key} type="button" role="tab" id={`${tabsId}-t-${t.key}`} className="tab" aria-selected={current === t.key}
+            aria-controls={`${tabsId}-p-${t.key}`} tabIndex={current === t.key ? 0 : -1} onClick={() => setTab(t.key)}
+            onKeyDown={(e) => {
+              const i = tabs.findIndex((x) => x.key === t.key);
+              const j = e.key === "ArrowRight" ? (i + 1) % tabs.length : e.key === "ArrowLeft" ? (i - 1 + tabs.length) % tabs.length : -1;
+              if (j < 0) return;
+              e.preventDefault(); setTab(tabs[j]!.key);
+              document.getElementById(`${tabsId}-t-${tabs[j]!.key}`)?.focus();
+            }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-        {(canVisibility || canRate || showStatus) && (
-          <section className="card pad" aria-labelledby="manage-h">
-            <h2 id="manage-h">Manage</h2>
-            {canVisibility && (
-              <VisibilitySwitch value={c.visibility} busy={busy === "vis"}
-                onChange={(to) => void act("vis", () => salesApi.setVisibility(c.id, to),
-                  to === "all_teams" ? `${c.name} is now open to all teams.` : `${c.name} is now visible to your team only.`)} />
-            )}
-            {canVisibility && (
-              <TeamSharePicker ownTeamId={c.team.id} visibility={c.visibility} shared={c.sharedTeams ?? []} busy={busy === "share"}
-                onSave={(ids) => void act("share", () => salesApi.setVisibility(c.id, ids.length ? "selected_teams" : "team", ids.length ? ids : undefined),
-                  ids.length ? `${c.name} is now shared with ${ids.length === 1 ? "1 team" : `${ids.length} teams`}.` : `${c.name} is now visible to your team only.`)} />
-            )}
-            {canRate && (
-              <RatingForm current={c.technicalRating} busy={busy === "rating"}
-                onSave={(r) => void act("rating", () => salesApi.setRating(c.id, r), `Technical rating set to ${r} of 5.`)} />
-            )}
-            {showStatus && (
-              <div className="manageblock">
-                <h3 id="status-h">Status</h3>
-                {next.length === 0 ? <p className="muted">No status changes are available from {statusLabel(c.status)}.</p> : (
-                  <div className="rowactions" role="group" aria-labelledby="status-h">
-                    {next.map((to) => to === "terminated" ? (
-                      <button key={to} type="button" className="btn sm danger" disabled={busy !== null} onClick={() => setModal({ kind: "terminate" })}>Terminate…</button>
-                    ) : (
-                      <button key={to} type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === `to:${to}` || undefined}
-                        onClick={() => void act(`to:${to}`, () => salesApi.transition(c.id, to), `Status changed to ${statusLabel(to)}.`, "transition")}>
-                        Move to {statusLabel(to)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
-        )}
-
-        {(c.companies !== undefined || c.documentsStatus !== undefined) && (
-          <section className="card pad" aria-labelledby="compliance-h">
-            <h2 id="compliance-h">Companies and documents</h2>
-            <dl className="facts">
-              <dt>Documents status</dt><dd>{documentsLabel(c.documentsStatus)}</dd>
-              {c.companies && (
-                <>
-                  <dt>E-Verify company</dt><dd>{c.companies.everify?.name ?? "—"}</dd>
-                  <dt>Offer letter company</dt><dd>{c.companies.offerLetter?.name ?? "—"}</dd>
-                  <dt>1099 company</dt><dd>{c.companies.form1099?.name ?? "—"}</dd>
-                </>
+      <div role="tabpanel" id={`${tabsId}-p-${current}`} aria-labelledby={`${tabsId}-t-${current}`}>
+        {current === "overview" && (
+          <div className="cp-overview">
+            <section className="card pad" aria-labelledby="facts-h">
+              <h2 id="facts-h">Details</h2>
+              <div className="cp-facts">{factList(filled)}</div>
+              {blank.length > 0 && (
+                <details className="cp-blank">
+                  <summary>Not recorded ({blank.length})</summary>
+                  <div className="cp-facts">{factList(blank)}</div>
+                </details>
               )}
-            </dl>
-            {c.canEditCompliance && <button type="button" className="btn" onClick={() => setModal({ kind: "compliance" })}>Edit companies and documents</button>}
-          </section>
+            </section>
+            <div className="cp-side">
+              {(canVisibility || canRate) && (
+                <section className="card pad" aria-labelledby="manage-h">
+                  <h2 id="manage-h">Sharing and rating</h2>
+                  {canVisibility && (
+                    <VisibilitySwitch value={c.visibility} busy={busy === "vis"}
+                      onChange={(to) => void act("vis", () => salesApi.setVisibility(c.id, to),
+                        to === "all_teams" ? `${c.name} is now open to all teams.` : `${c.name} is now visible to your team only.`)} />
+                  )}
+                  {canVisibility && c.visibility !== "all_teams" && (
+                    <TeamSharePicker ownTeamId={c.team.id} shared={c.sharedTeams ?? []} busy={busy === "share"}
+                      onSave={(ids) => void act("share", () => salesApi.setVisibility(c.id, ids.length ? "selected_teams" : "team", ids.length ? ids : undefined),
+                        ids.length ? `${c.name} is now shared with ${ids.length === 1 ? "1 team" : `${ids.length} teams`}.` : `${c.name} is now visible to your team only.`)} />
+                  )}
+                  {canRate && (
+                    <RatingForm current={c.technicalRating} busy={busy === "rating"}
+                      onSave={(r) => void act("rating", () => salesApi.setRating(c.id, r), `Technical rating set to ${r} of 5.`)} />
+                  )}
+                </section>
+              )}
+              <NonResponseCard candidateId={c.id} />
+            </div>
+          </div>
         )}
-        {caps.has("document:read") && <CandidateResumes candidateId={c.id} />}
-        {caps.has("document:read") && <DocumentsSection owner={{ kind: "candidate", id: c.id }} title="Paperwork documents" />}
-        {caps.has("visa:read") && <CandidateWorkAuthorization candidateId={c.id} />}
-        {caps.has("training:read") && <CandidateTraining candidateId={c.id} />}
 
-        <NonResponseCard candidateId={c.id} />
-        <CandidateTimeline id={c.id} />
+        {current === "documents" && (
+          <div className="cp-docs">
+            {caps.has("document:read") && <CandidateResumes candidateId={c.id} />}
+            {(c.companies !== undefined || c.documentsStatus !== undefined) && (
+              <section className="card pad" aria-labelledby="compliance-h">
+                <h2 id="compliance-h">Companies and documents</h2>
+                <dl className="facts">
+                  <dt>Documents status</dt><dd>{documentsLabel(c.documentsStatus)}</dd>
+                  {c.companies && (
+                    <>
+                      <dt>E-Verify company</dt><dd>{c.companies.everify?.name ?? "—"}</dd>
+                      <dt>Offer letter company</dt><dd>{c.companies.offerLetter?.name ?? "—"}</dd>
+                      <dt>1099 company</dt><dd>{c.companies.form1099?.name ?? "—"}</dd>
+                    </>
+                  )}
+                </dl>
+                {c.canEditCompliance && <button type="button" className="btn" onClick={() => setModal({ kind: "compliance" })}>Edit companies and documents</button>}
+              </section>
+            )}
+            {caps.has("document:read") && <div className="cp-wide"><DocumentsSection owner={{ kind: "candidate", id: c.id }} title="Paperwork documents" /></div>}
+            {caps.has("visa:read") && <div className="cp-wide"><CandidateWorkAuthorization candidateId={c.id} /></div>}
+          </div>
+        )}
+
+        {current === "training" && <CandidateTraining candidateId={c.id} />}
+        {current === "activity" && <CandidateTimeline id={c.id} />}
       </div>
 
       {modal?.kind === "edit" && (
@@ -271,32 +315,63 @@ function VisibilitySwitch({ value, busy, onChange }: { value: Visibility; busy: 
 
 /**
  * "Selected teams" (0240): pick the teams that may also see the candidate. Saving
- * with none picked goes back to team only; Open to all teams already covers every team.
+ * with none picked goes back to team only. Hidden while Open to all teams is on.
  */
-function TeamSharePicker({ ownTeamId, visibility, shared, busy, onSave }: {
-  ownTeamId: string; visibility: Visibility; shared: { id: string }[]; busy: boolean; onSave: (teamIds: string[]) => void;
+function TeamSharePicker({ ownTeamId, shared, busy, onSave }: {
+  ownTeamId: string; shared: { id: string }[]; busy: boolean; onSave: (teamIds: string[]) => void;
 }) {
   const id = useId();
   const savedKey = shared.map((t) => t.id).sort().join(",");
   const [picked, setPicked] = useState<Set<string>>(() => new Set(shared.map((t) => t.id)));
   useEffect(() => setPicked(new Set(savedKey ? savedKey.split(",") : [])), [savedKey]);
   const dirty = [...picked].sort().join(",") !== savedKey;
-  const openToAll = visibility === "all_teams";
   return (
     <form className="manageblock" aria-labelledby={`${id}-l`} onSubmit={(e) => { e.preventDefault(); onSave([...picked]); }}>
       <h3 id={`${id}-l`}>Share with selected teams</h3>
-      <p id={`${id}-d`} className="hint">
-        {openToAll
-          ? "Open to all teams already shares this candidate with every team. Turn it off to pick teams."
-          : "Picked teams can see and submit this candidate while they're active. Your team always sees it."}
-      </p>
-      {!openToAll && (
-        <>
-          <TeamChecklist picked={picked} onChange={setPicked} excludeTeamId={ownTeamId} disabled={busy} describedBy={`${id}-d`} />
-          <button type="submit" className="btn" disabled={busy || !dirty} aria-busy={busy || undefined}>Save sharing</button>
-        </>
-      )}
+      <p id={`${id}-d`} className="hint">Picked teams can see and submit this candidate while they're active. Your team always sees it.</p>
+      <TeamChecklist picked={picked} onChange={setPicked} excludeTeamId={ownTeamId} disabled={busy} describedBy={`${id}-d`} />
+      <button type="submit" className="btn" disabled={busy || !dirty} aria-busy={busy || undefined}>Save sharing</button>
     </form>
+  );
+}
+
+/** "Change status" disclosure: the allowed transitions in a small popover; Escape or a click outside closes it. */
+function StatusMenu({ from, next, busy, onPick }: {
+  from: string; next: readonly string[]; busy: string | null; onPick: (to: string) => void;
+}) {
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (!wrap.current?.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setOpen(false); toggle.current?.focus(); } };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  return (
+    <div className="cp-statusmenu" ref={wrap}>
+      <button ref={toggle} type="button" className="btn" aria-expanded={open} aria-controls={`${id}-p`}
+        aria-busy={busy?.startsWith("to:") || undefined} onClick={() => setOpen((o) => !o)}>
+        Change status <span aria-hidden="true">▾</span>
+      </button>
+      {open && (
+        <div id={`${id}-p`} className="cp-statuspop">
+          {next.length === 0 ? <p className="muted">No status changes are available from {statusLabel(from)}.</p> : (
+            <div role="group" aria-label="Status">
+              {next.map((to) => (
+                <button key={to} type="button" className={`btn sm ${to === "terminated" ? "danger" : ""}`} disabled={busy !== null}
+                  onClick={() => { setOpen(false); onPick(to); }}>
+                  {to === "terminated" ? "Terminate…" : `Move to ${statusLabel(to)}`}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

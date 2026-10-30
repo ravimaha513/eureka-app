@@ -89,6 +89,7 @@ test("a location admin runs a batch; the recruiter sees the student's progress",
   await page.getByRole("search", { name: "Candidates filters" }).getByLabel("Search name").fill(student.name.split(" ")[1]!);
   await page.getByRole("table", { name: "Candidates" }).getByRole("button", { name: `Open profile of ${student.name}` }).click();
   await expect(page.getByRole("heading", { level: 1, name: student.name })).toBeVisible();
+  await page.getByRole("tab", { name: "Training" }).click();
   const training = page.getByRole("region", { name: "Training" });
   await expect(training).toContainText(name);
   await expect(training.getByRole("progressbar", { name: "Overall training progress" })).toHaveAttribute("aria-valuenow", "100");

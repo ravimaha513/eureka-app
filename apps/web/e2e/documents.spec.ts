@@ -16,6 +16,7 @@ async function openDocuments(page: Page, name: string) {
   await page.getByRole("search", { name: "Candidates filters" }).getByLabel("Search name").fill(name.split(" ")[1]!);
   await page.getByRole("table", { name: "Candidates" }).getByRole("button", { name: `Open profile of ${name}` }).click();
   await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+  await page.getByRole("tab", { name: "Documents" }).click();
   return page.getByRole("region", { name: "Paperwork documents" });
 }
 

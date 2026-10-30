@@ -266,6 +266,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   from Log submission (`client:create`/`vendor:create`, `authz.create_client`/`create_vendor`; docs/lookups-api.md).
 - Superiors add preferred vendors (no migrations): `manager`, `assoc_director`, `ceo` hold `vendor.preferred:create` own; others' entries stay read-only (docs/pipeline-vendors-api.md).
 - Candidate cascade delete (0330): `candidate:delete` (lead team, manager/AD hierarchy, CEO org); `authz.delete_candidate` wipes the subtree, 409 `candidate_placed` if placed/employee; guards open only via `eureka.candidate_purge` (docs/candidates-api.md CA-7). S3 files not removed.
+- Candidate profile tabs (web only): header "Change status" popover; Overview / Documents / Training / Activity tabs; unset Details fields fold under "Not recorded (n)"; selected-teams picker hidden while Open to all teams is on.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

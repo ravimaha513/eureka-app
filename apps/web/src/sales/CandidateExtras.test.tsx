@@ -236,6 +236,7 @@ describe("Candidate profile: batch and timeline", () => {
     renderProfile();
     await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
     expect(screen.getByText("Java · Dallas · Nov 2026", { selector: "dd" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
     const list = await screen.findByRole("list", { name: "Candidate activity, newest first" });
     expect(within(list).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
       expect.stringMatching(/^Status changed from Active to On hold · .* · Lead One$/),
@@ -250,10 +251,12 @@ describe("Candidate profile: batch and timeline", () => {
 
   it("explains an empty timeline and a failed load", async () => {
     const { unmount } = renderProfile();
+    fireEvent.click(await screen.findByRole("tab", { name: "Activity" }));
     expect(await screen.findByText("No activity recorded yet.")).toBeInTheDocument();
     unmount();
     routes[`GET /api/v1/candidates/${CID}/timeline`] = () => problem(500, { title: "Internal Server Error" });
     renderProfile();
+    fireEvent.click(await screen.findByRole("tab", { name: "Activity" }));
     const section = (await screen.findByRole("heading", { name: "Timeline" })).closest("section")!;
     expect(await within(section).findByRole("alert")).toHaveTextContent("Internal Server Error");
   });

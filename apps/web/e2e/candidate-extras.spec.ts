@@ -47,6 +47,7 @@ test("batch filter on Candidates, and the batch and timeline on the profile", as
   await expect(details.locator("dt", { hasText: "Batch" }).locator("+ dd")).toHaveText(batch.label);
 
   // Newest first: status change, batch assignment, creation.
+  await page.getByRole("tab", { name: "Activity" }).click();
   const timeline = page.getByRole("list", { name: "Candidate activity, newest first" });
   const events = timeline.getByRole("listitem");
   await expect(events.filter({ hasText: "Status changed from In training to Active" })).toHaveCount(1);
@@ -63,6 +64,7 @@ test("batch filter on Candidates, and the batch and timeline on the profile", as
   await search.getByLabel("Search name").fill(outside.name.split(" ")[1]!);
   await candidatesTable(page).getByRole("button", { name: `Open profile of ${outside.name}` }).click();
   await expect(page.getByRole("region", { name: "Details" }).locator("dt", { hasText: "Batch" }).locator("+ dd")).toHaveText("No batch");
+  await page.getByRole("tab", { name: "Activity" }).click();
   await expect(page.getByRole("list", { name: "Candidate activity, newest first" }).getByRole("listitem")).toHaveCount(1);
 });
 
