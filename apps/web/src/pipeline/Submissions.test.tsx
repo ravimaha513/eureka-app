@@ -31,6 +31,25 @@ const openDrawer = async (name: string) => {
 };
 
 describe("Submissions list", () => {
+  it("keeps status and dates in the address bar and restores them on load", async () => {
+    window.history.replaceState(null, "", "/submissions?status=selected&from=2026-01-05&to=bogus");
+    wrap(<SubmissionsPage me={RECRUITER} />);
+    await rowOf("Asha Iyer");
+    // A bad value in the link is ignored rather than sent.
+    expect(lastList().get("status")).toBe("selected");
+    expect(lastList().get("from")).toBe(dayBoundary("2026-01-05"));
+    expect(lastList().get("to")).toBeNull();
+    expect(screen.getByLabelText("Submitted from")).toHaveValue("2026-01-05");
+
+    const chips = screen.getByRole("group", { name: "Status" });
+    fireEvent.click(within(chips).getByRole("button", { name: "Rejected" }));
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("status")).toBe("rejected"));
+    expect(window.location.pathname).toBe("/submissions");
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(window.location.search).toBe(""));
+    expect(lastList().get("status")).toBeNull();
+  });
+
   it("lists submissions with status chips and no rate column when rates are withheld", async () => {
     wrap(<SubmissionsPage me={RECRUITER} />);
     const row = await rowOf("Asha Iyer");

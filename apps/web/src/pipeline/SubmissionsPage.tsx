@@ -16,17 +16,23 @@ import { PipelineStatus, StatusChips } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
+import { useSearchParam } from "../lib/router";
 
 const PAGE_SIZE = 50;
 const CLOSING = new Set(["rejected", "withdrawn"]);
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Submissions list (GET /api/v1/submissions) with a detail drawer for status changes and next steps. */
 export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabilities">; onOpenPlacement?: (id: string) => void }) {
   const id = useId();
   const canSearchCandidates = can(me, "candidate:read");
-  const [status, setStatusRaw] = useState("");
-  const [from, setFromRaw] = useState("");
-  const [to, setToRaw] = useState("");
+  // Status and dates live in the address bar (?status=&from=&to=), so a refresh or a shared link keeps them.
+  const [statusParam, setStatusRaw] = useSearchParam("status");
+  const [fromParam, setFromRaw] = useSearchParam("from");
+  const [toParam, setToRaw] = useSearchParam("to");
+  const status = (SUBMISSION_STATUSES as readonly string[]).includes(statusParam) ? statusParam : "";
+  const from = ISO_DAY.test(fromParam) ? fromParam : "";
+  const to = ISO_DAY.test(toParam) ? toParam : "";
   const [candidateId, setCandidateRaw] = useState("");
   const pager = useCursorPager();
   const { page, reset } = pager;
