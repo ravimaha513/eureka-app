@@ -221,3 +221,21 @@ describe("screen switcher and tab titles", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Go to screen" })).not.toBeInTheDocument());
   });
 });
+
+describe("focus on screen change", () => {
+  const items = () => vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ items: [] }), { status: 200 }));
+
+  it("moves focus to the new screen's heading, and the skip link jumps to it", async () => {
+    items();
+    window.history.replaceState(null, "", "/hotlist");
+    wrap(<Shell me={meFor("recruiter")} onSignOut={() => undefined} />);
+    const nav = screen.getByRole("complementary", { name: "Main navigation" });
+    fireEvent.click(within(nav).getByRole("button", { name: "Submissions" }));
+    const heading = await screen.findByRole("heading", { level: 1, name: "Submissions" });
+    await waitFor(() => expect(heading).toHaveFocus());
+
+    within(nav).getByRole("button", { name: "Submissions" }).focus();
+    fireEvent.click(screen.getByRole("link", { name: "Skip to main content" }));
+    expect(heading).toHaveFocus();
+  });
+});

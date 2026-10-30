@@ -336,6 +336,34 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     document.title = current ? `${current.label} | Eureka` : "Eureka";
     return () => { document.title = "Eureka"; };
   }, [current]);
+  // Moving to another screen puts focus on its heading, so keyboard and screen-reader users land
+  // at the top of the new screen (not on the sidebar button). Lazy screens render their h1 late.
+  const shownScreen = useRef(active);
+  useEffect(() => {
+    if (shownScreen.current === active) return;
+    shownScreen.current = active;
+    const focusHeading = () => {
+      const h1 = document.querySelector<HTMLElement>(".content h1");
+      if (!h1) return false;
+      if (!h1.hasAttribute("tabindex")) h1.tabIndex = -1;
+      h1.focus();
+      return true;
+    };
+    if (focusHeading()) return;
+    const content = document.querySelector(".content");
+    if (!content) return;
+    const watch = new MutationObserver(() => { if (focusHeading()) stop(); });
+    const timer = window.setTimeout(() => stop(), 5000);
+    const stop = () => { watch.disconnect(); window.clearTimeout(timer); };
+    watch.observe(content, { childList: true, subtree: true });
+    return stop;
+  }, [active]);
+  const skipToContent = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const target = document.querySelector<HTMLElement>(".content h1") ?? document.getElementById("main-content");
+    if (target && !target.hasAttribute("tabindex")) target.tabIndex = -1;
+    target?.focus();
+  };
   // Ctrl/Cmd+K opens the screen switcher, unless another dialog is already open.
   const [jumpOpen, setJumpOpen] = useState(false);
   const jumpItems = useMemo(() => [...items, SETTINGS_NAV], [items]);
@@ -360,6 +388,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   }, [navOpen]);
   return (
     <div className={collapsed ? "app collapsed" : "app"}>
+      <a href="#main-content" className="skiplink" onClick={skipToContent}>Skip to main content</a>
       <aside id="mainnav" ref={sideRef} className={navOpen ? "side open" : "side"} aria-label="Main navigation">
         <div className="brandrow">
           <div className="brand"><span className="logo"><Sparkles size={16} aria-hidden="true" /></span><span className="brandtext">Eureka<small>Staffing pipeline</small></span></div>
@@ -404,7 +433,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           </div>
         </div>
         <OfflineBanner />
-        <div className="content">
+        <div className="content" id="main-content" tabIndex={-1}>
           <Suspense fallback={<PageLoading />}>
             {!current ? <p className="empty">Your role has no screens yet.</p>
               : current.key === "hotlist" || current.key === "candidates" ? (
