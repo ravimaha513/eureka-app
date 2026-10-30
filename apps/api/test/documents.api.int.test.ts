@@ -422,7 +422,8 @@ describe("Google step-up (OIDC max_age / auth_time)", () => {
     const { google, cb } = await stepUp(s, (nonce) => ({ nonce, auth_time: Math.floor(Date.now() / 1000) }));
     expect(google.origin + google.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
     expect(Object.fromEntries(google.searchParams)).toMatchObject({ max_age: "0", prompt: "login", login_hint: "imm@eureka.example",
-      hd: "eureka.example", code_challenge_method: "S256", redirect_uri: "http://localhost:5173/api/auth/step-up/callback" });
+      hd: "eureka.example", code_challenge_method: "S256", redirect_uri: "http://localhost:5173/api/auth/step-up/callback",
+      claims: JSON.stringify({ id_token: { auth_time: { essential: true } } }) });
     expect(cb.statusCode).toBe(302);
     expect(cb.headers.location).toBe("http://localhost:5173/candidates/x?tab=documents");
     expect((await gapp.inject({ method: "GET", url: "/api/auth/step-up", headers: { cookie: s.cookie } })).json()).toMatchObject({ active: true, method: "google", mode: "google" });

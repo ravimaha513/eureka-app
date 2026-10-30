@@ -5,6 +5,8 @@ import { CONFIG, parseEmailList, type AppConfig } from "./config.js";
 
 const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
+/** OIDC Core 5.5: requests auth_time in the step-up ID token (Google omits it otherwise). */
+const STEP_UP_CLAIMS = JSON.stringify({ id_token: { auth_time: { essential: true } } });
 const GOOGLE_JWKS = "https://www.googleapis.com/oauth2/v3/certs";
 const GOOGLE_ISSUERS = ["https://accounts.google.com", "accounts.google.com"];
 
@@ -40,10 +42,14 @@ export class OidcService {
    * claim; `prompt=login` is the design's request too. Whether Google honours
    * both is the Phase 0 spike: the callback trusts neither, it checks the
    * returned auth_time (verifyStepUp, authz.step_up_complete). `login_hint`
-   * pre-selects the signed-in user's account.
+   * pre-selects the signed-in user's account. Google leaves auth_time out of
+   * the ID token unless it is asked for through the `claims` parameter, so the
+   * step-up request names it explicitly.
    */
   startStepUp(redirectUri: string, loginHint?: string): OidcStart {
-    return this.authorize(redirectUri, { prompt: "login", max_age: "0", ...(loginHint ? { login_hint: loginHint } : {}) });
+    return this.authorize(redirectUri, {
+      prompt: "login", max_age: "0", claims: STEP_UP_CLAIMS, ...(loginHint ? { login_hint: loginHint } : {}),
+    });
   }
 
   private authorize(redirectUri: string, extra: Record<string, string>): OidcStart {
