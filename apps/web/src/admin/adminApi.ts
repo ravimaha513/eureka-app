@@ -7,8 +7,18 @@ export interface Place { id: string; name: string }
 
 export interface RoleMeta {
   key: string; label: string; restricted: boolean; locationBound: boolean;
-  isSystem: boolean; track: string; level: number; department: Place | null;
+  isSystem: boolean; track: string; level: number; recruiter: boolean; department: Place | null;
 }
+
+// ---- org chart (docs/roles-api.md, "Org chart") ---------------------------------------------------
+export interface OrgPerson {
+  id: string; displayName: string; designation: string | null; managerId: string | null;
+  roles: { key: string; label: string; track: string; level: number }[];
+  team: { id: string; name: string; asLead: boolean } | null;
+  canMove: boolean;
+}
+export interface OrgChart { people: OrgPerson[]; teams: { id: string; name: string; leadId: string }[] }
+export interface OrgPreview { loses: Ref[]; gains: Ref[]; warnings: string[] }
 
 // ---- role definitions (docs/roles-api.md) -----------------------------------------------------
 export interface RoleTraits { sales: boolean; locationBound: boolean; admin: boolean; recruiter: boolean; coach: boolean }
@@ -168,6 +178,12 @@ export const adminApi = {
   reject: (id: string) => api<{ status: "rejected" }>(`/api/v1/admin/role-requests/${enc(id)}/reject`, { method: "POST" }),
   revokeRole: (userId: string, role: string, locationId: string | null) =>
     api<void>(`/api/v1/admin/users/${enc(userId)}/roles/${enc(role)}${locationId ? `?locationId=${enc(locationId)}` : ""}`, { method: "DELETE" }),
+
+  orgChart: () => api<OrgChart>("/api/v1/admin/org-chart"),
+  orgChartPreview: (userId: string, managerId: string | null) =>
+    api<OrgPreview>(`/api/v1/admin/org-chart/preview?userId=${enc(userId)}&managerId=${enc(managerId ?? "")}`),
+  orgChartApply: (b: { moves: { userId: string; managerId: string | null }[]; teamAdds: { userId: string; teamId: string }[] }) =>
+    api<{ applied: number; warnings: { userId: string; code: string }[] }>("/api/v1/admin/org-chart/apply", { method: "POST", ...json(b) }),
 
   roles: (includeArchived = false) => api<{ items: RoleDef[] }>(`/api/v1/admin/roles${includeArchived ? "?includeArchived=true" : ""}`),
   permissions: () => api<PermissionCatalog>("/api/v1/admin/permissions"),

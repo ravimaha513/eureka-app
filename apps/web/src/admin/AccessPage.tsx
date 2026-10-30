@@ -6,6 +6,7 @@ import { ApprovalsTab } from "./ApprovalsTab";
 import { TeamsTab } from "./TeamsTab";
 import { LocationsTab } from "./LocationsTab";
 import { RolesTab } from "./RolesTab";
+import { OrgChartTab } from "./OrgChartTab";
 
 const TABS = [
   { key: "users", label: "Users" },
@@ -13,6 +14,7 @@ const TABS = [
   { key: "teams", label: "Teams" },
   { key: "locations", label: "Locations" },
   { key: "roles", label: "Roles" },
+  { key: "orgchart", label: "Org chart" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
@@ -59,7 +61,8 @@ export function AccessPage({ me, initialTab = "users" }: { me: Me; initialTab?: 
           : tab === "approvals" ? <ApprovalsTab />
           : tab === "teams" ? <TeamsTab onShowUnassigned={() => { setUsersPreset({ team: "none", status: "active" }); setTab("users"); }} />
           : tab === "locations" ? <LocationsTab />
-          : <RolesTab />}
+          : tab === "roles" ? <RolesTab />
+          : <OrgChartTab />}
       </section>
     </AccessContext.Provider>
   );

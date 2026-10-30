@@ -13,6 +13,7 @@ export const keys = {
   locations: ["admin", "locations"] as const,
   roles: ["admin", "roles"] as const,
   permissions: ["admin", "permissions"] as const,
+  orgChart: ["admin", "org-chart"] as const,
 };
 
 export interface AccessCtx {

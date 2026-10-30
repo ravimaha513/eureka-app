@@ -108,8 +108,8 @@ to seed and by tests (`assignmentFor(role)` builds an assignment from the catalo
   are rejected. `authz.role_archive`; audited as `admin.role.archived`.
 - `POST /api/v1/admin/roles/:key/restore` returns 204; 409 `role_exists` when a live role took the
   label. `authz.role_restore`; audited as `admin.role.restored`.
-- `GET /api/v1/admin/meta` `roles[]` now lists every non-archived role with `isSystem` and
-  `track`/`level`; `POST /admin/role-requests` and the bulk import accept custom keys and labels.
+- `GET /api/v1/admin/meta` `roles[]` now lists every non-archived role with `isSystem`,
+  `track`/`level` and `recruiter` (the trait); `POST /admin/role-requests` and the bulk import accept custom keys and labels.
   Granting a department-bound role to a user outside it is 422 `role_department_mismatch`; an
   archived one is 422 `role_archived` (bulk rows: `unknown_role`, archived roles are not offered).
   `DELETE /admin/users/:id/roles/:role` with an unknown key is 422 `unknown_role`.
@@ -122,3 +122,39 @@ Users & Access gets a **Roles** tab: a list grouped by track and ordered by leve
 badge, holders, restricted mark), a drawer with traits, ladder position, department and the
 permission grid (rows grouped by area, one scope select per row, "off" to remove). "Clone"
 on any role opens the create form prefilled. System roles are read-only in the drawer.
+
+## Org chart (Users & Access › Org chart)
+
+Decided 2026-10-30: the reporting hierarchy is edited on a chart, by drag and drop or a
+"Reports to" picker, and saved as one batch. A move changes who sees whose work
+(`hierarchy` scope follows `reporting_line`); it never changes roles, so it needs one admin
+(`access:manage`), not a second approver (AD-3 is about grants). Team membership on the
+chart is limited to adding unassigned recruiters to a team; moving someone between teams
+stays with `POST /teams/:id/move-member` (`team:move_member`, candidates reassigned).
+
+- Ladder rule: the new manager's highest level should be above the person's, compared
+  within a shared track (cross-track moves compare each one's highest level, so an
+  Interview Lead may report to an Associate Director). A breach is a **warning**
+  (`ladder_level`), returned and audited, never a refusal: the org is the admin's call.
+- `GET /api/v1/admin/org-chart` returns `{ people: [{ id, displayName, designation, managerId,
+  roles: [{ key, label, track, level }], team: { id, name, asLead }|null, canMove }],
+  teams: [{ id, name, leadId }] }` for active users (`canMove` is false for the caller: `self_change`).
+- `GET /api/v1/admin/org-chart/preview?userId=&managerId=` returns `{ loses: [{id,displayName}],
+  gains: [...], warnings: ["ladder_level"] }`: the managers leaving and joining the person's
+  reporting chain (`reporting_closure` ancestors before and after; `managerId` empty = no manager).
+- `POST /api/v1/admin/org-chart/apply` with `{ moves: [{ userId, managerId: uuid|null }],
+  teamAdds: [{ userId, teamId }] }` (1–100 items in total, each user once) returns 200
+  `{ applied, warnings: [{ userId, code }] }`. All or nothing, in order: each move goes through
+  `authz.org_chart_move` (ladder check, then `authz.admin_set_manager`: `self_change`, `cycle`,
+  `invalid_manager`, `user_inactive`), each team add through `authz.admin_add_team_member`
+  (`already_member`, `not_a_recruiter` when the role lacks the recruiter trait). Audited per item as
+  `admin.user.manager` `{ managerId, previous, warnings, batch: true }` and `admin.team.member_added`
+  `{ userId, batch: true }`. 422 `duplicate_user` when a user appears twice.
+- Promotion on the chart is the existing role flow: the web grants the next role on the ladder
+  (`POST /admin/role-requests`) and revokes the current one once that is applied; a restricted
+  next step stays pending for the second admin and the current role is kept until then.
+- Web: `apps/web/src/admin/OrgChartTab.tsx`. Tree by reporting line with a team strip under each
+  lead; drag a card onto a new manager or an unassigned recruiter chip onto a team strip; the side
+  panel's "Reports to" select (higher-level people only, descendants excluded) and keyboard **M**
+  are the accessible path. Drops queue up in a pending list with the Loses/Gains preview and go
+  with "Apply changes"; Undo and Discard are local.

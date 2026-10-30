@@ -50,6 +50,7 @@ const CODES: Record<string, (code: string) => HttpException> = {
   location_scope_needs_location: (c) => new UnprocessableEntityException(c),
   unknown_department: (c) => new UnprocessableEntityException(c),
   role_department_mismatch: (c) => new UnprocessableEntityException(c),
+  duplicate_user: (c) => new UnprocessableEntityException(c),
   invalid_manager: (c) => new UnprocessableEntityException(c),
   invalid_lead: (c) => new UnprocessableEntityException(c),
   invalid_name: (c) => new UnprocessableEntityException(c),

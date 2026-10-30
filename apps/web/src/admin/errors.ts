@@ -47,6 +47,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   invalid_scope: "That scope isn't allowed.",
   location_scope_needs_location: "Only a location-bound role can use the “Their location” scope.",
   unknown_department: "That department doesn't exist any more. Refresh and try again.",
+  duplicate_user: "Each person can appear once per batch. Undo one of their changes.",
+  not_a_recruiter: "Only people with a recruiter role can be team members.",
   role_department_mismatch: "This role is limited to one department; the person isn't in it. Set their department first.",
 };
 

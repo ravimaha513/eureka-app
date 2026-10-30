@@ -10,6 +10,8 @@ import {
   CreateRole,
   CreateRoleRequest,
   CreateTeam,
+  OrgChartApply,
+  OrgChartPreviewQuery,
   RoleListQuery,
   SetRoleGrants,
   UpdateRole,
@@ -172,6 +174,25 @@ export class AdminController {
   @HttpCode(204)
   async restoreRole(@CurrentUser() user: AuthedUser, @Param("key") key: string): Promise<void> {
     await this.svc.archiveRole(user, RoleKey.parse(key), true);
+  }
+
+  // ---------- org chart (docs/roles-api.md) ----------
+
+  @Get("org-chart")
+  orgChart(@CurrentUser() user: AuthedUser) {
+    return this.svc.orgChart(user);
+  }
+
+  @Get("org-chart/preview")
+  orgChartPreview(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
+    const p = OrgChartPreviewQuery.parse(q);
+    return this.svc.orgChartPreview(user, p.userId, p.managerId || null);
+  }
+
+  @Post("org-chart/apply")
+  @HttpCode(200)
+  orgChartApply(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
+    return this.svc.orgChartApply(user, OrgChartApply.parse(body));
   }
 
   // ---------- role requests ----------

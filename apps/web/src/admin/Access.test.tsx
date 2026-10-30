@@ -119,7 +119,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-const renderPage = (tab?: "users" | "approvals" | "teams" | "locations" | "roles", me: Me = ME) =>
+const renderPage = (tab?: "users" | "approvals" | "teams" | "locations" | "roles" | "orgchart", me: Me = ME) =>
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <AccessPage me={me} initialTab={tab} />
@@ -929,5 +929,92 @@ describe("Roles tab", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Create role" }));
     await waitFor(() => expect(lastWrite().body).toEqual({ label: "Team Lead", cloneFrom: "lead", departmentId: "d1" }));
     await waitFor(() => expect(status()).toHaveTextContent("Created Team Lead from Lead (Sales)."));
+  });
+});
+
+// ---- org chart (docs/roles-api.md, "Org chart") ----------------------------------------------
+
+const ORG_META = {
+  ...META,
+  roles: [
+    { key: "ceo", label: "CEO", restricted: true, locationBound: false, isSystem: true, track: "sales", level: 5, recruiter: false, department: null },
+    { key: "manager", label: "Manager (Sales)", restricted: false, locationBound: false, isSystem: true, track: "sales", level: 3, recruiter: false, department: null },
+    { key: "lead", label: "Lead (Sales)", restricted: false, locationBound: false, isSystem: true, track: "sales", level: 2, recruiter: false, department: null },
+    { key: "recruiter", label: "Recruiter", restricted: false, locationBound: false, isSystem: true, track: "sales", level: 1, recruiter: true, department: null },
+    { key: "org_admin", label: "Org Admin", restricted: true, locationBound: false, isSystem: true, track: "administration", level: 1, recruiter: false, department: null },
+  ],
+};
+const op = (id: string, displayName: string, role: [string, string, number], managerId: string | null, team: { id: string; name: string; asLead: boolean } | null = null) =>
+  ({ id, displayName, designation: null, managerId, roles: [{ key: role[0], label: role[1], track: "sales", level: role[2] }], team, canMove: id !== "me" });
+const ORG = {
+  people: [
+    op("u-ceo", "Ravi CEO", ["ceo", "CEO", 5], null),
+    op("u-mgr", "Mira Manager", ["manager", "Manager (Sales)", 3], "u-ceo"),
+    op("u-lead", "Rohit Lead", ["lead", "Lead (Sales)", 2], "u-mgr", { id: "t1", name: "Team Rohit", asLead: true }),
+    op("u-lead2", "Anjali Lead", ["lead", "Lead (Sales)", 2], "u-mgr", { id: "t2", name: "Team Anjali", asLead: true }),
+    op("u-priya", "Priya Rao", ["recruiter", "Recruiter", 1], "u-lead", { id: "t1", name: "Team Rohit", asLead: false }),
+    op("u-new", "Noor New", ["recruiter", "Recruiter", 1], "u-lead2"),
+    { ...op("me", "Ada Admin", ["org_admin", "Org Admin", 1], null), roles: [{ key: "org_admin", label: "Org Admin", track: "administration", level: 1 }] },
+  ],
+  teams: [{ id: "t1", name: "Team Rohit", leadId: "u-lead" }, { id: "t2", name: "Team Anjali", leadId: "u-lead2" }],
+};
+
+describe("Org chart tab", () => {
+  beforeEach(() => {
+    routes["GET /api/v1/admin/meta"] = () => ({ body: ORG_META });
+    routes["GET /api/v1/admin/org-chart"] = () => ({ body: ORG });
+    routes["GET /api/v1/admin/org-chart/preview"] = (u) => ({ body: u.searchParams.get("managerId") === "u-lead2"
+      ? { loses: [{ id: "u-lead", displayName: "Rohit Lead" }], gains: [{ id: "u-lead2", displayName: "Anjali Lead" }], warnings: [] }
+      : { loses: [], gains: [], warnings: ["ladder_level"] } });
+    routes["POST /api/v1/admin/org-chart/apply"] = () => ({ body: { applied: 2, warnings: [{ userId: "u-priya", code: "ladder_level" }] } });
+  });
+
+  it("draws the reporting tree with team strips and the unassigned recruiters", async () => {
+    renderPage("orgchart");
+    const chart = await screen.findByRole("region", { name: "Org chart" });
+    expect(within(chart).getByLabelText("Ravi CEO, CEO")).toHaveTextContent("5 below");
+    expect(within(chart).getByLabelText("Rohit Lead, Lead (Sales)")).toHaveTextContent("leads Team Rohit");
+    expect(within(chart).getByText("Team Rohit · 1 member")).toBeInTheDocument();
+    expect(within(chart).getByText("Noor New", { selector: ".chip" })).toBeInTheDocument(); // unassigned bin
+    expect(within(chart).getByLabelText("Ada Admin, Org Admin")).toHaveTextContent("you");
+  });
+
+  it("queues a manager change from the panel with the preview, then applies the batch", async () => {
+    renderPage("orgchart");
+    const chart = await screen.findByRole("region", { name: "Org chart" });
+    fireEvent.click(within(chart).getByLabelText("Priya Rao, Recruiter"));
+    const sel = screen.getByRole("combobox", { name: "Reports to" });
+    expect(sel).toHaveValue("u-lead");
+    // Her own subtree is not offered; same-level people are marked.
+    expect(within(sel).queryByRole("option", { name: /Priya Rao/ })).not.toBeInTheDocument();
+    expect(within(sel).getByRole("option", { name: /Noor New/ })).toHaveTextContent("same or lower level");
+    fireEvent.change(sel, { target: { value: "u-lead2" } });
+    const pending = await screen.findByRole("list", { name: "Pending changes" });
+    expect(pending).toHaveTextContent("Priya Rao: reports to Anjali Lead (was Rohit Lead).");
+    await waitFor(() => expect(pending).toHaveTextContent("Loses: Rohit Lead. Gains: Anjali Lead."));
+    expect(within(chart).getByLabelText("Anjali Lead, Lead (Sales)")).toHaveTextContent("2 below"); // the chart shows the pending state
+    // A same-level manager is allowed with a warning.
+    fireEvent.click(within(chart).getByLabelText("Noor New, Recruiter"));
+    fireEvent.change(screen.getByRole("combobox", { name: "Reports to" }), { target: { value: "u-priya" } });
+    expect(screen.getByTestId("orgstatus")).toHaveTextContent("not above level 1. Allowed, but check the ladder.");
+    await waitFor(() => expect(pending).toHaveTextContent("Below on the ladder."));
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+    await waitFor(() => expect(lastWrite().path).toBe("/api/v1/admin/org-chart/apply"));
+    expect(lastWrite().body).toEqual({ moves: [{ userId: "u-priya", managerId: "u-lead2" }, { userId: "u-new", managerId: "u-priya" }], teamAdds: [] });
+    await waitFor(() => expect(status()).toHaveTextContent("Applied 2 changes. Warnings: Priya Rao (below on the ladder)."));
+  });
+
+  it("adds an unassigned recruiter to a team, undoes a line, and keeps the admin's own card locked", async () => {
+    renderPage("orgchart");
+    const chart = await screen.findByRole("region", { name: "Org chart" });
+    fireEvent.click(within(chart).getByText("Noor New", { selector: ".chip" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Team" }), { target: { value: "t1" } });
+    const pending = await screen.findByRole("list", { name: "Pending changes" });
+    expect(pending).toHaveTextContent("Noor New joins Team Rohit.");
+    expect(within(chart).getByText("Team Rohit · 2 members")).toBeInTheDocument();
+    fireEvent.click(within(pending).getByRole("button", { name: "Undo change 1" }));
+    expect(screen.queryByRole("list", { name: "Pending changes" })).not.toBeInTheDocument();
+    fireEvent.click(within(chart).getByLabelText("Ada Admin, Org Admin"));
+    expect(screen.getByRole("combobox", { name: "Reports to" })).toBeDisabled();
   });
 });

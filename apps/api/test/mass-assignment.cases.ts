@@ -2107,6 +2107,21 @@ const IGNORED: IgnoreCase[] = [
       expect((await call(null, "GET", "/api/v1/me", undefined, {}, victim)).statusCode).toBe(200);
     },
   },
+  // org chart (docs/roles-api.md, "Org chart"): only moves and team adds are read; everything else is ignored
+  {
+    route: "POST /api/v1/admin/org-chart/apply",
+    run: async () => {
+      const r = await call("admin", "POST", "/api/v1/admin/org-chart/apply", {
+        moves: [{ userId: U.r1b, managerId: U.l2, ...SERVER_MANAGED, role: "org_admin", status: "inactive" }], ...SERVER_MANAGED, actorId: U.r2a,
+      });
+      expect(r.statusCode, r.body).toBe(422);
+      const ok1 = await ok("admin", "POST", "/api/v1/admin/org-chart/apply", { moves: [{ userId: U.r1b, managerId: U.l2 }] }, 200);
+      expect(ok1).toEqual({ applied: 1, warnings: [] });
+      expect(await rows(`SELECT manager_id FROM eureka.reporting_line WHERE user_id = $1 AND valid @> now()`, [U.r1b])).toEqual([{ manager_id: U.l2 }]);
+      expect(await rows(`SELECT status FROM eureka.app_user WHERE id = $1`, [U.r1b])).toEqual([{ status: "active" }]);
+      await ok("admin", "POST", "/api/v1/admin/org-chart/apply", { moves: [{ userId: U.r1b, managerId: U.l1 }] }, 200);
+    },
+  },
   // role definitions (docs/roles-api.md, migration 0310): key, is_system, is_restricted, holders and timestamps are the
   // server's. Cases run in shards, so each one clones its own role.
   {

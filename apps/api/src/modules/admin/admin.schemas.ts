@@ -166,3 +166,16 @@ export const SetDesignation = z
   })
   .strict();
 export type SetDesignation = z.infer<typeof SetDesignation>;
+
+// ---------- org chart (docs/roles-api.md, "Org chart") ----------
+export const OrgChartPreviewQuery = z.object({ userId: uuid, managerId: uuid.or(z.literal("")).optional() }).strict();
+
+export const OrgChartApply = z
+  .object({
+    moves: z.array(z.object({ userId: uuid, managerId: uuid.nullable() }).strict()).max(100).default([]),
+    teamAdds: z.array(z.object({ userId: uuid, teamId: uuid }).strict()).max(100).default([]),
+  })
+  .strict()
+  .refine((v) => v.moves.length + v.teamAdds.length > 0, "Nothing to apply.")
+  .refine((v) => v.moves.length + v.teamAdds.length <= 100, "At most 100 changes per batch.");
+export type OrgChartApply = z.infer<typeof OrgChartApply>;
