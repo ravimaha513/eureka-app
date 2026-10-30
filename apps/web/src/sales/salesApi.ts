@@ -94,6 +94,7 @@ export interface CandidateActions {
   visibility: boolean;
   rating: boolean;
   logSubmission: boolean;
+  delete: boolean;
 }
 
 export interface Page<T> { items: T[]; nextCursor: string | null }
@@ -231,6 +232,7 @@ export const salesApi = {
   createTeams: () => api<{ items: ShareTeam[]; defaultTeamId: string | null }>("/api/v1/candidate-create-teams"),
   setRating: (id: string, rating: number) =>
     api<{ id: string; technicalRating: number }>(`/api/v1/candidates/${enc(id)}/technical-rating`, { method: "PUT", ...json({ rating }) }),
+  remove: (id: string) => api<void>(`/api/v1/candidates/${enc(id)}`, { method: "DELETE" }),
   transition: (id: string, to: string) =>
     api<{ id: string; status: string }>(`/api/v1/candidates/${enc(id)}/transition`, { method: "POST", ...json({ to }) }),
   submit: (b: CreateSubmission) =>

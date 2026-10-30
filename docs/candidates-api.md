@@ -189,6 +189,34 @@ Tests: `candidate-extras.api.int.test.ts` ("duplicate check"), `api.int.test.ts`
 `applications.api.int.test.ts`, `engine.test.ts` ("adding candidates"), web `CandidateExtras.test.tsx`,
 `Sales.test.tsx`, `Applications.test.tsx`, e2e `candidate-extras.spec.ts`.
 
+## Deleting a candidate (CA-7)
+
+`DELETE /api/v1/candidates/:id` → 204. Hard delete, not undoable. Permission
+`candidate:delete`: lead (team), manager and associate director (hierarchy), CEO
+(org); custom roles can be given it. 404 when the candidate isn't readable, 403
+when readable but out of delete scope, 409 `candidate_placed` when the candidate
+has a placement or an employee record (contracts, invoices, payments and
+employment history are never deleted). The profile's `actions.delete` hints the
+button; the server decides.
+
+`authz.delete_candidate` (migration 0320) removes, in one transaction: submissions,
+interviews (panel, feedback, feedback deliveries, calendar blocks), assessments,
+jobs-portal applications (the applicant account stays), checklist items, BGC,
+documents with their access log and file rows, resumes, training progress,
+candidate events, non-response records, team shares, notifications about the
+candidate, its interviews or applications, import ledger rows, the candidate, and
+the person with their work authorizations when no other record uses them.
+`audit_event` keeps a `candidate.delete` row (ids only) and earlier audit rows.
+
+The guard triggers that make these tables append-only let `authz_definer` delete
+only while `eureka.candidate_purge` holds a row for the current transaction and
+backend (written only by `authz_definer`); outside that, definer deletes match no
+rows under RLS and the guards still refuse every other writer.
+
+Not removed: stored objects in S3 (resume and document files stay in the bucket,
+unreachable once their rows are gone; the API role has no delete on the bucket),
+staged import rows (`import_row`), and outbox events (ids only).
+
 ## Technologies
 
 The load seed uses the spec list (Java, DE/PY, Python Developer, .NET, DevOps, AI/ML, Networking,

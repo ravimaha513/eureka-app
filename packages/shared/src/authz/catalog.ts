@@ -151,6 +151,8 @@ export const PERMISSIONS = [
   "candidate:create",
   "candidate:update",
   "candidate:assign",
+  /** Hard-deletes a candidate with their submissions, interviews, documents (docs/candidates-api.md); refused once placed. */
+  "candidate:delete",
   "candidate.visibility:update",
   "candidate.rating:update",
   "candidate.phone:read",
@@ -309,6 +311,7 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   "candidate:create": "Add candidates",
   "candidate:update": "Edit candidates",
   "candidate:assign": "Move candidates between recruiters and teams",
+  "candidate:delete": "Delete candidates and everything recorded about them",
   "candidate.visibility:update": "Open a candidate to all or selected teams",
   "candidate.rating:update": "Rate candidates",
   "candidate.phone:read": "See candidate phone numbers",
@@ -463,6 +466,7 @@ export const GRANTS: Record<Role, Grants> = {
   lead: {
     ...salesLine("team", "team"),
     "candidate:assign": "team",
+    "candidate:delete": "team",
     "candidate.visibility:update": "team",
     "report:export": "team",
     // AD-10: add unassigned recruiters to the team they lead
@@ -494,6 +498,7 @@ export const GRANTS: Record<Role, Grants> = {
     ...salesLine("hierarchy", "hierarchy"),
     "calendar:block": "hierarchy",
     "candidate:assign": "hierarchy",
+    "candidate:delete": "hierarchy",
     "candidate.visibility:update": "hierarchy",
     "placement.bgc_status:update": "hierarchy",
     "rate:read": "hierarchy",
@@ -526,6 +531,7 @@ export const GRANTS: Record<Role, Grants> = {
     ...salesLine("hierarchy", "hierarchy"),
     "calendar:block": "hierarchy",
     "candidate:assign": "hierarchy",
+    "candidate:delete": "hierarchy",
     "candidate.visibility:update": "hierarchy",
     "placement.bgc_status:update": "hierarchy",
     "rate:read": "hierarchy",
@@ -557,6 +563,7 @@ export const GRANTS: Record<Role, Grants> = {
     "candidate:read": "org",
     // CA-6: adds candidates to any team (picked in the New candidate dialog)
     "candidate:create": "org",
+    "candidate:delete": "org",
     "assignment:read": "org",
     "hotlist:read": "org",
     "submission:read": "org",
@@ -868,6 +875,7 @@ export const ORG_SENSITIVE_PERMISSIONS: readonly Permission[] = [
   "employee:read",
   "candidate.phone:read",
   "candidate:assign",
+  "candidate:delete",
   "team:move_member",
   "document:read",
   // jobs-portal

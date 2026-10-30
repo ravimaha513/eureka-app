@@ -19,7 +19,7 @@ import { OpenToAllBadge, Phone, Priority, SharedBadge, StatusBadge, fmtDate } fr
 import { Loading } from "../ui/Loading";
 import { TeamChecklist } from "./TeamChecklist";
 
-type Modal = { kind: "edit" } | { kind: "submit" } | { kind: "terminate" } | { kind: "compliance" };
+type Modal = { kind: "edit" } | { kind: "submit" } | { kind: "terminate" } | { kind: "compliance" } | { kind: "delete" };
 
 /**
  * Candidate profile (GET /api/v1/candidates/:id). Actions follow the record's
@@ -84,6 +84,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
   const canVisibility = a ? a.visibility : caps.has("candidate.visibility:update");
   const canRate = a ? a.rating : caps.has("candidate.rating:update");
   const canSubmit = a ? a.logSubmission : caps.has("submission:create");
+  const canDelete = a ? a.delete : caps.has("candidate:delete");
   const next = a ? a.transition : canUpdate ? TRANSITIONS[c.status] ?? [] : [];
   // With hints, the status block appears only when a change is allowed; without, for candidate:update holders.
   const showStatus = a ? next.length > 0 : canUpdate;
@@ -105,6 +106,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
         <div className="rowactions push">
           {canUpdate && <button type="button" className="btn" onClick={() => setModal({ kind: "edit" })}>Edit profile</button>}
           {canSubmit && <button type="button" className="btn primary" onClick={() => { pendingWarning.current = ""; setWarning(""); setModal({ kind: "submit" }); }}>Log submission</button>}
+          {canDelete && <button type="button" className="btn danger" onClick={() => setModal({ kind: "delete" })}>Delete…</button>}
         </div>
       </div>
 
@@ -223,6 +225,20 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
           action={() => salesApi.transition(c.id, "terminated")} onClose={() => setModal(null)}
           onDone={() => { setModal(null); announce("Status changed to Terminated."); refresh(); }}>
           <p>The candidate leaves the Hot List. This can't be undone from this screen.</p>
+        </ConfirmDialog>
+      )}
+      {modal?.kind === "delete" && (
+        <ConfirmDialog title={`Delete ${c.name}?`} confirmLabel="Delete candidate" danger formatError={(e) => salesError(e, "delete")}
+          action={() => salesApi.remove(c.id)} onClose={() => setModal(null)}
+          onDone={() => {
+            setModal(null);
+            qc.removeQueries({ queryKey: salesKeys.candidate(id) });
+            void qc.invalidateQueries({ queryKey: salesKeys.hotlist });
+            void qc.invalidateQueries({ queryKey: salesKeys.candidates });
+            onBack();
+          }}>
+          <p>This permanently deletes the candidate with their submissions, interviews and feedback, resumes, documents, paperwork and history. It can't be undone.</p>
+          <p>Candidates with a placement or employee record can't be deleted.</p>
         </ConfirmDialog>
       )}
     </>

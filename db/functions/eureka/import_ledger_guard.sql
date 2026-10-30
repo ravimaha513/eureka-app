@@ -9,6 +9,10 @@ CREATE OR REPLACE FUNCTION eureka.import_ledger_guard()
 AS $function$
 DECLARE b record;
 BEGIN
+  -- Candidate delete (authz.delete_candidate, migration 0320) removes these rows.
+  IF TG_OP = 'DELETE' AND current_user = 'authz_definer' THEN
+    IF authz.candidate_purging() THEN RETURN OLD; END IF;
+  END IF;
   IF TG_OP <> 'INSERT' THEN
     RAISE EXCEPTION 'the import ledger is append-only' USING ERRCODE = 'insufficient_privilege';
   END IF;
