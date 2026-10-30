@@ -239,3 +239,19 @@ describe("focus on screen change", () => {
     expect(heading).toHaveFocus();
   });
 });
+
+describe('"/" shortcut', () => {
+  it("focuses the screen's search box, but not while typing elsewhere", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    window.history.replaceState(null, "", "/hotlist");
+    wrap(<Shell me={meFor("recruiter")} onSignOut={() => undefined} />);
+    const box = await screen.findByPlaceholderText("Candidate name");
+    const tech = screen.getByPlaceholderText("e.g. Java");
+    tech.focus();
+    fireEvent.keyDown(tech, { key: "/" });
+    expect(tech).toHaveFocus();
+    tech.blur();
+    fireEvent.keyDown(document.body, { key: "/" });
+    expect(box).toHaveFocus();
+  });
+});
