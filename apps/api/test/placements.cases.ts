@@ -1,5 +1,6 @@
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { shard } from "./shard.js";
 import {
   PLACEMENT_STATUSES,
   SUBMISSION_STATUSES,
@@ -149,7 +150,7 @@ describe("per-record actions match what the server allows (candidates)", () => {
     });
   }
 
-  it.each(users.filter((u) => can(toUserAccess(u), "candidate:read")))("%s", async (key) => {
+  it.each(shard.mine(users.filter((u) => can(toUserAccess(u), "candidate:read"))))("%s", async (key) => {
     let checked = 0;
     for (const cand of sample(key)) {
       const res = await call(key, "GET", `/api/v1/candidates/${cand.id}`);
@@ -183,7 +184,7 @@ describe("per-record actions match what the server allows (submissions)", () => 
   let hour = 9000;
   const at = (h: number) => new Date(Date.parse("2032-01-05T10:00:00Z") + h * 3_600_000).toISOString();
 
-  it.each(users.filter((u) => can(toUserAccess(u), "submission:read")))("%s", async (key) => {
+  it.each(shard.mine(users.filter((u) => can(toUserAccess(u), "submission:read"))))("%s", async (key) => {
     const items = (await getAll(key, "/api/v1/submissions")).filter((i) => seed.submissions.some((s) => s.id === i.id)).slice(0, 6);
     let allowed = 0;
     for (const item of items) {
@@ -252,7 +253,7 @@ describe("per-record actions match what the server allows (submissions)", () => 
   });
 });
 
-describe("placements", () => {
+describe.runIf(shard.first)("placements", () => {
   beforeAll(async () => {
     await makePlacements();
   }, 60_000);

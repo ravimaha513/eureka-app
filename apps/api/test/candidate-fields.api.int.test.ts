@@ -225,7 +225,11 @@ describe("Hot List filters", () => {
       expect(rows.length).toBeGreaterThan(40); // more than one page
       const key = (r: (typeof rows)[number]) =>
         sort === "priority" ? r.priority : sort === "days" ? (r.marketingStartDate ?? "9999-12-31") : r.name.toLowerCase();
-      for (let i = 1; i < rows.length; i++) expect(key(rows[i - 1]!) <= key(rows[i]!), `${sort} row ${i}`).toBe(true);
+      // Compared in the database: names sort by its collation (glibc en_US in CI skips spaces), not code points.
+      const unsorted = (await db.admin.query<{ i: number }>(
+        `SELECT i::int FROM (SELECT i, k, lag(k) OVER (ORDER BY i) AS prev FROM unnest($1::text[]) WITH ORDINALITY u(k, i)) x
+          WHERE prev > k ORDER BY i LIMIT 1`, [rows.map(key)])).rows[0];
+      expect(unsorted, `${sort} row ${(unsorted?.i ?? 0) - 1}`).toBeUndefined();
     });
 
     it("rows carry the team lead and in-person", async () => {
