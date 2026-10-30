@@ -16,9 +16,9 @@ const ADD_PAGE = 50;
  * bulk add (POST /admin/teams/:id/members/bulk). Rename, lead and move open as
  * dialogs on top (`suspended` hands Escape and focus to them).
  */
-export function TeamDrawer({ team, coaches, canMove, suspended, onClose, onRename, onLead, onMove, onChanged }: {
+export function TeamDrawer({ team, coaches, canMove, suspended, onClose, onRename, onLead, onMove, onRemove, onChanged }: {
   team: Team; coaches: Coach[]; canMove: boolean; suspended: boolean;
-  onClose: () => void; onRename: () => void; onLead: () => void; onMove: (member: Ref) => void;
+  onClose: () => void; onRename: () => void; onLead: () => void; onMove: (member: Ref) => void; onRemove: (member: Ref) => void;
   onChanged: (msg: string) => void;
 }) {
   const [filter, setFilter] = useState("");
@@ -49,9 +49,12 @@ export function TeamDrawer({ team, coaches, canMove, suspended, onClose, onRenam
             {shown.map((m) => (
               <li key={m.id}>
                 <span className="person"><Avatar name={m.displayName} size="sm" /><span>{m.displayName}</span></span>
-                {canMove && (
-                  <button className="btn sm" aria-label={`Move ${m.displayName} to another team`} onClick={() => onMove(m)}>Move…</button>
-                )}
+                <span className="rowactions">
+                  {canMove && (
+                    <button className="btn sm" aria-label={`Move ${m.displayName} to another team`} onClick={() => onMove(m)}>Move…</button>
+                  )}
+                  <button className="btn sm" aria-label={`Remove ${m.displayName} from ${team.name}`} onClick={() => onRemove(m)}>Remove</button>
+                </span>
               </li>
             ))}
             {team.members.length === 0 && <li className="muted">No members yet. Add people on the right.</li>}

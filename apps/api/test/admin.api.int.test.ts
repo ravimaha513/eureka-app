@@ -93,6 +93,7 @@ const ADMIN_ENDPOINTS: { method: Method; url: string; body?: unknown; adminStatu
   { method: "POST", url: `/api/v1/admin/teams/${T.t1}/members/bulk`, body: {}, adminStatus: 422 },
   { method: "POST", url: `/api/v1/admin/teams/${T.t1}/coaches`, body: {}, adminStatus: 422 },
   { method: "DELETE", url: `/api/v1/admin/teams/${T.t1}/coaches/${NIL}`, adminStatus: 404 },
+  { method: "DELETE", url: `/api/v1/admin/teams/${NIL}/members/${U.r1a}`, adminStatus: 404 },
 ];
 const MOVE = { method: "POST" as const, url: `/api/v1/teams/${T.t1}/move-member`, body: {} };
 
@@ -120,6 +121,7 @@ describe("authorization matrix (AD-1)", () => {
     const ok = can(toUserAccess(key), "team:add_member" as Permission);
     expect((await call(key, "GET", "/api/v1/teams/mine")).statusCode).toBe(ok ? 200 : 403);
     expect((await call(key, "POST", `/api/v1/teams/${T.t1}/members`, {})).statusCode).toBe(ok ? 422 : 403);
+    expect((await call(key, "DELETE", `/api/v1/teams/${NIL}/members/${U.r1a}`)).statusCode).toBe(ok ? 404 : 403);
   });
 
   it.each(users)("%s → coach assignment endpoints (coach:assign, AD-11)", async (key) => {
@@ -832,6 +834,61 @@ describe("lead adds members to their own team (AD-10)", () => {
     const r = await call("m1", "POST", `/api/v1/teams/${T.t2}/members`, { userId: NEW2 });
     expect(r.statusCode, r.body).toBe(204);
     expect((await audits("team.member_added")).at(-1)).toMatchObject({ actor_id: U.m1, entity_id: T.t2, changes: { userId: NEW2 } });
+  });
+
+  // AD-14: removing follows the same rule as adding.
+  const remove = async (key: keyof typeof U, team: string, userId: string) => {
+    const r = await call(key, "DELETE", `/api/v1/teams/${team}/members/${userId}`);
+    return [r.statusCode, r.statusCode === 200 ? r.json() : r.json().detail];
+  };
+
+  it("refuses removing outside the caller's teams, themself, non-members and unknown teams", async () => {
+    expect(await remove("l1", T.t2, NEW2)).toEqual([403, "not_in_scope"]);
+    expect(await remove("m2", T.t1, NEW1)).toEqual([403, "not_in_scope"]);
+    expect((await remove("r1b", T.t1, NEW1))[0]).toBe(403);
+    expect((await remove("admin", T.t1, NEW1))[0]).toBe(403);
+    expect(await remove("l1", T.t1, U.l1)).toEqual([403, "self_change"]);
+    expect(await remove("l1", T.t1, NEW2)).toEqual([422, "not_a_member"]);
+    expect((await remove("l1", NIL, NEW1))[0]).toBe(404);
+    expect((await db.admin.query(`SELECT 1 FROM eureka.team_member WHERE user_id = $1 AND valid @> now()`, [NEW1])).rowCount).toBe(1);
+  });
+
+  it("a lead removes a member of their team; audited, and they are addable again", async () => {
+    expect(await remove("l1", T.t1, NEW1)).toEqual([200, { movedCandidates: 0, reassignedTo: { id: U.l1 } }]);
+    expect((await audits("team.member_removed")).at(-1)).toMatchObject({
+      actor_id: U.l1, entity_id: T.t1, changes: { userId: NEW1, reassignedTo: U.l1, movedCandidates: 0 },
+    });
+    const body = (await call("l1", "GET", "/api/v1/teams/mine")).json();
+    expect(ids(body.items[0].members)).not.toContain(NEW1);
+    expect(ids(body.addable)).toContain(NEW1);
+    expect(await remove("l1", T.t1, NEW1)).toEqual([422, "not_a_member"]);
+  });
+
+  it("a manager removes from a team led in their hierarchy", async () => {
+    expect(await remove("m1", T.t2, NEW2)).toEqual([200, { movedCandidates: 0, reassignedTo: { id: U.l2 } }]);
+    expect((await audits("team.member_removed")).at(-1)).toMatchObject({ actor_id: U.m1, entity_id: T.t2, changes: { userId: NEW2 } });
+  });
+});
+
+describe("admin removes a team member (AD-14)", () => {
+  it("hands the member's candidates on that team to its lead", async () => {
+    const { team_id: team, lead_id: lead } = (await db.admin.query(
+      `SELECT tm.team_id, t.lead_id FROM eureka.team_member tm JOIN eureka.team t ON t.id = tm.team_id
+        WHERE tm.user_id = $1 AND tm.valid @> now()`, [U.r3a])).rows[0];
+    const mine = (await db.admin.query(`SELECT id FROM eureka.candidate WHERE recruiter_id = $1 AND team_id = $2`, [U.r3a, team])).rows.map((r) => r.id as string);
+    expect((await call("l1", "DELETE", `/api/v1/admin/teams/${team}/members/${U.r3a}`)).statusCode).toBe(403);
+    const r = await call("admin", "DELETE", `/api/v1/admin/teams/${team}/members/${U.r3a}`);
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json()).toEqual({ movedCandidates: mine.length, reassignedTo: { id: lead } });
+    const now = (await db.admin.query(`SELECT recruiter_id FROM eureka.candidate WHERE id = ANY ($1::uuid[])`, [mine])).rows;
+    expect(now.every((c) => c.recruiter_id === lead)).toBe(true);
+    const t = (await call("admin", "GET", "/api/v1/admin/teams")).json().items.find((x: { id: string }) => x.id === team);
+    expect(t.members.map((m: { id: string }) => m.id)).not.toContain(U.r3a);
+    expect((await audits("admin.team.member_removed")).at(-1)).toMatchObject({
+      actor_id: U.admin, entity_id: team, changes: { userId: U.r3a, reassignedTo: lead, movedCandidates: mine.length },
+    });
+    const again = await call("admin", "DELETE", `/api/v1/admin/teams/${team}/members/${U.r3a}`);
+    expect([again.statusCode, again.json().detail]).toEqual([422, "not_a_member"]);
   });
 });
 

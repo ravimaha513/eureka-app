@@ -97,6 +97,7 @@ export interface BulkReport { dryRun: boolean; committed: boolean; created: numb
 
 export interface Team { id: string; name: string; location: Place | null; lead: Ref; /** The lead's department. */ department: UserDepartment | null; members: Ref[]; coaches: Ref[] }
 export interface MoveResult { movedCandidates: number; reassignedTo: Ref }
+export interface RemoveResult { movedCandidates: number; reassignedTo: { id: string } }
 /** Bulk add: each person is added on its own; `failed` carries the contract error code per person. */
 export interface AddMembersResult { added: string[]; failed: { userId: string; error: string }[] }
 
@@ -218,6 +219,9 @@ export const adminApi = {
     api<void>(`/api/v1/admin/teams/${enc(teamId)}/members`, { method: "POST", ...json({ userId }) }),
   addMembers: (teamId: string, userIds: string[]) =>
     api<AddMembersResult>(`/api/v1/admin/teams/${enc(teamId)}/members/bulk`, { method: "POST", ...json({ userIds }) }),
+  /** AD-14: their candidates on the team go to its lead. */
+  removeMember: (teamId: string, userId: string) =>
+    api<RemoveResult>(`/api/v1/admin/teams/${enc(teamId)}/members/${enc(userId)}`, { method: "DELETE" }),
   moveMember: (fromTeamId: string, b: { userId: string; toTeamId: string; reassignTo?: string }) =>
     api<MoveResult>(`/api/v1/teams/${enc(fromTeamId)}/move-member`, { method: "POST", ...json(b) }),
 };

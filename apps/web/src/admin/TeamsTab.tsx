@@ -10,12 +10,14 @@ import { Loading } from "../ui/Loading";
 import { QueryError } from "../ui/QueryError";
 import { Avatar } from "../shell/ui";
 import { TeamDrawer } from "./TeamDrawer";
+import { RemoveMemberDialog } from "../team/RemoveMemberDialog";
 
 type Modal =
   | { kind: "create" }
   | { kind: "rename"; team: Team }
   | { kind: "lead"; team: Team }
-  | { kind: "move"; team: Team; member: Ref };
+  | { kind: "move"; team: Team; member: Ref }
+  | { kind: "remove"; team: Team; member: Ref };
 
 const STACK = 4;
 
@@ -97,6 +99,7 @@ export function TeamsTab({ onShowUnassigned }: { onShowUnassigned?: () => void }
           onRename={() => setModal({ kind: "rename", team: open })}
           onLead={() => setModal({ kind: "lead", team: open })}
           onMove={(member) => setModal({ kind: "move", team: open, member })}
+          onRemove={(member) => setModal({ kind: "remove", team: open, member })}
           onChanged={changed} />
       )}
       {modal?.kind === "create" && <CreateTeamDialog onClose={close} onDone={done} />}
@@ -105,6 +108,10 @@ export function TeamsTab({ onShowUnassigned }: { onShowUnassigned?: () => void }
       {modal?.kind === "move" && (
         <MoveMemberDialog team={modal.team} member={modal.member} teams={items} onClose={close}
           onMoved={(msg) => { announce(msg); refresh(); }} />
+      )}
+      {modal?.kind === "remove" && (
+        <RemoveMemberDialog teamName={modal.team.name} leadName={modal.team.lead.displayName} member={modal.member} onClose={close}
+          remove={() => adminApi.removeMember(modal.team.id, modal.member.id)} errorText={friendlyError} onDone={done} />
       )}
     </>
   );

@@ -608,6 +608,38 @@ describe("Teams tab", () => {
     expect(lastWrite()).toMatchObject({ method: "DELETE", path: "/api/v1/admin/teams/t1/coaches/u-coach" });
   });
 
+  it("removes a member after a confirm and refreshes the team and the people search (AD-14)", async () => {
+    let detail = "";
+    routes["DELETE /api/v1/admin/teams/t1/members/u-priya"] = () =>
+      detail ? problem(422, detail) : { body: { movedCandidates: 2, reassignedTo: { id: "u-lead" } } };
+    renderPage("teams");
+    const drawer = await openTeam("Team Rohit");
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/admin/users")).toBe(true));
+
+    // Cancel sends nothing.
+    fireEvent.click(within(drawer).getByRole("button", { name: "Remove Priya Rao from Team Rohit" }));
+    let dlg = await screen.findByRole("dialog", { name: "Remove Priya Rao from Team Rohit?" });
+    expect(dlg).toHaveTextContent("Their candidates stay with Team Rohit and go to its lead, Rohit Lead.");
+    fireEvent.click(within(dlg).getByRole("button", { name: "Cancel" }));
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+
+    detail = "not_a_member";
+    fireEvent.click(within(drawer).getByRole("button", { name: "Remove Priya Rao from Team Rohit" }));
+    dlg = await screen.findByRole("dialog", { name: "Remove Priya Rao from Team Rohit?" });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Remove" }));
+    expect(await within(dlg).findByRole("alert")).toHaveTextContent(ERROR_MESSAGES.not_a_member!);
+
+    detail = "";
+    const teamsBefore = calls.filter((c) => c.path === "/api/v1/admin/teams").length;
+    const usersBefore = calls.filter((c) => c.path === "/api/v1/admin/users").length;
+    fireEvent.click(within(dlg).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(status()).toHaveTextContent("Removed Priya Rao from Team Rohit. 2 candidates reassigned to Rohit Lead."));
+    expect(lastWrite()).toMatchObject({ method: "DELETE", path: "/api/v1/admin/teams/t1/members/u-priya" });
+    expect(screen.queryByRole("dialog", { name: "Remove Priya Rao from Team Rohit?" })).not.toBeInTheDocument();
+    await waitFor(() => expect(calls.filter((c) => c.path === "/api/v1/admin/teams").length).toBeGreaterThan(teamsBefore));
+    await waitFor(() => expect(calls.filter((c) => c.path === "/api/v1/admin/users").length).toBeGreaterThan(usersBefore));
+  });
+
   it("creates a team and changes a lead", async () => {
     routes["POST /api/v1/admin/teams"] = () => ({ status: 201, body: { id: "t9" } });
     routes["PUT /api/v1/admin/teams/t2/lead"] = () => ({ status: 204 });

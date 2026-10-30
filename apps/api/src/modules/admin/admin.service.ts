@@ -1247,6 +1247,35 @@ export class AdminService {
     });
   }
 
+  /**
+   * AD-14: take someone out of a team. `admin` is Users & Access (access:manage, any
+   * team); `team` is the AD-10 rule (team:add_member: the team's lead, or a team led
+   * in the caller's hierarchy). Their candidates on the team go to its lead.
+   * authz.team_remove_member re-checks all of it in the database.
+   */
+  async removeMember(user: AuthedUser, via: "admin" | "team", teamId: string, userId: string) {
+    this.notSelf(user, userId);
+    return this.tx(user, async (c) => {
+      const team = (await c.query<{ lead_id: string }>(`SELECT lead_id FROM eureka.team WHERE id = $1`, [teamId])).rows[0];
+      if (!team) throw new NotFoundException();
+      if (via === "team") {
+        const covered = !!resolveScope(user.access, "team:add_member")?.all
+          || team.lead_id === user.id
+          || !!resolveScopeFor(user.access, "team:add_member", ["hierarchy"])?.teamIds.has(teamId);
+        if (!covered) throw new ForbiddenException("not_in_scope");
+      }
+      const { rows } = await c.query<{ moved_candidates: number; reassigned_to: string }>(
+        `SELECT * FROM authz.team_remove_member($1, $2)`, [teamId, userId]);
+      const r = rows[0]!;
+      await this.audit.record(c, {
+        actorId: user.id, action: via === "admin" ? "admin.team.member_removed" : "team.member_removed",
+        entityType: "team", entityId: teamId,
+        changes: { userId, reassignedTo: r.reassigned_to, movedCandidates: r.moved_candidates },
+      });
+      return { movedCandidates: r.moved_candidates, reassignedTo: { id: r.reassigned_to } };
+    });
+  }
+
   async moveMember(user: AuthedUser, fromTeamId: string, body: MoveMember) {
     this.notSelf(user, body.userId);
     const scope = resolveScope(user.access, "team:move_member");

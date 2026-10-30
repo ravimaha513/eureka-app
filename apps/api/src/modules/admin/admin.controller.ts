@@ -296,6 +296,13 @@ export class AdminController {
     return this.svc.addMembers(user, id, AddMembers.parse(body).userIds);
   }
 
+  @Delete("teams/:id/members/:userId")
+  @HttpCode(200)
+  removeMember(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string,
+    @Param("userId", ParseUUIDPipe) userId: string) {
+    return this.svc.removeMember(user, "admin", id, userId);
+  }
+
   // AD-11: interview coaches supporting the team
   @Post("teams/:id/coaches")
   @HttpCode(204)
@@ -327,6 +334,14 @@ export class TeamsController {
   @RequirePermission("team:add_member")
   async addMember(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
     await this.svc.leadAddMember(user, id, AddMember.parse(body).userId);
+  }
+
+  @Delete(":id/members/:userId")
+  @HttpCode(200)
+  @RequirePermission("team:add_member")
+  removeMember(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string,
+    @Param("userId", ParseUUIDPipe) userId: string) {
+    return this.svc.removeMember(user, "team", id, userId);
   }
 
   // AD-11: an Interview Lead assigns the coaches in their reporting subtree to any team.

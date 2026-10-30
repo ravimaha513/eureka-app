@@ -3,19 +3,28 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserPlus } from "lucide-react";
 import { Person } from "../shell/ui";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
-import { teamApi, teamError, teamKeys, type Addable, type MyTeam } from "./teamApi";
+import { RemoveMemberDialog } from "./RemoveMemberDialog";
+import { teamApi, teamError, teamKeys, type Addable, type MyTeam, type Ref } from "./teamApi";
 
 /**
- * My team (team:add_member; docs/admin-api.md AD-10): the teams a lead leads
+ * My team (team:add_member; docs/admin-api.md AD-10, AD-14): the teams a lead leads
  * (for managers and associate directors, every team led in their hierarchy),
- * with their members, and adding an active recruiter who is in no team yet.
+ * with their members, adding an active recruiter who is in no team yet, and removing a member.
  * Moving someone out of another team is the move-member action (AD-8).
  */
 export function MyTeamPage() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: teamKeys.mine, queryFn: teamApi.mine });
   const [adding, setAdding] = useState<MyTeam | null>(null);
+  const [removing, setRemoving] = useState<{ team: MyTeam; member: Ref } | null>(null);
   const [message, setMessage] = useState("");
+  const done = (msg: string) => {
+    setAdding(null);
+    setRemoving(null);
+    setMessage("");
+    setTimeout(() => setMessage(msg), 30);
+    void qc.invalidateQueries({ queryKey: teamKeys.mine });
+  };
 
   return (
     <section className="panel">
@@ -39,7 +48,12 @@ export function MyTeamPage() {
               </header>
               <Person name={t.lead.displayName}><b>{t.lead.displayName}</b><span className="block muted">Lead</span></Person>
               <ul className="members" aria-label={`Members of ${t.name}`}>
-                {t.members.map((m) => <li key={m.id}><Person name={m.displayName}>{m.displayName}</Person></li>)}
+                {t.members.map((m) => (
+                  <li key={m.id}>
+                    <Person name={m.displayName}>{m.displayName}</Person>
+                    <button className="btn sm" aria-label={`Remove ${m.displayName} from ${t.name}`} onClick={() => setRemoving({ team: t, member: m })}>Remove</button>
+                  </li>
+                ))}
                 {t.members.length === 0 && <li className="muted">No members yet.</li>}
               </ul>
             </section>
@@ -48,13 +62,12 @@ export function MyTeamPage() {
         </div>
       )}
       {adding && (
-        <AddDialog team={adding} people={q.data?.addable ?? []} onClose={() => setAdding(null)}
-          onDone={(msg) => {
-            setAdding(null);
-            setMessage("");
-            setTimeout(() => setMessage(msg), 30);
-            void qc.invalidateQueries({ queryKey: teamKeys.mine });
-          }} />
+        <AddDialog team={adding} people={q.data?.addable ?? []} onClose={() => setAdding(null)} onDone={done} />
+      )}
+      {removing && (
+        <RemoveMemberDialog teamName={removing.team.name} leadName={removing.team.lead.displayName} member={removing.member}
+          remove={() => teamApi.removeMember(removing.team.id, removing.member.id)} errorText={teamError}
+          onClose={() => setRemoving(null)} onDone={done} />
       )}
     </section>
   );
