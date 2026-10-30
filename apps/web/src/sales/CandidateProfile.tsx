@@ -217,6 +217,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
       )}
       {modal?.kind === "submit" && (
         <LogSubmissionDialog candidate={c}
+          canAddClient={caps.has("client:create")} canAddVendor={caps.has("vendor:create")}
           onClose={() => { setModal(null); setWarning(pendingWarning.current); }}
           onLogged={(r) => { announce("Submission logged."); pendingWarning.current = r.duplicateWarning ? DUPLICATE_WARNING : ""; }} />
       )}

@@ -177,6 +177,20 @@ describe("interview details (IS-1..IS-5)", () => {
     expect(Object.keys(items[0]!).sort()).toEqual(["id", "name"]);
     expect((await call("coach", "GET", "/api/v1/interviews/panel-options")).statusCode).toBe(403);
   });
+
+  it("the CEO schedules and edits an interview on any team's submission, with panel and coach", async () => {
+    expect((await call("ceo", "GET", "/api/v1/interviews/panel-options")).statusCode).toBe(200);
+    expect((await call("ceo", "GET", "/api/v1/interviews/coaches")).statusCode).toBe(200);
+    const res = await call("ceo", "POST", "/api/v1/interviews", {
+      submissionId: r1aSubmission(), round: "Client Round", startsAt: slot(), durationMin: 60, interviewType: "video",
+      coachId: U.coach, panelIds: [U.l1], leadId: U.l1,
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    const id = res.json().id as string;
+    const patched = await call("ceo", "PATCH", `/api/v1/interviews/${id}`, { durationMin: 45 });
+    expect(patched.statusCode, patched.body).toBe(200);
+    expect(patched.json()).toMatchObject({ durationMin: 45, lead: { id: U.l1 } });
+  });
 });
 
 describe("scorecards (IS-6)", () => {

@@ -34,3 +34,23 @@ admin.
 
 Why: a database built from scratch (staging, rebuilt 2026-10-15) had no technologies, because
 seeds run only in dev and 0140 only topped up databases that already had some.
+
+## Add a client or vendor (migration 0320, 2026-10-30)
+
+`POST /api/v1/lookups/clients` — `client:create`; `POST /api/v1/lookups/vendors` — `vendor:create`
+(both org scope): every Sales role (`recruiter`, `lead`, `manager`, `assoc_director`, `ceo`).
+Everyone else gets 403; the definer function checks the permission again.
+
+Body, `200 { id, name, created }`, case-insensitive dedupe and 422 rules are the same as for
+technologies (1–60 characters). Clients and vendors have no `active` flag, so there is no 409.
+Audit `client.created` / `vendor.created` (entity id only, no name).
+
+Write path: `authz.create_client(text)` / `authz.create_vendor(text)`
+(`db/functions/authz/create_client.sql`, `create_vendor.sql`); `eureka_app` keeps SELECT only.
+
+Web: in Log submission the Client and Vendor pickers are always dropdowns and end with
+"Add a new client…" / "Add a new vendor…" for holders (`canAddClient` / `canAddVendor` from
+`me.capabilities`). Without the permission they keep the paste-an-ID fallback.
+
+Why: like technologies, clients and vendors came only from dev seeds, so staging had none and
+nobody could log a submission there.

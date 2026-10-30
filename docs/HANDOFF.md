@@ -262,6 +262,8 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Applications URL filters (no migrations): status, jobId and the applied applicant search (`q`) via `useSearchParam`.
 - "/" shortcut (no migrations): focuses the first visible `.content input[type="search"]`; ignored while typing or in a dialog.
 - Candidate create team picker (no migrations): `GET /candidate-create-teams` + Team select in New candidate; `ceo` holds `candidate:create` at org (docs/candidates-api.md CA-6).
+- CEO submissions + client/vendor add (0320): `ceo` holds `submission:create` at org; every Sales role adds clients/vendors
+  from Log submission (`client:create`/`vendor:create`, `authz.create_client`/`create_vendor`; docs/lookups-api.md).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

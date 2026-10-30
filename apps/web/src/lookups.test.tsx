@@ -113,8 +113,14 @@ describe("LookupPicker", () => {
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Choose…", "Go", "Java", "Add a new technology…"]);
   });
 
-  it("restricted lists never offer to add", () => {
-    renderWith(FULL, <Harness kind="clients" label="Client" canAdd />);
+  it("clients offer to add only with canAdd (client:create); coaches never", () => {
+    const { unmount } = renderWith(FULL, <Harness kind="clients" label="Client" canAdd />);
+    expect(screen.getByRole("option", { name: "Add a new client…" })).toBeInTheDocument();
+    unmount();
+    const r2 = renderWith(FULL, <Harness kind="clients" label="Client" />);
+    expect(screen.queryByRole("option", { name: /Add a new/ })).not.toBeInTheDocument();
+    r2.unmount();
+    renderWith(FULL, <Harness kind="coaches" label="Coach" canAdd />);
     expect(screen.queryByRole("option", { name: /Add a new/ })).not.toBeInTheDocument();
   });
 
