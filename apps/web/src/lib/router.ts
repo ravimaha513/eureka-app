@@ -22,9 +22,9 @@ export function usePathname(): string {
   return useSyncExternalStore(subscribe, () => window.location.pathname);
 }
 
-/** Moves to `path` (a new history entry unless `replace`); a no-op when already there. */
+/** Moves to `path` (may carry a query string; a new history entry unless `replace`); a no-op when already there. */
 export function navigate(path: string, { replace = false }: { replace?: boolean } = {}) {
-  if (path === window.location.pathname) return;
+  if (path === window.location.pathname + window.location.search) return;
   if (replace) window.history.replaceState(null, "", path);
   else window.history.pushState(null, "", path);
   window.dispatchEvent(new Event(CHANGE));

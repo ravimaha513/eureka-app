@@ -5,14 +5,14 @@ import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { DocumentsSection } from "../documents/DocumentsSection";
 import { saveBlob } from "../lib/download";
 import { docTypeLabel } from "../lib/format";
-import { useRoutedId } from "../lib/router";
+import { useRoutedId, useSearchParam } from "../lib/router";
 import { ContractsSection } from "./ContractsSection";
 import { Drawer, Field, fmtDate } from "../sales/ui";
 import { RoleName, useLookups, type Named } from "../lookups";
 import { pipelineError } from "./errors";
 import {
   CONTACT_KIND_LABELS, PLACEMENT_EXPORT_ROW_CAP, PLACEMENT_STATUSES, PLACEMENT_TYPE_LABELS, WORK_MODE_LABELS,
-  dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Placement, type PlacementFilters,
+  ISO_DAY, dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Placement, type PlacementFilters,
 } from "./pipelineApi";
 import { FirstPlacementBadge, PipelineStatus, StatusChips } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
@@ -69,13 +69,21 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
 }) {
   const id = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const [status, setStatusRaw] = useState("");
-  const [from, setFromRaw] = useState("");
-  const [to, setToRaw] = useState("");
-  const [report, setReport] = useState<Required<Pick<PlacementFilters, "vendorId" | "clientId" | "technologyId" | "locationId">>>({
-    vendorId: "", clientId: "", technologyId: "", locationId: "",
-  });
-  const setReportKey = (k: keyof typeof report) => (v: string) => { setReport((r) => ({ ...r, [k]: v })); reset(); };
+  // Filters live in the address bar (?status=&from=&to=&vendorId=…), so a refresh or a shared link keeps them.
+  const [statusParam, setStatusRaw] = useSearchParam("status");
+  const [fromParam, setFromRaw] = useSearchParam("from");
+  const [toParam, setToRaw] = useSearchParam("to");
+  const [vendorId, setVendorId] = useSearchParam("vendorId");
+  const [clientId, setClientId] = useSearchParam("clientId");
+  const [technologyId, setTechnologyId] = useSearchParam("technologyId");
+  const [locationId, setLocationId] = useSearchParam("locationId");
+  const status = (PLACEMENT_STATUSES as readonly string[]).includes(statusParam) ? statusParam : "";
+  const from = ISO_DAY.test(fromParam) ? fromParam : "";
+  const to = ISO_DAY.test(toParam) ? toParam : "";
+  // Lookup ids from a link go to the API as they are (it validates them); an unknown one matches nothing.
+  const report = { vendorId, clientId, technologyId, locationId };
+  const reportSetters = { vendorId: setVendorId, clientId: setClientId, technologyId: setTechnologyId, locationId: setLocationId };
+  const setReportKey = (k: keyof typeof report) => (v: string) => { reportSetters[k](v); reset(); };
   const lookups = useLookups();
   const canExport = can(me, "report:export");
   const exportRun = useMutation({
@@ -136,7 +144,7 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
           <LookupFilter id={`${id}-tech`} label="Technology" items={lookups.data?.technologies ?? []} value={report.technologyId} onChange={setReportKey("technologyId")} />
           <LookupFilter id={`${id}-loc`} label="Location" items={lookups.data?.locations ?? []} value={report.locationId} onChange={setReportKey("locationId")} />
           {hasFilters && <button type="button" className="btn" onClick={() => {
-            setStatusRaw(""); setFromRaw(""); setToRaw(""); setReport({ vendorId: "", clientId: "", technologyId: "", locationId: "" }); reset();
+            setStatusRaw(""); setFromRaw(""); setToRaw(""); for (const set of Object.values(reportSetters)) set(""); reset();
           }}>Clear filters</button>}
         </div>
         {canExport && (

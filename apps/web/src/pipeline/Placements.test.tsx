@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Shell } from "../App";
 import { PlacementsPage } from "./PlacementsPage";
 import { EMPTY_LOOKUPS, ROLE_LOOKUPS, meFor, mockApi, plc, problem, wrap, type Handler } from "./testkit";
 
@@ -260,5 +261,30 @@ describe("Placements report (migration 0160)", () => {
     fireEvent.click(within(dlg).getByRole("button", { name: "Mark joining issue" }));
     await waitFor(() => expect(api.writes()).toHaveLength(1));
     expect(api.writes()[0]!.body).toEqual({ to: "joining_issue", reason: "Client postponed the start" });
+  });
+});
+
+describe("Placements filters in the URL", () => {
+  it("restores filters from a link and keeps them while a placement is opened and closed", async () => {
+    api.routes["GET /api/v1/hotlist"] = () => ({ body: { items: [], nextCursor: null } });
+    window.history.replaceState(null, "", "/placements?status=joined&vendorId=v1&from=nope");
+    wrap(<Shell me={RECRUITER} onSignOut={() => undefined} />);
+    await rowOf("Asha Iyer");
+    expect(lastList().get("status")).toBe("joined");
+    expect(lastList().get("vendorId")).toBe("v1");
+    expect(lastList().get("from")).toBeNull();
+
+    const drawer = await openDrawer("Asha Iyer");
+    await waitFor(() => expect(window.location.pathname).toBe("/placements/p1"));
+    expect(new URLSearchParams(window.location.search).get("status")).toBe("joined");
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close placement details" }));
+    await waitFor(() => expect(window.location.pathname).toBe("/placements"));
+    expect(new URLSearchParams(window.location.search).get("vendorId")).toBe("v1");
+
+    // Another screen starts fresh.
+    const nav = screen.getByRole("complementary", { name: "Main navigation" });
+    fireEvent.click(within(nav).getByRole("button", { name: "Submissions" }));
+    await waitFor(() => expect(window.location.pathname).toBe("/submissions"));
+    expect(window.location.search).toBe("");
   });
 });
