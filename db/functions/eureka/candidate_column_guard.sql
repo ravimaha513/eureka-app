@@ -66,7 +66,8 @@ BEGIN
 END $function$;
 
 REVOKE ALL ON FUNCTION eureka.candidate_column_guard() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION eureka.candidate_column_guard() TO authz_definer;
-GRANT EXECUTE ON FUNCTION eureka.candidate_column_guard() TO eureka_app;
-GRANT EXECUTE ON FUNCTION eureka.candidate_column_guard() TO eureka_worker;
+-- A trigger function needs no EXECUTE to fire (only CREATE TRIGGER checks it, and the owner does that).
+-- REVOKE rather than drop the old GRANT lines: CREATE OR REPLACE keeps existing ACLs, so the
+-- grants already in a database would otherwise stay.
+REVOKE EXECUTE ON FUNCTION eureka.candidate_column_guard() FROM authz_definer, eureka_app, eureka_worker;
 RESET ROLE;
