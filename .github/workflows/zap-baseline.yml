@@ -40,7 +40,7 @@ jobs:
           fi
           curl -fsS -o /dev/null --max-time 20 "$TARGET" || { echo "::error::$TARGET is not reachable"; exit 1; }
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: ZAP baseline
         uses: zaproxy/action-baseline@v0.14.0
