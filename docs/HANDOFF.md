@@ -251,6 +251,8 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   `user-purge-inactive` anonymizes users inactive 7+ days; `DELETE /admin/users/:id` ("Delete now") skips the wait.
 - New candidates: lead or above only, email and phone required and unique (PRs #69, #76, migrations 0260/0300,
   docs/candidates-api.md CA-6): 409 `duplicate_contact`, no override; trigger `authz.candidate_contact_unique` backstop.
+- Bulk user import sets Manager Email and Team (PR #87, docs/admin-api.md): managers may be rows of the same file;
+  `authz.admin_bulk_set_managers` rebuilds the closure once; `access_version` bumped once per transaction (500 rows ~5s).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
