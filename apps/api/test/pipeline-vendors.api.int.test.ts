@@ -322,4 +322,13 @@ describe("preferred vendors (PV-9..PV-12)", () => {
     expect(audit).toContain("preferred_vendor.archived");
     expect(audit).not.toMatch(/acme|Jo Vendor|5550123|Northwind|Answers/i);
   });
+
+  it("superiors add their own vendors too", async () => {
+    for (const k of ["m1", "ad", "ceo"] as const) {
+      expect((await call(k, "GET", "/api/v1/preferred-vendors")).json().actions, k).toEqual({ create: true });
+      const res = await call(k, "POST", "/api/v1/preferred-vendors", { vendorName: `Own ${k}` });
+      expect(res.statusCode, res.body).toBe(201);
+      expect(res.json()).toMatchObject({ owner: { id: U[k] }, actions: { edit: true, archive: true } });
+    }
+  });
 });

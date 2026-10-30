@@ -9,7 +9,7 @@ Gap list items "Candidate pipeline report", "Notifications: candidate not respon
 
 No catalog change: the report uses `report:read` + `candidate:read`, assessments use `submission:read` /
 `submission:update`, flags use `candidate:read` / `candidate:update`, and vendors use the existing
-`vendor.preferred:create` (recruiter own, lead own) and `vendor.preferred:read` (lead team, manager and associate
+`vendor.preferred:create` (own, every sales role from recruiter to CEO) and `vendor.preferred:read` (lead team, manager and associate
 director hierarchy, CEO org).
 
 All bodies and queries are strict zod schemas (unknown keys: 422). Errors are RFC 9457 problems with the code in

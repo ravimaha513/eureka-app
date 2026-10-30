@@ -511,6 +511,8 @@ export const GRANTS: Record<Role, Grants> = {
     "placement.bgc_status:update": "hierarchy",
     "rate:read": "hierarchy",
     "report:export": "hierarchy",
+    // Superiors keep their own preferred vendors too; others' entries stay read-only
+    "vendor.preferred:create": "own",
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     // AD-10: add unassigned recruiters to teams led within their hierarchy
@@ -544,6 +546,8 @@ export const GRANTS: Record<Role, Grants> = {
     "placement.bgc_status:update": "hierarchy",
     "rate:read": "hierarchy",
     "report:export": "hierarchy",
+    // Superiors keep their own preferred vendors too; others' entries stay read-only
+    "vendor.preferred:create": "own",
     "vendor.preferred:read": "hierarchy",
     "team:move_member": "hierarchy",
     // AD-10: add unassigned recruiters to teams led within their hierarchy
@@ -591,6 +595,7 @@ export const GRANTS: Record<Role, Grants> = {
     "performance:read": "org",
     "report:read": "org",
     "report:export": "org",
+    "vendor.preferred:create": "own",
     "vendor.preferred:read": "org",
     // market-reports
     "report.market:read": "org",
