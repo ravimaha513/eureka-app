@@ -219,6 +219,30 @@ describe("submission filters and pagination", () => {
     expect((await call("m1", "GET", "/api/v1/submissions?cursor=abc")).statusCode).toBe(422);
   });
 
+  it("interviewed and search filters; interview counts per row; summary matches the list", async () => {
+    // Every seeded submission has one booked L1 interview.
+    const all = (await call("m1", "GET", "/api/v1/submissions?limit=200")).json().items as { id: string; interviewCount: number; lastInterviewAt: string | null }[];
+    expect(all.length).toBeGreaterThan(0);
+    for (const i of all) { expect(i.interviewCount).toBe(1); expect(i.lastInterviewAt).not.toBeNull(); }
+    const yes = (await call("m1", "GET", "/api/v1/submissions?limit=200&interviewed=true")).json().items.map((i: { id: string }) => i.id);
+    expect(yes).toEqual(all.map((i) => i.id));
+    expect((await call("m1", "GET", "/api/v1/submissions?interviewed=false")).json().items).toEqual([]);
+    expect((await call("m1", "GET", "/api/v1/submissions?interviewed=maybe")).statusCode).toBe(422);
+
+    expect((await call("m1", "GET", "/api/v1/submissions?limit=200&search=java%20dev")).json().items).toHaveLength(all.length);
+    expect((await call("m1", "GET", "/api/v1/submissions?search=zzz-none")).json().items).toEqual([]);
+    expect((await call("m1", "GET", "/api/v1/submissions?search=%25")).json().items).toEqual([]); // % is literal
+
+    const sum = (await call("m1", "GET", "/api/v1/submissions/summary")).json();
+    expect(sum).toMatchObject({ total: all.length, interviewed: all.length });
+    expect(sum.byStatus.submitted).toBe(all.length);
+    expect(sum.byStatus.selected).toBe(0);
+    const cand = seed.submissions.find((x) => x.recruiterId === U.r2a && x.teamId === T.t2)!.candidate.id;
+    const one = (await call("m1", "GET", `/api/v1/submissions/summary?candidateId=${cand}`)).json();
+    expect(one.total).toBe(all.filter((i) => (i as unknown as { candidateId: string }).candidateId === cand).length);
+    expect((await call("m1", "GET", "/api/v1/submissions/summary?cursor=x")).statusCode).toBe(422);
+  });
+
   it("small pages walk the same set as one large page", async () => {
     const all = (await call("ad", "GET", "/api/v1/submissions?limit=200")).json().items.map((i: { id: string }) => i.id);
     const paged = (await getAll("ad", "/api/v1/submissions")).map((i) => i.id);

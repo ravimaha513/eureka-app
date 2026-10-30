@@ -384,6 +384,13 @@ h1:focus { outline: none; }
 .filters { display: flex; flex-direction: column; gap: 10px; }
 .chipfilter { display: flex; flex-direction: column; gap: 4px; }
 .chiplabel { font-weight: 600; color: var(--text2); font-size: 12px; }
+.cs-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.cs-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+.cs-stat b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.cs-stat span { font-size: 12px; color: var(--text2); }
+.cs-stat:hover { border-color: var(--line-strong); background: var(--hover); }
+.cs-stat[aria-pressed="true"] { border-color: var(--pri-700); background: var(--pri-50); }
+.chipcount { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--line2); color: var(--text2); font-size: 11px; font-variant-numeric: tabular-nums; }
 .tabs.wrap { flex-wrap: wrap; }
 .badge.st-under_review, .badge.st-paperwork, .badge.st-bgc { background: var(--warn-bg); color: var(--warn-fg); }
 .badge.st-interview_requested, .badge.st-interview_scheduled, .badge.st-interview_completed, .badge.st-ready { background: var(--pri-50); color: var(--pri-700); }

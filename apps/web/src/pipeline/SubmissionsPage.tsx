@@ -12,7 +12,7 @@ import {
   ISO_DAY, SUBMISSION_STATUSES, dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Submission,
 } from "./pipelineApi";
 import { ScheduleInterviewDialog } from "./ScheduleInterviewDialog";
-import { PipelineStatus, StatusChips } from "./ui";
+import { InterviewCell, InterviewFilter, PipelineStatus, StatusChips } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
@@ -29,6 +29,10 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
   const [statusParam, setStatusRaw] = useSearchParam("status");
   const [fromParam, setFromRaw] = useSearchParam("from");
   const [toParam, setToRaw] = useSearchParam("to");
+  const [interviewedParam, setInterviewedRaw] = useSearchParam("interviewed");
+  const interviewed: "true" | "false" | "" = interviewedParam === "true" || interviewedParam === "false" ? interviewedParam : "";
+  const [searchInput, setSearchInput] = useState("");
+  const search = useDebounced(searchInput.trim());
   const status = (SUBMISSION_STATUSES as readonly string[]).includes(statusParam) ? statusParam : "";
   const from = ISO_DAY.test(fromParam) ? fromParam : "";
   const to = ISO_DAY.test(toParam) ? toParam : "";
@@ -39,12 +43,14 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
   const setFrom = (v: string) => { setFromRaw(v); reset(); };
   const setTo = (v: string) => { setToRaw(v); reset(); };
   const setCandidate = (v: string) => { setCandidateRaw(v); reset(); };
+  const setInterviewed = (v: string) => { setInterviewedRaw(v); reset(); };
+  useEffect(() => { reset(); }, [search, reset]);
   const invalidRange = Boolean(from && to && from > to);
   const [openId, setOpenId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
 
   const filters = {
-    status, candidateId,
+    status, candidateId, interviewed, search,
     from: from ? dayBoundary(from) : "", to: to ? dayBoundary(to, true) : "",
     cursor: pager.cursor ?? "", limit: PAGE_SIZE,
   };
@@ -56,7 +62,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
   });
   const items = q.data?.items ?? [];
   const showRate = items.some((s) => "rate" in s);
-  const hasFilters = Boolean(status || from || to || candidateId);
+  const hasFilters = Boolean(status || from || to || candidateId || interviewed || search);
   const open = items.find((s) => s.id === openId) ?? null;
   const n = items.length;
   const countMsg = q.isLoading || q.error || invalidRange ? ""
@@ -82,8 +88,13 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
               aria-invalid={invalidRange || undefined} aria-describedby={invalidRange ? `${id}-range` : undefined} />
           </div>
           {canSearchCandidates && <CandidateFilter value={candidateId} onChange={setCandidate} />}
+          <div className="field inline">
+            <label htmlFor={`${id}-job`}>Job or client</label>
+            <input id={`${id}-job`} type="search" placeholder="e.g. Java, Meta" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
+          </div>
+          <InterviewFilter value={interviewed} onChange={setInterviewed} />
           {hasFilters && (
-            <button type="button" className="btn" onClick={() => { setStatusRaw(""); setFromRaw(""); setToRaw(""); setCandidateRaw(""); reset(); }}>
+            <button type="button" className="btn" onClick={() => { setStatusRaw(""); setFromRaw(""); setToRaw(""); setCandidateRaw(""); setInterviewedRaw(""); setSearchInput(""); reset(); }}>
               Clear filters
             </button>
           )}
@@ -100,7 +111,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
           ) : (
             <div className="tablewrap"><table aria-label="Submissions" aria-busy={q.isFetching || undefined}>
               <thead><tr>
-                <th>Candidate</th><th>Job / client</th><th>Status</th><th>Submitted</th><th>Recruiter</th>
+                <th>Candidate</th><th>Job / client</th><th>Status</th><th>Interviews</th><th>Submitted</th><th>Recruiter</th>
                 {showRate && <th>Rate</th>}
                 <th><span className="sr-only">Actions</span></th>
               </tr></thead>
@@ -110,6 +121,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
                     <td><b>{s.candidateName ?? "Candidate"}</b></td>
                     <td>{s.jobTitle}<span className="block">{s.client}</span></td>
                     <td><PipelineStatus status={s.status} /></td>
+                    <td><InterviewCell s={s} /></td>
                     <td>{fmtDateTime(s.submittedAt)}</td>
                     <td>{s.recruiterName ?? "—"}</td>
                     {showRate && <td>{"rate" in s ? fmtRate(s.rate) : <span className="muted">—</span>}</td>}
@@ -120,7 +132,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
                   </tr>
                 ))}
                 {items.length === 0 && (
-                  <tr><td colSpan={showRate ? 7 : 6} className="empty">{hasFilters ? "No submissions match these filters." : "No submissions yet. Log one from a candidate profile."}</td></tr>
+                  <tr><td colSpan={showRate ? 8 : 7} className="empty">{hasFilters ? "No submissions match these filters." : "No submissions yet. Log one from a candidate profile."}</td></tr>
                 )}
               </tbody>
             </table></div>
@@ -137,6 +149,13 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
       )}
     </>
   );
+}
+
+/** The value once it has stopped changing for 250 ms (search boxes). */
+export function useDebounced(value: string, ms = 250) {
+  const [v, setV] = useState(value);
+  useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value, ms]);
+  return v;
 }
 
 /** Candidate name search: finds candidates, then filters submissions by the one picked (server-side). */
@@ -176,7 +195,7 @@ function CandidateFilter({ value, onChange }: { value: string; onChange: (id: st
 
 type Modal = { kind: "reject" } | { kind: "withdraw" } | { kind: "interview" } | { kind: "placement" };
 
-function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlacement }: {
+export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlacement }: {
   id: string; initial: Submission | null; onClose: () => void; onNotice: (m: string) => void; onOpenPlacement?: (id: string) => void;
 }) {
   const qc = useQueryClient();

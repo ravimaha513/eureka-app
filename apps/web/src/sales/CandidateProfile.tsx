@@ -9,6 +9,8 @@ import { CandidateTimeline } from "./CandidateTimeline";
 import { NonResponseCard } from "../pipelinereport/NonResponseCard";
 import { CandidateWorkAuthorization } from "../workauth/CandidateWorkAuthorization";
 import { CandidateTraining } from "../training/CandidateTraining";
+import { CandidateSubmissions } from "../pipeline/CandidateSubmissions";
+import { pipelineKeys } from "../pipeline/pipelineApi";
 import { EditProfileDialog } from "./EditProfileDialog";
 import { ComplianceDialog } from "./ComplianceDialog";
 import { documentsLabel, eligibilityLabel, stayLabel, visaLabel } from "./candidateFields";
@@ -21,7 +23,7 @@ import { TeamChecklist } from "./TeamChecklist";
 
 const BLANK = new Set(["Not recorded", "—", "Not rated", "No batch"]);
 
-type Tab = "overview" | "documents" | "training" | "activity";
+type Tab = "overview" | "submissions" | "documents" | "training" | "activity";
 type Modal = { kind: "edit" } | { kind: "submit" } | { kind: "terminate" } | { kind: "compliance" } | { kind: "delete" };
 
 /**
@@ -137,6 +139,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
   const hasDocs = caps.has("document:read") || caps.has("visa:read") || c.companies !== undefined || c.documentsStatus !== undefined;
   const tabs: { key: Tab; label: string }[] = [
     { key: "overview", label: "Overview" },
+    ...(caps.has("submission:read") ? [{ key: "submissions" as const, label: "Submissions" }] : []),
     ...(hasDocs ? [{ key: "documents" as const, label: "Documents" }] : []),
     ...(caps.has("training:read") ? [{ key: "training" as const, label: "Training" }] : []),
     { key: "activity", label: "Activity" },
@@ -257,6 +260,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
           </div>
         )}
 
+        {current === "submissions" && <CandidateSubmissions candidateId={c.id} />}
         {current === "training" && <CandidateTraining candidateId={c.id} />}
         {current === "activity" && <CandidateTimeline id={c.id} />}
       </div>
@@ -271,7 +275,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
         <LogSubmissionDialog candidate={c}
           canAddClient={caps.has("client:create")} canAddVendor={caps.has("vendor:create")}
           onClose={() => { setModal(null); setWarning(pendingWarning.current); }}
-          onLogged={(r) => { announce("Submission logged."); pendingWarning.current = r.duplicateWarning ? DUPLICATE_WARNING : ""; }} />
+          onLogged={(r) => { announce("Submission logged."); void qc.invalidateQueries({ queryKey: pipelineKeys.submissions }); pendingWarning.current = r.duplicateWarning ? DUPLICATE_WARNING : ""; }} />
       )}
       {modal?.kind === "terminate" && (
         <ConfirmDialog title={`Terminate ${c.name}?`} confirmLabel="Terminate" danger formatError={(e) => salesError(e, "transition")}

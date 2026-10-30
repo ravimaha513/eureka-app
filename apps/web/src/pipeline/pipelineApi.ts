@@ -36,6 +36,9 @@ export interface Submission {
   rejectionReason: string | null;
   submittedAt: string;
   statusChangedAt: string | null;
+  /** Booked or held interviews the caller can see (cancelled / no-invite calls excluded). */
+  interviewCount?: number;
+  lastInterviewAt?: string | null;
   actions?: SubmissionActions;
 }
 
@@ -44,9 +47,16 @@ export interface SubmissionFilters {
   candidateId?: string;
   from?: string;
   to?: string;
+  /** Job title or client name contains this text. */
+  search?: string;
+  /** "true": only submissions that got an interview; "false": only those that didn't. */
+  interviewed?: "true" | "false" | "";
   cursor?: string;
   limit?: number;
 }
+
+/** GET /api/v1/submissions/summary: counts for the filtered set across every status. */
+export interface SubmissionSummary { total: number; interviewed: number; byStatus: Record<string, number> }
 
 export const PLACEMENT_STATUSES = ["confirmed", "paperwork", "bgc", "ready", "joined", "backout", "bgc_failed", "joining_issue"] as const;
 export type PlacementType = "c2c" | "w2" | "1099";
@@ -148,6 +158,8 @@ const qs = (f: object) => {
 
 export const pipelineApi = {
   submissions: (f: SubmissionFilters) => api<Page<Submission>>(`/api/v1/submissions?${qs({ limit: 50, ...f })}`),
+  submissionSummary: (f: Omit<SubmissionFilters, "status" | "interviewed" | "cursor" | "limit">) =>
+    api<SubmissionSummary>(`/api/v1/submissions/summary?${qs(f)}`),
   submission: (id: string) => api<Submission>(`/api/v1/submissions/${enc(id)}`),
   changeSubmissionStatus: (id: string, to: string, rejectionReason?: string) =>
     api<{ id: string; status: string }>(`/api/v1/submissions/${enc(id)}/status`, {

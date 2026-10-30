@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from "@nestjs/common";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { CreateSubmission, StatusChange, SubmissionListQuery, SubmissionsService } from "./submissions.service.js";
+import { CreateSubmission, StatusChange, SubmissionListQuery, SubmissionSummaryQuery, SubmissionsService } from "./submissions.service.js";
 
 export { SubmissionsService };
 
@@ -18,6 +18,13 @@ export class SubmissionsController {
   @RequirePermission("submission:read")
   list(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.list(user, SubmissionListQuery.parse(q));
+  }
+
+  /** Counts per status and with an interview, for the same filters as the list (minus status/paging). */
+  @Get("summary")
+  @RequirePermission("submission:read")
+  summary(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
+    return this.svc.summary(user, SubmissionSummaryQuery.parse(q));
   }
 
   @Get(":id")

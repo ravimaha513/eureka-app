@@ -14,6 +14,7 @@ import {
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
+import { likeContains } from "../../platform/sql.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import {
   Cursor,
@@ -48,11 +49,18 @@ export const SubmissionListQuery = z
     recruiterId: uuid.optional(),
     from: QueryInstant.optional(),
     to: QueryInstant.optional(),
+    /** Job title or client name contains this text. */
+    search: z.string().trim().min(1).max(100).optional(),
+    /** "true": only submissions that got an interview (see INTERVIEWED). */
+    interviewed: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
     cursor: Cursor.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })
   .strict();
 export type SubmissionListQuery = z.infer<typeof SubmissionListQuery>;
+
+export const SubmissionSummaryQuery = SubmissionListQuery.omit({ status: true, interviewed: true, cursor: true, limit: true }).strict();
+export type SubmissionSummaryQuery = z.infer<typeof SubmissionSummaryQuery>;
 
 export const StatusChange = z
   .object({
@@ -67,6 +75,15 @@ export const StatusChange = z
     message: "rejection_reason_not_allowed", path: ["rejectionReason"],
   });
 export type StatusChange = z.infer<typeof StatusChange>;
+
+/** Interviews that happened or are booked (cancelled and no-invite calls don't count). */
+const LIVE_INTERVIEW = `i.submission_id = s.id AND i.call_status NOT IN ('cancelled','no_invite')`;
+/**
+ * The submission got an interview: it reached an interview status, or an
+ * interview is on record (a later rejection keeps it in this set).
+ */
+const INTERVIEWED = `(s.status IN ('interview_requested','interview_scheduled','interview_completed','selected')
+  OR EXISTS (SELECT 1 FROM eureka.interview i WHERE ${LIVE_INTERVIEW}))`;
 
 interface SubmissionRow {
   id: string;
@@ -92,6 +109,8 @@ interface SubmissionRow {
   c_location: string | null;
   visibility: CandidateRef["visibility"] | null;
   marketing_status: string | null;
+  interview_count: number;
+  last_interview_at: Date | null;
 }
 
 const SELECT = `
@@ -100,12 +119,15 @@ const SELECT = `
          cl.name AS client, ru.display_name AS recruiter_name,
          CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name END AS candidate_name,
          c.recruiter_id AS c_recruiter, c.team_id AS c_team, c.location_id AS c_location,
-         c.visibility, c.marketing_status
+         c.visibility, c.marketing_status,
+         iv.n AS interview_count, iv.last_at AS last_interview_at
   FROM eureka.submission s
   JOIN eureka.client cl ON cl.id = s.client_id
   LEFT JOIN eureka.app_user ru ON ru.id = s.recruiter_id
   LEFT JOIN eureka.candidate c ON c.id = s.candidate_id
-  LEFT JOIN eureka.person p ON p.id = c.person_id`;
+  LEFT JOIN eureka.person p ON p.id = c.person_id
+  CROSS JOIN LATERAL (SELECT count(*)::int AS n, max(i.starts_at) AS last_at
+                      FROM eureka.interview i WHERE ${LIVE_INTERVIEW}) iv`;
 
 const activityRef = (r: SubmissionRow) => ({
   recruiterId: r.recruiter_id,
@@ -170,6 +192,9 @@ export class SubmissionsService {
       jobId: r.job_id,
       submittedAt: r.submitted_at,
       statusChangedAt: r.status_changed_at,
+      /** Interviews the caller can see (not cancelled / no invite); lastInterviewAt is the latest start. */
+      interviewCount: r.interview_count,
+      lastInterviewAt: r.last_interview_at,
       /** Hints for the UI (docs/placements-api.md); every write is checked again. */
       actions: submissionActions(access, activityRef(r), r.status, visibleCandidate(r)),
     };
@@ -204,7 +229,8 @@ export class SubmissionsService {
     });
   }
 
-  async list(user: AuthedUser, q: SubmissionListQuery) {
+  /** WHERE terms shared by the list and its summary. */
+  private filters(user: AuthedUser, q: SubmissionSummaryQuery & Pick<SubmissionListQuery, "status" | "interviewed">) {
     const scope = resolveScope(user.access, "submission:read");
     if (!scope) throw new ForbiddenException();
     const params: unknown[] = [];
@@ -215,6 +241,37 @@ export class SubmissionsService {
     if (q.recruiterId) where.push(`s.recruiter_id = ${p(q.recruiterId)}`);
     if (q.from) where.push(`s.submitted_at >= ${p(q.from)}::timestamptz`);
     if (q.to) where.push(`s.submitted_at < ${p(q.to)}::timestamptz`);
+    if (q.search) {
+      const pat = p(likeContains(q.search));
+      where.push(`(s.job_title ILIKE ${pat} ESCAPE '\\' OR cl.name ILIKE ${pat} ESCAPE '\\')`);
+    }
+    if (q.interviewed !== undefined) where.push(q.interviewed ? INTERVIEWED : `NOT ${INTERVIEWED}`);
+    return { params, p, where };
+  }
+
+  /**
+   * Counts for the filtered set (all statuses): total, per status and how many
+   * got an interview. Lets a candidate's 140 submissions be read at a glance.
+   */
+  async summary(user: AuthedUser, q: SubmissionSummaryQuery) {
+    const { params, where } = this.filters(user, q);
+    const sql = `
+      SELECT s.status, count(*)::int AS n, count(*) FILTER (WHERE ${INTERVIEWED})::int AS interviewed
+      FROM eureka.submission s
+      JOIN eureka.client cl ON cl.id = s.client_id
+      LEFT JOIN eureka.candidate c ON c.id = s.candidate_id
+      WHERE ${where.join(" AND ")}
+      GROUP BY s.status`;
+    const rows = await this.db.withUser(user.id, async (c) =>
+      (await c.query<{ status: string; n: number; interviewed: number }>(sql, params)).rows);
+    const byStatus = Object.fromEntries(SUBMISSION_STATUSES.map((st) => [st, 0])) as Record<string, number>;
+    let total = 0, interviewed = 0;
+    for (const r of rows) { byStatus[r.status] = r.n; total += r.n; interviewed += r.interviewed; }
+    return { total, interviewed, byStatus };
+  }
+
+  async list(user: AuthedUser, q: SubmissionListQuery) {
+    const { params, p, where } = this.filters(user, q);
     if (q.cursor) {
       const [k, id] = splitCursor(q.cursor);
       where.push(`(s.submitted_at, s.id) < (${fromMicros(p(k))}, ${p(id)}::uuid)`);
