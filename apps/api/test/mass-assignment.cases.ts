@@ -682,6 +682,15 @@ const CASES: RejectCase[] = [
     }),
     forbidden: { id: TECH_ID, active: false, createdBy: U.r1a, created: false },
   },
+  // lookups (migration 0320): id and creator are the server's
+  ...(["client", "vendor"] as const).map((k) => ({
+    route: `POST /api/v1/lookups/${k}s`, actor: "r1a" as const,
+    prepare: async () => ({
+      url: `/api/v1/lookups/${k}s`, body: { name: `MA ${k} ${++n}` },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.${k}`),
+    }),
+    forbidden: { id: TECH_ID, createdBy: U.l1, created: false },
+  })),
   {
     route: "PATCH /api/v1/admin/locations/:id", actor: "admin",
     prepare: async () => {

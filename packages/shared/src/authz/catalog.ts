@@ -232,6 +232,9 @@ export const PERMISSIONS = [
   // reference data
   /** Add a technology to the pickers (docs/lookups-api.md); reading the list is open to everyone. */
   "technology:create",
+  /** Add a client or vendor to the pickers (docs/lookups-api.md); every Sales role. */
+  "client:create",
+  "vendor:create",
   // interviews-settings
   /** Staff contact details (phone, bio) entered in Settings; read by HR and in Users & Access. */
   "staff.contact:read",
@@ -370,6 +373,8 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   "training.progress:update": "Update trainee progress",
   "training.batch:create": "Create training batches",
   "technology:create": "Add technologies to the pickers",
+  "client:create": "Add clients to the pickers",
+  "vendor:create": "Add vendors to the pickers",
   "staff.contact:read": "See staff contact details",
   "staff.birthday:manage": "Manage staff birthdays",
   "chat:use": "Use chat",
@@ -426,6 +431,9 @@ const salesLine = (s: Scope, submitScope: Scope): Grants => ({
   "report:read": s,
   "document:read": s,
   "document:upload": s,
+  // reference data: anyone logging submissions can add a missing client or vendor
+  "client:create": "org",
+  "vendor:create": "org",
 });
 
 const withoutCandidateCreate = ({ "candidate:create": _, ...rest }: Grants): Grants => rest;
@@ -562,6 +570,8 @@ export const GRANTS: Record<Role, Grants> = {
     "submission:read": "org",
     // Anyone above lead logs submissions; the CEO for any candidate
     "submission:create": "org",
+    "client:create": "org",
+    "vendor:create": "org",
     "interview:read": "org",
     "placement:read": "org",
     "rate:read": "org",

@@ -18,8 +18,10 @@ export const DUPLICATE_WARNING =
  * records it and answers `duplicateWarning: true` when the same candidate went
  * to the same client within 90 days; that warning is shown before closing.
  */
-export function LogSubmissionDialog({ candidate, onClose, onLogged }: {
+export function LogSubmissionDialog({ candidate, onClose, onLogged, canAddClient = false, canAddVendor = false }: {
   candidate: { id: string; name: string }; onClose: () => void; onLogged: (r: { id: string; duplicateWarning: boolean }) => void;
+  /** client:create / vendor:create: the pickers offer "Add a new client/vendor…". */
+  canAddClient?: boolean; canAddVendor?: boolean;
 }) {
   const [v, setV] = useState({ jobTitle: "", clientId: "", vendorId: "", rate: "", jobId: "" });
   // jobs-portal: open client requirements the user can read (job:read); no picker without them.
@@ -110,8 +112,8 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged }: {
         <Field label="Job title" error={errors.jobTitle}>
           {(p) => <input {...p} value={v.jobTitle} onChange={set("jobTitle")} maxLength={200} {...(openJobs.length ? {} : { "data-autofocus": true })} />}
         </Field>
-        <LookupPicker kind="clients" label="Client" value={v.clientId} onChange={pick("clientId")} error={errors.clientId} />
-        <LookupPicker kind="vendors" label="Vendor (optional)" optional placeholder="No vendor" value={v.vendorId} onChange={pick("vendorId")} error={errors.vendorId} />
+        <LookupPicker kind="clients" label="Client" value={v.clientId} onChange={pick("clientId")} error={errors.clientId} canAdd={canAddClient} />
+        <LookupPicker kind="vendors" label="Vendor (optional)" optional placeholder="No vendor" value={v.vendorId} onChange={pick("vendorId")} error={errors.vendorId} canAdd={canAddVendor} />
         <Field label="Rate per hour (optional)" error={errors.rate}>
           {(p) => <input {...p} type="number" inputMode="decimal" min="0" max="1000" step="0.01" value={v.rate} onChange={set("rate")} />}
         </Field>

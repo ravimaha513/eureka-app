@@ -56,11 +56,14 @@ const ADD = "__add__";
 
 /**
  * Lists that can be added to from the picker (POST /api/v1/lookups/<path>,
- * docs/lookups-api.md; technology:create). These are always a dropdown, never a
+ * docs/lookups-api.md; technology:create, client:create, vendor:create). These are always a dropdown, never a
  * pasted ID: the add option is shown only to callers the screen says may add.
  */
-const ADDABLE: Partial<Record<LookupKind, { path: string; noun: string; plural: string }>> = {
+const ADDABLE: Partial<Record<LookupKind, { path: string; noun: string; plural: string; onlyWithAdd?: boolean }>> = {
   technologies: { path: "technologies", noun: "technology", plural: "technologies" },
+  // Restricted lists: a dropdown only for callers who may add; others keep the typed-ID fallback.
+  clients: { path: "clients", noun: "client", plural: "clients", onlyWithAdd: true },
+  vendors: { path: "vendors", noun: "vendor", plural: "vendors", onlyWithAdd: true },
 };
 
 /**
@@ -131,7 +134,7 @@ export function LookupPicker({ kind, label, value, onChange, error, optional, pl
   const af = autoFocus ? { "data-autofocus": true } : {};
   const empty = placeholder ?? (optional ? "None" : "Choose…");
   const rows = q.data?.[kind] ?? [];
-  const addable = ADDABLE[kind];
+  const addable = ADDABLE[kind]?.onlyWithAdd && !canAdd ? undefined : ADDABLE[kind];
 
   if (q.isPending && rows.length === 0) {
     return (

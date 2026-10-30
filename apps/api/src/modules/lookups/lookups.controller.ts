@@ -20,6 +20,15 @@ export const CreateTechnology = z.object({
   name: z.string().trim().min(1).max(60).regex(/^[^\p{Cc}]*$/u, "Must not contain control characters"),
 }).strict();
 
+/** Same limits as authz.create_client / create_vendor: 1–60 characters, no control characters. */
+export const CreateParty = z.object({
+  name: z.string().trim().min(1).max(60).regex(/^[^\p{Cc}]*$/u, "Must not contain control characters"),
+}).strict();
+
+const mapCreatePartyError = dbErrorMapper({
+  invalid_name: () => new UnprocessableEntityException("Name must be 1–60 characters"),
+});
+
 const mapCreateTechnologyError = dbErrorMapper({
   technology_inactive: () => new ConflictException("That technology has been retired"),
   invalid_name: () => new UnprocessableEntityException("Name must be 1–60 characters"),
@@ -84,6 +93,23 @@ export class LookupsService {
       return { id: r.technology_id, name: r.technology_name, created: r.created };
     }).catch(mapCreateTechnologyError);
   }
+
+  /**
+   * Adds a client or vendor (client:create / vendor:create: every Sales role). An existing
+   * name (case-insensitive) is returned instead of a duplicate, with `created: false`.
+   */
+  async createParty(user: AuthedUser, kind: "client" | "vendor", name: string) {
+    if (!can(user.access, `${kind}:create`)) throw new ForbiddenException("Not permitted");
+    return this.db.withUser(user.id, async (c) => {
+      const { rows } = await c.query<{ id: string; name: string; created: boolean }>(
+        `SELECT ${kind}_id AS id, ${kind}_name AS name, created FROM authz.create_${kind}($1)`, [name]);
+      const r = rows[0]!;
+      if (r.created) {
+        await this.audit.record(c, { actorId: user.id, action: `${kind}.created`, entityType: kind, entityId: r.id });
+      }
+      return { id: r.id, name: r.name, created: r.created };
+    }).catch(mapCreatePartyError);
+  }
 }
 
 @Controller("api/v1/lookups")
@@ -99,5 +125,17 @@ export class LookupsController {
   @HttpCode(200)
   createTechnology(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createTechnology(user, CreateTechnology.parse(body).name);
+  }
+
+  @Post("clients")
+  @HttpCode(200)
+  createClient(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
+    return this.svc.createParty(user, "client", CreateParty.parse(body).name);
+  }
+
+  @Post("vendors")
+  @HttpCode(200)
+  createVendor(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
+    return this.svc.createParty(user, "vendor", CreateParty.parse(body).name);
   }
 }

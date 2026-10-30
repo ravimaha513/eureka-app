@@ -172,3 +172,58 @@ describe("POST /api/v1/lookups/technologies", () => {
       .rejects.toMatchObject({ code: "42501" });
   });
 });
+
+describe.each([
+  { kind: "client" as const, path: "clients", existing: "Northwind Financial" },
+  { kind: "vendor" as const, path: "vendors", existing: "Acme Staffing" },
+])("POST /api/v1/lookups/$path", ({ kind, path, existing }) => {
+  const add = async (key: Key, payload: Record<string, unknown>) => {
+    const cookie = await login(key);
+    const me = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie } });
+    const csrf = me.json().csrfToken as string;
+    return app.inject({ method: "POST", url: `/api/v1/lookups/${path}`, headers: { cookie, "x-csrf-token": csrf }, payload });
+  };
+
+  const ADDERS = new Set<Key>(["r1a", "r1b", "r2a", "r3a", "l1", "l2", "l3", "m1", "m2", "ad", "ceo"]);
+
+  it(`every Sales role, and only those, holds ${kind}:create`, () => {
+    for (const key of users) expect(can(toUserAccess(key), `${kind}:create`), key).toBe(ADDERS.has(key));
+  });
+
+  it.each(users.filter((k) => !ADDERS.has(k)))("refuses %s with 403 and writes nothing", async (key) => {
+    const res = await add(key, { name: `Nope ${key}` });
+    expect(res.statusCode, res.body).toBe(403);
+    const { rows } = await db.admin.query(`SELECT count(*)::int AS n FROM eureka.${kind} WHERE name = $1`, [`Nope ${key}`]);
+    expect(rows[0].n).toBe(0);
+  });
+
+  it("lets a recruiter add one, audited by id only, and Sales then sees it", async () => {
+    const res = await add("r1a", { name: `  New   ${kind} Co ` });
+    expect(res.statusCode, res.body).toBe(200);
+    const made = res.json() as { id: string; name: string; created: boolean };
+    expect(made).toMatchObject({ name: `New ${kind} Co`, created: true });
+    expect((await lookups("ceo"))[path]).toContainEqual({ id: made.id, name: `New ${kind} Co` });
+    const audit = await db.admin.query(`SELECT actor_id, changes FROM eureka.audit_event WHERE action = $1 AND entity_id = $2`, [`${kind}.created`, made.id]);
+    expect(audit.rows).toEqual([{ actor_id: U.r1a, changes: null }]);
+  });
+
+  it("returns the existing row for the same name in any case", async () => {
+    const res = await add("ceo", { name: existing.toUpperCase() });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({ name: existing, created: false });
+  });
+
+  it("refuses bad input", async () => {
+    expect((await add("l2", { name: "   " })).statusCode).toBe(422);
+    expect((await add("l2", { name: "x".repeat(61) })).statusCode).toBe(422);
+    expect((await add("l2", { name: "a\u0007b" })).statusCode).toBe(422);
+    expect((await add("l2", { name: "Go", extra: 1 })).statusCode).toBe(422);
+  });
+
+  it("the database refuses callers without the permission, and direct inserts", async () => {
+    await expect(asUser(db.app, U.hr, (c) => c.query(`SELECT * FROM authz.create_${kind}('X')`)))
+      .rejects.toMatchObject({ code: "42501" });
+    await expect(asUser(db.app, U.r1a, (c) => c.query(`INSERT INTO eureka.${kind} (name) VALUES ('Direct')`)))
+      .rejects.toMatchObject({ code: "42501" });
+  });
+});

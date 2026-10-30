@@ -535,7 +535,7 @@ describe("Log submission", () => {
     routes["POST /api/v1/submissions"] = () => ({ status: 201, body: { id: "s3", duplicateWarning: false } });
     const dlg = await openDialog();
     fill(dlg);
-    expect(within(within(dlg).getByLabelText("Vendor (optional)")).getAllByRole("option").map((o) => o.textContent)).toEqual(["No vendor", "Contoso Staffing"]);
+    expect(within(within(dlg).getByLabelText("Vendor (optional)")).getAllByRole("option").map((o) => o.textContent)).toEqual(["No vendor", "Contoso Staffing", "Add a new vendor…"]);
     fireEvent.change(within(dlg).getByLabelText("Vendor (optional)"), { target: { value: VENDOR } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Log submission" }));
     await waitFor(() => expect(writes()[0]!.body).toMatchObject({ clientId: CLIENT, vendorId: VENDOR }));
