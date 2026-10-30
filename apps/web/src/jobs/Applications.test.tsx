@@ -33,6 +33,19 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Applications (staff)", () => {
+  it("keeps status, job and applicant search in the address bar", async () => {
+    window.history.replaceState(null, "", "/applications?status=hired&jobId=j1&q=rak");
+    wrap(<ApplicationsPage me={meFor("hr")} />);
+    await screen.findByText("Sales Development Representative", { selector: "b" });
+    const last = () => api.gets("/api/v1/applications").at(-1)!.url.searchParams;
+    expect([last().get("status"), last().get("jobId"), last().get("search")]).toEqual(["hired", "j1", "rak"]);
+    expect(screen.getByLabelText("Applicant")).toHaveValue("rak");
+    fireEvent.change(screen.getByLabelText("Applicant"), { target: { value: "uvsn" } });
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get("q")).toBe("uvsn"));
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(window.location.search).toBe(""));
+  });
+
   it("lists job, applicant, company, applied date, rating and status; filters by status", async () => {
     wrap(<ApplicationsPage me={meFor("hr")} />);
     const row = (await screen.findByText("Sales Development Representative", { selector: "b" })).closest("tr")!;
