@@ -1,11 +1,9 @@
 import { z } from "zod";
+import { validTimeZone } from "../../platform/time-zone.js";
 import { QueryInstant } from "../submissions/pipeline.js";
 
 const uuid = z.string().uuid();
 
-function validTimeZone(tz: string): boolean {
-  try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return true; } catch { return false; }
-}
 const TimeZone = z.string().max(64).refine(validTimeZone, "unknown time zone");
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD")

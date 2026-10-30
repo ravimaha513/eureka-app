@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post } from "@nestjs/common";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { WorkAuthCreate, WorkAuthUpdate, parseIfMatch } from "./work-authorization.schemas.js";
+import { parseIfMatch } from "../../platform/http/if-match.js";
+import { WorkAuthCreate, WorkAuthUpdate } from "./work-authorization.schemas.js";
 import { WorkAuthorizationService } from "./work-authorization.service.js";
 
 /** FR-VIS-01, 02: a candidate's work authorization records (docs/work-authorization-api.md). */

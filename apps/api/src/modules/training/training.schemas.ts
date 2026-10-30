@@ -12,14 +12,9 @@ const https = z.string().trim().max(2000).url()
   .refine((u) => /^https:\/\/[^\s\p{Cc}@/?#]+([/?#][^\s\p{Cc}]*)?$/u.test(u), "Use an https:// link without spaces or user info");
 
 export const BATCH_STATUSES = ["planned", "in_training", "completed", "cancelled"] as const;
+export type BatchStatus = (typeof BATCH_STATUSES)[number];
 export const coverColor = z.enum(TRAINING_COVER_COLORS);
 export const coverIcon = z.enum(TRAINING_COVER_ICONS);
-
-/** `If-Match: "3"` (or 3, or W/"3") -> 3; anything else -> null. */
-export function parseIfMatch(v: string | undefined): number | null {
-  const m = v === undefined ? null : /^\s*(?:W\/)?"?([1-9][0-9]{0,8})"?\s*$/.exec(v);
-  return m ? Number(m[1]) : null;
-}
 
 /** Keyset cursor of the batch list: "<start month YYYY-MM-DD>~<id>". */
 const BatchCursor = z.string().regex(/^\d{4}-\d{2}-\d{2}~[0-9a-f-]{36}$/i, "invalid cursor");

@@ -9,6 +9,7 @@ import { isValidBirthday, type Birthday } from "@eureka/shared";
 import { BirthdayFields } from "../staff/BirthdayFields";
 import { DEVICE_LABELS, settingsApi, settingsError, settingsKeys, type Preference, type Profile, type SessionRow } from "./settingsApi";
 import { Loading } from "../ui/Loading";
+import { fmtDateTime } from "../lib/format";
 
 type Tab = "profile" | "notifications" | "security";
 const TABS: { key: Tab; label: string; Icon: typeof Bell }[] = [
@@ -17,7 +18,6 @@ const TABS: { key: Tab; label: string; Icon: typeof Bell }[] = [
   { key: "security", label: "Security", Icon: ShieldCheck },
 ];
 
-const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 /**
  * Settings & Preferences (avatar menu -> Settings): the signed-in staff
@@ -179,12 +179,12 @@ function SecuritySection() {
           <tbody>
             {q.data.items.map((s) => (
               <tr key={s.id}>
-                <td><time dateTime={s.signedInAt}>{when(s.signedInAt)}</time></td>
+                <td><time dateTime={s.signedInAt}>{fmtDateTime(s.signedInAt)}</time></td>
                 <td>{DEVICE_LABELS[s.device]} · {s.browser}{s.current && <span className="tag">Current session</span>}</td>
                 <td>{s.ip ?? "—"}</td>
-                <td>{s.status === "active" ? <time dateTime={s.lastSeenAt}>{when(s.lastSeenAt)}</time> : <span className="muted">{s.status === "signed_out" ? "Signed out" : "Expired"}</span>}</td>
+                <td>{s.status === "active" ? <time dateTime={s.lastSeenAt}>{fmtDateTime(s.lastSeenAt)}</time> : <span className="muted">{s.status === "signed_out" ? "Signed out" : "Expired"}</span>}</td>
                 <td className="rowactions">{!s.current && s.status === "active" && (
-                  <button type="button" className="btn sm" aria-label={`Sign out the ${DEVICE_LABELS[s.device]} ${s.browser} session from ${when(s.signedInAt)}`}
+                  <button type="button" className="btn sm" aria-label={`Sign out the ${DEVICE_LABELS[s.device]} ${s.browser} session from ${fmtDateTime(s.signedInAt)}`}
                     onClick={() => setConfirm(s)}><LogOut size={14} aria-hidden="true" /> Sign out</button>)}</td>
               </tr>
             ))}
@@ -203,7 +203,7 @@ function SecuritySection() {
         <ConfirmDialog title="Sign out this session?" confirmLabel="Sign out" danger formatError={settingsError}
           action={async () => { await settingsApi.revoke(confirm.id); setMsg("Session signed out."); }}
           onClose={() => setConfirm(null)} onDone={() => setConfirm(null)}>
-          <p>{DEVICE_LABELS[confirm.device]} · {confirm.browser}, signed in {when(confirm.signedInAt)}{confirm.ip ? ` from ${confirm.ip}` : ""}. It will have to sign in again.</p>
+          <p>{DEVICE_LABELS[confirm.device]} · {confirm.browser}, signed in {fmtDateTime(confirm.signedInAt)}{confirm.ip ? ` from ${confirm.ip}` : ""}. It will have to sign in again.</p>
         </ConfirmDialog>
       )}
     </section>

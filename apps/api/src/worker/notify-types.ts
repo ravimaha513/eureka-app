@@ -15,7 +15,9 @@
  * the event before anyone is notified (the runner retries with backoff and alerts).
  */
 
-import { CONTRACT_KIND_LABELS, CONTRACT_KINDS, INTERVIEW_TYPE_LABELS } from "@eureka/shared";
+import {
+  ALL_ASSIGNMENT_END_REASONS, CONTRACT_KIND_LABELS, CONTRACT_KINDS, INTERVIEW_TYPE_LABELS, WORK_AUTH_EXPIRING_EVENT,
+} from "@eureka/shared";
 
 export interface OutboxEvent { id: string; type: string; aggregate_id: string; payload: Record<string, unknown> }
 
@@ -165,7 +167,7 @@ export const EVENT_SPECS: Record<string, EventSpec> = {
 
 
   // FR-NTF-11 visa-expiry (FR-VIS-03; producer: visa-expiry job, migration 0042): HR and Immigration.
-  "work_authorization.expiring": {
+  [WORK_AUTH_EXPIRING_EVENT]: {
     email: true, inApp: true,
     render: (ev) => {
       aggregate(ev);
@@ -201,7 +203,7 @@ export const EVENT_SPECS: Record<string, EventSpec> = {
       uuid(ev.payload, "assignmentId");
       const placementId = uuid(ev.payload, "placementId");
       date(ev.payload, "endDate");
-      oneOf(ev.payload, "endReason", ["bgc_failed", "completed", "terminated", "resigned"] as const); // validated, never shown
+      oneOf(ev.payload, "endReason", ALL_ASSIGNMENT_END_REASONS); // validated, never shown
       checkNotify(ev.payload, ADMIN_TEAMS_BU_CEO);
       return {
         subject: "Eureka: project assignment ended",

@@ -50,10 +50,10 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
   const canVisibility = caps.includes("candidate.visibility:update");
   const canBulk = canStatus || canVisibility;
   const canExport = caps.includes("report:export");
-  // Selection covers the rows on this page; a new page or filter starts empty.
+  // Selection covers the rows on this page; a new page or filter starts empty, but a background refetch keeps it.
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const data = s.q.data;
-  useEffect(() => setSelected(new Set()), [data]);
+  const filterKey = s.filterKey;
+  useEffect(() => setSelected(new Set()), [filterKey]);
   /** Rows the viewer cannot act on (profile in another team) are not selectable; the server would refuse them. */
   const selectable = items.filter((c) => c.canOpenProfile !== false);
   const allSelected = selectable.length > 0 && selectable.every((c) => selected.has(c.id));

@@ -94,7 +94,6 @@ export function richExcerpt(d: RichDoc | null | undefined, max = 180): string {
   const t = richToPlain(d).replace(/\s+/g, " ").trim();
   return t.length <= max ? t : `${t.slice(0, max - 1).trimEnd()}…`;
 }
-export const isRichEmpty = (d: RichDoc | null | undefined) => richToPlain(d) === "";
 
 // ---------- access ----------
 
@@ -171,4 +170,3 @@ export const APP_INTERVIEW_LABELS: Record<string, string> = {
   screening: "Initial screening", technical: "Technical", hr: "HR", managerial: "Managerial", final: "Final round",
   scheduled: "Scheduled", completed: "Completed", cancelled: "Cancelled", no_show: "No show",
 };
-export const SCORE_FIELDS = ["technical", "communication", "problemSolving", "attitude"] as const;

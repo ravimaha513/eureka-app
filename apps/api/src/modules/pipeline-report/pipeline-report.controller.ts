@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query } from "@nestjs/common";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { parseIfMatch } from "../training/training.schemas.js";
+import { parseIfMatch } from "../../platform/http/if-match.js";
 import {
   CreateAssessment, FlagNonResponse, PipelineQuery, ResolveNonResponse, UpdateAssessment,
 } from "./pipeline-report.schemas.js";

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { isSafeHttpsUrl } from "@eureka/shared";
 import { Copy, Eye, EyeOff, KeyRound, Link2, Pencil, Plus, UserRound, Hash, Building } from "lucide-react";
 import { Dialog, useSubmit } from "../ui/Dialog";
 import { StepUpDialog } from "../ui/StepUpDialog";
@@ -101,7 +102,9 @@ export function UtilitiesTab({ kind, ownerId, canManage, canReveal }: { kind: Si
                     <td>
                       <b>{label}</b>
                       <span className="block">{u.serviceProvider}</span>
-                      {u.websiteUrl && <a className="block small" href={u.websiteUrl} target="_blank" rel="noopener noreferrer">Portal<span className="sr-only"> for {label} (opens in a new tab)</span></a>}
+                      {u.websiteUrl && (isSafeHttpsUrl(u.websiteUrl)
+                        ? <a className="block small" href={u.websiteUrl} target="_blank" rel="noopener noreferrer">Portal<span className="sr-only"> for {label} (opens in a new tab)</span></a>
+                        : <span className="block small">{u.websiteUrl}</span>)}
                     </td>
                     <td>{u.accountNumber ?? <span className="muted">—</span>}</td>
                     <td>{u.username ?? <span className="muted">—</span>}</td>

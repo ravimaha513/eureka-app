@@ -4,10 +4,9 @@ import {
   HttpException,
   HttpStatus,
   NotFoundException,
-  UnprocessableEntityException,
 } from "@nestjs/common";
+import { unprocessable } from "../../platform/errors.js";
 
-const unprocessable = (c: string) => new UnprocessableEntityException(c);
 const CODES: Record<string, (code: string) => HttpException> = {
   placement_not_found: () => new NotFoundException(),
   invoice_not_found: () => new NotFoundException(),

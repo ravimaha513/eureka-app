@@ -7,8 +7,8 @@ import { portal, portalError, type PortalApplication } from "./portalApi";
 import "../jobs/jobs.css";
 import { Loading } from "../ui/Loading";
 import { QueryError } from "../ui/QueryError";
+import { fmtDateTime } from "../lib/format";
 
-const fmtWhen = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const Status = ({ s }: { s: string }) => <span className={`badge app-${s}`}>{APPLICATION_STATUS_LABELS[s as ApplicationStatus] ?? s}</span>;
 
 /** My Applications: list with status and Withdraw; the detail shows interviews only (no internal notes or ratings). */
@@ -84,7 +84,7 @@ function AppDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                   <tr key={i.id}>
                     <td>{APP_INTERVIEW_LABELS[i.interviewType] ?? i.interviewType}</td>
                     <td>{APP_INTERVIEW_LABELS[i.round] ?? i.round}</td>
-                    <td>{fmtWhen(i.startsAt)}<span className="block muted">{i.durationMinutes} min</span>
+                    <td>{fmtDateTime(i.startsAt)}<span className="block muted">{i.durationMinutes} min</span>
                       {i.meetingLink && isSafeHttpsUrl(i.meetingLink) && <a href={i.meetingLink} target="_blank" rel="noopener noreferrer">Join link</a>}</td>
                     <td><span className={`badge ai-${i.status}`}>{APP_INTERVIEW_LABELS[i.status] ?? i.status}</span></td>
                   </tr>

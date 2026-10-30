@@ -6,6 +6,7 @@ import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
+import { validTimeZone } from "../../platform/time-zone.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import { toCsv } from "../hotlist/csv.js";
 import { EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS } from "../hotlist/hotlist.service.js";
@@ -28,10 +29,6 @@ const DAY_MS = 86_400_000;
  */
 export const GROUP_BY = ["recruiter", "team", "location", "manager", "candidate"] as const;
 export type GroupBy = (typeof GROUP_BY)[number];
-
-function validTimeZone(tz: string): boolean {
-  try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return true; } catch { return false; }
-}
 
 export const DashboardQuery = z
   .object({

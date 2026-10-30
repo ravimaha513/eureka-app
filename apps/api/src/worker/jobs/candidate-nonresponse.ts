@@ -68,7 +68,10 @@ export function candidateNonresponseMailJob(mail: MailTransport, holdDays = DEFA
     async run(key, { pool, signal }) {
       const m = KEY.exec(key);
       if (!m) throw new Error("candidate-nonresponse-mail run key must be <flag id>:<stage>");
-      const [, flagId, stage] = m as unknown as [string, string, "warning" | "hold"];
+      const flagId = m[1]!;
+      // KEY is case-insensitive: normalise the stage and refuse anything but the two stages the mail knows.
+      const stage = m[2]!.toLowerCase();
+      if (stage !== "warning" && stage !== "hold") throw new Error("candidate-nonresponse-mail stage must be warning or hold");
       const c = await pool.connect();
       try {
         await c.query("BEGIN");

@@ -1,8 +1,8 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query } from "@nestjs/common";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
+import { BatchStatusChange } from "../training/training.schemas.js";
 import {
   BatchListQuery,
-  BatchStatusChange,
   CandidateListQuery,
   ComplianceUpdate,
   CreateBatch,

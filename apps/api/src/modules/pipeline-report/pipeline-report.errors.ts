@@ -1,8 +1,7 @@
 import {
   ConflictException, ForbiddenException, HttpException, HttpStatus, NotFoundException, UnprocessableEntityException,
 } from "@nestjs/common";
-
-const unprocessable = (c: string) => new UnprocessableEntityException(c);
+import { unprocessable } from "../../platform/errors.js";
 
 /** Coded errors raised by the migration 0170-0172 functions (message = code). */
 const CODES: Record<string, (code: string) => HttpException> = {

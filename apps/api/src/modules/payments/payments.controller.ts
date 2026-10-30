@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from "@nestjs/common";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
+import { parseIfMatch } from "../../platform/http/if-match.js";
 import {
-  BillablePlacementQuery, CreateInvoice, Empty, InvoiceListQuery, InvoiceSummaryQuery, RecordPayment, UpdateInvoice, parseIfMatch,
+  BillablePlacementQuery, CreateInvoice, Empty, InvoiceListQuery, InvoiceSummaryQuery, RecordPayment, UpdateInvoice,
 } from "./payments.schemas.js";
 import { PaymentsService } from "./payments.service.js";
 

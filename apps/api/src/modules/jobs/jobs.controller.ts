@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query } from "@nestjs/common";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { parseIfMatch } from "../work-authorization/work-authorization.schemas.js";
+import { parseIfMatch } from "../../platform/http/if-match.js";
 import { CreateJob, JobListQuery, UpdateJob } from "./jobs.schemas.js";
 import { JobsService } from "./jobs.service.js";
 

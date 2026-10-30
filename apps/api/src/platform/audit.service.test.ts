@@ -12,6 +12,8 @@ describe("audit redaction (rule 5)", () => {
     });
     expect(redactChanges({ number: "EAC2190012345", numberEnc: "x", number_enc: "x", workAuthNumber: "A1", type: "h1b" }))
       .toEqual({ number: "[redacted]", numberEnc: "[redacted]", number_enc: "[redacted]", workAuthNumber: "[redacted]", type: "h1b" });
+    expect(redactChanges({ payRate: 40, pay_rate: 40, amount: 1200, incentiveAmount: 90, incentive_amount: 90, fields: ["amount"] }))
+      .toEqual({ payRate: "[redacted]", pay_rate: "[redacted]", amount: "[redacted]", incentiveAmount: "[redacted]", incentive_amount: "[redacted]", fields: ["amount"] });
     expect(redactChanges(undefined)).toBeNull();
   });
 });

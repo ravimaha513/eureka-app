@@ -9,14 +9,15 @@ import {
   type DocumentItem, type DocumentOwner,
 } from "./documentsApi";
 import { StepUpDialog } from "../ui/StepUpDialog";
+import { UPLOAD_FAILED_MESSAGE } from "../lib/uploadErrors";
+import { fmtDateTime } from "../lib/format";
 
-const fmt = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const ACCEPT = [".pdf", ".docx", ".png", ".jpg", ".jpeg", ...Object.keys(DOCUMENT_CONTENT_TYPES)].join(",");
 export const DOCUMENT_POLL_MS = 3000;
 
 function documentError(e: unknown, action: "upload" | "download" | "load"): string {
   if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";
-  if (e.detail === "upload_failed") return "The file could not be sent to storage. Try again; the link is valid for 2 minutes.";
+  if (e.detail === "upload_failed") return UPLOAD_FAILED_MESSAGE;
   switch (e.status) {
     case 401: return "Your session ended. Sign in again.";
     case 403: return action === "upload" ? "You can't upload this type of document for this candidate." : "You can't open this document.";
@@ -44,7 +45,7 @@ function AccessLogDialog({ doc, onClose }: { doc: DocumentItem; onClose: () => v
             <tbody>
               {q.data.items.map((a) => (
                 <tr key={a.id}>
-                  <td><time dateTime={a.at}>{fmt(a.at)}</time></td>
+                  <td><time dateTime={a.at}>{fmtDateTime(a.at)}</time></td>
                   <td>{a.user.name ?? a.user.id}</td>
                   <td>{a.steppedUp ? "Signed in again" : "—"}</td>
                 </tr>
@@ -170,7 +171,7 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
                     {owner.kind === "candidate" && d.placementId && <span className="muted"> · placement</span>}
                   </td>
                   <td><span className={`badge resume-${d.status}`}>{resumeStatusText(d)}</span></td>
-                  <td><time dateTime={d.createdAt}>{fmt(d.createdAt)}</time>{d.uploadedBy.name ? ` · ${d.uploadedBy.name}` : ""}</td>
+                  <td><time dateTime={d.createdAt}>{fmtDateTime(d.createdAt)}</time>{d.uploadedBy.name ? ` · ${d.uploadedBy.name}` : ""}</td>
                   <td>{fmtBytes(d.sizeBytes)}</td>
                   <td className="rowactions">
                     {d.status === "clean" && (

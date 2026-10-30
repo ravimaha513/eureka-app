@@ -21,6 +21,7 @@ import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import "./jobs.css";
 import { Loading } from "../ui/Loading";
+import { fmtDateTime } from "../lib/format";
 
 const PAGE_SIZE = 50;
 
@@ -28,7 +29,6 @@ export const AppStatus = ({ status }: { status: string }) =>
   <span className={`badge app-${status}`}>{APPLICATION_STATUS_LABELS[status as ApplicationStatus] ?? status}</span>;
 export const InterviewStatusBadge = ({ status }: { status: string }) => <span className={`badge ai-${status}`}>{APP_INTERVIEW_LABELS[status] ?? status}</span>;
 
-const fmtWhen = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 export const stars = (n: number) => `${"★".repeat(n)}${"☆".repeat(5 - n)}`;
 
 /** Applications (staff): HR sees all; a hiring manager their jobs'; an interviewer those they review (the server decides). */
@@ -192,8 +192,8 @@ function ApplicationDrawer({ id, initial, me, onClose, onNotice }: {
                   <dt>Name</dt><dd>{a.applicant.name ?? "—"}</dd>
                   <dt>Email</dt><dd>{a.applicant.email ?? "—"}{a.applicant.emailVerified ? " (verified)" : ""}</dd>
                   <dt>Phone</dt><dd>{a.applicant.phone ? <span className={a.applicant.phoneMasked ? "masked" : undefined}>{a.applicant.phone}</span> : "—"}</dd>
-                  <dt>Applied</dt><dd>{fmtWhen(a.appliedAt)}</dd>
-                  <dt>Status since</dt><dd>{fmtWhen(a.statusChangedAt)}</dd>
+                  <dt>Applied</dt><dd>{fmtDateTime(a.appliedAt)}</dd>
+                  <dt>Status since</dt><dd>{fmtDateTime(a.statusChangedAt)}</dd>
                 </dl>
               )}
               {tab === "interviews" && (!full ? <p className="muted">Loading interviews…</p> : a.interviews.length === 0 ? <p className="muted">No interviews yet.</p> : (
@@ -206,7 +206,7 @@ function ApplicationDrawer({ id, initial, me, onClose, onNotice }: {
                         <tr key={i.id}>
                           <td><span className="badge pill">{APP_INTERVIEW_LABELS[i.interviewType]}</span></td>
                           <td>{APP_INTERVIEW_LABELS[i.round]}</td>
-                          <td>{fmtWhen(i.startsAt)}<span className="block muted">{i.durationMinutes} min</span></td>
+                          <td>{fmtDateTime(i.startsAt)}<span className="block muted">{i.durationMinutes} min</span></td>
                           <td><InterviewStatusBadge status={i.status} /></td>
                           <td>{avg ?? <span className="muted">—</span>}</td>
                           <td className="rowactions">
@@ -230,7 +230,7 @@ function ApplicationDrawer({ id, initial, me, onClose, onNotice }: {
                         : h.kind === "applied" ? "Applied" : h.kind === "withdrawn" ? "Withdrawn by the applicant" : h.kind === "interview_scheduled" ? "Interview scheduled"
                         : h.kind === "interview_status" ? `Interview ${APP_INTERVIEW_LABELS[h.toStatus ?? ""]?.toLowerCase() ?? ""}` : "Candidate created"}</b>
                       {h.comment && <span className="block note">{h.comment}</span>}
-                      <span className="block muted">{fmtWhen(h.at)}{h.actor ? ` · ${h.actor}` : ""}</span>
+                      <span className="block muted">{fmtDateTime(h.at)}{h.actor ? ` · ${h.actor}` : ""}</span>
                     </li>
                   ))}
                 </ol>
@@ -398,7 +398,7 @@ function InterviewDialog({ i, onClose, onDone, onPeople }: { i: AppInterview; on
     <Dialog title={`Interview · ${APP_INTERVIEW_LABELS[i.round]}`} onClose={onClose} wide>
       <dl className="facts">
         <dt>Type</dt><dd>{APP_INTERVIEW_LABELS[i.interviewType]}</dd>
-        <dt>Slot</dt><dd>{fmtWhen(i.startsAt)} · {i.durationMinutes} min</dd>
+        <dt>Slot</dt><dd>{fmtDateTime(i.startsAt)} · {i.durationMinutes} min</dd>
         <dt>Status</dt><dd><InterviewStatusBadge status={i.status} /></dd>
         <dt>Lead user</dt><dd>{i.lead.name ?? "—"}</dd>
         <dt>Panel</dt><dd>{i.panel.length ? i.panel.map((p) => p.name).join(", ") : "—"}</dd>

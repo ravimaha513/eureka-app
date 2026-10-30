@@ -9,8 +9,6 @@ export type ContractKind = (typeof CONTRACT_KINDS)[number];
 export const CONTRACT_KIND_LABELS: Record<ContractKind, string> = {
   msa: "Master services agreement", po: "Purchase order", sow: "Statement of work", other: "Other contract",
 };
-/** Document types that belong to a contract (uploaded on the placement). */
-export const CONTRACT_DOCUMENT_TYPES = ["msa", "purchase_order", "sow"] as const;
 export const CONTRACT_TITLE_MAX = 120;
 export const CONTRACT_REFERENCE_MAX = 80;
 export const CONTRACT_NOTES_MAX = 2000;

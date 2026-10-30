@@ -31,7 +31,7 @@ test("candidate submits feedback via the public link, once; the recruiter sees i
   const send = page.getByRole("button", { name: "Send feedback" });
   await expect(send).toBeDisabled(); // a rating is required
   await page.getByRole("radio", { name: "4" }).check();
-  await page.getByRole("combobox", { name: "Interview format (optional)" }).selectOption("Video");
+  await page.getByRole("combobox", { name: "Interview format (optional)", exact: true }).selectOption("Video");
   await page.getByLabel("Duration in minutes (optional)").fill("45");
   await page.getByLabel("Topics covered (optional)").fill("Java, Spring Boot");
   await page.getByLabel("Anything you'd like your team to know? (optional)").fill(`Friendly panel ${run}`);

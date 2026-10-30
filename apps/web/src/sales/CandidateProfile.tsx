@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { isSafeHttpsUrl } from "@eureka/shared";
 import { ApiError, type Me } from "../api";
 import { ConfirmDialog } from "../ui/Dialog";
 import { CandidateResumes } from "./CandidateResumes";
@@ -126,10 +127,10 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
             {c.eligibility !== undefined && <><dt>Eligibility</dt><dd>{eligibilityLabel(c.eligibility)}</dd></>}
             {c.confirmations !== undefined && <><dt>Confirmations</dt><dd>{c.confirmations}</dd></>}
             {c.linkedinUrl !== undefined && (
-              <><dt>LinkedIn</dt><dd>{c.linkedinUrl ? <a href={c.linkedinUrl} target="_blank" rel="noopener noreferrer">Open profile</a> : "—"}</dd></>
+              <><dt>LinkedIn</dt><dd>{c.linkedinUrl ? (isSafeHttpsUrl(c.linkedinUrl) ? <a href={c.linkedinUrl} target="_blank" rel="noopener noreferrer">Open profile</a> : c.linkedinUrl) : "—"}</dd></>
             )}
             {c.resumeUrl !== undefined && (
-              <><dt>Resume link</dt><dd>{c.resumeUrl ? <a href={c.resumeUrl} target="_blank" rel="noopener noreferrer">Open resume</a> : "—"}</dd></>
+              <><dt>Resume link</dt><dd>{c.resumeUrl ? (isSafeHttpsUrl(c.resumeUrl) ? <a href={c.resumeUrl} target="_blank" rel="noopener noreferrer">Open resume</a> : c.resumeUrl) : "—"}</dd></>
             )}
             {c.batch !== undefined && <><dt>Batch</dt><dd>{c.batch?.label ?? "No batch"}</dd></>}
             <dt>Phone</dt><dd><Phone c={c} /></dd>
