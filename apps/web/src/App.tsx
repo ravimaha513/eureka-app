@@ -14,6 +14,7 @@ import { Loading } from "./ui/Loading";
 import { QueryError } from "./ui/QueryError";
 import { useAuthMethods } from "./shell/useAuthMethods";
 import { QuickJump, isQuickJumpKey } from "./shell/QuickJump";
+import { OfflineBanner } from "./shell/OfflineBanner";
 
 // Every screen but the default landing (the Hot List) is its own chunk, loaded on first visit.
 const SettingsPage = lazyNamed(() => import("./settings/SettingsPage"), "SettingsPage");
@@ -402,6 +403,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
               onSettings={() => { go(SETTINGS_NAV.key); setNavOpen(false); }} />
           </div>
         </div>
+        <OfflineBanner />
         <div className="content">
           <Suspense fallback={<PageLoading />}>
             {!current ? <p className="empty">Your role has no screens yet.</p>

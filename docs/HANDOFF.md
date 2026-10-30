@@ -253,6 +253,8 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   docs/candidates-api.md CA-6): 409 `duplicate_contact`, no override; trigger `authz.candidate_contact_unique` backstop.
 - Screen switcher (no migrations): Ctrl/Cmd+K or the top-bar search button opens "Go to screen" (`shell/QuickJump.tsx`,
   the role's screens + Settings, combobox/listbox); the browser tab title names the current screen.
+- Offline banner + Submissions URL filters (no migrations): `shell/OfflineBanner.tsx` warns while the browser is
+  offline; `useSearchParam` (lib/router.ts) keeps Submissions status/from/to in `?status=&from=&to=` (invalid values ignored).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
