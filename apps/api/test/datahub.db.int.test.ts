@@ -277,7 +277,7 @@ describe("files, versions, scan, download, access log", () => {
     expect(await err(upload(U.r3a, id, "p10.pdf"))).toMatchObject({ message: "too_many_pending" });
   });
 
-  it("downloads: clean only, restricted needs a step-up; each link is logged for the managers", async () => {
+  it("downloads: clean only, restricted opens for members with or without a step-up; each link is logged for the managers", async () => {
     const pol = await upload(U.hr, F["Company policies"]!, "Holidays.pdf");
     const pay = await upload(U.acct, F["Payroll exports"]!, "July.pdf");
     const s1 = await session(U.r1a);
@@ -285,22 +285,22 @@ describe("files, versions, scan, download, access log", () => {
     await finish(pol.file_object_id, "clean", "NO_THREATS_FOUND", SHA, 1000);
     await finish(pay.file_object_id, "clean", "NO_THREATS_FOUND", SHA, 1000);
     expect(await download(U.r1a, pol.version_id, s1)).toMatchObject({ outcome: "ok", classification: "internal" });
-    expect(await download(U.r1a, pay.version_id, s1)).toMatchObject({ outcome: "step_up_required", file_object_id: null });
+    expect(await download(U.r1a, pay.version_id, s1)).toMatchObject({ outcome: "ok", classification: "restricted" });
     expect(await err(download(U.r2a, pay.version_id, s1))).toMatchObject({ message: "not_found" });
     expect(await err(download(U.hr, pay.version_id, await session(U.hr)))).toMatchObject({ message: "not_found" });
     await q(U.r1a, `SELECT * FROM authz.step_up_dev($1, 10)`, [s1]);
     const ok = await download(U.r1a, pay.version_id, s1);
     expect(ok).toMatchObject({ outcome: "ok", classification: "restricted" });
-    // Another session of the same user has no grant.
-    expect((await download(U.r1a, pay.version_id, await session(U.r1a))).outcome).toBe("step_up_required");
+    // Another session of the same user opens it too, with no grant recorded.
+    expect((await download(U.r1a, pay.version_id, await session(U.r1a))).outcome).toBe("ok");
 
     const log = await q<{ user_id: string; level: string; step_up_grant_id: string | null; version: number }>(U.acct,
-      `SELECT user_id, level, step_up_grant_id, version FROM eureka.datahub_access WHERE folder_id = $1`, [F["Payroll exports"]]);
-    expect(log).toHaveLength(1);
-    expect(log[0]).toMatchObject({ user_id: U.r1a, level: "restricted", version: 1 });
-    expect(log[0]!.step_up_grant_id).not.toBeNull();
+      `SELECT user_id, level, step_up_grant_id, version FROM eureka.datahub_access WHERE folder_id = $1 ORDER BY at, id`, [F["Payroll exports"]]);
+    expect(log).toHaveLength(3);
+    for (const row of log) expect(row).toMatchObject({ user_id: U.r1a, level: "restricted", version: 1 });
+    expect(log.filter((r) => r.step_up_grant_id !== null)).toHaveLength(1);
     // hr manages every folder (org scope) and sees the log; readers do not.
-    expect((await q(U.hr, `SELECT id FROM eureka.datahub_access WHERE folder_id = $1`, [F["Payroll exports"]])).length).toBe(1);
+    expect((await q(U.hr, `SELECT id FROM eureka.datahub_access WHERE folder_id = $1`, [F["Payroll exports"]])).length).toBe(3);
     expect(await q(U.r1a, `SELECT id FROM eureka.datahub_access`)).toEqual([]);
     expect(await q(U.locD, `SELECT id FROM eureka.datahub_access WHERE folder_id = $1`, [F["Payroll exports"]])).toEqual([]);
     expect((await q(U.admin, `SELECT id FROM eureka.datahub_access`)).length).toBeGreaterThanOrEqual(2); // audit:read
@@ -365,8 +365,6 @@ describe("review fixes: levels never weaken below the parent; locks; membership 
     expect((await raw(`SELECT level FROM eureka.audit_event, LATERAL (SELECT changes->>'level' AS level) l WHERE action = 'datahub.upload_requested' AND entity_id = $1`, [up.file_id]))[0].level).toBe("restricted");
     await finish(up.file_object_id, "clean", "NO_THREATS_FOUND", SHA, 1000);
     const s = await session(U.r1a);
-    expect((await download(U.r1a, up.version_id, s)).outcome).toBe("step_up_required");
-    await q(U.r1a, `SELECT * FROM authz.step_up_dev($1, 10)`, [s]);
     expect(await download(U.r1a, up.version_id, s)).toMatchObject({ outcome: "ok", classification: "restricted" });
     expect((await raw(`SELECT level FROM eureka.datahub_access WHERE version_id = $1`, [up.version_id]))[0].level).toBe("restricted");
   });
@@ -412,7 +410,7 @@ describe("audit (rule 5)", () => {
     const actions = new Set(rows.map((r) => r.action));
     for (const a of ["datahub.folder_created", "datahub.folder_updated", "datahub.folder_deleted", "datahub.member_added",
       "datahub.member_removed", "datahub.upload_requested", "datahub.file_deleted", "datahub.downloaded", "datahub.viewed",
-      "datahub.view_refused"]) expect(actions, a).toContain(a);
+    ]) expect(actions, a).toContain(a);
     const text = JSON.stringify(rows);
     for (const s of ["Zephyr", "Company policies", "Payroll", "Leave policy", "Holidays", "June", "July", "Mine.pdf", "Shared", ".pdf"]) {
       expect(text).not.toContain(s);

@@ -65,8 +65,8 @@ function AccessLogDialog({ doc, onClose }: { doc: DocumentItem; onClose: () => v
  * to 03). Uploads go straight to storage through a short-lived signed form and
  * are usable after the malware scan. Restricted documents (I-9, driving
  * license, work authorization) are listed only for HR, Accounts and
- * Immigration and open after "Confirm it's you" (step-up); each opening is in
- * the access log. Shown to document:read holders; 403/404 hides the section.
+ * Immigration (role and scope decide, no step-up since migration 0350); each
+ * opening is in the access log. Shown to document:read holders; 403/404 hides the section.
  */
 export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT_POLL_MS }: {
   owner: DocumentOwner; title?: string; pollMs?: number;

@@ -37,29 +37,23 @@ test("HR opens a restricted document with step-up; the opening is in the access 
   const row = section.getByRole("table", { name: "Paperwork documents, newest first" }).getByRole("row").nth(1);
   await expect(row).toContainText("Restricted");
 
-  // Opening needs a fresh confirmation (step-up) first.
-  await row.getByRole("button", { name: "Download Form I-9" }).click();
-  const dialog = page.getByRole("dialog", { name: "Confirm it's you" });
-  await expect(dialog).toBeVisible();
+  // Role and scope decide: restricted documents download without a step-up (migration 0350).
   const download = page.waitForEvent("download");
-  await dialog.getByRole("button", { name: "Confirm (development)" }).click();
+  await row.getByRole("button", { name: "Download Form I-9" }).click();
   const d = await download;
-  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "Confirm it's you" })).toHaveCount(0);
   expect(d.suggestedFilename()).toMatch(/^i9-[0-9a-f]{8}\.pdf$/);
   expect((await readFile(await d.path())).equals(file)).toBe(true);
 
-  // Within the step-up window a second opening needs no new confirmation.
   const again = page.waitForEvent("download");
   await row.getByRole("button", { name: "Download Form I-9" }).click();
   await again;
-  await expect(page.getByRole("dialog", { name: "Confirm it's you" })).toHaveCount(0);
 
   // Every opening is in the access log.
   await row.getByRole("button", { name: "Access log for Form I-9" }).click();
   const log = page.getByRole("dialog", { name: "Access log: Form I-9" });
   await expect(log.getByRole("table", { name: "Access log, newest first" }).getByRole("row")).toHaveCount(3);
   await expect(log.getByRole("row").nth(1)).toContainText("hr");
-  await expect(log.getByRole("row").nth(1)).toContainText("Signed in again");
   await log.getByRole("button", { name: "Close" }).click();
 
   // The recruiter who owns the candidate does not see the restricted document at all.

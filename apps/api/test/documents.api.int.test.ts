@@ -144,7 +144,7 @@ describe("upload, scan, promote (local driver, fake scanner)", () => {
     await runScan();
     const d = (await list("hr", `/api/v1/candidates/${cand.id}/documents`)).items[0]!;
     expect(d).toMatchObject({ id: u.id, status, reason });
-    expect((await call("hr", "POST", `/api/v1/documents/${u.id}/download`)).statusCode).toBe(docType === "i9" || docType === "drivers_license" ? 403 : 409);
+    expect((await call("hr", "POST", `/api/v1/documents/${u.id}/download`)).statusCode).toBe(409);
     if (status === "infected") expect(await exists(join(dir, "quarantine/documents", u.fileId))).toBe(false);
     expect(await exists(join(dir, "restricted/documents", u.fileId))).toBe(false);
     expect(await exists(join(dir, "clean/documents", u.fileId))).toBe(false);
@@ -240,8 +240,8 @@ describe("restricted access matrix (every fixture user; with, without and expire
     } else if (!a.readRestricted || !readable) {
       expect(before.statusCode).toBe(404);
     } else {
-      expect(before.statusCode).toBe(403);
-      expect(before.json().detail).toBe("step_up_required");
+      // Role and scope decide; no step-up is needed (migration 0350).
+      expect(before.statusCode, before.body).toBe(200);
     }
 
     const stepped = await call(s, "POST", "/api/auth/step-up/dev");
@@ -267,12 +267,17 @@ describe("restricted access matrix (every fixture user; with, without and expire
     expect(plain.statusCode).toBe(!holds ? 403 : a.read && readable ? 200 : 404);
   });
 
-  it("an expired step-up, or one taken in another session, does not open restricted documents", async () => {
+  it("restricted documents open without a step-up; a live grant is still recorded, an expired one is not", async () => {
     const s = await login(emailOf("acct"), true);
     expect((await call(s, "POST", "/api/auth/step-up/dev")).statusCode).toBe(200);
+    const grants = async () => (await db.admin.query<{ g: string | null }>(
+      `SELECT step_up_grant_id AS g FROM eureka.document_access WHERE document_id = $1 AND user_id = $2 ORDER BY at DESC, id DESC LIMIT 1`,
+      [restricted.id, U.acct])).rows[0]?.g ?? null;
     expect((await call(s, "POST", `/api/v1/documents/${restricted.id}/download`)).statusCode).toBe(200);
+    expect(await grants()).not.toBeNull();
     const other = await login(emailOf("acct"), true);
-    expect((await call(other, "POST", `/api/v1/documents/${restricted.id}/download`)).json().detail).toBe("step_up_required");
+    expect((await call(other, "POST", `/api/v1/documents/${restricted.id}/download`)).statusCode).toBe(200);
+    expect(await grants()).toBeNull();
     // Time travel: the grant ran out.
     const c = await db.admin.connect();
     try {
@@ -286,8 +291,8 @@ describe("restricted access matrix (every fixture user; with, without and expire
     }
     expect((await call(s, "GET", "/api/auth/step-up")).json()).toMatchObject({ active: false, expiresAt: null });
     const r = await call(s, "POST", `/api/v1/documents/${restricted.id}/download`);
-    expect(r.statusCode).toBe(403);
-    expect(r.json().detail).toBe("step_up_required");
+    expect(r.statusCode).toBe(200);
+    expect(await grants()).toBeNull();
   });
 
   it("logging out ends the step-up with the session", async () => {
@@ -418,7 +423,6 @@ describe("Google step-up (OIDC max_age / auth_time)", () => {
 
   it("asks Google for a fresh sign-in (max_age=0, prompt=login, the user's account) and grants step-up on a fresh auth_time", async () => {
     const s = await googleSession(U.imm);
-    expect((await download(s)).json().detail).toBe("step_up_required");
     const { google, cb } = await stepUp(s, (nonce) => ({ nonce, auth_time: Math.floor(Date.now() / 1000) }));
     expect(google.origin + google.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
     expect(Object.fromEntries(google.searchParams)).toMatchObject({ max_age: "0", prompt: "login", login_hint: "imm@eureka.example",
@@ -442,7 +446,8 @@ describe("Google step-up (OIDC max_age / auth_time)", () => {
     expect(cb.statusCode).toBe(302);
     expect(cb.headers.location).toBe("http://localhost:5173/candidates/x?tab=documents&stepUp=failed");
     expect((await gapp.inject({ method: "GET", url: "/api/auth/step-up", headers: { cookie: s.cookie } })).json()).toMatchObject({ active: false });
-    expect((await download(s)).json().detail).toBe("step_up_required");
+    // A refused step-up does not block opening: role and scope decide.
+    expect((await download(s)).statusCode).toBe(200);
   });
 
   const lastFailure = async () => (await db.admin.query(

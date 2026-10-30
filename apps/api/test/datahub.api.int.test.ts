@@ -301,7 +301,7 @@ describe("files", () => {
     expect(d.json().detail).toBe("not_available");
   });
 
-  it("restricted: stored under restricted/, every download needs a step-up and is in the managers' access log", async () => {
+  it("restricted: stored under restricted/, opens for members without a step-up, and every download is in the managers' access log", async () => {
     const up = await upload("acct", F.restricted, "June payroll.pdf", pdf("june"));
     await runScan();
     const fo = (await db.admin.query(`SELECT file_object_id FROM eureka.datahub_file_version WHERE id = $1`, [up.versionId])).rows[0].file_object_id;
@@ -309,9 +309,9 @@ describe("files", () => {
     expect(await exists(join(dir, "clean/documents", fo))).toBe(false);
 
     const s = await login("r1a", true);
+    // Membership decides; no step-up is needed (migration 0350).
     const before = await call(s, "POST", `/api/v1/datahub/versions/${up.versionId}/download`);
-    expect(before.statusCode).toBe(403);
-    expect(before.json().detail).toBe("step_up_required");
+    expect(before.statusCode, before.body).toBe(200);
     expect((await call(s, "POST", "/api/auth/step-up/dev")).statusCode).toBe(200);
     const after = await call(s, "POST", `/api/v1/datahub/versions/${up.versionId}/download`);
     expect(after.statusCode, after.body).toBe(200);
@@ -322,9 +322,10 @@ describe("files", () => {
     const log = await call("hr", "GET", `/api/v1/datahub/folders/${F.restricted}/access-log`);
     expect(log.statusCode).toBe(200);
     const items = log.json().items as { user: { id: string }; fileName: string | null; version: number; level: string; steppedUp: boolean }[];
-    expect(items).toHaveLength(1);
-    // HR manages the folder but is not a member: ids, not the file name.
+    expect(items).toHaveLength(2);
+    // HR manages the folder but is not a member: ids, not the file name. Newest first: the stepped-up download.
     expect(items[0]).toMatchObject({ user: { id: U.r1a }, fileName: null, version: 1, level: "restricted", steppedUp: true });
+    expect(items[1]).toMatchObject({ user: { id: U.r1a }, level: "restricted", steppedUp: false });
     expect((await call("acct", "GET", `/api/v1/datahub/folders/${F.restricted}/access-log`)).json().items[0].fileName).toBe("June payroll.pdf");
     expect((await call("r1a", "GET", `/api/v1/datahub/folders/${F.restricted}/access-log`)).statusCode).toBe(403);
   });

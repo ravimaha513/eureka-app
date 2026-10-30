@@ -507,7 +507,7 @@ describe("authz.document_download: restricted access matrix, access log and audi
     pending = (await upload(U.hr, own().id, "drivers_license")).document_id;
   });
 
-  it.each(users)("%s: restricted needs document.restricted:read and a live step-up of this session", async (key) => {
+  it.each(users)("%s: restricted needs document.restricted:read; a step-up is recorded when held, not required", async (key) => {
     const access = toUserAccess(key);
     const a = documentAccess(access, own());
     const readable = candidateVisible(resolveScope(access, "candidate:read"), own());
@@ -516,24 +516,27 @@ describe("authz.document_download: restricted access matrix, access log and audi
       await expect(download(U[key], restricted, s)).rejects.toThrow(/not_found/);
       await expect(devGrant(U[key], s).then(() => download(U[key], restricted, s))).rejects.toThrow(/not_found/);
     } else {
-      expect(await download(U[key], restricted, s)).toMatchObject({ outcome: "step_up_required", file_id: null, access_id: null });
-      expect(await download(U[key], restricted, null)).toMatchObject({ outcome: "step_up_required" });
+      expect(await download(U[key], restricted, s)).toMatchObject({ outcome: "ok", classification: "restricted" });
+      expect(await download(U[key], restricted, null)).toMatchObject({ outcome: "ok" });
       await devGrant(U[key], s);
       expect(await download(U[key], restricted, s)).toMatchObject({ outcome: "ok", file_id: expect.any(String), access_id: expect.any(String), classification: "restricted" });
-      // Another session of the same user has no step-up.
-      expect(await download(U[key], restricted, await session(U[key]))).toMatchObject({ outcome: "step_up_required" });
+      expect(await download(U[key], restricted, await session(U[key]))).toMatchObject({ outcome: "ok" });
     }
     // Internal documents: document:read over the candidate, no step-up.
     if (!readable || !a.read) await expect(download(U[key], internal, null)).rejects.toThrow(/not_found/);
     else expect(await download(U[key], internal, null)).toMatchObject({ outcome: "ok", classification: "internal" });
   });
 
-  it("an expired step-up no longer opens restricted documents", async () => {
+  it("an expired step-up is not recorded on the access log row", async () => {
     const s = await session(U.imm);
     const g = await devGrant(U.imm, s);
-    expect((await download(U.imm, restricted, s)).outcome).toBe("ok");
+    const live = await download(U.imm, restricted, s);
     await raw(`UPDATE eureka.step_up_grant SET created_at = now() - interval '11 minutes', expires_at = now() - interval '1 second' WHERE id = $1`, [g.grant_id]);
-    expect((await download(U.imm, restricted, s)).outcome).toBe("step_up_required");
+    const expired = await download(U.imm, restricted, s);
+    expect(expired.outcome).toBe("ok");
+    const grantOf = async (id: string | null) => (await db.admin.query(`SELECT step_up_grant_id g FROM eureka.document_access WHERE id = $1`, [id])).rows[0].g;
+    expect(await grantOf(live.access_id)).toBe(g.grant_id);
+    expect(await grantOf(expired.access_id)).toBeNull();
   });
 
   it("a file that is not clean is not available (nothing logged)", async () => {
@@ -560,9 +563,6 @@ describe("authz.document_download: restricted access matrix, access log and audi
     for (const { t } of rows) {
       expect(t).not.toMatch(/@|Cand\d|Test|\+1469|quarantine\/|clean\/|restricted\/|\.pdf/);
     }
-    // The refusal is audited too.
-    const refused = (await db.admin.query(`SELECT count(*)::int n FROM eureka.audit_event WHERE action = 'document.view_refused' AND entity_id = $1`, [restricted])).rows[0].n;
-    expect(refused).toBeGreaterThan(0);
   });
 
   it("the access log: org admins (audit:read) see all rows; restricted readers see restricted documents' rows; others none", async () => {

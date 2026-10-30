@@ -344,7 +344,7 @@ function MembersDialog({ folder, onClose }: { folder: Folder; onClose: () => voi
   };
   return (
     <Dialog title={`Members: ${folder.name}`} onClose={onClose}>
-      <p className="muted">Only these people can open files in this restricted folder. Every download asks them to confirm it's them.</p>
+      <p className="muted">Only these people can open files in this restricted folder. Every opening is in the access log.</p>
       {error && <p className="error formerr" role="alert" tabIndex={-1}>{error}</p>}
       {q.isLoading ? <p className="muted">Loading…</p> : (
         <ul className="members" aria-label="Members">
@@ -413,7 +413,7 @@ type Modal =
  * DataHub (docs/datahub-api.md): organisation folders on the left, the
  * selected folder's files on the right; search across the folders the user
  * can read. Uploads go straight to storage and open after the malware scan;
- * files in Restricted folders open after "Confirm it's you" and every
+ * files in Restricted folders open for their members only and every
  * download is in the folder's access log. Panels stack on phones.
  */
 export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
