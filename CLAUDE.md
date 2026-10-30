@@ -27,6 +27,7 @@ Several Claude sessions work this repo at once. The SessionStart hook (`scripts/
   ```
   Unfinished work: push + draft PR, never only local. Pick up someone's work with `gh pr view N`
 - On merge, add one line to `docs/HANDOFF.md` "Built"; nothing else there per session
+- Staging deploys ride a train: after pushing to main run `infra/scripts/deploy-train.sh go` (in background). It deploys origin/main only once ≥3 non-doc commits are queued, holds a shared lock, and builds from its own worktree. Under 3 it exits 0 and your commits wait for the next train. `--force` only when the user asks for a deploy now. Never call `deploy-local.sh` directly
 
 ## Token hygiene
 - Big files — grep or read a range, never whole: `docs/design.md` (100K), `docs/HANDOFF.md` (30K), `apps/web/src/styles.css`, `apps/api/test/mass-assignment.cases.ts`, large migrations

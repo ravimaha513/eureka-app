@@ -39,4 +39,12 @@ for ref in $refs; do
   fi
 done
 [ "${all_max:-0000}" \> "${main_max:-0000}" ] || echo "  (none)"
+common=$(git rev-parse --path-format=absolute --git-common-dir)
+last=$(cat "$common/deploy-staging.last" 2>/dev/null)
+if [ -n "$last" ] && git cat-file -e "$last^{commit}" 2>/dev/null; then
+  q=$(git rev-list --no-merges "$last..origin/main" | while read -r c; do
+    git diff-tree --no-commit-id --name-only -r "$c" | grep -qvE '^docs/|\.md$' && echo "$c"; done | grep -c .)
+  run=$([ -d "$common/deploy-staging.lock" ] && echo ", train running: $(cat "$common/deploy-staging.lock/info" 2>/dev/null)")
+  echo "Staging train: deployed ${last:0:7}, $q change(s) queued on origin/main (leaves at 3)$run. Never deploy-local.sh directly; infra/scripts/deploy-train.sh go"
+fi
 echo "Next free migration block: $(printf '%04d' $(( (10#${all_max:-0} / 10 + 1) * 10 )))"
