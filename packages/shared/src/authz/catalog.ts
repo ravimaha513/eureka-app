@@ -565,6 +565,8 @@ export const GRANTS: Record<Role, Grants> = {
     "candidate:read": "org",
     // CA-6: adds candidates to any team (picked in the New candidate dialog)
     "candidate:create": "org",
+    // Anyone above lead edits candidates and moves them onto the Hot List (status); the CEO any candidate
+    "candidate:update": "org",
     "assignment:read": "org",
     "hotlist:read": "org",
     "submission:read": "org",

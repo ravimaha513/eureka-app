@@ -264,6 +264,9 @@ describe("candidate endpoints", () => {
     const r = await call("ceo", "POST", "/api/v1/candidates", { ...body, teamId: T.t3 });
     expect(r.statusCode, r.body).toBe(201);
     expect((await call("ceo", "GET", `/api/v1/candidates/${r.json().id}`)).json().team.id).toBe(T.t3);
+    // ...and moves it onto the Hot List
+    const moved = await call("ceo", "POST", `/api/v1/candidates/${r.json().id}/transition`, { to: "active" });
+    expect([moved.statusCode, moved.json().status], moved.body).toEqual([201, "active"]);
   });
 
   it("writes are audited with sensitive values redacted", async () => {

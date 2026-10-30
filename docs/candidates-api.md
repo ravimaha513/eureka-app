@@ -31,6 +31,12 @@ active), so a recruiter can log submissions, interviews and placements for any H
 they see. No grant changed; `engine.test.ts` ("recruiter entry rights") and the API test keep the
 two in step.
 
+**Adding to the Hot List.** There is no membership table: a candidate is on the Hot List while its
+status is in `HOTLIST_STATUSES`. New candidates start "In training", so adding one is the
+`in_training -> active` transition (`POST /candidates/:id/transition`, `candidate:update`); the
+profile header shows it as "Add to Hot List". `candidate:update` covers recruiter (own), lead (team),
+manager / AD (hierarchy) and the CEO (org).
+
 The gap list's "narrow `interview_coordinator`'s org-wide candidate read" does not apply on this
 branch's base: that role does not exist here (interview prep is the interview coach, `coached` scope).
 
