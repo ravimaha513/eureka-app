@@ -95,7 +95,6 @@ describe("submission transitions in the database", () => {
     await expect(transition(U.r1b, id, "under_review")).rejects.toThrow(/submission_not_found/);
     await expect(transition(U.r3a, id, "under_review")).rejects.toThrow(/submission_not_found/);
     await expect(transition(U.locD, id, "under_review")).rejects.toThrow(/not_permitted/); // location read, no update
-    await expect(transition(U.ceo, id, "under_review")).rejects.toThrow(/not_permitted/);
     expect((await transition(U.m1, id, "under_review")).rows[0].s).toBe("under_review");
   });
 

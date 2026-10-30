@@ -385,6 +385,21 @@ describe("Candidate profile", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("That status change isn't allowed");
   });
 
+  it("adds an in-training candidate to the Hot List from the header", async () => {
+    routes[`GET /api/v1/candidates/${CID}`] = () => ({ body: { ...PROFILE, status: "in_training" } });
+    routes[`POST /api/v1/candidates/${CID}/transition`] = () => ({ body: { id: CID, status: "active" } });
+    renderProfile(RECRUITER);
+    fireEvent.click(await screen.findByRole("button", { name: "Add to Hot List" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Added to the Hot List (status Active)."));
+    expect(writes()[0]).toMatchObject({ method: "POST", body: { to: "active" } });
+  });
+
+  it("offers Add to Hot List only for in-training candidates", async () => {
+    renderProfile(RECRUITER);
+    await screen.findByRole("button", { name: "Move to On hold" });
+    expect(screen.queryByRole("button", { name: "Add to Hot List" })).not.toBeInTheDocument();
+  });
+
   it("confirms before terminating", async () => {
     routes[`POST /api/v1/candidates/${CID}/transition`] = () => ({ body: { id: CID, status: "terminated" } });
     renderProfile(RECRUITER);

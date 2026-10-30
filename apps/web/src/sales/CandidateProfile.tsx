@@ -88,6 +88,8 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
   const next = a ? a.transition : canUpdate ? TRANSITIONS[c.status] ?? [] : [];
   // With hints, the status block appears only when a change is allowed; without, for candidate:update holders.
   const showStatus = a ? next.length > 0 : canUpdate;
+  // The Hot List is the active statuses, so "In training" -> Active is what puts a candidate on it.
+  const canAddToHotList = c.status === "in_training" && next.includes("active");
 
   return (
     <>
@@ -104,7 +106,13 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
           </p>
         </div>
         <div className="rowactions push">
-          {canUpdate && <button type="button" className="btn" onClick={() => setModal({ kind: "edit" })}>Edit profile</button>}
+          {canAddToHotList && (
+            <button type="button" className="btn" disabled={busy !== null} aria-busy={busy === "to:active" || undefined}
+              onClick={() => void act("to:active", () => salesApi.transition(c.id, "active"), "Added to the Hot List (status Active).", "transition")}>
+              Add to Hot List
+            </button>
+          )}
+          {canUpdate &&<button type="button" className="btn" onClick={() => setModal({ kind: "edit" })}>Edit profile</button>}
           {canSubmit && <button type="button" className="btn primary" onClick={() => { pendingWarning.current = ""; setWarning(""); setModal({ kind: "submit" }); }}>Log submission</button>}
           {canDelete && <button type="button" className="btn danger" onClick={() => setModal({ kind: "delete" })}>Delete…</button>}
         </div>
