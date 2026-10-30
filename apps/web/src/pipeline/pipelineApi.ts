@@ -4,6 +4,7 @@
  */
 import { api } from "../api";
 import { fetchCsv } from "../lib/download";
+import { formatUsd } from "../lib/format";
 
 export interface Page<T> { items: T[]; nextCursor: string | null }
 export interface Ref { id: string; name: string }
@@ -185,4 +186,4 @@ export function dayBoundary(day: string, next = false) {
 export const fmtDateTime = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "—";
 
-export const fmtRate = (r: number | null | undefined) => (r === null || r === undefined ? "—" : `$${r.toFixed(2)}/hr`);
+export const fmtRate = (r: number | null | undefined) => (r === null || r === undefined ? "—" : `${formatUsd(r)}/hr`);

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { isSafeHttpsUrl } from "@eureka/shared";
 import { BookOpen, CalendarDays, ChevronDown, ChevronUp, GraduationCap, Pencil, Plus, Trash2, UserMinus, Users } from "lucide-react";
 import type { Me } from "../api";
 import { ConfirmDialog, Dialog } from "../ui/Dialog";
@@ -164,7 +165,9 @@ function CoursesPanel({ batch, onNotice }: { batch: BatchDetail; onNotice: (s: s
                             <span>{m.title}</span><span className="muted">{fmtMinutes(m.durationMinutes)}</span>
                             {m.resources.length > 0 && (
                               <span className="tr-links">{m.resources.map((u, k) => (
-                                <a key={u} href={u} target="_blank" rel="noopener noreferrer">Resource {k + 1}<span className="sr-only"> for {m.title} (opens in a new tab)</span></a>
+                                isSafeHttpsUrl(u)
+                                  ? <a key={u} href={u} target="_blank" rel="noopener noreferrer">Resource {k + 1}<span className="sr-only"> for {m.title} (opens in a new tab)</span></a>
+                                  : <span key={u}>Resource {k + 1}</span>
                               ))}</span>
                             )}
                           </li>

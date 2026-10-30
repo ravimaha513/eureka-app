@@ -1,6 +1,7 @@
 /** Typed client for the Payments / incentive dashboard (docs/payments-api.md). */
 import { INVOICE_STATUS_LABELS, type InvoiceStatus } from "@eureka/shared";
 import { ApiError, api } from "../api";
+import { formatUsd } from "../lib/format";
 
 export interface Named { id: string; name: string | null }
 
@@ -177,4 +178,4 @@ export function paymentError(e: unknown): string {
 
 /** Money as US dollars (amounts are entered and stored in USD). */
 export const fmtMoney = (v: number | null | undefined) =>
-  v === null || v === undefined ? "—" : v.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  v === null || v === undefined ? "—" : formatUsd(v);

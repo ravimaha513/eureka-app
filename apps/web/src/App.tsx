@@ -11,6 +11,8 @@ import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Sparkles, Sun } from "lucide
 import { useTheme } from "./shell/theme";
 import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
 import { Loading } from "./ui/Loading";
+import { QueryError } from "./ui/QueryError";
+import { useAuthMethods } from "./shell/useAuthMethods";
 
 // Every screen but the default landing (the Hot List) is its own chunk, loaded on first visit.
 const SettingsPage = lazyNamed(() => import("./settings/SettingsPage"), "SettingsPage");
@@ -178,11 +180,7 @@ export function SetPassword({ onDone }: { onDone: () => void }) {
 export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedIn: () => void; devMode?: boolean }) {
   const [who, setWho] = useState<string>(DEV_USERS[0][0]);
   const [err, setErr] = useState("");
-  const methods = useQuery({
-    queryKey: ["auth-methods"],
-    queryFn: () => api<{ password: boolean; google: boolean; dev: boolean }>("/api/auth/methods").catch(() => null),
-    staleTime: Infinity,
-  });
+  const methods = useAuthMethods();
   const passwordLogin = methods.data?.password === true;
   const [theme, setTheme] = useTheme();
   return (
@@ -456,6 +454,14 @@ export default function App() {
   });
   if (pathname === "/set-password") return <SetPassword onDone={() => void qc.invalidateQueries()} />;
   if (me.isLoading) return <Loading page />;
+  // Only a 401 (me resolves to null) means signed out. Any other failure is shown as an error, not as the sign-in form.
+  if (me.isError) {
+    return (
+      <div className="loginpage"><main className="loginpanel"><div className="loginbox">
+        <QueryError query={me} message="We couldn't load your account. Check your connection and try again." />
+      </div></main></div>
+    );
+  }
   if (!me.data) return <Login onSignedIn={() => qc.invalidateQueries()} />;
   const signOut = async () => {
     // A 401 here means the session is already gone; either way the client must return to the sign-in screen.

@@ -65,6 +65,8 @@ export function useCandidateList(kind: "hotlist" | "candidates") {
 
   return {
     q, page,
+    /** Changes with any filter or page, not on a background refetch: selections keyed by it reset only then. */
+    filterKey: JSON.stringify(filters),
     searchInput, setSearchInput, technologyInput, setTechnologyInput,
     status, setStatus: (v: string) => { setStatusRaw(v); reset(); },
     visibility, setVisibility: (v: Visibility | "") => { setVisibilityRaw(v); reset(); },

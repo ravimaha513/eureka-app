@@ -65,6 +65,7 @@ beforeEach(() => {
     [`GET /api/v1/candidates/${CID}`]: () => ({ body: PROFILE }),
     "GET /api/v1/lookups": () => ({ body: LOOKUPS }),
     [`GET /api/v1/candidates/${CID}/timeline`]: () => ({ body: { items: [], nextCursor: null } }),
+    [`GET /api/v1/candidates/${CID}/non-response`]: () => ({ body: { current: null, history: [], actions: { flag: false, resolve: false } } }),
     "GET /api/v1/batches": () => ({ body: { items: [], canCreate: false } }),
   };
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init = {}) => {

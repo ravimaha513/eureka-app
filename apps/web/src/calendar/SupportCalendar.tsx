@@ -3,8 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarCheck } from "lucide-react";
 import { ApiError } from "../api";
 import { type BusyInterval, calendarApi, calendarError, calendarKeys } from "./calendarApi";
+import { fmtDateTime } from "../lib/format";
 
-const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 /**
  * The support calendar connection (docs/alerts-calendar-birthdays.md CA-1..CA-3),
@@ -25,7 +25,7 @@ export function SupportCalendarCard() {
       <h2 id={`${id}-h`} className="sectiontitle"><CalendarCheck size={16} aria-hidden="true" /> Support calendar</h2>
       {s.connected ? (
         <>
-          <p>Connected: <b>{s.calendarId}</b> (Google account {s.accountEmail}), connected by {s.connectedBy?.name ?? "a colleague"}{s.connectedAt ? ` on ${when(s.connectedAt)}` : ""}.
+          <p>Connected: <b>{s.calendarId}</b> (Google account {s.accountEmail}), connected by {s.connectedBy?.name ?? "a colleague"}{s.connectedAt ? ` on ${fmtDateTime(s.connectedAt)}` : ""}.
             {" "}Block a slot from any interview's details.
             {" "}<button type="button" className="btn sm" disabled={disconnect.isPending} onClick={() => disconnect.mutate()}>Disconnect</button></p>
           {!s.freeBusy && (
@@ -122,7 +122,7 @@ export function SupportCalendarBlock({ interviewId, scheduled, startsAt, endsAt 
     <section className="card pad" aria-labelledby={`${id}-h`}>
       <h2 id={`${id}-h`}>Support calendar</h2>
       {s.block ? (
-        <p>Blocked on <b>{s.block.calendarId}</b> by {s.block.createdBy.name ?? "a colleague"} on {when(s.block.createdAt)}.
+        <p>Blocked on <b>{s.block.calendarId}</b> by {s.block.createdBy.name ?? "a colleague"} on {fmtDateTime(s.block.createdAt)}.
           {s.canBlock && <> <button type="button" className="btn sm" disabled={busy} aria-busy={release.isPending || undefined} onClick={() => release.mutate()}>Release slot</button></>}</p>
       ) : !s.connected ? (
         <p className="muted">The support calendar is not connected. Connect it from the top of the Interviews page.</p>

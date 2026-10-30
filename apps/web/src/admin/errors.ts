@@ -1,4 +1,5 @@
 import { ApiError } from "../api";
+import { CONNECTION_MESSAGE, GENERIC_ERROR_MESSAGE } from "../lib/errorText";
 
 /** Friendly text for the RFC 9457 `detail` codes in docs/admin-api.md. */
 export const ERROR_MESSAGES: Record<string, string> = {
@@ -52,12 +53,15 @@ export function skipReason(code: string): string {
 export type ErrorContext = "createUser" | "addMember" | "generic";
 
 export function friendlyError(e: unknown, ctx: ErrorContext = "generic"): string {
-  if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";
+  if (e instanceof TypeError) return CONNECTION_MESSAGE;
+  if (!(e instanceof ApiError)) return e instanceof Error ? e.message : GENERIC_ERROR_MESSAGE;
   if (e.detail && ERROR_MESSAGES[e.detail]) return ERROR_MESSAGES[e.detail]!;
   if (ctx === "createUser" && e.status === 409) return "A user with this email already exists.";
   if (ctx === "createUser" && e.status === 422) return "That email isn't allowed. Use an address in the company's Google domain (or a listed test address).";
   if (ctx === "addMember" && e.status === 409) return ERROR_MESSAGES.already_member!;
   if (e.status === 403) return "You don't have permission to do that.";
   if (e.status === 404) return "That record no longer exists. Refresh and try again.";
-  return e.detail ?? e.title ?? e.message ?? "Something went wrong.";
+  // An unknown code is not shown to the user; it goes to the console for support.
+  console.debug("Unhandled API error", e.status, e.detail ?? e.title ?? e.message);
+  return GENERIC_ERROR_MESSAGE;
 }
