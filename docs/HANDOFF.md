@@ -272,6 +272,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Remove team members (no migrations, AD-14): Remove + confirm in the Users & Access team drawer (`access:manage`) and on My team (`team:add_member`: lead, manager/AD above); `authz.team_remove_member` ends the membership and hands their team candidates to the lead.
 - Candidate profile Submissions tab (totals, per-status counts, got-an-interview filter, job/client search); `interviewed`/`search` filters + `/submissions/summary` (docs/submissions-api.md).
 - Candidate profile Metrics card on Overview (no migrations): submissions, interviews (upcoming/cleared/not cleared/by round), placements and conversion rates via `GET /candidates/:id/metrics`, each section under its own read scope (docs/candidates-api.md "Metrics").
+- Interview result (0360): per-round Pending/Cleared/Rejected (Sales: recruiter, lead and above), Result column + filter on the board; Placements → Cleared interviews tab (latest first, by team) and Team filter (`GET /placements/teams`).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
