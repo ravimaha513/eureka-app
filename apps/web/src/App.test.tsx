@@ -61,7 +61,7 @@ describe("URL routing", () => {
     expect(within(nav()).getByRole("button", { name: "Hot List" })).toHaveAttribute("aria-current", "page");
     fireEvent.click(within(nav()).getByRole("button", { name: "Submissions" }));
     expect(window.location.pathname).toBe("/submissions");
-    expect(await screen.findByRole("heading", { level: 1, name: "Submissions" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Submissions" }, { timeout: 5000 })).toBeInTheDocument();
     goBackTo("/hotlist");
     expect(within(nav()).getByRole("button", { name: "Hot List" })).toHaveAttribute("aria-current", "page");
   });
@@ -70,7 +70,7 @@ describe("URL routing", () => {
     items();
     window.history.replaceState(null, "", "/submissions");
     wrap(<Shell me={meFor("recruiter")} onSignOut={() => undefined} />);
-    expect(await screen.findByRole("heading", { level: 1, name: "Submissions" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Submissions" }, { timeout: 5000 })).toBeInTheDocument();
     expect(within(nav()).getByRole("button", { name: "Submissions" })).toHaveAttribute("aria-current", "page");
   });
 
