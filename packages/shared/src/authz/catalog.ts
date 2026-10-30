@@ -573,6 +573,10 @@ export const GRANTS: Record<Role, Grants> = {
     "client:create": "org",
     "vendor:create": "org",
     "interview:read": "org",
+    // Schedules interviews for any submission: creation is checked against submission:update (design B4.8)
+    "submission:update": "org",
+    "interview:create": "org",
+    "interview:update": "org",
     "placement:read": "org",
     "rate:read": "org",
     "employee:read": "org",
