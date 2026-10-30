@@ -192,6 +192,9 @@ tbody tr:hover td { background: var(--surface2); }
 .push { margin-left: auto; }
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
 .field.inline { margin-bottom: 0; }
+.addentry { display: flex; align-items: center; gap: 8px; }
+.addentry input { flex: 1; min-width: 0; }
+.addentry .btn { height: 40px; }
 .field label { font-weight: 600; color: var(--text2); font-size: 13px; }
 .field input, .field select { height: 40px; border-radius: 10px; border: 1px solid var(--line-strong); padding: 0 12px; background: var(--surface); font: inherit; color: var(--text); min-width: 200px; }
 .field input::placeholder, .field textarea::placeholder { color: var(--faint); }

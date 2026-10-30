@@ -99,19 +99,20 @@ function AddEntry({ kind, onAdded, onCancel }: { kind: LookupKind; onAdded: (id:
     add.mutate(n);
   };
   return (
-    <div className="toolbar">
-      <Field label={`New ${noun}`} error={error} hint="Adds it to the list for everyone.">
-        {(p) => (
+    // Input and buttons share one row; hint and error sit under the whole row.
+    <Field label={`New ${noun}`} error={error} hint="Adds it to the list for everyone.">
+      {(p) => (
+        <div className="addentry">
           <input {...p} autoFocus value={name} maxLength={60} autoComplete="off"
             placeholder={`New ${noun} name`} disabled={add.isPending}
             onChange={(e) => { setName(e.target.value); setError(undefined); }}
             // Inside a dialog form: Enter adds the entry instead of submitting the dialog.
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }} />
-        )}
-      </Field>
-      <button type="button" className="btn" disabled={add.isPending} onClick={submit}>{add.isPending ? "Adding…" : "Add"}</button>
-      <button type="button" className="btn ghost" disabled={add.isPending} onClick={onCancel}>Cancel</button>
-    </div>
+          <button type="button" className="btn" disabled={add.isPending} onClick={submit}>{add.isPending ? "Adding…" : "Add"}</button>
+          <button type="button" className="btn ghost" disabled={add.isPending} onClick={onCancel}>Cancel</button>
+        </div>
+      )}
+    </Field>
   );
 }
 
