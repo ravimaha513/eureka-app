@@ -48,6 +48,8 @@ const PlacementFilters = {
   status: z.enum(PLACEMENT_STATUSES).optional(),
   candidateId: uuid.optional(),
   recruiterId: uuid.optional(),
+  /** Team snapshot (placement.team_id). */
+  teamId: uuid.optional(),
   vendorId: uuid.optional(),
   /** The end client (placement.client_id). */
   clientId: uuid.optional(),

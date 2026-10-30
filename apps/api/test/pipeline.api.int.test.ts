@@ -346,7 +346,7 @@ describe("interviews", () => {
       client: { id: CLIENT_ID, name: "Northwind Financial" }, callStatus: "scheduled", cleared: false, consentCaptured: false,
     });
     expect(got.editableFields).toEqual(["callStatus", "coachId", "durationMin", "endsAt", "interviewType", "inviteReceived", "leadId",
-      "meetingUrl", "otterUrl", "panelIds", "recordingUrl", "round", "startsAt"]);
+      "meetingUrl", "otterUrl", "panelIds", "recordingUrl", "result", "round", "startsAt"]);
   });
 
   it("creation is authorized against the parent submission", async () => {

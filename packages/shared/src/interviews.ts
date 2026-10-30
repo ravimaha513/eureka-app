@@ -5,6 +5,10 @@
 
 export const INTERVIEW_TYPES = ["phone", "video", "in_person"] as const;
 export type InterviewType = (typeof INTERVIEW_TYPES)[number];
+
+/** Outcome of a round (migration 0360); not the location's pre-call "cleared" readiness flag. */
+export const INTERVIEW_RESULTS = ["pending", "cleared", "rejected"] as const;
+export type InterviewResult = (typeof INTERVIEW_RESULTS)[number];
 export const INTERVIEW_TYPE_LABELS: Record<InterviewType, string> = { phone: "Phone", video: "Video", in_person: "In person" };
 
 /** Durations offered by the scheduling dialog; the API accepts any whole minute in the range. */

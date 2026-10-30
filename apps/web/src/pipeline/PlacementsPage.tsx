@@ -7,6 +7,7 @@ import { saveBlob } from "../lib/download";
 import { docTypeLabel } from "../lib/format";
 import { useRoutedId, useSearchParam } from "../lib/router";
 import { ContractsSection } from "./ContractsSection";
+import { ClearedInterviews } from "./ClearedInterviews";
 import { Drawer, Field, fmtDate } from "../sales/ui";
 import { RoleName, useLookups, type Named } from "../lookups";
 import { pipelineError } from "./errors";
@@ -77,14 +78,22 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
   const [clientId, setClientId] = useSearchParam("clientId");
   const [technologyId, setTechnologyId] = useSearchParam("technologyId");
   const [locationId, setLocationId] = useSearchParam("locationId");
+  const [teamId, setTeamId] = useSearchParam("teamId");
+  // ?view=cleared: rounds marked Cleared on the Interviews board (migration 0360).
+  const [viewParam, setView] = useSearchParam("view");
+  const canSeeCleared = can(me, "interview:read");
+  const view = viewParam === "cleared" && canSeeCleared ? "cleared" : "placements";
   const status = (PLACEMENT_STATUSES as readonly string[]).includes(statusParam) ? statusParam : "";
   const from = ISO_DAY.test(fromParam) ? fromParam : "";
   const to = ISO_DAY.test(toParam) ? toParam : "";
   // Lookup ids from a link go to the API as they are (it validates them); an unknown one matches nothing.
-  const report = { vendorId, clientId, technologyId, locationId };
-  const reportSetters = { vendorId: setVendorId, clientId: setClientId, technologyId: setTechnologyId, locationId: setLocationId };
+  const report = { vendorId, clientId, technologyId, locationId, teamId };
+  const reportSetters = { vendorId: setVendorId, clientId: setClientId, technologyId: setTechnologyId, locationId: setLocationId, teamId: setTeamId };
   const setReportKey = (k: keyof typeof report) => (v: string) => { reportSetters[k](v); reset(); };
   const lookups = useLookups();
+  // A team lead's scope is one team: the filter shows only when there is more than one to pick.
+  const teams = useQuery({ queryKey: [...pipelineKeys.placements, "teams"], queryFn: () => pipelineApi.placementTeams(), staleTime: 60_000 });
+  const teamItems = (teams.data?.items.length ?? 0) > 1 ? teams.data!.items : [];
   const canExport = can(me, "report:export");
   const exportRun = useMutation({
     mutationFn: () => pipelineApi.exportPlacements({
@@ -105,7 +114,7 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
     queryKey: [...pipelineKeys.placements, "list", filters],
     queryFn: () => pipelineApi.placements(filters),
     placeholderData: keepPreviousData,
-    enabled: !invalidRange,
+    enabled: !invalidRange && view === "placements",
   });
   const items = q.data?.items ?? [];
   const showRate = items.some((p) => "rate" in p);
@@ -127,6 +136,25 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
         <p className="sub">Confirmed offers through joining. Open a placement to see contacts and the assignment, or move it to the next step.</p>
       </div>
 
+      {canSeeCleared && (
+        <div className="tabs" role="tablist" aria-label="Placements sections">
+          {([["placements", "Placements"], ["cleared", "Cleared interviews"]] as const).map(([k, l]) => (
+            <button key={k} type="button" className="tab" role="tab" id={`${id}-tab-${k}`} aria-selected={view === k}
+              aria-controls={`${id}-panel`} onClick={() => { setView(k === "cleared" ? "cleared" : ""); reset(); }}>{l}</button>
+          ))}
+        </div>
+      )}
+
+      {view === "cleared" ? (
+        <section role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-tab-cleared`}>
+          <form className="filters" role="search" aria-label="Cleared interview filters" onSubmit={(e) => e.preventDefault()}>
+            <div className="toolbar">
+              <LookupFilter id={`${id}-cteam`} label="Team" items={teamItems} value={teamId} onChange={setTeamId} />
+            </div>
+          </form>
+          <ClearedInterviews teamId={teamId} onOpenPlacement={(pid) => setOpenId(pid)} />
+        </section>
+      ) : <>
       <form className="filters" role="search" aria-label="Placement filters" onSubmit={(e) => e.preventDefault()}>
         <StatusChips label="Status" statuses={PLACEMENT_STATUSES} value={status} onChange={(v) => { setStatusRaw(v); reset(); }} />
         <div className="toolbar">
@@ -142,6 +170,7 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
           <LookupFilter id={`${id}-vendor`} label="Vendor" items={lookups.data?.vendors ?? []} value={report.vendorId} onChange={setReportKey("vendorId")} />
           <LookupFilter id={`${id}-client`} label="End client" items={lookups.data?.clients ?? []} value={report.clientId} onChange={setReportKey("clientId")} />
           <LookupFilter id={`${id}-tech`} label="Technology" items={lookups.data?.technologies ?? []} value={report.technologyId} onChange={setReportKey("technologyId")} />
+          <LookupFilter id={`${id}-team`} label="Team" items={teamItems} value={report.teamId} onChange={setReportKey("teamId")} />
           <LookupFilter id={`${id}-loc`} label="Location" items={lookups.data?.locations ?? []} value={report.locationId} onChange={setReportKey("locationId")} />
           {hasFilters && <button type="button" className="btn" onClick={() => {
             setStatusRaw(""); setFromRaw(""); setToRaw(""); for (const set of Object.values(reportSetters)) set(""); reset();
@@ -203,6 +232,7 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
         <p role="status" aria-live="polite" className="muted">{countMsg}</p>
         <Pager pager={pager} label="Placement pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
       </div>
+      </>}
 
       {openId && <PlacementDrawer id={openId} initial={items.find((p) => p.id === openId) ?? null} onClose={close} onNotice={setNotice}
         canReadDocuments={can(me, "document:read")} />}

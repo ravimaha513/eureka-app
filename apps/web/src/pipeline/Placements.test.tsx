@@ -288,3 +288,45 @@ describe("Placements filters in the URL", () => {
     expect(window.location.search).toBe("");
   });
 });
+
+describe("Placements team filter and cleared interviews (migration 0360)", () => {
+  const TEAMS = { items: [{ id: "t1", name: "Team Rohit" }, { id: "t2", name: "Team Anjali" }] };
+  const CLEARED = {
+    id: "i1", submissionId: "s1", candidate: { id: "c1", name: "Kumar Sakesh" }, recruiter: { id: "r1", name: "Jason" },
+    team: { id: "t2", name: "Team Anjali" }, location: null, client: { id: "cl1", name: "Intuit" }, round: "L1",
+    startsAt: "2026-10-30T21:00:00Z", endsAt: "2026-10-30T22:00:00Z", coach: null, inviteReceived: true,
+    callStatus: "completed", cleared: true, consentCaptured: true, otterUrl: null, recordingUrl: null, systemName: null,
+    editableFields: [], feedbackKinds: [], result: "cleared", resultAt: "2026-10-30T22:10:00Z",
+    submissionStatus: "interview_completed", placement: null,
+  };
+
+  it("filters placements by team when the caller sees more than one", async () => {
+    api.routes["GET /api/v1/placements/teams"] = () => ({ body: TEAMS });
+    wrap(<PlacementsPage me={RECRUITER} />);
+    const team = await screen.findByRole("combobox", { name: /^Team$/ });
+    fireEvent.change(team, { target: { value: "t2" } });
+    await waitFor(() => expect(lastList().get("teamId")).toBe("t2"));
+  });
+
+  it("hides the team filter for a single team (a team lead)", async () => {
+    api.routes["GET /api/v1/placements/teams"] = () => ({ body: { items: [TEAMS.items[0]] } });
+    wrap(<PlacementsPage me={RECRUITER} />);
+    await rowOf("Asha Iyer");
+    expect(screen.queryByRole("combobox", { name: /^Team$/ })).not.toBeInTheDocument();
+  });
+
+  it("lists cleared interviews latest first, by team", async () => {
+    api.routes["GET /api/v1/placements/teams"] = () => ({ body: TEAMS });
+    api.routes["GET /api/v1/interviews"] = () => ({ body: { items: [CLEARED], nextCursor: null } });
+    wrap(<PlacementsPage me={RECRUITER} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Cleared interviews" }));
+    const row = (await screen.findByText("Kumar Sakesh", { selector: "b" })).closest("tr")!;
+    expect(within(row).getByText("Intuit")).toBeInTheDocument();
+    expect(within(row).getByText("Team Anjali")).toBeInTheDocument();
+    const q = () => api.gets("/api/v1/interviews").at(-1)!.url.searchParams;
+    expect(q().get("result")).toBe("cleared");
+    expect(q().get("sort")).toBe("desc");
+    fireEvent.change(screen.getByRole("combobox", { name: /^Team$/ }), { target: { value: "t1" } });
+    await waitFor(() => expect(q().get("teamId")).toBe("t1"));
+  });
+});

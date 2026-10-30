@@ -150,6 +150,7 @@ export class PlacementsService {
     if (q.status) where.push(`pl.status = ${p(q.status)}`);
     if (q.candidateId) where.push(`pl.candidate_id = ${p(q.candidateId)}`);
     if (q.recruiterId) where.push(`pl.recruiter_id = ${p(q.recruiterId)}`);
+    if (q.teamId) where.push(`pl.team_id = ${p(q.teamId)}::uuid`);
     if (q.vendorId) where.push(`pl.vendor_id = ${p(q.vendorId)}::uuid`);
     if (q.clientId) where.push(`pl.client_id = ${p(q.clientId)}::uuid`);
     if (q.technologyId) where.push(`pl.technology_id = ${p(q.technologyId)}::uuid`);
@@ -175,6 +176,29 @@ export class PlacementsService {
       items: page.map((r) => this.present(user.access, r)),
       nextCursor: rows.length > q.limit && last ? `${last.k}.${last.id}` : null,
     };
+  }
+
+  /**
+   * Teams for the Placements Team filter: those of the placements and cleared
+   * interviews the caller can read (a team lead sees their own team; Manager,
+   * AD and CEO every team in their scope). Names only.
+   */
+  async teams(user: AuthedUser) {
+    const params: unknown[] = [];
+    const parts: string[] = [];
+    const pScope = resolveScope(user.access, "placement:read");
+    if (pScope) {
+      parts.push(`SELECT pl.team_id FROM eureka.placement pl LEFT JOIN eureka.candidate c ON c.id = pl.candidate_id
+                  WHERE pl.team_id IS NOT NULL AND ${activityPredicate(pScope, params, "pl", "c")}`);
+    }
+    const iScope = resolveScope(user.access, "interview:read");
+    if (iScope) {
+      parts.push(`SELECT i.team_id FROM eureka.interview i LEFT JOIN eureka.candidate c ON c.id = i.candidate_id
+                  WHERE i.result = 'cleared' AND i.team_id IS NOT NULL AND ${activityPredicate(iScope, params, "i", "c")}`);
+    }
+    if (!parts.length) return { items: [] };
+    const sql = `SELECT t.id, t.name FROM eureka.team t WHERE t.id IN (${parts.join(" UNION ")}) ORDER BY lower(t.name), t.id`;
+    return { items: await this.db.withUser(user.id, async (c) => (await c.query<{ id: string; name: string }>(sql, params)).rows) };
   }
 
   private readonly exportLimiter = new RateLimiter(EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);

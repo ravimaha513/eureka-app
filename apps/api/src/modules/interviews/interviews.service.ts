@@ -54,6 +54,11 @@ interface InterviewRow {
   call_status: string;
   cleared: boolean;
   cleared_at: Date | null;
+  result: string;
+  result_at: Date | null;
+  submission_status: string | null;
+  placement_id: string | null;
+  placement_status: string | null;
   otter_url: string | null;
   recording_url: string | null;
   consent_captured: boolean;
@@ -74,6 +79,7 @@ interface InterviewRow {
 const SELECT = `
   SELECT i.id, i.submission_id, i.candidate_id, i.recruiter_id, i.team_id, i.location_id, i.client_id,
          i.round, i.starts_at, i.ends_at, i.coach_id, i.invite_received, i.call_status, i.cleared, i.cleared_at,
+         i.result, i.result_at, sub.status AS submission_status, pl.id AS placement_id, pl.status AS placement_status,
          i.otter_url, i.recording_url, i.consent_captured, i.system_name, i.interview_type, i.meeting_url,
          i.updated_at, ${toMicros("i.starts_at")} AS k,
          CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name
@@ -94,7 +100,11 @@ const SELECT = `
   LEFT JOIN LATERAL (
     SELECT f.rating, f.notes, f.created_at FROM eureka.interview_feedback f
     WHERE f.interview_id = i.id AND f.kind = 'candidate' ORDER BY f.created_at DESC, f.id DESC LIMIT 1
-  ) cf ON true`;
+  ) cf ON true
+  LEFT JOIN LATERAL (
+    SELECT x.id, x.status FROM eureka.placement x
+    WHERE x.submission_id = i.submission_id ORDER BY x.created_at DESC, x.id DESC LIMIT 1
+  ) pl ON true`;
 
 const SALES_SCOPES: readonly Scope[] = ["own", "team", "hierarchy", "org"];
 const FEEDBACK_SCOPES: Record<FeedbackKind, readonly Scope[]> = {
@@ -168,6 +178,12 @@ export class InterviewsService {
       callStatus: r.call_status,
       cleared: r.cleared,
       clearedAt: r.cleared_at,
+      /** Outcome of the round (0360); `cleared` above is the location's pre-call readiness. */
+      result: r.result,
+      resultAt: r.result_at,
+      /** null when the caller cannot read the submission / placement. */
+      submissionStatus: r.submission_status,
+      placement: r.placement_id ? { id: r.placement_id, status: r.placement_status } : null,
       consentCaptured: r.consent_captured,
       otterUrl: r.otter_url,
       recordingUrl: r.recording_url,
@@ -203,11 +219,14 @@ export class InterviewsService {
     if (q.clientId) where.push(`i.client_id = ${p(q.clientId)}`);
     if (q.submissionId) where.push(`i.submission_id = ${p(q.submissionId)}`);
     if (q.cleared !== undefined) where.push(`i.cleared = ${p(q.cleared)}`);
+    if (q.result) where.push(`i.result = ${p(q.result)}`);
+    const desc = q.sort === "desc";
     if (q.cursor) {
       const [k, id] = splitCursor(q.cursor);
-      where.push(`(i.starts_at, i.id) > (${fromMicros(p(k))}, ${p(id)}::uuid)`);
+      where.push(`(i.starts_at, i.id) ${desc ? "<" : ">"} (${fromMicros(p(k))}, ${p(id)}::uuid)`);
     }
-    const sql = `${SELECT} WHERE ${where.join(" AND ")} ORDER BY i.starts_at, i.id LIMIT ${p(q.limit + 1)}`;
+    const order = desc ? "i.starts_at DESC, i.id DESC" : "i.starts_at, i.id";
+    const sql = `${SELECT} WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ${p(q.limit + 1)}`;
     const rows = await this.db.withUser(user.id, async (c) => (await c.query<InterviewRow>(sql, params)).rows);
     const page = rows.slice(0, q.limit);
     const last = page[page.length - 1];

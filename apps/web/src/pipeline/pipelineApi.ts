@@ -3,6 +3,7 @@
  * (create only) and placements (docs/placements-api.md).
  */
 import { api } from "../api";
+import type { Interview } from "../interviews/InterviewsPage";
 import { fetchCsv } from "../lib/download";
 import { formatUsd } from "../lib/format";
 
@@ -128,6 +129,8 @@ export interface CreatePlacement {
 export interface PlacementFilters {
   status?: string; from?: string; to?: string; cursor?: string; limit?: number;
   vendorId?: string; clientId?: string; technologyId?: string; locationId?: string;
+  /** Team snapshot (Placements Team filter, migration 0360). */
+  teamId?: string;
 }
 
 /** Rows in one placements CSV export (PLACEMENT_EXPORT_ROW_CAP in the API). */
@@ -168,6 +171,11 @@ export const pipelineApi = {
   createInterview: (b: CreateInterview) => api<{ id: string }>("/api/v1/interviews", { method: "POST", body: JSON.stringify(b) }),
   placements: (f: PlacementFilters) => api<Page<Placement>>(`/api/v1/placements?${qs({ limit: 50, ...f })}`),
   placement: (id: string) => api<Placement>(`/api/v1/placements/${enc(id)}`),
+  /** Teams for the Placements Team filter (placements and cleared interviews in the caller's scope). */
+  placementTeams: () => api<{ items: { id: string; name: string }[] }>("/api/v1/placements/teams"),
+  /** Placements → Cleared interviews: GET /interviews?result=cleared, latest first. */
+  clearedInterviews: (f: { result: string; sort: string; teamId?: string; cursor?: string; limit?: number }) =>
+    api<Page<Interview>>(`/api/v1/interviews?${qs(f)}`),
   /** Placements report CSV: the list filters without paging; capped and audited by the server. */
   exportPlacements: (f: Omit<PlacementFilters, "cursor" | "limit">) =>
     fetchCsv("/api/v1/placements/export", Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined && v !== "")), "placements.csv"),

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { INTERVIEW_DURATION_MAX, INTERVIEW_DURATION_MIN, INTERVIEW_TYPES, PANEL_MAX, SCORECARD_KINDS } from "@eureka/shared";
+import { INTERVIEW_DURATION_MAX, INTERVIEW_DURATION_MIN, INTERVIEW_RESULTS, INTERVIEW_TYPES, PANEL_MAX, SCORECARD_KINDS } from "@eureka/shared";
 import { CALL_STATUSES, Cursor, QueryInstant, interviewTimesProblem } from "../submissions/pipeline.js";
 
 const uuid = z.string().uuid();
@@ -19,6 +19,9 @@ export const InterviewListQuery = z
     clientId: uuid.optional(),
     submissionId: uuid.optional(),
     cleared: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
+    result: z.enum(INTERVIEW_RESULTS).optional(),
+    /** asc (default) by start time; desc lists the latest first (Placements "Cleared interviews"). */
+    sort: z.enum(["asc", "desc"]).default("asc"),
     cursor: Cursor.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(100),
   })
@@ -82,6 +85,7 @@ export const UpdateInterview = z
     inviteReceived: z.boolean(),
     callStatus: z.enum(CALL_STATUSES),
     cleared: z.boolean(),
+    result: z.enum(INTERVIEW_RESULTS),
     consentCaptured: z.boolean(),
     systemName: z.string().trim().min(1).max(80).nullable(),
     interviewType: z.enum(INTERVIEW_TYPES).nullable(),
@@ -105,7 +109,7 @@ export type InterviewField = keyof UpdateInterview;
 /** Sales grants (own/team/hierarchy) on the interview's actor snapshot. */
 export const SALES_FIELDS: ReadonlySet<InterviewField> = new Set<InterviewField>([
   "round", "startsAt", "endsAt", "otterUrl", "recordingUrl", "coachId", "inviteReceived", "callStatus",
-  "interviewType", "meetingUrl", "durationMin", "panelIds", "leadId",
+  "interviewType", "meetingUrl", "durationMin", "panelIds", "leadId", "result",
 ]);
 /** Location grants on the interview's location. */
 export const LOCATION_FIELDS: ReadonlySet<InterviewField> = new Set<InterviewField>([
@@ -116,7 +120,7 @@ export const LOCATION_FIELDS: ReadonlySet<InterviewField> = new Set<InterviewFie
 export type InterviewColumnField = Exclude<InterviewField, "durationMin" | "panelIds" | "leadId">;
 export const COLUMN: Record<InterviewColumnField, string> = {
   round: "round", startsAt: "starts_at", endsAt: "ends_at", otterUrl: "otter_url", recordingUrl: "recording_url",
-  coachId: "coach_id", inviteReceived: "invite_received", callStatus: "call_status", cleared: "cleared",
+  coachId: "coach_id", inviteReceived: "invite_received", callStatus: "call_status", cleared: "cleared", result: "result",
   consentCaptured: "consent_captured", systemName: "system_name", interviewType: "interview_type", meetingUrl: "meeting_url",
 };
 

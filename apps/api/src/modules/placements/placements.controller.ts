@@ -29,6 +29,13 @@ export class PlacementsController {
     return out.csv;
   }
 
+  /** Teams for the Team filter (placements and cleared interviews the caller reads). */
+  @Get("teams")
+  @RequirePermission("placement:read")
+  teams(@CurrentUser() user: AuthedUser) {
+    return this.svc.teams(user);
+  }
+
   @Get(":id")
   @RequirePermission("placement:read")
   get(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {

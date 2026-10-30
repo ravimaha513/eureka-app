@@ -147,3 +147,13 @@ Eureka App 4 gap list, slice sales-placements. Code: `apps/api/src/modules/place
   cells, at most 5 000 rows, 5 exports per 10 minutes per user, audited `placement.export` with the row count, the cap and the
   filter **names** only. Holders today: Lead (team), Manager and AD (hierarchy), CEO (org); location roles have no
   `report:export`.
+
+## Team filter and Cleared interviews (migration 0360)
+
+- `GET /api/v1/placements` and `POST /placements/export` take `teamId` (the team snapshot).
+- `GET /api/v1/placements/teams` (`placement:read`) returns `{ items: [{id,name}] }`: the teams of the placements and
+  cleared interviews the caller reads (a lead sees their team; Manager, AD and CEO every team in scope). The web shows the
+  Team filter only when there is more than one.
+- The Placements screen has a **Cleared interviews** tab (`?view=cleared`, needs `interview:read`): rounds whose result is
+  `cleared` (IS-10), latest first, via `GET /interviews?result=cleared&sort=desc&teamId=`, with the placement status or
+  the submission status as the next step.

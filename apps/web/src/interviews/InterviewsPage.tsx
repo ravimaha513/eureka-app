@@ -3,7 +3,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { CalendarPlus } from "lucide-react";
 import {
   INTERVIEW_DURATIONS, INTERVIEW_ROUNDS, INTERVIEW_TYPES, INTERVIEW_TYPE_LABELS, PANEL_MAX, SCORECARD_CRITERIA, SCORECARD_KINDS,
-  SCORECARD_LABELS, isSafeHttpsUrl, type InterviewType, type Scorecard,
+  SCORECARD_LABELS, INTERVIEW_RESULTS, isSafeHttpsUrl, type InterviewResult, type InterviewType, type Scorecard,
 } from "@eureka/shared";
 import { api, can, type Me } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
@@ -14,6 +14,12 @@ import { SupportCalendarBlock, SupportCalendarBusy, SupportCalendarCard } from "
 
 const STATUSES = ["scheduled", "in_progress", "completed", "rescheduled", "cancelled", "no_invite"];
 const label = (s: string) => s.replaceAll("_", " ");
+export const RESULT_LABELS: Record<InterviewResult, string> = { pending: "Pending", cleared: "Cleared", rejected: "Rejected" };
+/** The round's outcome as a badge (cleared / rejected) or muted text while pending. */
+export const ResultBadge = ({ result }: { result?: InterviewResult }) =>
+  result === "cleared" ? <span className="badge st-selected">Cleared</span>
+    : result === "rejected" ? <span className="badge st-rejected">Rejected</span>
+      : <span className="muted">Result pending</span>;
 const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const errorText = (e: unknown) => e instanceof Error ? e.message : "Unable to save. Please try again.";
 type Named = { id: string; name: string | null };
@@ -27,6 +33,9 @@ export interface Interview {
   position?: string | null; interviewType?: InterviewType | null; meetingUrl?: string | null; durationMin?: number;
   /** interview-reports (migration 0130): latest feedback the candidate sent through the feedback email. */
   candidateFeedback?: { rating: number | null; notes: string | null; submittedAt: string } | null;
+  /** Outcome of the round (migration 0360); `cleared` is the location's pre-call readiness. */
+  result?: InterviewResult; resultAt?: string | null;
+  submissionStatus?: string | null; placement?: { id: string; status: string } | null;
 }
 
 /** Board cell: the candidate's own feedback (rating and a short excerpt; the full text is in the Feedback dialog). */
@@ -183,7 +192,7 @@ function Edit({ item, onClose, onDone }: { item: Interview; onClose: () => void;
   const detail = useQuery({ queryKey: ["interview", item.id], queryFn: () => api<InterviewDetail>(`/api/v1/interviews/${item.id}`), enabled: item.editableFields.includes("panelIds") });
   const initial: Record<string, string | boolean | number> = {
     round: item.round, startsAt: localInput(item.startsAt), endsAt: localInput(item.endsAt), coachId: item.coach?.id ?? "", inviteReceived: item.inviteReceived,
-    callStatus: item.callStatus, cleared: item.cleared, consentCaptured: item.consentCaptured, systemName: item.systemName ?? "",
+    callStatus: item.callStatus, result: item.result ?? "pending", cleared: item.cleared, consentCaptured: item.consentCaptured, systemName: item.systemName ?? "",
     otterUrl: item.otterUrl ?? "", recordingUrl: item.recordingUrl ?? "", interviewType: item.interviewType ?? "", meetingUrl: item.meetingUrl ?? "",
     durationMin: item.durationMin ?? Math.round((Date.parse(item.endsAt) - Date.parse(item.startsAt)) / 60_000),
   };
@@ -194,8 +203,8 @@ function Edit({ item, onClose, onDone }: { item: Interview; onClose: () => void;
   const can = (k: string) => item.editableFields.includes(k);
   // A duration in the allowed range replaces the end time in the form.
   const useDuration = can("durationMin") && Number(initial.durationMin) >= 15 && Number(initial.durationMin) <= 240;
-  const title: Record<string, string> = { round: "Round", startsAt: "Interview slot", endsAt: "End", inviteReceived: "Invite received", callStatus: "Call status", cleared: "Cleared", consentCaptured: "Consent captured", systemName: "System name", otterUrl: "Otter URL", recordingUrl: "Recording URL", meetingUrl: "Meeting link" };
-  const order = ["interviewType", "round", "startsAt", "durationMin", "endsAt", "meetingUrl", "coachId", "inviteReceived", "callStatus", "cleared", "consentCaptured", "systemName", "otterUrl", "recordingUrl"];
+  const title: Record<string, string> = { round: "Round", startsAt: "Interview slot", endsAt: "End", inviteReceived: "Invite received", callStatus: "Call status", result: "Interview result", cleared: "Cleared for interview (readiness)", consentCaptured: "Consent captured", systemName: "System name", otterUrl: "Otter URL", recordingUrl: "Recording URL", meetingUrl: "Meeting link" };
+  const order = ["interviewType", "round", "startsAt", "durationMin", "endsAt", "meetingUrl", "coachId", "inviteReceived", "callStatus", "result", "cleared", "consentCaptured", "systemName", "otterUrl", "recordingUrl"];
   // CA-7: the support calendar's state for the slot being edited, under the duration (or the end time).
   const editDuration = useDuration ? Number(values.durationMin) : Math.round((Date.parse(String(values.endsAt)) - Date.parse(String(values.startsAt))) / 60_000);
   const busyLine = can("startsAt") ? <SupportCalendarBusy key="busy" start={String(values.startsAt)} durationMin={editDuration} interviewId={item.id} /> : null;
@@ -225,7 +234,7 @@ function Edit({ item, onClose, onDone }: { item: Interview; onClose: () => void;
       if (k === "endsAt" && useDuration) return null;
       if (k === "coachId") return <Coaches key={k} value={String(values[k])} onChange={v => set(k, v)} />;
       if (typeof values[k] === "boolean") return <div className="field" key={k}><label><input type="checkbox" checked={Boolean(values[k])} onChange={e => set(k, e.target.checked)} /> {title[k]}</label></div>;
-      const field = <Field key={k} title={title[k] ?? k}>{k === "callStatus" ? <select value={String(values[k])} onChange={e => set(k, e.target.value)}>{STATUSES.map(s => <option key={s} value={s}>{label(s)}</option>)}</select> : <input type={k.endsWith("At") ? "datetime-local" : k.endsWith("Url") ? "url" : "text"} required={["round", "startsAt", "endsAt"].includes(k)} maxLength={k === "round" ? 40 : k === "systemName" ? 80 : 500} value={String(values[k])} onChange={e => set(k, e.target.value)} />}</Field>;
+      const field = <Field key={k} title={title[k] ?? k}>{k === "callStatus" ? <select value={String(values[k])} onChange={e => set(k, e.target.value)}>{STATUSES.map(s => <option key={s} value={s}>{label(s)}</option>)}</select> : k === "result" ? <select value={String(values[k])} onChange={e => set(k, e.target.value)}>{INTERVIEW_RESULTS.map(r => <option key={r} value={r}>{RESULT_LABELS[r]}</option>)}</select> : <input type={k.endsWith("At") ? "datetime-local" : k.endsWith("Url") ? "url" : "text"} required={["round", "startsAt", "endsAt"].includes(k)} maxLength={k === "round" ? 40 : k === "systemName" ? 80 : 500} value={String(values[k])} onChange={e => set(k, e.target.value)} />}</Field>;
       return k === "endsAt" ? [field, busyLine] : field;
     })}
     {can("panelIds") && (detail.isPending ? <p role="status">Loading panel…</p> : detail.isError ? <p role="alert">Could not load the panel.</p>
@@ -327,7 +336,7 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
 }) {
   const [displayZone, setDisplayZone] = useState(zone);
   const [clientFilter, setClientFilter] = useState<Named | null>(null);
-  const qc = useQueryClient(); const [from, setFrom] = useState(localInput(new Date().toISOString()).slice(0, 10)); const [to, setTo] = useState(""); const [status, setStatus] = useState(""); const [cleared, setCleared] = useState(""); const [locationId, setLocationId] = useState("");
+  const qc = useQueryClient(); const [from, setFrom] = useState(localInput(new Date().toISOString()).slice(0, 10)); const [to, setTo] = useState(""); const [status, setStatus] = useState(""); const [cleared, setCleared] = useState(""); const [result, setResult] = useState(""); const [locationId, setLocationId] = useState("");
   // Interview location (B2.3): narrows the board within the caller's scope; the server applies the scope.
   const locations = useLookups().data?.locations ?? [];
   const [schedule, setSchedule] = useState(false);
@@ -337,8 +346,8 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
   const [detailsId, setDetailsId] = useState<string | null>(initialOpenId);
   const [notice, setNotice] = useState("");
   const invalidRange = Boolean(from && to && from > to);
-  const q = useInfiniteQuery({ queryKey: ["interviews", from, to, status, cleared, locationId, clientFilter?.id], initialPageParam: "", enabled: !invalidRange, queryFn: ({ pageParam }) => {
-    const p = new URLSearchParams({ limit: "50" }); if (from) p.set("from", dateBoundary(from)); if (to) p.set("to", dateBoundary(to, true)); if (status) p.set("status", status); if (cleared) p.set("cleared", cleared); if (locationId) p.set("locationId", locationId); if (clientFilter) p.set("clientId", clientFilter.id); if (pageParam) p.set("cursor", pageParam);
+  const q = useInfiniteQuery({ queryKey: ["interviews", from, to, status, cleared, result, locationId, clientFilter?.id], initialPageParam: "", enabled: !invalidRange, queryFn: ({ pageParam }) => {
+    const p = new URLSearchParams({ limit: "50" }); if (from) p.set("from", dateBoundary(from)); if (to) p.set("to", dateBoundary(to, true)); if (status) p.set("status", status); if (cleared) p.set("cleared", cleared); if (result) p.set("result", result); if (locationId) p.set("locationId", locationId); if (clientFilter) p.set("clientId", clientFilter.id); if (pageParam) p.set("cursor", pageParam);
     return api<Page<Interview>>(`/api/v1/interviews?${p}`);
   }, getNextPageParam: p => p.nextCursor || undefined });
   const done = () => {
@@ -364,20 +373,22 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
     <div className="toolbar"><Field title="Display timezone"><select value={displayZone} onChange={e => setDisplayZone(e.target.value)}><option value={zone}>{zone} (local)</option>{zone !== "America/New_York" && <option value="America/New_York">America/New_York (EST/EDT)</option>}</select></Field><Field title="From date"><input type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field title="Through date"><input type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>
       <Field title="Call status filter"><select value={status} onChange={e => setStatus(e.target.value)}><option value="">All statuses</option>{STATUSES.map(s => <option key={s} value={s}>{label(s)}</option>)}</select></Field>
       <Field title="Clearance filter"><select value={cleared} onChange={e => setCleared(e.target.value)}><option value="">All</option><option value="true">Cleared</option><option value="false">Not cleared</option></select></Field>
+      <Field title="Result filter"><select value={result} onChange={e => setResult(e.target.value)}><option value="">All</option>{INTERVIEW_RESULTS.map(r => <option key={r} value={r}>{RESULT_LABELS[r]}</option>)}</select></Field>
       {locations.length > 1 && <Field title="Location filter"><select value={locationId} onChange={e => setLocationId(e.target.value)}><option value="">All locations</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></Field>}
       <button className="btn" onClick={() => { setFrom(localInput(new Date().toISOString()).slice(0,10)); setTo(localInput(new Date().toISOString()).slice(0,10)); }}>Today</button>
-      <button className="btn" onClick={() => { setFrom(""); setTo(""); setStatus(""); setCleared(""); setLocationId(""); setClientFilter(null); }}>Reset filters</button>
+      <button className="btn" onClick={() => { setFrom(""); setTo(""); setStatus(""); setCleared(""); setResult(""); setLocationId(""); setClientFilter(null); }}>Reset filters</button>
     </div>
     {can(me, "calendar:block") && <SupportCalendarCard />}
     {initialOpenId && initial.isError && <p role="alert">That interview is no longer available to you.</p>}
     {clientFilter && <p className="hint">Client history: {clientFilter.name} <button className="btn" onClick={() => setClientFilter(null)}>Clear client filter</button></p>}
     {notice && <p role="status" className="livemsg">{notice}</p>}{invalidRange && <p role="alert">Through date must be on or after From date.</p>}
     {!invalidRange && q.isPending && <p>Loading interviews…</p>}{q.isError && <p role="alert">Could not load interviews. <button className="btn" onClick={() => void q.refetch()}>Retry</button></p>}
-    {!invalidRange && <div className="card tablewrap"><table><thead><tr><th>Candidate / client</th><th>Time / round</th><th>Team / location</th><th>Readiness</th><th>Candidate feedback</th><th>Recordings</th><th>Actions</th></tr></thead><tbody>{items.map(i => <tr key={i.id} className={i.cleared ? "row-cleared" : undefined}>
-      <td><b>{i.candidate.name ?? "Candidate"}</b><span className="block">{i.client ? <button className="linkbtn" aria-label={`View history for ${i.client.name}`} onClick={() => { setClientFilter(i.client); setFrom(""); setTo(""); setStatus(""); setCleared(""); setLocationId(""); }}>{i.client.name}</button> : "No client"}</span><span className="block">Recruiter: {i.recruiter.name}</span></td>
+    {!invalidRange && <div className="card tablewrap"><table><thead><tr><th>Candidate / client</th><th>Time / round</th><th>Team / location</th><th>Readiness</th><th>Result</th><th>Candidate feedback</th><th>Recordings</th><th>Actions</th></tr></thead><tbody>{items.map(i => <tr key={i.id} className={i.cleared ? "row-cleared" : undefined}>
+      <td><b>{i.candidate.name ?? "Candidate"}</b><span className="block">{i.client ? <button className="linkbtn" aria-label={`View history for ${i.client.name}`} onClick={() => { setClientFilter(i.client); setFrom(""); setTo(""); setStatus(""); setCleared(""); setResult(""); setLocationId(""); }}>{i.client.name}</button> : "No client"}</span><span className="block">Recruiter: {i.recruiter.name}</span></td>
       <td><time dateTime={i.startsAt}>{new Date(i.startsAt).toLocaleString(undefined, { timeZone: displayZone })}</time><span className="block">to {new Date(i.endsAt).toLocaleString(undefined, { timeZone: displayZone })}</span><span className="block">{i.round} · {label(i.callStatus)}{i.interviewType ? ` · ${INTERVIEW_TYPE_LABELS[i.interviewType]}` : ""}</span></td>
       <td>{i.team?.name ?? "—"}<span className="block">{i.location?.name ?? "No location"}</span><span className="block">Coach: {i.coach?.name ?? "Unassigned"}</span></td>
       <td>{i.cleared ? <span className="badge cleared">Cleared</span> : "Not cleared"}<span className="block">{i.inviteReceived ? "Invite received" : "Awaiting invite"}</span><span className="block">{i.consentCaptured ? "Consent captured" : "Consent pending"}</span>{i.systemName && <span className="block">{i.systemName}</span>}</td>
+      <td><ResultBadge result={i.result} />{i.placement && <span className="block">Placement: {label(i.placement.status)}</span>}</td>
       <td><CandidateFeedbackCell f={i.candidateFeedback} /></td>
       <td>{i.consentCaptured ? <>{i.otterUrl && (isSafeHttpsUrl(i.otterUrl) ? <a href={i.otterUrl} target="_blank" rel="noopener noreferrer">Otter</a> : "Otter")} {i.recordingUrl && (isSafeHttpsUrl(i.recordingUrl) ? <a href={i.recordingUrl} target="_blank" rel="noopener noreferrer">Recording</a> : "Recording")}{!i.otterUrl && !i.recordingUrl && "—"}</> : "Consent required"}</td>
       <td><div className="rowactions"><button className="btn" aria-label={`Details of the interview with ${i.candidate.name ?? "the candidate"}`} onClick={() => showDetails(i.id)}>Details</button>{i.editableFields.length > 0 && <button className="btn" onClick={() => setEdit(i)}>Edit interview</button>}<button className="btn" onClick={() => setFeedback(i)}>Feedback</button></div></td>

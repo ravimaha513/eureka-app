@@ -47,7 +47,7 @@ test("recruiter schedules, location clears and coach records feedback", async ({
   await row.getByRole("button", { name: "Edit interview" }).click();
   const edit = page.getByRole("dialog");
   await expect(edit.getByLabel("Round", { exact: true })).toHaveCount(0);
-  await edit.getByLabel("Cleared", { exact: true }).check();
+  await edit.getByLabel("Cleared for interview (readiness)", { exact: true }).check();
   await edit.getByLabel("Consent captured", { exact: true }).check();
   await edit.getByRole("button", { name: "Save interview" }).click();
   await expect(edit).toBeHidden();

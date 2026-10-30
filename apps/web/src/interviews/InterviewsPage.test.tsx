@@ -39,7 +39,7 @@ describe("interview board", () => {
    expect(within(dialog).queryByLabelText("Meeting link")).not.toBeInTheDocument();
    expect(within(dialog).queryByLabelText("Round")).not.toBeInTheDocument();
    expect(within(dialog).queryByLabelText("Recording URL")).not.toBeInTheDocument();
-   fireEvent.click(within(dialog).getByLabelText("Cleared"));
+   fireEvent.click(within(dialog).getByLabelText("Cleared for interview (readiness)"));
    fireEvent.click(within(dialog).getByRole("button", { name: "Save interview" }));
    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/v1/interviews/i1", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ cleared: true }) })));
  });
