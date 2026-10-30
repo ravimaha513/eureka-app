@@ -1,6 +1,6 @@
-import { ForbiddenException, type HttpException, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
+import { ForbiddenException, type HttpException, NotFoundException } from "@nestjs/common";
+import { unprocessable } from "../../platform/errors.js";
 
-const unprocessable = (c: string) => new UnprocessableEntityException(c);
 const CODES: Record<string, (code: string) => HttpException> = {
   assignment_not_found: () => new NotFoundException(),
   employee_not_found: () => new NotFoundException(),

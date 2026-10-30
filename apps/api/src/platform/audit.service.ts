@@ -9,6 +9,8 @@ export const REDACT: ReadonlySet<string> = new Set([
   "phone", "phone_e164", "phoneE164", "vitelNumber", "vitel_number",
   "email", "personalEmail", "personal_email", "marketingEmail", "marketing_email",
   "dob", "dob_enc", "rate",
+  // Money (placements, payroll, invoices and incentives): amounts never reach the audit, in either spelling.
+  "payRate", "pay_rate", "amount", "incentiveAmount", "incentive_amount",
   // Encrypted fields (work authorization number, migration 0042): never the value or its ciphertext.
   "number", "numberEnc", "number_enc", "workAuthNumber",
   // Companies, facilities, utilities and bills (migration 0054): never passwords,

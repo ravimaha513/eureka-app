@@ -1,6 +1,11 @@
-import { type ArgumentsHost, Catch, type ExceptionFilter, HttpException, Logger } from "@nestjs/common";
+import {
+  type ArgumentsHost, Catch, type ExceptionFilter, HttpException, Logger, UnprocessableEntityException,
+} from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { ZodError } from "zod";
+
+/** A 422 whose title and detail are the coded error `c` (module error maps: `placement_not_joined` and so on). */
+export const unprocessable = (c: string) => new UnprocessableEntityException(c);
 
 /**
  * Maps errors to RFC 9457 problem details. Database errors are mapped to

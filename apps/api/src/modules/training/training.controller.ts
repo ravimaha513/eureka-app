@@ -2,6 +2,7 @@ import {
   Body, Controller, Delete, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query,
 } from "@nestjs/common";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
+import { parseIfMatch } from "../../platform/http/if-match.js";
 import {
   AddBatchCourse,
   AddStudent,
@@ -18,7 +19,6 @@ import {
   UpdateCourse,
   UpdateModule,
   UpdateTrainingBatch,
-  parseIfMatch,
 } from "./training.schemas.js";
 import { TrainingService } from "./training.service.js";
 

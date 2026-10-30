@@ -15,7 +15,7 @@ import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
-import { IdempotencyKey } from "../placements/placements.schemas.js";
+import { canonical, IdempotencyKey } from "../../platform/idempotency.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import { mapPaymentError } from "./payments.errors.js";
 import type {
@@ -143,16 +143,6 @@ const num = (v: string | null) => (v === null ? null : Number(v));
 const actor = (r: { recruiter_id: string; team_id: string | null; location_id: string | null }) => ({
   recruiterId: r.recruiter_id, teamId: r.team_id, locationId: r.location_id,
 });
-
-/** Key order does not change the hash: the same body always hashes the same. */
-function canonical(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
-  if (v && typeof v === "object") {
-    return `{${Object.keys(v).sort().filter((k) => (v as Record<string, unknown>)[k] !== undefined)
-      .map((k) => `${JSON.stringify(k)}:${canonical((v as Record<string, unknown>)[k])}`).join(",")}}`;
-  }
-  return JSON.stringify(v);
-}
 
 /** Field names sent (for the audit), never their values. */
 const fieldsOf = (body: object) => Object.keys(body).filter((k) => (body as Record<string, unknown>)[k] !== undefined).sort();
@@ -398,8 +388,7 @@ export class PaymentsService {
     // Malformed or missing keys are refused before anything else (400).
     if (!IdempotencyKey.safeParse(idempotencyKey).success) throw new BadRequestException("idempotency_key_required");
     return this.db.withUser(user.id, async (c) => {
-      const k = await this.claim(c, user, INVOICES_ENDPOINT, idempotencyKey, body);
-      if (k.replay !== undefined) return k.replay as { id: string };
+      // Visibility and permission first: a replay is only returned to a caller who still may create this invoice.
       const scope = resolveScope(user.access, "invoice:read");
       if (!scope) throw new NotFoundException();
       const params: unknown[] = [body.placementId];
@@ -409,6 +398,8 @@ export class PaymentsService {
          WHERE pl.id = $1 AND ${activityPredicate(scope, params, "pl", "c")}`, params)).rows[0];
       if (!pl) throw new NotFoundException();
       if (!this.canUpdate(user.access, pl)) throw new ForbiddenException("Not permitted");
+      const k = await this.claim(c, user, INVOICES_ENDPOINT, idempotencyKey, body);
+      if (k.replay !== undefined) return k.replay as { id: string };
       if (pl.joined_at === null) throw new UnprocessableEntityException("placement_not_joined");
       let id: string;
       try {
@@ -478,9 +469,10 @@ export class PaymentsService {
   async recordPayment(user: AuthedUser, invoiceId: string, body: RecordPayment, idempotencyKey: string | undefined) {
     if (!IdempotencyKey.safeParse(idempotencyKey).success) throw new BadRequestException("idempotency_key_required");
     return this.db.withUser(user.id, async (c) => {
+      // Read-before-write first (404/403/422 void): a replay is only returned to a caller who still may record payments.
+      const row = await this.loadForWrite(c, user, invoiceId);
       const k = await this.claim(c, user, PAYMENTS_ENDPOINT, idempotencyKey, { invoiceId, ...body });
       if (k.replay !== undefined) return k.replay as { id: string; invoiceId: string; firstPayment: boolean };
-      const row = await this.loadForWrite(c, user, invoiceId);
       if (row.status === "received") throw new UnprocessableEntityException("invoice_received");
       let r: { payment_id: string; first_payment: boolean };
       try {

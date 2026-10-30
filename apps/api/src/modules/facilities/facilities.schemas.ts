@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DOCUMENT_CONTENT_TYPE_LIST, DOCUMENT_MAX_BYTES, type DocumentContentType } from "@eureka/shared";
+import { validTimeZone } from "../../platform/time-zone.js";
 
 /**
  * docs/facilities-api.md. Every body is strict (design B4.7): unknown and
@@ -199,9 +200,6 @@ export type BillListQuery = z.infer<typeof BillListQuery>;
 export const BillExportQuery = z.object(billFilters).strict().refine(ordered, { message: "from must be on or before to", path: ["to"] });
 export type BillExportQuery = z.infer<typeof BillExportQuery>;
 
-function validTimeZone(tz: string): boolean {
-  try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return true; } catch { return false; }
-}
 export const SummaryQuery = z.object({
   ...periodFilters,
   /** IANA time zone for "today" (the default period ends in the current month there); default UTC. */

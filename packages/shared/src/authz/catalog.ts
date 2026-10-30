@@ -612,10 +612,6 @@ export const GRANTS: Record<Role, Grants> = {
   },
 };
 
-export function grantFor(role: Role, permission: Permission): Scope | undefined {
-  return GRANTS[role][permission];
-}
-
 /**
  * Restricted roles need a second approver when granted (admin-api.md AD-3):
  * org_admin, every role holding a permission in RESTRICTED_PERMISSIONS, and

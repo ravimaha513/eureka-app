@@ -139,8 +139,8 @@ export class PortalAuthService {
     const m = TOKEN.exec(token);
     const invalid = () => new BadRequestException("link_invalid");
     if (!m) throw invalid();
-    const [, id, secret] = m as unknown as [string, string, string];
-    const given = sha256(secret);
+    const id = m[1]!;
+    const given = sha256(m[2]!);
     const stored = await this.db.system(async (c) =>
       (await c.query<{ h: Buffer | null }>(`SELECT authz.portal_link_hash($1) AS h`, [id])).rows[0]?.h ?? null);
     const match = timingSafeEqual(given, stored && stored.length === 32 ? stored : DUMMY_HASH);

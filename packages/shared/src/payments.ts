@@ -33,12 +33,3 @@ const fromDay = (t: number) => new Date(t).toISOString().slice(0, 10);
 export function expectedPaymentDate(invoiceDate: string, termsDays: number): string {
   return fromDay(toDay(invoiceDate) + termsDays * DAY_MS);
 }
-
-/**
- * Delay in days, as the view computes it: received invoices compare the last
- * payment date with the expected date, open ones compare today; never negative.
- */
-export function paymentDelayDays(expected: string, receivedOn: string | null, today: string): number {
-  const end = receivedOn ?? today;
-  return Math.max(0, Math.round((toDay(end) - toDay(expected)) / DAY_MS));
-}

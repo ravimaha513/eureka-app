@@ -3,9 +3,10 @@ import { Body, Controller, Get, Inject, HttpException, NotFoundException, Param,
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { Public } from "../../platform/auth.guard.js";
-import { clientIp } from "../../platform/client-info.js";
+import { clientIp } from "../../platform/client-ip.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
+import { RateLimiter } from "../../platform/rate-limit.js";
 
 const Feedback = z.object({ rating: z.number().int().min(1).max(5), notes: z.string().trim().max(4000).optional(),
   format: z.string().trim().max(80).optional(), topics: z.array(z.string().trim().max(100)).max(20).optional(),
@@ -16,20 +17,18 @@ export const hashToken = (token: string) => createHash("sha256").update(token).d
 @Controller("api/public/feedback")
 export class FeedbackController {
   // Bounded process-local abuse protection. Production edge rate limits supplement
-  // this per-instance limit; tokens are hashed before entering the map.
-  private readonly limits = new Map<string, { n: number; until: number }>();
+  // this per-instance limit; tokens are hashed before entering the limiter.
+  private readonly limiter = new RateLimiter(30, 60_000);
   constructor(private readonly db: DbService, @Inject(CONFIG) private readonly config: AppConfig) {}
   private check(req: FastifyRequest, token: string) {
-    const now = Date.now();
-    for (const [key, value] of this.limits) if (value.until <= now) this.limits.delete(key);
+    // Limiter runs before the format check so guessing malformed tokens is also throttled.
+    const hash = hashToken(token);
     const ip = clientIp(req, this.config);
-    for (const key of [`ip:${ip}`, `token:${hashToken(token)}`]) {
-      const entry = this.limits.get(key) ?? { n: 0, until: now + 60_000 };
-      if (++entry.n > 30 || (!this.limits.has(key) && this.limits.size >= 10_000)) throw new HttpException("Too many requests", 429);
-      this.limits.set(key, entry);
+    for (const key of [`ip:${ip}`, `token:${hash}`]) {
+      if (!this.limiter.take(key)) throw new HttpException("Too many requests", 429);
     }
     if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new NotFoundException("Feedback link unavailable");
-    return hashToken(token);
+    return hash;
   }
   @Get(":token")
   async get(@Req() req: FastifyRequest, @Param("token") token: string) {

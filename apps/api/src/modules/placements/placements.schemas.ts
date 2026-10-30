@@ -71,6 +71,3 @@ export type PlacementListQuery = z.infer<typeof PlacementListQuery>;
 /** POST /placements/export body: the list filters, no paging. */
 export const PlacementExportQuery = z.object(PlacementFilters).strict();
 export type PlacementExportQuery = z.infer<typeof PlacementExportQuery>;
-
-/** Idempotency-Key header: printable ASCII, as the idempotency_key CHECK. */
-export const IdempotencyKey = z.string().regex(/^[\x21-\x7e]{1,200}$/);

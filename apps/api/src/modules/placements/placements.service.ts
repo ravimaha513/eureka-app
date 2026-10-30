@@ -22,6 +22,7 @@ import {
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
+import { canonical, IdempotencyKey } from "../../platform/idempotency.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
 import { toCsv } from "../hotlist/csv.js";
 import { EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS } from "../hotlist/hotlist.service.js";
@@ -29,7 +30,6 @@ import { activityPredicate } from "../submissions/submissions.service.js";
 import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import { mapPlacementError } from "./placements.errors.js";
 import {
-  IdempotencyKey,
   type CreatePlacement,
   type PlacementExportQuery,
   type PlacementListQuery,
@@ -103,16 +103,6 @@ const actor = (r: Pick<PlacementRow, "recruiter_id" | "team_id" | "location_id">
 });
 
 const ref = (id: string | null, name: string | null) => (id ? { id, name } : null);
-
-/** Key order does not change the hash: the same body always hashes the same. */
-function canonical(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
-  if (v && typeof v === "object") {
-    return `{${Object.keys(v).sort().filter((k) => (v as Record<string, unknown>)[k] !== undefined)
-      .map((k) => `${JSON.stringify(k)}:${canonical((v as Record<string, unknown>)[k])}`).join(",")}}`;
-  }
-  return JSON.stringify(v);
-}
 
 export const PLACEMENTS_ENDPOINT = "POST /api/v1/placements";
 

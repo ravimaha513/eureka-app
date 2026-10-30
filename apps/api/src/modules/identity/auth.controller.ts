@@ -67,7 +67,8 @@ export class AuthController {
 
   /** Link by Google sub; email only once for a pre-provisioned user without a sub (design A6.1). */
   async linkUser(sub: string, email: string): Promise<string> {
-    return this.db.system(async (c) => {
+    // The link and its audit row share one transaction. The denial is thrown after commit so its audit row is kept.
+    const userId = await this.db.withSystemTx(async (c) => {
       const bySub = await c.query<{ id: string }>(
         `SELECT id FROM eureka.app_user WHERE google_sub = $1 AND status = 'active'`, [sub]);
       if (bySub.rows[0]) return bySub.rows[0].id;
@@ -85,9 +86,10 @@ export class AuthController {
         entityId: linked?.id,
         changes: { email },
       });
-      if (!linked) throw new ForbiddenException("No active Eureka account for this Google account");
-      return linked.id;
+      return linked?.id ?? null;
     });
+    if (!userId) throw new ForbiddenException("No active Eureka account for this Google account");
+    return userId;
   }
 
   /** Development identity provider; unreachable unless AUTH_MODE=dev (never in production). */

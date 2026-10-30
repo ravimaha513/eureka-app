@@ -14,8 +14,9 @@ import type { CallStatus, MappingConfig, SalesTarget, Sheet } from "./mapping.js
 import {
   clean, labelKey, lookupLabel, nameKey, normalizeColor, normalizeEmail, normalizeName, normalizePhone,
   normalizePlacementType, normalizeState, normalizeText, normalizeWorkMode, parseDate, parseRate, parseTime,
-  plausibleDob, splitFullName, validTimeZone, type DateOrder, type Mapped, type Norm,
+  plausibleDob, splitFullName, type DateOrder, type Mapped, type Norm,
 } from "./normalize.js";
+import { validTimeZone } from "../platform/time-zone.js";
 
 export type RowState = "clean" | "review" | "rejected" | "skipped" | "held" | "committed";
 

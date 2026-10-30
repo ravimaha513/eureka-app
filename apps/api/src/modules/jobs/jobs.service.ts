@@ -10,7 +10,7 @@ import {
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
-import { IdempotencyKey } from "../placements/placements.schemas.js";
+import { canonical, IdempotencyKey } from "../../platform/idempotency.js";
 import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import { PARTY_PERMISSIONS } from "../lookups/lookups.controller.js";
 import type { CreateJob, JobListQuery, UpdateJob } from "./jobs.schemas.js";
@@ -115,15 +115,6 @@ function payVisible(access: UserAccess, r: JobRow): boolean {
 }
 
 const ENDPOINT = "POST /api/v1/jobs";
-
-function canonical(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
-  if (v && typeof v === "object") {
-    return `{${Object.keys(v).sort().filter((k) => (v as Record<string, unknown>)[k] !== undefined)
-      .map((k) => `${JSON.stringify(k)}:${canonical((v as Record<string, unknown>)[k])}`).join(",")}}`;
-  }
-  return JSON.stringify(v);
-}
 
 const CODES: Record<string, () => HttpException> = {
   invalid_skill: () => new UnprocessableEntityException("invalid_skill"),
