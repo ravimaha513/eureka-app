@@ -1,5 +1,5 @@
 -- authz.delete_candidate: current definition (repeatable; db/functions/README.md).
--- Hard-deletes a candidate and everything recorded about them (migration 0320,
+-- Hard-deletes a candidate and everything recorded about them (migration 0330,
 -- docs/candidates-api.md "Deleting a candidate"). Refused while the candidate has a
 -- placement or an employee record. Change this file, not a new migration.
 

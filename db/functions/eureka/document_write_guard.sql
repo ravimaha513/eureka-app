@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION eureka.document_write_guard()
 AS $function$
 DECLARE cls text;
 BEGIN
-  -- Candidate delete (authz.delete_candidate, migration 0320) removes these rows.
+  -- Candidate delete (authz.delete_candidate, migration 0330) removes these rows.
   IF TG_OP = 'DELETE' AND current_user = 'authz_definer' THEN
     IF authz.candidate_purging() THEN RETURN OLD; END IF;
   END IF;

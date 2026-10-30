@@ -199,7 +199,7 @@ has a placement or an employee record (contracts, invoices, payments and
 employment history are never deleted). The profile's `actions.delete` hints the
 button; the server decides.
 
-`authz.delete_candidate` (migration 0320) removes, in one transaction: submissions,
+`authz.delete_candidate` (migration 0330) removes, in one transaction: submissions,
 interviews (panel, feedback, feedback deliveries, calendar blocks), assessments,
 jobs-portal applications (the applicant account stays), checklist items, BGC,
 documents with their access log and file rows, resumes, training progress,

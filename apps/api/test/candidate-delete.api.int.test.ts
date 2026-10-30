@@ -7,7 +7,7 @@ import { LOC, T, U, seedFixtures } from "./fixtures.js";
 import { createPlacement, newCandidate, selectedSubmission } from "./placement-seed.js";
 
 /**
- * Candidate delete (migration 0320, docs/candidates-api.md "Deleting a candidate"):
+ * Candidate delete (migration 0330, docs/candidates-api.md "Deleting a candidate"):
  * candidate:delete holders hard-delete a candidate in scope with everything recorded
  * about them; a placed candidate is refused; the guards stay closed outside the delete.
  */

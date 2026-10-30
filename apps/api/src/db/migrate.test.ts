@@ -8,7 +8,7 @@ const LAST_COPYING_MIGRATION = "0180";
 /** Functions moved to db/functions after their last migrated body (migration: function). */
 const MOVED_LATER = new Set([
   "0270_import_hotlist_sheet.sql: authz.import_load_person",
-  // Moved with the other guards for the candidate delete bypass (migration 0320).
+  // Moved with the other guards for the candidate delete bypass (migration 0330).
   "0240_candidate_team_share.sql: eureka.candidate_team_share_guard",
 ]);
 /**

@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION eureka.interview_panelist_guard()
  SET search_path TO 'pg_catalog', 'pg_temp'
 AS $function$
 BEGIN
-  -- Candidate delete (authz.delete_candidate, migration 0320) removes these rows.
+  -- Candidate delete (authz.delete_candidate, migration 0330) removes these rows.
   IF TG_OP = 'DELETE' AND current_user = 'authz_definer' THEN
     IF authz.candidate_purging() THEN RETURN OLD; END IF;
   END IF;
