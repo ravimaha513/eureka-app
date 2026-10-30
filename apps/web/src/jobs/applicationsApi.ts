@@ -67,7 +67,7 @@ export const applicationsApi = {
     api<{ id: string }>(`/api/v1/application-interviews/${id}/people`, { method: "PUT", body: JSON.stringify(body) }),
   scorecard: (id: string, body: { technical: number; communication: number; problemSolving: number; attitude: number; notes?: string }) =>
     api<{ id: string }>(`/api/v1/application-interviews/${id}/scorecard`, { method: "PUT", body: JSON.stringify(body) }),
-  createCandidate: (id: string, body: { technologyId: string; locationId: string; confirmDuplicate?: boolean }) =>
+  createCandidate: (id: string, body: { technologyId: string; locationId: string; phone?: string; email?: string }) =>
     api<{ candidateId: string }>(`/api/v1/applications/${id}/candidate`, post(body)),
   exportCsv: (f: Omit<ApplicationFilters, "cursor" | "limit">) => downloadCsv("/api/v1/applications/export", f, "applications.csv"),
   applicants: (f: { search?: string; cursor?: string; limit?: number }) => api<{ items: Applicant[]; nextCursor: string | null }>(`/api/v1/applicants${qs(f)}`),
@@ -83,7 +83,9 @@ const MESSAGES: Record<string, string> = {
   interview_closed: "This interview was cancelled; it can't be reviewed.",
   application_not_hired: "Only hired applications become candidates.",
   candidate_exists: "A candidate was already created from this application.",
-  possible_duplicate: "A candidate with this email or phone may already exist. Check before creating another one.",
+  duplicate_contact: "A candidate with this email or phone already exists. Each candidate needs their own email and phone.",
+  email_required: "Enter the candidate's personal email.",
+  phone_required: "Enter the candidate's phone number.",
   if_match_required: "Reload the application and try again.",
 };
 

@@ -67,6 +67,8 @@ describe("permission matrix (generated from the catalog)", () => {
     { perm: "hotlist:read", method: "POST", url: "/api/v1/hotlist/views", body: { bogus: 1 } },
     { perm: "candidate.visibility:update", method: "POST", url: "/api/v1/hotlist/bulk/visibility", body: { ids: [NOBODY], visibility: "team" } },
     { perm: "candidate:update", method: "POST", url: "/api/v1/hotlist/bulk/status", body: { ids: [NOBODY], to: "active" } },
+    { perm: "candidate:update", method: "POST", url: "/api/v1/hotlist/bulk/priority", body: { ids: [NOBODY], priority: "P1" } },
+    { perm: "hotlist:read", method: "GET", url: "/api/v1/hotlist/filter-options" },
     { perm: "report:export", method: "POST", url: "/api/v1/hotlist/export", body: { status: "bench" } },
   ];
   const cases = users.flatMap((u) => endpoints.map((e) => [u, e.perm, e.url, e] as const));
@@ -113,7 +115,7 @@ describe("saved views", () => {
   });
 
   it.each([
-    ["an unknown filter", { name: "x", filters: { teamId: T.t1 } }],
+    ["an unknown filter", { name: "x", filters: { batchId: T.t1 } }],
     ["an owner", { name: "x", filters: {}, ownerId: U.r1b }],
     ["a non-Hot-List status", { name: "x", filters: { status: "placed" } }],
     ["an empty name", { name: "  ", filters: {} }],
@@ -176,6 +178,35 @@ describe("bulk actions re-check every record", () => {
     expect(await statusOf(own.id)).toBe("active");
   });
 
+  it("priority: a recruiter sets own candidates' priority; teammates' are forbidden", async () => {
+    const priorityOf = async (id: string) =>
+      (await db.admin.query(`SELECT priority FROM eureka.candidate WHERE id = $1`, [id])).rows[0].priority as string;
+    const own = find((c) => c.recruiterId === U.r1a && c.marketingStatus === "active");
+    const teammate = find((c) => c.recruiterId === U.r1b && c.marketingStatus === "active");
+    const before = await priorityOf(teammate.id);
+    const r = await call("r1a", "POST", "/api/v1/hotlist/bulk/priority", { ids: [own.id, teammate.id, NOBODY], priority: "P3" });
+    expect(r.json().results).toEqual([
+      { id: own.id, ok: true },
+      { id: teammate.id, ok: false, error: "forbidden" },
+      { id: NOBODY, ok: false, error: "not_found" },
+    ]);
+    expect(await priorityOf(own.id)).toBe("P3");
+    expect(await priorityOf(teammate.id)).toBe(before);
+    expect((await audits("hotlist.bulk", U.r1a)).at(-1)!.changes).toEqual(
+      { action: "priority", value: "P3", requested: 3, succeeded: 1, failed: 2 });
+    expect((await call("r1a", "POST", "/api/v1/hotlist/bulk/priority", { ids: [own.id], priority: "P9" })).statusCode).toBe(422);
+  });
+
+  it("filter options list teams with their lead, current recruiters and guest houses", async () => {
+    const r = await call("r1a", "GET", "/api/v1/hotlist/filter-options");
+    expect(r.statusCode).toBe(200);
+    const o = r.json() as { teams: { id: string; lead: string }[]; recruiters: { id: string }[]; guestHouses: unknown[] };
+    expect(o.teams).toContainEqual(expect.objectContaining({ id: T.t1, name: "Team Rohit", lead: "l1" }));
+    expect(o.recruiters.map((x) => x.id)).toEqual(expect.arrayContaining([U.r1a, U.r1b, U.r2a, U.r3a]));
+    expect(o.recruiters.map((x) => x.id)).not.toContain(U.l1);
+    expect(Array.isArray(o.guestHouses)).toBe(true);
+  });
+
   it("a candidate seen only on the open Hot List cannot be changed in bulk", async () => {
     const hotOnly = find((c) => c.teamId === T.t3 && c.visibility === "team" && c.marketingStatus === "active");
     const r = await call("m1", "POST", "/api/v1/hotlist/bulk/visibility", { ids: [hotOnly.id], visibility: "all_teams" });
@@ -207,13 +238,13 @@ describe("export", () => {
     expect(r.headers["content-disposition"]).toMatch(/^attachment; filename="hotlist-\d{4}-\d{2}-\d{2}\.csv"$/);
     expect(r.headers["x-export-truncated"]).toBe("false");
     const body = r.body.replace(/^﻿/, "");
-    expect(body.split("\r\n")[0]).toBe("Candidate,Technology,Status,Visibility,Priority,Team,Recruiter,Location,Phone,Marketing since,Days in market,Technical rating,Visa,Documents,Stay");
+    expect(body.split("\r\n")[0]).toBe("Candidate,Technology,Status,Visibility,Priority,Team,Lead,Recruiter,Location,Phone,Marketing since,Days in market,Technical rating,Visa,Documents,Stay,In person");
     const rows = csvRows(r.body);
     const expected = expectedFor("l1");
     expect(rows).toHaveLength(expected.length);
     expect(r.headers["x-export-rows"]).toBe(String(expected.length));
     expect(body).not.toMatch(/\+1469/);
-    for (const row of rows) expect(row.split(",")[8]).toMatch(/^•••-•••-\d\d$/);
+    for (const row of rows) expect(row.split(",")[9]).toMatch(/^•••-•••-\d\d$/);
     expect(rows.every((row) => row.includes("Team Rohit"))).toBe(true);
 
     const audit = (await audits("hotlist.export", U.l1)).at(-1)!.changes;
@@ -239,7 +270,7 @@ describe("export", () => {
   });
 
   it("rejects unknown filters and needs the CSRF token", async () => {
-    expect((await call("ad", "POST", "/api/v1/hotlist/export", { teamId: T.t1 })).statusCode).toBe(422);
+    expect((await call("ad", "POST", "/api/v1/hotlist/export", { batchId: T.t1 })).statusCode).toBe(422);
     expect((await call("ad", "POST", "/api/v1/hotlist/export", {}, false)).statusCode).toBe(403);
   });
 
@@ -251,11 +282,12 @@ describe("export", () => {
   });
 
   it(`is capped at ${EXPORT_ROW_CAP.toLocaleString("en-US")} rows and says so`, async () => {
-    // 50,001 extra Hot List candidates in team t3 (CEO exports at org scope).
+    // 50,001 extra Hot List candidates in team t3 (CEO exports at org scope). No contact
+    // values: the per-row uniqueness check (0300) makes a 50k insert with phones take minutes.
     await db.admin.query(`
       WITH p AS (
-        INSERT INTO eureka.person (first_name, last_name, phone_e164)
-        SELECT 'Bulk' || g, 'Row', '+1555' || lpad(g::text, 7, '0') FROM generate_series(1, ${EXPORT_ROW_CAP + 1}) g
+        INSERT INTO eureka.person (first_name, last_name)
+        SELECT 'Bulk' || g, 'Row' FROM generate_series(1, ${EXPORT_ROW_CAP + 1}) g
         RETURNING id)
       INSERT INTO eureka.candidate (person_id, technology_id, team_id, location_id, marketing_status)
       SELECT p.id, $1, $2, l.id, 'active' FROM p, (SELECT id FROM eureka.location ORDER BY id LIMIT 1) l`, [TECH_ID, T.t3]);

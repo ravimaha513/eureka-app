@@ -4,6 +4,7 @@ import {
   DOCUMENTS_FILTERS,
   DOCUMENTS_STATUS_LIST,
   ELIGIBILITY_LIST,
+  LIST_SORTS,
   MARKETING_LOCATIONS_MAX,
   PHONE_PROBLEM_MESSAGES,
   STAY_FILTERS,
@@ -27,6 +28,14 @@ export const ExtraListFilters = {
   documents: z.enum(DOCUMENTS_FILTERS).optional(),
   resume: z.enum(["yes", "no"]).optional(),
   stay: z.enum(STAY_FILTERS).optional(),
+  // Hot List sheet columns (0290): priority, team (the sheet's Lead), recruiter, in-person, which guest house.
+  priority: z.enum(["P1", "P2", "P3"]).optional(),
+  teamId: uuid.optional(),
+  recruiterId: uuid.optional(),
+  inPerson: z.enum(["yes", "no"]).optional(),
+  ghLocationId: uuid.optional(),
+  /** Row order; paging stays keyset (sort key, id). */
+  sort: z.enum(LIST_SORTS).optional(),
 };
 
 export const CandidateListQuery = z
@@ -49,7 +58,7 @@ export const HotlistQuery = CandidateListQuery.omit({ batchId: true });
  * A phone number as typed, normalized to E.164 (country code required; see
  * normalizePhoneE164). Stored and compared only in normalized form.
  */
-const Phone = z.string().max(40).transform((v, ctx) => {
+export const Phone = z.string().max(40).transform((v, ctx) => {
   const p = normalizePhoneE164(v);
   if (!p) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: PHONE_PROBLEM_MESSAGES[phoneProblem(v) ?? "invalid"] });
@@ -57,7 +66,7 @@ const Phone = z.string().max(40).transform((v, ctx) => {
   }
   return p;
 });
-const Email = z.string().max(254).transform(normalizeEmail).pipe(z.string().email());
+export const Email = z.string().max(254).transform(normalizeEmail).pipe(z.string().email());
 
 /**
  * Write schema for candidate:update (design B4.7). Strict: any other field
@@ -129,16 +138,15 @@ export const CreateCandidate = z
   .object({
     firstName: z.string().trim().min(1).max(80),
     lastName: z.string().trim().min(1).max(80),
-    phone: Phone.optional(),
-    /** Personal email; used for the duplicate check. */
-    email: Email.optional(),
+    /** Required and unique across candidates (with the email; 409 duplicate_contact). */
+    phone: Phone,
+    /** Personal email; required and unique across candidates. */
+    email: Email,
     technologyId: uuid,
     locationId: uuid,
     teamId: uuid.optional(),
     recruiterId: uuid.nullable().optional(),
     batchId: uuid.optional(),
-    /** Create even though the duplicate check found a likely duplicate (409 possible_duplicate). */
-    confirmDuplicate: z.boolean().optional(),
   })
   .strict();
 export type CreateCandidate = z.infer<typeof CreateCandidate>;

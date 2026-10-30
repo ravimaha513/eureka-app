@@ -243,8 +243,14 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
   search, so the mount-time run no longer resets an early Next (UsersTab, SitesPage, ApplicantsPage).
 - Password invite (PR #70, migration 0270): staging/local admins email a one-time `/set-password#token=` link
   (Users tab "Email invite" / on create) instead of a temporary password; SHA-256-only tokens, 72 h, docs/admin-api.md.
+- Migration 0260 grant fix (PR #74): `GRANT EXECUTE ... candidate_contact_unique() TO eureka_owner` so CREATE TRIGGER
+  passes (edited in place, never applied anywhere); mass-assignment case for POST /api/v1/lookups/technologies.
 - Location rename (PR #73, migration 0280): `PATCH /admin/locations/:id` via `authz.admin_rename_location`; Rename
   button on the location detail header; audited with the id only.
+- Deleting inactive users (PR #71, `db/migrations/*_user_purge.sql`, docs/admin-api.md AD-13): worker job
+  `user-purge-inactive` anonymizes users inactive 7+ days; `DELETE /admin/users/:id` ("Delete now") skips the wait.
+- New candidates: lead or above only, email and phone required and unique (PRs #69, #76, migrations 0260/0300,
+  docs/candidates-api.md CA-6): 409 `duplicate_contact`, no override; trigger `authz.candidate_contact_unique` backstop.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

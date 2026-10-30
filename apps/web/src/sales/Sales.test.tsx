@@ -95,7 +95,7 @@ describe("Hot List", () => {
     wrap(<HotListPage me={RECRUITER} onOpenProfile={() => undefined} />);
     const foreign = await rowOf("Divya Menon");
     // The recruiter may change status, so the first column holds the row-selection checkbox.
-    const phoneCell = within(foreign).getAllByRole("cell")[10]!;
+    const phoneCell = within(foreign).getAllByRole("cell")[12]!;
     expect(phoneCell).toHaveClass("masked");
     expect(within(phoneCell).getByText("•••-•••-42")).toHaveAttribute("aria-hidden", "true");
     expect(within(phoneCell).getByText(/Phone hidden, ends in 42\. Not your team's candidate\./)).toHaveClass("sr-only");
@@ -181,12 +181,14 @@ describe("Hot List", () => {
 // ---- Candidates + create -----------------------------------------------------------------------
 
 describe("Candidates list and create", () => {
-  it("shows New candidate only with candidate:create", async () => {
-    const { unmount } = wrap(<CandidatesPage me={LOC_ADMIN} />);
-    await rowOf("Asha Iyer");
-    expect(screen.queryByRole("button", { name: "New candidate" })).not.toBeInTheDocument();
-    unmount();
-    wrap(<CandidatesPage me={RECRUITER} />);
+  it("shows New candidate only with candidate:create (lead or above, CA-6)", async () => {
+    for (const me of [LOC_ADMIN, RECRUITER]) {
+      const { unmount } = wrap(<CandidatesPage me={me} />);
+      await rowOf("Asha Iyer");
+      expect(screen.queryByRole("button", { name: "New candidate" })).not.toBeInTheDocument();
+      unmount();
+    }
+    wrap(<CandidatesPage me={LEAD} />);
     expect(await screen.findByRole("button", { name: "New candidate" })).toBeInTheDocument();
   });
 
@@ -196,7 +198,7 @@ describe("Candidates list and create", () => {
     routes["POST /api/v1/candidates"] = () => (++n === 1
       ? problem(422, { title: "Validation failed", errors: [{ path: "phone", message: "E.164 format, e.g. +14695550142" }] })
       : { status: 201, body: { id: "new-id" } });
-    wrap(<CandidatesPage me={RECRUITER} onOpenProfile={open} />);
+    wrap(<CandidatesPage me={LEAD} onOpenProfile={open} />);
     fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
     const dlg = screen.getByRole("dialog", { name: "New candidate" });
     expect(within(dlg).getByLabelText("First name")).toHaveFocus();
@@ -212,16 +214,17 @@ describe("Candidates list and create", () => {
 
     fireEvent.change(within(dlg).getByLabelText("First name"), { target: { value: "Ravi" } });
     fireEvent.change(within(dlg).getByLabelText("Last name"), { target: { value: "Kumar" } });
-    fireEvent.change(within(dlg).getByLabelText("Phone (optional)"), { target: { value: "+14695550199" } });
+    fireEvent.change(within(dlg).getByLabelText("Phone"), { target: { value: "+14695550199" } });
+    fireEvent.change(within(dlg).getByLabelText("Personal email"), { target: { value: "ravi@example.com" } });
     fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
     fireEvent.change(within(dlg).getByLabelText("Location"), { target: { value: LOC } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
 
-    const phone = within(dlg).getByLabelText("Phone (optional)");
+    const phone = within(dlg).getByLabelText("Phone");
     await waitFor(() => expect(phone).toHaveAttribute("aria-invalid", "true"));
     expect(phone).toHaveAccessibleDescription(expect.stringContaining("E.164 format, e.g. +14695550142"));
     expect(within(dlg).getByRole("alert")).toHaveTextContent("Some fields need attention");
-    expect(writes()[0]!.body).toEqual({ firstName: "Ravi", lastName: "Kumar", phone: "+14695550199", technologyId: TECH, locationId: LOC });
+    expect(writes()[0]!.body).toEqual({ firstName: "Ravi", lastName: "Kumar", phone: "+14695550199", email: "ravi@example.com", technologyId: TECH, locationId: LOC });
     expect(writes()[0]!.headers["x-csrf-token"]).toBe("tok");
 
     fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
@@ -231,11 +234,13 @@ describe("Candidates list and create", () => {
 
   it("explains a 403 when creating in a team outside the user's scope", async () => {
     routes["POST /api/v1/candidates"] = () => problem(403, { detail: "Not permitted to create candidates in this team" });
-    wrap(<CandidatesPage me={RECRUITER} />);
+    wrap(<CandidatesPage me={LEAD} />);
     fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
     const dlg = screen.getByRole("dialog", { name: "New candidate" });
     fireEvent.change(within(dlg).getByLabelText("First name"), { target: { value: "A" } });
     fireEvent.change(within(dlg).getByLabelText("Last name"), { target: { value: "B" } });
+    fireEvent.change(within(dlg).getByLabelText("Phone"), { target: { value: "+14695550199" } });
+    fireEvent.change(within(dlg).getByLabelText("Personal email"), { target: { value: "a.b@example.com" } });
     await within(dlg).findByRole("option", { name: "Dallas" });
     fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
     fireEvent.change(within(dlg).getByLabelText("Location"), { target: { value: LOC } });
@@ -245,7 +250,7 @@ describe("Candidates list and create", () => {
 
   it("when the lookup list is unavailable: technology stays a dropdown, locations fall back to known ones", async () => {
     routes["GET /api/v1/lookups"] = () => problem(503, { title: "Unavailable" });
-    wrap(<CandidatesPage me={RECRUITER} />);
+    wrap(<CandidatesPage me={LEAD} />);
     fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
     const dlg = screen.getByRole("dialog", { name: "New candidate" });
     await waitFor(() => expect(within(dlg).getByLabelText("Technology")).toHaveAccessibleDescription("The list couldn't be loaded; reload the page to try again."));
@@ -258,13 +263,14 @@ describe("Candidates list and create", () => {
     expect(writes()).toEqual([]);
   });
 
-  it.each([[RECRUITER, false], [LEAD, true]] as const)("offers to add a technology only with technology:create (%#)", async (me, offered) => {
-    wrap(<CandidatesPage me={me} />);
+  // Every role that may add candidates (lead or above, CA-6) also holds technology:create.
+  it("offers to add a technology to a lead", async () => {
+    wrap(<CandidatesPage me={LEAD} />);
     fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
     const dlg = screen.getByRole("dialog", { name: "New candidate" });
     await waitFor(() => expect(within(dlg).getByLabelText("Technology").tagName).toBe("SELECT"));
     await waitFor(() => expect(within(dlg).getAllByRole("option").length).toBeGreaterThan(1));
-    expect(!!within(dlg).queryByRole("option", { name: "Add a new technology…" })).toBe(offered);
+    expect(within(dlg).getByRole("option", { name: "Add a new technology…" })).toBeInTheDocument();
   });
 });
 
@@ -558,7 +564,7 @@ const submitWith = (dlg: HTMLElement, name: string) => {
 
 describe("Focus after a failed submit: New candidate", () => {
   const openCreate = async () => {
-    wrap(<CandidatesPage me={RECRUITER} />);
+    wrap(<CandidatesPage me={LEAD} />);
     fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
     const dlg = screen.getByRole("dialog", { name: "New candidate" });
     await within(dlg).findByRole("option", { name: "Dallas" });
@@ -567,6 +573,8 @@ describe("Focus after a failed submit: New candidate", () => {
   const fillAll = (dlg: HTMLElement) => {
     fireEvent.change(within(dlg).getByLabelText("First name"), { target: { value: "Ravi" } });
     fireEvent.change(within(dlg).getByLabelText("Last name"), { target: { value: "Kumar" } });
+    fireEvent.change(within(dlg).getByLabelText("Phone"), { target: { value: "+14695550199" } });
+    fireEvent.change(within(dlg).getByLabelText("Personal email"), { target: { value: "ravi@example.com" } });
     fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
     fireEvent.change(within(dlg).getByLabelText("Location"), { target: { value: LOC } });
   };
@@ -581,6 +589,8 @@ describe("Focus after a failed submit: New candidate", () => {
 
     // Fix everything but the location: focus skips the fields that were invalid last round.
     fireEvent.change(last, { target: { value: "Kumar" } });
+    fireEvent.change(within(dlg).getByLabelText("Phone"), { target: { value: "+14695550199" } });
+    fireEvent.change(within(dlg).getByLabelText("Personal email"), { target: { value: "ravi@example.com" } });
     fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
     submitWith(dlg, "Create candidate");
     const loc = within(dlg).getByLabelText("Location");
@@ -593,9 +603,9 @@ describe("Focus after a failed submit: New candidate", () => {
     routes["POST /api/v1/candidates"] = () => problem(422, { title: "Validation failed", errors: [{ path: "phone", message: "E.164 format" }] });
     const dlg = await openCreate();
     fillAll(dlg);
-    fireEvent.change(within(dlg).getByLabelText("Phone (optional)"), { target: { value: "+14695550199" } });
+    fireEvent.change(within(dlg).getByLabelText("Phone"), { target: { value: "+14695550199" } });
     submitWith(dlg, "Create candidate");
-    const phone = within(dlg).getByLabelText("Phone (optional)");
+    const phone = within(dlg).getByLabelText("Phone");
     await waitFor(() => expect(phone).toHaveFocus());
     expect(within(dlg).getByRole("alert")).toHaveTextContent("Some fields need attention");
   });

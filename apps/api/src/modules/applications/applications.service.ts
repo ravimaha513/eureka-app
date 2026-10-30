@@ -339,7 +339,7 @@ export class ApplicationsService {
 
   /**
    * JP-30: a hired applicant becomes a Eureka candidate through the candidate
-   * service (team rules, duplicate check with 409 possible_duplicate) and the
+   * service (team rules, email and phone required and unique: 409 duplicate_contact) and the
    * application is linked in the same transaction.
    */
   async createCandidate(user: AuthedUser, id: string, b: CreateCandidateFromApplication) {
@@ -348,12 +348,14 @@ export class ApplicationsService {
     if (r.status !== "hired") throw new UnprocessableEntityException("application_not_hired");
     if (r.candidate_id !== null) throw new ConflictException("candidate_exists");
     if (r.first_name === null || r.last_name === null) throw new NotFoundException();
+    // The phone is copied only for callers who may read applicant phones; others supply it.
+    const phone = r.phone_e164 && resolveScope(user.access, "applicant.phone:read")?.all === true ? r.phone_e164 : b.phone;
+    const email = r.email ?? b.email;
+    if (!email) throw new UnprocessableEntityException("email_required");
+    if (!phone) throw new UnprocessableEntityException("phone_required");
     const created = await this.candidates.create(user, {
       firstName: r.first_name, lastName: r.last_name, technologyId: b.technologyId, locationId: b.locationId,
-      ...(b.teamId ? { teamId: b.teamId } : {}), ...(r.email ? { email: r.email } : {}),
-      // The phone is copied only for callers who may read applicant phones; others create the candidate without it.
-      ...(r.phone_e164 && resolveScope(user.access, "applicant.phone:read")?.all === true ? { phone: r.phone_e164 } : {}),
-      ...(b.confirmDuplicate !== undefined ? { confirmDuplicate: b.confirmDuplicate } : {}),
+      ...(b.teamId ? { teamId: b.teamId } : {}), email, phone,
     }, async (c, candidateId) => {
       try {
         await c.query(`SELECT authz.application_link_candidate($1, $2)`, [id, candidateId]);

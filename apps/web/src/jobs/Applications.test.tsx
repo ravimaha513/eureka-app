@@ -83,6 +83,30 @@ describe("Applications (staff)", () => {
     await waitFor(() => expect(api.writes()[0]!.body).toEqual({ technical: 3, communication: 3, problemSolving: 3, attitude: 2 }));
   });
 
+  it("create candidate asks for the phone when the applicant's is masked, and sends it normalized (CA-6)", async () => {
+    const hired = detail({ status: "hired", applicant: { ...app().applicant, phone: "+1 212•••0123", phoneMasked: true },
+      actions: { transition: [], scheduleInterview: false, createCandidate: true } });
+    api.routes["GET /api/v1/applications/ap1"] = () => ({ body: hired });
+    api.routes["GET /api/v1/lookups"] = () => ({ body: { technologies: [{ id: "t1", name: "Java" }], locations: [{ id: "l1", name: "Dallas" }],
+      clients: [], vendors: [], implementationPartners: [], coaches: [] } });
+    api.routes["POST /api/v1/applications/ap1/candidate"] = () => ({ status: 201, body: { candidateId: "c1" } });
+    wrap(<ApplicationsPage me={meFor("lead")} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open application of Rakesh Uvsn" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create candidate…" }));
+    const dlg = await screen.findByRole("dialog", { name: /Create candidate/ });
+    expect(within(dlg).queryByLabelText("Personal email")).not.toBeInTheDocument();
+    await within(dlg).findByRole("option", { name: "Java" });
+    fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: "t1" } });
+    fireEvent.change(within(dlg).getByLabelText("Location"), { target: { value: "l1" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
+    expect(await within(dlg).findByRole("alert")).toHaveTextContent(/phone number/i);
+    expect(api.writes()).toHaveLength(0);
+    fireEvent.change(within(dlg).getByLabelText("Phone"), { target: { value: "+1 (212) 555-0199" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create candidate" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.body).toEqual({ technologyId: "t1", locationId: "l1", phone: "+12125550199" });
+  });
+
   it("applicants list masks the phone without applicant.phone:read", async () => {
     wrap(<ApplicantsPage />);
     const row = (await screen.findByText("Rakesh Uvsn", { selector: "b" })).closest("tr")!;

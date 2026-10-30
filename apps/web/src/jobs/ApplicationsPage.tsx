@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import {
-  APPLICATION_STATUSES, APPLICATION_STATUS_LABELS, APP_INTERVIEW_LABELS, APP_INTERVIEW_ROUNDS, APP_INTERVIEW_TYPES, isSafeHttpsUrl,
+  APPLICATION_STATUSES, APPLICATION_STATUS_LABELS, APP_INTERVIEW_LABELS, APP_INTERVIEW_ROUNDS, APP_INTERVIEW_TYPES, PHONE_PROBLEM_MESSAGES, isSafeHttpsUrl, normalizePhoneE164, phoneProblem,
   type ApplicationStatus,
 } from "@eureka/shared";
 import { can, type Me } from "../api";
@@ -319,23 +319,31 @@ function CandidateDialog({ a, onClose, onDone }: { a: ApplicationDetail; onClose
   const lookups = useLookups();
   const [tech, setTech] = useState("");
   const [loc, setLoc] = useState("");
-  const [dup, setDup] = useState(false);
+  // Email and phone are required and unique (CA-6); asked for when the applicant has none or the phone is masked.
+  const needPhone = !a.applicant.phone || a.applicant.phoneMasked;
+  const needEmail = !a.applicant.email;
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const { busy, error, run, setError } = useSubmit(applicationError);
   return (
     <Dialog title={`Create candidate · ${a.applicant.name ?? ""}`} onClose={onClose}>
-      <form onSubmit={(e) => {
+      <form noValidate onSubmit={(e) => {
         e.preventDefault();
         if (!tech || !loc) { setError("Choose the technology and the location."); return; }
+        const p = needPhone ? normalizePhoneE164(phone) : null;
+        if (needPhone && !p) { setError(PHONE_PROBLEM_MESSAGES[phoneProblem(phone) ?? "invalid"]); return; }
+        if (needEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setError("Enter a valid email address."); return; }
         void run(async () => {
-          try { await applicationsApi.createCandidate(a.id, { technologyId: tech, locationId: loc, ...(dup ? { confirmDuplicate: true } : {}) }); onDone(); }
-          catch (err) { if ((err as { detail?: string }).detail === "possible_duplicate") setDup(true); throw err; }
+          await applicationsApi.createCandidate(a.id, { technologyId: tech, locationId: loc, ...(p ? { phone: p } : {}), ...(needEmail ? { email: email.trim() } : {}) });
+          onDone();
         });
       }}>
         <p className="dialogbody">Creates a Eureka candidate with the applicant's name, email and phone, in your team.</p>
         <Field label="Technology">{(p) => <select {...p} value={tech} onChange={(e) => setTech(e.target.value)} data-autofocus><option value="" disabled>Choose…</option>{(lookups.data?.technologies ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}</Field>
         <Field label="Location">{(p) => <select {...p} value={loc} onChange={(e) => setLoc(e.target.value)}><option value="" disabled>Choose…</option>{(lookups.data?.locations ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}</Field>
-        {dup && <p className="note warn">A possible duplicate exists. Create anyway only if you checked it is a different person; submitting again confirms.</p>}
-        <DialogActions onCancel={onClose} submitLabel={dup ? "Create anyway" : "Create candidate"} busy={busy} error={error} />
+        {needPhone && <Field label="Phone" hint="With the country code, e.g. +1 469 555 0142">{(p) => <input {...p} type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} />}</Field>}
+        {needEmail && <Field label="Personal email">{(p) => <input {...p} type="email" required autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} />}</Field>}
+        <DialogActions onCancel={onClose} submitLabel="Create candidate" busy={busy} error={error} />
       </form>
     </Dialog>
   );

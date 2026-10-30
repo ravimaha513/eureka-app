@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
-import { apiAs, cell, freshCandidate, login, uniq, type Api } from "./support";
+import { apiAs, cell, freshCandidate, login, uniq, uniqPhone, type Api } from "./support";
 
 /**
  * Hot List extras (FR-HOT, migration 0025/0030): saved views, export (button
@@ -75,8 +75,8 @@ test("export: no button for a recruiter or location admin; a lead exports a scop
   const tag = `Exp${uniq()}`;
   const who = LEADS[Math.floor(Math.random() * LEADS.length)]!;
   const recruiter = await apiAs(playwright, baseURL, `${who.recruiter}@eureka.example`);
-  const phone = `+1972555${String(Math.floor(Math.random() * 1e4)).padStart(4, "0")}`;
-  const c = await freshCandidate(recruiter, tag, { phone, confirmDuplicate: true });
+  const phone = uniqPhone();
+  const c = await freshCandidate(recruiter, tag, { phone });
   await recruiter.send("POST", `/api/v1/candidates/${c.id}/transition`, { to: "active" });
   expect((await recruiter.send("POST", "/api/v1/hotlist/export", {}, 403))).toMatchObject({ status: 403 });
   await recruiter.dispose();

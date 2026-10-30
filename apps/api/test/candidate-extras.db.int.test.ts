@@ -287,15 +287,15 @@ describe("authz.candidate_duplicates", () => {
 
   it("matches the normalized phone and email; the owner's team gets the candidate id", async () => {
     expect(first().teamId).toBe(T.t1);
-    const rows = await check(U.r1b, "Someone", "Else", "cand1.test@example.com", "+14695550001");
+    const rows = await check(U.l1, "Someone", "Else", "cand1.test@example.com", "+14695550001");
     expect(rows).toEqual([{ candidate_id: first().id, team_name: "Team Rohit", contact_name: "l1", matched_on: ["email", "phone"] }]);
   });
 
   it("outside the caller's read scope it reveals only team and contact, never the id", async () => {
-    const rows = await check(U.r3a, "Someone", "Else", null, "+14695550001");
+    const rows = await check(U.l3, "Someone", "Else", null, "+14695550001");
     expect(rows).toEqual([{ candidate_id: null, team_name: "Team Rohit", contact_name: "l1", matched_on: ["phone"] }]);
     // Only these four columns exist: no name, phone, email or status of the other record.
-    const cols = await asUser(db.app, U.r3a, async (c) =>
+    const cols = await asUser(db.app, U.l3, async (c) =>
       (await c.query(`SELECT * FROM authz.candidate_duplicates('A', 'B', NULL, '+14695550001')`)).fields.map((f) => f.name));
     expect(cols).toEqual(["candidate_id", "team_name", "contact_name", "matched_on"]);
   });
@@ -303,20 +303,21 @@ describe("authz.candidate_duplicates", () => {
   it("matches the marketing email too, case-insensitively", async () => {
     const own = candidates.find((c) => c.recruiterId === U.r3a)!;
     await asUser(db.app, U.r3a, (c) => c.query(`UPDATE eureka.candidate SET marketing_email = 'Mkt.R3a@Eureka.example' WHERE id = $1`, [own.id]), true);
-    const rows = await check(U.r1a, "X", "Y", "mkt.r3a@eureka.example", null);
+    const rows = await check(U.l1, "X", "Y", "mkt.r3a@eureka.example", null);
     expect(rows).toEqual([{ candidate_id: null, team_name: "Team Vikram", contact_name: "l3", matched_on: ["email"] }]);
   });
 
   it("no match answers with no rows", async () => {
-    expect(await check(U.r1a, "Nobody", "Here", "nobody@example.com", "+919999999999")).toEqual([]);
+    expect(await check(U.l1, "Nobody", "Here", "nobody@example.com", "+919999999999")).toEqual([]);
   });
 
   it("needs a name plus email or phone, valid values, a user and candidate:create", async () => {
-    await expect(check(U.r1a, "", "Y", null, "+14695550001")).rejects.toThrow(/name_and_contact_required/);
-    await expect(check(U.r1a, "X", "Y", null, null)).rejects.toThrow(/name_and_contact_required/);
-    await expect(check(U.r1a, "X", "Y", null, "4695550001")).rejects.toThrow(/invalid_contact/);
-    await expect(check(U.r1a, "X", "Y", "not-an-email", null)).rejects.toThrow(/invalid_contact/);
-    for (const key of ["hr", "locD", "coach", "admin", "ceo"] as const) {
+    await expect(check(U.l1, "", "Y", null, "+14695550001")).rejects.toThrow(/name_and_contact_required/);
+    await expect(check(U.l1, "X", "Y", null, null)).rejects.toThrow(/name_and_contact_required/);
+    await expect(check(U.l1, "X", "Y", null, "4695550001")).rejects.toThrow(/invalid_contact/);
+    await expect(check(U.l1, "X", "Y", "not-an-email", null)).rejects.toThrow(/invalid_contact/);
+    // Recruiters too: only a lead or above adds candidates (CA-6).
+    for (const key of ["r1a", "r1b", "hr", "locD", "coach", "admin", "ceo"] as const) {
       await expect(check(U[key], "X", "Y", null, "+14695550001")).rejects.toThrow(/not_permitted/);
     }
     await expect(db.app.query(`SELECT * FROM authz.candidate_duplicates('X','Y',NULL,'+14695550001')`)).rejects.toThrow(/not_permitted/);

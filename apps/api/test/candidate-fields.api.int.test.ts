@@ -161,6 +161,13 @@ describe("Hot List filters", () => {
     await raw(`UPDATE eureka.candidate SET gh_location_id = $2 WHERE id = ANY($1)`, [ids(guestHouse), LOC.dallas]);
     await raw(`UPDATE eureka.candidate SET documents_status = 'complete' WHERE id = ANY($1)`, [ids(complete)]);
     await raw(`UPDATE eureka.candidate SET resume_url = 'https://drive.example/r' WHERE id = ANY($1)`, [ids(withLink)]);
+    // Sheet columns (0290): priority, in person, marketing start dates.
+    await raw(`UPDATE eureka.candidate SET priority = 'P1' WHERE id = ANY($1)`, [ids(h1b)]);
+    await raw(`UPDATE eureka.candidate SET priority = 'P3' WHERE id = ANY($1)`, [ids(remote)]);
+    await raw(`UPDATE eureka.candidate SET in_person_ok = true WHERE id = ANY($1)`, [ids(complete)]);
+    await raw(`UPDATE eureka.candidate SET in_person_ok = false WHERE id = ANY($1)`, [ids(withLink)]);
+    await raw(`UPDATE eureka.candidate SET marketing_start_date = date '2026-01-01' + (abs(hashtext(id::text)) % 200)
+                WHERE id = ANY($1)`, [ids([...h1b, ...remote, ...guestHouse])]);
     // A current (clean) uploaded resume for one candidate, bypassing the upload and scan flow.
     await raw(`
       INSERT INTO eureka.resume (candidate_id, status, content_type, size_bytes, sha256_hex, version, is_current, uploaded_by,
@@ -190,6 +197,45 @@ describe("Hot List filters", () => {
         .toEqual(sorted(h1b.filter((c) => c.locationId === LOC.austin).map((c) => c.id)));
     });
 
+    it("sheet filters: priority, team, recruiter, in person, guest house", async () => {
+      const ids = (cs: FixtureCandidate[]) => sorted(cs.map((c) => c.id));
+      expect(await ceoIds("priority=P1")).toEqual(ids(h1b));
+      expect(await ceoIds("priority=P3")).toEqual(ids(remote));
+      expect(await ceoIds(`teamId=${T.t2}`)).toEqual(ids(hotAll().filter((c) => c.teamId === T.t2)));
+      expect(await ceoIds(`recruiterId=${U.r1a}`)).toEqual(ids(hotAll().filter((c) => c.recruiterId === U.r1a)));
+      expect(await ceoIds("inPerson=yes")).toEqual(ids(complete));
+      expect(await ceoIds("inPerson=no")).toEqual(ids(withLink));
+      expect(await ceoIds(`ghLocationId=${LOC.dallas}`)).toEqual(ids(guestHouse));
+      expect(await ceoIds(`priority=P1&teamId=${T.t2}`)).toEqual([]);
+    });
+
+    // As the AD (org scope like the CEO): the CEO's page budget (60 a minute) goes to the filter tests.
+    it.each(["priority", "days", "name"] as const)("sort=%s pages in order with no row lost or repeated", async (sort) => {
+      const rows: { id: string; priority: string; marketingStartDate: string | null; name: string }[] = [];
+      let cursor: string | null = null;
+      do {
+        const r = await call("ad", "GET", `/api/v1/hotlist?sort=${sort}&limit=40${cursor ? `&cursor=${cursor}` : ""}`);
+        expect(r.statusCode).toBe(200);
+        const page = r.json() as { items: typeof rows; nextCursor: string | null };
+        rows.push(...page.items);
+        cursor = page.nextCursor;
+      } while (cursor);
+      const adScope = resolveScope(toUserAccess("ad"), "hotlist:read");
+      expect(sorted(rows.map((r) => r.id))).toEqual(sorted(candidates.filter((c) => hotlistVisible(adScope, c)).map((c) => c.id)));
+      expect(rows.length).toBeGreaterThan(40); // more than one page
+      const key = (r: (typeof rows)[number]) =>
+        sort === "priority" ? r.priority : sort === "days" ? (r.marketingStartDate ?? "9999-12-31") : r.name.toLowerCase();
+      for (let i = 1; i < rows.length; i++) expect(key(rows[i - 1]!) <= key(rows[i]!), `${sort} row ${i}`).toBe(true);
+    });
+
+    it("rows carry the team lead and in-person", async () => {
+      const rows = await all("ceo", `/api/v1/hotlist?teamId=${T.t1}`);
+      expect(rows.length).toBeGreaterThan(0);
+      for (const r of rows) expect(r.team).toMatchObject({ id: T.t1, lead: "l1" });
+      const inPerson = (await all("ceo", "/api/v1/hotlist?inPerson=yes"))[0]!;
+      expect(inPerson.inPersonOk).toBe(true);
+    });
+
     it("rows carry the list columns", async () => {
       const rows = await all("ceo", "/api/v1/hotlist?stay=remote");
       for (const r of rows) expect(r).toMatchObject({ stay: "remote", hasResume: expect.any(Boolean) });
@@ -214,7 +260,7 @@ describe("Hot List filters", () => {
     const r = await call("l1", "POST", "/api/v1/hotlist/export", { visa: "h1b" });
     expect(r.statusCode).toBe(200);
     const lines = r.body.replace(/^﻿/, "").split("\r\n").filter(Boolean);
-    expect(lines[0]).toMatch(/,Visa,Documents,Stay$/);
+    expect(lines[0]).toMatch(/,Visa,Documents,Stay,In person$/);
     const l1 = resolveScope(toUserAccess("l1"), "report:export")!;
     expect(lines.length - 1).toBe(h1b.filter((c) => ownsCandidate(l1, c)).length);
     for (const line of lines.slice(1)) expect(line).toContain("H-1B");

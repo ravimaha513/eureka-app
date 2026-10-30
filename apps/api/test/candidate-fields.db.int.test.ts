@@ -70,7 +70,8 @@ describe("candidate_profile_guard", () => {
   });
 
   it("an API insert cannot set compliance columns; team_assigned_at is the server's time", async () => {
-    const out = await asUser(db.app, U.r1a, async (c) => {
+    // A lead adds candidates (CA-6); r1a stays the assigned recruiter.
+    const out = await asUser(db.app, U.l1, async (c) => {
       const person = "11111111-2222-4333-8444-555555555555";
       await c.query(`INSERT INTO eureka.person (id, first_name, last_name) VALUES ($1, 'New', 'Person')`, [person]);
       await expect(c.query(`SAVEPOINT a; INSERT INTO eureka.candidate (person_id, technology_id, team_id, recruiter_id, location_id, documents_status)
@@ -145,8 +146,8 @@ describe("function hygiene (rule 2)", () => {
     "authz.compliance_company_options()",
     "authz.resume_candidate_ids()",
     "authz.resume_flags(uuid[])",
-    "authz.hotlist_page(text,text,text,text,uuid,integer,uuid,text,text,boolean,text)",
-    "authz.hotlist_export(text,text,text,text,integer,uuid,text,text,boolean,text)",
+    "authz.hotlist_page(text,text,text,text,uuid,integer,uuid,text,text,boolean,text,jsonb)",
+    "authz.hotlist_export(text,text,text,text,integer,uuid,text,text,boolean,text,jsonb)",
   ];
 
   it.each(fns)("%s: definer with a pinned search_path, executable by the API role only", async (fn) => {
@@ -169,7 +170,7 @@ describe("function hygiene (rule 2)", () => {
   it("the old six- and five-argument Hot List functions are gone (no ambiguous overloads)", async () => {
     const { rows } = await db.admin.query(`
       SELECT proname, pronargs FROM pg_proc WHERE proname IN ('hotlist_page', 'hotlist_export') ORDER BY proname`);
-    expect(rows).toEqual([{ proname: "hotlist_export", pronargs: 10 }, { proname: "hotlist_page", pronargs: 11 }]);
+    expect(rows).toEqual([{ proname: "hotlist_export", pronargs: 11 }, { proname: "hotlist_page", pronargs: 12 }]);
   });
 
   it("migration-time backfill policies were dropped", async () => {

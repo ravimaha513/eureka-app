@@ -99,7 +99,7 @@ describe("batches", () => {
   });
 
   it("assigns candidates on create and on edit; filters the list by batch", async () => {
-    const created = await call("r1a", "POST", "/api/v1/candidates", { firstName: "Bat", lastName: "Ch", technologyId: TECH_ID, locationId: LOC.dallas, batchId });
+    const created = await call("l1", "POST", "/api/v1/candidates", { firstName: "Bat", lastName: "Ch", phone: "+14695558601", email: "bat.ch@example.com", technologyId: TECH_ID, locationId: LOC.dallas, batchId });
     expect(created.statusCode, created.body).toBe(201);
     const own = candidates.find((c) => c.recruiterId === U.r1a && c.locationId === LOC.dallas && c.visibility === "team" && c.marketingStatus === "on_hold")!;
     expect((await call("r1a", "PATCH", `/api/v1/candidates/${own.id}`, { batchId })).statusCode).toBe(200);
@@ -134,7 +134,7 @@ describe("batches", () => {
 
 describe("timeline", () => {
   it("records API actions with actor names and labels, newest first", async () => {
-    const c = await call("l1", "POST", "/api/v1/candidates", { firstName: "Time", lastName: "Line", technologyId: TECH_ID, locationId: LOC.dallas });
+    const c = await call("l1", "POST", "/api/v1/candidates", { firstName: "Time", lastName: "Line", phone: "+14695558602", email: "time.line@example.com", technologyId: TECH_ID, locationId: LOC.dallas });
     const id = c.json().id;
     await call("l1", "PUT", `/api/v1/candidates/${id}/visibility`, { visibility: "all_teams" });
     await call("locD", "PUT", `/api/v1/candidates/${id}/technical-rating`, { rating: 3 });
@@ -236,7 +236,7 @@ describe("review follow-ups (0032)", () => {
   });
 
   it("a national 0 after the country code is refused with an explanation", async () => {
-    const r = await call("r1a", "POST", "/api/v1/candidates", { firstName: "T", lastName: "Z", technologyId: TECH_ID, locationId: LOC.dallas, phone: "+91 098765 43210" });
+    const r = await call("l1", "POST", "/api/v1/candidates", { firstName: "T", lastName: "Z", email: "t.z@example.com", technologyId: TECH_ID, locationId: LOC.dallas, phone: "+91 098765 43210" });
     expect(r.statusCode).toBe(422);
     expect(r.json().errors[0]).toEqual({ path: "phone", message: expect.stringContaining("Leave out the national 0") });
   });
@@ -248,49 +248,58 @@ describe("duplicate check", () => {
   const base = { firstName: "Dup", lastName: "Licate", technologyId: TECH_ID, locationId: LOC.dallas };
 
   it("normalizes the phone before storing; refuses a number without a country code", async () => {
-    const r = await call("r1a", "POST", "/api/v1/candidates", { ...base, firstName: "Norm", phone: "+1 (469) 555-7777", email: " Norm@Example.COM " });
+    const r = await call("l1", "POST", "/api/v1/candidates", { ...base, firstName: "Norm", phone: "+1 (469) 555-7777", email: " Norm@Example.COM " });
     expect(r.statusCode, r.body).toBe(201);
     const p = await db.admin.query(`SELECT p.phone_e164, p.personal_email::text AS email FROM eureka.person p JOIN eureka.candidate c ON c.person_id = p.id WHERE c.id = $1`, [r.json().id]);
     expect(p.rows[0]).toEqual({ phone_e164: "+14695557777", email: "norm@example.com" });
-    const bad = await call("r1a", "POST", "/api/v1/candidates", { ...base, phone: "469 555 7778" });
+    const bad = await call("l1", "POST", "/api/v1/candidates", { ...base, phone: "469 555 7778", email: "bad@example.com" });
     expect(bad.statusCode).toBe(422);
     expect(bad.json().errors[0].path).toBe("phone");
   });
 
-  it("a likely duplicate (formatted phone of another team's candidate) is 409 with no details", async () => {
-    const r = await call("r3a", "POST", "/api/v1/candidates", { ...base, phone: "+1 469-555-0001" });
-    expect([r.statusCode, r.json().detail]).toEqual([409, "possible_duplicate"]);
+  it("email and phone are both required", async () => {
+    for (const body of [{ ...base, phone: "+14695558603" }, { ...base, email: "only.email@example.com" }]) {
+      const r = await call("l1", "POST", "/api/v1/candidates", body);
+      expect(r.statusCode).toBe(422);
+    }
+  });
+
+  it("a taken phone (formatted, another team's candidate) is 409 with no details", async () => {
+    const r = await call("l3", "POST", "/api/v1/candidates", { ...base, phone: "+1 469-555-0001", email: "fresh.one@example.com" });
+    expect([r.statusCode, r.json().detail]).toEqual([409, "duplicate_contact"]);
     expect(r.body).not.toMatch(/Team Rohit|Cand1|0001/);
   });
 
   it("the check reveals team and contact only, and the id only to those who can read the candidate", async () => {
-    const other = (await call("r3a", "POST", "/api/v1/candidates/duplicate-check", { firstName: "A", lastName: "B", phone: "+1 469 555 0001" })).json();
+    const other = (await call("l3", "POST", "/api/v1/candidates/duplicate-check", { firstName: "A", lastName: "B", phone: "+1 469 555 0001" })).json();
     expect(other).toEqual({ duplicates: [{ candidateId: null, team: "Team Rohit", contact: "l1", matchedOn: ["phone"] }] });
-    const owner = (await call("r1b", "POST", "/api/v1/candidates/duplicate-check", { firstName: "A", lastName: "B", phone: "+14695550001" })).json();
+    const owner = (await call("l1", "POST", "/api/v1/candidates/duplicate-check", { firstName: "A", lastName: "B", phone: "+14695550001" })).json();
     expect(owner.duplicates[0].candidateId).toBe(first().id);
-    expect((await call("r1a", "POST", "/api/v1/candidates/duplicate-check", { firstName: "A", lastName: "B", phone: "+919000000001" })).json())
+    expect((await call("l1", "POST", "/api/v1/candidates/duplicate-check", { firstName: "A", lastName: "B", phone: "+919000000001" })).json())
       .toEqual({ duplicates: [] });
-    expect((await call("r1a", "POST", "/api/v1/candidates/duplicate-check", { firstName: "A", lastName: "B" })).statusCode).toBe(422);
-    expect((await call("r1a", "POST", "/api/v1/candidates/duplicate-check", { firstName: "", lastName: "B", phone: "+14695550001" })).statusCode).toBe(422);
+    expect((await call("l1", "POST", "/api/v1/candidates/duplicate-check", { firstName: "A", lastName: "B" })).statusCode).toBe(422);
+    expect((await call("l1", "POST", "/api/v1/candidates/duplicate-check", { firstName: "", lastName: "B", phone: "+14695550001" })).statusCode).toBe(422);
+    expect((await call("r1a", "POST", "/api/v1/candidates/duplicate-check", { firstName: "A", lastName: "B", phone: "+14695550001" })).statusCode).toBe(403);
   });
 
-  it("matches the normalized email too; a taken personal email or phone is refused even when confirmed", async () => {
-    const r = await call("l3", "POST", "/api/v1/candidates", { ...base, email: "NORM@example.com" });
-    expect([r.statusCode, r.json().detail]).toEqual([409, "possible_duplicate"]);
-    const email = await call("l3", "POST", "/api/v1/candidates", { ...base, email: "NORM@example.com", confirmDuplicate: true });
-    expect([email.statusCode, email.json().detail]).toEqual([409, "duplicate_email"]);
-    const phone = await call("l3", "POST", "/api/v1/candidates", { ...base, phone: "+14695550001", confirmDuplicate: true });
-    expect([phone.statusCode, phone.json().detail]).toEqual([409, "duplicate_phone"]);
+  it("matches the normalized email too, with no way to override", async () => {
+    const r = await call("l3", "POST", "/api/v1/candidates", { ...base, phone: "+14695558604", email: "NORM@example.com" });
+    expect([r.statusCode, r.json().detail]).toEqual([409, "duplicate_contact"]);
+    const override = await call("l3", "POST", "/api/v1/candidates", { ...base, phone: "+14695558604", email: "NORM@example.com", confirmDuplicate: true });
+    expect(override.statusCode).toBe(422);
   });
 
-  it("a match on another candidate's marketing email only is created after an explicit confirmation", async () => {
-    expect((await call("l1", "PATCH", `/api/v1/candidates/${first().id}`, { marketingEmail: "mkt.dup@example.com" })).statusCode).toBe(200);
-    const r = await call("l3", "POST", "/api/v1/candidates", { ...base, email: "MKT.dup@example.com" });
-    expect([r.statusCode, r.json().detail]).toEqual([409, "possible_duplicate"]);
-    const ok = await call("l3", "POST", "/api/v1/candidates", { ...base, email: "MKT.dup@example.com", confirmDuplicate: true });
-    expect(ok.statusCode, ok.body).toBe(201);
-    const audit = await db.admin.query(`SELECT changes FROM eureka.audit_event WHERE action = 'candidate.created' AND entity_id = $1`, [ok.json().id]);
-    expect(audit.rows[0].changes).toEqual({ duplicateConfirmed: true });
+  it("the database refuses a taken email or phone from any writer (0260 backstop)", async () => {
+    const insert = (phone: string, email: string) => db.admin.query(
+      `WITH p AS (INSERT INTO eureka.person (first_name, last_name, phone_e164, personal_email) VALUES ('Race', 'Cond', $1, $2) RETURNING id)
+       INSERT INTO eureka.candidate (person_id, technology_id, team_id, location_id) SELECT id, $3, $4, $5 FROM p`,
+      [phone, email, TECH_ID, T.t1, LOC.dallas]);
+    await expect(insert("+14695550001", "race.one@example.com")).rejects.toThrow("duplicate_phone");
+    await expect(insert("+14695558605", "norm@EXAMPLE.com")).rejects.toThrow("duplicate_email");
+    const own = candidates.find((c) => c.recruiterId === U.r1a)!;
+    await expect(db.admin.query(
+      `UPDATE eureka.person SET phone_e164 = '+14695557777' WHERE id = (SELECT person_id FROM eureka.candidate WHERE id = $1)`, [own.id]))
+      .rejects.toThrow("duplicate_phone");
   });
 
   it("every check is audited without the checked values", async () => {
@@ -298,7 +307,7 @@ describe("duplicate check", () => {
     expect(rows.length).toBeGreaterThanOrEqual(6);
     const text = JSON.stringify(rows.map((r) => r.changes));
     expect(text).not.toMatch(/\+1469|469|example\.com|norm/i);
-    expect(rows).toContainEqual({ actor_id: U.r3a, changes: { checked: ["phone"], matches: 1 } });
+    expect(rows).toContainEqual({ actor_id: U.l3, changes: { checked: ["phone"], matches: 1 } });
   });
 
   it("is rate-limited per user", async () => {
