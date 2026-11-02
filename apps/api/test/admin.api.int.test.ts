@@ -426,7 +426,8 @@ describe("users", () => {
       const lines = (await db.admin.query(
         `SELECT user_id, manager_id FROM eureka.reporting_line WHERE user_id = ANY ($1) AND valid @> now() ORDER BY user_id = $2`,
         [[rec, lead], lead])).rows;
-      expect(lines).toEqual([{ user_id: rec, manager_id: lead }, { user_id: lead, manager_id: U.m1 }]);
+      // The team wins over the file's manager: a member reports to the team's lead (0370).
+      expect(lines).toEqual([{ user_id: rec, manager_id: U.l1 }, { user_id: lead, manager_id: U.m1 }]);
       const member = (await db.admin.query(
         `SELECT team_id FROM eureka.team_member WHERE user_id = $1 AND valid @> now()`, [rec])).rows;
       expect(member).toEqual([{ team_id: T.t1 }]);
@@ -674,7 +675,7 @@ describe("teams", () => {
   });
 
   it("bulk add: adds each person on its own and reports the ones it skipped", async () => {
-    const { id } = (await call("admin", "POST", "/api/v1/admin/teams", { name: "Team Bulk", leadId: U.l3 })).json() as { id: string };
+    const { id } = (await call("admin", "POST", "/api/v1/admin/teams", { name: "Team Bulk", leadId: U.acct })).json() as { id: string };
     const before = (await call("admin", "GET", "/api/v1/admin/teams")).json().unassignedCount as number;
     const free = (await call("admin", "GET", "/api/v1/admin/users?status=active&team=none&limit=200")).json().items as { id: string; teams: unknown[] }[];
     expect(free.length).toBe(before);

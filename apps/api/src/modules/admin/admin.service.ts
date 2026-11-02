@@ -83,8 +83,8 @@ const roleIndex = (roles: RoleRow[]) =>
 const ROW_ROLE_ERRORS = new Set([
   "separation_of_duties", "location_required", "location_not_allowed", "role_already_held", "role_archived", "role_department_mismatch",
 ]);
-/** admin_add_team_member failures that are a problem with one row. */
-const ROW_TEAM_ERRORS = new Set(["already_member", "user_inactive"]);
+/** admin_add_team_member failures that are a problem with one row (cycle: the member is above the team's lead, 0370). */
+const ROW_TEAM_ERRORS = new Set(["already_member", "user_inactive", "cycle"]);
 
 /**
  * Admin and team operations (docs/admin-api.md). The controllers check the
