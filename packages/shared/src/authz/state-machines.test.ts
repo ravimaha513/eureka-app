@@ -62,15 +62,17 @@ describe("action hints", () => {
   });
 
   it("submission actions: createPlacement needs selected, update + create rights and an available candidate", () => {
-    expect(submissionActions(R1a, r1aAct, "selected", own)).toEqual({ transition: [], createInterview: false, createPlacement: true, clearAndPlace: true });
+    expect(submissionActions(R1a, r1aAct, "selected", own)).toEqual({ transition: [], createInterview: false, createPlacement: true, clearAndPlace: true, placeBlocked: null });
     expect(submissionActions(R1a, r1aAct, "selected", { ...own, marketingStatus: "on_hold" }).createPlacement).toBe(false);
     expect(submissionActions(R1a, r1aAct, "selected", null).createPlacement).toBe(false);
     expect(submissionActions(R1a, r1aAct, "submitted", own)).toEqual({
-      transition: ["under_review", "rejected", "withdrawn"], createInterview: true, createPlacement: false, clearAndPlace: true,
+      transition: ["under_review", "rejected", "withdrawn"], createInterview: true, createPlacement: false, clearAndPlace: true, placeBlocked: null,
     });
     expect(submissionActions(R1a, r1aAct, "withdrawn", own).clearAndPlace).toBe(false);
     expect(submissionActions(R1a, r1aAct, "submitted", { ...own, marketingStatus: "on_hold" }).clearAndPlace).toBe(false);
-    expect(submissionActions(HR, r1aAct, "selected", own)).toEqual({ transition: [], createInterview: false, createPlacement: false, clearAndPlace: false });
+    expect(submissionActions(R1a, r1aAct, "submitted", { ...own, marketingStatus: "confirmation" }).placeBlocked).toBe("confirmation");
+    expect(submissionActions(R1a, r1aAct, "withdrawn", { ...own, marketingStatus: "confirmation" }).placeBlocked).toBeNull();
+    expect(submissionActions(HR, r1aAct, "selected", own)).toEqual({ transition: [], createInterview: false, createPlacement: false, clearAndPlace: false, placeBlocked: null });
   });
 
   it("placement transitions: bgc_failed only with placement.bgc_status:update", () => {

@@ -67,7 +67,7 @@ export const sub = (id: string, extra: Partial<Submission> = {}): Submission => 
   id, candidateId: `c-${id}`, candidateName: "Asha Iyer", recruiterId: "u-me", recruiterName: "Test User",
   teamId: "t1", locationId: "loc", jobTitle: "Senior Java Developer", clientId: "cl1", client: "Northwind Financial",
   vendorId: null, status: "submitted", rejectionReason: null, submittedAt: "2026-09-20T15:00:00Z", statusChangedAt: null,
-  actions: { transition: ["under_review", "rejected", "withdrawn"], createInterview: true, createPlacement: false, clearAndPlace: true },
+  actions: { transition: ["under_review", "rejected", "withdrawn"], createInterview: true, createPlacement: false, clearAndPlace: true, placeBlocked: null },
   ...extra,
 });
 

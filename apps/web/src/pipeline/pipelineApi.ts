@@ -22,6 +22,8 @@ export interface SubmissionActions {
   transition: string[]; createInterview: boolean; createPlacement: boolean;
   /** IS-11: may clear a round and place from it; absent on older servers. */
   clearAndPlace?: boolean;
+  /** The candidate's status when only that stops a placement (another placement in progress); absent on older servers. */
+  placeBlocked?: string | null;
 }
 
 export interface Submission {
@@ -77,7 +79,7 @@ export interface SubmissionSummary {
   };
 }
 
-export interface TrailStep { stage: InterviewStage; round: string; result: string; callStatus: string; startsAt: string }
+export interface TrailStep { id?: string; stage: InterviewStage; round: string; result: string; callStatus: string; startsAt: string }
 
 export const PLACEMENT_STATUSES = ["confirmed", "paperwork", "bgc", "ready", "joined", "backout", "bgc_failed", "joining_issue"] as const;
 export type PlacementType = "c2c" | "w2" | "1099";

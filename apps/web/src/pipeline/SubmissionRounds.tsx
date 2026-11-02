@@ -100,6 +100,12 @@ export function SubmissionRounds({ submission: s, onPlace, onReject, onSchedule,
             })}
           </ol>
           {error && <p className="banner error" role="alert">{error}</p>}
+          {s.actions?.placeBlocked && !placed && rounds.some((r) => r.result === "cleared") && (
+            <p className="hint">
+              {s.candidateName ?? "The candidate"} can't be placed from this submission while their status is {pipelineLabel(s.actions.placeBlocked)}
+              {s.actions.placeBlocked === "confirmation" ? " (another placement is in progress). Back that placement out or move them to Active first." : ". Move them to Active first."}
+            </p>
+          )}
           {s.actions?.createInterview && (
             <div className="rowactions">
               <button type="button" className="btn sm" onClick={() => onSchedule(nextRoundName(latest?.round))}>

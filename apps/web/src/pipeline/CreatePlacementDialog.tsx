@@ -7,7 +7,7 @@ import { Field } from "../sales/ui";
 import { pipelineError } from "./errors";
 import {
   CONTACT_KIND_LABELS, PLACEMENT_TYPE_LABELS, WORK_MODE_LABELS, pipelineApi,
-  pipelineKeys, type ContactKind, type CreatePlacement, type PlacementType, type Submission, type WorkMode,
+  pipelineKeys, type ContactKind, type CreatePlacement, type PlacementType, type Submission, type TrailStep, type WorkMode,
 } from "./pipelineApi";
 
 const FIELDS = ["placementType", "rate", "workMode", "projectCity", "projectState", "tentativeStart", "contacts"] as const;
@@ -269,5 +269,51 @@ function ContactInput({ id, label, value, error, onChange, type = "text", maxLen
         aria-invalid={error ? true : undefined} aria-describedby={error ? `${id}-err` : undefined} />
       {error && <small id={`${id}-err`} className="error fielderr">{error}</small>}
     </div>
+  );
+}
+
+/**
+ * Where a list row can place from: the selected submission itself, or its
+ * latest cleared round (IS-11, which moves the submission to Selected first).
+ * Null when the row offers no placement.
+ */
+export function rowPlacement(s: Pick<Submission, "actions" | "interviews" | "placementStatus">): { round?: TrailStep } | null {
+  if (s.placementStatus) return null;
+  if (s.actions?.createPlacement) return {};
+  if (!s.actions?.clearAndPlace) return null;
+  const held = (s.interviews ?? []).filter((t) => t.callStatus !== "cancelled" && t.callStatus !== "no_invite");
+  if (held.some((t) => t.result === "rejected")) return null;
+  const cleared = [...held].reverse().find((t) => t.result === "cleared" && t.id);
+  return cleared ? { round: cleared } : null;
+}
+
+/** List-row "Create placement": opens the placement dialog without the drawer. */
+export function CreatePlacementButton({ submission: s, onNotice }: {
+  submission: Pick<Submission, "id" | "candidateName" | "jobTitle" | "client" | "actions" | "interviews" | "placementStatus">;
+  onNotice: (m: string) => void;
+}) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const from = rowPlacement(s);
+  if (!from) return null;
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: pipelineKeys.submissions });
+    void qc.invalidateQueries({ queryKey: pipelineKeys.placements });
+    void qc.invalidateQueries({ queryKey: ["interviews"] });
+  };
+  return (
+    <>
+      <button type="button" className="btn sm primary" onClick={() => setOpen(true)}
+        aria-label={`Create placement for ${s.candidateName ?? "candidate"}, ${s.jobTitle} at ${s.client}`}>Create placement</button>
+      {open && (
+        <CreatePlacementDialog submission={s} onClose={() => setOpen(false)}
+          clearRound={from.round && { id: from.round.id!, round: from.round.round, pending: false }}
+          onSelectedOnly={from.round ? () => { setOpen(false); onNotice("Submission moved to Selected."); refresh(); } : undefined}
+          onCreated={(r) => {
+            setOpen(false); refresh();
+            onNotice(r.isFirstPlacement ? `Placement created for ${s.candidateName ?? "the candidate"}. This is their first placement.` : `Placement created for ${s.candidateName ?? "the candidate"}.`);
+          }} />
+      )}
+    </>
   );
 }

@@ -7,7 +7,7 @@ import { salesApi } from "../sales/salesApi";
 import { Drawer, Field } from "../sales/ui";
 import { AssessmentsSection } from "../pipelinereport/AssessmentsSection";
 import type { Interview } from "../interviews/InterviewsPage";
-import { CreatePlacementDialog } from "./CreatePlacementDialog";
+import { CreatePlacementButton, CreatePlacementDialog } from "./CreatePlacementDialog";
 import { pipelineError } from "./errors";
 import {
   ISO_DAY, SUBMISSION_STATUSES, dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Submission,
@@ -142,6 +142,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
                       <button type="button" className="btn sm" onClick={() => setOpenId(s.id)}
                         aria-label={`Open submission of ${s.candidateName ?? "candidate"} for ${s.jobTitle} at ${s.client}`}>Open</button>
                       <ScheduleInterviewButton submission={s} onNotice={setNotice} />
+                      <CreatePlacementButton submission={s} onNotice={setNotice} />
                     </td>
                   </tr>
                 ))}

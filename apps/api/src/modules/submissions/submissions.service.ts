@@ -95,7 +95,7 @@ const REACHED_STAGE = (ph: string) =>
 const PLACED = `EXISTS (SELECT 1 FROM eureka.placement pl WHERE pl.submission_id = s.id
   AND pl.status NOT IN ('backout','bgc_failed','joining_issue'))`;
 
-export interface TrailStep { stage: string; round: string; result: string; callStatus: string; startsAt: string }
+export interface TrailStep { id: string; stage: string; round: string; result: string; callStatus: string; startsAt: string }
 
 interface SubmissionRow {
   id: string;
@@ -145,7 +145,7 @@ const SELECT = `
   CROSS JOIN LATERAL (
     SELECT count(*) FILTER (WHERE i.call_status NOT IN ('cancelled','no_invite'))::int AS n,
            max(i.starts_at) FILTER (WHERE i.call_status NOT IN ('cancelled','no_invite')) AS last_at,
-           jsonb_agg(jsonb_build_object('stage', ${interviewStageSql("i.round")}, 'round', i.round, 'result', i.result,
+           jsonb_agg(jsonb_build_object('id', i.id, 'stage', ${interviewStageSql("i.round")}, 'round', i.round, 'result', i.result,
              'callStatus', i.call_status, 'startsAt', i.starts_at) ORDER BY i.starts_at, i.id) AS trail
     FROM eureka.interview i WHERE i.submission_id = s.id) iv`;
 

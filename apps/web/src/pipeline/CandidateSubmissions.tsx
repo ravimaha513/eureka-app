@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { SUBMISSION_STATUSES, fmtDateTime, fmtRate, pipelineApi, pipelineKeys } from "./pipelineApi";
 import { pipelineError } from "./errors";
+import { CreatePlacementButton } from "./CreatePlacementDialog";
 import { ScheduleInterviewButton } from "./ScheduleInterviewDialog";
 import { SubmissionDrawer, useDebounced } from "./SubmissionsPage";
 import { PipelineFunnel, PipelineStatus, ReachedFilter, StageTrail, StatusChips, type Reached } from "./ui";
@@ -93,6 +94,7 @@ export function CandidateSubmissions({ candidateId, onOpenPlacement }: { candida
                     <button type="button" className="btn sm" onClick={() => setOpenId(s.id)}
                       aria-label={`Open submission for ${s.jobTitle} at ${s.client}`}>Open</button>
                     <ScheduleInterviewButton submission={s} onNotice={setNotice} />
+                    <CreatePlacementButton submission={s} onNotice={setNotice} />
                   </td>
                 </tr>
               ))}

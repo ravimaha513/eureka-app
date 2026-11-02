@@ -6,7 +6,7 @@ import { nextRoundName } from "./SubmissionRounds";
 import { LOOKUPS, UUID, mockApi, sub, wrap } from "./testkit";
 
 const S1 = sub("s1", { status: "interview_scheduled", actions: {
-  transition: ["interview_completed", "rejected", "withdrawn"], createInterview: true, createPlacement: false, clearAndPlace: true,
+  transition: ["interview_completed", "rejected", "withdrawn"], createInterview: true, createPlacement: false, clearAndPlace: true, placeBlocked: null,
 } });
 const round = (id: string, name: string, extra: Partial<Interview> = {}): Interview => ({
   id, submissionId: "s1", candidate: { id: "c-s1", name: "Asha Iyer" }, recruiter: { id: "u-me", name: "Test User" },
@@ -101,6 +101,13 @@ describe("Submission drawer: interview rounds", () => {
     rounds[1] = round("i2", "L1", { result: "rejected" });
     const drawer = await open();
     expect(within(resultGroup(drawer, "Manager")).queryByRole("button", { name: "Clear and place" })).not.toBeInTheDocument();
+  });
+
+  it("explains why there's no placement action while the candidate is in another placement", async () => {
+    api.routes["GET /api/v1/submissions/s1"] = () => ({ body: { ...S1, actions: { ...S1.actions!, clearAndPlace: false, placeBlocked: "confirmation" } } });
+    const drawer = await open();
+    expect(within(drawer).queryByRole("button", { name: /Clear and place|Create placement/ })).not.toBeInTheDocument();
+    expect(within(drawer).getByText(/can't be placed from this submission while their status is Confirmation \(another placement is in progress\)/)).toBeInTheDocument();
   });
 
   it("suggests the next round name", () => {

@@ -10,7 +10,7 @@ const RECRUITER = meFor("recruiter");
 const S1 = sub("s1");
 const S2 = sub("s2", {
   candidateName: "Divya Menon", jobTitle: "Data Engineer", status: "selected",
-  actions: { transition: [], createInterview: false, createPlacement: true, clearAndPlace: true },
+  actions: { transition: [], createInterview: false, createPlacement: true, clearAndPlace: true, placeBlocked: null },
 });
 
 let api: ReturnType<typeof mockApi>;
@@ -126,6 +126,41 @@ describe("Submissions list: schedule from the row", () => {
     fireEvent.click(within(await rowOf("Asha Iyer")).getByRole("button", { name: /^Schedule next round for Asha Iyer/ }));
     const dlg = screen.getByRole("dialog", { name: "Schedule interview · Asha Iyer" });
     expect(within(dlg).getByLabelText("Round")).toHaveValue("L2");
+  });
+});
+
+describe("Submissions list: create placement from the row", () => {
+  it("places from the latest cleared round: moves the submission to Selected, then creates the placement", async () => {
+    const trail = [
+      { id: "i1", stage: "l1" as const, round: "L1", result: "cleared", callStatus: "completed", startsAt: "2026-10-30T15:00:00Z" },
+      { id: "i2", stage: "l2" as const, round: "L2", result: "cleared", callStatus: "completed", startsAt: "2026-10-31T15:00:00Z" },
+    ];
+    const ready = { ...S1, interviews: trail };
+    api.routes["GET /api/v1/submissions"] = () => ({ body: { items: [ready, { ...S2, placementStatus: "confirmed" }], nextCursor: null } });
+    api.routes["POST /api/v1/interviews/i2/clear-and-select"] = () => ({ status: 201, body: {} });
+    api.routes["POST /api/v1/placements"] = () => ({ status: 201, body: { id: "p1", isFirstPlacement: false } });
+    wrap(<SubmissionsPage me={RECRUITER} />);
+    expect(within(await rowOf("Divya Menon")).queryByRole("button", { name: /^Create placement/ })).not.toBeInTheDocument();
+    fireEvent.click(within(await rowOf("Asha Iyer")).getByRole("button", { name: /^Create placement for Asha Iyer/ }));
+    const dlg = screen.getByRole("dialog", { name: "Create placement · Asha Iyer" });
+    fireEvent.change(within(dlg).getByLabelText("Placement type"), { target: { value: "c2c" } });
+    fireEvent.change(within(dlg).getByLabelText("Work mode"), { target: { value: "onsite" } });
+    fireEvent.change(within(dlg).getByLabelText("Tentative start date"), { target: { value: "2026-12-01" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create placement" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Create placement/ })).not.toBeInTheDocument());
+    expect(api.writes().map((w) => w.path)).toEqual(["/api/v1/interviews/i2/clear-and-select", "/api/v1/placements"]);
+    expect(screen.getByText("Placement created for Asha Iyer.")).toBeInTheDocument();
+  });
+
+  it("offers nothing while a round is rejected or no round is cleared", async () => {
+    const t = (id: string, result: string) => ({ id, stage: "l1" as const, round: id, result, callStatus: "completed", startsAt: "2026-10-30T15:00:00Z" });
+    api.routes["GET /api/v1/submissions"] = () => ({ body: { items: [
+      { ...S1, interviews: [t("a", "cleared"), t("b", "rejected")] },
+      { ...S1, id: "s3", candidateName: "Ravi Kumar", interviews: [t("c", "pending")] },
+    ], nextCursor: null } });
+    wrap(<SubmissionsPage me={RECRUITER} />);
+    expect(within(await rowOf("Asha Iyer")).queryByRole("button", { name: /^Create placement/ })).not.toBeInTheDocument();
+    expect(within(await rowOf("Ravi Kumar")).queryByRole("button", { name: /^Create placement/ })).not.toBeInTheDocument();
   });
 });
 
