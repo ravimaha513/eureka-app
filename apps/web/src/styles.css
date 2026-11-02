@@ -987,3 +987,15 @@ form.stack { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .round-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .round-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .round .rowactions { margin-top: 4px; }
+
+/* Schedule interview: day chips, start list, duration chips (pipeline/SlotPicker) */
+.slotchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.slotchip { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--text2); font-size: 13px; font-weight: 600; cursor: pointer; }
+.slotchip:hover { border-color: var(--pri-700); color: var(--pri-700); }
+.slotchip[aria-pressed="true"], .slotchip.on { background: var(--pri-50); border-color: var(--pri-700); color: var(--pri-700); }
+.slotdate { padding: 0 10px; display: inline-flex; align-items: center; }
+.slotpicker .slotdate input { border: 0; background: transparent; padding: 5px 0; height: auto; min-height: 0; width: auto; font: inherit; color: inherit; box-shadow: none; }
+.slot-label { font-weight: 600; color: var(--text2); font-size: 13px; }
+.slot-row { display: flex; flex-wrap: wrap; gap: 0 16px; align-items: flex-start; }
+.slot-row > .field:first-child { flex: 0 0 140px; }
+.slot-summary { margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: var(--surface2); font-size: 13px; }

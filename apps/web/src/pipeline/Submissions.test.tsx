@@ -213,19 +213,22 @@ describe("Submission detail", () => {
     const dlg = screen.getByRole("dialog", { name: "Schedule interview · Asha Iyer" });
     await within(dlg).findByRole("option", { name: "Coach One" });
     fireEvent.change(within(dlg).getByLabelText("Round"), { target: { value: "Technical 1" } });
-    fireEvent.change(within(dlg).getByLabelText("Start"), { target: { value: "2026-10-01T11:00" } });
-    fireEvent.change(within(dlg).getByLabelText("End"), { target: { value: "2026-10-01T10:00" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Schedule" }));
-    expect(within(dlg).getByLabelText("End")).toHaveAccessibleDescription("End must be after start.");
+    expect(within(dlg).getByText("Choose the day.")).toBeInTheDocument();
+    expect(within(dlg).getByLabelText("Start time")).toHaveAccessibleDescription("Choose the start time.");
     expect(api.writes()).toHaveLength(0);
 
-    fireEvent.change(within(dlg).getByLabelText("End"), { target: { value: "2026-10-01T12:00" } });
+    fireEvent.change(within(dlg).getByLabelText("Other date"), { target: { value: "2031-10-01" } });
+    fireEvent.change(within(dlg).getByLabelText("Start time"), { target: { value: "11:00" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "45 min" }));
+    expect(within(dlg).getByRole("button", { name: "45 min" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(dlg).getByText(/October 1/)).toBeInTheDocument();
     fireEvent.change(within(dlg).getByLabelText("Coach (optional)"), { target: { value: COACH } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Schedule" }));
     expect(await within(dlg).findByRole("alert")).toHaveTextContent("overlaps another interview");
     expect(api.writes()[0]!.body).toEqual({
-      submissionId: "s1", round: "Technical 1", startsAt: new Date("2026-10-01T11:00").toISOString(),
-      endsAt: new Date("2026-10-01T12:00").toISOString(), coachId: COACH, inviteReceived: false,
+      submissionId: "s1", round: "Technical 1", startsAt: new Date("2031-10-01T11:00").toISOString(),
+      durationMin: 45, coachId: COACH, inviteReceived: false,
     });
     fireEvent.click(within(dlg).getByRole("button", { name: "Schedule" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /Schedule interview/ })).not.toBeInTheDocument());

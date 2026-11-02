@@ -157,7 +157,9 @@ export interface PlacementFilters {
 export const PLACEMENT_EXPORT_ROW_CAP = 5000;
 
 export interface CreateInterview {
-  submissionId: string; round: string; startsAt: string; endsAt: string; coachId?: string; inviteReceived?: boolean;
+  submissionId: string; round: string; startsAt: string; coachId?: string; inviteReceived?: boolean;
+  /** Send endsAt or durationMin (15..240), not both. */
+  endsAt?: string; durationMin?: number;
 }
 
 export const PLACEMENT_TYPE_LABELS: Record<PlacementType, string> = { c2c: "C2C", w2: "W2", "1099": "1099" };
