@@ -117,7 +117,7 @@ rewrites existing placements.
 
 Migration 0044 (`docs/paperwork-api.md`): each checklist entry adds `{ id, dueOn, overdue }` and `status` is one of
 `pending`, `received`, `verified`, `waived`; notes, reasons and history are on `/paperwork` (`document:read`). Where
-`document:read` covers the placement the detail also carries `bgc: { status }` (`not_started` until HR records it);
+`document:read` covers the placement the detail also carries `bgc: { status, actions: { transition } }` (BGC targets this caller may set; the drawer offers Initiate / Re-initiate BGC) (`not_started` until HR records it);
 the key is omitted otherwise.
 
 ## Sales/placements gaps (migration 0160, 2026-10-17)

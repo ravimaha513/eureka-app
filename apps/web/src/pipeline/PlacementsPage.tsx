@@ -11,6 +11,7 @@ import { ClearedInterviews } from "./ClearedInterviews";
 import { Drawer, Field, fmtDate } from "../sales/ui";
 import { RoleName, useLookups, type Named } from "../lookups";
 import { pipelineError } from "./errors";
+import { paperworkApi, paperworkKeys } from "../paperwork/paperworkApi";
 import {
   CONTACT_KIND_LABELS, PLACEMENT_EXPORT_ROW_CAP, PLACEMENT_STATUSES, PLACEMENT_TYPE_LABELS, WORK_MODE_LABELS,
   ISO_DAY, dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Placement, type PlacementFilters,
@@ -248,6 +249,7 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
   // The list row lacks contacts and assignment; show it while the full record loads.
   const q = useQuery({ queryKey: pipelineKeys.placement(id), queryFn: () => pipelineApi.placement(id), placeholderData: initial ?? undefined });
   const [exit, setExit] = useState<string | null>(null);
+  const [reinitiate, setReinitiate] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -263,13 +265,21 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
     finally { setBusy(null); }
   };
 
+  const initiateBgc = async () => {
+    setBusy("bgc"); setError(""); setMessage("");
+    try { await paperworkApi.updateBgc(id, { status: "initiated" }); announce("Background check initiated."); refreshBgc(); }
+    catch (e) { setError(pipelineError(e, "placement")); }
+    finally { setBusy(null); }
+  };
+  const refreshBgc = () => { refresh(); void qc.invalidateQueries({ queryKey: paperworkKeys.all }); };
+
   const transitions = p?.allowedTransitions ?? [];
   const forward = transitions.filter((t) => !EXITS.has(t));
   const exits = transitions.filter((t) => EXITS.has(t));
 
   return (
     <>
-      <Drawer title={p ? `${p.candidate.name} · ${p.client.name}` : "Placement"} onClose={onClose} suspended={exit !== null} wide closeLabel="Close placement details">
+      <Drawer title={p ? `${p.candidate.name} · ${p.client.name}` : "Placement"} onClose={onClose} suspended={exit !== null || reinitiate} wide closeLabel="Close placement details">
         {q.isLoading && !p ? <Loading /> : !p ? (
           <p className="error" role="alert">{pipelineError(q.error, "placement")}</p>
         ) : (
@@ -363,7 +373,17 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
               <section className="manageblock" aria-labelledby={`${hid}-b`}>
                 <h3 id={`${hid}-b`}>Background check</h3>
                 <p><span className={`badge bgc-${p.bgc.status}`}>{p.bgc.status === "not_started" ? "Not started" : pipelineLabel(p.bgc.status)}</span>
-                  {" "}<span className="muted">Recorded by HR on Paperwork &amp; BGC.</span></p>
+                  {" "}<span className="muted">Details are recorded by HR on Paperwork &amp; BGC.</span></p>
+                {p.bgc.actions?.transition.includes("initiated") && (
+                  <div className="rowactions">
+                    {p.bgc.status === "cleared" ? (
+                      <button type="button" className="btn sm" disabled={busy !== null} onClick={() => setReinitiate(true)}>Re-initiate BGC…</button>
+                    ) : (
+                      <button type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === "bgc" || undefined}
+                        onClick={() => void initiateBgc()}>Initiate BGC</button>
+                    )}
+                  </div>
+                )}
               </section>
             )}
 
@@ -392,7 +412,35 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
         <ExitDialog placement={p} to={exit} onClose={() => setExit(null)}
           onDone={() => { const t = exit; setExit(null); announce(`Placement marked ${pipelineLabel(t)}.`); refresh(); }} />
       )}
+      {p && reinitiate && (
+        <ReinitiateBgcDialog placement={p} onClose={() => setReinitiate(false)}
+          onDone={() => { setReinitiate(false); announce("Background check re-initiated."); refreshBgc(); }} />
+      )}
     </>
+  );
+}
+
+/** Cleared BGC back to Initiated (PW-7), e.g. the vendor asks for more documents after joining. The placement status is unchanged. */
+function ReinitiateBgcDialog({ placement, onClose, onDone }: { placement: Placement; onClose: () => void; onDone: () => void }) {
+  const [reason, setReason] = useState("");
+  const [fieldErr, setFieldErr] = useState("");
+  const submit = useSubmit((e) => pipelineError(e, "placement"));
+  useEffect(() => setFieldErr(""), [reason]);
+  return (
+    <Dialog title={`Re-initiate the background check for ${placement.candidate.name}?`} onClose={onClose}>
+      <form noValidate onSubmit={(e) => {
+        e.preventDefault();
+        const r = reason.trim();
+        if (!r) { setFieldErr("Give a reason."); e.currentTarget.querySelector<HTMLElement>("textarea")?.focus(); return; }
+        void submit.run(async () => { await paperworkApi.updateBgc(placement.id, { status: "initiated", reason: r }); onDone(); });
+      }}>
+        <p className="dialogbody">The check goes back to Initiated from today and its completion date is cleared. The placement status{placement.status === "joined" ? " and the assignment stay" : " stays"} as {placement.status === "joined" ? "they are" : "it is"}.</p>
+        <Field label="Reason" hint="For example, the vendor asked for more documents. Up to 500 characters; never in the audit log." error={fieldErr}>
+          {(p) => <textarea {...p} rows={4} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} data-autofocus />}
+        </Field>
+        <DialogActions onCancel={onClose} submitLabel="Re-initiate BGC" busy={submit.busy} error={submit.error} />
+      </form>
+    </Dialog>
   );
 }
 

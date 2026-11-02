@@ -143,7 +143,8 @@ const BGC_EDGES: Partial<Record<string, readonly BgcStatus[]>> = {
   initiated: ["in_progress", "cleared", "failed"],
   in_progress: ["cleared", "failed"],
   // FR-PLC-06: a cleared check can still fail after the fact; failed is final.
-  cleared: ["failed"],
+  // cleared -> initiated re-opens it (the vendor asks for more documents, even after joining).
+  cleared: ["initiated", "failed"],
 };
 
 export function bgcTransitionAllowed(from: string, to: string): boolean {
@@ -156,3 +157,8 @@ export function bgcTransitionTargets(from: string): BgcStatus[] {
 
 /** Recording a failed check needs a non-blank reason. */
 export const BGC_REASON_REQUIRED: ReadonlySet<string> = new Set(["failed"]);
+
+/** Failing and re-initiating a cleared check need a non-blank reason (reason_required). */
+export function bgcReasonRequired(from: string, to: string): boolean {
+  return BGC_REASON_REQUIRED.has(to) || (from === "cleared" && to === "initiated");
+}

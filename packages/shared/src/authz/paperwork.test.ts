@@ -4,6 +4,7 @@ import type { UserAccess } from "./engine.js";
 import {
   BGC_STATUSES,
   CHECKLIST_ITEM_STATUSES,
+  bgcReasonRequired,
   bgcTransitionAllowed,
   bgcTransitionTargets,
   checklistItemTransitionAllowed,
@@ -41,12 +42,15 @@ describe("checklist item state machine (PW-2)", () => {
 });
 
 describe("BGC state machine (PW-7)", () => {
-  it("steps forward; cleared can still fail (FR-PLC-06); failed is final", () => {
+  it("steps forward; cleared can still fail (FR-PLC-06) or be re-initiated; failed is final", () => {
     const edges = BGC_STATUSES.flatMap((f) => BGC_STATUSES.filter((t) => bgcTransitionAllowed(f, t)).map((t) => `${f}>${t}`));
     expect(edges.sort()).toEqual([
-      "cleared>failed", "in_progress>cleared", "in_progress>failed", "initiated>cleared", "initiated>failed",
+      "cleared>failed", "cleared>initiated", "in_progress>cleared", "in_progress>failed", "initiated>cleared", "initiated>failed",
       "initiated>in_progress", "not_started>initiated"].sort());
     expect(bgcTransitionTargets("failed")).toEqual([]);
+    expect(bgcReasonRequired("cleared", "initiated")).toBe(true);
+    expect(bgcReasonRequired("not_started", "initiated")).toBe(false);
+    expect(bgcReasonRequired("in_progress", "failed")).toBe(true);
   });
 });
 

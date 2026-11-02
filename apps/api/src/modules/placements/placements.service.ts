@@ -12,6 +12,7 @@ import {
 import type pg from "pg";
 import {
   PLACEMENT_REASON_REQUIRED,
+  bgcActions,
   ownsActivity,
   ownsCandidate,
   placementTransitionAllowed,
@@ -301,7 +302,13 @@ export class PlacementsService {
         checklist: checklist.rows.map((i) => ({
           id: i.id, docType: i.doc_type, ownerRole: i.owner_role, required: i.required, status: i.status, dueOn: i.due_on, overdue: i.overdue,
         })),
-        ...(bgc !== undefined ? { bgc: { status: bgc } } : {}),
+        // Actions mirror /paperwork (PW-6..PW-9) so HR can initiate or re-initiate from the drawer.
+        ...(bgc !== undefined ? { bgc: { status: bgc, actions: { transition: bgcActions(user.access, {
+          ...actor(row),
+          candidate: row.cand_recruiter_id
+            ? { recruiterId: row.cand_recruiter_id, teamId: row.cand_team_id, locationId: row.cand_location_id, visibility: "team", marketingStatus: "" }
+            : null,
+        }, bgc, row.status).transition } } } : {}),
       };
       // Field policy: the assignment key only where assignment:read covers the placement.
       if (!this.assignmentVisible(user.access, row)) return base;

@@ -328,7 +328,7 @@ describe.runIf(shard.first)("placements", () => {
       // No paperwork template configured in this database (migration 0035).
       expect(p.checklist).toEqual([]);
       // Migration 0044: BGC status for document:read holders; no record yet.
-      expect(p.bgc).toEqual({ status: "not_started" });
+      expect(p.bgc).toEqual({ status: "not_started", actions: { transition: [] } });
     });
   });
 

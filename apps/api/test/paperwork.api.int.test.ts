@@ -245,7 +245,7 @@ describe("item updates", () => {
     const hr = (await call("hr", "GET", `/api/v1/placements/${m.id}`)).json();
     expect(hr.checklist[0]).toEqual({ id: expect.any(String), docType: "sample_doc_a", ownerRole: "hr", required: true, status: "received",
       dueOn: "2020-01-03", overdue: true });
-    expect(hr.bgc).toEqual({ status: "not_started" });
+    expect(hr.bgc).toEqual({ status: "not_started", actions: { transition: ["initiated"] } });
     expect(JSON.stringify(hr)).not.toContain("Fictional note");
     const loc = (await call("locD", "GET", `/api/v1/placements/${m.id}`)).json();
     expect(loc.checklist).toHaveLength(3);
@@ -254,6 +254,18 @@ describe("item updates", () => {
 });
 
 describe("BGC", () => {
+  it("a cleared check is re-initiated with a reason; the drawer offers it", async () => {
+    const m = await placed();
+    const url = `/api/v1/paperwork/placements/${m.id}/bgc`;
+    await call("hr", "PATCH", url, { status: "initiated" });
+    await call("hr", "PATCH", url, { status: "cleared" });
+    expect((await call("hr", "GET", `/api/v1/placements/${m.id}`)).json().bgc).toEqual({ status: "cleared", actions: { transition: ["initiated", "failed"] } });
+    expect((await call("hr", "PATCH", url, { status: "initiated" })).json().detail).toBe("reason_required");
+    const res = await call("hr", "PATCH", url, { status: "initiated", reason: "Vendor asked for more documents" });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({ status: "initiated", completedOn: null, actions: { transition: ["in_progress", "cleared", "failed"] } });
+  });
+
   it("HR records the check; others get 403 or 404; values and transitions are validated", async () => {
     const m = await placed();
     const url = `/api/v1/paperwork/placements/${m.id}/bgc`;
@@ -319,7 +331,7 @@ describe("BGC failure drives the placement through its own rules (FR-PLC-06)", (
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json()).toMatchObject({ status: "failed", actions: { update: true, transition: [], failPlacement: false } });
     const p = (await call("m1", "GET", `/api/v1/placements/${m.id}`)).json();
-    expect([p.status, p.bgc]).toEqual(["bgc_failed", { status: "failed" }]);
+    expect([p.status, p.bgc]).toEqual(["bgc_failed", { status: "failed", actions: { transition: [] } }]);
     const actions = (await auditOf(m.id)).map((a) => [a.action, a.changes]);
     expect(actions).toContainEqual(["placement.status", { from: "confirmed", to: "bgc_failed", reasonGiven: true, via: "bgc" }]);
     expect((await auditOf(m.cand.id)).map((a) => a.changes)).toContainEqual({ from: "confirmation", to: "active", via: "placement" });

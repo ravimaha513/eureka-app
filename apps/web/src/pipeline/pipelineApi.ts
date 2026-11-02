@@ -130,7 +130,8 @@ export interface Placement {
   /** Detail only (GET /placements/:id); absent on older servers. */
   checklist?: ChecklistItem[];
   /** Detail only, where document:read covers the placement (migration 0044). */
-  bgc?: { status: string };
+  /** `actions.transition`: BGC statuses this caller may set now (bgc:update; absent on older servers). */
+  bgc?: { status: string; actions?: { transition: string[] } };
   assignment?: Assignment | null;
 }
 

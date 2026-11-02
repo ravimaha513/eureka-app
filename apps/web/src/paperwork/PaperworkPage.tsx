@@ -11,7 +11,7 @@ import { docTypeLabel } from "../lib/format";
 import { DocumentsSection } from "../documents/DocumentsSection";
 import { documentKeys, documentsApi } from "../documents/documentsApi";
 import {
-  BGC_REASON_REQUIRED, BGC_STATUSES, ITEM_REASON_REQUIRED, PAPERWORK_ERRORS,
+  BGC_STATUSES, bgcReasonRequired, ITEM_REASON_REQUIRED, PAPERWORK_ERRORS,
   paperworkApi, paperworkKeys, paperworkLabel,
   type Bgc, type BgcChange, type HistoryEntry, type ItemChange, type PaperworkItem, type QueueFilters, type QueueRow,
   type TemplateItem, type TemplateVersion,
@@ -459,7 +459,7 @@ function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string;
   const [err, setErr] = useState<{ reason?: string; form?: string }>({});
   const submit = useSubmit(paperworkError);
   const willFail = status === "failed" || (status === "" && bgc.status === "failed");
-  const needsReason = status !== "" && BGC_REASON_REQUIRED.has(status);
+  const needsReason = status !== "" && bgcReasonRequired(bgc.status, status);
 
   const build = (): BgcChange => {
     const b: BgcChange = bgc.version === null ? {} : { expectedVersion: bgc.version };
@@ -496,7 +496,7 @@ function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string;
             {(p) => (
               <select {...p} value={status} onChange={(e) => setStatus(e.target.value)} data-autofocus>
                 <option value="">No change</option>
-                {bgc.actions.transition.map((t) => <option key={t} value={t}>{paperworkLabel(t)}</option>)}
+                {bgc.actions.transition.map((t) => <option key={t} value={t}>{bgc.status === "cleared" && t === "initiated" ? "Re-initiate (more documents needed)" : paperworkLabel(t)}</option>)}
               </select>
             )}
           </Field>

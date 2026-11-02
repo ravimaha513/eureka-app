@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import type pg from "pg";
 import {
-  BGC_REASON_REQUIRED,
+  bgcReasonRequired,
   CHECKLIST_REASON_REQUIRED,
   activityVisible,
   bgcActions,
@@ -382,7 +382,7 @@ export class PaperworkService {
       if (h.placement_status !== "backout" && !acts.update) throw new ForbiddenException("Not permitted");
       if (changes.status !== undefined) {
         if (!bgcTransitionAllowed(status, changes.status)) throw new UnprocessableEntityException("invalid_transition");
-        if (BGC_REASON_REQUIRED.has(changes.status) && !changes.reason) throw new UnprocessableEntityException("reason_required");
+        if (bgcReasonRequired(status, changes.status) && !changes.reason) throw new UnprocessableEntityException("reason_required");
       }
       let r: { from_status: string; to_status: string; new_version: number; changed: string[]; placement_from: string | null;
         placement_to: string | null; candidate_from: string | null; candidate_to: string | null };

@@ -465,6 +465,20 @@ describe("BGC and the placement state machine (FR-PLC-06): one set of rules in a
     expect(r).toEqual({ placement: "bgc_failed", end_reason: "bgc_failed", candidate: "bench", outbox: 1 });
   });
 
+  it("a cleared check can be re-initiated after joining, with a reason; the placement and assignment stay", async () => {
+    const { id } = await placed();
+    for (const to of ["paperwork", "bgc", "ready", "joined"]) await transitionPlacement(db, U.r1a, id, to);
+    await updateBgc(U.hr, id, { status: "initiated", initiatedOn: "2026-01-05" });
+    await updateBgc(U.hr, id, { status: "cleared", completedOn: "2026-01-20" });
+    await expect(updateBgc(U.hr, id, { status: "initiated" })).rejects.toThrow(/reason_required/);
+    await updateBgc(U.hr, id, { status: "initiated", reason: "Vendor asked for more documents" });
+    const r = (await db.admin.query(`SELECT (SELECT status FROM eureka.bgc WHERE placement_id = $1) AS bgc,
+        (SELECT initiated_on = current_date AND completed_on IS NULL FROM eureka.bgc WHERE placement_id = $1) AS dates,
+        (SELECT status FROM eureka.placement WHERE id = $1) AS placement,
+        (SELECT end_date FROM eureka.assignment WHERE placement_id = $1) AS end_date`, [id])).rows[0];
+    expect(r).toEqual({ bgc: "initiated", dates: true, placement: "joined", end_date: null });
+  });
+
   it("an already failed check can fail the placement later; a placement already in bgc_failed is refused", async () => {
     const { id } = await placed();
     await updateBgc(U.hr, id, { status: "initiated" });

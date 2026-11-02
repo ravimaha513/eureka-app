@@ -11,6 +11,8 @@ export const OUTSTANDING = new Set(["pending", "received"]);
 /** Targets that need a reason (mirrors CHECKLIST_REASON_REQUIRED / BGC_REASON_REQUIRED in @eureka/shared). */
 export const ITEM_REASON_REQUIRED = new Set(["waived", "pending"]);
 export const BGC_REASON_REQUIRED = new Set(["failed"]);
+/** Mirrors bgcReasonRequired: failing, or re-initiating a cleared check. */
+export const bgcReasonRequired = (from: string, to: string) => BGC_REASON_REQUIRED.has(to) || (from === "cleared" && to === "initiated");
 
 export interface QueueRow {
   placementId: string;
