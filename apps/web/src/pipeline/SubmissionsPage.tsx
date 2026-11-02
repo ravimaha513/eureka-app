@@ -12,7 +12,7 @@ import { pipelineError } from "./errors";
 import {
   ISO_DAY, SUBMISSION_STATUSES, dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Submission,
 } from "./pipelineApi";
-import { ScheduleInterviewDialog } from "./ScheduleInterviewDialog";
+import { ScheduleInterviewButton, ScheduleInterviewDialog } from "./ScheduleInterviewDialog";
 import { RejectRoundDialog, SubmissionRounds, refreshRounds } from "./SubmissionRounds";
 import { PipelineFunnel, PipelineStatus, ReachedFilter, StageTrail, StatusChips, parseReached, reachedValue, type Reached } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
@@ -141,6 +141,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
                     <td className="rowactions">
                       <button type="button" className="btn sm" onClick={() => setOpenId(s.id)}
                         aria-label={`Open submission of ${s.candidateName ?? "candidate"} for ${s.jobTitle} at ${s.client}`}>Open</button>
+                      <ScheduleInterviewButton submission={s} onNotice={setNotice} />
                     </td>
                   </tr>
                 ))}

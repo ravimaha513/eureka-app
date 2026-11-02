@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogActions } from "../ui/Dialog";
 import { LookupPicker } from "../lookups";
 import { fieldErrors } from "../sales/errors";
 import { Field } from "../sales/ui";
 import { pipelineError } from "./errors";
-import { pipelineApi, type Submission } from "./pipelineApi";
+import { pipelineApi, pipelineKeys, type Submission } from "./pipelineApi";
+import { nextRoundName } from "./SubmissionRounds";
 
 const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const MAX_MS = 12 * 60 * 60 * 1000;
@@ -81,5 +83,36 @@ export function ScheduleInterviewDialog({ submission, onClose, onScheduled, defa
         <DialogActions onCancel={onClose} submitLabel="Schedule" busy={busy} error={formError} />
       </form>
     </Dialog>
+  );
+}
+
+/**
+ * List-row shortcut: "Schedule interview" (or "Schedule next round") without
+ * opening the drawer, offered when the submission's actions allow it.
+ */
+export function ScheduleInterviewButton({ submission: s, onNotice }: {
+  submission: Pick<Submission, "id" | "candidateName" | "jobTitle" | "client" | "interviews" | "actions">;
+  onNotice: (m: string) => void;
+}) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  if (!s.actions?.createInterview) return null;
+  const held = (s.interviews ?? []).filter((t) => t.callStatus !== "cancelled" && t.callStatus !== "no_invite");
+  const last = held[held.length - 1];
+  return (
+    <>
+      <button type="button" className="btn sm" onClick={() => setOpen(true)}
+        aria-label={`Schedule ${last ? "next round" : "interview"} for ${s.candidateName ?? "candidate"}, ${s.jobTitle} at ${s.client}`}>
+        {last ? "Schedule next round" : "Schedule interview"}
+      </button>
+      {open && (
+        <ScheduleInterviewDialog submission={s} defaultRound={nextRoundName(last?.round)} onClose={() => setOpen(false)}
+          onScheduled={() => {
+            setOpen(false); onNotice(`Interview scheduled for ${s.candidateName ?? "the candidate"}.`);
+            void qc.invalidateQueries({ queryKey: ["interviews"] });
+            void qc.invalidateQueries({ queryKey: pipelineKeys.submissions });
+          }} />
+      )}
+    </>
   );
 }

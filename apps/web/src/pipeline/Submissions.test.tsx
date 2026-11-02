@@ -117,6 +117,18 @@ describe("Submissions list", () => {
   });
 });
 
+describe("Submissions list: schedule from the row", () => {
+  it("offers Schedule next round only where actions allow, prefilled with the next round name", async () => {
+    const withRound = { ...S1, interviews: [{ stage: "l1" as const, round: "L1", result: "cleared", callStatus: "completed", startsAt: "2026-10-30T15:00:00Z" }] };
+    api.routes["GET /api/v1/submissions"] = () => ({ body: { items: [withRound, S2], nextCursor: null } });
+    wrap(<SubmissionsPage me={RECRUITER} />);
+    expect(within(await rowOf("Divya Menon")).queryByRole("button", { name: /^Schedule/ })).not.toBeInTheDocument();
+    fireEvent.click(within(await rowOf("Asha Iyer")).getByRole("button", { name: /^Schedule next round for Asha Iyer/ }));
+    const dlg = screen.getByRole("dialog", { name: "Schedule interview · Asha Iyer" });
+    expect(within(dlg).getByLabelText("Round")).toHaveValue("L2");
+  });
+});
+
 describe("Submission detail", () => {
   it("offers exactly the transitions in actions and moves the submission forward", async () => {
     let status = "submitted";
