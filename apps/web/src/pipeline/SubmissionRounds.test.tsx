@@ -37,11 +37,11 @@ const open = async () => {
 const resultGroup = (drawer: HTMLElement, name: string) => within(drawer).getByRole("group", { name: `Result of ${name}` });
 
 describe("Submission drawer: interview rounds", () => {
-  it("lists every round in order and offers Clear and place only on the latest pending round", async () => {
+  it("lists every round in order and offers a placement from any held round", async () => {
     const drawer = await open();
     expect(api.gets("/api/v1/interviews")[0]!.url.searchParams.get("submissionId")).toBe("s1");
     expect(within(drawer).getAllByText(/^Round \d · /).map((e) => e.textContent)).toEqual(["Round 1 · Initial", "Round 2 · L1", "Round 3 · Manager"]);
-    expect(within(resultGroup(drawer, "Initial")).getAllByRole("button").map((b) => b.textContent)).toEqual(["Reset to pending"]);
+    expect(within(resultGroup(drawer, "Initial")).getAllByRole("button").map((b) => b.textContent)).toEqual(["Reset to pending", "Create placement"]);
     expect(within(resultGroup(drawer, "Manager")).getAllByRole("button").map((b) => b.textContent))
       .toEqual(["Mark cleared", "Mark rejected…", "Clear and place"]);
     expect(within(drawer).getByRole("button", { name: "Schedule next round" })).toBeInTheDocument();

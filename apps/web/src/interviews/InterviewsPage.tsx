@@ -10,6 +10,7 @@ import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { useLookups } from "../lookups";
 import { Drawer } from "../sales/ui";
 import { Avatar } from "../shell/ui";
+import { CreatePlacementDialog } from "../pipeline/CreatePlacementDialog";
 import { SupportCalendarBlock, SupportCalendarBusy, SupportCalendarCard } from "../calendar/SupportCalendar";
 
 const STATUSES = ["scheduled", "in_progress", "completed", "rescheduled", "cancelled", "no_invite"];
@@ -342,6 +343,11 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
   const [schedule, setSchedule] = useState(false);
   const [edit, setEdit] = useState<Interview | null>(null);
   const [feedback, setFeedback] = useState<Interview | null>(null);
+  const [placing, setPlacing] = useState<Interview | null>(null);
+  // IS-11: any held round can become a placement; the server re-checks scope, the other rounds and the submission.
+  const canPlace = (i: Interview) => can(me, "placement:create") && !i.placement && i.editableFields.includes("result")
+    && i.result !== "rejected" && i.callStatus !== "cancelled" && i.callStatus !== "no_invite"
+    && !["rejected", "withdrawn"].includes(i.submissionStatus ?? "");
   // Only the open interview's id is kept here; its record is read from the query data (see `details` below).
   const [detailsId, setDetailsId] = useState<string | null>(initialOpenId);
   const [notice, setNotice] = useState("");
@@ -391,10 +397,16 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
       <td><ResultBadge result={i.result} />{i.placement && <span className="block">Placement: {label(i.placement.status)}</span>}</td>
       <td><CandidateFeedbackCell f={i.candidateFeedback} /></td>
       <td>{i.consentCaptured ? <>{i.otterUrl && (isSafeHttpsUrl(i.otterUrl) ? <a href={i.otterUrl} target="_blank" rel="noopener noreferrer">Otter</a> : "Otter")} {i.recordingUrl && (isSafeHttpsUrl(i.recordingUrl) ? <a href={i.recordingUrl} target="_blank" rel="noopener noreferrer">Recording</a> : "Recording")}{!i.otterUrl && !i.recordingUrl && "—"}</> : "Consent required"}</td>
-      <td><div className="rowactions"><button className="btn" aria-label={`Details of the interview with ${i.candidate.name ?? "the candidate"}`} onClick={() => showDetails(i.id)}>Details</button>{i.editableFields.length > 0 && <button className="btn" onClick={() => setEdit(i)}>Edit interview</button>}<button className="btn" onClick={() => setFeedback(i)}>Feedback</button></div></td>
+      <td><div className="rowactions"><button className="btn" aria-label={`Details of the interview with ${i.candidate.name ?? "the candidate"}`} onClick={() => showDetails(i.id)}>Details</button>{i.editableFields.length > 0 && <button className="btn" onClick={() => setEdit(i)}>Edit interview</button>}<button className="btn" onClick={() => setFeedback(i)}>Feedback</button>{canPlace(i) && <button className="btn primary" aria-label={`${i.result === "cleared" ? "Create placement" : "Clear and place"} from ${i.round} for ${i.candidate.name ?? "the candidate"}`} onClick={() => setPlacing(i)}>{i.result === "cleared" ? "Create placement" : "Clear and place"}</button>}</div></td>
     </tr>)}</tbody></table>{!q.isPending && !q.isError && !items.length && <p className="empty">No interviews match these filters.</p>}</div>}
     {q.hasNextPage && <button className="btn" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Load more interviews</button>}
     {schedule && <Schedule onClose={() => setSchedule(false)} onDone={done} />}{edit && <Edit item={edit} onClose={() => setEdit(null)} onDone={done} />}{feedback && <Feedback item={feedback} onClose={() => setFeedback(null)} />}
+    {placing && <CreatePlacementDialog
+      submission={{ id: placing.submissionId, candidateName: placing.candidate.name, jobTitle: placing.position || "The position", client: placing.client?.name ?? "the client" }}
+      clearRound={{ id: placing.id, round: placing.round, pending: placing.result !== "cleared" }}
+      onClose={() => setPlacing(null)}
+      onSelectedOnly={() => { setPlacing(null); setNotice(`${placing.round} cleared and the submission moved to Selected.`); void qc.invalidateQueries({ queryKey: ["interviews"] }); void qc.invalidateQueries({ queryKey: ["submissions"] }); }}
+      onCreated={() => { setPlacing(null); setNotice(`Placement created for ${placing.candidate.name ?? "the candidate"} from ${placing.round}.`); void qc.invalidateQueries({ queryKey: ["interviews"] }); void qc.invalidateQueries({ queryKey: ["submissions"] }); void qc.invalidateQueries({ queryKey: ["placements"] }); }} />}
     {details && <InterviewDrawer item={details} displayZone={displayZone} onClose={() => showDetails(null)} />}
   </section>;
 }

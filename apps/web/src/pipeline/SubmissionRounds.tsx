@@ -17,8 +17,8 @@ export function nextRoundName(round: string | undefined): string {
 
 /**
  * Submission drawer: every interview round in time order with its result
- * (IS-10). Sales can mark a round cleared or rejected (and back), and from the
- * latest held round clear it and place the candidate (IS-11).
+ * (IS-10). Sales can mark a round cleared or rejected (and back), and from any
+ * held round clear it and place the candidate (IS-11).
  */
 export function SubmissionRounds({ submission: s, onPlace, onReject, onSchedule, onNotice }: {
   submission: Submission;
@@ -87,7 +87,7 @@ export function SubmissionRounds({ submission: s, onPlace, onReject, onSchedule,
                           <button type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === r.id || undefined}
                             onClick={() => void setResult(r, "pending")}>Reset to pending</button>
                         )}
-                        {isLatest && canPlace && r.result !== "rejected" && (
+                        {canPlace && r.result !== "rejected" && (
                           <button type="button" className="btn sm primary" disabled={busy !== null} onClick={() => onPlace(r)}>
                             {r.result === "cleared" ? "Create placement" : "Clear and place"}
                           </button>

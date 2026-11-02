@@ -179,6 +179,35 @@ describe("interview board", () => {
    fireEvent.change(within(dialog).getByLabelText("Interview slot"), { target: { value: "2026-10-01T09:00" } });
    expect(await within(dialog).findByText("Support calendar is free for this slot.")).toBeInTheDocument();
  });
+ it("any held round can become a placement: Clear and place clears it, selects the submission, then creates the placement", async () => {
+   const sales = { ...row, client: { id: "cl", name: "Intuit" }, position: "Java FSD", round: "L1", result: "pending" as const, submissionStatus: "submitted", placement: null, editableFields: ["result", "round", "callStatus"] };
+   const fetch = setup(sales, ["interview:read", "placement:create"]);
+   await screen.findByText("Alex Doe");
+   fireEvent.click(screen.getByRole("button", { name: "Clear and place from L1 for Alex Doe" }));
+   const dlg = screen.getByRole("dialog", { name: "Clear L1 and create placement · Alex Doe" });
+   expect(within(dlg).getByText(/Java FSD at Intuit/)).toBeInTheDocument();
+   fireEvent.change(within(dlg).getByLabelText("Placement type"), { target: { value: "w2" } });
+   fireEvent.change(within(dlg).getByLabelText("Work mode"), { target: { value: "remote" } });
+   fireEvent.change(within(dlg).getByLabelText("Tentative start date"), { target: { value: "2026-12-01" } });
+   fireEvent.click(within(dlg).getByRole("button", { name: "Clear and create placement" }));
+   await waitFor(() => expect(screen.getByText("Placement created for Alex Doe from L1.")).toBeInTheDocument());
+   const writes = fetch.mock.calls.filter(([, init]) => init?.method).map(([url]) => String(url));
+   expect(writes).toEqual(["/api/v1/interviews/i1/clear-and-select", "/api/v1/placements"]);
+ });
+ it("no placement action without placement:create, on rejected rounds, or once placed", async () => {
+   const sales = { ...row, result: "cleared" as const, submissionStatus: "selected", placement: null, editableFields: ["result"] };
+   setup(sales, ["interview:read"]); await screen.findByText("Alex Doe");
+   expect(screen.queryByRole("button", { name: /placement|Clear and place/ })).not.toBeInTheDocument();
+   vi.restoreAllMocks(); document.body.innerHTML = "";
+   setup({ ...sales, result: "rejected" }, ["interview:read", "placement:create"]); await screen.findByText("Alex Doe");
+   expect(screen.queryByRole("button", { name: /placement|Clear and place/ })).not.toBeInTheDocument();
+   vi.restoreAllMocks(); document.body.innerHTML = "";
+   setup({ ...sales, placement: { id: "p1", status: "confirmed" } }, ["interview:read", "placement:create"]); await screen.findByText("Alex Doe");
+   expect(screen.queryByRole("button", { name: /^Create placement/ })).not.toBeInTheDocument();
+   vi.restoreAllMocks(); document.body.innerHTML = "";
+   setup(sales, ["interview:read", "placement:create"]); await screen.findByText("Alex Doe");
+   expect(screen.getByRole("button", { name: "Create placement from Technical for Alex Doe" })).toBeInTheDocument();
+ });
  it("offers no scorecard for location feedback", async () => {
    setup();
    await screen.findByText("Alex Doe");
