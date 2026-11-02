@@ -8,6 +8,8 @@ export const PIPELINE_ERRORS: Record<string, string> = {
   reason_required: "Give a reason for this status change.",
   rejection_reason_required: "Give a rejection reason.",
   rejection_reason_not_allowed: "A rejection reason can only be given when rejecting.",
+  round_rejected: "Another round of this submission was rejected. Reset that round to pending first if the client is moving ahead anyway.",
+  interview_not_held: "This round was cancelled or never got an invite, so it can't be cleared.",
   submission_closed: "This submission is closed (selected, rejected or withdrawn) and can't be changed.",
   idempotency_key_required: "The request was missing its safety key. Close the dialog and try again.",
   // 409: the first request with this key already committed; only POST /placements sends a key.

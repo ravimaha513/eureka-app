@@ -46,6 +46,13 @@ export class InterviewsController {
     return this.svc.update(user, id, UpdateInterview.parse(body));
   }
 
+  /** IS-11: mark the round cleared and move its submission to selected (ready for a placement). */
+  @Post(":id/clear-and-select")
+  @RequirePermission("interview:update")
+  clearAndSelect(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
+    return this.svc.clearAndSelect(user, id);
+  }
+
   /** IS-7: calendar file of a scheduled interview. */
   @Get(":id/calendar.ics")
   @RequirePermission("interview:read")

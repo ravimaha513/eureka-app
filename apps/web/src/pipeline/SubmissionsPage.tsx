@@ -6,12 +6,14 @@ import { useLookupName } from "../lookups";
 import { salesApi } from "../sales/salesApi";
 import { Drawer, Field } from "../sales/ui";
 import { AssessmentsSection } from "../pipelinereport/AssessmentsSection";
+import type { Interview } from "../interviews/InterviewsPage";
 import { CreatePlacementDialog } from "./CreatePlacementDialog";
 import { pipelineError } from "./errors";
 import {
   ISO_DAY, SUBMISSION_STATUSES, dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Submission,
 } from "./pipelineApi";
 import { ScheduleInterviewDialog } from "./ScheduleInterviewDialog";
+import { RejectRoundDialog, SubmissionRounds, refreshRounds } from "./SubmissionRounds";
 import { PipelineFunnel, PipelineStatus, ReachedFilter, StageTrail, StatusChips, parseReached, reachedValue, type Reached } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
@@ -204,7 +206,8 @@ function CandidateFilter({ value, onChange }: { value: string; onChange: (id: st
   );
 }
 
-type Modal = { kind: "reject" } | { kind: "withdraw" } | { kind: "interview" } | { kind: "placement" };
+type Modal = { kind: "reject" } | { kind: "withdraw" } | { kind: "interview"; defaultRound?: string }
+  | { kind: "placement"; round?: Interview } | { kind: "rejectRound"; round: Interview };
 
 export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlacement }: {
   id: string; initial: Submission | null; onClose: () => void; onNotice: (m: string) => void; onOpenPlacement?: (id: string) => void;
@@ -236,7 +239,7 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
   const forward = actions?.transition.filter((t) => !CLOSING.has(t)) ?? [];
   const canReject = actions?.transition.includes("rejected") ?? false;
   const canWithdraw = actions?.transition.includes("withdrawn") ?? false;
-  const anyAction = Boolean(actions && (actions.transition.length || actions.createInterview || actions.createPlacement));
+  const anyAction = Boolean(actions && (actions.transition.length || actions.createPlacement));
 
   return (
     <>
@@ -264,6 +267,11 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
             )}
             {error && <p className="banner error" role="alert">{error}</p>}
 
+            <SubmissionRounds submission={s} onNotice={announce}
+              onPlace={(round) => setModal({ kind: "placement", round })}
+              onReject={(round) => setModal({ kind: "rejectRound", round })}
+              onSchedule={(defaultRound) => setModal({ kind: "interview", defaultRound })} />
+
             {anyAction && actions && (
               <section className="manageblock" aria-labelledby={`${id}-next`}>
                 <h3 id={`${id}-next`}>Next steps</h3>
@@ -277,10 +285,9 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
                     {canWithdraw && <button type="button" className="btn sm danger" disabled={busy !== null} onClick={() => setModal({ kind: "withdraw" })}>Withdraw…</button>}
                   </div>
                 )}
-                {(actions.createInterview || actions.createPlacement) && (
+                {actions.createPlacement && (
                   <div className="rowactions">
-                    {actions.createInterview && <button type="button" className="btn" onClick={() => setModal({ kind: "interview" })}>Schedule interview</button>}
-                    {actions.createPlacement && <button type="button" className="btn primary" onClick={() => setModal({ kind: "placement" })}>Create placement</button>}
+                    <button type="button" className="btn primary" onClick={() => setModal({ kind: "placement" })}>Create placement</button>
                   </div>
                 )}
               </section>
@@ -301,8 +308,16 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
           <p>{s.candidateName ?? "The candidate"} will be withdrawn from {s.jobTitle} at {s.client}. A withdrawn submission is closed and can't be reopened.</p>
         </ConfirmDialog>
       )}
+      {s && modal?.kind === "rejectRound" && (
+        <RejectRoundDialog submission={s} round={modal.round} canRejectSubmission={canReject}
+          onClose={() => setModal(null)}
+          onDone={(also) => {
+            setModal(null); refreshRounds(qc, s.id);
+            announce(also ? `${modal.round.round} marked rejected and the submission rejected.` : `${modal.round.round} marked rejected.`);
+          }} />
+      )}
       {s && modal?.kind === "interview" && (
-        <ScheduleInterviewDialog submission={s} onClose={() => setModal(null)}
+        <ScheduleInterviewDialog submission={s} defaultRound={modal.defaultRound} onClose={() => setModal(null)}
           onScheduled={() => {
             setModal(null); announce("Interview scheduled.");
             void qc.invalidateQueries({ queryKey: ["interviews"] }); refresh();
@@ -310,8 +325,13 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
       )}
       {s && modal?.kind === "placement" && (
         <CreatePlacementDialog submission={s} onClose={() => setModal(null)}
+          clearRound={modal.round && { id: modal.round.id, round: modal.round.round, pending: modal.round.result !== "cleared" }}
+          onSelectedOnly={() => {
+            setModal(null); announce("Round cleared and submission moved to Selected. Create the placement when the offer is in.");
+            refreshRounds(qc, s.id);
+          }}
           onCreated={(r) => {
-            setModal(null); setCreated(r);
+            setModal(null); setCreated(r); refreshRounds(qc, s.id);
             announce(r.isFirstPlacement ? `Placement created for ${s.candidateName ?? "the candidate"}. This is their first placement.` : `Placement created for ${s.candidateName ?? "the candidate"}.`);
             void qc.invalidateQueries({ queryKey: ["placements"] }); refresh();
           }} />

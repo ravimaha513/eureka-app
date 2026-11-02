@@ -18,7 +18,11 @@ export const SUBMISSION_STATUSES = [
 export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];
 
 /** Per-record hints (docs/placements-api.md); the server still enforces every rule. */
-export interface SubmissionActions { transition: string[]; createInterview: boolean; createPlacement: boolean }
+export interface SubmissionActions {
+  transition: string[]; createInterview: boolean; createPlacement: boolean;
+  /** IS-11: may clear a round and place from it; absent on older servers. */
+  clearAndPlace?: boolean;
+}
 
 export interface Submission {
   id: string;
@@ -185,6 +189,15 @@ export const pipelineApi = {
       method: "PATCH", body: JSON.stringify({ to, ...(rejectionReason ? { rejectionReason } : {}) }),
     }),
   createInterview: (b: CreateInterview) => api<{ id: string }>("/api/v1/interviews", { method: "POST", body: JSON.stringify(b) }),
+  /** Every round of one submission the caller can see, in time order (drawer timeline). */
+  submissionInterviews: (submissionId: string) =>
+    api<Page<Interview>>(`/api/v1/interviews?${qs({ submissionId, sort: "asc", limit: 200 })}`),
+  setInterviewResult: (id: string, result: "pending" | "cleared" | "rejected") =>
+    api<Interview>(`/api/v1/interviews/${enc(id)}`, { method: "PATCH", body: JSON.stringify({ result }) }),
+  /** IS-11: mark the round cleared and move its submission to Selected in one step. */
+  clearAndSelect: (id: string) =>
+    api<{ interviewId: string; result: string; submissionId: string; submissionStatus: string }>(
+      `/api/v1/interviews/${enc(id)}/clear-and-select`, { method: "POST" }),
   placements: (f: PlacementFilters) => api<Page<Placement>>(`/api/v1/placements?${qs({ limit: 50, ...f })}`),
   placement: (id: string) => api<Placement>(`/api/v1/placements/${enc(id)}`),
   /** Teams for the Placements Team filter (placements and cleared interviews in the caller's scope). */
@@ -208,6 +221,7 @@ export const pipelineApi = {
 export const pipelineKeys = {
   submissions: ["submissions"] as const,
   submission: (id: string) => ["submissions", "detail", id] as const,
+  rounds: (id: string) => ["interviews", "submission", id] as const,
   placements: ["placements"] as const,
   placement: (id: string) => ["placements", "detail", id] as const,
 };

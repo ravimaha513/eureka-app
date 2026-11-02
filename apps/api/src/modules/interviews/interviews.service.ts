@@ -5,6 +5,7 @@ import {
   ownsActivity,
   resolveScope,
   resolveScopeFor,
+  submissionTransitionTargets,
   type ActivityRef,
   type Scope,
   type UserAccess,
@@ -389,6 +390,56 @@ export class InterviewsService {
       if (panelIds !== undefined) { changes.panelSize = panelIds.length; changes.leadId = lead ?? null; }
       await this.audit.record(c, { actorId: user.id, action: "interview.updated", entityType: "interview", entityId: id, changes });
       return { ...this.present(user.access, await this.load(c, user, id)), ...(await this.panel(c, id)) };
+    });
+  }
+
+  /**
+   * IS-11 "Clear and place": marks this round cleared and moves its submission
+   * forward, one step at a time through authz.transition_submission, to
+   * selected, in one transaction. The placement itself is created next with
+   * POST /placements. Refused when another visible round was rejected.
+   */
+  async clearAndSelect(user: AuthedUser, id: string) {
+    return this.db.withUser(user.id, async (c) => {
+      const row = await this.load(c, user, id);
+      if (!editableFields(user.access, ref(row)).has("result")
+          || !ownsActivity(resolveScope(user.access, "submission:update"), ref(row))) {
+        throw new ForbiddenException("Not permitted");
+      }
+      if (row.call_status === "cancelled" || row.call_status === "no_invite") throw new UnprocessableEntityException("interview_not_held");
+      const sub = await c.query<{ status: string }>(`SELECT status FROM eureka.submission WHERE id = $1`, [row.submission_id]);
+      const from = sub.rows[0]?.status;
+      if (from === undefined) throw new NotFoundException();
+      if (from !== "selected" && !submissionTransitionTargets(from).length) throw new UnprocessableEntityException("submission_closed");
+      const rejected = await c.query(
+        `SELECT 1 FROM eureka.interview WHERE submission_id = $1 AND id <> $2 AND result = 'rejected' LIMIT 1`, [row.submission_id, id]);
+      if (rejected.rowCount) throw new UnprocessableEntityException("round_rejected");
+
+      const sets = ["result = 'cleared'"];
+      if (row.call_status !== "completed") sets.push("call_status = 'completed'");
+      let updated = 0;
+      try {
+        if (row.result !== "cleared" || row.call_status !== "completed") {
+          updated = (await c.query(`UPDATE eureka.interview SET ${sets.join(", ")} WHERE id = $1`, [id])).rowCount ?? 0;
+          if (updated !== 1) throw new ForbiddenException("Not permitted");
+        }
+        let status = from;
+        while (status !== "selected") {
+          const next = submissionTransitionTargets(status).find((t) => t !== "rejected" && t !== "withdrawn")!;
+          status = (await c.query<{ s: string }>(`SELECT authz.transition_submission($1, $2, NULL) AS s`, [row.submission_id, next])).rows[0]!.s;
+        }
+      } catch (err) {
+        mapPipelineError(err);
+      }
+      if (updated) {
+        await this.audit.record(c, { actorId: user.id, action: "interview.updated", entityType: "interview", entityId: id,
+          changes: { result: "cleared", ...(sets.length > 1 ? { callStatus: "completed" } : {}) } });
+      }
+      if (from !== "selected") {
+        await this.audit.record(c, { actorId: user.id, action: "submission.status", entityType: "submission", entityId: row.submission_id,
+          changes: { from, to: "selected", viaInterview: id } });
+      }
+      return { interviewId: id, result: "cleared", submissionId: row.submission_id, submissionStatus: "selected" };
     });
   }
 

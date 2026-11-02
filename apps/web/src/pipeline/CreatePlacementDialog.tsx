@@ -25,10 +25,18 @@ const newKey = () => crypto.randomUUID();
  * The rate is optional input: users without rate:read may enter it but never
  * see it back. Snapshots and first-placement are set by the server (PL-2, PL-3).
  */
-export function CreatePlacementDialog({ submission, onClose, onCreated }: {
+export function CreatePlacementDialog({ submission, onClose, onCreated, clearRound, onSelectedOnly }: {
   submission: Pick<Submission, "id" | "candidateName" | "jobTitle" | "client">;
   onClose: () => void;
   onCreated: (r: { id: string; isFirstPlacement: boolean }) => void;
+  /**
+   * IS-11 "Clear and place": the round to clear first. The submission is moved
+   * to Selected (POST /interviews/:id/clear-and-select, a no-op when already
+   * done) before the placement is created, so a failed placement can be retried.
+   */
+  clearRound?: { id: string; round: string; pending: boolean };
+  /** With clearRound: clear the round and mark the submission Selected without a placement yet. */
+  onSelectedOnly?: () => void;
 }) {
   const id = useId();
   const qc = useQueryClient();
@@ -123,6 +131,7 @@ export function CreatePlacementDialog({ submission, onClose, onCreated }: {
     };
     setBusy(true);
     try {
+      if (clearRound) await pipelineApi.clearAndSelect(clearRound.id);
       const r = await pipelineApi.createPlacement(body, keyRef.current);
       onCreated(r);
     } catch (err) {
@@ -141,9 +150,26 @@ export function CreatePlacementDialog({ submission, onClose, onCreated }: {
     } finally { setBusy(false); }
   };
 
+  const selectOnly = async () => {
+    setBusy(true); setFormError("");
+    try {
+      await pipelineApi.clearAndSelect(clearRound!.id);
+      onSelectedOnly!();
+    } catch (err) { setFormError(pipelineError(err, "submission")); }
+    finally { setBusy(false); }
+  };
+  const title = clearRound?.pending
+    ? `Clear ${clearRound.round} and create placement · ${submission.candidateName ?? "Candidate"}`
+    : `Create placement · ${submission.candidateName ?? "Candidate"}`;
+
   return (
-    <Dialog title={`Create placement · ${submission.candidateName ?? "Candidate"}`} onClose={onClose}>
+    <Dialog title={title} onClose={onClose}>
       <form ref={formRef} onSubmit={submit} noValidate>
+        {clearRound && (
+          <p className="banner ok">
+            {clearRound.pending ? `${clearRound.round} will be marked cleared and the` : "The"} submission moved to Selected, then the placement is created.
+          </p>
+        )}
         <p className="hint">{submission.jobTitle} at {submission.client}. Candidate, team, client and vendor come from the submission.</p>
         <div className="grid2">
           <Field label="Placement type" error={errors.placementType}>
@@ -215,7 +241,18 @@ export function CreatePlacementDialog({ submission, onClose, onCreated }: {
             </div>
           </>
         ) : (
-          <DialogActions onCancel={onClose} submitLabel="Create placement" busy={busy} disabled={blocked} error={formError} />
+          <>
+            <DialogActions onCancel={onClose} submitLabel={clearRound?.pending ? "Clear and create placement" : "Create placement"}
+              busy={busy} disabled={blocked} error={formError} />
+            {clearRound && onSelectedOnly && (
+              <p className="hint">
+                Waiting on the offer?{" "}
+                <button type="button" className="linkbtn" disabled={busy} onClick={() => void selectOnly()}>
+                  {clearRound.pending ? "Only clear the round and mark Selected" : "Only mark Selected"}
+                </button>
+              </p>
+            )}
+          </>
         )}
       </form>
     </Dialog>

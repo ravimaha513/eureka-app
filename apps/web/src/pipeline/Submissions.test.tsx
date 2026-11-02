@@ -10,7 +10,7 @@ const RECRUITER = meFor("recruiter");
 const S1 = sub("s1");
 const S2 = sub("s2", {
   candidateName: "Divya Menon", jobTitle: "Data Engineer", status: "selected",
-  actions: { transition: [], createInterview: false, createPlacement: true },
+  actions: { transition: [], createInterview: false, createPlacement: true, clearAndPlace: true },
 });
 
 let api: ReturnType<typeof mockApi>;
@@ -19,6 +19,7 @@ const base = (): Record<string, Handler> => ({
   "GET /api/v1/submissions/s1": () => ({ body: S1 }),
   "GET /api/v1/submissions/s2": () => ({ body: S2 }),
   "GET /api/v1/lookups": () => ({ body: LOOKUPS }),
+  "GET /api/v1/interviews": () => ({ body: { items: [], nextCursor: null } }),
 });
 beforeEach(() => { api = mockApi(base()); });
 afterEach(() => vi.restoreAllMocks());
@@ -125,7 +126,7 @@ describe("Submission detail", () => {
     const drawer = await openDrawer("Asha Iyer");
     const group = within(drawer).getByRole("group", { name: "Change status" });
     expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(["Move to Under review", "Reject…", "Withdraw…"]);
-    expect(within(drawer).getByRole("button", { name: "Schedule interview" })).toBeInTheDocument();
+    expect(await within(drawer).findByRole("button", { name: "Schedule interview" })).toBeInTheDocument();
     expect(within(drawer).queryByRole("button", { name: "Create placement" })).not.toBeInTheDocument();
 
     fireEvent.click(within(group).getByRole("button", { name: "Move to Under review" }));
@@ -196,7 +197,7 @@ describe("Submission detail", () => {
     api.routes["POST /api/v1/interviews"] = () => (++n === 1 ? problem(409, { detail: "interview_conflict" }) : { status: 201, body: { id: "i1" } });
     wrap(<SubmissionsPage me={RECRUITER} />);
     const drawer = await openDrawer("Asha Iyer");
-    fireEvent.click(within(drawer).getByRole("button", { name: "Schedule interview" }));
+    fireEvent.click(await within(drawer).findByRole("button", { name: "Schedule interview" }));
     const dlg = screen.getByRole("dialog", { name: "Schedule interview · Asha Iyer" });
     await within(dlg).findByRole("option", { name: "Coach One" });
     fireEvent.change(within(dlg).getByLabelText("Round"), { target: { value: "Technical 1" } });

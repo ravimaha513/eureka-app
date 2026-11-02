@@ -11,10 +11,12 @@ const MAX_MS = 12 * 60 * 60 * 1000;
 const FIELDS = ["round", "startsAt", "endsAt", "coachId"] as const;
 
 /** Schedule an interview for one submission (POST /api/v1/interviews); same rules as the Interviews board. */
-export function ScheduleInterviewDialog({ submission, onClose, onScheduled }: {
+export function ScheduleInterviewDialog({ submission, onClose, onScheduled, defaultRound = "" }: {
   submission: Pick<Submission, "id" | "candidateName" | "jobTitle" | "client">; onClose: () => void; onScheduled: () => void;
+  /** Prefilled round name (the drawer suggests the next one, e.g. L2 after L1). */
+  defaultRound?: string;
 }) {
-  const [v, setV] = useState({ round: "", start: "", end: "", coachId: "", invite: false });
+  const [v, setV] = useState({ round: defaultRound, start: "", end: "", coachId: "", invite: false });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);

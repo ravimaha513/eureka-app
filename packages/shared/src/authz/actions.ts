@@ -61,6 +61,8 @@ export interface SubmissionActions {
   transition: SubmissionStatus[];
   createInterview: boolean;
   createPlacement: boolean;
+  /** IS-11: may clear a round and place from it (submission open or selected, placement:create covers it). */
+  clearAndPlace: boolean;
 }
 
 /**
@@ -74,16 +76,17 @@ export function submissionActions(
   candidate: CandidateRef | null,
 ): SubmissionActions {
   const canUpdate = ownsActivity(resolveScope(user, "submission:update"), s);
+  const canPlace =
+    canUpdate &&
+    ownsActivity(resolveScope(user, "placement:create"), s) &&
+    candidate !== null &&
+    PLACEABLE_CANDIDATE_STATUSES.has(candidate.marketingStatus) &&
+    candidateVisible(resolveScope(user, "placement:create"), candidate);
   return {
     transition: canUpdate ? submissionTransitionTargets(status) : [],
     createInterview: canUpdate && resolveScope(user, "interview:create") !== null && !TERMINAL_SUBMISSION_STATUSES.has(status),
-    createPlacement:
-      canUpdate &&
-      status === "selected" &&
-      ownsActivity(resolveScope(user, "placement:create"), s) &&
-      candidate !== null &&
-      PLACEABLE_CANDIDATE_STATUSES.has(candidate.marketingStatus) &&
-      candidateVisible(resolveScope(user, "placement:create"), candidate),
+    createPlacement: canPlace && status === "selected",
+    clearAndPlace: canPlace && (status === "selected" || !TERMINAL_SUBMISSION_STATUSES.has(status)),
   };
 }
 

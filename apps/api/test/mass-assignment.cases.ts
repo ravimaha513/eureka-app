@@ -1757,6 +1757,20 @@ const IGNORED: IgnoreCase[] = [
     },
   },
   { route: "POST /api/v1/interviews/:id/calendar-block/release", run: async () => undefined /* covered with the block case above */ },
+  // IS-11 clear-and-select takes no body: the interview comes from the URL, the target status is always selected
+  {
+    route: "POST /api/v1/interviews/:id/clear-and-select",
+    run: async () => {
+      const cand = await newCandidate(db, { teamId: T.t1, recruiterId: U.r1a, locationId: LOC.dallas });
+      const sub = await selectedSubmission(db, U.r1a, cand.id, "interview_requested");
+      const iv = await ok("r1a", "POST", "/api/v1/interviews", { submissionId: sub, round: "MA", startsAt: "2032-02-03T15:00:00Z", durationMin: 30 });
+      const r = await call("r1a", "POST", `/api/v1/interviews/${iv.id}/clear-and-select`,
+        { ...SERVER_MANAGED, result: "rejected", submissionStatus: "withdrawn", submissionId: FOREIGN_ID, resultBy: U.admin2 });
+      expect(r.statusCode, r.body).toBe(201);
+      expect(await rows(`SELECT i.result, i.result_by, s.status FROM eureka.interview i JOIN eureka.submission s ON s.id = i.submission_id WHERE i.id = $1`, [iv.id]))
+        .toEqual([{ result: "cleared", result_by: U.r1a, status: "selected" }]);
+    },
+  },
   {
     route: "POST /api/v1/calendar/support/disconnect",
     run: async () => {
