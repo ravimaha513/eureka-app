@@ -33,7 +33,8 @@ BEGIN
     RAISE EXCEPTION 'placement_exists' USING ERRCODE = 'unique_violation';
   END IF;
   SELECT cd.* INTO c FROM eureka.candidate cd WHERE cd.id = s.candidate_id FOR UPDATE;
-  IF NOT FOUND OR c.marketing_status IS NULL OR c.marketing_status NOT IN ('active', 'full_of_interviews') THEN
+  -- 'confirmation': another placement for the candidate is in progress; a second one may be made alongside it.
+  IF NOT FOUND OR c.marketing_status IS NULL OR c.marketing_status NOT IN ('active', 'full_of_interviews', 'confirmation') THEN
     RAISE EXCEPTION 'candidate_not_available' USING ERRCODE = 'check_violation';
   END IF;
   IF NOT coalesce(authz.candidate_visible(c.id, 'placement:create'), false) THEN
@@ -75,14 +76,19 @@ BEGIN
             nullif(pg_catalog.btrim(ct ->> 'email'), ''), nullif(pg_catalog.btrim(ct ->> 'phone'), ''));
   END LOOP;
 
-  PERFORM authz.candidate_status_by_placement(c.id, 'confirmation');
+  IF c.marketing_status IS DISTINCT FROM 'confirmation' THEN
+    PERFORM authz.candidate_status_by_placement(c.id, 'confirmation');
+  END IF;
 
   INSERT INTO eureka.outbox_event (type, aggregate_type, aggregate_id, payload)
   VALUES ('placement.created', 'placement', new_id, pg_catalog.jsonb_build_object(
     'placementId', new_id, 'submissionId', s.id, 'candidateId', s.candidate_id, 'status', 'confirmed',
     'isFirstPlacement', first, 'notify', pg_catalog.jsonb_build_array('hr', 'accounts', 'immigration')));
 
-  RETURN QUERY SELECT new_id, first, c.marketing_status::text, 'confirmation'::text;
+  -- No candidate change to report when they were already in confirmation.
+  RETURN QUERY SELECT new_id, first,
+    CASE WHEN c.marketing_status IS DISTINCT FROM 'confirmation' THEN c.marketing_status::text END,
+    CASE WHEN c.marketing_status IS DISTINCT FROM 'confirmation' THEN 'confirmation'::text END;
 END $function$;
 
 REVOKE ALL ON FUNCTION authz.create_placement(uuid, text, numeric, text, text, text, date, uuid, jsonb, boolean) FROM PUBLIC;

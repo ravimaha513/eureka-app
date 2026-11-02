@@ -102,8 +102,8 @@ export const CLOSED_BEFORE_JOIN_STATUSES: ReadonlySet<string> = new Set(["backou
 /** BGC employment and address history choices, in years (migration 0160). */
 export const BGC_HISTORY_YEARS = [3, 5, 7, 10] as const;
 
-/** Candidate statuses from which a placement may be created (PL-5 moves them to confirmation). */
-export const PLACEABLE_CANDIDATE_STATUSES: ReadonlySet<string> = new Set(["active", "full_of_interviews"]);
+/** Candidate statuses a placement can be made from; confirmation = another placement already in progress (a second one is allowed). */
+export const PLACEABLE_CANDIDATE_STATUSES: ReadonlySet<string> = new Set(["active", "full_of_interviews", "confirmation"]);
 
 // ---------- paperwork checklist items (migration 0044, docs/paperwork-api.md PW-2) ----------
 

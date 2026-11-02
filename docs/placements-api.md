@@ -18,6 +18,7 @@ like `/submissions`. Design references: B2.2 (`placement`, `placement_contact`,
 | PL-7 | Notifications to HR, Accounts and Immigration are recorded as `outbox_event` rows (type `placement.created`, `placement.state_changed`) in the same transaction; delivered by the worker job `outbox-delivery` (migration 0024). |
 | PL-8 | `Idempotency-Key` header is required on `POST /placements` (design B3); a repeat with the same key and body returns the first response. |
 | PL-9 | Every write is audited. |
+| PL-10 | (Migration 0380) A candidate may have several placements in progress at once: one can be created while the candidate is in `confirmation` (no candidate change then). A backout / BGC failure before joining moves them back to `active` only when no other placement is still in progress. Only one can join while an assignment is open: joining another is refused with 422 `candidate_on_assignment` (back it out instead). |
 
 ## Endpoints
 

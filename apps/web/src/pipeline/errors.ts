@@ -8,6 +8,8 @@ export const PIPELINE_ERRORS: Record<string, string> = {
   reason_required: "Give a reason for this status change.",
   rejection_reason_required: "Give a rejection reason.",
   rejection_reason_not_allowed: "A rejection reason can only be given when rejecting.",
+  candidate_not_available: "This candidate can't be placed in their current status (for example on hold or already placed). Move them to Active first.",
+  candidate_on_assignment: "The candidate already joined through another placement. Back this placement out, or end the other assignment first.",
   round_rejected: "Another round of this submission was rejected. Reset that round to pending first if the client is moving ahead anyway.",
   interview_not_held: "This round was cancelled or never got an invite, so it can't be cleared.",
   submission_closed: "This submission is closed (selected, rejected or withdrawn) and can't be changed.",

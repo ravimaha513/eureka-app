@@ -16,9 +16,10 @@ const CODES: Record<string, (code: string) => HttpException> = {
   reason_required: (c) => new UnprocessableEntityException(c),
   invalid_placement: (c) => new UnprocessableEntityException(c),
   placement_exists: (c) => new ConflictException(c),
+  candidate_on_assignment: (c) => new UnprocessableEntityException(c),
 };
 
-const PLACEMENT_UNIQUE = new Set(["placement_active_submission", "placement_open_candidate"]);
+const PLACEMENT_UNIQUE = new Set(["placement_active_submission"]);
 
 /**
  * Maps errors raised by authz.create_placement / authz.transition_placement

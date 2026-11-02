@@ -275,6 +275,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Interview result (0360): per-round Pending/Cleared/Rejected (Sales: recruiter, lead and above), Result column + filter on the board; Placements → Cleared interviews tab (latest first, by team) and Team filter (`GET /placements/teams`).
 - Submission funnel (submitted → interview → screening/L1/L2/L3+/final → placed) on Submissions page + candidate tab; per-row interview-round trail; `stage` filter (docs/submissions-api.md).
 - Interview rounds in the submission drawer: per-round Mark cleared / Mark rejected (optionally rejects the submission) / Reset; "Clear and place" on the latest round (`POST /interviews/:id/clear-and-select` walks the submission to Selected, then the placement dialog; "only mark Selected" option); Schedule next round prefilled (docs/interviews-settings-api.md IS-11).
+- Several placements in progress per candidate (0380, PL-10): create while in Confirmation; backout keeps Confirmation while another is open; second join refused (`candidate_on_assignment`).
 - Team = reporting line: joining a team (drawer, My team, admin, import, move) or a lead change sets the member's manager to the team's lead, so AD/manager hierarchy scope (Hot List, candidates) follows the teams; existing members backfilled (migration 0370, docs/admin-api.md AD-9).
 
 ## Next tasks (Phase 2 to MVP), in suggested order

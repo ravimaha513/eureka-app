@@ -136,13 +136,36 @@ describe("create_placement", () => {
     const sub = await selectedSubmission(db, U.r1a, cand.id);
     const first = await createPlacement(db, U.r1a, sub);
     await expect(createPlacement(db, U.r1a, sub)).rejects.toThrow(/placement_exists/);
-    // A second submission of the same candidate: the candidate is now in confirmation.
-    const other = await selectedSubmission(db, U.r1a, cand.id);
-    await expect(createPlacement(db, U.r1a, other)).rejects.toThrow(/candidate_not_available/);
     // After a backout the submission can be placed again.
     await transitionPlacement(db, U.r1a, first.id, "backout", "Candidate declined");
     const again = await createPlacement(db, U.r1a, sub);
     expect(again.isFirst).toBe(true); // a backout never counts (PL-3)
+  });
+
+  it("a second placement while another is in progress: the candidate stays in confirmation until the last one ends", async () => {
+    const cand = await r1aCandidate();
+    const status = async () => (await db.admin.query(`SELECT marketing_status FROM eureka.candidate WHERE id = $1`, [cand.id])).rows[0].marketing_status;
+    const a = await createPlacement(db, U.r1a, await selectedSubmission(db, U.r1a, cand.id));
+    const b = await createPlacement(db, U.r1a, await selectedSubmission(db, U.r1a, cand.id));
+    expect([b.candidateFrom, b.candidateTo]).toEqual([null, null]); // already in confirmation: no candidate change
+    expect(await status()).toBe("confirmation");
+    await transitionPlacement(db, U.r1a, a.id, "backout", "Picked the other offer");
+    expect(await status()).toBe("confirmation"); // b is still in progress
+    await transitionPlacement(db, U.r1a, b.id, "backout", "Client froze the role");
+    expect(await status()).toBe("active");
+  });
+
+  it("of two placements one joins; the other can't join while that assignment is open and backs out, leaving them placed", async () => {
+    const cand = await r1aCandidate();
+    const status = async () => (await db.admin.query(`SELECT marketing_status FROM eureka.candidate WHERE id = $1`, [cand.id])).rows[0].marketing_status;
+    const a = await createPlacement(db, U.r1a, await selectedSubmission(db, U.r1a, cand.id));
+    const b = await createPlacement(db, U.r1a, await selectedSubmission(db, U.r1a, cand.id));
+    for (const p of [a, b]) for (const to of ["paperwork", "bgc", "ready"]) await transitionPlacement(db, U.r1a, p.id, to);
+    await transitionPlacement(db, U.r1a, a.id, "joined");
+    expect(await status()).toBe("placed");
+    await expect(transitionPlacement(db, U.r1a, b.id, "joined")).rejects.toThrow(/candidate_on_assignment/);
+    await transitionPlacement(db, U.r1a, b.id, "backout", "Joined the other client");
+    expect(await status()).toBe("placed");
   });
 
   it.each(["on_hold", "stopped", "bench", "in_training", "terminated", "placed"])("refuses a candidate in %s", async (status) => {

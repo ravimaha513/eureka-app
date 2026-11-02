@@ -41,14 +41,25 @@ BEGIN
   SELECT c.marketing_status INTO cand_status FROM eureka.candidate c WHERE c.id = p.candidate_id FOR UPDATE;
 
   IF p_to = 'joined' THEN
-    PERFORM authz.candidate_status_by_placement(p.candidate_id, 'placed');
-    cand_to := 'placed';
+    -- Already placed through another placement: the candidate stays placed.
+    IF cand_status IS DISTINCT FROM 'placed' THEN
+      PERFORM authz.candidate_status_by_placement(p.candidate_id, 'placed');
+      cand_to := 'placed';
+    END IF;
     PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('eureka.assignment:' || p.person_id::text));
+    -- With two placements in progress, only one can join while the other assignment is open.
+    IF EXISTS (SELECT 1 FROM eureka.assignment o WHERE o.person_id = p.person_id AND o.end_date IS NULL) THEN
+      RAISE EXCEPTION 'candidate_on_assignment' USING ERRCODE = 'check_violation';
+    END IF;
     SELECT coalesce(max(a.assignment_no), 0) + 1 INTO next_no FROM eureka.assignment a WHERE a.person_id = p.person_id;
     INSERT INTO eureka.assignment (person_id, placement_id, assignment_no, start_date)
     VALUES (p.person_id, p.id, next_no, CURRENT_DATE);
   ELSIF p_to IN ('backout', 'bgc_failed', 'joining_issue') AND p.status IS DISTINCT FROM 'joined' THEN
-    IF cand_status IS NOT DISTINCT FROM 'confirmation' THEN
+    -- Back to active only when no other placement of the candidate is still in progress.
+    IF cand_status IS NOT DISTINCT FROM 'confirmation'
+       AND NOT EXISTS (SELECT 1 FROM eureka.placement o
+                       WHERE o.candidate_id = p.candidate_id AND o.id <> p.id
+                         AND o.status IN ('confirmed', 'paperwork', 'bgc', 'ready')) THEN
       PERFORM authz.candidate_status_by_placement(p.candidate_id, 'active');
       cand_to := 'active';
     END IF;

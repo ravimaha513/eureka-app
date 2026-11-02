@@ -84,11 +84,11 @@ describe("interview clear-and-select", () => {
     expect(placed.statusCode, placed.body).toBe(201);
     expect(sub.interviews.map((t: { id: string }) => t.id)).toEqual([interviewId]);
 
-    // The candidate is now in confirmation: another submission for them hints why it can't be placed.
+    // The candidate is now in confirmation: a second placement may still be made from another submission.
     const candidateId = (await db.admin.query(`SELECT candidate_id FROM eureka.submission WHERE id = $1`, [submissionId])).rows[0].candidate_id;
     const other = await selectedSubmission(db, U.r1a, candidateId, "submitted");
     const otherSub = (await call("r1a", "GET", `/api/v1/submissions/${other}`)).json();
-    expect(otherSub.actions).toMatchObject({ clearAndPlace: false, placeBlocked: "confirmation" });
+    expect(otherSub.actions).toMatchObject({ clearAndPlace: true, placeBlocked: null });
   });
 
   it("repeating on a selected submission is a no-op success", async () => {

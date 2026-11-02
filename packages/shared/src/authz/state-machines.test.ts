@@ -70,8 +70,10 @@ describe("action hints", () => {
     });
     expect(submissionActions(R1a, r1aAct, "withdrawn", own).clearAndPlace).toBe(false);
     expect(submissionActions(R1a, r1aAct, "submitted", { ...own, marketingStatus: "on_hold" }).clearAndPlace).toBe(false);
-    expect(submissionActions(R1a, r1aAct, "submitted", { ...own, marketingStatus: "confirmation" }).placeBlocked).toBe("confirmation");
-    expect(submissionActions(R1a, r1aAct, "withdrawn", { ...own, marketingStatus: "confirmation" }).placeBlocked).toBeNull();
+    // A second placement may be made while another is in progress (candidate in confirmation).
+    expect(submissionActions(R1a, r1aAct, "submitted", { ...own, marketingStatus: "confirmation" })).toMatchObject({ clearAndPlace: true, placeBlocked: null });
+    expect(submissionActions(R1a, r1aAct, "submitted", { ...own, marketingStatus: "placed" }).placeBlocked).toBe("placed");
+    expect(submissionActions(R1a, r1aAct, "withdrawn", { ...own, marketingStatus: "placed" }).placeBlocked).toBeNull();
     expect(submissionActions(HR, r1aAct, "selected", own)).toEqual({ transition: [], createInterview: false, createPlacement: false, clearAndPlace: false, placeBlocked: null });
   });
 

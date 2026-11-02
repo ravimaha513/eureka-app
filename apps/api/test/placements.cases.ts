@@ -191,7 +191,7 @@ describe("per-record actions match what the server allows (submissions)", () => 
     for (const item of items) {
       const id = item.id as string;
       const actions = item.actions as { transition: string[]; createInterview: boolean; createPlacement: boolean };
-      expect(Object.keys(actions).sort()).toEqual(["createInterview", "createPlacement", "transition"]);
+      expect(Object.keys(actions).sort()).toEqual(["clearAndPlace", "createInterview", "createPlacement", "placeBlocked", "transition"]);
       for (const to of SUBMISSION_STATUSES) {
         const r = await call(key, "PATCH", `/api/v1/submissions/${id}/status`, { to, ...(to === "rejected" ? { rejectionReason: "Probe" } : {}) });
         const ok = actions.transition.includes(to);
