@@ -371,7 +371,7 @@ export class PaperworkService {
     return row;
   }
 
-  /** PW-6..PW-9. 404 without document:read over the placement; 403 without bgc:update. */
+  /** PW-6..PW-9. 404 without document:read over the placement; 403 without bgc:update (or placement.bgc_status:update for marking it initiated). */
   async updateBgc(user: AuthedUser, placementId: string, body: UpdateBgc) {
     return this.db.withUser(user.id, async (c) => {
       const h = await this.header(c, user, placementId);
@@ -379,7 +379,10 @@ export class PaperworkService {
       const status = current?.status ?? "not_started";
       const acts = bgcActions(user.access, paperworkRef(h), status, h.placement_status);
       const { expectedVersion, ...changes } = body;
-      if (h.placement_status !== "backout" && !acts.update) throw new ForbiddenException("Not permitted");
+      // Without bgc:update, Manager/AD may only mark the check initiated (bgcActions offers just that).
+      const initiateOnly = changes.status === "initiated" && acts.transition.includes("initiated")
+        && Object.keys(changes).every((k) => k === "status" || k === "reason");
+      if (h.placement_status !== "backout" && !acts.update && !initiateOnly) throw new ForbiddenException("Not permitted");
       if (changes.status !== undefined) {
         if (!bgcTransitionAllowed(status, changes.status)) throw new UnprocessableEntityException("invalid_transition");
         if (bgcReasonRequired(status, changes.status) && !changes.reason) throw new UnprocessableEntityException("reason_required");

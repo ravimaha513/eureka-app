@@ -274,19 +274,20 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
   const refreshBgc = () => { refresh(); void qc.invalidateQueries({ queryKey: paperworkKeys.all }); };
 
   const transitions = p?.allowedTransitions ?? [];
+  const canInitiateBgc = full && Boolean(p?.bgc?.actions?.transition.includes("initiated"));
   const forward = transitions.filter((t) => !EXITS.has(t));
   const exits = transitions.filter((t) => EXITS.has(t));
 
   return (
     <>
-      <Drawer title={p ? `${p.candidate.name} · ${p.client.name}` : "Placement"} onClose={onClose} suspended={exit !== null || reinitiate} wide closeLabel="Close placement details">
+      <Drawer title={p ? `${p.candidate.name ?? "Candidate not visible"} · ${p.client.name}` : "Placement"} onClose={onClose} suspended={exit !== null || reinitiate} wide closeLabel="Close placement details">
         {q.isLoading && !p ? <Loading /> : !p ? (
           <p className="error" role="alert">{pipelineError(q.error, "placement")}</p>
         ) : (
           <>
             <p><PipelineStatus status={p.status} />{p.isFirstPlacement && <>{" "}<FirstPlacementBadge /></>}{p.reconfirmed && <>{" "}<ReconfirmedBadge /></>}</p>
             <dl className="facts">
-              <dt>Candidate</dt><dd>{p.candidate.name}</dd>
+              <dt>Candidate</dt><dd>{p.candidate.name ?? <span className="muted">Not visible to you</span>}</dd>
               <dt>Technology</dt><dd>{p.technology?.name ?? "—"}</dd>
               <dt>Existing consultant re-confirmed</dt><dd>{p.reconfirmed ? "Yes" : "No"}</dd>
               <dt>Client</dt><dd>{p.client.name}</dd>
@@ -306,13 +307,19 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
             <p role="status" aria-live="polite" className="livemsg">{message}</p>
             {error && <p className="banner error" role="alert">{error}</p>}
 
-            {transitions.length > 0 && (
+            {(transitions.length > 0 || canInitiateBgc) && (
               <section className="manageblock" aria-labelledby={`${hid}-st`}>
                 <h3 id={`${hid}-st`}>Status</h3>
                 <div className="rowactions" role="group" aria-labelledby={`${hid}-st`}>
                   {forward.map((t) => (
                     <button key={t} type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === t || undefined}
                       onClick={() => void move(t)}>Move to {pipelineLabel(t)}</button>
+                  ))}
+                  {canInitiateBgc && (p.bgc?.status === "cleared" ? (
+                    <button type="button" className="btn sm" disabled={busy !== null} onClick={() => setReinitiate(true)}>Re-initiate BGC…</button>
+                  ) : (
+                    <button type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === "bgc" || undefined}
+                      onClick={() => void initiateBgc()}>Mark BGC initiated</button>
                   ))}
                   {exits.map((t) => (
                     <button key={t} type="button" className="btn sm danger" disabled={busy !== null} onClick={() => setExit(t)}>
@@ -373,17 +380,7 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
               <section className="manageblock" aria-labelledby={`${hid}-b`}>
                 <h3 id={`${hid}-b`}>Background check</h3>
                 <p><span className={`badge bgc-${p.bgc.status}`}>{p.bgc.status === "not_started" ? "Not started" : pipelineLabel(p.bgc.status)}</span>
-                  {" "}<span className="muted">Details are recorded by HR on Paperwork &amp; BGC.</span></p>
-                {p.bgc.actions?.transition.includes("initiated") && (
-                  <div className="rowactions">
-                    {p.bgc.status === "cleared" ? (
-                      <button type="button" className="btn sm" disabled={busy !== null} onClick={() => setReinitiate(true)}>Re-initiate BGC…</button>
-                    ) : (
-                      <button type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === "bgc" || undefined}
-                        onClick={() => void initiateBgc()}>Initiate BGC</button>
-                    )}
-                  </div>
-                )}
+                  {" "}<span className="muted">Mark it initiated under Status; details are recorded by HR on Paperwork &amp; BGC.</span></p>
               </section>
             )}
 

@@ -22,7 +22,12 @@ BEGIN
   IF NOT FOUND OR actor IS NULL OR NOT coalesce(authz.placement_covered(p_placement, 'document:read'), false) THEN
     RAISE EXCEPTION 'placement_not_found' USING ERRCODE = 'no_data_found';
   END IF;
-  IF NOT coalesce(authz.placement_covered(p_placement, 'bgc:update'), false) THEN
+  -- bgc:update (HR) edits everything; placement.bgc_status:update (Manager, AD) may only mark it initiated.
+  IF NOT coalesce(authz.placement_covered(p_placement, 'bgc:update'), false)
+     AND NOT coalesce(pg_catalog.jsonb_typeof(p_changes) = 'object'
+         AND p_changes ->> 'status' = 'initiated'
+         AND NOT EXISTS (SELECT 1 FROM pg_catalog.jsonb_object_keys(p_changes) k WHERE k NOT IN ('status', 'reason'))
+         AND authz.owns('placement.bgc_status:update', pl.recruiter_id, pl.team_id, pl.location_id), false) THEN
     RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
   END IF;
   IF pg_catalog.jsonb_typeof(p_changes) IS DISTINCT FROM 'object'

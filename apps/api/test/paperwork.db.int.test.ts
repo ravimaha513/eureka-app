@@ -400,15 +400,17 @@ describe("background checks", () => {
     ]);
   });
 
-  it("only bgc:update over the placement writes (HR); 404 without document:read coverage", async () => {
+  it("only bgc:update over the placement writes (HR), Manager/AD only mark it initiated; 404 without document:read coverage", async () => {
     const { id } = await placed();
     for (const k of users) {
       const docs = ["r1a", "l1", "m1", "ad", "hr", "acct", "imm"].includes(k);
       const run = updateBgc(U[k], id, { status: "initiated" }, null, false);
-      if (k === "hr") await expect(run).resolves.toBeTruthy();
+      if (["hr", "m1", "ad"].includes(k)) await expect(run, k).resolves.toBeTruthy();
       else if (docs) await expect(run, k).rejects.toThrow(/not_permitted/);
       else await expect(run, k).rejects.toThrow(/placement_not_found/);
     }
+    await expect(updateBgc(U.m1, id, { status: "initiated", bgcCompany: "Fictional" }, null, false)).rejects.toThrow(/not_permitted/);
+    await expect(updateBgc(U.m1, id, { notes: "Fictional" }, null, false)).rejects.toThrow(/not_permitted/);
     await expect(db.app.query(`SELECT authz.update_bgc($1, '{"status":"initiated"}', NULL)`, [id])).rejects.toThrow(/placement_not_found/);
     await expect(updateBgc(U.hr, null, { status: "initiated" })).rejects.toThrow(/placement_not_found/);
   });

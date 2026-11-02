@@ -34,9 +34,9 @@ export class PaperworkController {
     return this.svc.detail(user, id);
   }
 
-  /** PW-6..PW-9: the placement's background check. */
+  /** PW-6..PW-9: the placement's background check. The service checks bgc:update, or placement.bgc_status:update for marking it initiated. */
   @Patch("placements/:id/bgc")
-  @RequirePermission("bgc:update")
+  @RequirePermission("document:read")
   bgc(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.updateBgc(user, id, UpdateBgc.parse(body));
   }

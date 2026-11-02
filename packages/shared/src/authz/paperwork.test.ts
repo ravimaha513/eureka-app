@@ -82,6 +82,10 @@ describe("paperwork coverage and actions", () => {
     expect(bgcActions(HR_M, ref, "failed", "bgc_failed").failPlacement).toBe(false);
     expect(bgcActions(HR_M, ref, "in_progress", null).failPlacement).toBe(false);
     expect(bgcActions(M, ref, "in_progress", "bgc")).toEqual({ update: false, transition: [], failPlacement: false });
+    // Manager/AD (placement.bgc_status:update) may only mark the check initiated.
+    expect(bgcActions(M, ref, "not_started", "joined")).toEqual({ update: false, transition: ["initiated"], failPlacement: false });
+    expect(bgcActions(M, ref, "cleared", "joined").transition).toEqual(["initiated"]);
+    expect(bgcActions(M, ref, "not_started", "backout").transition).toEqual([]);
     expect(bgcActions(IMM, ref, "in_progress", null).update).toBe(false);
     expect(bgcActions(HR, ref, "initiated", "backout").update).toBe(false);
   });

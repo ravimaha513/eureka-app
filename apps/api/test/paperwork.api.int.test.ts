@@ -269,7 +269,11 @@ describe("BGC", () => {
   it("HR records the check; others get 403 or 404; values and transitions are validated", async () => {
     const m = await placed();
     const url = `/api/v1/paperwork/placements/${m.id}/bgc`;
-    expect((await call("m1", "PATCH", url, { status: "initiated" })).statusCode).toBe(403); // no bgc:update
+    expect((await call("m1", "PATCH", url, { status: "initiated", notes: "Fictional" })).statusCode).toBe(403); // no bgc:update
+    // Manager (placement.bgc_status:update) marks it initiated only: status alone, from the drawer.
+    const pm = await placed();
+    const mi = await call("m1", "PATCH", `/api/v1/paperwork/placements/${pm.id}/bgc`, { status: "initiated" });
+    expect(mi.statusCode, mi.body).toBe(200);
     expect((await call("imm", "PATCH", url, { status: "initiated" })).statusCode).toBe(403);
     let res = await call("hr", "PATCH", url, { status: "initiated", bgcCompany: "Fictional Checks LLC", employmentYears: 7, helpedBy: U.r1a });
     expect(res.statusCode, res.body).toBe(200);
