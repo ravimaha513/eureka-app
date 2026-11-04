@@ -152,7 +152,10 @@ describe("preferred vendors (0172)", () => {
     await expect(upd(U.r1a, ids.r1a!, 7)).rejects.toThrow(/stale/);
     await upd(U.r1a, ids.r1a!, 1);
     await expect(as(U.m1, (c) => c.query(`SELECT authz.preferred_vendor_archive($1)`, [ids.r1b]))).rejects.toThrow(/not_permitted/);
-    await expect(as(U.ceo, (c) => c.query(`SELECT authz.preferred_vendor_create('x', NULL, NULL, NULL, NULL, NULL, NULL, NULL)`)))
+    // Superiors add entries of their own, but reports' entries stay read-only.
+    await expect(upd(U.ceo, ids.r1a!, 2)).rejects.toThrow(/not_permitted/);
+    await expect(as(U.ceo, (c) => c.query(`SELECT authz.preferred_vendor_archive($1)`, [ids.r1b]))).rejects.toThrow(/not_permitted/);
+    await expect(as(U.hr, (c) => c.query(`SELECT authz.preferred_vendor_create('x', NULL, NULL, NULL, NULL, NULL, NULL, NULL)`)))
       .rejects.toThrow(/not_permitted/);
     await expect(create(U.r1b, "v-R1B ")).rejects.toThrow(/vendor_exists/);
     await expect(as(U.r1a, (c) => c.query(`SELECT authz.preferred_vendor_create('ok', NULL, NULL, 'not-an-email', NULL, NULL, NULL, NULL)`)))
