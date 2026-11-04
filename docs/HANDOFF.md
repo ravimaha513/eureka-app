@@ -286,6 +286,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - API test runs queue across sessions (`scripts/test-api-gate.sh`): one full suite with 6 forks, 3 filtered runs with 2 forks each; CI skips the queue.
 - Candidate and batch filters on lists (no migrations): `candidate` (name contains) and `batchId` on `GET /placements` + export, `/interviews`, `/submissions` + `/summary`; Candidate box and Batch select on all three tabs and Cleared interviews; Submissions' two-step picker replaced; Interviews search drops the default from-today date.
 - New batch workflow (no migrations): name, location, technology, month, then optional bulk upload of new candidates from an Excel template (preview, all or nothing; `docs/candidates-api.md` CA-6a); upload also on the batch's Students tab; `BatchDialog` is edit-only.
+- Candidate with no team yet (0410): "No team yet" in the New candidate Team picker; Assign team on the profile (`PUT /candidates/:id/team`, `authz.assign_candidate_team`); no Hot List until assigned.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

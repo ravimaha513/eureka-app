@@ -8,6 +8,7 @@ import {
   CandidateListQuery,
   ComplianceUpdate,
   CreateBatch,
+  AssignCandidateTeam,
   CreateCandidate,
   DuplicateCheck,
   HotlistQuery,
@@ -104,6 +105,13 @@ export class CandidatesController {
   @RequirePermission("candidate:create")
   createTeams(@CurrentUser() user: AuthedUser) {
     return this.svc.createTeams(user);
+  }
+
+  /** A candidate created with no team gets one (0410); same right and teams as choosing it at creation. */
+  @Put("candidates/:id/team")
+  @RequirePermission("candidate:create")
+  assignTeam(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.assignTeam(user, id, AssignCandidateTeam.parse(body).teamId);
   }
 
   /** Teams for the "Selected teams" picker (0240). */

@@ -16,6 +16,7 @@ import { CandidateSubmissions } from "../pipeline/CandidateSubmissions";
 import { pipelineKeys } from "../pipeline/pipelineApi";
 import { EditProfileDialog } from "./EditProfileDialog";
 import { ComplianceDialog } from "./ComplianceDialog";
+import { AssignTeamDialog } from "./AssignTeamDialog";
 import { documentsLabel, eligibilityLabel, stayLabel, visaLabel } from "./candidateFields";
 import { salesError } from "./errors";
 import { DUPLICATE_WARNING, LogSubmissionDialog } from "./LogSubmissionDialog";
@@ -27,7 +28,7 @@ import { TeamChecklist } from "./TeamChecklist";
 const BLANK = new Set(["Not recorded", "—", "Not rated", "No batch"]);
 
 type Tab = "overview" | "submissions" | "documents" | "training" | "activity";
-type Modal = { kind: "edit" } | { kind: "submit" } | { kind: "terminate" } | { kind: "compliance" } | { kind: "delete" };
+type Modal = { kind: "edit" } | { kind: "submit" } | { kind: "terminate" } | { kind: "compliance" } | { kind: "delete" } | { kind: "team" };
 
 /**
  * Candidate profile (GET /api/v1/candidates/:id). Actions follow the record's
@@ -96,7 +97,8 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
   const canSubmit = a ? a.logSubmission : caps.has("submission:create");
   const canDelete = a ? a.delete : caps.has("candidate:delete");
   const canAssign = a ? a.assign === true : caps.has("candidate:assign");
-  const next = a ? a.transition : canUpdate ? TRANSITIONS[c.status] ?? [] : [];
+  // No team, no Hot List: the server refuses Active until the team is assigned.
+  const next = (a ? a.transition : canUpdate ? TRANSITIONS[c.status] ?? [] : []).filter((to) => to !== "active" || c.team.id !== null);
   // With hints, the status block appears only when a change is allowed; without, for candidate:update holders.
   const showStatus = a ? next.length > 0 : canUpdate;
   // The Hot List is the active statuses, so "In training" -> Active is what puts a candidate on it.
@@ -108,7 +110,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
   const facts: (Fact | false)[] = [
     { label: "Technology", value: c.technology },
     { label: "Team", value: c.team.name },
-    !!c.teamAssignedAt && { label: "Added to team", value: fmtDate(c.teamAssignedAt) },
+    !!c.teamAssignedAt && c.team.id !== null && { label: "Added to team", value: fmtDate(c.teamAssignedAt) },
     { label: "Recruiter", value: canAssign
       ? <RecruiterPicker candidateId={c.id} current={c.recruiter} busy={busy === "recruiter"}
           onSave={(id, name) => act("recruiter", () => salesApi.setRecruiter(c.id, id), id ? `${name} is now the recruiter.` : "Recruiter removed.")} />
@@ -184,6 +186,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
               onPick={(to) => to === "terminated" ? setModal({ kind: "terminate" })
                 : void act(`to:${to}`, () => salesApi.transition(c.id, to), `Status changed to ${statusLabel(to)}.`, "transition")} />
           )}
+          {c.canAssignTeam && <button type="button" className="btn" onClick={() => setModal({ kind: "team" })}>Assign team</button>}
           {canUpdate && <button type="button" className="btn" onClick={() => setModal({ kind: "edit" })}>Edit profile</button>}
           {canSubmit && <button type="button" className="btn primary" onClick={() => { pendingWarning.current = ""; setWarning(""); setModal({ kind: "submit" }); }}>Log submission</button>}
           {canDelete && <button type="button" className="btn danger" onClick={() => setModal({ kind: "delete" })}>Delete…</button>}
@@ -281,6 +284,9 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
       {modal?.kind === "edit" && (
         <EditProfileDialog candidate={c} onClose={() => setModal(null)} onSaved={() => { setModal(null); announce("Profile saved."); refresh(); }} />
       )}
+      {modal?.kind === "team" && (
+        <AssignTeamDialog candidateId={c.id} onClose={() => setModal(null)} onAssigned={(name) => { setModal(null); announce(`Team set to ${name}.`); refresh(); }} />
+      )}
       {modal?.kind === "compliance" && (
         <ComplianceDialog candidate={c} onClose={() => setModal(null)} onSaved={() => { setModal(null); announce("Companies and documents saved."); refresh(); }} />
       )}
@@ -335,7 +341,7 @@ function VisibilitySwitch({ value, busy, onChange }: { value: Visibility; busy: 
  * with none picked goes back to team only. Hidden while Open to all teams is on.
  */
 function TeamSharePicker({ ownTeamId, shared, busy, onSave }: {
-  ownTeamId: string; shared: { id: string }[]; busy: boolean; onSave: (teamIds: string[]) => void;
+  ownTeamId: string | null; shared: { id: string }[]; busy: boolean; onSave: (teamIds: string[]) => void;
 }) {
   const id = useId();
   const savedKey = shared.map((t) => t.id).sort().join(",");

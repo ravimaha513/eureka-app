@@ -148,7 +148,8 @@ export const CreateCandidate = z
     email: Email,
     technologyId: uuid,
     locationId: uuid,
-    teamId: uuid.optional(),
+    /** Omitted: the caller's first team. null: no team yet (0410), assigned later with PUT /candidates/:id/team. */
+    teamId: uuid.nullable().optional(),
     recruiterId: uuid.nullable().optional(),
     batchId: uuid.optional(),
     /**
@@ -160,6 +161,9 @@ export const CreateCandidate = z
   })
   .strict();
 export type CreateCandidate = z.infer<typeof CreateCandidate>;
+
+/** PUT /candidates/:id/team: gives a candidate with no team their team (0410). */
+export const AssignCandidateTeam = z.object({ teamId: uuid }).strict();
 
 /** Duplicate check (design B3, N11): name plus email or phone. */
 export const DuplicateCheck = z

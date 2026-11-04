@@ -30,6 +30,8 @@ export interface CandidateProfile extends Candidate {
   companies?: { everify: Named | null; offerLetter: Named | null; form1099: Named | null };
   /** candidate.compliance:update covers this candidate (UI hint). */
   canEditCompliance?: boolean;
+  /** No team yet and the caller may give it one (PUT /candidates/:id/team). */
+  canAssignTeam?: boolean;
   /** Owners only: the teams a "Selected teams" candidate is shared with. */
   sharedTeams?: Named[];
 }
@@ -181,7 +183,8 @@ export interface CreateCandidate {
   locationId: string;
   batchId?: string;
   /** One of GET /candidate-create-teams; the server defaults to the creator's team. */
-  teamId?: string;
+  /** null: no team yet, assigned later from the profile. */
+  teamId?: string | null;
   /** "active" starts marketing right away (in_training -> active in the same request); default in training. */
   initialStatus?: InitialStatus;
 }
@@ -252,6 +255,8 @@ export const salesApi = {
       method: "PUT", ...json(visibility === "selected_teams" ? { visibility, teamIds } : { visibility }) }),
   shareTeams: () => api<{ items: ShareTeam[] }>("/api/v1/candidate-share-teams"),
   createTeams: () => api<{ items: ShareTeam[]; defaultTeamId: string | null }>("/api/v1/candidate-create-teams"),
+  assignTeam: (id: string, teamId: string) =>
+    api<{ id: string; teamId: string }>(`/api/v1/candidates/${enc(id)}/team`, { method: "PUT", ...json({ teamId }) }),
   setRating: (id: string, rating: number) =>
     api<{ id: string; technicalRating: number }>(`/api/v1/candidates/${enc(id)}/technical-rating`, { method: "PUT", ...json({ rating }) }),
   recruiterOptions: (id: string) => api<{ items: { id: string; name: string }[] }>(`/api/v1/candidates/${enc(id)}/recruiter-options`),

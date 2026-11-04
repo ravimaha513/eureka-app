@@ -197,6 +197,14 @@ Migrations `0260_candidate_unique_contact.sql` (trigger) and `0300_candidate_con
   CSV (First name, Last name, Phone, Email, optional Technology and Location by name), with one team,
   batch and default technology/location. Each row is its own `POST /api/v1/candidates`, so every
   server check applies per row; rows that fail stay in the table with the reason, a 429 stops the run.
+- **No team yet (0410):** `teamId: null` creates a candidate with no team; the picker's "No team yet"
+  (single mode only) sends it; with Status Active the dialog asks for a team first. Outside org scope the creator becomes the recruiter, so the candidate stays in their and
+  their reporting line's scope. Responses show `team: { id: null, name: "No team yet", lead: null }`
+  and the profile's `canAssignTeam`. `PUT /api/v1/candidates/:id/team` `{ teamId }` (`candidate:create`
+  over the candidate, team in the same scope as the picker; 403 otherwise, 404 not visible, 409
+  `team_already_assigned`) sets it once through `authz.assign_candidate_team`: the recruiter stays only
+  if they are a member of that team, and the new team's lead is notified (`candidate.assigned`). Moving
+  to Active answers 422 `team_required` until then, so the Hot List never has a candidate with no team.
 - **Required:** `POST /api/v1/candidates` needs `phone` (normalized to E.164) and `email` (personal,
   lower-cased); missing either is 422. The hire flow (`POST /applications/:id/candidate`) uses the
   applicant's email and phone, and takes `phone` / `email` in the body when the applicant has none or

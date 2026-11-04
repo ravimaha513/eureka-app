@@ -18,7 +18,8 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * the caller's candidate:create scope (GET /candidate-create-teams) and starts
  * on "Not yet assigned", so the team is always a deliberate pick; it is hidden
  * (and the only team used) when there is just one. A recruiter creator becomes
- * the candidate's recruiter.
+ * the candidate's recruiter. "No team yet" (single mode) leaves the team for
+ * later (Assign team on the profile).
  * "Several" switches to BulkCandidatesForm: one team/batch for many rows, typed
  * or pasted from a spreadsheet / CSV.
  * Technology and location come from the lookups pickers; `locations` (the ones
@@ -100,12 +101,12 @@ function OneCandidateForm({ locations, onCancel, onCreated, onOpenProfile, canAd
     setV((s) => ({ ...s, batchId, ...(b ? { locationId: b.location.id, technologyId: s.technologyId || b.technology.id } : {}) }));
   };
 
-  const team = useCreateTeam();
-  const teamId = team.teamId;
+  const team = useCreateTeam({ allowNone: true });
 
   const validate = () => {
     const e: Record<string, string> = {};
     if (team.problem) e.teamId = team.problem;
+    if (team.none && status === "active") e.teamId = "Assign a team before adding this candidate to the Hot List.";
     if (!v.firstName.trim()) e.firstName = "Enter a first name.";
     if (!v.lastName.trim()) e.lastName = "Enter a last name.";
     if (!v.phone.trim()) e.phone = "Enter a phone number.";
@@ -130,7 +131,7 @@ function OneCandidateForm({ locations, onCancel, onCreated, onOpenProfile, canAd
       technologyId: v.technologyId.trim(), locationId: v.locationId.trim(),
       phone: normalizePhoneE164(v.phone)!, email: v.email.trim(),
       ...(v.batchId && openBatches.some((b) => b.id === v.batchId) ? { batchId: v.batchId } : {}),
-      ...(teamId ? { teamId } : {}),
+      ...team.body(),
       ...(status === "active" ? { initialStatus: status } : {}),
     };
     setBusy(true);
