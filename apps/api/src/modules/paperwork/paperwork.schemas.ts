@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BGC_HISTORY_YEARS, BGC_STATUSES, CHECKLIST_ITEM_STATUSES, PLACEMENT_STATUSES } from "@eureka/shared";
+import { BGC_HISTORY_YEARS_MAX, BGC_HISTORY_YEARS_MIN, BGC_STATUSES, CHECKLIST_ITEM_STATUSES, PLACEMENT_STATUSES } from "@eureka/shared";
 
 const RoleKey = z.string().regex(/^[a-z][a-z0-9_]{0,63}$/);
 import { Cursor } from "../submissions/pipeline.js";
@@ -9,7 +9,7 @@ const day = z.string().date().refine((d) => d >= "2000-01-01" && d <= "2100-12-3
 const noControl = /^[^\p{Cc}]+$/u;
 /** Notes may span lines; other control characters are refused. */
 const notes = z.string().trim().max(1000).regex(/^[^\x00-\x09\x0b-\x1f\x7f]*$/, "no control characters");
-const historyYears = z.number().int().refine((n) => (BGC_HISTORY_YEARS as readonly number[]).includes(n), "one of 3, 5, 7 or 10 years");
+const historyYears = z.number().int().min(BGC_HISTORY_YEARS_MIN).max(BGC_HISTORY_YEARS_MAX);
 const reason = z.string().trim().max(500).regex(/^[^\x00-\x09\x0b-\x1f\x7f]*$/, "no control characters");
 
 /**
@@ -42,7 +42,7 @@ export const UpdateBgc = z
     bgcCompany: z.string().trim().min(1).max(120).regex(noControl, "no control characters").nullable().optional(),
     initiatedOn: day.nullable().optional(),
     educationLevel: z.string().trim().min(1).max(60).regex(noControl, "no control characters").nullable().optional(),
-    /** History checked, in years: one of BGC_HISTORY_YEARS (3, 5, 7, 10; migration 0160). */
+    /** History checked, in whole years 1-50 (migration 0400). */
     employmentYears: historyYears.nullable().optional(),
     addressYears: historyYears.nullable().optional(),
     notes: notes.nullable().optional(),

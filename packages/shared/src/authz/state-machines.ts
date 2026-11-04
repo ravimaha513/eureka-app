@@ -99,8 +99,9 @@ export const PLACEMENT_REASON_REQUIRED: ReadonlySet<string> = new Set(["backout"
 /** Closed placements that never joined free the submission and the candidate (PL-1, PL-5). */
 export const CLOSED_BEFORE_JOIN_STATUSES: ReadonlySet<string> = new Set(["backout", "bgc_failed", "joining_issue"]);
 
-/** BGC employment and address history choices, in years (migration 0160). */
-export const BGC_HISTORY_YEARS = [3, 5, 7, 10] as const;
+/** BGC employment and address history, typed in as whole years (migration 0400; was 3/5/7/10 since 0160). */
+export const BGC_HISTORY_YEARS_MIN = 1;
+export const BGC_HISTORY_YEARS_MAX = 50;
 
 /** Candidate statuses a placement can be made from; confirmation = another placement already in progress (a second one is allowed). */
 export const PLACEABLE_CANDIDATE_STATUSES: ReadonlySet<string> = new Set(["active", "full_of_interviews", "confirmation"]);

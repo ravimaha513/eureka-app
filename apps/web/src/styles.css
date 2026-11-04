@@ -430,6 +430,15 @@ h1:focus { outline: none; }
 .check { display: inline-flex; gap: 6px; align-items: center; font-weight: 600; color: var(--text2); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 .grid2 .field input, .grid2 .field select, .contactrow .field input, .contactrow .field select { min-width: 0; }
+/* Grouped dialog sections (e.g. Update background check) */
+.formsect { border-top: 1px solid var(--line2); padding-top: 12px; margin-top: 4px; }
+.formsect > h4 { margin: 0 0 8px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.formsect > .hint { margin: -4px 0 6px; }
+/* Number input with a trailing unit ("7 years") */
+.unitinput { position: relative; display: block; }
+.unitinput input { width: 100%; padding-right: 56px; -moz-appearance: textfield; }
+.unitinput input::-webkit-inner-spin-button, .unitinput input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.unitinput .unit { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 13px; pointer-events: none; }
 .contacts { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 4px 0 12px; display: flex; flex-direction: column; gap: 10px; }
 .contacts legend { font-weight: 600; color: var(--text2); font-size: 12px; padding: 0 4px; }
 .contacts .hint { margin-bottom: 0; }
