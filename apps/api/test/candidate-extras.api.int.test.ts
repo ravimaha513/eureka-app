@@ -75,13 +75,13 @@ describe("batches", () => {
   let batchId: string;
 
   it("a lead creates a batch; duplicates are 409 and bad input 422", async () => {
-    const r = await call("l1", "POST", "/api/v1/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-11", sizePlanned: 25 });
+    const r = await call("l1", "POST", "/api/v1/batches", { name: "Planned batch", locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-11", sizePlanned: 25 });
     expect(r.statusCode, r.body).toBe(201);
     batchId = r.json().id;
-    const again = await call("m1", "POST", "/api/v1/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-11" });
+    const again = await call("m1", "POST", "/api/v1/batches", { name: "Planned batch", locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-11" });
     expect([again.statusCode, again.json().detail]).toEqual([409, "batch_exists"]);
-    expect((await call("l1", "POST", "/api/v1/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-13" })).statusCode).toBe(422);
-    expect((await call("l1", "POST", "/api/v1/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-10", status: "completed" })).statusCode).toBe(422);
+    expect((await call("l1", "POST", "/api/v1/batches", { name: "Planned batch", locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-13" })).statusCode).toBe(422);
+    expect((await call("l1", "POST", "/api/v1/batches", { name: "Planned batch", locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-10", status: "completed" })).statusCode).toBe(422);
     const audit = await db.admin.query(`SELECT actor_id FROM eureka.audit_event WHERE action = 'batch.created' AND entity_id = $1`, [batchId]);
     expect(audit.rows).toEqual([{ actor_id: U.l1 }]);
   });
@@ -223,7 +223,7 @@ describe("review follow-ups (0032)", () => {
   });
 
   it("batch status: Sales leadership of the location moves it on; others get 403/404/422", async () => {
-    const id = (await call("l1", "POST", "/api/v1/batches", { locationId: LOC.austin, technologyId: TECH_ID, startMonth: "2028-02" })).json().id;
+    const id = (await call("l1", "POST", "/api/v1/batches", { name: "Planned batch", locationId: LOC.austin, technologyId: TECH_ID, startMonth: "2028-02" })).json().id;
     expect((await call("r1a", "PUT", `/api/v1/batches/${id}/status`, { to: "in_training" })).statusCode).toBe(403);
     expect((await call("admin", "PUT", `/api/v1/batches/${id}/status`, { to: "in_training" })).statusCode).toBe(403);
     expect((await call("hr", "PUT", `/api/v1/batches/${id}/status`, { to: "in_training" })).statusCode).toBe(403);
@@ -239,7 +239,7 @@ describe("review follow-ups (0032)", () => {
   it("creating a batch outside the caller's locations is 403", async () => {
     const houston = "00000000-0000-0000-0000-00000000b002";
     await db.admin.query(`INSERT INTO eureka.location (id, name, kind) VALUES ($1, 'Houston', 'training')`, [houston]);
-    const r = await call("l1", "POST", "/api/v1/batches", { locationId: houston, technologyId: TECH_ID, startMonth: "2028-03" });
+    const r = await call("l1", "POST", "/api/v1/batches", { name: "Planned batch", locationId: houston, technologyId: TECH_ID, startMonth: "2028-03" });
     expect([r.statusCode, r.json().detail]).toEqual([403, "location_not_in_scope"]);
   });
 

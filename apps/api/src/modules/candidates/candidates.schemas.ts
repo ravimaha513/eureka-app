@@ -195,6 +195,7 @@ export const CreateBatch = z
   .object({
     locationId: uuid,
     technologyId: uuid,
+    name: z.string().trim().min(1).max(80).regex(/^[^\p{Cc}]+$/u, "no control characters"),
     /** First month of training, "YYYY-MM". */
     startMonth: z.string().regex(/^(20[0-9]{2}|2100)-(0[1-9]|1[0-2])$/, "Use YYYY-MM"),
     sizePlanned: z.number().int().min(1).max(500).optional(),

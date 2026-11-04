@@ -144,7 +144,7 @@ describe("review fixes (TR-4)", () => {
   });
 
   it("concurrent course assignments to one batch get distinct positions", async () => {
-    const b = (await call("locD", "POST", "/api/v1/training/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2070-02-01" })).json().id as string;
+    const b = (await call("locD", "POST", "/api/v1/training/batches", { name: "Test batch", locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2070-02-01" })).json().id as string;
     const ids = await Promise.all([mk("Par A", 1), mk("Par B", 1), mk("Par C", 1), mk("Par D", 1)]);
     const rs = await Promise.all(ids.map((c) => call("locD", "POST", `/api/v1/training/batches/${b}/courses`, { courseId: c })));
     expect(rs.map((r) => r.statusCode)).toEqual([201, 201, 201, 201]);
@@ -154,7 +154,7 @@ describe("review fixes (TR-4)", () => {
 
   it("another location's batch freezes timing, order, adds, deletes and archiving: 409 course_shared; the count only includes visible batches", async () => {
     const id = await mk("Frozen");
-    const austin = (await call("locA", "POST", "/api/v1/training/batches", { locationId: LOC.austin, technologyId: TECH_ID, startDate: "2070-03-01" })).json().id as string;
+    const austin = (await call("locA", "POST", "/api/v1/training/batches", { name: "Test batch", locationId: LOC.austin, technologyId: TECH_ID, startDate: "2070-03-01" })).json().id as string;
     expect((await call("locA", "POST", `/api/v1/training/batches/${austin}/courses`, { courseId: id })).statusCode).toBe(201);
     const course = (await call("locD", "GET", `/api/v1/training/courses/${id}`)).json();
     const [a, b] = course.modules as { id: string; rowVersion: number }[];
@@ -199,11 +199,26 @@ describe("training batches, students and progress (TR-5..TR-11)", () => {
     expect((await call("hr", "PATCH", `/api/v1/training/batches/${hrBatch}`, { name: "Renamed" }, { "if-match": '"2"' })).statusCode).toBe(403);
     const l = await call("l1", "POST", "/api/v1/training/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2034-02-01", name: "Lead Batch" });
     expect(l.statusCode, l.body).toBe(201);
-    expect((await call("r1a", "POST", "/api/v1/training/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2034-03-01" })).statusCode).toBe(403);
+    expect((await call("r1a", "POST", "/api/v1/training/batches", { name: "Test batch", locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2034-03-01" })).statusCode).toBe(403);
+  });
+
+  it("a batch name is required on both create paths and stays out of the audit row (TR-5)", async () => {
+    const training = { locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2034-04-01" };
+    for (const name of [undefined, null, "", "   "]) {
+      expect((await call("locD", "POST", "/api/v1/training/batches", { ...training, name })).statusCode, String(name)).toBe(422);
+    }
+    const planning = { locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2034-05" };
+    expect((await call("l1", "POST", "/api/v1/batches", planning)).statusCode).toBe(422);
+    const r = await call("l1", "POST", "/api/v1/batches", { ...planning, name: "Secret Planned Name" });
+    expect(r.statusCode, r.body).toBe(201);
+    const id = r.json().id as string;
+    expect((await call("l1", "GET", `/api/v1/training/batches/${id}`)).json().name).toBe("Secret Planned Name");
+    const audit = await db.admin.query(`SELECT changes FROM eureka.audit_event WHERE action = 'batch.created' AND entity_id = $1`, [id]);
+    expect(JSON.stringify(audit.rows)).not.toContain("Secret Planned Name");
   });
 
   it("creates a batch with a name, trainer and dates; refuses bad input", async () => {
-    const base = { locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2032-09-30" };
+    const base = { name: "Test batch", locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2032-09-30" };
     expect((await call("locD", "POST", "/api/v1/training/batches", { ...base, endDate: "2032-09-01" })).statusCode).toBe(422);
     expect((await call("locD", "POST", "/api/v1/training/batches", { ...base, status: "completed" })).statusCode).toBe(422);
     expect((await call("locD", "POST", "/api/v1/training/batches", { ...base, trainerId: U.r1a })).json().detail).toBe("invalid_trainer");
@@ -232,14 +247,18 @@ describe("training batches, students and progress (TR-5..TR-11)", () => {
     expect(coachCard.actions).toEqual({ manage: false, delete: false, updateProgress: true, addStudents: false, removeStudents: false });
   });
 
-  it("PATCH needs If-Match and a manager; a derived name appears when the name is cleared", async () => {
-    expect((await call("locD", "PATCH", `/api/v1/training/batches/${batchId}`, { name: null })).statusCode).toBe(428);
-    expect((await call("coach", "PATCH", `/api/v1/training/batches/${batchId}`, { name: null }, { "if-match": String(rowVersion) })).statusCode).toBe(403);
-    expect((await call("locD", "PATCH", `/api/v1/training/batches/${batchId}`, { name: null }, { "if-match": "99" })).statusCode).toBe(412);
-    const ok = await call("locD", "PATCH", `/api/v1/training/batches/${batchId}`, { name: null }, { "if-match": String(rowVersion) });
+  it("PATCH needs If-Match and a manager; the name can change but not be cleared", async () => {
+    const name = { name: "Renamed Batch" };
+    expect((await call("locD", "PATCH", `/api/v1/training/batches/${batchId}`, name)).statusCode).toBe(428);
+    expect((await call("coach", "PATCH", `/api/v1/training/batches/${batchId}`, name, { "if-match": String(rowVersion) })).statusCode).toBe(403);
+    expect((await call("locD", "PATCH", `/api/v1/training/batches/${batchId}`, name, { "if-match": "99" })).statusCode).toBe(412);
+    for (const bad of [null, "", "   "]) {
+      expect((await call("locD", "PATCH", `/api/v1/training/batches/${batchId}`, { name: bad }, { "if-match": String(rowVersion) })).statusCode, String(bad)).toBe(422);
+    }
+    const ok = await call("locD", "PATCH", `/api/v1/training/batches/${batchId}`, name, { "if-match": String(rowVersion) });
     expect(ok.statusCode, ok.body).toBe(200);
     const b = (await call("locD", "GET", `/api/v1/training/batches/${batchId}`)).json();
-    expect([b.name, b.customName, b.trainer?.id, b.endDate]).toEqual(["Java Sep 2032", null, U.coach, "2033-06-30"]);
+    expect([b.name, b.customName, b.trainer?.id, b.endDate]).toEqual(["Renamed Batch", "Renamed Batch", U.coach, "2033-06-30"]);
     await call("locD", "PATCH", `/api/v1/training/batches/${batchId}`, { name: "Secret Batch Name" }, { "if-match": String(b.rowVersion) });
   });
 
@@ -317,7 +336,7 @@ describe("training batches, students and progress (TR-5..TR-11)", () => {
   });
 
   it("an empty batch is deleted (204)", async () => {
-    const r = await call("locD", "POST", "/api/v1/training/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2033-01-10" });
+    const r = await call("locD", "POST", "/api/v1/training/batches", { name: "Test batch", locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2033-01-10" });
     expect((await call("coach", "DELETE", `/api/v1/training/batches/${r.json().id}`)).statusCode).toBe(403);
     expect((await call("locD", "DELETE", `/api/v1/training/batches/${r.json().id}`)).statusCode).toBe(204);
     expect((await call("locD", "GET", `/api/v1/training/batches/${r.json().id}`)).statusCode).toBe(404);
@@ -341,7 +360,7 @@ describe("training batches, students and progress (TR-5..TR-11)", () => {
 describe("batch creators find and fill their batches (TR-3, TR-8, TR-14)", () => {
   const dallasOf = (recruiter: string) => candidates.find((c) => c.recruiterId === recruiter && c.locationId === LOC.dallas)!;
   const create = async (k: keyof typeof U, startDate: string) => {
-    const r = await call(k, "POST", "/api/v1/training/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startDate });
+    const r = await call(k, "POST", "/api/v1/training/batches", { name: "Test batch", locationId: LOC.dallas, technologyId: TECH_ID, startDate });
     expect(r.statusCode, r.body).toBe(201);
     return r.json().id as string;
   };
