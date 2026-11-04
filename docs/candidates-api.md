@@ -186,7 +186,25 @@ Migrations `0260_candidate_unique_contact.sql` (trigger) and `0300_candidate_con
   `GET /api/v1/candidate-create-teams` (`candidate:create`) returns
   `{ items: [{ id, name, lead }], defaultTeamId }`: the teams in scope (all for org), own team first;
   `defaultTeamId` is the caller's team when listed, else null. The dialog shows a Team picker when
-  there is more than one, and a note when there are none.
+  there is more than one, starting on "Not yet assigned" (a placeholder: the user must pick a team
+  before Create; `defaultTeamId` is no longer preselected), and a note when there are none.
+- **Status:** optional `initialStatus` (`in_training`, the default, or `active`). New rows are
+  always inserted in training (DB guard); `active` runs `authz.transition_candidate` in the same
+  transaction, which re-checks `candidate:update` (403 and nothing created when refused) and
+  records the usual status-change timeline entry. The dialog's Status select sends it.
+- **Several at once (web only):** the dialog's "Several candidates" tab takes up to 20 rows
+  (the duplicate-check limit, 20 per user per minute) typed in, pasted from a sheet or loaded from a
+  CSV (First name, Last name, Phone, Email, optional Technology and Location by name), with one team,
+  batch and default technology/location. Each row is its own `POST /api/v1/candidates`, so every
+  server check applies per row; rows that fail stay in the table with the reason, a 429 stops the run.
+- **No team yet (0410):** `teamId: null` creates a candidate with no team; the picker's "No team yet"
+  (single mode only) sends it; with Status Active the dialog asks for a team first. Outside org scope the creator becomes the recruiter, so the candidate stays in their and
+  their reporting line's scope. Responses show `team: { id: null, name: "No team yet", lead: null }`
+  and the profile's `canAssignTeam`. `PUT /api/v1/candidates/:id/team` `{ teamId }` (`candidate:create`
+  over the candidate, team in the same scope as the picker; 403 otherwise, 404 not visible, 409
+  `team_already_assigned`) sets it once through `authz.assign_candidate_team`: the recruiter stays only
+  if they are a member of that team, and the new team's lead is notified (`candidate.assigned`). Moving
+  to Active answers 422 `team_required` until then, so the Hot List never has a candidate with no team.
 - **Required:** `POST /api/v1/candidates` needs `phone` (normalized to E.164) and `email` (personal,
   lower-cased); missing either is 422. The hire flow (`POST /applications/:id/candidate`) uses the
   applicant's email and phone, and takes `phone` / `email` in the body when the applicant has none or
@@ -205,6 +223,25 @@ Migrations `0260_candidate_unique_contact.sql` (trigger) and `0300_candidate_con
 Tests: `candidate-extras.api.int.test.ts` ("duplicate check"), `api.int.test.ts`,
 `applications.api.int.test.ts`, `engine.test.ts` ("adding candidates"), web `CandidateExtras.test.tsx`,
 `Sales.test.tsx`, `Applications.test.tsx`, e2e `candidate-extras.spec.ts`.
+
+## New batch workflow: bulk add from Excel (CA-6a)
+
+The web "New batch" dialog (Candidates and Training Batches) asks for the batch name, location, technology and month
+(`POST /api/v1/training/batches`, month = first day), then lets `candidate:create` holders upload new candidates. The
+upload is also on the batch's Students tab while the batch is open.
+
+- `GET /api/v1/batches/candidate-template` (`candidate:create`) → `.xlsx` with `First Name`, `Last Name`, `Phone`,
+  `Personal Email`: only what a new candidate must have. Technology and location come from the batch.
+- `POST /api/v1/batches/:id/candidates/bulk` (`candidate:create`) `{ dryRun, teamId?, rows: [{ firstName, lastName, phone, email }] }`
+  (1-500 rows) → 200 `{ dryRun, committed, created, failed, rows: [{ row, firstName, lastName, phone, email, status, error? }] }`.
+- All or nothing: one transaction, rolled back when any row fails or on `dryRun`, so the preview is what a real run does.
+- Row errors: `invalid_first_name`, `invalid_last_name`, `missing_country_code`, `trunk_zero`, `invalid` (phone),
+  `invalid_email`, `duplicate_in_file`, `duplicate_email`, `duplicate_phone`. Rows name only the value that is taken, not
+  whose it is.
+- 404 batch not visible; 403 team outside `candidate:create` (same rule as `POST /candidates`); 422 `batch_not_allowed`
+  when the batch is completed or cancelled; 429 after 10 calls a minute per user.
+- Audit (counts and ids only): `candidate.created` per row with `{ batchId, bulk: true }`, `batch.candidates_added`,
+  and `batch.candidates_checked` for a preview or a refused file.
 
 ## Deleting a candidate (CA-7)
 

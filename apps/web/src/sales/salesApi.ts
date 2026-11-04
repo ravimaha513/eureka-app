@@ -30,6 +30,8 @@ export interface CandidateProfile extends Candidate {
   companies?: { everify: Named | null; offerLetter: Named | null; form1099: Named | null };
   /** candidate.compliance:update covers this candidate (UI hint). */
   canEditCompliance?: boolean;
+  /** No team yet and the caller may give it one (PUT /candidates/:id/team). */
+  canAssignTeam?: boolean;
   /** Owners only: the teams a "Selected teams" candidate is shared with. */
   sharedTeams?: Named[];
 }
@@ -49,7 +51,7 @@ export type BatchStatus = "planned" | "in_training" | "completed" | "cancelled";
 /** GET /api/v1/batches item (any candidate:read holder). */
 export interface Batch {
   id: string;
-  /** "Java · Dallas · Nov 2026" */
+  /** "Java · Dallas · Nov 2026", or "Fall cohort · Dallas" for a named batch. */
   label: string;
   /** The name given on the Training Batches screen, if any. */
   customName?: string | null;
@@ -66,7 +68,6 @@ export interface Batch {
 /** `canCreate` is a hint (Sales leadership); the server decides. */
 export interface BatchList { items: Batch[]; canCreate: boolean }
 
-export interface CreateBatch { locationId: string; technologyId: string; startMonth: string; sizePlanned?: number }
 
 /** Batches a candidate can join: planned or in training. */
 export const OPEN_BATCH_STATUSES: readonly BatchStatus[] = ["planned", "in_training"];
@@ -182,8 +183,12 @@ export interface CreateCandidate {
   locationId: string;
   batchId?: string;
   /** One of GET /candidate-create-teams; the server defaults to the creator's team. */
-  teamId?: string;
+  /** null: no team yet, assigned later from the profile. */
+  teamId?: string | null;
+  /** "active" starts marketing right away (in_training -> active in the same request); default in training. */
+  initialStatus?: InitialStatus;
 }
+export type InitialStatus = "in_training" | "active";
 
 export interface CreateSubmission {
   candidateId: string;
@@ -250,6 +255,8 @@ export const salesApi = {
       method: "PUT", ...json(visibility === "selected_teams" ? { visibility, teamIds } : { visibility }) }),
   shareTeams: () => api<{ items: ShareTeam[] }>("/api/v1/candidate-share-teams"),
   createTeams: () => api<{ items: ShareTeam[]; defaultTeamId: string | null }>("/api/v1/candidate-create-teams"),
+  assignTeam: (id: string, teamId: string) =>
+    api<{ id: string; teamId: string }>(`/api/v1/candidates/${enc(id)}/team`, { method: "PUT", ...json({ teamId }) }),
   setRating: (id: string, rating: number) =>
     api<{ id: string; technicalRating: number }>(`/api/v1/candidates/${enc(id)}/technical-rating`, { method: "PUT", ...json({ rating }) }),
   recruiterOptions: (id: string) => api<{ items: { id: string; name: string }[] }>(`/api/v1/candidates/${enc(id)}/recruiter-options`),
@@ -267,7 +274,6 @@ export const salesApi = {
     api<Page<TimelineEvent>>(`/api/v1/candidates/${enc(id)}/timeline?limit=50${cursor ? `&cursor=${enc(cursor)}` : ""}`),
   batches: (locationId?: string) =>
     api<BatchList>(`/api/v1/batches${locationId ? `?locationId=${enc(locationId)}` : ""}`),
-  createBatch: (b: CreateBatch) => api<{ id: string }>("/api/v1/batches", { method: "POST", ...json(b) }),
   setCompliance: (id: string, b: ComplianceUpdate) =>
     api<{ id: string }>(`/api/v1/candidates/${enc(id)}/compliance`, { method: "PUT", ...json(b) }),
   complianceCompanies: () => api<{ items: { id: string; name: string; location: string }[] }>("/api/v1/candidate-companies"),

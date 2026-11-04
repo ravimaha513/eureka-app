@@ -75,13 +75,13 @@ describe("batches", () => {
   let batchId: string;
 
   it("a lead creates a batch; duplicates are 409 and bad input 422", async () => {
-    const r = await call("l1", "POST", "/api/v1/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-11", sizePlanned: 25 });
+    const r = await call("l1", "POST", "/api/v1/batches", { name: "Planned batch", locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-11", sizePlanned: 25 });
     expect(r.statusCode, r.body).toBe(201);
     batchId = r.json().id;
-    const again = await call("m1", "POST", "/api/v1/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-11" });
+    const again = await call("m1", "POST", "/api/v1/batches", { name: "Planned batch", locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-11" });
     expect([again.statusCode, again.json().detail]).toEqual([409, "batch_exists"]);
-    expect((await call("l1", "POST", "/api/v1/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-13" })).statusCode).toBe(422);
-    expect((await call("l1", "POST", "/api/v1/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-10", status: "completed" })).statusCode).toBe(422);
+    expect((await call("l1", "POST", "/api/v1/batches", { name: "Planned batch", locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-13" })).statusCode).toBe(422);
+    expect((await call("l1", "POST", "/api/v1/batches", { name: "Planned batch", locationId: LOC.dallas, technologyId: TECH_ID, startMonth: "2026-10", status: "completed" })).statusCode).toBe(422);
     const audit = await db.admin.query(`SELECT actor_id FROM eureka.audit_event WHERE action = 'batch.created' AND entity_id = $1`, [batchId]);
     expect(audit.rows).toEqual([{ actor_id: U.l1 }]);
   });
@@ -90,7 +90,7 @@ describe("batches", () => {
     const lead = (await call("l1", "GET", "/api/v1/batches")).json();
     expect(lead.canCreate).toBe(true);
     expect(lead.items).toContainEqual(expect.objectContaining({
-      id: batchId, label: "Java · Dallas · Nov 2026", startMonth: "2026-11", sizePlanned: 25, status: "planned",
+      id: batchId, label: "Planned batch · Dallas", startMonth: "2026-11", sizePlanned: 25, status: "planned",
       location: { id: LOC.dallas, name: "Dallas" }, technology: { id: TECH_ID, name: "Java" },
     }));
     const rec = (await call("r1a", "GET", "/api/v1/batches?locationId=" + LOC.austin)).json();
@@ -105,7 +105,7 @@ describe("batches", () => {
     expect((await call("r1a", "PATCH", `/api/v1/candidates/${own.id}`, { batchId })).statusCode).toBe(200);
 
     const profile = (await call("r1b", "GET", `/api/v1/candidates/${own.id}`)).json();
-    expect(profile.batch).toEqual({ id: batchId, label: "Java · Dallas · Nov 2026" });
+    expect(profile.batch).toEqual({ id: batchId, label: "Planned batch · Dallas" });
 
     const r1a = (await call("r1a", "GET", `/api/v1/candidates?batchId=${batchId}`)).json().items.map((i: { id: string }) => i.id).sort();
     expect(r1a).toEqual([created.json().id, own.id].sort());
@@ -117,6 +117,22 @@ describe("batches", () => {
 
     expect((await call("r1a", "PATCH", `/api/v1/candidates/${own.id}`, { batchId: null })).statusCode).toBe(200);
     expect((await call("r1a", "GET", `/api/v1/candidates/${own.id}`)).json().batch).toBeNull();
+  });
+
+  it("labels a named batch by its name and location in the list, profile and timeline", async () => {
+    const made = await call("locD", "POST", "/api/v1/training/batches", { name: "Fall cohort", locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2071-03-01" });
+    expect(made.statusCode, made.body).toBe(201);
+    const named = made.json().id;
+    const label = "Fall cohort · Dallas";
+    expect((await call("l1", "GET", "/api/v1/batches")).json().items.find((b: { id: string }) => b.id === named).label).toBe(label);
+    const created = await call("l1", "POST", "/api/v1/candidates", { firstName: "Nam", lastName: "Ed", phone: "+14695558699", email: "nam.ed@example.com", technologyId: TECH_ID, locationId: LOC.dallas, batchId: named });
+    expect(created.statusCode, created.body).toBe(201);
+    const id = created.json().id;
+    expect((await call("l1", "GET", `/api/v1/candidates/${id}`)).json().batch).toEqual({ id: named, label });
+    expect((await call("l1", "PATCH", `/api/v1/candidates/${id}`, { batchId: null })).statusCode).toBe(200);
+    expect((await call("l1", "PATCH", `/api/v1/candidates/${id}`, { batchId: named })).statusCode).toBe(200);
+    const events = (await call("l1", "GET", `/api/v1/candidates/${id}/timeline`)).json().items as { type: string; ref: { id: string; label: string } | null }[];
+    expect(events.find((e) => e.type === "candidate.batch_changed" && e.ref?.id === named)!.ref!.label).toBe(label);
   });
 
   it("refuses a batch at another location (422 batch_not_allowed) and a teammate's candidate (403)", async () => {
@@ -207,7 +223,7 @@ describe("review follow-ups (0032)", () => {
   });
 
   it("batch status: Sales leadership of the location moves it on; others get 403/404/422", async () => {
-    const id = (await call("l1", "POST", "/api/v1/batches", { locationId: LOC.austin, technologyId: TECH_ID, startMonth: "2028-02" })).json().id;
+    const id = (await call("l1", "POST", "/api/v1/batches", { name: "Planned batch", locationId: LOC.austin, technologyId: TECH_ID, startMonth: "2028-02" })).json().id;
     expect((await call("r1a", "PUT", `/api/v1/batches/${id}/status`, { to: "in_training" })).statusCode).toBe(403);
     expect((await call("admin", "PUT", `/api/v1/batches/${id}/status`, { to: "in_training" })).statusCode).toBe(403);
     expect((await call("hr", "PUT", `/api/v1/batches/${id}/status`, { to: "in_training" })).statusCode).toBe(403);
@@ -223,7 +239,7 @@ describe("review follow-ups (0032)", () => {
   it("creating a batch outside the caller's locations is 403", async () => {
     const houston = "00000000-0000-0000-0000-00000000b002";
     await db.admin.query(`INSERT INTO eureka.location (id, name, kind) VALUES ($1, 'Houston', 'training')`, [houston]);
-    const r = await call("l1", "POST", "/api/v1/batches", { locationId: houston, technologyId: TECH_ID, startMonth: "2028-03" });
+    const r = await call("l1", "POST", "/api/v1/batches", { name: "Planned batch", locationId: houston, technologyId: TECH_ID, startMonth: "2028-03" });
     expect([r.statusCode, r.json().detail]).toEqual([403, "location_not_in_scope"]);
   });
 
@@ -233,6 +249,21 @@ describe("review follow-ups (0032)", () => {
     const { rows } = await db.admin.query(
       `SELECT changes FROM eureka.audit_event WHERE action = 'candidate.updated' AND entity_id = $1 ORDER BY seq DESC LIMIT 1`, [own.id]);
     expect(rows[0].changes).toEqual({ marketingEmail: "[redacted]", vitelNumber: "[redacted]" });
+  });
+
+  it("initialStatus active creates the candidate already active, with the transition on the timeline", async () => {
+    const body = { firstName: "Act", lastName: "Ive", phone: "+14695558604", email: "act.ive@example.com", technologyId: TECH_ID, locationId: LOC.dallas };
+    expect((await call("l1", "POST", "/api/v1/candidates", { ...body, initialStatus: "placed" })).statusCode).toBe(422);
+    const c = await call("l1", "POST", "/api/v1/candidates", { ...body, initialStatus: "active" });
+    expect(c.statusCode, c.body).toBe(201);
+    const id = c.json().id;
+    const row = await db.admin.query(`SELECT marketing_status FROM eureka.candidate WHERE id = $1`, [id]);
+    expect(row.rows).toEqual([{ marketing_status: "active" }]);
+    const r = await call("l1", "GET", `/api/v1/candidates/${id}/timeline`);
+    expect(r.json().items.map((e: { type: string; from: string | null; to: string | null }) => [e.type, e.from, e.to])).toEqual([
+      ["candidate.status_changed", "in_training", "active"],
+      ["candidate.created", null, "in_training"],
+    ]);
   });
 
   it("a national 0 after the country code is refused with an explanation", async () => {

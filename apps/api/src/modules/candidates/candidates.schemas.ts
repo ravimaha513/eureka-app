@@ -148,12 +148,22 @@ export const CreateCandidate = z
     email: Email,
     technologyId: uuid,
     locationId: uuid,
-    teamId: uuid.optional(),
+    /** Omitted: the caller's first team. null: no team yet (0410), assigned later with PUT /candidates/:id/team. */
+    teamId: uuid.nullable().optional(),
     recruiterId: uuid.nullable().optional(),
     batchId: uuid.optional(),
+    /**
+     * Status right after create. Candidates are inserted "in_training" (DB guard);
+     * "active" runs the in_training -> active transition in the same transaction,
+     * which needs candidate:update over the new candidate (403 otherwise, nothing created).
+     */
+    initialStatus: z.enum(["in_training", "active"]).optional(),
   })
   .strict();
 export type CreateCandidate = z.infer<typeof CreateCandidate>;
+
+/** PUT /candidates/:id/team: gives a candidate with no team their team (0410). */
+export const AssignCandidateTeam = z.object({ teamId: uuid }).strict();
 
 /** Duplicate check (design B3, N11): name plus email or phone. */
 export const DuplicateCheck = z
@@ -189,9 +199,35 @@ export const CreateBatch = z
   .object({
     locationId: uuid,
     technologyId: uuid,
+    name: z.string().trim().min(1).max(80).regex(/^[^\p{Cc}]+$/u, "no control characters"),
     /** First month of training, "YYYY-MM". */
     startMonth: z.string().regex(/^(20[0-9]{2}|2100)-(0[1-9]|1[0-2])$/, "Use YYYY-MM"),
     sizePlanned: z.number().int().min(1).max(500).optional(),
   })
   .strict();
 export type CreateBatch = z.infer<typeof CreateBatch>;
+
+/**
+ * POST /batches/:id/candidates/bulk. Technology and location come from the batch.
+ * Rows are validated one by one in the service so a bad row is reported, not a rejected request.
+ */
+export const BulkBatchCandidates = z
+  .object({
+    dryRun: z.boolean(),
+    teamId: uuid.optional(),
+    rows: z
+      .array(
+        z
+          .object({
+            firstName: z.string().max(200),
+            lastName: z.string().max(200),
+            phone: z.string().max(40),
+            email: z.string().max(254),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(500),
+  })
+  .strict();
+export type BulkBatchCandidates = z.infer<typeof BulkBatchCandidates>;

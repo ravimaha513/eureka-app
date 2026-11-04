@@ -22,6 +22,8 @@ import {
   candidateTransitionAllowed,
   ownsCandidate,
   hasTrait,
+  normalizePhoneE164,
+  phoneProblem,
   resolveScope,
   type CandidateCompanyLink,
   type CandidateRef,
@@ -38,6 +40,7 @@ import { RateLimiter } from "../../platform/rate-limit.js";
 import type { BatchStatus } from "../training/training.schemas.js";
 import type {
   BatchListQuery,
+  BulkBatchCandidates,
   CandidateListQuery,
   ComplianceUpdate,
   CreateBatch,
@@ -46,6 +49,8 @@ import type {
   ProfileUpdate,
   TimelineQuery,
 } from "./candidates.schemas.js";
+import { Email } from "./candidates.schemas.js";
+import { buildCandidateImportTemplate } from "./candidate-import-template.js";
 import { likeContains } from "../../platform/sql.js";
 import { dbErrorMapper } from "../../platform/errors.js";
 
@@ -56,8 +61,8 @@ interface CandidateRow {
   phone_e164: string | null;
   dob_year: number | null;
   technology: string;
-  team_id: string;
-  team_name: string;
+  team_id: string | null;
+  team_name: string | null;
   recruiter_id: string | null;
   recruiter_name: string | null;
   location_id: string;
@@ -69,6 +74,7 @@ interface CandidateRow {
   technical_rating: number | null;
   row_version: number;
   batch_id: string | null;
+  batch_name: string | null;
   batch_month: string | null;
   batch_technology: string | null;
   batch_location: string | null;
@@ -136,8 +142,12 @@ export function sortKey(sort: ListSort | undefined, c = "c", p = "p"): string | 
   }
 }
 
-/** "Java · Dallas · Nov 2026" from a batch's technology, location and start month (YYYY-MM-DD). */
-export function batchLabel(technology: string, location: string, startMonth: string): string {
+/**
+ * "Java · Dallas · Nov 2026" from a batch's technology, location and start month (YYYY-MM-DD),
+ * or "Fall cohort · Dallas" when the batch has a custom name (Training).
+ */
+export function batchLabel(technology: string, location: string, startMonth: string, name?: string | null): string {
+  if (name?.trim()) return `${name.trim()} · ${location}`;
   const month = new Date(`${startMonth.slice(0, 7)}-01T00:00:00Z`)
     .toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
   return `${technology} · ${location} · ${month}`;
@@ -148,6 +158,13 @@ export function batchLabel(technology: string, location: string, startMonth: str
  * going over is logged as a warning (high-volume alert).
  */
 export const DUPLICATE_CHECKS_PER_MINUTE = 20;
+/** A file answers "is this contact taken?" for up to 500 rows, so previews are limited per user too. */
+export const BULK_CANDIDATE_CALLS_PER_MINUTE = 10;
+
+/** Thrown inside the transaction to roll a bulk add back and still answer with its report. */
+class BulkCandidatesRollback extends Error {
+  constructor(readonly report: unknown) { super("bulk_rollback"); }
+}
 
 const BATCH_ERRORS: Record<string, () => HttpException> = {
   invalid_batch: () => new UnprocessableEntityException("invalid_batch"),
@@ -294,6 +311,7 @@ export class CandidatesService implements OnModuleInit {
   private readonly log = new Logger(CandidatesService.name);
   private readonly hotlistLimiter = new RateLimiter(HOTLIST_PAGES_PER_MINUTE, 60_000);
   private readonly duplicateLimiter = new RateLimiter(DUPLICATE_CHECKS_PER_MINUTE, 60_000);
+  private readonly bulkCandidateLimiter = new RateLimiter(BULK_CANDIDATE_CALLS_PER_MINUTE, 60_000);
   /** The database is the source of truth for the Hot List switch (cached briefly). */
   private hotlistPolicy: "everyone" | "team" = HOTLIST_VISIBILITY;
   private hotlistPolicyAt = 0;
@@ -330,14 +348,14 @@ export class CandidatesService implements OnModuleInit {
            c.team_id, tm.name AS team_name, c.recruiter_id, u.display_name AS recruiter_name,
            c.location_id, l.name AS location_name, c.visibility, c.marketing_status, c.priority,
            c.marketing_start_date::text, c.technical_rating, c.row_version,
-           c.batch_id, b.start_month::text AS batch_month, bt.name AS batch_technology, bl.name AS batch_location,
+           c.batch_id, b.name AS batch_name, b.start_month::text AS batch_month, bt.name AS batch_technology, bl.name AS batch_location,
            c.visa_category, c.documents_status, c.gh_remote, c.gh_location_id, gl.name AS gh_location_name,
            c.team_assigned_at, (c.resume_url IS NOT NULL) AS resume_link,
            lu.display_name AS lead_name, c.in_person_ok
     FROM eureka.candidate c
     JOIN eureka.person p ON p.id = c.person_id
     JOIN eureka.technology t ON t.id = c.technology_id
-    JOIN eureka.team tm ON tm.id = c.team_id
+    LEFT JOIN eureka.team tm ON tm.id = c.team_id
     JOIN eureka.location l ON l.id = c.location_id
     LEFT JOIN eureka.app_user u ON u.id = c.recruiter_id
     LEFT JOIN eureka.app_user lu ON lu.id = tm.lead_id
@@ -363,7 +381,7 @@ export class CandidatesService implements OnModuleInit {
       statusLabel: marketingStatusLabel(r.marketing_status, r.visibility, r.gh_remote),
       visibility: r.visibility,
       priority: r.priority,
-      team: { id: r.team_id, name: r.team_name, lead: r.lead_name },
+      team: { id: r.team_id, name: r.team_name ?? "No team yet", lead: r.lead_name },
       teamAssignedAt: r.team_assigned_at.toISOString(),
       inPersonOk: r.in_person_ok,
       recruiter: r.recruiter_id ? { id: r.recruiter_id, name: r.recruiter_name } : null,
@@ -381,7 +399,7 @@ export class CandidatesService implements OnModuleInit {
       dobMasked: r.dob_year ? `•• / •• / ${r.dob_year}` : null,
       rowVersion: r.row_version,
       batch: r.batch_id && r.batch_month
-        ? { id: r.batch_id, label: batchLabel(r.batch_technology ?? "", r.batch_location ?? "", r.batch_month) }
+        ? { id: r.batch_id, label: batchLabel(r.batch_technology ?? "", r.batch_location ?? "", r.batch_month, r.batch_name) }
         : null,
     };
   }
@@ -553,6 +571,7 @@ export class CandidatesService implements OnModuleInit {
     if (!found) throw new NotFoundException();
     const ref = toRef(found.row);
     const readScope = resolveScope(user.access, "candidate:read");
+    const createScope = resolveScope(user.access, "candidate:create");
     const complianceScope = resolveScope(user.access, "candidate.compliance:update");
     const canCompliance = complianceScope !== null && ownsCandidate(complianceScope, ref);
     const showCompanies = canCompliance || (readScope !== null && ownsCandidate(readScope, ref));
@@ -567,6 +586,8 @@ export class CandidatesService implements OnModuleInit {
       /** Owners and compliance editors only (E-Verify, offer letter and 1099 companies). */
       ...(showCompanies ? { companies: { everify: link("everify"), offerLetter: link("offerLetter"), form1099: link("form1099") } } : {}),
       canEditCompliance: canCompliance,
+      /** No team yet (0410) and the caller may give it one: PUT /candidates/:id/team. */
+      canAssignTeam: found.row.team_id === null && createScope !== null && ownsCandidate(createScope, ref),
       /** Owners only: the teams a "Selected teams" candidate is shared with. */
       ...(readScope !== null && ownsCandidate(readScope, ref) ? { sharedTeams: found.sharedTeams } : {}),
       /** Hints for the UI (docs/placements-api.md); every write is checked again. */
@@ -668,6 +689,24 @@ export class CandidatesService implements OnModuleInit {
     return { items: rows.map((r) => ({ id: r.id, name: r.name, lead: r.lead_name })), defaultTeamId: rows.some((r) => r.id === own) ? own : null };
   }
 
+  /** Gives a candidate with no team (0410) their team, from the same teams the New candidate dialog offers. */
+  async assignTeam(user: AuthedUser, id: string, teamId: string) {
+    const scope = resolveScope(user.access, "candidate:create");
+    if (!scope || !(scope.all || scope.teamIds.has(teamId))) throw new ForbiddenException("Not permitted to assign candidates to this team");
+    return this.db.withUser(user.id, async (c) => {
+      const row = await this.loadForWrite(c, user, id, "candidate:create");
+      if (row.team_id !== null) throw new ConflictException("team_already_assigned");
+      try {
+        await c.query(`SELECT authz.assign_candidate_team($1, $2)`, [id, teamId]);
+      } catch (err) {
+        if ((err as { message?: string }).message === "invalid_team") throw new UnprocessableEntityException("invalid_team");
+        throw err;
+      }
+      await this.audit.record(c, { actorId: user.id, action: "candidate.team_assigned", entityType: "candidate", entityId: id, changes: { teamId } });
+      return { id, teamId };
+    });
+  }
+
   async setVisibility(user: AuthedUser, id: string, visibility: CandidateVisibility, teamIds: string[] = []) {
     return this.db.withUser(user.id, async (c) => {
       await this.loadForWrite(c, user, id, "candidate.visibility:update");
@@ -686,8 +725,12 @@ export class CandidatesService implements OnModuleInit {
     });
   }
 
-  /** The team's active members and its lead: the same people a removed member's candidates can go to. */
-  private async teamRecruiters(c: pg.PoolClient, teamId: string) {
+  /**
+   * The team's active members and its lead: the same people a removed member's candidates can go to.
+   * None for a candidate with no team yet (0410): the team is assigned first.
+   */
+  private async teamRecruiters(c: pg.PoolClient, teamId: string | null) {
+    if (teamId === null) return [];
     return (await c.query<{ id: string; name: string }>(
       `SELECT u.id, u.display_name AS name FROM eureka.app_user u
         WHERE u.status = 'active'
@@ -708,6 +751,8 @@ export class CandidatesService implements OnModuleInit {
     return this.db.withUser(user.id, async (c) => {
       const row = await this.loadForWrite(c, user, id, "candidate:assign");
       if (recruiterId === row.recruiter_id) return { id, recruiterId };
+      // With no team the recruiter is what keeps the candidate in scope (0410); assign the team first.
+      if (row.team_id === null) throw new UnprocessableEntityException("team_required");
       if (recruiterId && !(await this.teamRecruiters(c, row.team_id)).some((u) => u.id === recruiterId)) {
         throw new UnprocessableEntityException("invalid_recruiter");
       }
@@ -737,6 +782,7 @@ export class CandidatesService implements OnModuleInit {
       } catch (err) {
         // The placement drives the candidate until it joins or backs out (migration 0022).
         if ((err as { message?: string }).message === "placement_open") throw new UnprocessableEntityException("placement_open");
+        if ((err as { message?: string }).message === "team_required") throw new UnprocessableEntityException("team_required");
         throw err;
       }
       await this.audit.record(c, { actorId: user.id, action: "candidate.transition", entityType: "candidate", entityId: id, changes: { from: row.marketing_status, to } });
@@ -759,16 +805,25 @@ export class CandidatesService implements OnModuleInit {
   }
 
   /**
+   * The team a new candidate goes to: the one asked for, else the caller's own;
+   * `null` asks for no team yet (0410). 403 outside candidate:create.
+   */
+  private creatableTeam(user: AuthedUser, teamId?: string | null): string | null {
+    const team = teamId === null ? null : teamId ?? user.access.teamIds[0];
+    if (team === undefined) throw new ForbiddenException("No team to assign");
+    const scope = resolveScope(user.access, "candidate:create");
+    const teamAllowed = scope && (team === null || scope.all || scope.teamIds.has(team)
+      || (scope.recruiterIds.has(user.id) && user.access.teamIds[0] === team));
+    if (!teamAllowed) throw new ForbiddenException("Not permitted to create candidates in this team");
+    return team;
+  }
+
+  /**
    * `then` runs in the same transaction after the candidate row exists (jobs-portal:
    * linking the hired application), so both commit or neither does.
    */
   async create(user: AuthedUser, body: CreateCandidate, then?: (c: pg.PoolClient, candidateId: string) => Promise<void>) {
-    const team = body.teamId ?? user.access.teamIds[0];
-    if (!team) throw new ForbiddenException("No team to assign");
-    const scope = resolveScope(user.access, "candidate:create");
-    const teamAllowed = scope && (scope.all || scope.teamIds.has(team)
-      || (scope.recruiterIds.has(user.id) && user.access.teamIds[0] === team));
-    if (!teamAllowed) throw new ForbiddenException("Not permitted to create candidates in this team");
+    const team = this.creatableTeam(user, body.teamId);
 
     // Email and phone are each unique across candidates (CA-6). The check runs
     // in its own transaction so its audit row stays when the create is refused;
@@ -780,8 +835,9 @@ export class CandidatesService implements OnModuleInit {
     if ((await this.duplicates(user, body)).length > 0) throw new ConflictException("duplicate_contact");
 
     return this.db.withUser(user.id, async (c) => {
-      const recruiter = body.recruiterId === undefined
-        ? (hasTrait(user.access, "recruiter") ? user.id : null)
+      // With no team, only the recruiter link keeps the candidate in the creator's scope (org scope needs none).
+      const recruiter = team === null && !resolveScope(user.access, "candidate:create")?.all ? user.id
+        : body.recruiterId === undefined ? (hasTrait(user.access, "recruiter") ? user.id : null)
         : body.recruiterId;
       // The person row becomes visible only through its candidate, so its id is
       // generated here rather than read back with RETURNING (RLS would hide it).
@@ -793,9 +849,99 @@ export class CandidatesService implements OnModuleInit {
          VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
         [personId, body.technologyId, team, recruiter, body.locationId, body.batchId ?? null]).catch(mapCreateError);
       await this.audit.record(c, { actorId: user.id, action: "candidate.created", entityType: "candidate", entityId: cand.rows[0]!.id });
+      if (body.initialStatus === "active") {
+        // authz.transition_candidate re-checks candidate:update scope; a refusal rolls the create back.
+        await c.query(`SELECT authz.transition_candidate($1, 'active')`, [cand.rows[0]!.id]).catch((err: { code?: string }) => {
+          if (err.code === "insufficient_privilege" || err.code === "P0002") throw new ForbiddenException("Not permitted to set this status");
+          throw err;
+        });
+        await this.audit.record(c, { actorId: user.id, action: "candidate.transition", entityType: "candidate", entityId: cand.rows[0]!.id,
+          changes: { from: "in_training", to: "active" } });
+      }
       if (then) await then(c, cand.rows[0]!.id);
       return { id: cand.rows[0]!.id };
     });
+  }
+
+  /**
+   * New candidates for a batch from the Excel template (docs/candidates-api.md). All
+   * or nothing: every row is inserted in one transaction, rolled back when any row
+   * fails or when `dryRun` is set, so a preview shows exactly what a real run would
+   * do. Each row is the single create's insert and audit event; technology and
+   * location come from the batch. authz.candidate_contact_unique (0260) finds taken
+   * contacts; a row reports only which value is taken, not whose it is.
+   */
+  async bulkAddToBatch(user: AuthedUser, batchId: string, body: BulkBatchCandidates) {
+    if (!this.bulkCandidateLimiter.take(user.id)) {
+      this.log.warn(`Bulk candidate rate limit exceeded by user ${user.id}`);
+      throw new HttpException("Too many imports; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
+    }
+    type Row = { row: number; firstName: string; lastName: string; phone: string; email: string; status: "ok" | "error"; error?: string };
+    try {
+      const report = await this.db.withUser(user.id, async (c) => {
+        const batch = (await c.query<{ location_id: string; technology_id: string; status: string }>(
+          `SELECT location_id, technology_id, status FROM eureka.batch WHERE id = $1`, [batchId])).rows[0];
+        if (!batch) throw new NotFoundException();
+        const team = this.creatableTeam(user, body.teamId);
+        if (batch.status !== "planned" && batch.status !== "in_training") throw new UnprocessableEntityException("batch_not_allowed");
+        const recruiter = hasTrait(user.access, "recruiter") ? user.id : null;
+        const emails = new Set<string>();
+        const phones = new Set<string>();
+        const rows: Row[] = [];
+        for (const [i, r] of body.rows.entries()) {
+          const firstName = r.firstName.trim();
+          const lastName = r.lastName.trim();
+          const email = Email.safeParse(r.email);
+          const phone = normalizePhoneE164(r.phone);
+          const res: Row = { row: i + 1, firstName, lastName, phone: phone ?? r.phone.trim(), email: email.success ? email.data : r.email.trim(), status: "ok" };
+          rows.push(res);
+          const fail = (code: string) => { res.status = "error"; res.error = code; };
+          if (!firstName || firstName.length > 80) { fail("invalid_first_name"); continue; }
+          if (!lastName || lastName.length > 80) { fail("invalid_last_name"); continue; }
+          if (!phone) { fail(phoneProblem(r.phone) ?? "invalid"); continue; }
+          if (!email.success) { fail("invalid_email"); continue; }
+          if (emails.has(email.data) || phones.has(phone)) { fail("duplicate_in_file"); continue; }
+          emails.add(email.data);
+          phones.add(phone);
+          await c.query("SAVEPOINT bulk_candidate");
+          try {
+            const personId = randomUUID();
+            await c.query(`INSERT INTO eureka.person (id, first_name, last_name, phone_e164, personal_email) VALUES ($1,$2,$3,$4,$5)`,
+              [personId, firstName, lastName, phone, email.data]);
+            const cand = await c.query<{ id: string }>(
+              `INSERT INTO eureka.candidate (person_id, technology_id, team_id, recruiter_id, location_id, batch_id)
+               VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+              [personId, batch.technology_id, team, recruiter, batch.location_id, batchId]);
+            await this.audit.record(c, { actorId: user.id, action: "candidate.created", entityType: "candidate", entityId: cand.rows[0]!.id, changes: { batchId, bulk: true } });
+            await c.query("RELEASE SAVEPOINT bulk_candidate");
+          } catch (err) {
+            const m = (err as { message?: string }).message;
+            if (m !== "duplicate_email" && m !== "duplicate_phone") throw err;
+            await c.query("ROLLBACK TO SAVEPOINT bulk_candidate");
+            fail(m);
+          }
+        }
+        const failed = rows.filter((r) => r.status === "error").length;
+        const out = { dryRun: body.dryRun, committed: !body.dryRun && failed === 0, created: body.dryRun || failed > 0 ? 0 : rows.length, failed, rows };
+        if (!out.committed) throw new BulkCandidatesRollback(out);
+        await this.audit.record(c, { actorId: user.id, action: "batch.candidates_added", entityType: "batch", entityId: batchId, changes: { teamId: team, created: rows.length } });
+        return out;
+      }).catch(mapCreateError);
+      return report;
+    } catch (err) {
+      if (!(err instanceof BulkCandidatesRollback)) throw err;
+      // Audited apart: the check's transaction was rolled back. Counts only (rule 5).
+      const { rows, failed } = err.report as { rows: Row[]; failed: number };
+      await this.db.withUser(user.id, (c) => this.audit.record(c, {
+        actorId: user.id, action: "batch.candidates_checked", entityType: "batch", entityId: batchId, changes: { rows: rows.length, failed },
+      }));
+      return err.report;
+    }
+  }
+
+  /** The Excel template of bulkAddToBatch. */
+  candidateTemplate(): Promise<Buffer> {
+    return buildCandidateImportTemplate();
   }
 
   /**
@@ -870,11 +1016,11 @@ export class CandidatesService implements OnModuleInit {
       const { rows } = await c.query<{
         id: string; type: string; at: Date; actor_id: string | null; actor_name: string | null;
         ref_type: string | null; ref_id: string | null; from_value: string | null; to_value: string | null;
-        team_name: string | null; batch_month: string | null; batch_technology: string | null; batch_location: string | null;
+        team_name: string | null; batch_name: string | null; batch_month: string | null; batch_technology: string | null; batch_location: string | null;
       }>(
         `SELECT e.id::text, e.type, e.at, e.actor_id, u.display_name AS actor_name, e.ref_type, e.ref_id,
                 e.from_value, e.to_value, tm.name AS team_name,
-                b.start_month::text AS batch_month, bt.name AS batch_technology, bl.name AS batch_location
+                b.name AS batch_name, b.start_month::text AS batch_month, bt.name AS batch_technology, bl.name AS batch_location
          FROM eureka.candidate_event e
          LEFT JOIN eureka.app_user u ON u.id = e.actor_id
          LEFT JOIN eureka.team tm ON e.ref_type = 'team' AND tm.id = e.ref_id
@@ -895,7 +1041,7 @@ export class CandidatesService implements OnModuleInit {
             type: e.ref_type,
             id: e.ref_id,
             label: e.ref_type === "team" ? e.team_name
-              : e.ref_type === "batch" && e.batch_month ? batchLabel(e.batch_technology ?? "", e.batch_location ?? "", e.batch_month)
+              : e.ref_type === "batch" && e.batch_month ? batchLabel(e.batch_technology ?? "", e.batch_location ?? "", e.batch_month, e.batch_name)
               : null,
           } : null,
           from: e.from_value,
@@ -929,7 +1075,7 @@ export class CandidatesService implements OnModuleInit {
     return {
       items: rows.map((b) => ({
         id: b.id,
-        label: batchLabel(b.technology_name, b.location_name, b.start_month),
+        label: batchLabel(b.technology_name, b.location_name, b.start_month, b.name),
         customName: b.name,
         location: { id: b.location_id, name: b.location_name },
         technology: { id: b.technology_id, name: b.technology_name },
@@ -951,7 +1097,11 @@ export class CandidatesService implements OnModuleInit {
       const { rows } = await c.query<{ id: string }>(`SELECT authz.create_batch($1, $2, $3::date, $4) AS id`,
         [body.locationId, body.technologyId, `${body.startMonth}-01`, body.sizePlanned ?? null]).catch(mapBatchError);
       const id = rows[0]!.id;
-      await this.audit.record(c, { actorId: user.id, action: "batch.created", entityType: "batch", entityId: id, changes: { ...body } });
+      // Named in the same transaction (TR-1a); the name itself stays out of the audit row (rule 5).
+      await c.query(`SELECT authz.update_batch($1, 1, $2, NULL, NULL, NULL, $3, 'indigo', 'users')`,
+        [id, body.name, body.sizePlanned ?? null]).catch(mapBatchError);
+      const { name: _name, ...details } = body;
+      await this.audit.record(c, { actorId: user.id, action: "batch.created", entityType: "batch", entityId: id, changes: { ...details, named: true } });
       return { id };
     });
   }

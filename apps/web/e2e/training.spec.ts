@@ -40,14 +40,13 @@ test("a location admin runs a batch; the recruiter sees the student's progress",
   let created = false;
   for (let attempt = 0; attempt < 6 && !created; attempt++) {
     await page.getByRole("button", { name: "Add training batch" }).click();
-    const dlg = page.getByRole("dialog", { name: "Add training batch" });
-    await dlg.getByRole("textbox", { name: /Batch name/ }).fill(name);
+    const dlg = page.getByRole("dialog", { name: "New batch" });
+    await dlg.getByRole("textbox", { name: "Batch name", exact: true }).fill(name);
     await dlg.getByRole("combobox", { name: "Location", exact: true }).selectOption({ label: "Dallas" });
     await dlg.getByRole("combobox", { name: "Technology", exact: true }).selectOption({ label: "Java" });
     const year = 2040 + Math.floor(Math.random() * 60);
     const month = String(1 + Math.floor(Math.random() * 12)).padStart(2, "0");
-    await dlg.getByLabel("Start date").fill(`${year}-${month}-10`);
-    await dlg.getByRole("combobox", { name: "Trainer", exact: true }).selectOption({ label: "coach" });
+    await dlg.getByLabel("Month", { exact: true }).fill(`${year}-${month}`);
     await dlg.getByRole("button", { name: "Create batch" }).click();
     const outcome = await Promise.race([
       page.getByRole("heading", { level: 1, name }).waitFor().then(() => "ok"),

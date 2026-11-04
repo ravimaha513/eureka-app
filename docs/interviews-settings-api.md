@@ -32,6 +32,7 @@ problems with the code in `detail`, CSRF header on every write.
 - `PATCH /api/v1/interviews/:id` adds `interviewType` (nullable), `meetingUrl` (nullable), `durationMin`, `panelIds`
   (replaces the panel; the current lead stays when still a member), `leadId` (needs `panelIds`; null = no lead).
   Returns the interview with `panel` and `lead`.
+- `GET /api/v1/interviews` takes `search` (1-80 characters, case-insensitive part of the candidate's or the coach's name, within the caller's scope; API only, the board uses `candidate`).
 - `GET /api/v1/interviews` and `/:id` add `position` (the submission's job title; null when the caller cannot read the
   submission, e.g. coaches), `interviewType`, `meetingUrl`, `durationMin`; `/:id` adds
   `panel: [{ id, name, lead }]` and `lead: { id, name } | null`.

@@ -44,11 +44,18 @@ BEGIN
     RAISE EXCEPTION 'not permitted to change visibility' USING ERRCODE = 'insufficient_privilege';
   END IF;
 
+  -- No team (0410) is a starting state only: a candidate never goes back to it.
+  IF OLD.team_id IS NOT NULL AND NEW.team_id IS NULL THEN
+    RAISE EXCEPTION 'team cannot be cleared' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
   IF NEW.team_id IS DISTINCT FROM OLD.team_id
      OR (NEW.recruiter_id IS DISTINCT FROM OLD.recruiter_id AND NOT is_definer) THEN
     -- Only the definer may read the marker (the app role has no privilege on it).
+    -- A candidate with no team (0410) reaches a definer only through
+    -- authz.assign_candidate_team, which re-checks candidate:create.
     IF is_definer THEN
-      employment := EXISTS (SELECT 1 FROM authz.employment_team_context x
+      employment := OLD.team_id IS NULL OR EXISTS (SELECT 1 FROM authz.employment_team_context x
                              WHERE x.xact = pg_catalog.pg_current_xact_id() AND x.candidate_id = OLD.id);
     END IF;
     IF NOT coalesce(employment, false) THEN

@@ -24,6 +24,8 @@ export const InterviewListQuery = z
     submissionId: uuid.optional(),
     cleared: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
     result: z.enum(INTERVIEW_RESULTS).optional(),
+    /** Part of the candidate's or the coach's name. */
+    search: z.string().trim().min(1).max(80).optional(),
     /** asc (default) by start time; desc lists the latest first (Placements "Cleared interviews"). */
     sort: z.enum(["asc", "desc"]).default("asc"),
     cursor: Cursor.optional(),

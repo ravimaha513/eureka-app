@@ -227,6 +227,10 @@ export class InterviewsService {
     if (q.submissionId) where.push(`i.submission_id = ${p(q.submissionId)}`);
     if (q.cleared !== undefined) where.push(`i.cleared = ${p(q.cleared)}`);
     if (q.result) where.push(`i.result = ${p(q.result)}`);
+    if (q.search) {
+      const pat = p(likeContains(q.search));
+      where.push(`(${CANDIDATE_NAME} ILIKE ${pat} ESCAPE '\\' OR cu.display_name ILIKE ${pat} ESCAPE '\\')`);
+    }
     const desc = q.sort === "desc";
     if (q.cursor) {
       const [k, id] = splitCursor(q.cursor);

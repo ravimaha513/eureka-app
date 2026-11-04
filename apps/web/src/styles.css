@@ -572,6 +572,12 @@ tr.clickrow { cursor: pointer; }
 .editlink { font-weight: 600; }
 .editlink:hover { text-decoration: underline; }
 .dialog.wide { width: min(700px, 100%); }
+.dialog.wide.bulk { width: min(980px, 100%); }
+.ncd-tabs { margin-bottom: 14px; }
+.bulkrows-wrap { overflow-x: auto; margin-bottom: 8px; }
+.bulkrows input, .bulkrows select { width: 100%; min-width: 96px; }
+.bulkrow-err td { padding-top: 0; border-top: 0; }
+.bulkrows-tools { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
 .dialog.xwide { width: min(940px, 100%); }
 .formgrid { display: grid; gap: 0 14px; }
 .formgrid.cols2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
