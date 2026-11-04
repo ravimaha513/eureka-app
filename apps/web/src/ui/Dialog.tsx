@@ -60,15 +60,15 @@ export function Dialog({ title, onClose, children, describedBy, className, wide 
 }
 
 /** Footer with Cancel + primary action; the error (if any) is announced. */
-export function DialogActions({ onCancel, submitLabel, busy, disabled, error, danger }: {
-  onCancel: () => void; submitLabel: string; busy?: boolean; disabled?: boolean; error?: string; danger?: boolean;
+export function DialogActions({ onCancel, cancelLabel = "Cancel", submitLabel, busy, disabled, error, danger }: {
+  onCancel: () => void; cancelLabel?: string; submitLabel: string; busy?: boolean; disabled?: boolean; error?: string; danger?: boolean;
 }) {
   return (
     <>
       {/* tabIndex -1: a form can move focus here after a failed submit with no field to point at. */}
       {error && <p className="error formerr" role="alert" tabIndex={-1}>{error}</p>}
       <div className="actions">
-        <button type="button" className="btn" onClick={onCancel}>Cancel</button>
+        <button type="button" className="btn" onClick={onCancel}>{cancelLabel}</button>
         <button type="submit" className={`btn ${danger ? "danger" : "primary"}`} disabled={busy || disabled} aria-busy={busy || undefined}>
           {busy ? "Working…" : submitLabel}
         </button>

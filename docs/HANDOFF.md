@@ -282,6 +282,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Batches: whoever may create a batch sees it and bulk adds or removes students (TR-3, TR-8, migration 0390); new batch opens at `/training/<id>`; profile Training tab attaches, changes or clears the batch and links to it (TR-14).
 - Create placement scope (no migrations): CEO gets `placement:create` (org); `authz.create_placement` no longer needs the candidate visible, so the submission's team can place after visibility is withdrawn; `submissionActions` follows (PL-1).
 - BGC: Completed and Helped by removed from the drawer and API (`completed_on` stays server-set); Manager and AD hold `bgc:update` over their hierarchy; Notes block saves in place in the paperwork drawer.
+- New batch workflow (no migrations): name, location, technology, month, then optional bulk upload of new candidates from an Excel template (preview, all or nothing; `docs/candidates-api.md` CA-6a); upload also on the batch's Students tab; `BatchDialog` is edit-only.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

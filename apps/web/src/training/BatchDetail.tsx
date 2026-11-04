@@ -1,13 +1,14 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isSafeHttpsUrl } from "@eureka/shared";
-import { BookOpen, CalendarDays, ChevronDown, ChevronUp, ExternalLink, GraduationCap, Pencil, Plus, Trash2, UserMinus, Users } from "lucide-react";
+import { BookOpen, CalendarDays, ChevronDown, ChevronUp, ExternalLink, GraduationCap, Pencil, Plus, Trash2, Upload, UserMinus, Users } from "lucide-react";
 import { can, type Me } from "../api";
 import { navigate } from "../lib/router";
 import { screenPath } from "../nav";
 import { ConfirmDialog, Dialog } from "../ui/Dialog";
 import { fmtDate } from "../sales/ui";
 import { BatchDialog } from "./BatchDialog";
+import { BulkCandidatesDialog } from "./BulkCandidatesDialog";
 import {
   NEXT_STATUS, fmtMinutes, trainingApi, trainingError, trainingKeys,
   type AssignedCourse, type BatchDetail, type Student,
@@ -89,11 +90,11 @@ export function BatchDetailView({ id, me, onBack, onDeleted }: {
         </div>
       ) : (
         <div role="tabpanel" id={`${tabsId}-ps`} aria-labelledby={`${tabsId}-ts`}>
-          <StudentsPanel batch={b} canOpenProfile={can(me, "candidate:read")} onNotice={setNotice} />
+          <StudentsPanel batch={b} canOpenProfile={can(me, "candidate:read")} canImport={can(me, "candidate:create")} onNotice={setNotice} />
         </div>
       )}
 
-      {editing && <BatchDialog me={me} batch={b} onClose={() => setEditing(false)}
+      {editing && <BatchDialog batch={b} onClose={() => setEditing(false)}
         onSaved={() => { setEditing(false); setNotice("Batch saved."); void refresh(); }} />}
       {statusTo && (
         <ConfirmDialog title={`${statusTo.label}?`} confirmLabel={statusTo.label} danger={statusTo.to === "cancelled"} formatError={trainingError}
@@ -232,7 +233,7 @@ function AddCourseDialog({ batch, onClose, onAdded }: { batch: BatchDetail; onCl
   );
 }
 
-function StudentsPanel({ batch, canOpenProfile, onNotice }: { batch: BatchDetail; canOpenProfile: boolean; onNotice: (s: string) => void }) {
+function StudentsPanel({ batch, canOpenProfile, canImport, onNotice }: { batch: BatchDetail; canOpenProfile: boolean; canImport: boolean; onNotice: (s: string) => void }) {
   const qc = useQueryClient();
   const id = useId();
   const [text, setText] = useState("");
@@ -241,6 +242,7 @@ function StudentsPanel({ batch, canOpenProfile, onNotice }: { batch: BatchDetail
   const q = useQuery({ queryKey: trainingKeys.students(batch.id, search), queryFn: () => trainingApi.students(batch.id, search) });
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [removing, setRemoving] = useState<Student | null>(null);
   const [error, setError] = useState("");
   const refresh = () => qc.invalidateQueries({ queryKey: trainingKeys.all });
@@ -270,6 +272,9 @@ function StudentsPanel({ batch, canOpenProfile, onNotice }: { batch: BatchDetail
             <label htmlFor={`${id}-q`}>Search students</label>
             <input id={`${id}-q`} type="search" value={text} maxLength={80} onChange={(e) => setText(e.target.value)} />
           </div>
+          {canImport && ["planned", "in_training"].includes(batch.status) && (
+            <button type="button" className="btn sm" onClick={() => setImporting(true)}><Upload size={14} aria-hidden="true" />Upload new candidates</button>
+          )}
           {batch.actions.addStudents && <button type="button" className="btn sm" onClick={() => setAdding(true)}><Plus size={14} aria-hidden="true" />Add students</button>}
         </div>
       </div>
@@ -336,6 +341,13 @@ function StudentsPanel({ batch, canOpenProfile, onNotice }: { batch: BatchDetail
             })}
           </ul>
         )}
+      {importing && (
+        <BulkCandidatesDialog batch={batch} onClose={() => setImporting(false)} onDone={(n) => {
+          setImporting(false);
+          onNotice(`${n} candidate${n === 1 ? "" : "s"} added to ${batch.name}.`);
+          void refresh();
+        }} />
+      )}
       {adding && <AddStudentsDialog batch={batch} onClose={() => setAdding(false)}
         onAdded={(message) => { onNotice(message); void refresh(); }} />}
       {removing && (

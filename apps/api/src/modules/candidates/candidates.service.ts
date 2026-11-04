@@ -22,6 +22,8 @@ import {
   candidateTransitionAllowed,
   ownsCandidate,
   hasTrait,
+  normalizePhoneE164,
+  phoneProblem,
   resolveScope,
   type CandidateCompanyLink,
   type CandidateRef,
@@ -38,6 +40,7 @@ import { RateLimiter } from "../../platform/rate-limit.js";
 import type { BatchStatus } from "../training/training.schemas.js";
 import type {
   BatchListQuery,
+  BulkBatchCandidates,
   CandidateListQuery,
   ComplianceUpdate,
   CreateBatch,
@@ -46,6 +49,8 @@ import type {
   ProfileUpdate,
   TimelineQuery,
 } from "./candidates.schemas.js";
+import { Email } from "./candidates.schemas.js";
+import { buildCandidateImportTemplate } from "./candidate-import-template.js";
 import { likeContains } from "../../platform/sql.js";
 import { dbErrorMapper } from "../../platform/errors.js";
 
@@ -148,6 +153,13 @@ export function batchLabel(technology: string, location: string, startMonth: str
  * going over is logged as a warning (high-volume alert).
  */
 export const DUPLICATE_CHECKS_PER_MINUTE = 20;
+/** A file answers "is this contact taken?" for up to 500 rows, so previews are limited per user too. */
+export const BULK_CANDIDATE_CALLS_PER_MINUTE = 10;
+
+/** Thrown inside the transaction to roll a bulk add back and still answer with its report. */
+class BulkCandidatesRollback extends Error {
+  constructor(readonly report: unknown) { super("bulk_rollback"); }
+}
 
 const BATCH_ERRORS: Record<string, () => HttpException> = {
   invalid_batch: () => new UnprocessableEntityException("invalid_batch"),
@@ -294,6 +306,7 @@ export class CandidatesService implements OnModuleInit {
   private readonly log = new Logger(CandidatesService.name);
   private readonly hotlistLimiter = new RateLimiter(HOTLIST_PAGES_PER_MINUTE, 60_000);
   private readonly duplicateLimiter = new RateLimiter(DUPLICATE_CHECKS_PER_MINUTE, 60_000);
+  private readonly bulkCandidateLimiter = new RateLimiter(BULK_CANDIDATE_CALLS_PER_MINUTE, 60_000);
   /** The database is the source of truth for the Hot List switch (cached briefly). */
   private hotlistPolicy: "everyone" | "team" = HOTLIST_VISIBILITY;
   private hotlistPolicyAt = 0;
@@ -726,17 +739,23 @@ export class CandidatesService implements OnModuleInit {
     });
   }
 
-  /**
-   * `then` runs in the same transaction after the candidate row exists (jobs-portal:
-   * linking the hired application), so both commit or neither does.
-   */
-  async create(user: AuthedUser, body: CreateCandidate, then?: (c: pg.PoolClient, candidateId: string) => Promise<void>) {
-    const team = body.teamId ?? user.access.teamIds[0];
+  /** The team a new candidate goes to: the one asked for, else the caller's own; 403 outside candidate:create. */
+  private creatableTeam(user: AuthedUser, teamId?: string): string {
+    const team = teamId ?? user.access.teamIds[0];
     if (!team) throw new ForbiddenException("No team to assign");
     const scope = resolveScope(user.access, "candidate:create");
     const teamAllowed = scope && (scope.all || scope.teamIds.has(team)
       || (scope.recruiterIds.has(user.id) && user.access.teamIds[0] === team));
     if (!teamAllowed) throw new ForbiddenException("Not permitted to create candidates in this team");
+    return team;
+  }
+
+  /**
+   * `then` runs in the same transaction after the candidate row exists (jobs-portal:
+   * linking the hired application), so both commit or neither does.
+   */
+  async create(user: AuthedUser, body: CreateCandidate, then?: (c: pg.PoolClient, candidateId: string) => Promise<void>) {
+    const team = this.creatableTeam(user, body.teamId);
 
     // Email and phone are each unique across candidates (CA-6). The check runs
     // in its own transaction so its audit row stays when the create is refused;
@@ -764,6 +783,87 @@ export class CandidatesService implements OnModuleInit {
       if (then) await then(c, cand.rows[0]!.id);
       return { id: cand.rows[0]!.id };
     });
+  }
+
+  /**
+   * New candidates for a batch from the Excel template (docs/candidates-api.md). All
+   * or nothing: every row is inserted in one transaction, rolled back when any row
+   * fails or when `dryRun` is set, so a preview shows exactly what a real run would
+   * do. Each row is the single create's insert and audit event; technology and
+   * location come from the batch. authz.candidate_contact_unique (0260) finds taken
+   * contacts; a row reports only which value is taken, not whose it is.
+   */
+  async bulkAddToBatch(user: AuthedUser, batchId: string, body: BulkBatchCandidates) {
+    if (!this.bulkCandidateLimiter.take(user.id)) {
+      this.log.warn(`Bulk candidate rate limit exceeded by user ${user.id}`);
+      throw new HttpException("Too many imports; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
+    }
+    type Row = { row: number; firstName: string; lastName: string; phone: string; email: string; status: "ok" | "error"; error?: string };
+    try {
+      const report = await this.db.withUser(user.id, async (c) => {
+        const batch = (await c.query<{ location_id: string; technology_id: string; status: string }>(
+          `SELECT location_id, technology_id, status FROM eureka.batch WHERE id = $1`, [batchId])).rows[0];
+        if (!batch) throw new NotFoundException();
+        const team = this.creatableTeam(user, body.teamId);
+        if (batch.status !== "planned" && batch.status !== "in_training") throw new UnprocessableEntityException("batch_not_allowed");
+        const recruiter = hasTrait(user.access, "recruiter") ? user.id : null;
+        const emails = new Set<string>();
+        const phones = new Set<string>();
+        const rows: Row[] = [];
+        for (const [i, r] of body.rows.entries()) {
+          const firstName = r.firstName.trim();
+          const lastName = r.lastName.trim();
+          const email = Email.safeParse(r.email);
+          const phone = normalizePhoneE164(r.phone);
+          const res: Row = { row: i + 1, firstName, lastName, phone: phone ?? r.phone.trim(), email: email.success ? email.data : r.email.trim(), status: "ok" };
+          rows.push(res);
+          const fail = (code: string) => { res.status = "error"; res.error = code; };
+          if (!firstName || firstName.length > 80) { fail("invalid_first_name"); continue; }
+          if (!lastName || lastName.length > 80) { fail("invalid_last_name"); continue; }
+          if (!phone) { fail(phoneProblem(r.phone) ?? "invalid"); continue; }
+          if (!email.success) { fail("invalid_email"); continue; }
+          if (emails.has(email.data) || phones.has(phone)) { fail("duplicate_in_file"); continue; }
+          emails.add(email.data);
+          phones.add(phone);
+          await c.query("SAVEPOINT bulk_candidate");
+          try {
+            const personId = randomUUID();
+            await c.query(`INSERT INTO eureka.person (id, first_name, last_name, phone_e164, personal_email) VALUES ($1,$2,$3,$4,$5)`,
+              [personId, firstName, lastName, phone, email.data]);
+            const cand = await c.query<{ id: string }>(
+              `INSERT INTO eureka.candidate (person_id, technology_id, team_id, recruiter_id, location_id, batch_id)
+               VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+              [personId, batch.technology_id, team, recruiter, batch.location_id, batchId]);
+            await this.audit.record(c, { actorId: user.id, action: "candidate.created", entityType: "candidate", entityId: cand.rows[0]!.id, changes: { batchId, bulk: true } });
+            await c.query("RELEASE SAVEPOINT bulk_candidate");
+          } catch (err) {
+            const m = (err as { message?: string }).message;
+            if (m !== "duplicate_email" && m !== "duplicate_phone") throw err;
+            await c.query("ROLLBACK TO SAVEPOINT bulk_candidate");
+            fail(m);
+          }
+        }
+        const failed = rows.filter((r) => r.status === "error").length;
+        const out = { dryRun: body.dryRun, committed: !body.dryRun && failed === 0, created: body.dryRun || failed > 0 ? 0 : rows.length, failed, rows };
+        if (!out.committed) throw new BulkCandidatesRollback(out);
+        await this.audit.record(c, { actorId: user.id, action: "batch.candidates_added", entityType: "batch", entityId: batchId, changes: { teamId: team, created: rows.length } });
+        return out;
+      }).catch(mapCreateError);
+      return report;
+    } catch (err) {
+      if (!(err instanceof BulkCandidatesRollback)) throw err;
+      // Audited apart: the check's transaction was rolled back. Counts only (rule 5).
+      const { rows, failed } = err.report as { rows: Row[]; failed: number };
+      await this.db.withUser(user.id, (c) => this.audit.record(c, {
+        actorId: user.id, action: "batch.candidates_checked", entityType: "batch", entityId: batchId, changes: { rows: rows.length, failed },
+      }));
+      return err.report;
+    }
+  }
+
+  /** The Excel template of bulkAddToBatch. */
+  candidateTemplate(): Promise<Buffer> {
+    return buildCandidateImportTemplate();
   }
 
   /**

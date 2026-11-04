@@ -3,13 +3,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { salesError } from "./errors";
 import { navigate } from "../lib/router";
 import { screenPath } from "../nav";
-import { CreateBatchDialog } from "./CreateBatchDialog";
 import { CreateCandidateDialog } from "./CreateCandidateDialog";
 import { CandidateName, type ListPageProps } from "./HotListPage";
 import { ListFilters, ListFooter } from "./ListControls";
 import { STATUSES, salesApi, salesKeys } from "./salesApi";
 import { OpenToAllBadge, SharedBadge, Phone, Priority, StatusBadge } from "./ui";
 import { useCandidateList } from "./useCandidateList";
+import { NewBatchDialog } from "../training/NewBatchDialog";
 import { Loading } from "../ui/Loading";
 import { QueryError } from "../ui/QueryError";
 
@@ -82,13 +82,14 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
         />
       )}
       {creating === "batch" && (
-        <CreateBatchDialog
-          canAddTechnology={caps.includes("technology:create")}
+        <NewBatchDialog
+          me={me}
           onClose={() => setCreating(null)}
-          onCreated={(id) => {
+          onDone={(id, name, added) => {
             setCreating(null);
-            setMessage("Batch created.");
+            setMessage(added > 0 ? `Batch ${name} created with ${added} candidate${added === 1 ? "" : "s"}.` : "Batch created.");
             void qc.invalidateQueries({ queryKey: salesKeys.batches });
+            if (added > 0) void qc.invalidateQueries({ queryKey: salesKeys.candidates });
             // Straight to the new batch, where students are added.
             if (caps.includes("training:read")) navigate(screenPath("training", id));
           }}
