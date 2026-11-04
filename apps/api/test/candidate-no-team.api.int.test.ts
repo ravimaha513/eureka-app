@@ -66,7 +66,7 @@ const row = async (id: string) => (await db.admin.query<{ team_id: string | null
 
 describe("candidate with no team", () => {
   it("is held by the creator as recruiter, visible up their line and not to other lines", async () => {
-    const { id } = await createNoTeam("m1");
+    const { id, body } = await createNoTeam("m1");
     expect(await row(id)).toEqual({ team_id: null, recruiter_id: U.m1 });
 
     const res = await call("m1", "GET", `/api/v1/candidates/${id}`);
@@ -78,7 +78,8 @@ describe("candidate with no team", () => {
     expect((await call("m2", "GET", `/api/v1/candidates/${id}`)).statusCode).toBe(404);
     expect((await call("l3", "GET", `/api/v1/candidates/${id}`)).statusCode).toBe(404);
 
-    const list = await call("m1", "GET", `/api/v1/candidates?limit=100`);
+    // Search by name: the list is ordered by id, so a plain first page can miss a new row.
+    const list = await call("m1", "GET", `/api/v1/candidates?limit=100&search=${body.lastName}`);
     expect(list.statusCode, list.body).toBe(200);
     expect((list.json().items as { id: string }[]).some((c) => c.id === id)).toBe(true);
   });
