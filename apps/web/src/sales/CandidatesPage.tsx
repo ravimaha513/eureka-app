@@ -79,6 +79,13 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
             void qc.invalidateQueries({ queryKey: salesKeys.batches });
             onOpenProfile?.(id);
           }}
+          onCreatedMany={(n, done) => {
+            if (done) setCreating(null);
+            setMessage(`${n} ${n === 1 ? "candidate" : "candidates"} added.`);
+            void qc.invalidateQueries({ queryKey: salesKeys.candidates });
+            void qc.invalidateQueries({ queryKey: salesKeys.hotlist });
+            void qc.invalidateQueries({ queryKey: salesKeys.batches });
+          }}
         />
       )}
       {creating === "batch" && (

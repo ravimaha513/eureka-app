@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { PHONE_PROBLEM_MESSAGES, normalizePhoneE164, phoneProblem } from "@eureka/shared";
 import { ApiError } from "../api";
@@ -7,15 +7,20 @@ import { LookupPicker } from "../lookups";
 import { UUID_RE, fieldErrors, salesError } from "./errors";
 import { OPEN_BATCH_STATUSES, salesApi, salesKeys, type CreateCandidate, type Duplicate } from "./salesApi";
 import { Field, useFocusAfterFailure } from "./ui";
+import { BulkCandidatesForm } from "./BulkCandidatesForm";
+import { useCreateTeam } from "./useCreateTeam";
 
 const FIELDS = ["firstName", "lastName", "phone", "email", "teamId", "technologyId", "locationId", "batchId"] as const;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * New candidate (POST /api/v1/candidates). The Team picker lists the teams in
- * the caller's candidate:create scope (GET /candidate-create-teams), preset to
- * their own team; it is hidden when there is only one. A recruiter creator
- * becomes the candidate's recruiter.
+ * the caller's candidate:create scope (GET /candidate-create-teams) and starts
+ * on "Not yet assigned", so the team is always a deliberate pick; it is hidden
+ * (and the only team used) when there is just one. A recruiter creator becomes
+ * the candidate's recruiter.
+ * "Several" switches to BulkCandidatesForm: one team/batch for many rows, typed
+ * or pasted from a spreadsheet / CSV.
  * Technology and location come from the lookups pickers; `locations` (the ones
  * the user has already seen) are the fallback when the lookup list is unavailable.
  * The Batch picker lists every open batch until a location is chosen, then that
@@ -28,11 +33,47 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * (owning team and contact; a link only when the user can open that profile).
  * There is no "Create anyway": the email or phone has to change.
  */
-export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenProfile, canAddTechnology = false }: {
+export function CreateCandidateDialog({ locations, onClose, onCreated, onCreatedMany, onOpenProfile, canAddTechnology = false }: {
   locations: { id: string; name: string }[]; onClose: () => void; onCreated: (id: string) => void;
+  /** Several mode: `count` more candidates were created; `done` when every row went through (the dialog should close). */
+  onCreatedMany?: (count: number, done: boolean) => void;
   /** technology:create: the Technology picker offers "Add a new technology…". */
   canAddTechnology?: boolean;
   onOpenProfile?: (id: string) => void;
+}) {
+  const [mode, setMode] = useState<"one" | "several">("one");
+  const tabsId = useId();
+  const modes = [{ key: "one", label: "One candidate" }, { key: "several", label: "Several candidates" }] as const;
+  const tabs = onCreatedMany && (
+    <div className="tabs ncd-tabs" role="tablist" aria-label="How many candidates">
+      {modes.map((m) => (
+        <button key={m.key} type="button" role="tab" id={`${tabsId}-${m.key}`} className="tab" aria-selected={mode === m.key}
+          tabIndex={mode === m.key ? 0 : -1} onClick={() => setMode(m.key)}
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+            e.preventDefault();
+            const next = mode === "one" ? "several" : "one";
+            setMode(next);
+            document.getElementById(`${tabsId}-${next}`)?.focus();
+          }}>
+          {m.label}
+        </button>
+      ))}
+    </div>
+  );
+  return (
+    <Dialog title="New candidate" onClose={onClose} wide={mode === "several"} className={mode === "several" ? "bulk" : undefined}>
+      {tabs}
+      {mode === "several" && onCreatedMany
+        ? <BulkCandidatesForm locations={locations} canAddTechnology={canAddTechnology} onCancel={onClose} onCreated={onCreatedMany} />
+        : <OneCandidateForm locations={locations} canAddTechnology={canAddTechnology} onCancel={onClose} onCreated={onCreated} onOpenProfile={onOpenProfile} />}
+    </Dialog>
+  );
+}
+
+function OneCandidateForm({ locations, onCancel, onCreated, onOpenProfile, canAddTechnology }: {
+  locations: { id: string; name: string }[]; onCancel: () => void; onCreated: (id: string) => void;
+  canAddTechnology: boolean; onOpenProfile?: (id: string) => void;
 }) {
   const [v, setV] = useState({ firstName: "", lastName: "", phone: "", email: "", technologyId: "", locationId: "", batchId: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -58,15 +99,12 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
     setV((s) => ({ ...s, batchId, ...(b ? { locationId: b.location.id, technologyId: s.technologyId || b.technology.id } : {}) }));
   };
 
-  const teams = useQuery({ queryKey: ["candidate-create-teams"], queryFn: () => salesApi.createTeams(), staleTime: 300_000 });
-  const teamItems = teams.data?.items ?? [];
-  const [pickedTeam, setPickedTeam] = useState<string | null>(null);
-  const teamId = pickedTeam ?? teams.data?.defaultTeamId ?? (teamItems.length === 1 ? teamItems[0]!.id : "");
-  const noTeams = teams.isSuccess && teamItems.length === 0;
+  const team = useCreateTeam();
+  const teamId = team.teamId;
 
   const validate = () => {
     const e: Record<string, string> = {};
-    if (teams.isSuccess && !teamItems.some((t) => t.id === teamId)) e.teamId = "Choose a team.";
+    if (team.problem) e.teamId = team.problem;
     if (!v.firstName.trim()) e.firstName = "Enter a first name.";
     if (!v.lastName.trim()) e.lastName = "Enter a last name.";
     if (!v.phone.trim()) e.phone = "Enter a phone number.";
@@ -117,7 +155,6 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
   };
 
   return (
-    <Dialog title="New candidate" onClose={onClose}>
       <form ref={formRef} onSubmit={submit} noValidate>
         <Field label="First name" error={errors.firstName}>
           {(p) => <input {...p} autoComplete="off" value={v.firstName} onChange={set("firstName")} data-autofocus />}
@@ -131,19 +168,7 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
         <Field label="Personal email" hint="One candidate per email." error={errors.email}>
           {(p) => <input {...p} type="email" required autoComplete="off" value={v.email} onChange={set("email")} />}
         </Field>
-        {noTeams && (
-          <p className="note warn" role="alert">You aren't on a team you can add candidates to. Ask an admin to add you to a team.</p>
-        )}
-        {teamItems.length > 1 && (
-          <Field label="Team" error={errors.teamId}>
-            {(p) => (
-              <select {...p} required value={teamId} onChange={(e) => setPickedTeam(e.target.value)}>
-                {!teamItems.some((t) => t.id === teamId) && <option value="">Choose a team</option>}
-                {teamItems.map((t) => <option key={t.id} value={t.id}>{t.lead ? `${t.name} (${t.lead})` : t.name}</option>)}
-              </select>
-            )}
-          </Field>
-        )}
+        {team.field(errors.teamId)}
         <LookupPicker kind="technologies" label="Technology" value={v.technologyId} error={errors.technologyId} canAdd={canAddTechnology}
           onChange={(id) => setV((s) => ({ ...s, technologyId: id }))} />
         <LookupPicker kind="locations" label="Location" value={v.locationId} error={errors.locationId} fallback={locations}
@@ -157,9 +182,8 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
           )}
         </Field>
         {duplicates && <DuplicateWarning duplicates={duplicates} onOpenProfile={onOpenProfile} />}
-        <DialogActions onCancel={onClose} submitLabel="Create candidate" busy={busy} error={formError} />
+        <DialogActions onCancel={onCancel} submitLabel="Create candidate" busy={busy} error={formError} />
       </form>
-    </Dialog>
   );
 }
 
