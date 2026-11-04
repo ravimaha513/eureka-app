@@ -236,7 +236,7 @@ describe("profile card", () => {
   it("attaches the candidate to an open batch at their location", async () => {
     api.routes["GET /api/v1/candidates/c9/training"] = () => ({ body: { batch: null, canChangeBatch: true, locationId: "l1" } });
     api.routes["GET /api/v1/batches"] = () => ({ body: { canCreate: false, items: [
-      { id: "b1", label: ".NET · Dallas · Sep 2026", customName: ".NET 2026", status: "planned" },
+      { id: "b1", label: ".NET 2026 · Dallas", customName: ".NET 2026", status: "planned" },
       { id: "b3", label: "Java · Dallas · Jan 2026", customName: null, status: "cancelled" },
     ] } });
     api.routes["PUT /api/v1/candidates/c9/training/batch"] = (_u, body) => ({ body: { candidateId: "c9", ...(body as object) } });
@@ -244,7 +244,7 @@ describe("profile card", () => {
     wrap(<CandidateTraining candidateId="c9" onChanged={onChanged} />);
     fireEvent.click(await screen.findByRole("button", { name: "Add to batch" }));
     const dlg = screen.getByRole("dialog", { name: "Add to batch" });
-    await within(dlg).findByRole("option", { name: ".NET 2026 (.NET · Dallas · Sep 2026)" });
+    await within(dlg).findByRole("option", { name: ".NET 2026 · Dallas" });
     expect(within(dlg).queryByRole("option", { name: /Java/ })).not.toBeInTheDocument();
     fireEvent.change(within(dlg).getByRole("combobox", { name: "Batch" }), { target: { value: "b1" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Save batch" }));
