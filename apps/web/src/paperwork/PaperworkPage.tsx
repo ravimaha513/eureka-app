@@ -244,6 +244,7 @@ function PaperworkDrawer({ placementId, me, onClose }: { placementId: string; me
               title={d.placement ? "Placement documents" : "Candidate documents"} />
 
             <BgcSection hid={hid} bgc={d.bgc} onEdit={() => setEditBgc(true)} />
+            <BgcNotes key={d.bgc.version ?? 0} hid={hid} placementId={placementId} bgc={d.bgc} onDone={done} />
           </>
         )}
       </Drawer>
@@ -295,15 +296,38 @@ function BgcSection({ hid, bgc, onEdit }: { hid: string; bgc: Bgc; onEdit: () =>
         <dt>Status</dt><dd><BgcBadge status={bgc.status} />{bgc.statusReason && <span className="block muted">{bgc.statusReason}</span>}</dd>
         <dt>BGC company</dt><dd>{bgc.bgcCompany ?? "—"}</dd>
         <dt>Initiated</dt><dd>{fmtDate(bgc.initiatedOn)}</dd>
-        <dt>Completed</dt><dd>{fmtDate(bgc.completedOn)}</dd>
-        <dt>Helped by</dt><dd>{bgc.helpedBy?.name ?? "—"}</dd>
         <dt>Education level</dt><dd>{bgc.educationLevel ?? "—"}</dd>
         <dt>Employment history</dt><dd>{yearsText(bgc.employmentYears)}</dd>
         <dt>Address history</dt><dd>{yearsText(bgc.addressYears)}</dd>
-        {bgc.notes && <><dt>Notes</dt><dd>{bgc.notes}</dd></>}
       </dl>
       {bgc.actions.update && <button type="button" className="btn sm" style={{ alignSelf: "flex-start" }} onClick={onEdit}>Update background check</button>}
       <HistoryList entries={bgc.history} label="Background check history" />
+    </section>
+  );
+}
+
+/** The BGC record's notes, saved in place by whoever may update the check; read-only for everyone else. */
+function BgcNotes({ hid, placementId, bgc, onDone }: { hid: string; placementId: string; bgc: Bgc; onDone: (m: string) => void }) {
+  const [notes, setNotes] = useState(bgc.notes ?? "");
+  const submit = useSubmit(paperworkError);
+  const changed = notes.trim() !== (bgc.notes ?? "");
+  return (
+    <section className="manageblock" aria-labelledby={`${hid}-n`}>
+      <h3 id={`${hid}-n`}>Notes</h3>
+      {!bgc.actions.update ? <p className={bgc.notes ? undefined : "muted"}>{bgc.notes ?? "No notes yet."}</p> : (
+        <form noValidate onSubmit={(e) => {
+          e.preventDefault();
+          void submit.run(async () => {
+            await paperworkApi.updateBgc(placementId, { notes: notes.trim() || null, ...(bgc.version === null ? {} : { expectedVersion: bgc.version }) });
+            onDone("Notes saved.");
+          });
+        }}>
+          <Field label="Add or edit notes" hint="Up to 1000 characters. Avoid personal data." error={submit.error || undefined}>
+            {(p) => <textarea {...p} rows={3} maxLength={1000} value={notes} onChange={(e) => setNotes(e.target.value)} />}
+          </Field>
+          <button type="submit" className="btn sm" style={{ alignSelf: "flex-start" }} disabled={!changed || submit.busy}>Save notes</button>
+        </form>
+      )}
     </section>
   );
 }
@@ -450,11 +474,9 @@ function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string;
   const [reason, setReason] = useState("");
   const [company, setCompany] = useState(bgc.bgcCompany ?? "");
   const [initiatedOn, setInitiated] = useState(bgc.initiatedOn ?? "");
-  const [completedOn, setCompleted] = useState(bgc.completedOn ?? "");
   const [education, setEducation] = useState(bgc.educationLevel ?? "");
   const [employment, setEmployment] = useState(bgc.employmentYears === null ? "" : String(bgc.employmentYears));
   const [address, setAddress] = useState(bgc.addressYears === null ? "" : String(bgc.addressYears));
-  const [notes, setNotes] = useState(bgc.notes ?? "");
   const [failPlacement, setFailPlacement] = useState(false);
   const [err, setErr] = useState<{ reason?: string; form?: string }>({});
   const submit = useSubmit(paperworkError);
@@ -463,17 +485,14 @@ function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string;
 
   const build = (): BgcChange => {
     const b: BgcChange = bgc.version === null ? {} : { expectedVersion: bgc.version };
-    const text = (v: string, old: string | null, k: "bgcCompany" | "educationLevel" | "notes") => { if (v.trim() !== (old ?? "")) b[k] = v.trim() || null; };
-    const date = (v: string, old: string | null, k: "initiatedOn" | "completedOn") => { if (v !== (old ?? "")) b[k] = v || null; };
+    const text = (v: string, old: string | null, k: "bgcCompany" | "educationLevel") => { if (v.trim() !== (old ?? "")) b[k] = v.trim() || null; };
     const num = (v: string, old: number | null, k: "employmentYears" | "addressYears") => { if (v !== (old === null ? "" : String(old))) b[k] = v === "" ? null : Number(v); };
     if (status) { b.status = status; if (reason.trim()) b.reason = reason.trim(); }
     text(company, bgc.bgcCompany, "bgcCompany");
-    date(initiatedOn, bgc.initiatedOn, "initiatedOn");
-    date(completedOn, bgc.completedOn, "completedOn");
+    if (initiatedOn !== (bgc.initiatedOn ?? "")) b.initiatedOn = initiatedOn || null;
     text(education, bgc.educationLevel, "educationLevel");
     num(employment, bgc.employmentYears, "employmentYears");
     num(address, bgc.addressYears, "addressYears");
-    text(notes, bgc.notes, "notes");
     if (failPlacement && willFail && bgc.actions.failPlacement) b.failPlacement = true;
     return b;
   };
@@ -514,13 +533,9 @@ function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string;
           <Field label="BGC company">{(p) => <input {...p} maxLength={120} value={company} onChange={(e) => setCompany(e.target.value)} />}</Field>
           <Field label="Education level">{(p) => <input {...p} maxLength={60} value={education} onChange={(e) => setEducation(e.target.value)} />}</Field>
           <Field label="Initiated on">{(p) => <input {...p} type="date" value={initiatedOn} onChange={(e) => setInitiated(e.target.value)} />}</Field>
-          <Field label="Completed on">{(p) => <input {...p} type="date" value={completedOn} onChange={(e) => setCompleted(e.target.value)} />}</Field>
           <Field label="Employment history">{(p) => <YearsSelect {...p} value={employment} onChange={setEmployment} />}</Field>
           <Field label="Address history">{(p) => <YearsSelect {...p} value={address} onChange={setAddress} />}</Field>
         </div>
-        <Field label="Notes" hint="Up to 1000 characters. Avoid personal data.">
-          {(p) => <textarea {...p} rows={3} maxLength={1000} value={notes} onChange={(e) => setNotes(e.target.value)} />}
-        </Field>
         {err.form && <p className="error" role="alert">{err.form}</p>}
         <DialogActions onCancel={onClose} submitLabel="Save" busy={submit.busy} error={submit.error} />
       </form>

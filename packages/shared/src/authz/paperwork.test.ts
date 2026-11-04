@@ -81,10 +81,10 @@ describe("paperwork coverage and actions", () => {
     expect(bgcActions(HR_M, ref, "failed", "joined").failPlacement).toBe(true);
     expect(bgcActions(HR_M, ref, "failed", "bgc_failed").failPlacement).toBe(false);
     expect(bgcActions(HR_M, ref, "in_progress", null).failPlacement).toBe(false);
-    expect(bgcActions(M, ref, "in_progress", "bgc")).toEqual({ update: false, transition: [], failPlacement: false });
-    // Manager/AD (placement.bgc_status:update) may only mark the check initiated.
-    expect(bgcActions(M, ref, "not_started", "joined")).toEqual({ update: false, transition: ["initiated"], failPlacement: false });
-    expect(bgcActions(M, ref, "cleared", "joined").transition).toEqual(["initiated"]);
+    // Manager/AD hold bgc:update over their hierarchy, so they edit the check like HR.
+    expect(bgcActions(M, ref, "in_progress", "bgc")).toEqual({ update: true, transition: ["cleared", "failed"], failPlacement: true });
+    expect(bgcActions(M, ref, "not_started", "joined")).toEqual({ update: true, transition: ["initiated"], failPlacement: false });
+    expect(bgcActions(M, ref, "cleared", "joined").transition).toEqual(["initiated", "failed"]);
     expect(bgcActions(M, ref, "not_started", "backout").transition).toEqual([]);
     expect(bgcActions(IMM, ref, "in_progress", null).update).toBe(false);
     expect(bgcActions(HR, ref, "initiated", "backout").update).toBe(false);

@@ -174,7 +174,7 @@ export interface BgcActions {
 export function bgcActions(user: UserAccess, r: PaperworkRef, status: string, placementStatus: string | null): BgcActions {
   const update = placementStatus !== "backout" && paperworkCovered(user, "bgc:update", r);
   const canFail = status === "failed" || bgcTransitionTargets(status).includes("failed");
-  // Whoever may mark the placement BGC failed (Manager, AD) may also mark the check initiated (status only).
+  // Whoever may mark the placement BGC failed may also mark the check initiated (status only), even without bgc:update.
   const scope = resolveScope(user, "placement.bgc_status:update");
   const initiate = placementStatus !== null && placementStatus !== "backout" && scope !== null && ownsActivity(scope, r);
   return {

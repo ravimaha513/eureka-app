@@ -23,7 +23,7 @@ const DETAIL: PaperworkDetail = {
       templateVersion: 1, actions: { transition: ["pending"], editNotes: true, assign: true } },
   ],
   bgc: {
-    status: "initiated", bgcCompany: "Fictional Checks LLC", initiatedOn: "2026-01-01", completedOn: null, helpedBy: null,
+    status: "initiated", bgcCompany: "Fictional Checks LLC", initiatedOn: "2026-01-01",
     educationLevel: null, employmentYears: 7, addressYears: null, notes: null, statusReason: null, statusChangedAt: null, version: 2,
     history: [{ at: "2026-01-01T10:00:00Z", actor: { id: "u-me", name: "Test User" }, from: "not_started", to: "initiated", changed: ["status", "bgc_company"], reason: null }],
     actions: { update: true, transition: ["in_progress", "cleared", "failed"], failPlacement: false },
@@ -216,6 +216,30 @@ describe("Paperwork drawer", () => {
     fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.writes()).toHaveLength(2));
     expect(api.writes()[1]!.body).toMatchObject({ status: "failed", failPlacement: true });
+  });
+
+  it("no longer shows Completed or Helped by; saves notes in place when the caller may update", async () => {
+    api.routes["PATCH /api/v1/paperwork/placements/p1/bgc"] = () => ({ body: { ...DETAIL.bgc, notes: "Fictional note" } });
+    wrap(<PaperworkPage me={HR} />);
+    const drawer = await openDrawer();
+    await within(drawer).findByRole("heading", { name: "Notes" });
+    expect(within(drawer).queryByText("Completed")).not.toBeInTheDocument();
+    expect(within(drawer).queryByText("Helped by")).not.toBeInTheDocument();
+    const save = within(drawer).getByRole("button", { name: "Save notes" });
+    expect(save).toBeDisabled();
+    fireEvent.change(within(drawer).getByLabelText("Add or edit notes"), { target: { value: " Fictional note " } });
+    fireEvent.click(save);
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.body).toEqual({ notes: "Fictional note", expectedVersion: 2 });
+    expect(await within(drawer).findByText("Notes saved.")).toBeInTheDocument();
+  });
+
+  it("shows notes read-only without update rights", async () => {
+    api.routes["GET /api/v1/paperwork/placements/p1"] = () => ({ body: { ...DETAIL, bgc: { ...DETAIL.bgc, notes: "Fictional BGC note", actions: { update: false, transition: [], failPlacement: false } } } });
+    wrap(<PaperworkPage me={HR} />);
+    const drawer = await openDrawer();
+    expect(await within(drawer).findByText("Fictional BGC note")).toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "Save notes" })).not.toBeInTheDocument();
   });
 
   it("records employment and address history as 3, 5, 7 or 10 years (migration 0160)", async () => {

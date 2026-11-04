@@ -509,6 +509,8 @@ export const GRANTS: Record<Role, Grants> = {
     "candidate:delete": "hierarchy",
     "candidate.visibility:update": "hierarchy",
     "placement.bgc_status:update": "hierarchy",
+    // Anyone above lead edits the background check (the CEO holds no document:read, so no Paperwork screen)
+    "bgc:update": "hierarchy",
     "rate:read": "hierarchy",
     "report:export": "hierarchy",
     // Superiors keep their own preferred vendors too; others' entries stay read-only
@@ -544,6 +546,8 @@ export const GRANTS: Record<Role, Grants> = {
     "candidate:delete": "hierarchy",
     "candidate.visibility:update": "hierarchy",
     "placement.bgc_status:update": "hierarchy",
+    // Anyone above lead edits the background check (the CEO holds no document:read, so no Paperwork screen)
+    "bgc:update": "hierarchy",
     "rate:read": "hierarchy",
     "report:export": "hierarchy",
     // Superiors keep their own preferred vendors too; others' entries stay read-only

@@ -243,12 +243,12 @@ export class PaperworkService {
 
   private async bgcDetail(c: pg.PoolClient, access: UserAccess, h: HeaderRow) {
     const b = (await c.query<{
-      id: string; status: string; bgc_company: string | null; initiated_on: string | null; completed_on: string | null;
-      helped_by: string | null; helper_name: string | null; education_level: string | null; employment_years: number | null;
+      id: string; status: string; bgc_company: string | null; initiated_on: string | null;
+      education_level: string | null; employment_years: number | null;
       address_years: number | null; notes: string | null; status_reason: string | null; status_changed_at: Date | null; version: number;
-    }>(`SELECT b.id, b.status, b.bgc_company, b.initiated_on::text, b.completed_on::text, b.helped_by, u.display_name AS helper_name,
+    }>(`SELECT b.id, b.status, b.bgc_company, b.initiated_on::text,
                b.education_level, b.employment_years, b.address_years, b.notes, b.status_reason, b.status_changed_at, b.version
-          FROM eureka.bgc b LEFT JOIN eureka.app_user u ON u.id = b.helped_by WHERE b.placement_id = $1`, [h.placement_id])).rows[0];
+          FROM eureka.bgc b WHERE b.placement_id = $1`, [h.placement_id])).rows[0];
     const history = b ? (await c.query<{ at: Date; actor_id: string | null; actor_name: string | null; from_status: string | null;
       to_status: string | null; changed: string[]; reason: string | null }>(
       `SELECT e.at, e.actor_id, u.display_name AS actor_name, e.from_status, e.to_status, e.changed, e.reason
@@ -259,8 +259,6 @@ export class PaperworkService {
       status,
       bgcCompany: b?.bgc_company ?? null,
       initiatedOn: b?.initiated_on ?? null,
-      completedOn: b?.completed_on ?? null,
-      helpedBy: ref(b?.helped_by ?? null, b?.helper_name ?? null),
       educationLevel: b?.education_level ?? null,
       employmentYears: b?.employment_years ?? null,
       addressYears: b?.address_years ?? null,
@@ -379,7 +377,7 @@ export class PaperworkService {
       const status = current?.status ?? "not_started";
       const acts = bgcActions(user.access, paperworkRef(h), status, h.placement_status);
       const { expectedVersion, ...changes } = body;
-      // Without bgc:update, Manager/AD may only mark the check initiated (bgcActions offers just that).
+      // Without bgc:update, a holder of placement.bgc_status:update may only mark the check initiated (bgcActions offers just that).
       const initiateOnly = changes.status === "initiated" && acts.transition.includes("initiated")
         && Object.keys(changes).every((k) => k === "status" || k === "reason");
       if (h.placement_status !== "backout" && !acts.update && !initiateOnly) throw new ForbiddenException("Not permitted");

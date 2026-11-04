@@ -263,22 +263,26 @@ describe("BGC", () => {
     expect((await call("hr", "PATCH", url, { status: "initiated" })).json().detail).toBe("reason_required");
     const res = await call("hr", "PATCH", url, { status: "initiated", reason: "Vendor asked for more documents" });
     expect(res.statusCode, res.body).toBe(200);
-    expect(res.json()).toMatchObject({ status: "initiated", completedOn: null, actions: { transition: ["in_progress", "cleared", "failed"] } });
+    expect(res.json()).toMatchObject({ status: "initiated", actions: { transition: ["in_progress", "cleared", "failed"] } });
   });
 
   it("HR records the check; others get 403 or 404; values and transitions are validated", async () => {
     const m = await placed();
     const url = `/api/v1/paperwork/placements/${m.id}/bgc`;
-    expect((await call("m1", "PATCH", url, { status: "initiated", notes: "Fictional" })).statusCode).toBe(403); // no bgc:update
-    // Manager (placement.bgc_status:update) marks it initiated only: status alone, from the drawer.
+    // Manager (bgc:update over their hierarchy) edits the details too.
     const pm = await placed();
-    const mi = await call("m1", "PATCH", `/api/v1/paperwork/placements/${pm.id}/bgc`, { status: "initiated" });
+    const mi = await call("m1", "PATCH", `/api/v1/paperwork/placements/${pm.id}/bgc`, { status: "initiated", notes: "Fictional" });
     expect(mi.statusCode, mi.body).toBe(200);
+    expect(mi.json()).toMatchObject({ status: "initiated", notes: "Fictional", actions: { update: true } });
+    expect((await call("l1", "PATCH", url, { notes: "Fictional" })).statusCode).toBe(403); // no bgc:update
+    // completedOn and helpedBy are gone from the API.
+    expect((await call("hr", "PATCH", url, { completedOn: "2026-01-20" })).statusCode).toBe(422);
+    expect((await call("hr", "PATCH", url, { helpedBy: U.r1a })).statusCode).toBe(422);
     expect((await call("imm", "PATCH", url, { status: "initiated" })).statusCode).toBe(403);
-    let res = await call("hr", "PATCH", url, { status: "initiated", bgcCompany: "Fictional Checks LLC", employmentYears: 7, helpedBy: U.r1a });
+    let res = await call("hr", "PATCH", url, { status: "initiated", bgcCompany: "Fictional Checks LLC", employmentYears: 7 });
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json()).toMatchObject({ status: "initiated", bgcCompany: "Fictional Checks LLC", employmentYears: 7,
-      helpedBy: { id: U.r1a, name: "r1a" }, version: 2, actions: { update: true, transition: ["in_progress", "cleared", "failed"], failPlacement: false } });
+      version: 2, actions: { update: true, transition: ["in_progress", "cleared", "failed"], failPlacement: false } });
     expect(res.json().history).toHaveLength(1);
     expect((await call("hr", "PATCH", url, { status: "failed" })).json().detail).toBe("reason_required");
     expect((await call("hr", "PATCH", url, { status: "not_started" })).json().detail).toBe("invalid_transition");
@@ -291,7 +295,7 @@ describe("BGC", () => {
     expect((await call("hr", "PATCH", "/api/v1/paperwork/placements/00000000-0000-4000-8000-000000000999/bgc", { status: "initiated" })).statusCode).toBe(404);
     const audit = await auditOf(m.id);
     expect(audit.filter((a) => a.action === "bgc.update").map((a) => a.changes)).toEqual([
-      { fields: ["status", "bgc_company", "initiated_on", "helped_by", "employment_years"], from: "not_started", to: "initiated" }]);
+      { fields: ["status", "bgc_company", "initiated_on", "employment_years"], from: "not_started", to: "initiated" }]);
     expect(JSON.stringify(audit)).not.toMatch(/Fictional/);
   });
 });

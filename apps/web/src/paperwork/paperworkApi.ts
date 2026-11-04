@@ -58,8 +58,6 @@ export interface Bgc {
   status: string;
   bgcCompany: string | null;
   initiatedOn: string | null;
-  completedOn: string | null;
-  helpedBy: Ref | null;
   educationLevel: string | null;
   employmentYears: number | null;
   addressYears: number | null;
@@ -100,7 +98,6 @@ export interface BgcChange {
   reason?: string;
   bgcCompany?: string | null;
   initiatedOn?: string | null;
-  completedOn?: string | null;
   educationLevel?: string | null;
   employmentYears?: number | null;
   addressYears?: number | null;
@@ -162,7 +159,6 @@ export const PAPERWORK_ERRORS: Record<string, string> = {
   invalid_owner_role: "Pick an existing role as the owner.",
   invalid_due_date: "Pick a due date between 2000 and 2100.",
   invalid_change: "One of the values isn't valid. Check the fields and try again.",
-  invalid_helper: "The person who helped must be an active user.",
   invalid_document: "That document can't be linked: it must belong to this candidate or placement, be readable by you and not be blocked by the scan.",
   placement_closed: "This placement was backed out; its paperwork can no longer change.",
   version_mismatch: "Someone else changed this in the meantime. Close and reopen to see the latest version.",

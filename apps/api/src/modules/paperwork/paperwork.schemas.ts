@@ -41,8 +41,6 @@ export const UpdateBgc = z
     reason: reason.optional(),
     bgcCompany: z.string().trim().min(1).max(120).regex(noControl, "no control characters").nullable().optional(),
     initiatedOn: day.nullable().optional(),
-    completedOn: day.nullable().optional(),
-    helpedBy: uuid.nullable().optional(),
     educationLevel: z.string().trim().min(1).max(60).regex(noControl, "no control characters").nullable().optional(),
     /** History checked, in years: one of BGC_HISTORY_YEARS (3, 5, 7, 10; migration 0160). */
     employmentYears: historyYears.nullable().optional(),
