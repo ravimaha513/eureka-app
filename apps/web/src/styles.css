@@ -343,6 +343,10 @@ h1:focus { outline: none; }
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; }
 .facts dt { color: var(--muted); font-weight: 600; font-size: 12px; }
 .facts dd { margin: 0; color: var(--text2); min-width: 0; overflow-wrap: anywhere; }
+.factshead { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+.factshead h3 { font-size: 13px; }
+.factsnote { font-size: 12px; margin-top: 8px; }
+.field input[readonly] { background: var(--hover); color: var(--muted); cursor: default; }
 .profilegrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; align-items: start; }
 .cp-tabs { margin: 4px 0 14px; }
 .cp-overview { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }

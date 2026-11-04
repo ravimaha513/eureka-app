@@ -164,6 +164,8 @@ export const PERMISSIONS = [
   "submission:read",
   "submission:create",
   "submission:update",
+  /** Corrects job title, client, vendor, rate, job and submitted time (docs/submissions-api.md); status stays a transition. */
+  "submission.details:update",
   // interviews
   "interview:read",
   "interview:create",
@@ -324,6 +326,7 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   "submission:read": "See submissions",
   "submission:create": "Submit candidates to clients",
   "submission:update": "Edit submissions",
+  "submission.details:update": "Correct submission details (client, vendor, job, rate, date)",
   "interview:read": "See interviews",
   "interview:create": "Schedule interviews",
   "interview:update": "Edit interviews and outcomes",
@@ -474,6 +477,8 @@ export const GRANTS: Record<Role, Grants> = {
   lead: {
     ...salesLine("team", "team"),
     "candidate:assign": "team",
+    // Anyone from lead up corrects submission details; the CEO on any submission
+    "submission.details:update": "team",
     "candidate:delete": "team",
     "candidate.visibility:update": "team",
     "report:export": "team",
@@ -505,6 +510,7 @@ export const GRANTS: Record<Role, Grants> = {
     "technology:create": "org",
     ...salesLine("hierarchy", "hierarchy"),
     "calendar:block": "hierarchy",
+    "submission.details:update": "hierarchy",
     "candidate:assign": "hierarchy",
     "candidate:delete": "hierarchy",
     "candidate.visibility:update": "hierarchy",
@@ -542,6 +548,7 @@ export const GRANTS: Record<Role, Grants> = {
     "technology:create": "org",
     ...salesLine("hierarchy", "hierarchy"),
     "calendar:block": "hierarchy",
+    "submission.details:update": "hierarchy",
     "candidate:assign": "hierarchy",
     "candidate:delete": "hierarchy",
     "candidate.visibility:update": "hierarchy",
@@ -594,6 +601,7 @@ export const GRANTS: Record<Role, Grants> = {
     "interview:read": "org",
     // Schedules interviews for any submission: creation is checked against submission:update (design B4.8)
     "submission:update": "org",
+    "submission.details:update": "org",
     "interview:create": "org",
     "interview:update": "org",
     "placement:read": "org",
