@@ -282,8 +282,10 @@ describe("deleting (TR-7, TR-4)", () => {
   it("a batch with students cannot be deleted; without them it goes with its courses and progress", async () => {
     await expect(q(U.locD, `SELECT authz.delete_batch($1)`, [batch])).rejects.toThrow(/batch_has_students/);
     await expect(q(U.coach, `SELECT authz.delete_batch($1)`, [batch])).rejects.toThrow(/not_permitted/);
-    await expect(q(U.l1, `SELECT authz.delete_batch($1)`, [batch])).rejects.toThrow(/not_permitted/);
-    await expect(q(U.m1, `SELECT authz.delete_batch($1)`, [batch])).rejects.toThrow(/not_permitted/);
+    // Lead and above pass the permission check (batch_manage_location_ids) but still not with students.
+    await expect(q(U.l1, `SELECT authz.delete_batch($1)`, [batch])).rejects.toThrow(/batch_has_students/);
+    await expect(q(U.m1, `SELECT authz.delete_batch($1)`, [batch])).rejects.toThrow(/batch_has_students/);
+    await expect(q(U.r1a, `SELECT authz.delete_batch($1)`, [batch])).rejects.toThrow(/not_permitted|batch_not_found/);
     await q(U.locD, `SELECT authz.set_batch_student($1, $2, false)`, [batch, s1.id]);
     await q(U.locD, `SELECT authz.set_batch_student($1, $2, false)`, [batch, s2.id]);
     await q(U.locD, `SELECT authz.delete_batch($1)`, [batch]);

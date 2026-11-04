@@ -57,12 +57,12 @@ export function BatchDetailView({ id, me, onBack, onDeleted }: {
           <div className="tr-headtop">
             <h1 id={`${tabsId}-h`} ref={heading} tabIndex={-1}>{b.name}</h1>
             <BatchStatusPill status={b.status} />
-            {b.actions.manage && (
+            {(b.actions.manage || b.actions.delete) && (
               <div className="rowactions push">
-                {(NEXT_STATUS[b.status] ?? []).map((s) => (
+                {b.actions.manage && (NEXT_STATUS[b.status] ?? []).map((s) => (
                   <button key={s.to} type="button" className={`btn sm${s.to === "cancelled" ? " danger" : ""}`} onClick={() => setStatusTo(s)}>{s.label}</button>
                 ))}
-                <button type="button" className="btn sm" onClick={() => setEditing(true)}><Pencil size={14} aria-hidden="true" />Edit</button>
+                {b.actions.manage && <button type="button" className="btn sm" onClick={() => setEditing(true)}><Pencil size={14} aria-hidden="true" />Edit</button>}
                 {b.actions.delete && <button type="button" className="btn sm danger" onClick={() => setDeleting(true)}><Trash2 size={14} aria-hidden="true" />Delete</button>}
               </div>
             )}
