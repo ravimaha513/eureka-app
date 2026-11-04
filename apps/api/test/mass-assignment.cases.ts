@@ -1057,6 +1057,38 @@ const CASES: RejectCase[] = [
     },
   },
   {
+    route: "POST /api/v1/paperwork/placements/:id/bgc/entries", actor: "hr",
+    prepare: async () => {
+      const { placementId } = await paperworkPlacement();
+      return {
+        url: `/api/v1/paperwork/placements/${placementId}/bgc/entries`,
+        body: { kind: "employment", employer: "Sample Employer", startMonth: "2020-01" },
+        state: () => rows(`SELECT count(*)::int AS n FROM eureka.bgc_entry WHERE placement_id = $1`, [placementId]),
+      };
+    },
+    forbidden: {
+      id: FOREIGN_ID, bgcId: FOREIGN_ID, placementId: FOREIGN_ID, candidateId: FOREIGN_ID, recruiterId: U.r1b, teamId: T.t2,
+      locationId: LOC.austin, version: 99, createdAt: PAST, createdBy: U.admin,
+    },
+  },
+  {
+    route: "PATCH /api/v1/paperwork/placements/:id/bgc/entries/:entryId", actor: "hr",
+    prepare: async () => {
+      const { placementId } = await paperworkPlacement();
+      const created = await asUser(db.app, U.hr, async (c) => (await c.query(
+        `SELECT entry_id FROM authz.save_bgc_entry($1, NULL, 'employment', '{"employer":"Sample Employer","startMonth":"2020-01"}'::jsonb, NULL)`,
+        [placementId])).rows[0].entry_id as string, true);
+      return {
+        url: `/api/v1/paperwork/placements/${placementId}/bgc/entries/${created}`, body: { verification: "verified" },
+        state: () => rows(`SELECT row_to_json(e) AS e FROM eureka.bgc_entry e WHERE e.id = $1`, [created]),
+      };
+    },
+    forbidden: {
+      id: FOREIGN_ID, kind: "address", bgcId: FOREIGN_ID, placementId: FOREIGN_ID, candidateId: FOREIGN_ID, recruiterId: U.r1b,
+      version: 99, updatedAt: PAST, updatedBy: U.admin,
+    },
+  },
+  {
     route: "POST /api/v1/paperwork/templates", actor: "hr",
     prepare: async () => ({
       url: "/api/v1/paperwork/templates",

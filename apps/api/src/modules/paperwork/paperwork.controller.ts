@@ -1,6 +1,8 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query } from "@nestjs/common";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { PaperworkQueueQuery, PublishTemplate, UpdateBgc, UpdateChecklistItem } from "./paperwork.schemas.js";
+import {
+  CreateBgcEntry, DeleteBgcEntryQuery, PaperworkQueueQuery, PublishTemplate, UpdateBgc, UpdateBgcEntry, UpdateChecklistItem,
+} from "./paperwork.schemas.js";
 import { PaperworkService } from "./paperwork.service.js";
 
 /** docs/paperwork-api.md (migration 0044). */
@@ -39,6 +41,27 @@ export class PaperworkController {
   @RequirePermission("document:read")
   bgc(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.updateBgc(user, id, UpdateBgc.parse(body));
+  }
+
+  /** PW-11: employment / address history rows (bgc:update over the placement; the service and the function check it). Each returns the fresh BGC. */
+  @Post("placements/:id/bgc/entries")
+  @RequirePermission("document:read")
+  addEntry(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.addBgcEntry(user, id, CreateBgcEntry.parse(body));
+  }
+
+  @Patch("placements/:id/bgc/entries/:entryId")
+  @RequirePermission("document:read")
+  updateEntry(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string,
+    @Param("entryId", ParseUUIDPipe) entryId: string, @Body() body: unknown) {
+    return this.svc.updateBgcEntry(user, id, entryId, UpdateBgcEntry.parse(body));
+  }
+
+  @Delete("placements/:id/bgc/entries/:entryId")
+  @RequirePermission("document:read")
+  deleteEntry(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string,
+    @Param("entryId", ParseUUIDPipe) entryId: string, @Query() q: unknown) {
+    return this.svc.deleteBgcEntry(user, id, entryId, DeleteBgcEntryQuery.parse(q).expectedVersion);
   }
 
   @Get("items/:id/history")

@@ -73,6 +73,7 @@ BEGIN
   -- Paperwork, documents, resumes
   DELETE FROM eureka.checklist_item_event WHERE item_id = ANY (v_items);
   DELETE FROM eureka.checklist_item WHERE id = ANY (v_items);
+  DELETE FROM eureka.bgc_entry WHERE bgc_id = ANY (v_bgcs);
   DELETE FROM eureka.bgc_event WHERE bgc_id = ANY (v_bgcs);
   DELETE FROM eureka.bgc WHERE id = ANY (v_bgcs);
   DELETE FROM eureka.document_access WHERE document_id = ANY (v_docs);
