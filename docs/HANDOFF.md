@@ -282,6 +282,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Batches: whoever may create a batch sees it and bulk adds or removes students (TR-3, TR-8, migration 0390); new batch opens at `/training/<id>`; profile Training tab attaches, changes or clears the batch and links to it (TR-14).
 - Create placement scope (no migrations): CEO gets `placement:create` (org); `authz.create_placement` no longer needs the candidate visible, so the submission's team can place after visibility is withdrawn; `submissionActions` follows (PL-1).
 - BGC: Completed and Helped by removed from the drawer and API (`completed_on` stays server-set); Manager and AD hold `bgc:update` over their hierarchy; Notes block saves in place in the paperwork drawer.
+- Candidate recruiter (no migrations): lead (team), manager/AD (hierarchy) and CEO (org, new `candidate:assign` grant) set it with `PUT /candidates/:id/recruiter`, from the active members and lead of the candidate's team (`GET .../recruiter-options`); picker on the profile's Recruiter row, `actions.assign` hint. Timeline still shows the team name for a recruiter-only change.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
