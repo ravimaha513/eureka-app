@@ -242,20 +242,23 @@ describe("Paperwork drawer", () => {
     expect(within(drawer).queryByRole("button", { name: "Save notes" })).not.toBeInTheDocument();
   });
 
-  it("records employment and address history as 3, 5, 7 or 10 years (migration 0160)", async () => {
-    api.routes["PATCH /api/v1/paperwork/placements/p1/bgc"] = () => ({ body: { ...DETAIL.bgc, addressYears: 10 } });
+  it("types employment and address history as whole years (migration 0400)", async () => {
+    api.routes["PATCH /api/v1/paperwork/placements/p1/bgc"] = () => ({ body: { ...DETAIL.bgc, addressYears: 12 } });
     wrap(<PaperworkPage me={HR} />);
     const drawer = await openDrawer();
     expect(within(drawer).getByText("7 years")).toBeInTheDocument();
     fireEvent.click(await within(drawer).findByRole("button", { name: "Update background check" }));
     const dlg = screen.getByRole("dialog", { name: "Update background check" });
-    const address = within(dlg).getByRole("combobox", { name: "Address history" });
-    expect(within(address).getAllByRole("option").map((o) => o.textContent)).toEqual(["Not recorded", "3 years", "5 years", "7 years", "10 years"]);
-    expect(within(dlg).getByRole("combobox", { name: "Employment history" })).toHaveValue("7");
-    fireEvent.change(address, { target: { value: "10" } });
+    expect(within(dlg).getByRole("spinbutton", { name: "Employment history" })).toHaveValue(7);
+    const address = within(dlg).getByRole("spinbutton", { name: "Address history" });
+    fireEvent.change(address, { target: { value: "60" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
+    expect(await within(dlg).findByText("Whole years, 1-50.")).toBeInTheDocument();
+    expect(api.writes()).toHaveLength(0);
+    fireEvent.change(address, { target: { value: "12" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.writes()).toHaveLength(1));
-    expect(api.writes()[0]!.body).toEqual({ addressYears: 10, expectedVersion: 2 });
+    expect(api.writes()[0]!.body).toEqual({ addressYears: 12, expectedVersion: 2 });
   });
 });
 

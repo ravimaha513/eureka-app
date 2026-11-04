@@ -346,16 +346,16 @@ describe("sales reports by manager and by candidate", () => {
 
 // ---------- BGC history years ----------
 
-describe("BGC employment and address history as 3 / 5 / 7 / 10 years", () => {
-  it("accepts only the four choices (API and database)", async () => {
+describe("BGC employment and address history in whole years", () => {
+  it("accepts 1-50 years (API and database, migration 0400)", async () => {
     const p = await placed(U.r1a, { teamId: T.t1, recruiterId: U.r1a, locationId: LOC.dallas });
     const url = `/api/v1/paperwork/placements/${p.id}/bgc`;
-    expect((await call("hr", "PATCH", url, { employmentYears: 4 })).statusCode).toBe(422);
+    expect((await call("hr", "PATCH", url, { employmentYears: 51 })).statusCode).toBe(422);
     expect((await call("hr", "PATCH", url, { addressYears: 0 })).statusCode).toBe(422);
-    const ok = await call("hr", "PATCH", url, { employmentYears: 10, addressYears: 5 });
+    const ok = await call("hr", "PATCH", url, { employmentYears: 4, addressYears: 12 });
     expect(ok.statusCode).toBe(200);
-    expect(ok.json()).toMatchObject({ employmentYears: 10, addressYears: 5 });
-    await expect(asUser(db.app, U.hr, (c) => c.query(`SELECT * FROM authz.update_bgc($1, '{"employmentYears": 6}'::jsonb, NULL)`, [p.id])))
+    expect(ok.json()).toMatchObject({ employmentYears: 4, addressYears: 12 });
+    await expect(asUser(db.app, U.hr, (c) => c.query(`SELECT * FROM authz.update_bgc($1, '{"employmentYears": 0}'::jsonb, NULL)`, [p.id])))
       .rejects.toThrow(/invalid_change/);
     expect((await call("hr", "PATCH", url, { employmentYears: null })).json().employmentYears).toBeNull();
   });

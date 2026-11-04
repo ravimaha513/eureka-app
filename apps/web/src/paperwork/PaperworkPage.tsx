@@ -1,6 +1,6 @@
 import { useId, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BGC_HISTORY_YEARS, PLACEMENT_STATUSES } from "@eureka/shared";
+import { BGC_HISTORY_YEARS_MAX, BGC_HISTORY_YEARS_MIN, PLACEMENT_STATUSES } from "@eureka/shared";
 import { ApiError, type Me } from "../api";
 import { RoleName, RoleOptions } from "../lookups";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
@@ -456,18 +456,26 @@ function ItemDialog({ item, me, candidateId, placementId, onClose, onDone }: {
   );
 }
 
-/** "7 years" (BGC history depth; the API accepts 3, 5, 7 or 10 since migration 0160). */
-const yearsText = (n: number | null) => (n === null ? "—" : `${n} years`);
+/** "7 years" / "1 year" (BGC history depth, whole years 1-50 since migration 0400). */
+const yearsText = (n: number | null) => (n === null ? "—" : `${n} ${n === 1 ? "year" : "years"}`);
 
-/** Employment / address history depth: one of BGC_HISTORY_YEARS, or not recorded. */
-function YearsSelect({ value, onChange, ...p }: { id: string; "aria-invalid"?: true; "aria-describedby"?: string; value: string; onChange: (v: string) => void }) {
+/** Employment / address history depth: typed in as whole years, with a "years" unit; blank = not recorded. */
+function YearsInput({ value, onChange, ...p }: { id: string; "aria-invalid"?: true; "aria-describedby"?: string; value: string; onChange: (v: string) => void }) {
   return (
-    <select {...p} value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">Not recorded</option>
-      {BGC_HISTORY_YEARS.map((y) => <option key={y} value={String(y)}>{y} years</option>)}
-    </select>
+    <span className="unitinput">
+      <input {...p} type="number" inputMode="numeric" min={BGC_HISTORY_YEARS_MIN} max={BGC_HISTORY_YEARS_MAX} step={1}
+        placeholder="—" value={value} onChange={(e) => onChange(e.target.value)} />
+      <span className="unit" aria-hidden="true">years</span>
+    </span>
   );
 }
+
+/** "" or a whole number of years in range; otherwise the field error. */
+const yearsError = (v: string) => {
+  if (v.trim() === "") return undefined;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= BGC_HISTORY_YEARS_MIN && n <= BGC_HISTORY_YEARS_MAX ? undefined : `Whole years, ${BGC_HISTORY_YEARS_MIN}-${BGC_HISTORY_YEARS_MAX}.`;
+};
 
 function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string; bgc: Bgc; onClose: () => void; onDone: (m: string) => void }) {
   const [status, setStatus] = useState("");
@@ -478,15 +486,16 @@ function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string;
   const [employment, setEmployment] = useState(bgc.employmentYears === null ? "" : String(bgc.employmentYears));
   const [address, setAddress] = useState(bgc.addressYears === null ? "" : String(bgc.addressYears));
   const [failPlacement, setFailPlacement] = useState(false);
-  const [err, setErr] = useState<{ reason?: string; form?: string }>({});
+  const [err, setErr] = useState<{ reason?: string; employment?: string; address?: string; form?: string }>({});
   const submit = useSubmit(paperworkError);
   const willFail = status === "failed" || (status === "" && bgc.status === "failed");
   const needsReason = status !== "" && bgcReasonRequired(bgc.status, status);
+  const hid = useId();
 
   const build = (): BgcChange => {
     const b: BgcChange = bgc.version === null ? {} : { expectedVersion: bgc.version };
     const text = (v: string, old: string | null, k: "bgcCompany" | "educationLevel") => { if (v.trim() !== (old ?? "")) b[k] = v.trim() || null; };
-    const num = (v: string, old: number | null, k: "employmentYears" | "addressYears") => { if (v !== (old === null ? "" : String(old))) b[k] = v === "" ? null : Number(v); };
+    const num = (v: string, old: number | null, k: "employmentYears" | "addressYears") => { const t = v.trim(); if (t !== (old === null ? "" : String(old))) b[k] = t === "" ? null : Number(t); };
     if (status) { b.status = status; if (reason.trim()) b.reason = reason.trim(); }
     text(company, bgc.bgcCompany, "bgcCompany");
     if (initiatedOn !== (bgc.initiatedOn ?? "")) b.initiatedOn = initiatedOn || null;
@@ -503,6 +512,8 @@ function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string;
         e.preventDefault();
         const b = build();
         if (needsReason && !reason.trim()) { setErr({ reason: "Give a reason." }); e.currentTarget.querySelector<HTMLElement>("textarea")?.focus(); return; }
+        const yErr = { employment: yearsError(employment), address: yearsError(address) };
+        if (yErr.employment || yErr.address) { setErr(yErr); e.currentTarget.querySelector<HTMLElement>("[aria-invalid]")?.focus(); return; }
         if (Object.keys(b).filter((k) => k !== "expectedVersion").length === 0) { setErr({ form: "Change at least one field." }); return; }
         setErr({});
         void submit.run(async () => {
@@ -529,13 +540,22 @@ function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string;
           <label className="check"><input type="checkbox" checked={failPlacement} onChange={(e) => setFailPlacement(e.target.checked)} />
             {" "}Also mark the placement BGC failed (same rules as on Placements)</label>
         )}
-        <div className="grid2">
-          <Field label="BGC company">{(p) => <input {...p} maxLength={120} value={company} onChange={(e) => setCompany(e.target.value)} />}</Field>
-          <Field label="Education level">{(p) => <input {...p} maxLength={60} value={education} onChange={(e) => setEducation(e.target.value)} />}</Field>
-          <Field label="Initiated on">{(p) => <input {...p} type="date" value={initiatedOn} onChange={(e) => setInitiated(e.target.value)} />}</Field>
-          <Field label="Employment history">{(p) => <YearsSelect {...p} value={employment} onChange={setEmployment} />}</Field>
-          <Field label="Address history">{(p) => <YearsSelect {...p} value={address} onChange={setAddress} />}</Field>
-        </div>
+        <section className="formsect" aria-labelledby={`${hid}-check`}>
+          <h4 id={`${hid}-check`}>Check details</h4>
+          <div className="grid2">
+            <Field label="BGC company">{(p) => <input {...p} maxLength={120} value={company} onChange={(e) => setCompany(e.target.value)} />}</Field>
+            <Field label="Initiated on">{(p) => <input {...p} type="date" value={initiatedOn} onChange={(e) => setInitiated(e.target.value)} />}</Field>
+          </div>
+        </section>
+        <section className="formsect" aria-labelledby={`${hid}-verified`}>
+          <h4 id={`${hid}-verified`}>Verified history</h4>
+          <Field label="Education level">{(p) => <input {...p} maxLength={60} placeholder="e.g. Master's" value={education} onChange={(e) => setEducation(e.target.value)} />}</Field>
+          <div className="grid2">
+            <Field label="Employment history" error={err.employment}>{(p) => <YearsInput {...p} value={employment} onChange={setEmployment} />}</Field>
+            <Field label="Address history" error={err.address}>{(p) => <YearsInput {...p} value={address} onChange={setAddress} />}</Field>
+          </div>
+          <p className="hint">Years checked back. Leave blank if not recorded.</p>
+        </section>
         {err.form && <p className="error" role="alert">{err.form}</p>}
         <DialogActions onCancel={onClose} submitLabel="Save" busy={submit.busy} error={submit.error} />
       </form>
