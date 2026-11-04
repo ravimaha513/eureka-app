@@ -509,7 +509,7 @@ export const GRANTS: Record<Role, Grants> = {
     "candidate:delete": "hierarchy",
     "candidate.visibility:update": "hierarchy",
     "placement.bgc_status:update": "hierarchy",
-    // Anyone above lead edits the background check (the CEO holds no document:read, so no Paperwork screen)
+    // Anyone above lead edits the background check
     "bgc:update": "hierarchy",
     "rate:read": "hierarchy",
     "report:export": "hierarchy",
@@ -546,7 +546,7 @@ export const GRANTS: Record<Role, Grants> = {
     "candidate:delete": "hierarchy",
     "candidate.visibility:update": "hierarchy",
     "placement.bgc_status:update": "hierarchy",
-    // Anyone above lead edits the background check (the CEO holds no document:read, so no Paperwork screen)
+    // Anyone above lead edits the background check
     "bgc:update": "hierarchy",
     "rate:read": "hierarchy",
     "report:export": "hierarchy",
@@ -597,6 +597,9 @@ export const GRANTS: Record<Role, Grants> = {
     "interview:create": "org",
     "interview:update": "org",
     "placement:read": "org",
+    // Anyone above lead edits the background check; the Paperwork screen needs document:read
+    "document:read": "org",
+    "bgc:update": "org",
     // Places any submission; needs submission:update too (PL-1)
     "placement:create": "org",
     "rate:read": "org",

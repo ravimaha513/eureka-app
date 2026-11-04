@@ -22,7 +22,7 @@ BEGIN
   IF NOT FOUND OR actor IS NULL OR NOT coalesce(authz.placement_covered(p_placement, 'document:read'), false) THEN
     RAISE EXCEPTION 'placement_not_found' USING ERRCODE = 'no_data_found';
   END IF;
-  -- bgc:update (HR, Manager, AD) edits everything; placement.bgc_status:update alone may only mark it initiated.
+  -- bgc:update (HR, Manager, AD, CEO) edits everything; placement.bgc_status:update alone may only mark it initiated.
   IF NOT coalesce(authz.placement_covered(p_placement, 'bgc:update'), false)
      AND NOT coalesce(pg_catalog.jsonb_typeof(p_changes) = 'object'
          AND p_changes ->> 'status' = 'initiated'

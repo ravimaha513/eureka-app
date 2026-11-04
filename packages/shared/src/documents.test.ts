@@ -41,11 +41,11 @@ describe("resumeAccess (document:read / document:upload over the candidate)", ()
     expect(resumeAccess(l, cand({ recruiterId: "x", teamId: "t9", visibility: "all_teams" }))).toEqual({ read: false, upload: false });
   });
 
-  it("org roles: HR and Documents Team read and upload, Accounts reads only; CEO and location roles neither", () => {
+  it("org roles: HR and Documents Team read and upload, Accounts and the CEO read only; location roles neither", () => {
     expect(resumeAccess(user([{ role: "hr" }]), cand({ recruiterId: "x", teamId: "t9" }))).toEqual({ read: true, upload: true });
     expect(resumeAccess(user([{ role: "documents_team" }]), cand({ recruiterId: "x" }))).toEqual({ read: true, upload: true });
     expect(resumeAccess(user([{ role: "accounts" }]), cand({ recruiterId: "x" }))).toEqual({ read: true, upload: false });
-    expect(resumeAccess(user([{ role: "ceo" }]), cand())).toEqual({ read: false, upload: false });
+    expect(resumeAccess(user([{ role: "ceo" }]), cand())).toEqual({ read: true, upload: false });
     expect(resumeAccess(user([{ role: "location_incharge", locationId: "dallas" }]), cand())).toEqual({ read: false, upload: false });
   });
 });
@@ -91,8 +91,8 @@ describe("documentAccess (B4.4: document:read scope; restricted needs document.r
     expect(documentAccess(user([{ role: "lead" }]), cand({ recruiterId: "x", teamId: "t9", visibility: "all_teams" }))).toEqual(none);
   });
 
-  it("CEO, BU head, location roles, coaches and org admins see no documents", () => {
-    for (const roles of [[{ role: "ceo" }], [{ role: "bu_head" }], [{ role: "org_admin" }], [{ role: "interview_coach" }],
+  it("BU head, location roles, coaches and org admins see no documents", () => {
+    for (const roles of [[{ role: "bu_head" }], [{ role: "org_admin" }], [{ role: "interview_coach" }],
       [{ role: "location_incharge", locationId: "dallas" }]] as UserAccess["roles"][]) {
       expect(documentAccess(user(roles), cand())).toEqual(none);
     }

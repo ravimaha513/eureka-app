@@ -139,7 +139,7 @@ describe("versioned templates", () => {
   it("template versions are readable with document:read at org scope only", async () => {
     for (const k of users) {
       const read = asUser(db.app, U[k], (c) => c.query(`SELECT * FROM authz.checklist_templates()`));
-      if (["hr", "acct", "imm"].includes(k)) expect((await read).rowCount, k).toBeGreaterThan(0);
+      if (["ceo", "hr", "acct", "imm"].includes(k)) expect((await read).rowCount, k).toBeGreaterThan(0);
       else await expect(read, k).rejects.toThrow(/not_permitted/);
     }
   });
@@ -403,9 +403,9 @@ describe("background checks", () => {
   it("only bgc:update over the placement writes (HR, Manager, AD); 404 without document:read coverage", async () => {
     const { id } = await placed();
     for (const k of users) {
-      const docs = ["r1a", "l1", "m1", "ad", "hr", "acct", "imm"].includes(k);
+      const docs = ["r1a", "l1", "m1", "ad", "ceo", "hr", "acct", "imm"].includes(k);
       const run = updateBgc(U[k], id, { status: "initiated" }, null, false);
-      if (["hr", "m1", "ad"].includes(k)) await expect(run, k).resolves.toBeTruthy();
+      if (["hr", "m1", "ad", "ceo"].includes(k)) await expect(run, k).resolves.toBeTruthy();
       else if (docs) await expect(run, k).rejects.toThrow(/not_permitted/);
       else await expect(run, k).rejects.toThrow(/placement_not_found/);
     }
@@ -590,7 +590,7 @@ describe("closed write paths and hardening", () => {
       await expect(asUser(db.app, U[k], (c) => c.query(`SELECT notes FROM eureka.checklist_item`)), k).rejects.toThrow(/permission denied/);
       await expect(asUser(db.app, U[k], (c) => c.query(`SELECT status_reason FROM eureka.checklist_item`)), k).rejects.toThrow(/permission denied/);
       const texts = (await asUser(db.app, U[k], (c) => c.query(`SELECT * FROM authz.checklist_item_texts($1) WHERE item_id = $2`, [id, item]))).rows;
-      const docs = ["r1a", "hr", "imm"].includes(k);
+      const docs = ["ceo", "r1a", "hr", "imm"].includes(k);
       expect(texts, k).toEqual(docs ? [{ item_id: item, notes: "Fictional note text", status_reason: "Fictional reason text" }] : []);
     }
     expect((await asUser(db.app, U.locD, (c) => c.query(`SELECT status FROM eureka.checklist_item WHERE id = $1`, [item]))).rows)

@@ -134,8 +134,8 @@ describe("differential: RLS alone matches the engine", () => {
   it("sanity: some users see some resumes and some see none", async () => {
     const counts = await Promise.all(users.map((k) =>
       asUser(db.app, U[k], async (c) => (await c.query(`SELECT count(*)::int AS n FROM eureka.resume`)).rows[0].n as number)));
-    expect(Math.max(...counts)).toBe(candidates.length); // HR, Accounts, Immigration (org)
-    expect(counts[users.indexOf("ceo")]).toBe(0);         // no document:read
+    expect(Math.max(...counts)).toBe(candidates.length); // HR, Accounts, Immigration, CEO (org)
+    expect(counts[users.indexOf("ceo")]).toBe(candidates.length);
     expect(counts[users.indexOf("locD")]).toBe(0);
     expect(counts[users.indexOf("r1a")]).toBeLessThan(counts[users.indexOf("l1")]!); // own vs team
   });

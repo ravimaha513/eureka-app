@@ -59,7 +59,7 @@ describe("paperwork coverage and actions", () => {
     expect(paperworkCovered(R1a, "document:read", ref)).toBe(true);
     expect(paperworkCovered(R2a, "document:read", ref)).toBe(false);
     expect(paperworkCovered(R2a, "document:read", { ...ref, candidate: { ...ref.candidate!, visibility: "all_teams", marketingStatus: "active" } })).toBe(false);
-    expect(paperworkCovered(CEO, "document:read", ref)).toBe(false);
+    expect(paperworkCovered(CEO, "document:read", ref)).toBe(true);
     expect(paperworkCovered(IMM, "document:read", { ...ref, candidate: null })).toBe(true);
   });
 
