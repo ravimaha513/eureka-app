@@ -283,7 +283,7 @@ export class PaperworkService {
       educationLevel: b?.education_level ?? null,
       employmentYears: b?.employment_years ?? null,
       addressYears: b?.address_years ?? null,
-      /** PW-11 rows; employmentYears / addressYears above are the older summary, kept for checks recorded before 0420. */
+      /** PW-12 rows; employmentYears / addressYears above are the older summary, kept for checks recorded before 0420. */
       employment: entries.filter((e) => e.kind === "employment").map(presentEntry),
       addresses: entries.filter((e) => e.kind === "address").map(presentEntry),
       notes: b?.notes ?? null,
@@ -444,7 +444,7 @@ export class PaperworkService {
     });
   }
 
-  /** PW-11: 404 without document:read over the placement; 403 without bgc:update. The function checks both again. */
+  /** PW-12: 404 without document:read over the placement; 403 without bgc:update. The function checks both again. */
   private async entryWrite(user: AuthedUser, placementId: string,
     write: (c: pg.PoolClient) => Promise<{ action: string; changes: Record<string, unknown> }>) {
     return this.db.withUser(user.id, async (c) => {

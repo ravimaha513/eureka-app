@@ -43,7 +43,7 @@ export class PaperworkController {
     return this.svc.updateBgc(user, id, UpdateBgc.parse(body));
   }
 
-  /** PW-11: employment / address history rows (bgc:update over the placement; the service and the function check it). Each returns the fresh BGC. */
+  /** PW-12: employment / address history rows (bgc:update over the placement; the service and the function check it). Each returns the fresh BGC. */
   @Post("placements/:id/bgc/entries")
   @RequirePermission("document:read")
   addEntry(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {

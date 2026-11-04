@@ -21,6 +21,7 @@ FR-PLC-06, implementation plan Phase 3 "Paperwork and onboarding checklists per 
 | PW-9 | Writes go only through definer functions (`authz.update_checklist_item`, `authz.update_bgc`) that re-check visibility (404), permission (403) and the state machine (422). The server sets status timestamps, who changed it, `version` and the snapshots; every change writes a history row (`checklist_item_event`, `bgc_event`). `expectedVersion` (optional) refuses lost updates with 409 `version_mismatch`. |
 | PW-10 | Templates are versioned: publishing appends version n+1 of (kind, placement type); versions are immutable; a placement copies the latest paperwork version of its type at creation and keeps it (`templateVersion`). Read with `document:read` at org scope, publish with `document:verify` at org scope (HR, Immigration, Documents Team; open question). No template content ships. |
 | PW-11 | Audit (rule 5): field names, statuses, role keys, ids and dates only; never notes, reasons, the BGC company or education text. |
+| PW-12 | Employment and address history are rows (`eureka.bgc_entry`, migration 0420): one per employer or address, with whole months (`YYYY-MM`, no end = still there), `verification` (`pending`/`verified`/`unverified`) and optional notes. Read under the check's `document:read` scope; written with `bgc:update` through `authz.save_bgc_entry` / `authz.delete_bgc_entry`; up to 50 rows per kind; nothing changes on a backed-out placement. Personal data: the audit (`bgc.entry.create`/`.update`/`.delete`) and `bgc_event` (`employment_history`/`address_history`) carry the row id, kind and changed field names only. |
 
 ## Endpoints
 
@@ -33,6 +34,11 @@ FR-PLC-06, implementation plan Phase 3 "Paperwork and onboarding checklists per 
 - `GET /api/v1/paperwork/items/:id/history` (`document:read`) returns `{ items: [{ at, actor, from, to, changed, details, reason }] }`.
 - `PATCH /api/v1/paperwork/placements/:id/bgc` (`bgc:update`, or `placement.bgc_status:update` for `status: initiated` only) with any of
   `{ status, reason, bgcCompany, initiatedOn, educationLevel, employmentYears, addressYears, notes, failPlacement, expectedVersion }` returns `Bgc`.
+- `POST /api/v1/paperwork/placements/:id/bgc/entries` (`bgc:update`) with `{ kind: "employment", employer, title?, startMonth, endMonth?, verification?, notes? }`
+  or `{ kind: "address", street?, city, region?, postalCode?, country, startMonth, endMonth?, verification?, notes? }` returns 201 `Bgc`.
+- `PATCH /api/v1/paperwork/placements/:id/bgc/entries/:entryId` (`bgc:update`) with any fields of that row's kind plus `expectedVersion` returns `Bgc`;
+  a field of the other kind is 422 `invalid_change`.
+- `DELETE /api/v1/paperwork/placements/:id/bgc/entries/:entryId?expectedVersion=` (`bgc:update`) returns `Bgc`.
 - `GET /api/v1/paperwork/templates` (`document:read` at org scope) returns `{ canPublish, templates: [{ kind, placementType, version, publishedAt, publishedBy, items: [{ docType, ownerRole, required }] }] }`.
 - `POST /api/v1/paperwork/templates` (`document:verify` at org scope) with `{ kind, placementType, items, expectedVersion }` returns 201 `{ kind, placementType, version }`.
 
@@ -40,15 +46,17 @@ FR-PLC-06, implementation plan Phase 3 "Paperwork and onboarding checklists per 
 
 `Item` = `{ id, docType, ownerRole, required, status, statusReason, statusChangedAt, assignee: {id,name}|null, dueOn, overdue, notes, documentId, version, templateVersion, actions: { transition, editNotes, assign } }`
 
-`Bgc` = `{ status, bgcCompany, initiatedOn, educationLevel, employmentYears, addressYears, notes, statusReason, statusChangedAt, version|null, history, actions: { update, transition, failPlacement } }`
+`Bgc` = `{ status, bgcCompany, initiatedOn, educationLevel, employmentYears, addressYears, employment: [Entry], addresses: [Entry], notes, statusReason, statusChangedAt, version|null, history, actions: { update, transition, failPlacement } }`
+
+`Entry` = `{ id, kind, employer, title, street, city, region, postalCode, country, startMonth, endMonth|null, verification, notes, version }`, newest first (current rows on top).
 
 `GET /api/v1/placements/:id` adds to each checklist entry `{ id, dueOn, overdue }` and, where `document:read` covers the placement, `bgc: { status, actions: { transition } }` (key omitted otherwise).
 
 ## Error codes
 
 `invalid_transition`, `reason_required`, `invalid_change`, `invalid_assignee`, `invalid_owner_role`, `invalid_due_date`,
-`invalid_helper`, `invalid_document`, `placement_closed` (backed-out placement), `invalid_checklist_template` (422); `version_mismatch` (409);
-`not_permitted` (403); not found (404). With `failPlacement`, the placement codes of `authz.transition_placement` apply too.
+`invalid_helper`, `invalid_document`, `placement_closed` (backed-out placement), `invalid_checklist_template`, `too_many_entries` (422); `version_mismatch` (409);
+`not_permitted` (403); not found (404, also `entry_not_found`). With `failPlacement`, the placement codes of `authz.transition_placement` apply too.
 
 ## Dev seed
 
@@ -73,3 +81,13 @@ Follow-up (review of 0044, not fixed): `checklist_item.document_id` is in the ap
 (`BGC_HISTORY_YEARS_MIN` / `_MAX` in `@eureka/shared`) and as table CHECKs; anything else is 422 (`invalid_change` from the
 database). The web form has typed number inputs with a "years" unit. From 0160 to 0400 only 3, 5, 7 or 10 were accepted
 (earlier 0-50 values were rounded up then); 0400 widened the CHECKs without rewriting any row.
+
+Since 0420 the rows (PW-12) replace these numbers for new checks; the web page shows the years read-only while a check has no
+rows of that kind, and no longer edits them. The API still accepts them.
+
+## Web: the paperwork page
+
+The candidate name in the work queue (and its Open button) opens `/paperwork/<placementId>`, which replaced the drawer: tabs for
+Documents (upload, view, download), Checklist (item updates and history), Background check (status with a progress bar,
+check details, employment and address rows with a coverage bar and gap warnings, notes) and Activity (the check's history),
+plus a summary rail with "Needs attention" links. The tab is kept in `?tab=`.

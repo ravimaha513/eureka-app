@@ -1,4 +1,4 @@
--- BGC employment and address history as rows (docs/paperwork-api.md PW-11).
+-- BGC employment and address history as rows (docs/paperwork-api.md PW-12).
 -- Until now the check recorded only how many years were looked at
 -- (bgc.employment_years / address_years, 0400). Each row here is one employer
 -- or one address with its months and whether the vendor verified it. The

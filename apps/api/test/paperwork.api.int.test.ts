@@ -300,7 +300,7 @@ describe("BGC", () => {
   });
 });
 
-describe("BGC history rows (PW-11, migration 0420)", () => {
+describe("BGC history rows (PW-12, migration 0420)", () => {
   it("HR adds, edits and removes employment and address rows; scope, kinds, months and the audit are checked", async () => {
     const m = await placed();
     const base = `/api/v1/paperwork/placements/${m.id}/bgc/entries`;

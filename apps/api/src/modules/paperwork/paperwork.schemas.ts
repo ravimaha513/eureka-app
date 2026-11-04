@@ -58,7 +58,7 @@ export const UpdateBgc = z
   });
 export type UpdateBgc = z.infer<typeof UpdateBgc>;
 
-/** Employment / address history rows (PW-11, migration 0420): whole months as "YYYY-MM"; no end month = still there. */
+/** Employment / address history rows (PW-12, migration 0420): whole months as "YYYY-MM"; no end month = still there. */
 export const BGC_ENTRY_VERIFICATIONS = ["pending", "verified", "unverified"] as const;
 const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "YYYY-MM").refine((m) => m >= "1950-01" && m <= "2100-12", "out of range");
 const line = (max: number) => z.string().trim().min(1).max(max).regex(noControl, "no control characters");
