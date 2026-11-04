@@ -20,7 +20,7 @@ import { AssignTeamDialog } from "./AssignTeamDialog";
 import { documentsLabel, eligibilityLabel, stayLabel, visaLabel } from "./candidateFields";
 import { salesError } from "./errors";
 import { DUPLICATE_WARNING, LogSubmissionDialog } from "./LogSubmissionDialog";
-import { TRANSITIONS, VISIBILITY_LABELS, salesApi, salesKeys, statusLabel, type CandidateProfile as Profile, type Visibility } from "./salesApi";
+import { OPEN_BATCH_STATUSES, TRANSITIONS, VISIBILITY_LABELS, salesApi, salesKeys, statusLabel, type CandidateProfile as Profile, type Visibility } from "./salesApi";
 import { OpenToAllBadge, Phone, Priority, SharedBadge, StatusBadge, fmtDate } from "./ui";
 import { Loading } from "../ui/Loading";
 import { TeamChecklist } from "./TeamChecklist";
@@ -127,9 +127,10 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
     c.resumeUrl !== undefined && { label: "Resume link", value: link(c.resumeUrl, "Open resume") },
     c.batch !== undefined && {
       label: "Batch",
-      value: !c.batch ? "No batch" : caps.has("training:read")
-        ? <button type="button" className="linkbtn" onClick={() => navigate(screenPath("training", c.batch!.id))}>{c.batch.label}</button>
-        : c.batch.label,
+      value: canUpdate
+        ? <BatchPicker candidate={c} canOpen={caps.has("training:read")} busy={busy === "batch"}
+            onSave={(batchId, label) => act("batch", () => salesApi.update(c.id, { batchId }), batchId ? `Batch set to ${label}.` : "Removed from batch.")} />
+        : batchValue(c.batch, caps.has("training:read")),
     },
     { label: "Marketing since", value: fmtDate(c.marketingStartDate) },
     { label: "Days in market", value: c.daysInMarket ?? "—" },
@@ -359,6 +360,62 @@ function TeamSharePicker({ ownTeamId, shared, busy, onSave }: {
 }
 
 /** The Recruiter row for a lead or above: the name, and a Change or Assign button that opens a picker of the team's people. */
+/** The batch label, a link to the batch on the Training screen for training:read holders. */
+function batchValue(batch: Profile["batch"], canOpen: boolean): ReactNode {
+  if (!batch) return "No batch";
+  return canOpen
+    ? <button type="button" className="linkbtn" onClick={() => navigate(screenPath("training", batch.id))}>{batch.label}</button>
+    : batch.label;
+}
+
+/**
+ * Inline batch change for candidate:update holders (PATCH batchId). Lists the
+ * open batches at the candidate's location, as the Edit profile dialog does;
+ * the server checks location and status again.
+ */
+function BatchPicker({ candidate, canOpen, busy, onSave }: {
+  candidate: Profile; canOpen: boolean; busy: boolean;
+  onSave: (batchId: string | null, label: string | null) => Promise<void>;
+}) {
+  const current = candidate.batch ?? null;
+  const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState(current?.id ?? "");
+  const batches = useQuery({
+    queryKey: [...salesKeys.batches, candidate.location.id],
+    queryFn: () => salesApi.batches(candidate.location.id),
+    enabled: open,
+    staleTime: 0,
+  });
+  if (!open) {
+    return (
+      <span className="cp-recruiter">
+        {batchValue(current, canOpen)}
+        <button type="button" className="linkbtn" aria-label={`${current ? "Change" : "Assign"} batch`}
+          onClick={() => { setPicked(current?.id ?? ""); setOpen(true); }}>{current ? "Change" : "Assign"}</button>
+      </span>
+    );
+  }
+  const items = (batches.data?.items ?? []).filter((b) => OPEN_BATCH_STATUSES.includes(b.status) || b.id === current?.id);
+  // A closed current batch stays selectable until another is picked.
+  const offList = current && !batches.isLoading && !items.some((b) => b.id === current.id);
+  return (
+    <form className="cp-recruiter" onSubmit={(e) => {
+      e.preventDefault();
+      void onSave(picked || null, items.find((b) => b.id === picked)?.label ?? null).then(() => setOpen(false));
+    }}>
+      <select aria-label="Batch" value={picked} disabled={busy || batches.isLoading} onChange={(e) => setPicked(e.target.value)}>
+        <option value="">No batch</option>
+        {offList && <option value={current.id}>{current.label}</option>}
+        {items.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+      </select>
+      <button type="submit" className="btn sm" disabled={busy || batches.isLoading || picked === (current?.id ?? "")} aria-busy={busy || undefined}>Save</button>
+      <button type="button" className="btn sm" disabled={busy} onClick={() => setOpen(false)}>Cancel</button>
+      {batches.isSuccess && items.length === 0 && !current && <span className="sub">No open batches at {candidate.location.name}.</span>}
+      {batches.error && <span role="alert">{salesError(batches.error)}</span>}
+    </form>
+  );
+}
+
 function RecruiterPicker({ candidateId, current, busy, onSave }: {
   candidateId: string; current: { id: string; name: string | null } | null; busy: boolean;
   onSave: (recruiterId: string | null, name: string | null) => Promise<void>;
