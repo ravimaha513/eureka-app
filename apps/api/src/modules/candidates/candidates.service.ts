@@ -250,13 +250,18 @@ interface ProfileExtraRow {
 /**
  * Profile-only fields of GET /candidates/:id (FR-CAN-04..06), so what Edit
  * profile saves can be read back. `inPersonOk` goes to every profile reader.
- * The marketing contact details follow the phone rule (design B4.6):
- * `candidate.phone:read` over a candidate the caller owns, never through the
- * Open-to-all-teams rule; otherwise both keys are omitted.
+ * The marketing contact details (business identities, not the candidate's
+ * personal phone/email) go to callers who own the candidate through
+ * `candidate.phone:read` or `candidate:update` (the people who edit them in
+ * Edit profile), never through the Open-to-all-teams rule; otherwise both keys
+ * are omitted.
  */
 export function profileExtras(access: UserAccess, ref: CandidateRef, r: ProfileExtraRow) {
-  const phoneScope = resolveScope(access, "candidate.phone:read");
-  const contact = phoneScope !== null && ownsCandidate(phoneScope, ref);
+  const ownsThrough = (p: "candidate.phone:read" | "candidate:update") => {
+    const scope = resolveScope(access, p);
+    return scope !== null && ownsCandidate(scope, ref);
+  };
+  const contact = ownsThrough("candidate.phone:read") || ownsThrough("candidate:update");
   // LinkedIn and the resume link follow the uploaded-resume rule: owners of
   // the candidate (candidate:read through ownership, team, hierarchy, location
   // or org), never through Open to all teams.

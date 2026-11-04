@@ -111,8 +111,8 @@ workstream.
   relocation, travel, ...), with which values, and who may edit them?
 - **Marketing locations and office (FR-CAN-05/06):** meaning, allowed values and who edits them.
 - Field policy chosen for the marketing email and VITEL number on the profile: shown under the phone
-  rule (`candidate.phone:read` over an owned candidate; never through Open to all teams). Confirm or
-  widen.
+  rule (`candidate.phone:read` over an owned candidate; never through Open to all teams). 2026-11:
+  personal phone/email narrowed to HR, Accounts and CEO; marketing contacts also go to owners holding `candidate:update`.
 
 Existing open questions in `docs/HANDOFF.md` (rates for recruiters, skipping submission steps, assignment
 start date, re-placement after BGC failure, the manual `active → confirmation` edge, pre-join

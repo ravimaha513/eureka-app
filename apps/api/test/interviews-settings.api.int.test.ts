@@ -490,11 +490,11 @@ describe("employees: contacts and export (EM-C1, EM-X1)", () => {
   const item = async (k: Key) => ((await call(k, "GET", "/api/v1/employees?limit=200")).json().items as { id: string; contact: unknown }[])
     .find((i) => i.id === j.personId)!;
 
-  it("HR (candidate.phone:read) sees the contact; Accounts and the CEO see it masked", async () => {
-    expect((await item("hr")).contact).toEqual({ email: "asha.iyer@example.com", phone: "+14695559143", masked: false });
-    for (const k of ["acct", "ceo"] as const) {
-      expect((await item(k)).contact).toEqual({ email: "a•••@example.com", phone: "•••-•••-43", masked: true });
+  it("HR, Accounts and the CEO (candidate.phone:read) see the contact; Immigration sees it masked", async () => {
+    for (const k of ["hr", "acct", "ceo"] as const) {
+      expect((await item(k)).contact, k).toEqual({ email: "asha.iyer@example.com", phone: "+14695559143", masked: false });
     }
+    expect((await item("imm")).contact).toEqual({ email: "a•••@example.com", phone: "•••-•••-43", masked: true });
   });
 
   it("exports CSV for report:export holders who read employees; formula cells are neutralised; audit has counts only", async () => {
@@ -502,8 +502,8 @@ describe("employees: contacts and export (EM-C1, EM-X1)", () => {
     expect(res.statusCode, res.body).toBe(200);
     expect(res.headers["content-type"]).toMatch(/^text\/csv/);
     expect(res.body).toContain(`"'=HYPERLINK(""x"") Placed"`);
-    expect(res.body).toContain("a•••@example.com");
-    expect(res.body).not.toContain("asha.iyer@example.com");
+    // The CEO holds candidate.phone:read, so the export carries the real contact.
+    expect(res.body).toContain("asha.iyer@example.com");
     const a = (await audits("employee.export")).at(-1)!;
     expect(a.changes).toMatchObject({ filters: ["status"], truncated: false });
     noPii(await audits("employee.export"));

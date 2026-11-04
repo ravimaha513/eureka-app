@@ -20,7 +20,7 @@ Pass 1 findings and their resolution in v0.2:
 | Per-table BYPASSRLS for workers is impossible | Worker role has no BYPASSRLS; explicit worker policies and grants per table (B4.5) |
 | Write-side authorization undefined, mass assignment | WITH CHECK policies, protected-column triggers, per-role write schemas, dedicated endpoints for narrow grants (B4.7) |
 | Grants table incomplete and inconsistent with SRS | Grants live in code and the table in B4.2 is generated from it; all 16 roles covered; deviations recorded (B4.2, B10) |
-| Recruiters could not see phone numbers | `candidate.phone:read` granted at read scope to Sales and Location roles, masked for other teams' all-teams candidates (B4.6) |
+| Recruiters could not see phone numbers | Superseded 2026-11: `candidate.phone:read` (personal phone and email) is HR, Accounts and CEO only; everyone else sees them masked (B4.6) |
 | MFA and step-up not enforceable through Cognito federation | Direct Google OIDC from the BFF; step-up with `prompt=login&max_age=0` and `auth_time` check; MFA via Workspace 2-Step Verification (A6.1) |
 | Cache invalidation across tasks, closure table undated | `access_version` counter checked per request; closure rebuilt in-transaction with cycle check; single active manager enforced by exclusion constraint; team snapshots on activity rows (B4.3, B2) |
 | Admin self-escalation | Grants are code-reviewed, not editable at runtime; `access:manage` cannot change the holder's own roles; restricted roles need a second approver (A6.2) |
@@ -690,7 +690,7 @@ CREATE POLICY candidate_update ON candidate FOR UPDATE TO eureka_app
 
 | Field | Rule |
 |---|---|
-| person.phone_e164 | Shown with `candidate.phone:read` when the candidate is visible through ownership; masked (last two digits) when visible only through the all-teams rule, and in exports |
+| person.phone_e164, person.personal_email | `candidate.phone:read` is held only by HR, Accounts and the CEO (org scope, 2026-11). Shown with it when the candidate is visible through ownership; masked (last two digits) when visible only through the all-teams rule, and in exports |
 | person.dob | Only with `candidate.dob:read`; otherwise `•• / •• / YYYY`; each reveal audited |
 | placement.rate, invoice amounts | Omitted without `rate:read` or `invoice:read` |
 | work_authorization.number | Only with `visa:read` |
