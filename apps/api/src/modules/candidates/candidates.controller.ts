@@ -11,6 +11,7 @@ import {
   HotlistQuery,
   ProfileUpdate,
   RatingUpdate,
+  RecruiterUpdate,
   TimelineQuery,
   Transition,
   VisibilityUpdate,
@@ -115,6 +116,20 @@ export class CandidatesController {
   visibility(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     const b = VisibilityUpdate.parse(body);
     return this.svc.setVisibility(user, id, b.visibility, b.teamIds);
+  }
+
+  /** Who can be the recruiter: the candidate's team's active members and lead. */
+  @Get("candidates/:id/recruiter-options")
+  @RequirePermission("candidate:assign")
+  recruiterOptions(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
+    return this.svc.recruiterOptions(user, id);
+  }
+
+  /** A lead or above; 422 invalid_recruiter when the user isn't on the candidate's team. */
+  @Put("candidates/:id/recruiter")
+  @RequirePermission("candidate:assign")
+  setRecruiter(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.setRecruiter(user, id, RecruiterUpdate.parse(body).recruiterId);
   }
 
   @Put("candidates/:id/technical-rating")

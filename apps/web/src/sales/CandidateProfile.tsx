@@ -95,6 +95,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
   const canRate = a ? a.rating : caps.has("candidate.rating:update");
   const canSubmit = a ? a.logSubmission : caps.has("submission:create");
   const canDelete = a ? a.delete : caps.has("candidate:delete");
+  const canAssign = a ? a.assign === true : caps.has("candidate:assign");
   const next = a ? a.transition : canUpdate ? TRANSITIONS[c.status] ?? [] : [];
   // With hints, the status block appears only when a change is allowed; without, for candidate:update holders.
   const showStatus = a ? next.length > 0 : canUpdate;
@@ -108,7 +109,10 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
     { label: "Technology", value: c.technology },
     { label: "Team", value: c.team.name },
     !!c.teamAssignedAt && { label: "Added to team", value: fmtDate(c.teamAssignedAt) },
-    { label: "Recruiter", value: c.recruiter?.name ?? "Unassigned" },
+    { label: "Recruiter", value: canAssign
+      ? <RecruiterPicker candidateId={c.id} current={c.recruiter} busy={busy === "recruiter"}
+          onSave={(id, name) => act("recruiter", () => salesApi.setRecruiter(c.id, id), id ? `${name} is now the recruiter.` : "Recruiter removed.")} />
+      : c.recruiter?.name ?? "Unassigned" },
     { label: "Location", value: c.location.name },
     { label: "Phone", value: <Phone c={c} /> },
     !!c.dobMasked && { label: "Date of birth", value: c.dobMasked, className: "masked" },
@@ -344,6 +348,46 @@ function TeamSharePicker({ ownTeamId, shared, busy, onSave }: {
       <p id={`${id}-d`} className="hint">Picked teams can see and submit this candidate while they're active. Your team always sees it.</p>
       <TeamChecklist picked={picked} onChange={setPicked} excludeTeamId={ownTeamId} disabled={busy} describedBy={`${id}-d`} />
       <button type="submit" className="btn" disabled={busy || !dirty} aria-busy={busy || undefined}>Save sharing</button>
+    </form>
+  );
+}
+
+/** The Recruiter row for a lead or above: the name, and a Change or Assign button that opens a picker of the team's people. */
+function RecruiterPicker({ candidateId, current, busy, onSave }: {
+  candidateId: string; current: { id: string; name: string | null } | null; busy: boolean;
+  onSave: (recruiterId: string | null, name: string | null) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState(current?.id ?? "");
+  const options = useQuery({
+    queryKey: ["candidate-recruiter-options", candidateId], queryFn: () => salesApi.recruiterOptions(candidateId), enabled: open,
+  });
+  const name = current?.name ?? "Unassigned";
+  if (!open) {
+    return (
+      <span className="cp-recruiter">
+        {name}
+        <button type="button" className="linkbtn" aria-label={`${current ? "Change" : "Assign"} recruiter`}
+          onClick={() => { setPicked(current?.id ?? ""); setOpen(true); }}>{current ? "Change" : "Assign"}</button>
+      </span>
+    );
+  }
+  const items = options.data?.items ?? [];
+  // A recruiter who has left the team stays selectable until someone else is picked.
+  const offTeam = current && !options.isLoading && !items.some((u) => u.id === current.id);
+  return (
+    <form className="cp-recruiter" onSubmit={(e) => {
+      e.preventDefault();
+      void onSave(picked || null, items.find((u) => u.id === picked)?.name ?? null).then(() => setOpen(false));
+    }}>
+      <select aria-label="Recruiter" value={picked} disabled={busy || options.isLoading} onChange={(e) => setPicked(e.target.value)}>
+        <option value="">Unassigned</option>
+        {offTeam && <option value={current.id}>{current.name ?? "Current recruiter"} (not on this team)</option>}
+        {items.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+      </select>
+      <button type="submit" className="btn sm" disabled={busy || options.isLoading || picked === (current?.id ?? "")} aria-busy={busy || undefined}>Save</button>
+      <button type="button" className="btn sm" disabled={busy} onClick={() => setOpen(false)}>Cancel</button>
+      {options.error && <span role="alert">{salesError(options.error)}</span>}
     </form>
   );
 }

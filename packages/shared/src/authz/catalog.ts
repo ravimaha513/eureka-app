@@ -582,6 +582,8 @@ export const GRANTS: Record<Role, Grants> = {
     "candidate:delete": "org",
     // Anyone above lead edits candidates and moves them onto the Hot List (status); the CEO any candidate
     "candidate:update": "org",
+    // A lead or above sets the recruiter; the CEO on any candidate
+    "candidate:assign": "org",
     "assignment:read": "org",
     "hotlist:read": "org",
     "submission:read": "org",

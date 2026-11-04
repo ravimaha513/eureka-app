@@ -686,6 +686,38 @@ export class CandidatesService implements OnModuleInit {
     });
   }
 
+  /** The team's active members and its lead: the same people a removed member's candidates can go to. */
+  private async teamRecruiters(c: pg.PoolClient, teamId: string) {
+    return (await c.query<{ id: string; name: string }>(
+      `SELECT u.id, u.display_name AS name FROM eureka.app_user u
+        WHERE u.status = 'active'
+          AND (u.id = (SELECT t.lead_id FROM eureka.team t WHERE t.id = $1)
+               OR EXISTS (SELECT 1 FROM eureka.team_member tm
+                           WHERE tm.team_id = $1 AND tm.user_id = u.id AND tm.valid @> now()))
+        ORDER BY lower(u.display_name), u.id`, [teamId])).rows;
+  }
+
+  async recruiterOptions(user: AuthedUser, id: string) {
+    return this.db.withUser(user.id, async (c) => {
+      const row = await this.loadForWrite(c, user, id, "candidate:assign");
+      return { items: await this.teamRecruiters(c, row.team_id) };
+    });
+  }
+
+  async setRecruiter(user: AuthedUser, id: string, recruiterId: string | null) {
+    return this.db.withUser(user.id, async (c) => {
+      const row = await this.loadForWrite(c, user, id, "candidate:assign");
+      if (recruiterId === row.recruiter_id) return { id, recruiterId };
+      if (recruiterId && !(await this.teamRecruiters(c, row.team_id)).some((u) => u.id === recruiterId)) {
+        throw new UnprocessableEntityException("invalid_recruiter");
+      }
+      await c.query(`UPDATE eureka.candidate SET recruiter_id = $2 WHERE id = $1`, [id, recruiterId]);
+      await this.audit.record(c, { actorId: user.id, action: "candidate.recruiter", entityType: "candidate", entityId: id,
+        changes: { fromRecruiterId: row.recruiter_id, toRecruiterId: recruiterId } });
+      return { id, recruiterId };
+    });
+  }
+
   async setRating(user: AuthedUser, id: string, rating: number) {
     return this.db.withUser(user.id, async (c) => {
       await this.loadForWrite(c, user, id, "candidate.rating:update");

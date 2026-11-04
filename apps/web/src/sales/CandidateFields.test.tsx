@@ -135,6 +135,25 @@ describe("profile", () => {
     expect(calls.find((c) => c.method === "PATCH")!.body).toEqual({ ghLocation: LOC, eligibility: ["in_person", "hybrid"], visaCategory: "gc_ead" });
   });
 
+  it("hides the recruiter control without the assign hint", async () => {
+    wrap(<CandidateProfile id={CID} me={meFor("recruiter")} onBack={() => undefined} />);
+    await screen.findByRole("button", { name: "Edit profile" });
+    expect(screen.queryByRole("button", { name: "Change recruiter" })).not.toBeInTheDocument();
+  });
+
+  it("lets a lead or above change the recruiter from the team's people", async () => {
+    routes[`GET /api/v1/candidates/${CID}`] = () => ({ body: { ...PROFILE, actions: { ...PROFILE.actions, assign: true } } });
+    routes[`GET /api/v1/candidates/${CID}/recruiter-options`] = () => ({ body: { items: [{ id: "u-me", name: "Test User" }, { id: "u-sam", name: "Sam Member" }] } });
+    routes[`PUT /api/v1/candidates/${CID}/recruiter`] = () => ({ body: { id: CID, recruiterId: "u-sam" } });
+    wrap(<CandidateProfile id={CID} me={meFor("lead")} onBack={() => undefined} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Change recruiter" }));
+    await screen.findByRole("option", { name: "Sam Member" });
+    fireEvent.change(screen.getByRole("combobox", { name: "Recruiter" }), { target: { value: "u-sam" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
+    expect(calls.find((c) => c.method === "PUT")!.body).toEqual({ recruiterId: "u-sam" });
+  });
+
   it("rejects a non-LinkedIn link before sending", async () => {
     wrap(<CandidateProfile id={CID} me={meFor("recruiter")} onBack={() => undefined} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit profile" }));

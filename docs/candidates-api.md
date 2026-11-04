@@ -162,6 +162,17 @@ the API loads it once per request (`UserAccess.sharedCandidateIds`). Shares coun
 `visibility = 'selected_teams'`. Tests: `apps/api/test/candidate-team-share.{db,api}.int.test.ts`,
 `engine.test.ts` ("selected teams"), `apps/web/src/sales/Sales.test.tsx`.
 
+## Setting the recruiter: lead or above
+
+`candidate:assign`: lead (team), manager / AD (hierarchy), CEO (org). A recruiter gets 403, also for
+their own candidate; `PATCH /candidates/:id` rejects `recruiterId` (422). `actions.assign` on the
+profile is the hint.
+
+- `GET /api/v1/candidates/:id/recruiter-options`: `{ items: [{ id, name }] }`, the active members
+  and lead of the candidate's team.
+- `PUT /api/v1/candidates/:id/recruiter` with `{ recruiterId }` (`null` unassigns): 422
+  `invalid_recruiter` for anyone not in that list. Audited as `candidate.recruiter` (ids only).
+
 ## Adding candidates: required, unique contact; lead or above (CA-6)
 
 Migrations `0260_candidate_unique_contact.sql` (trigger) and `0300_candidate_contact_required.sql` (one lock per transaction, import loader policies).

@@ -37,6 +37,8 @@ export interface CandidateActions {
   logSubmission: boolean;
   /** Cascade delete (candidate:delete); the server still refuses a placed candidate (409). */
   delete: boolean;
+  /** Set the recruiter (candidate:assign): a lead or above. */
+  assign: boolean;
 }
 
 const owns = (user: UserAccess, perm: Parameters<typeof resolveScope>[1], c: CandidateRef) => {
@@ -54,6 +56,7 @@ export function candidateActions(user: UserAccess, c: CandidateRef, hasOpenPlace
     rating: owns(user, "candidate.rating:update", c),
     logSubmission: candidateVisible(resolveScope(user, "submission:create"), c),
     delete: owns(user, "candidate:delete", c),
+    assign: owns(user, "candidate:assign", c),
   };
 }
 

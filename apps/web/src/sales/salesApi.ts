@@ -113,6 +113,8 @@ export interface CandidateActions {
   rating: boolean;
   logSubmission: boolean;
   delete: boolean;
+  /** Set the recruiter: a lead or above. Older responses omit it. */
+  assign?: boolean;
 }
 
 export interface Page<T> { items: T[]; nextCursor: string | null }
@@ -250,6 +252,9 @@ export const salesApi = {
   createTeams: () => api<{ items: ShareTeam[]; defaultTeamId: string | null }>("/api/v1/candidate-create-teams"),
   setRating: (id: string, rating: number) =>
     api<{ id: string; technicalRating: number }>(`/api/v1/candidates/${enc(id)}/technical-rating`, { method: "PUT", ...json({ rating }) }),
+  recruiterOptions: (id: string) => api<{ items: { id: string; name: string }[] }>(`/api/v1/candidates/${enc(id)}/recruiter-options`),
+  setRecruiter: (id: string, recruiterId: string | null) =>
+    api<{ id: string; recruiterId: string | null }>(`/api/v1/candidates/${enc(id)}/recruiter`, { method: "PUT", ...json({ recruiterId }) }),
   remove: (id: string) => api<void>(`/api/v1/candidates/${enc(id)}`, { method: "DELETE" }),
   transition: (id: string, to: string) =>
     api<{ id: string; status: string }>(`/api/v1/candidates/${enc(id)}/transition`, { method: "POST", ...json({ to }) }),

@@ -131,6 +131,8 @@ export const VisibilityUpdate = z
   .object({ visibility: z.enum(CANDIDATE_VISIBILITIES), teamIds: ShareTeamIds.optional() })
   .strict()
   .refine((b) => (b.visibility === "selected_teams") === (b.teamIds !== undefined), { message: "teamIds goes with selected_teams" });
+/** PUT /candidates/:id/recruiter (candidate:assign); null leaves the candidate unassigned. */
+export const RecruiterUpdate = z.object({ recruiterId: uuid.nullable() }).strict();
 export const RatingUpdate = z.object({ rating: z.number().int().min(1).max(5) }).strict();
 export const Transition = z
   .object({ to: z.enum(["active", "on_hold", "stopped", "full_of_interviews", "confirmation", "terminated"]) })

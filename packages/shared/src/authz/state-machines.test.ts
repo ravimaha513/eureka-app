@@ -53,12 +53,13 @@ describe("action hints", () => {
   it("candidate actions follow the grants", () => {
     expect(candidateActions(R1a, own, false)).toEqual({
       edit: true, transition: ["on_hold", "stopped", "full_of_interviews", "confirmation", "terminated"],
-      visibility: false, rating: false, logSubmission: true, delete: false,
+      visibility: false, rating: false, logSubmission: true, delete: false, assign: false,
     });
     expect(candidateActions(L1, own, false).delete).toBe(true);
     expect(candidateActions(L1, own, false).visibility).toBe(true);
-    expect(candidateActions(LOC, own, false)).toEqual({ edit: false, transition: [], visibility: false, rating: true, logSubmission: false, delete: false });
-    expect(candidateActions(HR, own, false)).toEqual({ edit: false, transition: [], visibility: false, rating: false, logSubmission: false, delete: false });
+    expect(candidateActions(L1, own, false).assign).toBe(true);
+    expect(candidateActions(LOC, own, false)).toEqual({ edit: false, transition: [], visibility: false, rating: true, logSubmission: false, delete: false, assign: false });
+    expect(candidateActions(HR, own, false)).toEqual({ edit: false, transition: [], visibility: false, rating: false, logSubmission: false, delete: false, assign: false });
   });
 
   it("submission actions: createPlacement needs selected, update + create rights and an available candidate", () => {
