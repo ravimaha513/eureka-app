@@ -872,6 +872,21 @@ const CASES: RejectCase[] = [
     },
     forbidden: { status: "selected", recruiterId: U.r1b, teamId: T.t2, candidateId: FOREIGN_ID, statusChangedAt: PAST, statusChangedBy: U.l1, from: "selected" },
   },
+  {
+    // Detail corrections (lead and above, migration 0420): snapshots, status and the edit stamps stay server-managed.
+    route: "PATCH /api/v1/submissions/:id", actor: "l1",
+    prepare: async () => {
+      const { submissionId } = await interviewOf();
+      return {
+        url: `/api/v1/submissions/${submissionId}`, body: { jobTitle: "MA edited" },
+        state: () => rows(`SELECT * FROM eureka.submission WHERE id = $1`, [submissionId]),
+      };
+    },
+    forbidden: {
+      status: "selected", recruiterId: U.r1b, teamId: T.t2, locationId: LOC.austin, candidateId: FOREIGN_ID,
+      rejectionReason: "x", statusChangedAt: PAST, detailsEditedAt: PAST, detailsEditedBy: U.l1,
+    },
+  },
   // candidate feedback (public, token-authenticated)
   {
     route: "POST /api/public/feedback/:token", actor: null,

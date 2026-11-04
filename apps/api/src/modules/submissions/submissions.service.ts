@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import type pg from "pg";
 import { z } from "zod";
 import {
@@ -43,6 +43,24 @@ export const CreateSubmission = z
   })
   .strict(); // recruiter, team and location snapshots are set by the database
 export type CreateSubmission = z.infer<typeof CreateSubmission>;
+
+/**
+ * Detail corrections (lead and above, submission.details:update); status is a
+ * transition. Only the keys sent are changed; null clears an optional field.
+ */
+export const EditSubmission = z
+  .object({
+    jobTitle: z.string().trim().min(1).max(160),
+    clientId: uuid,
+    vendorId: uuid.nullable(),
+    rate: z.number().positive().max(1000).multipleOf(0.01).nullable(),
+    jobId: uuid.nullable(),
+    submittedAt: z.string().datetime({ offset: true }),
+  })
+  .partial()
+  .strict()
+  .refine((b) => Object.keys(b).length > 0, { message: "no_changes" });
+export type EditSubmission = z.infer<typeof EditSubmission>;
 
 export const SubmissionListQuery = z
   .object({
@@ -119,6 +137,8 @@ interface SubmissionRow {
   job_id: string | null;
   submitted_at: Date;
   status_changed_at: Date | null;
+  details_edited_at: Date | null;
+  details_edited_by_name: string | null;
   k: string;
   c_recruiter: string | null;
   c_team: string | null;
@@ -134,6 +154,7 @@ interface SubmissionRow {
 const SELECT = `
   SELECT s.id, s.candidate_id, s.recruiter_id, s.team_id, s.location_id, s.job_title, s.client_id, s.vendor_id,
          s.rate, s.status, s.rejection_reason, s.job_id, s.submitted_at, s.status_changed_at, ${toMicros("s.submitted_at")} AS k,
+         s.details_edited_at, eu.display_name AS details_edited_by_name,
          cl.name AS client, ru.display_name AS recruiter_name,
          CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name END AS candidate_name,
          c.recruiter_id AS c_recruiter, c.team_id AS c_team, c.location_id AS c_location,
@@ -144,6 +165,7 @@ const SELECT = `
   FROM eureka.submission s
   JOIN eureka.client cl ON cl.id = s.client_id
   LEFT JOIN eureka.app_user ru ON ru.id = s.recruiter_id
+  LEFT JOIN eureka.app_user eu ON eu.id = s.details_edited_by
   LEFT JOIN eureka.candidate c ON c.id = s.candidate_id
   LEFT JOIN eureka.person p ON p.id = c.person_id
   CROSS JOIN LATERAL (
@@ -178,6 +200,18 @@ export function activityPredicate(scope: EffectiveScope, params: unknown[], acti
   const actor = scopePredicate({ ...scope, allTeams: false, hotlistOpen: false }, params, activity);
   const owner = scopePredicate({ ...scope, allTeams: false, hotlistOpen: false }, params, cand);
   return `(${actor} OR ${owner})`;
+}
+
+/** Detail-edit refusals from authz.edit_submission (migration 0420). */
+const EDIT_CONFLICTS = new Set(["submission_placed", "client_locked"]);
+const EDIT_INVALID = new Set(["invalid_job_title", "invalid_rate", "invalid_submitted_at", "client_not_found", "vendor_not_found", "invalid_change",
+  "job_not_found", "job_client_mismatch", "job_not_open"]);
+function mapEditError(err: unknown): never {
+  const e = err as { message?: string; code?: string };
+  if (e.code === "23514" && e.message && EDIT_CONFLICTS.has(e.message)) throw new ConflictException(e.message);
+  if (e.code === "23514" && e.message && EDIT_INVALID.has(e.message)) throw new UnprocessableEntityException(e.message);
+  if (e.code === "42501" && e.message === "field_not_permitted") throw new ForbiddenException(e.message);
+  mapPipelineError(err);
 }
 
 /** jobs-portal (migration 0060): the submission's job must be a readable, open client requirement of its client. */
@@ -216,6 +250,8 @@ export class SubmissionsService {
       jobId: r.job_id,
       submittedAt: r.submitted_at,
       statusChangedAt: r.status_changed_at,
+      /** Latest detail correction (PATCH /submissions/:id), or null when never edited. */
+      detailsEdited: r.details_edited_at ? { at: r.details_edited_at, byName: r.details_edited_by_name } : null,
       /** Interviews the caller can see (not cancelled / no invite); lastInterviewAt is the latest start. */
       interviewCount: r.interview_count,
       lastInterviewAt: r.last_interview_at,
@@ -372,6 +408,33 @@ export class SubmissionsService {
         changes: { from: row.status, to: status, ...(body.rejectionReason ? { rejectionReasonGiven: true } : {}) },
       });
       return { id, status, rejectionReason: body.rejectionReason ?? null };
+    });
+  }
+
+  /**
+   * Correct a submission's details (lead and above). Read-before-write: 404 when not
+   * visible, 403 without submission.details:update (or rate:read for the rate);
+   * authz.edit_submission checks everything again. The audit keeps field names only (rule 5).
+   */
+  async edit(user: AuthedUser, id: string, body: EditSubmission) {
+    return this.db.withUser(user.id, async (c) => {
+      const row = await this.load(c, user, id);
+      if (!ownsActivity(resolveScope(user.access, "submission.details:update"), activityRef(row))) {
+        throw new ForbiddenException("Not permitted");
+      }
+      if (body.rate !== undefined && !ownsActivity(resolveScope(user.access, "rate:read"), activityRef(row))) {
+        throw new ForbiddenException("field_not_permitted");
+      }
+      const r = await c.query<{ ch: string[] }>(`SELECT authz.edit_submission($1, $2::jsonb) AS ch`, [id, JSON.stringify(body)])
+        .catch(mapEditError);
+      const changed = r.rows[0]!.ch;
+      if (changed.length > 0) {
+        await this.audit.record(c, {
+          actorId: user.id, action: "submission.edited", entityType: "submission", entityId: id,
+          changes: { fields: changed },
+        });
+      }
+      return { changed, submission: this.present(user.access, await this.load(c, user, id)) };
     });
   }
 }

@@ -71,6 +71,10 @@ export interface SubmissionActions {
    * (e.g. "confirmation" while another placement is in progress), else null.
    */
   placeBlocked: string | null;
+  /** submission.details:update covers it (lead and above); the server still refuses a placed submission. */
+  editDetails: boolean;
+  /** editDetails and rate:read: the rate is shown and may be corrected. */
+  editRate: boolean;
 }
 
 /**
@@ -84,6 +88,7 @@ export function submissionActions(
   candidate: CandidateRef | null,
 ): SubmissionActions {
   const canUpdate = ownsActivity(resolveScope(user, "submission:update"), s);
+  const editDetails = ownsActivity(resolveScope(user, "submission.details:update"), s);
   // PL-1: the submission decides who may place, even once its candidate is hidden from them.
   // The status of a hidden candidate is unknown here; the server still refuses an unavailable one.
   const placeScope = canUpdate && ownsActivity(resolveScope(user, "placement:create"), s);
@@ -95,6 +100,8 @@ export function submissionActions(
     createPlacement: canPlace && status === "selected",
     clearAndPlace: canPlace && open,
     placeBlocked: placeScope && open && !canPlace ? candidate!.marketingStatus : null,
+    editDetails,
+    editRate: editDetails && ownsActivity(resolveScope(user, "rate:read"), s),
   };
 }
 

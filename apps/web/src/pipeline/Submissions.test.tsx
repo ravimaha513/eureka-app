@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Shell } from "../App";
 import { SubmissionsPage } from "./SubmissionsPage";
 import { dayBoundary } from "./pipelineApi";
-import { COACH, LOOKUPS, UUID, meFor, mockApi, plc, problem, sub, wrap, type Handler } from "./testkit";
+import { COACH, LOOKUPS, UUID, VENDOR, meFor, mockApi, plc, problem, sub, wrap, type Handler } from "./testkit";
 
 const RECRUITER = meFor("recruiter");
 const S1 = sub("s1");
@@ -469,5 +469,77 @@ describe("Pipeline navigation", () => {
     expect(await screen.findByRole("dialog", { name: "Divya Menon · Northwind Financial" })).toBeInTheDocument();
     // The open placement is in the URL, so the link can be shared or reloaded.
     expect(window.location.pathname).toBe("/placements/p9");
+  });
+});
+
+describe("Edit submission details (lead and above)", () => {
+  const LEAD = meFor("lead");
+  const editable = (extra: Partial<Parameters<typeof sub>[1]> = {}) => sub("s1", {
+    actions: { transition: ["under_review"], createInterview: true, createPlacement: false, clearAndPlace: true, placeBlocked: null, editDetails: true, editRate: false },
+    ...extra,
+  });
+
+  it("is a separate Details action, absent without editDetails", async () => {
+    wrap(<SubmissionsPage me={RECRUITER} />);
+    const drawer = await openDrawer("Asha Iyer");
+    expect(within(drawer).getByRole("heading", { name: "Details" })).toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "Edit details" })).not.toBeInTheDocument();
+  });
+
+  it("sends only the changed fields, hides the rate without editRate and shows who edited", async () => {
+    let current = editable();
+    api.routes["GET /api/v1/submissions"] = () => ({ body: { items: [current], nextCursor: null } });
+    api.routes["GET /api/v1/submissions/s1"] = () => ({ body: current });
+    api.routes["PATCH /api/v1/submissions/s1"] = (_u, b) => {
+      current = { ...current, ...(b as object), detailsEdited: { at: "2026-10-01T12:00:00Z", byName: "Lead One" } };
+      return { body: { changed: Object.keys(b as object), submission: current } };
+    };
+    wrap(<SubmissionsPage me={LEAD} />);
+    const drawer = await openDrawer("Asha Iyer");
+    // Status moves stay under Next steps; the edit lives with the details.
+    expect(within(drawer).getByRole("heading", { name: "Next steps" })).toBeInTheDocument();
+    fireEvent.click(within(drawer).getByRole("button", { name: "Edit details" }));
+    const dlg = await screen.findByRole("dialog", { name: "Edit submission details" });
+    expect(within(dlg).queryByLabelText("Rate per hour")).not.toBeInTheDocument();
+
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save changes" }));
+    expect(await within(dlg).findByText(/Nothing has changed yet/)).toBeInTheDocument();
+    expect(api.writes()).toHaveLength(0);
+
+    fireEvent.change(within(dlg).getByLabelText("Job title"), { target: { value: "  Staff Java Developer " } });
+    fireEvent.change(within(dlg).getByLabelText("Vendor"), { target: { value: VENDOR } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit submission details" })).not.toBeInTheDocument());
+    expect(api.writes()[0]!.body).toEqual({ jobTitle: "Staff Java Developer", vendorId: VENDOR });
+    expect(await within(drawer).findByText(/Details edited .* by Lead One\./)).toBeInTheDocument();
+  });
+
+  it("locks the client once interviews exist and maps a client_locked refusal", async () => {
+    const s = editable({ interviews: [{ id: "i1", stage: "l1", round: "L1", result: "pending", callStatus: "scheduled", startsAt: "2026-09-22T15:00:00Z" }] });
+    api.routes["GET /api/v1/submissions"] = () => ({ body: { items: [s], nextCursor: null } });
+    api.routes["GET /api/v1/submissions/s1"] = () => ({ body: s });
+    api.routes["PATCH /api/v1/submissions/s1"] = () => problem(409, { detail: "client_locked" });
+    wrap(<SubmissionsPage me={LEAD} />);
+    const drawer = await openDrawer("Asha Iyer");
+    fireEvent.click(within(drawer).getByRole("button", { name: "Edit details" }));
+    const dlg = await screen.findByRole("dialog", { name: "Edit submission details" });
+    const client = within(dlg).getByLabelText("Client");
+    expect(client).toHaveAttribute("readonly");
+    expect(client).toHaveValue("Northwind Financial");
+    fireEvent.change(within(dlg).getByLabelText("Job title"), { target: { value: "Java Lead" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save changes" }));
+    expect(await within(dlg).findByText(/Interviews were booked with this client/)).toBeInTheDocument();
+  });
+
+  it("explains that a placement in progress holds the details", async () => {
+    const s = editable({ placementStatus: "paperwork", actions: { ...editable().actions!, editRate: true } });
+    api.routes["GET /api/v1/submissions"] = () => ({ body: { items: [s], nextCursor: null } });
+    api.routes["GET /api/v1/submissions/s1"] = () => ({ body: s });
+    wrap(<SubmissionsPage me={LEAD} />);
+    const drawer = await openDrawer("Asha Iyer");
+    fireEvent.click(within(drawer).getByRole("button", { name: "Edit details" }));
+    const dlg = await screen.findByRole("dialog", { name: "Edit submission details" });
+    expect(within(dlg).getByText(/correct them on the placement/)).toBeInTheDocument();
+    expect(within(dlg).queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
   });
 });

@@ -63,12 +63,13 @@ describe("action hints", () => {
   });
 
   it("submission actions: createPlacement needs selected, update + create rights and an available candidate", () => {
-    expect(submissionActions(R1a, r1aAct, "selected", own)).toEqual({ transition: [], createInterview: false, createPlacement: true, clearAndPlace: true, placeBlocked: null });
+    expect(submissionActions(R1a, r1aAct, "selected", own)).toEqual({ transition: [], createInterview: false, createPlacement: true, clearAndPlace: true, placeBlocked: null, editDetails: false, editRate: false });
     expect(submissionActions(R1a, r1aAct, "selected", { ...own, marketingStatus: "on_hold" }).createPlacement).toBe(false);
     // A candidate hidden from the caller does not stop them placing their own submission.
     expect(submissionActions(R1a, r1aAct, "selected", null).createPlacement).toBe(true);
     expect(submissionActions(R1a, r1aAct, "submitted", own)).toEqual({
       transition: ["under_review", "rejected", "withdrawn"], createInterview: true, createPlacement: false, clearAndPlace: true, placeBlocked: null,
+      editDetails: false, editRate: false,
     });
     expect(submissionActions(R1a, r1aAct, "withdrawn", own).clearAndPlace).toBe(false);
     expect(submissionActions(R1a, r1aAct, "submitted", { ...own, marketingStatus: "on_hold" }).clearAndPlace).toBe(false);
@@ -76,7 +77,13 @@ describe("action hints", () => {
     expect(submissionActions(R1a, r1aAct, "submitted", { ...own, marketingStatus: "confirmation" })).toMatchObject({ clearAndPlace: true, placeBlocked: null });
     expect(submissionActions(R1a, r1aAct, "submitted", { ...own, marketingStatus: "placed" }).placeBlocked).toBe("placed");
     expect(submissionActions(R1a, r1aAct, "withdrawn", { ...own, marketingStatus: "placed" }).placeBlocked).toBeNull();
-    expect(submissionActions(HR, r1aAct, "selected", own)).toEqual({ transition: [], createInterview: false, createPlacement: false, clearAndPlace: false, placeBlocked: null });
+    expect(submissionActions(HR, r1aAct, "selected", own)).toEqual({ transition: [], createInterview: false, createPlacement: false, clearAndPlace: false, placeBlocked: null, editDetails: false, editRate: false });
+  });
+
+  it("submission actions: lead and above correct details; the rate only with rate:read", () => {
+    // Lead of the recruiter's team: details yes, rate no (no rate:read).
+    expect(submissionActions(L1, r1aAct, "submitted", own)).toMatchObject({ editDetails: true, editRate: false });
+    expect(submissionActions(R1a, r1aAct, "rejected", own)).toMatchObject({ editDetails: false, editRate: false });
   });
 
   it("placement transitions: bgc_failed only with placement.bgc_status:update", () => {

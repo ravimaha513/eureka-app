@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { Pencil } from "lucide-react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { can, type Me } from "../api";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
@@ -7,6 +8,7 @@ import { Drawer, Field } from "../sales/ui";
 import { AssessmentsSection } from "../pipelinereport/AssessmentsSection";
 import type { Interview } from "../interviews/InterviewsPage";
 import { CreatePlacementButton, CreatePlacementDialog } from "./CreatePlacementDialog";
+import { EditSubmissionDialog } from "./EditSubmissionDialog";
 import { pipelineError } from "./errors";
 import {
   ISO_DAY, SUBMISSION_STATUSES, dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Submission,
@@ -182,7 +184,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
   );
 }
 
-type Modal = { kind: "reject" } | { kind: "withdraw" } | { kind: "interview"; defaultRound?: string }
+type Modal = { kind: "edit" } | { kind: "reject" } | { kind: "withdraw" } | { kind: "interview"; defaultRound?: string }
   | { kind: "placement"; round?: Interview } | { kind: "rejectRound"; round: Interview };
 
 export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlacement }: {
@@ -224,18 +226,31 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
           <p className="error" role="alert">{pipelineError(q.error, "submission")}</p>
         ) : (
           <>
-            <dl className="facts">
-              <dt>Candidate</dt><dd>{s.candidateName ?? "—"}</dd>
-              <dt>Job title</dt><dd>{s.jobTitle}</dd>
-              <dt>Client</dt><dd>{s.client}</dd>
-              <dt>Vendor</dt><dd>{s.vendorId ? vendorName ?? "Vendor on file" : "None"}</dd>
-              <dt>Status</dt><dd><PipelineStatus status={s.status} /></dd>
-              {s.rejectionReason && <><dt>Rejection reason</dt><dd>{s.rejectionReason}</dd></>}
-              <dt>Recruiter</dt><dd>{s.recruiterName ?? "—"}</dd>
-              {"rate" in s && <><dt>Rate</dt><dd>{fmtRate(s.rate)}</dd></>}
-              <dt>Submitted</dt><dd>{fmtDateTime(s.submittedAt)}</dd>
-              <dt>Last status change</dt><dd>{fmtDateTime(s.statusChangedAt)}</dd>
-            </dl>
+            <section aria-labelledby={`${id}-details`}>
+              <div className="factshead">
+                <h3 id={`${id}-details`}>Details</h3>
+                {actions?.editDetails && (
+                  <button type="button" className="btn sm" onClick={() => setModal({ kind: "edit" })}>
+                    <Pencil size={14} aria-hidden="true" />Edit details
+                  </button>
+                )}
+              </div>
+              <dl className="facts">
+                <dt>Candidate</dt><dd>{s.candidateName ?? "—"}</dd>
+                <dt>Job title</dt><dd>{s.jobTitle}</dd>
+                <dt>Client</dt><dd>{s.client}</dd>
+                <dt>Vendor</dt><dd>{s.vendorId ? vendorName ?? "Vendor on file" : "None"}</dd>
+                <dt>Status</dt><dd><PipelineStatus status={s.status} /></dd>
+                {s.rejectionReason && <><dt>Rejection reason</dt><dd>{s.rejectionReason}</dd></>}
+                <dt>Recruiter</dt><dd>{s.recruiterName ?? "—"}</dd>
+                {"rate" in s && <><dt>Rate</dt><dd>{fmtRate(s.rate)}</dd></>}
+                <dt>Submitted</dt><dd>{fmtDateTime(s.submittedAt)}</dd>
+                <dt>Last status change</dt><dd>{fmtDateTime(s.statusChangedAt)}</dd>
+              </dl>
+              {s.detailsEdited && (
+                <p className="muted factsnote">Details edited {fmtDateTime(s.detailsEdited.at)}{s.detailsEdited.byName ? ` by ${s.detailsEdited.byName}` : ""}.</p>
+              )}
+            </section>
 
             <p role="status" aria-live="polite" className="livemsg">{message}</p>
             {created && onOpenPlacement && (
@@ -273,6 +288,14 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
         )}
       </Drawer>
 
+      {s && modal?.kind === "edit" && (
+        <EditSubmissionDialog submission={s} canEditRate={actions?.editRate ?? false} onClose={() => setModal(null)}
+          onSaved={(changed) => {
+            setModal(null);
+            announce(changed.length ? "Submission details saved." : "Nothing changed.");
+            refresh(); void qc.invalidateQueries({ queryKey: ["interviews"] });
+          }} />
+      )}
       {s && modal?.kind === "reject" && (
         <RejectDialog submission={s} onClose={() => setModal(null)}
           onDone={() => { setModal(null); announce("Submission rejected."); refresh(); }} />
