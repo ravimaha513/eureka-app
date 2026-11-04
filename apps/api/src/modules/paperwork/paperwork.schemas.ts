@@ -41,6 +41,8 @@ export const UpdateBgc = z
     reason: reason.optional(),
     bgcCompany: z.string().trim().min(1).max(120).regex(noControl, "no control characters").nullable().optional(),
     initiatedOn: day.nullable().optional(),
+    /** The placement's actual start date: required when clearing the check (0420), only while it is cleared. */
+    actualStart: day.optional(),
     educationLevel: z.string().trim().min(1).max(60).regex(noControl, "no control characters").nullable().optional(),
     /** History checked, in whole years 1-50 (migration 0400). */
     employmentYears: historyYears.nullable().optional(),

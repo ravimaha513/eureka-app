@@ -224,7 +224,7 @@ describe("placements report: filters and export", () => {
     expect(res.headers["content-type"]).toContain("text/csv");
     expect(res.headers["x-export-rows"]).toBe("1"); // b only: c belongs to team t3
     const lines = res.body.replace(/^﻿/, "").trim().split("\r\n");
-    expect(lines[0]).toBe("Candidate,Technology,Status,Type,Work mode,End client,Vendor,Implementation partner,Recruiter,Team,Location,Tentative start,Joined on,First placement,Re-confirmed,Created on");
+    expect(lines[0]).toBe("Candidate,Technology,Status,Type,Work mode,End client,Vendor,Implementation partner,Recruiter,Team,Location,Tentative start,Actual start,Joined on,First placement,Re-confirmed,Created on");
     expect(lines[1]).toContain("Python,confirmed,w2,onsite,Fabrikam Health,Tailspin Partners,");
     expect(res.body).not.toMatch(/\b60(\.00)?\b/); // the seed's rate
     const a = (await audits("placement.export")).at(-1)!;

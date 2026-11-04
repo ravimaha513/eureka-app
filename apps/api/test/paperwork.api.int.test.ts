@@ -165,7 +165,7 @@ describe("work queue: document:read scope per fixture user", () => {
     const ids = async () => (await call("hr", "GET", "/api/v1/paperwork?limit=200")).json().items.map((r: { placementId: string }) => r.placementId);
     expect(await ids()).toContain(m.id); // BGC not started on an open placement
     await call("hr", "PATCH", `/api/v1/paperwork/placements/${m.id}/bgc`, { status: "initiated" });
-    await call("hr", "PATCH", `/api/v1/paperwork/placements/${m.id}/bgc`, { status: "cleared" });
+    await call("hr", "PATCH", `/api/v1/paperwork/placements/${m.id}/bgc`, { status: "cleared", actualStart: "2026-12-01" });
     expect(await ids()).not.toContain(m.id);
   });
 });
@@ -258,7 +258,12 @@ describe("BGC", () => {
     const m = await placed();
     const url = `/api/v1/paperwork/placements/${m.id}/bgc`;
     await call("hr", "PATCH", url, { status: "initiated" });
-    await call("hr", "PATCH", url, { status: "cleared" });
+    expect((await call("hr", "PATCH", url, { status: "cleared" })).json().detail).toBe("actual_start_required");
+    expect((await call("hr", "PATCH", url, { status: "cleared", actualStart: null })).statusCode).toBe(422);
+    const cl = await call("hr", "PATCH", url, { status: "cleared", actualStart: "2026-12-01" });
+    expect(cl.statusCode, cl.body).toBe(200);
+    expect((await call("hr", "GET", `/api/v1/paperwork/placements/${m.id}`)).json().placement).toMatchObject({ actualStart: "2026-12-01" });
+    expect((await call("hr", "GET", `/api/v1/placements/${m.id}`)).json()).toMatchObject({ actualStart: "2026-12-01" });
     expect((await call("hr", "GET", `/api/v1/placements/${m.id}`)).json().bgc).toEqual({ status: "cleared", actions: { transition: ["initiated", "failed"] } });
     expect((await call("hr", "PATCH", url, { status: "initiated" })).json().detail).toBe("reason_required");
     const res = await call("hr", "PATCH", url, { status: "initiated", reason: "Vendor asked for more documents" });

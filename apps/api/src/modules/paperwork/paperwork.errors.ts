@@ -13,6 +13,7 @@ const CODES: Record<string, (code: string) => HttpException> = {
   version_mismatch: (c) => new ConflictException(c),
   invalid_transition: unprocessable,
   reason_required: unprocessable,
+  actual_start_required: unprocessable,
   invalid_change: unprocessable,
   invalid_assignee: unprocessable,
   invalid_owner_role: unprocessable,

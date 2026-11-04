@@ -48,6 +48,7 @@ interface HeaderRow {
   placement_status: string | null;
   placement_type: string | null;
   tentative_start: string | null;
+  actual_start: string | null;
   client_id: string | null;
   client_name: string | null;
   total: number;
@@ -96,6 +97,7 @@ const HEADER = (base: string, items: string) => `
          CASE WHEN pe.id IS NOT NULL THEN pe.first_name || ' ' || pe.last_name END AS candidate_name,
          ru.display_name AS recruiter_name,
          pl.status AS placement_status, pl.placement_type, pl.tentative_start::text AS tentative_start,
+         pl.actual_start::text AS actual_start,
          cl.id AS client_id, cl.name AS client_name,
          coalesce(a.total, 0) AS total, coalesce(a.open, 0) AS open, coalesce(a.required_open, 0) AS required_open,
          coalesce(a.overdue, 0) AS overdue, a.next_due::text AS next_due,
@@ -169,6 +171,8 @@ export class PaperworkService {
       /** null when the caller cannot read the placement record itself. */
       placement: r.placement_status === null ? null : {
         status: r.placement_status, placementType: r.placement_type, tentativeStart: r.tentative_start,
+        /** Set when the background check is cleared (0420); null before. */
+        actualStart: r.actual_start,
         client: ref(r.client_id, r.client_name),
       },
       checklist: { total: r.total, open: r.open, requiredOpen: r.required_open, overdue: r.overdue, nextDue: r.next_due },

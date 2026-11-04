@@ -218,6 +218,28 @@ describe("Paperwork drawer", () => {
     expect(api.writes()[1]!.body).toMatchObject({ status: "failed", failPlacement: true });
   });
 
+  it("clearing the check requires the actual start date, then shows it beside the tentative one", async () => {
+    api.routes["PATCH /api/v1/paperwork/placements/p1/bgc"] = () => ({ body: { ...DETAIL.bgc, status: "cleared" } });
+    wrap(<PaperworkPage me={HR} />);
+    const drawer = await openDrawer();
+    expect(within(drawer).queryByText("Actual start")).not.toBeInTheDocument();
+    fireEvent.click(await within(drawer).findByRole("button", { name: "Update background check" }));
+    const dlg = screen.getByRole("dialog", { name: "Update background check" });
+    expect(within(dlg).queryByLabelText("Actual start date")).not.toBeInTheDocument();
+    fireEvent.change(within(dlg).getByLabelText("Status"), { target: { value: "cleared" } });
+    const start = within(dlg).getByLabelText("Actual start date");
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
+    expect(await within(dlg).findByText("Enter the actual start date.")).toBeInTheDocument();
+    expect(start).toHaveAttribute("aria-invalid", "true");
+    expect(api.writes()).toHaveLength(0);
+    fireEvent.change(start, { target: { value: "2031-01-12" } });
+    api.routes["GET /api/v1/paperwork/placements/p1"] = () => ({ body: { ...DETAIL, placement: { ...DETAIL.placement!, actualStart: "2031-01-12" } } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.body).toEqual({ status: "cleared", actualStart: "2031-01-12", expectedVersion: 2 });
+    expect(await within(drawer).findByText("Actual start")).toBeInTheDocument();
+  });
+
   it("no longer shows Completed or Helped by; saves notes in place when the caller may update", async () => {
     api.routes["PATCH /api/v1/paperwork/placements/p1/bgc"] = () => ({ body: { ...DETAIL.bgc, notes: "Fictional note" } });
     wrap(<PaperworkPage me={HR} />);

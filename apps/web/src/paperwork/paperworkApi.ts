@@ -19,7 +19,8 @@ export interface QueueRow {
   candidate: { id: string; name: string | null };
   recruiter: { id: string; name: string | null };
   /** null when the caller cannot read the placement record itself (e.g. Immigration). */
-  placement: { status: string; placementType: string; tentativeStart: string; client: Ref | null } | null;
+  /** actualStart: recorded when the background check is cleared (migration 0420); null before. */
+  placement: { status: string; placementType: string; tentativeStart: string; actualStart?: string | null; client: Ref | null } | null;
   checklist: { total: number; open: number; requiredOpen: number; overdue: number; nextDue: string | null };
   bgc: { status: string };
 }
@@ -98,6 +99,8 @@ export interface BgcChange {
   reason?: string;
   bgcCompany?: string | null;
   initiatedOn?: string | null;
+  /** Required when clearing the check; only while it is cleared. */
+  actualStart?: string;
   educationLevel?: string | null;
   employmentYears?: number | null;
   addressYears?: number | null;
@@ -155,6 +158,7 @@ export const paperworkLabel = (s: string) => {
 export const PAPERWORK_ERRORS: Record<string, string> = {
   invalid_transition: "That status change isn't allowed from the current status. Refresh to see the latest status.",
   reason_required: "Give a reason for this change.",
+  actual_start_required: "Enter the actual start date to clear the background check.",
   invalid_assignee: "The assignee must be an active user who holds the item's owner role.",
   invalid_owner_role: "Pick an existing role as the owner.",
   invalid_due_date: "Pick a due date between 2000 and 2100.",

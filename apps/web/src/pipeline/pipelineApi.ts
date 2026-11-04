@@ -112,6 +112,8 @@ export interface Placement {
   projectCity: string | null;
   projectState: string | null;
   tentativeStart: string;
+  /** Recorded when the background check is cleared (migration 0420); null before, absent on older servers. */
+  actualStart?: string | null;
   isFirstPlacement: boolean;
   /** "Existing consultant re-confirmed", entered on placement entry (migration 0160); absent on older servers. */
   reconfirmed?: boolean;
