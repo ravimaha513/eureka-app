@@ -671,7 +671,7 @@ export class CandidatesService implements OnModuleInit {
     const rows = await this.db.withUser(user.id, async (c) => (await c.query<{ id: string; name: string; lead_name: string | null }>(
       `SELECT t.id, t.name, u.display_name AS lead_name
          FROM eureka.team t LEFT JOIN eureka.app_user u ON u.id = t.lead_id
-        ORDER BY lower(t.name), t.id`)).rows);
+        WHERE t.deleted_at IS NULL ORDER BY lower(t.name), t.id`)).rows);
     return { items: rows.map((r) => ({ id: r.id, name: r.name, lead: r.lead_name })) };
   }
 
@@ -684,7 +684,7 @@ export class CandidatesService implements OnModuleInit {
     const rows = await this.db.withUser(user.id, async (c) => (await c.query<{ id: string; name: string; lead_name: string | null }>(
       `SELECT t.id, t.name, u.display_name AS lead_name
          FROM eureka.team t LEFT JOIN eureka.app_user u ON u.id = t.lead_id
-        WHERE $1::uuid[] IS NULL OR t.id = ANY ($1::uuid[])
+        WHERE t.deleted_at IS NULL AND ($1::uuid[] IS NULL OR t.id = ANY ($1::uuid[]))
         ORDER BY t.id IS DISTINCT FROM $2::uuid, lower(t.name), t.id`, [ids, own])).rows);
     return { items: rows.map((r) => ({ id: r.id, name: r.name, lead: r.lead_name })), defaultTeamId: rows.some((r) => r.id === own) ? own : null };
   }
