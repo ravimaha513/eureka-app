@@ -277,6 +277,67 @@ describe("Candidates list and create", () => {
     expect(writes()[0]!.body).toMatchObject({ teamId: "22222222-2222-4222-8222-222222222222" });
   });
 
+  it("starts the Team picker on Not yet assigned even when the user has a default team", async () => {
+    routes["GET /api/v1/candidate-create-teams"] = () => ({ body: { defaultTeamId: "11111111-1111-4111-8111-111111111111", items: [
+      { id: "11111111-1111-4111-8111-111111111111", name: "Alpha", lead: "Lena Lead" },
+      { id: "22222222-2222-4222-8222-222222222222", name: "Beta", lead: null },
+    ] } });
+    wrap(<CandidatesPage me={LEAD} />);
+    fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
+    const dlg = screen.getByRole("dialog", { name: "New candidate" });
+    const team = await within(dlg).findByRole("combobox", { name: "Team" });
+    expect(team).toHaveValue("");
+    expect(within(team).getByRole("option", { name: "Not yet assigned" })).toBeInTheDocument();
+    expect(within(dlg).getByRole("combobox", { name: "Status" })).toHaveValue("in_training");
+  });
+
+  it("adds several candidates from pasted rows; a duplicate row stays with its reason", async () => {
+    const T2 = "22222222-2222-4222-8222-222222222222";
+    routes["GET /api/v1/candidate-create-teams"] = () => ({ body: { defaultTeamId: null, items: [
+      { id: "11111111-1111-4111-8111-111111111111", name: "Alpha", lead: null }, { id: T2, name: "Beta", lead: null },
+    ] } });
+    routes["POST /api/v1/candidates"] = (_u, b) => ((b as { email: string }).email === "dup@example.com"
+      ? problem(409, { detail: "duplicate_contact" })
+      : { status: 201, body: { id: `id-${(b as { email: string }).email}` } });
+    wrap(<CandidatesPage me={LEAD} />);
+    fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
+    const dlg = screen.getByRole("dialog", { name: "New candidate" });
+    fireEvent.click(within(dlg).getByRole("tab", { name: "Several candidates" }));
+    await within(dlg).findAllByRole("option", { name: "Dallas" });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Paste from spreadsheet" }));
+    fireEvent.change(within(dlg).getByLabelText("Rows to paste"), { target: { value: [
+      "First name\tLast name\tPhone\tEmail\tTechnology\tLocation",
+      "Asha\tRao\t+14695550101\tasha@example.com\tJava\tDallas",
+      "Dup\tPerson\t+14695550102\tdup@example.com\tjava\tdallas",
+      "Bo,Lee,+14695550103,bo@example.com",
+    ].join("\n") } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Add these rows" }));
+    expect(within(dlg).getByLabelText("First name, row 3")).toHaveValue("Bo");
+
+    // Team still "Not yet assigned", and row 3 has no technology/location yet.
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create 3 candidates" }));
+    expect(writes()).toEqual([]);
+    expect(within(dlg).getByRole("combobox", { name: "Team" })).toHaveAccessibleDescription("Choose a team.");
+    expect(within(dlg).getByLabelText("First name, row 3")).toHaveAccessibleDescription("Needs technology, location.");
+
+    fireEvent.change(within(dlg).getByRole("combobox", { name: "Team" }), { target: { value: T2 } });
+    fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
+    fireEvent.change(within(dlg).getByLabelText("Location"), { target: { value: LOC } });
+    fireEvent.change(within(dlg).getByRole("combobox", { name: "Status" }), { target: { value: "active" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create 3 candidates" }));
+
+    await waitFor(() => expect(writes()).toHaveLength(3));
+    expect(writes().map((w) => w.body)).toEqual([
+      { firstName: "Asha", lastName: "Rao", phone: "+14695550101", email: "asha@example.com", technologyId: TECH, locationId: LOC, teamId: T2, initialStatus: "active" },
+      { firstName: "Dup", lastName: "Person", phone: "+14695550102", email: "dup@example.com", technologyId: TECH, locationId: LOC, teamId: T2, initialStatus: "active" },
+      { firstName: "Bo", lastName: "Lee", phone: "+14695550103", email: "bo@example.com", technologyId: TECH, locationId: LOC, teamId: T2, initialStatus: "active" },
+    ]);
+    expect(await within(dlg).findByRole("alert")).toHaveTextContent("2 added. 1 row needs attention.");
+    expect(within(dlg).getByLabelText("First name, row 1")).toHaveValue("Dup");
+    expect(within(dlg).getByLabelText("First name, row 1")).toHaveAccessibleDescription("Already a candidate with this email or phone.");
+    expect(screen.getByText("2 candidates added.")).toBeInTheDocument();
+  });
+
   it("when the lookup list is unavailable: technology stays a dropdown, locations fall back to known ones", async () => {
     routes["GET /api/v1/lookups"] = () => problem(503, { title: "Unavailable" });
     wrap(<CandidatesPage me={LEAD} />);

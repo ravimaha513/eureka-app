@@ -186,7 +186,17 @@ Migrations `0260_candidate_unique_contact.sql` (trigger) and `0300_candidate_con
   `GET /api/v1/candidate-create-teams` (`candidate:create`) returns
   `{ items: [{ id, name, lead }], defaultTeamId }`: the teams in scope (all for org), own team first;
   `defaultTeamId` is the caller's team when listed, else null. The dialog shows a Team picker when
-  there is more than one, and a note when there are none.
+  there is more than one, starting on "Not yet assigned" (a placeholder: the user must pick a team
+  before Create; `defaultTeamId` is no longer preselected), and a note when there are none.
+- **Status:** optional `initialStatus` (`in_training`, the default, or `active`). New rows are
+  always inserted in training (DB guard); `active` runs `authz.transition_candidate` in the same
+  transaction, which re-checks `candidate:update` (403 and nothing created when refused) and
+  records the usual status-change timeline entry. The dialog's Status select sends it.
+- **Several at once (web only):** the dialog's "Several candidates" tab takes up to 20 rows
+  (the duplicate-check limit, 20 per user per minute) typed in, pasted from a sheet or loaded from a
+  CSV (First name, Last name, Phone, Email, optional Technology and Location by name), with one team,
+  batch and default technology/location. Each row is its own `POST /api/v1/candidates`, so every
+  server check applies per row; rows that fail stay in the table with the reason, a 429 stops the run.
 - **Required:** `POST /api/v1/candidates` needs `phone` (normalized to E.164) and `email` (personal,
   lower-cased); missing either is 422. The hire flow (`POST /applications/:id/candidate`) uses the
   applicant's email and phone, and takes `phone` / `email` in the body when the applicant has none or

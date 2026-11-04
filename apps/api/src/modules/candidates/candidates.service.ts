@@ -793,6 +793,15 @@ export class CandidatesService implements OnModuleInit {
          VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
         [personId, body.technologyId, team, recruiter, body.locationId, body.batchId ?? null]).catch(mapCreateError);
       await this.audit.record(c, { actorId: user.id, action: "candidate.created", entityType: "candidate", entityId: cand.rows[0]!.id });
+      if (body.initialStatus === "active") {
+        // authz.transition_candidate re-checks candidate:update scope; a refusal rolls the create back.
+        await c.query(`SELECT authz.transition_candidate($1, 'active')`, [cand.rows[0]!.id]).catch((err: { code?: string }) => {
+          if (err.code === "insufficient_privilege" || err.code === "P0002") throw new ForbiddenException("Not permitted to set this status");
+          throw err;
+        });
+        await this.audit.record(c, { actorId: user.id, action: "candidate.transition", entityType: "candidate", entityId: cand.rows[0]!.id,
+          changes: { from: "in_training", to: "active" } });
+      }
       if (then) await then(c, cand.rows[0]!.id);
       return { id: cand.rows[0]!.id };
     });
