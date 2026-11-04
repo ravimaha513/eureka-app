@@ -661,6 +661,37 @@ describe("Teams tab", () => {
     await waitFor(() => expect(status()).toHaveTextContent("Priya Rao now leads Team Anjali."));
     expect(lastWrite()).toMatchObject({ method: "PUT", path: "/api/v1/admin/teams/t2/lead", body: { leadId: "u-priya" } });
   });
+
+  it("deletes a team, moving its people to another team (AD-15)", async () => {
+    routes["GET /api/v1/admin/teams/t1/delete-impact"] = () => ({ body: { members: 2, candidates: 5, hotlistCandidates: 3 } });
+    routes["DELETE /api/v1/admin/teams/t1"] = () => ({ body: { members: 2, movedCandidates: 5, unassignedCandidates: 0 } });
+    renderPage("teams");
+    fireEvent.click(within(await openTeam("Team Rohit")).getByRole("button", { name: "Delete team" }));
+    const dlg = await screen.findByRole("dialog", { name: "Delete Team Rohit" });
+    await within(dlg).findByText(/3 of them on the Hot List/);
+    // Hot List candidates need a team, so "no team" is not offered.
+    expect(within(dlg).getByRole("radio", { name: "Leave them with no team" })).toBeDisabled();
+    expect(within(dlg).getByRole("button", { name: "Delete team" })).toBeDisabled();
+    fireEvent.change(within(dlg).getByRole("combobox", { name: "Move to team" }), { target: { value: "t2" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Delete team" }));
+    await waitFor(() => expect(status()).toHaveTextContent("Deleted Team Rohit. 2 members and 5 candidates moved to Team Anjali."));
+    expect(lastWrite()).toMatchObject({ method: "DELETE", path: "/api/v1/admin/teams/t1" });
+    expect(lastWrite().url.searchParams.get("toTeamId")).toBe("t2");
+  });
+
+  it("deletes a team, leaving its people with no team (AD-15)", async () => {
+    routes["GET /api/v1/admin/teams/t1/delete-impact"] = () => ({ body: { members: 2, candidates: 1, hotlistCandidates: 0 } });
+    routes["DELETE /api/v1/admin/teams/t1"] = () => ({ body: { members: 2, movedCandidates: 0, unassignedCandidates: 1 } });
+    renderPage("teams");
+    fireEvent.click(within(await openTeam("Team Rohit")).getByRole("button", { name: "Delete team" }));
+    const dlg = await screen.findByRole("dialog", { name: "Delete Team Rohit" });
+    await within(dlg).findByText(/2 members and 1 candidate\b/);
+    fireEvent.click(within(dlg).getByRole("radio", { name: "Leave them with no team" }));
+    fireEvent.click(within(dlg).getByRole("button", { name: "Delete team" }));
+    await waitFor(() => expect(status()).toHaveTextContent("Deleted Team Rohit. 2 members and 1 candidate now have no team."));
+    expect(lastWrite()).toMatchObject({ method: "DELETE", path: "/api/v1/admin/teams/t1" });
+    expect(lastWrite().url.searchParams.has("toTeamId")).toBe(false);
+  });
 });
 
 describe("Locations tab", () => {

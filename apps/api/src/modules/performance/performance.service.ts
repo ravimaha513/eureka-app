@@ -528,7 +528,7 @@ export class PerformanceService {
       const move = resolveScope(user.access, "team:move_member");
       const moveTeams = move
         ? (await c.query<{ id: string; name: string }>(
-          `SELECT id, name FROM eureka.team WHERE $1::boolean OR id = ANY ($2::uuid[]) ORDER BY name, id`,
+          `SELECT id, name FROM eureka.team WHERE deleted_at IS NULL AND ($1::boolean OR id = ANY ($2::uuid[])) ORDER BY name, id`,
           [move.all, [...move.teamIds]])).rows
         : [];
       const movable = new Set(moveTeams.map((t) => t.id));

@@ -144,7 +144,7 @@ export class HotlistService {
     return this.db.withUser(user.id, async (c) => {
       const teams = (await c.query<{ id: string; name: string; lead: string | null }>(
         `SELECT t.id, t.name, u.display_name AS lead FROM eureka.team t LEFT JOIN eureka.app_user u ON u.id = t.lead_id
-          ORDER BY lower(t.name), t.id`)).rows;
+          WHERE t.deleted_at IS NULL ORDER BY lower(t.name), t.id`)).rows;
       const recruiters = (await c.query<{ id: string; name: string }>(
         `SELECT DISTINCT u.id, u.display_name AS name FROM eureka.app_user u
            JOIN eureka.user_role ur ON ur.user_id = u.id AND ur.role_key = 'recruiter' AND ur.valid @> now()

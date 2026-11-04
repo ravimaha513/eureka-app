@@ -11,6 +11,8 @@ BEGIN
   -- Candidate delete (authz.delete_candidate, migration 0330) removes these rows.
   IF TG_OP = 'DELETE' AND current_user = 'authz_definer' THEN
     IF authz.candidate_purging() THEN RETURN OLD; END IF;
+    -- authz.admin_delete_team (0420) drops the shares to the team it deletes.
+    IF authz.team_deleting(OLD.team_id) THEN RETURN OLD; END IF;
   END IF;
   IF current_user IS DISTINCT FROM 'authz_definer' THEN
     RAISE EXCEPTION 'team shares are written only by authz.set_candidate_visibility' USING ERRCODE = 'insufficient_privilege';

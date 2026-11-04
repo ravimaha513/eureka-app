@@ -19,7 +19,7 @@ import { DbService } from "../../platform/db.service.js";
 import { MAIL_PORT, type MailPort } from "../../platform/mail.js";
 import { mapAdminError } from "./admin.errors.js";
 import type {
-  BulkCreateUsers, CreateDepartment, CreateLocation, CreateRole, CreateRoleRequest, CreateTeam, CreateUser, MoveMember, OrgChartApply,
+  BulkCreateUsers, CreateDepartment, CreateLocation, CreateRole, CreateRoleRequest, CreateTeam, CreateUser, DeleteTeam, MoveMember, OrgChartApply,
   SetRoleGrants, UpdateRole, UserListQuery,
 } from "./admin.schemas.js";
 import { likeContains } from "../../platform/sql.js";
@@ -377,7 +377,7 @@ export class AdminService {
         const locs = (await c.query<{ id: string; name: string }>(`SELECT id, name FROM eureka.location`)).rows;
         const byName = new Map(locs.map((l) => [l.name.trim().toLowerCase(), l.id]));
         const byRole = roleIndex(await this.roleRows(c));
-        const teams = (await c.query<{ id: string; name: string }>(`SELECT id, name FROM eureka.team`)).rows;
+        const teams = (await c.query<{ id: string; name: string }>(`SELECT id, name FROM eureka.team WHERE deleted_at IS NULL`)).rows;
         const teamsByName = new Map<string, { id: string; name: string }[]>();
         for (const t of teams) {
           const k = t.name.trim().toLowerCase();
@@ -535,7 +535,7 @@ export class AdminService {
     const { locations, roles, teams } = await this.tx(user, async (c) => ({
       locations: (await c.query<{ name: string }>(`SELECT name FROM eureka.location ORDER BY name`)).rows.map((l) => l.name),
       roles: (await this.roleRows(c)).filter((r) => !r.archived_at).map((r) => r.label),
-      teams: (await c.query<{ name: string }>(`SELECT DISTINCT name FROM eureka.team ORDER BY name`)).rows.map((t) => t.name),
+      teams: (await c.query<{ name: string }>(`SELECT DISTINCT name FROM eureka.team WHERE deleted_at IS NULL ORDER BY name`)).rows.map((t) => t.name),
     }));
     return buildUserImportTemplate(roles, locations, teams);
   }
@@ -671,7 +671,7 @@ export class AdminService {
            LIMIT 1) t ON true
          WHERE u.status = 'active' AND u.deleted_at IS NULL
          ORDER BY u.display_name, u.id LIMIT 2000`)).rows;
-      const teams = (await c.query<{ id: string; name: string; lead_id: string }>(`SELECT id, name, lead_id FROM eureka.team ORDER BY name, id`)).rows;
+      const teams = (await c.query<{ id: string; name: string; lead_id: string }>(`SELECT id, name, lead_id FROM eureka.team WHERE deleted_at IS NULL ORDER BY name, id`)).rows;
       return {
         people: people.map((p) => ({
           id: p.id, displayName: p.display_name, designation: p.designation, managerId: p.manager_id, roles: p.roles,
@@ -826,6 +826,7 @@ export class AdminService {
          FROM eureka.team t JOIN eureka.app_user u ON u.id = t.lead_id
          LEFT JOIN eureka.location l ON l.id = t.location_id
          LEFT JOIN eureka.department d ON d.id = u.department_id LEFT JOIN eureka.department p ON p.id = d.parent_id
+         WHERE t.deleted_at IS NULL
          ORDER BY t.name, t.id`);
       const members = await c.query<{ team_id: string; id: string; display_name: string }>(
         `SELECT tm.team_id, u.id, u.display_name FROM eureka.team_member tm
@@ -870,6 +871,29 @@ export class AdminService {
     await this.tx(user, async (c) => {
       await c.query(`SELECT authz.admin_rename_team($1, $2)`, [teamId, name]);
       await this.audit.record(c, { actorId: user.id, action: "admin.team.renamed", entityType: "team", entityId: teamId });
+    });
+  }
+
+  /** AD-15: what deleting the team would touch (delete dialog). */
+  async teamDeleteImpact(user: AuthedUser, teamId: string) {
+    return this.tx(user, async (c) => {
+      const r = (await c.query<{ members: number; candidates: number; hotlist_candidates: number }>(
+        `SELECT * FROM authz.admin_team_delete_impact($1)`, [teamId])).rows[0]!;
+      return { members: r.members, candidates: r.candidates, hotlistCandidates: r.hotlist_candidates };
+    });
+  }
+
+  /** AD-15: soft-deletes the team, moving its members and candidates to toTeamId or leaving them with no team. */
+  async deleteTeam(user: AuthedUser, teamId: string, body: DeleteTeam) {
+    return this.tx(user, async (c) => {
+      const r = (await c.query<{ members: number; moved_candidates: number; unassigned_candidates: number }>(
+        `SELECT * FROM authz.admin_delete_team($1, $2)`, [teamId, body.toTeamId ?? null])).rows[0]!;
+      const result = { members: r.members, movedCandidates: r.moved_candidates, unassignedCandidates: r.unassigned_candidates };
+      await this.audit.record(c, {
+        actorId: user.id, action: "admin.team.deleted", entityType: "team", entityId: teamId,
+        changes: { toTeamId: body.toTeamId ?? null, ...result },
+      });
+      return result;
     });
   }
 
@@ -928,7 +952,7 @@ export class AdminService {
          SELECT l.id, l.name, l.kind, l.state, l.timezone,
                 (SELECT count(DISTINCT lp.user_id) FROM lp JOIN eureka.app_user u ON u.id = lp.user_id
                   WHERE lp.location_id = l.id AND u.status = 'active')::int AS people_count,
-                (SELECT count(*) FROM eureka.team t WHERE t.location_id = l.id)::int AS team_count
+                (SELECT count(*) FROM eureka.team t WHERE t.location_id = l.id AND t.deleted_at IS NULL)::int AS team_count
          FROM eureka.location l ORDER BY l.name`);
       const holders = await c.query<{ location_id: string; user_id: string; display_name: string; role_key: string }>(
         `SELECT ur.location_id, u.id AS user_id, u.display_name, ur.role_key FROM eureka.user_role ur
@@ -1062,7 +1086,7 @@ export class AdminService {
    */
   async addMembers(user: AuthedUser, teamId: string, userIds: string[]) {
     const exists = await this.tx(user, async (c) =>
-      (await c.query(`SELECT 1 FROM eureka.team WHERE id = $1`, [teamId])).rowCount === 1);
+      (await c.query(`SELECT 1 FROM eureka.team WHERE id = $1 AND deleted_at IS NULL`, [teamId])).rowCount === 1);
     if (!exists) throw new NotFoundException();
     const added: string[] = [];
     const failed: { userId: string; error: string }[] = [];
@@ -1176,7 +1200,7 @@ export class AdminService {
       if (!scope.all && !user.access.subordinateUserIds.includes(coachId)) throw new ForbiddenException("not_in_scope");
     }
     await this.tx(user, async (c) => {
-      const team = await c.query(`SELECT 1 FROM eureka.team WHERE id = $1`, [teamId]);
+      const team = await c.query(`SELECT 1 FROM eureka.team WHERE id = $1 AND deleted_at IS NULL`, [teamId]);
       if (team.rowCount === 0) throw new NotFoundException();
       await c.query(`SELECT authz.${op}_coach($1, $2)`, [coachId, teamId]);
       await this.audit.record(c, {
@@ -1236,7 +1260,7 @@ export class AdminService {
   async leadAddMember(user: AuthedUser, teamId: string, userId: string) {
     this.notSelf(user, userId);
     await this.tx(user, async (c) => {
-      const team = (await c.query<{ lead_id: string }>(`SELECT lead_id FROM eureka.team WHERE id = $1`, [teamId])).rows[0];
+      const team = (await c.query<{ lead_id: string }>(`SELECT lead_id FROM eureka.team WHERE id = $1 AND deleted_at IS NULL`, [teamId])).rows[0];
       if (!team) throw new NotFoundException();
       const covered = !!resolveScope(user.access, "team:add_member")?.all
         || team.lead_id === user.id
@@ -1256,7 +1280,7 @@ export class AdminService {
   async removeMember(user: AuthedUser, via: "admin" | "team", teamId: string, userId: string) {
     this.notSelf(user, userId);
     return this.tx(user, async (c) => {
-      const team = (await c.query<{ lead_id: string }>(`SELECT lead_id FROM eureka.team WHERE id = $1`, [teamId])).rows[0];
+      const team = (await c.query<{ lead_id: string }>(`SELECT lead_id FROM eureka.team WHERE id = $1 AND deleted_at IS NULL`, [teamId])).rows[0];
       if (!team) throw new NotFoundException();
       if (via === "team") {
         const covered = !!resolveScope(user.access, "team:add_member")?.all

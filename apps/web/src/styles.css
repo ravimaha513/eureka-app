@@ -196,6 +196,11 @@ tbody tr:hover td { background: var(--surface2); }
 .addentry input { flex: 1; min-width: 0; }
 .addentry .btn { height: 40px; }
 .field label { font-weight: 600; color: var(--text2); font-size: 13px; }
+/* A radio choice with follow-up fields under each option (e.g. Delete team). */
+.choicelist { border: 0; padding: 0; margin: 0 0 12px; display: grid; gap: 8px; }
+.choicelist legend { font-weight: 600; color: var(--text2); font-size: 13px; margin-bottom: 6px; padding: 0; }
+.choicelist > label { display: inline-flex; align-items: center; gap: 8px; }
+.choicelist > .field, .choicelist > .hint { margin-left: 24px; }
 .field input, .field select { height: 40px; border-radius: 10px; border: 1px solid var(--line-strong); padding: 0 12px; background: var(--surface); font: inherit; color: var(--text); min-width: 200px; }
 .field input::placeholder, .field textarea::placeholder { color: var(--faint); }
 .btn { height: 38px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text2); font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }

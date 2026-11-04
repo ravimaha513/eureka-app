@@ -32,6 +32,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   invalid_lead: "Pick an active person as the lead.",
   not_a_member: "This person isn't in that team any more. Refresh and try again.",
   same_team: "Pick a different team.",
+  has_hotlist_candidates: "Some of this team's candidates are on the Hot List, which needs a team. Move everyone to another team instead.",
   restricted_target: "This user holds a restricted role. Their password is set by whoever manages the database (set-password), not here.",
   password_weak: "Use 10 to 72 characters with at least one letter and one number.",
   password_login_disabled: "Password sign-in is not enabled in this environment.",

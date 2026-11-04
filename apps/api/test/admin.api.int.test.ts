@@ -94,6 +94,8 @@ const ADMIN_ENDPOINTS: { method: Method; url: string; body?: unknown; adminStatu
   { method: "POST", url: `/api/v1/admin/teams/${T.t1}/coaches`, body: {}, adminStatus: 422 },
   { method: "DELETE", url: `/api/v1/admin/teams/${T.t1}/coaches/${NIL}`, adminStatus: 404 },
   { method: "DELETE", url: `/api/v1/admin/teams/${NIL}/members/${U.r1a}`, adminStatus: 404 },
+  { method: "GET", url: `/api/v1/admin/teams/${NIL}/delete-impact`, adminStatus: 404 },
+  { method: "DELETE", url: `/api/v1/admin/teams/${NIL}`, adminStatus: 404 },
 ];
 const MOVE = { method: "POST" as const, url: `/api/v1/teams/${T.t1}/move-member`, body: {} };
 
