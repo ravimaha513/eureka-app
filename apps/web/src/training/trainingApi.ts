@@ -152,7 +152,6 @@ export const trainingApi = {
 };
 
 const MESSAGES: Record<string, string> = {
-  batch_not_allowed: "This batch is no longer open, so candidates can't be added to it.",
   batch_exists: "A batch for this location, technology and month already exists.",
   batch_has_students: "This batch has students, so it can't be deleted. Cancel it instead.",
   location_not_in_scope: "You can manage training only at your own location.",

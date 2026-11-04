@@ -352,7 +352,7 @@ function TeamSharePicker({ ownTeamId, shared, busy, onSave }: {
     <form className="manageblock" aria-labelledby={`${id}-l`} onSubmit={(e) => { e.preventDefault(); onSave([...picked]); }}>
       <h3 id={`${id}-l`}>Share with selected teams</h3>
       <p id={`${id}-d`} className="hint">Picked teams can see and submit this candidate while they're active. Your team always sees it.</p>
-      <TeamChecklist picked={picked} onChange={setPicked} excludeTeamId={ownTeamId} disabled={busy} describedBy={`${id}-d`} />
+      <TeamChecklist picked={picked} onChange={setPicked} excludeTeamId={ownTeamId ?? undefined} disabled={busy} describedBy={`${id}-d`} />
       <button type="submit" className="btn" disabled={busy || !dirty} aria-busy={busy || undefined}>Save sharing</button>
     </form>
   );

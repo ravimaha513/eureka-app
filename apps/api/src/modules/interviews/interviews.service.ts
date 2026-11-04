@@ -13,7 +13,6 @@ import {
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
-import { likeContains } from "../../platform/sql.js";
 import { inPickerScope, pickerScopePerm } from "../../platform/people-scope.js";
 import { likeContains } from "../../platform/sql.js";
 import { activityPredicate } from "../submissions/submissions.service.js";

@@ -725,8 +725,12 @@ export class CandidatesService implements OnModuleInit {
     });
   }
 
-  /** The team's active members and its lead: the same people a removed member's candidates can go to. */
-  private async teamRecruiters(c: pg.PoolClient, teamId: string) {
+  /**
+   * The team's active members and its lead: the same people a removed member's candidates can go to.
+   * None for a candidate with no team yet (0410): the team is assigned first.
+   */
+  private async teamRecruiters(c: pg.PoolClient, teamId: string | null) {
+    if (teamId === null) return [];
     return (await c.query<{ id: string; name: string }>(
       `SELECT u.id, u.display_name AS name FROM eureka.app_user u
         WHERE u.status = 'active'
@@ -747,6 +751,8 @@ export class CandidatesService implements OnModuleInit {
     return this.db.withUser(user.id, async (c) => {
       const row = await this.loadForWrite(c, user, id, "candidate:assign");
       if (recruiterId === row.recruiter_id) return { id, recruiterId };
+      // With no team the recruiter is what keeps the candidate in scope (0410); assign the team first.
+      if (row.team_id === null) throw new UnprocessableEntityException("team_required");
       if (recruiterId && !(await this.teamRecruiters(c, row.team_id)).some((u) => u.id === recruiterId)) {
         throw new UnprocessableEntityException("invalid_recruiter");
       }
