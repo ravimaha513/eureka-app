@@ -7,6 +7,8 @@
 --      recruiter, as before.
 --   3. authz.candidate_duplicates: LEFT JOIN team, so a candidate with no team still
 --      shows up as a duplicate.
+--   4. eureka.candidate_team_invariant (0006): with no team there is no membership to
+--      check; the recruiter must then be the creator (insert) or stay as it was (update).
 --
 -- In db/functions: authz.assign_candidate_team (new), authz.transition_candidate (no
 -- team, no Hot List) and eureka.candidate_column_guard (a team is never cleared).
@@ -76,4 +78,29 @@ BEGIN
   LEFT JOIN eureka.app_user u ON u.id = t.lead_id
   ORDER BY h.created_at, h.id;
 END $$;
+RESET ROLE;
+
+SET ROLE eureka_owner;
+CREATE OR REPLACE FUNCTION eureka.candidate_team_invariant() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+BEGIN
+  IF NEW.team_id IS NULL THEN
+    -- No team yet: the recruiter link is what keeps the candidate in its creator's scope.
+    IF NEW.recruiter_id IS NOT NULL
+       AND NOT coalesce(CASE WHEN TG_OP = 'INSERT' THEN NEW.recruiter_id = authz.current_user_id()
+                             ELSE NEW.recruiter_id IS NOT DISTINCT FROM OLD.recruiter_id END, false) THEN
+      RAISE EXCEPTION 'recruiter is not a member of the candidate''s team' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF NEW.recruiter_id IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM eureka.team_member tm
+       WHERE tm.team_id = NEW.team_id AND tm.user_id = NEW.recruiter_id AND tm.valid @> now()
+       UNION ALL
+       SELECT 1 FROM eureka.team t WHERE t.id = NEW.team_id AND t.lead_id = NEW.recruiter_id) THEN
+    RAISE EXCEPTION 'recruiter is not a member of the candidate''s team' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION eureka.candidate_team_invariant() FROM PUBLIC;
 RESET ROLE;

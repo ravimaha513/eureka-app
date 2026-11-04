@@ -23,11 +23,20 @@ beforeAll(async () => {
     DATABASE_URL: `postgres://eureka_app:eureka_app_test@${url.host}/${db.name}`,
   }));
   target = seed.interviews.find((i) => i.recruiterId === U.r1a)!;
-  await db.admin.query(
-    `UPDATE eureka.person SET first_name = 'Zelda', last_name = 'Quixote_100%'
-      WHERE id = (SELECT person_id FROM eureka.candidate WHERE id = $1)`, [target.candidate.id]);
-  await db.admin.query(`UPDATE eureka.app_user SET display_name = 'Wanda Coachwell' WHERE id = $1`, [U.coach]);
-  await db.admin.query(`UPDATE eureka.interview SET coach_id = $1 WHERE id = $2`, [U.coach, target.id]);
+  // Shape the data directly (triggers off), as interview-reports does.
+  const c = await db.admin.connect();
+  try {
+    await c.query("BEGIN");
+    await c.query("SET LOCAL session_replication_role = replica");
+    await c.query(
+      `UPDATE eureka.person SET first_name = 'Zelda', last_name = 'Quixote_100%'
+        WHERE id = (SELECT person_id FROM eureka.candidate WHERE id = $1)`, [target.candidate.id]);
+    await c.query(`UPDATE eureka.app_user SET display_name = 'Wanda Coachwell' WHERE id = $1`, [U.coach]);
+    await c.query(`UPDATE eureka.interview SET coach_id = $1 WHERE id = $2`, [U.coach, target.id]);
+    await c.query("COMMIT");
+  } finally {
+    c.release();
+  }
 }, 120_000);
 
 afterAll(async () => {

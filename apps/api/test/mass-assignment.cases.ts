@@ -1451,6 +1451,52 @@ const CASES: RejectCase[] = [
     forbidden: { batchId: FOREIGN_ID, locationId: LOC.austin, status: "active", progress: 100 },
   },
   {
+    route: "POST /api/v1/training/batches/:id/students/bulk", actor: "locD",
+    prepare: async () => {
+      const b = await trainingBatch();
+      const cand = await freshOwn();
+      return { url: `/api/v1/training/batches/${b}/students/bulk`, body: { candidateIds: [cand.id] },
+        state: () => rows(`SELECT batch_id FROM eureka.candidate WHERE id = $1`, [cand.id]) };
+    },
+    forbidden: { batchId: FOREIGN_ID, locationId: LOC.austin, status: "active", candidateId: FOREIGN_ID },
+  },
+  {
+    route: "PUT /api/v1/candidates/:id/training/batch", actor: "locD",
+    prepare: async () => {
+      const b = await trainingBatch();
+      const cand = await freshOwn();
+      return { url: `/api/v1/candidates/${cand.id}/training/batch`, body: { batchId: b },
+        state: () => rows(`SELECT * FROM eureka.candidate WHERE id = $1`, [cand.id]) };
+    },
+    forbidden: { candidateId: FOREIGN_ID, locationId: LOC.austin, status: "active", teamId: T.t2 },
+  },
+  {
+    route: "POST /api/v1/batches/:id/candidates/bulk", actor: "l1",
+    prepare: async () => {
+      const b = await trainingBatch();
+      return { url: `/api/v1/batches/${b}/candidates/bulk`,
+        body: { dryRun: true, rows: [{ firstName: "Mass", lastName: "Assign", phone: "+14695550177", email: "mass.assign@example.com" }] },
+        state: () => rows(`SELECT count(*)::int AS n FROM eureka.candidate`) };
+    },
+    forbidden: { recruiterId: U.r2a, locationId: LOC.austin, technologyId: FOREIGN_ID, status: "active", batchId: FOREIGN_ID },
+  },
+  {
+    route: "PUT /api/v1/candidates/:id/recruiter", actor: "l1",
+    prepare: async () => ({
+      url: `/api/v1/candidates/${own().id}/recruiter`, body: { recruiterId: U.r1a },
+      state: () => rows(`SELECT * FROM eureka.candidate WHERE id = $1`, [own().id]),
+    }),
+    forbidden: { teamId: T.t2, candidateId: FOREIGN_ID, status: "stopped", locationId: LOC.austin },
+  },
+  {
+    route: "PUT /api/v1/candidates/:id/team", actor: "l1",
+    prepare: async () => ({
+      url: `/api/v1/candidates/${own().id}/team`, body: { teamId: T.t1 },
+      state: () => rows(`SELECT * FROM eureka.candidate WHERE id = $1`, [own().id]),
+    }),
+    forbidden: { recruiterId: U.r2a, candidateId: FOREIGN_ID, status: "stopped", locationId: LOC.austin },
+  },
+  {
     route: "PUT /api/v1/training/batches/:id/students/:candidateId/modules/:moduleId", actor: "locD",
     prepare: async () => {
       const b = await trainingBatch();

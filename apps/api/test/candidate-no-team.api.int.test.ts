@@ -105,13 +105,13 @@ describe("candidate with no team", () => {
 
   it("stays off the Hot List until a team is assigned", async () => {
     const { id } = await createNoTeam("m1");
-    const refused = await call("m1", "PATCH", `/api/v1/candidates/${id}/status`, { to: "active" });
+    const refused = await call("m1", "POST", `/api/v1/candidates/${id}/transition`, { to: "active" });
     expect(refused.statusCode, refused.body).toBe(422);
     expect(refused.json().detail).toBe("team_required");
 
     expect((await call("m1", "PUT", `/api/v1/candidates/${id}/team`, { teamId: T.t1 })).statusCode).toBe(200);
-    const ok = await call("m1", "PATCH", `/api/v1/candidates/${id}/status`, { to: "active" });
-    expect(ok.statusCode, ok.body).toBe(200);
+    const ok = await call("m1", "POST", `/api/v1/candidates/${id}/transition`, { to: "active" });
+    expect(ok.statusCode, ok.body).toBe(201);
   });
 
   it("gets a team once, within the caller's scope, and the team's lead is told", async () => {
@@ -137,7 +137,16 @@ describe("candidate with no team", () => {
 
   it("keeps a recruiter who is in the team", async () => {
     const { id } = await createNoTeam("ceo");
-    await db.admin.query(`UPDATE eureka.candidate SET recruiter_id = $2 WHERE id = $1`, [id, U.r1a]);
+    // Set the recruiter directly (triggers off): the column guard refuses a plain update.
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL session_replication_role = replica");
+      await c.query(`UPDATE eureka.candidate SET recruiter_id = $2 WHERE id = $1`, [id, U.r1a]);
+      await c.query("COMMIT");
+    } finally {
+      c.release();
+    }
     expect((await call("ceo", "PUT", `/api/v1/candidates/${id}/team`, { teamId: T.t1 })).statusCode).toBe(200);
     expect(await row(id)).toEqual({ team_id: T.t1, recruiter_id: U.r1a });
   });

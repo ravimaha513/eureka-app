@@ -90,7 +90,7 @@ describe("batches", () => {
     const lead = (await call("l1", "GET", "/api/v1/batches")).json();
     expect(lead.canCreate).toBe(true);
     expect(lead.items).toContainEqual(expect.objectContaining({
-      id: batchId, label: "Java · Dallas · Nov 2026", startMonth: "2026-11", sizePlanned: 25, status: "planned",
+      id: batchId, label: "Planned batch · Dallas", startMonth: "2026-11", sizePlanned: 25, status: "planned",
       location: { id: LOC.dallas, name: "Dallas" }, technology: { id: TECH_ID, name: "Java" },
     }));
     const rec = (await call("r1a", "GET", "/api/v1/batches?locationId=" + LOC.austin)).json();
@@ -105,7 +105,7 @@ describe("batches", () => {
     expect((await call("r1a", "PATCH", `/api/v1/candidates/${own.id}`, { batchId })).statusCode).toBe(200);
 
     const profile = (await call("r1b", "GET", `/api/v1/candidates/${own.id}`)).json();
-    expect(profile.batch).toEqual({ id: batchId, label: "Java · Dallas · Nov 2026" });
+    expect(profile.batch).toEqual({ id: batchId, label: "Planned batch · Dallas" });
 
     const r1a = (await call("r1a", "GET", `/api/v1/candidates?batchId=${batchId}`)).json().items.map((i: { id: string }) => i.id).sort();
     expect(r1a).toEqual([created.json().id, own.id].sort());
