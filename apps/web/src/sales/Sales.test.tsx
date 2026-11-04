@@ -288,6 +288,7 @@ describe("Candidates list and create", () => {
     const team = await within(dlg).findByRole("combobox", { name: "Team" });
     expect(team).toHaveValue("");
     expect(within(team).getByRole("option", { name: "Not yet assigned" })).toBeInTheDocument();
+    expect(within(dlg).getByRole("combobox", { name: "Status" })).toHaveValue("in_training");
   });
 
   it("adds several candidates from pasted rows; a duplicate row stays with its reason", async () => {
@@ -322,13 +323,14 @@ describe("Candidates list and create", () => {
     fireEvent.change(within(dlg).getByRole("combobox", { name: "Team" }), { target: { value: T2 } });
     fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
     fireEvent.change(within(dlg).getByLabelText("Location"), { target: { value: LOC } });
+    fireEvent.change(within(dlg).getByRole("combobox", { name: "Status" }), { target: { value: "active" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create 3 candidates" }));
 
     await waitFor(() => expect(writes()).toHaveLength(3));
     expect(writes().map((w) => w.body)).toEqual([
-      { firstName: "Asha", lastName: "Rao", phone: "+14695550101", email: "asha@example.com", technologyId: TECH, locationId: LOC, teamId: T2 },
-      { firstName: "Dup", lastName: "Person", phone: "+14695550102", email: "dup@example.com", technologyId: TECH, locationId: LOC, teamId: T2 },
-      { firstName: "Bo", lastName: "Lee", phone: "+14695550103", email: "bo@example.com", technologyId: TECH, locationId: LOC, teamId: T2 },
+      { firstName: "Asha", lastName: "Rao", phone: "+14695550101", email: "asha@example.com", technologyId: TECH, locationId: LOC, teamId: T2, initialStatus: "active" },
+      { firstName: "Dup", lastName: "Person", phone: "+14695550102", email: "dup@example.com", technologyId: TECH, locationId: LOC, teamId: T2, initialStatus: "active" },
+      { firstName: "Bo", lastName: "Lee", phone: "+14695550103", email: "bo@example.com", technologyId: TECH, locationId: LOC, teamId: T2, initialStatus: "active" },
     ]);
     expect(await within(dlg).findByRole("alert")).toHaveTextContent("2 added. 1 row needs attention.");
     expect(within(dlg).getByLabelText("First name, row 1")).toHaveValue("Dup");

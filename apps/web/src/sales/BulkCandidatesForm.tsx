@@ -5,8 +5,8 @@ import { ApiError } from "../api";
 import { DialogActions } from "../ui/Dialog";
 import { LookupPicker, useLookups, type Named } from "../lookups";
 import { fieldErrors, salesError, UUID_RE } from "./errors";
-import { OPEN_BATCH_STATUSES, salesApi, salesKeys, type CreateCandidate } from "./salesApi";
-import { useCreateTeam } from "./useCreateTeam";
+import { OPEN_BATCH_STATUSES, salesApi, salesKeys, type CreateCandidate, type InitialStatus } from "./salesApi";
+import { InitialStatusField, useCreateTeam } from "./useCreateTeam";
 import { Field } from "./ui";
 
 /**
@@ -87,6 +87,7 @@ export function BulkCandidatesForm({ locations, canAddTechnology, onCancel, onCr
   const locs = lookups.data?.locations?.length ? lookups.data.locations : locations;
   const team = useCreateTeam();
   const [defaults, setDefaults] = useState({ technologyId: "", locationId: "", batchId: "" });
+  const [status, setStatus] = useState<InitialStatus>("in_training");
   const [rows, setRows] = useState<Row[]>(() => [blankRow(), blankRow(), blankRow()]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
@@ -197,6 +198,7 @@ export function BulkCandidatesForm({ locations, canAddTechnology, onCancel, onCr
         technologyId: eff.technologyId, locationId: eff.locationId,
         ...(batch ? { batchId: batch.id } : {}),
         ...(team.teamId ? { teamId: team.teamId } : {}),
+        ...(status === "active" ? { initialStatus: status } : {}),
       };
       try {
         await salesApi.create(body);
@@ -247,6 +249,7 @@ export function BulkCandidatesForm({ locations, canAddTechnology, onCancel, onCr
   return (
     <form ref={formRef} onSubmit={submit} noValidate>
       {team.field(errors.teamId)}
+      <InitialStatusField value={status} onChange={setStatus} />
       <div className="grid2">
         <LookupPicker kind="technologies" label="Technology" value={defaults.technologyId} canAdd={canAddTechnology}
           placeholder="Choose per row…" onChange={(id) => setDefaults((s) => ({ ...s, technologyId: id }))} />

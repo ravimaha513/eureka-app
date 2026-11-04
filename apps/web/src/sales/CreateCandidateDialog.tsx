@@ -5,10 +5,10 @@ import { ApiError } from "../api";
 import { Dialog, DialogActions } from "../ui/Dialog";
 import { LookupPicker } from "../lookups";
 import { UUID_RE, fieldErrors, salesError } from "./errors";
-import { OPEN_BATCH_STATUSES, salesApi, salesKeys, type CreateCandidate, type Duplicate } from "./salesApi";
+import { OPEN_BATCH_STATUSES, salesApi, salesKeys, type CreateCandidate, type Duplicate, type InitialStatus } from "./salesApi";
 import { Field, useFocusAfterFailure } from "./ui";
 import { BulkCandidatesForm } from "./BulkCandidatesForm";
-import { useCreateTeam } from "./useCreateTeam";
+import { InitialStatusField, useCreateTeam } from "./useCreateTeam";
 
 const FIELDS = ["firstName", "lastName", "phone", "email", "teamId", "technologyId", "locationId", "batchId"] as const;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -76,6 +76,7 @@ function OneCandidateForm({ locations, onCancel, onCreated, onOpenProfile, canAd
   canAddTechnology: boolean; onOpenProfile?: (id: string) => void;
 }) {
   const [v, setV] = useState({ firstName: "", lastName: "", phone: "", email: "", technologyId: "", locationId: "", batchId: "" });
+  const [status, setStatus] = useState<InitialStatus>("in_training");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -130,6 +131,7 @@ function OneCandidateForm({ locations, onCancel, onCreated, onOpenProfile, canAd
       phone: normalizePhoneE164(v.phone)!, email: v.email.trim(),
       ...(v.batchId && openBatches.some((b) => b.id === v.batchId) ? { batchId: v.batchId } : {}),
       ...(teamId ? { teamId } : {}),
+      ...(status === "active" ? { initialStatus: status } : {}),
     };
     setBusy(true);
     try {
@@ -169,6 +171,7 @@ function OneCandidateForm({ locations, onCancel, onCreated, onOpenProfile, canAd
           {(p) => <input {...p} type="email" required autoComplete="off" value={v.email} onChange={set("email")} />}
         </Field>
         {team.field(errors.teamId)}
+        <InitialStatusField value={status} onChange={setStatus} />
         <LookupPicker kind="technologies" label="Technology" value={v.technologyId} error={errors.technologyId} canAdd={canAddTechnology}
           onChange={(id) => setV((s) => ({ ...s, technologyId: id }))} />
         <LookupPicker kind="locations" label="Location" value={v.locationId} error={errors.locationId} fallback={locations}

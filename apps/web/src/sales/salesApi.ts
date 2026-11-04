@@ -183,7 +183,10 @@ export interface CreateCandidate {
   batchId?: string;
   /** One of GET /candidate-create-teams; the server defaults to the creator's team. */
   teamId?: string;
+  /** "active" starts marketing right away (in_training -> active in the same request); default in training. */
+  initialStatus?: InitialStatus;
 }
+export type InitialStatus = "in_training" | "active";
 
 export interface CreateSubmission {
   candidateId: string;

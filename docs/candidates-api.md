@@ -188,6 +188,10 @@ Migrations `0260_candidate_unique_contact.sql` (trigger) and `0300_candidate_con
   `defaultTeamId` is the caller's team when listed, else null. The dialog shows a Team picker when
   there is more than one, starting on "Not yet assigned" (a placeholder: the user must pick a team
   before Create; `defaultTeamId` is no longer preselected), and a note when there are none.
+- **Status:** optional `initialStatus` (`in_training`, the default, or `active`). New rows are
+  always inserted in training (DB guard); `active` runs `authz.transition_candidate` in the same
+  transaction, which re-checks `candidate:update` (403 and nothing created when refused) and
+  records the usual status-change timeline entry. The dialog's Status select sends it.
 - **Several at once (web only):** the dialog's "Several candidates" tab takes up to 20 rows
   (the duplicate-check limit, 20 per user per minute) typed in, pasted from a sheet or loaded from a
   CSV (First name, Last name, Phone, Email, optional Technology and Location by name), with one team,

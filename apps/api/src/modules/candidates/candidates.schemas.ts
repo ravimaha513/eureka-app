@@ -151,6 +151,12 @@ export const CreateCandidate = z
     teamId: uuid.optional(),
     recruiterId: uuid.nullable().optional(),
     batchId: uuid.optional(),
+    /**
+     * Status right after create. Candidates are inserted "in_training" (DB guard);
+     * "active" runs the in_training -> active transition in the same transaction,
+     * which needs candidate:update over the new candidate (403 otherwise, nothing created).
+     */
+    initialStatus: z.enum(["in_training", "active"]).optional(),
   })
   .strict();
 export type CreateCandidate = z.infer<typeof CreateCandidate>;

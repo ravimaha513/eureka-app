@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { salesApi } from "./salesApi";
+import { salesApi, type InitialStatus } from "./salesApi";
 import { Field } from "./ui";
 
 /**
@@ -34,4 +34,18 @@ export function useCreateTeam() {
     </>
   );
   return { teamId, problem, field };
+}
+
+/** Status for New candidate: new candidates start in training, or go straight to Active (marketing). */
+export function InitialStatusField({ value, onChange }: { value: InitialStatus; onChange: (s: InitialStatus) => void }) {
+  return (
+    <Field label="Status" hint={value === "active" ? "Starts marketing now: the candidate shows on the Hot List." : "Moves to Active later from the profile."}>
+      {(p) => (
+        <select {...p} value={value} onChange={(e) => onChange(e.target.value as InitialStatus)}>
+          <option value="in_training">In training</option>
+          <option value="active">Active</option>
+        </select>
+      )}
+    </Field>
+  );
 }

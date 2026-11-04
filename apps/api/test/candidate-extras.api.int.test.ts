@@ -235,6 +235,21 @@ describe("review follow-ups (0032)", () => {
     expect(rows[0].changes).toEqual({ marketingEmail: "[redacted]", vitelNumber: "[redacted]" });
   });
 
+  it("initialStatus active creates the candidate already active, with the transition on the timeline", async () => {
+    const body = { firstName: "Act", lastName: "Ive", phone: "+14695558604", email: "act.ive@example.com", technologyId: TECH_ID, locationId: LOC.dallas };
+    expect((await call("l1", "POST", "/api/v1/candidates", { ...body, initialStatus: "placed" })).statusCode).toBe(422);
+    const c = await call("l1", "POST", "/api/v1/candidates", { ...body, initialStatus: "active" });
+    expect(c.statusCode, c.body).toBe(201);
+    const id = c.json().id;
+    const row = await db.admin.query(`SELECT marketing_status FROM eureka.candidate WHERE id = $1`, [id]);
+    expect(row.rows).toEqual([{ marketing_status: "active" }]);
+    const r = await call("l1", "GET", `/api/v1/candidates/${id}/timeline`);
+    expect(r.json().items.map((e: { type: string; from: string | null; to: string | null }) => [e.type, e.from, e.to])).toEqual([
+      ["candidate.status_changed", "in_training", "active"],
+      ["candidate.created", null, "in_training"],
+    ]);
+  });
+
   it("a national 0 after the country code is refused with an explanation", async () => {
     const r = await call("l1", "POST", "/api/v1/candidates", { firstName: "T", lastName: "Z", email: "t.z@example.com", technologyId: TECH_ID, locationId: LOC.dallas, phone: "+91 098765 43210" });
     expect(r.statusCode).toBe(422);
