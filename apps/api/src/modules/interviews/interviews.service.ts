@@ -13,6 +13,7 @@ import {
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
+import { likeContains } from "../../platform/sql.js";
 import { inPickerScope, pickerScopePerm } from "../../platform/people-scope.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import { TERMINAL_SUBMISSION_STATUSES, fromMicros, mapPipelineError, splitCursor, toMicros } from "../submissions/pipeline.js";
@@ -77,14 +78,17 @@ interface InterviewRow {
   c_location: string | null;
 }
 
+/** The candidate name the board shows, whether or not the caller can read the person row. */
+const CANDIDATE_NAME = `CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name
+              ELSE authz.interview_candidate_name(i.id) END`;
+
 const SELECT = `
   SELECT i.id, i.submission_id, i.candidate_id, i.recruiter_id, i.team_id, i.location_id, i.client_id,
          i.round, i.starts_at, i.ends_at, i.coach_id, i.invite_received, i.call_status, i.cleared, i.cleared_at,
          i.result, i.result_at, sub.status AS submission_status, pl.id AS placement_id, pl.status AS placement_status,
          i.otter_url, i.recording_url, i.consent_captured, i.system_name, i.interview_type, i.meeting_url,
          i.updated_at, ${toMicros("i.starts_at")} AS k,
-         CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name
-              ELSE authz.interview_candidate_name(i.id) END AS candidate_name,
+         ${CANDIDATE_NAME} AS candidate_name,
          ru.display_name AS recruiter_name, cu.display_name AS coach_name,
          tm.name AS team_name, l.name AS location_name, cl.name AS client_name,
          c.recruiter_id AS c_recruiter, c.team_id AS c_team, c.location_id AS c_location,
@@ -221,6 +225,10 @@ export class InterviewsService {
     if (q.submissionId) where.push(`i.submission_id = ${p(q.submissionId)}`);
     if (q.cleared !== undefined) where.push(`i.cleared = ${p(q.cleared)}`);
     if (q.result) where.push(`i.result = ${p(q.result)}`);
+    if (q.search) {
+      const pat = p(likeContains(q.search));
+      where.push(`(${CANDIDATE_NAME} ILIKE ${pat} ESCAPE '\\' OR cu.display_name ILIKE ${pat} ESCAPE '\\')`);
+    }
     const desc = q.sort === "desc";
     if (q.cursor) {
       const [k, id] = splitCursor(q.cursor);

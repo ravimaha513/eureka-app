@@ -78,6 +78,14 @@ describe("interview board", () => {
    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
    expect(select).toHaveValue("");
  });
+ it("searches the board by candidate or coach name", async () => {
+   const fetch = setup(); await screen.findByText("Alex Doe");
+   const box = screen.getByRole("searchbox", { name: "Search" });
+   fireEvent.change(box, { target: { value: "  Coach One " } });
+   await waitFor(() => expect(fetch.mock.calls.some(([u]) => String(u).startsWith("/api/v1/interviews?") && new URL(String(u), "http://x").searchParams.get("search") === "Coach One")).toBe(true));
+   fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+   expect(box).toHaveValue("");
+ });
  it("offers no location filter with a single location", async () => {
    const fetch = setup(); await screen.findByText("Alex Doe");
    await waitFor(() => expect(fetch.mock.calls.some(([u]) => String(u).includes("/lookups"))).toBe(true));

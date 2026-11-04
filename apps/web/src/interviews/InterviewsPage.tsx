@@ -11,6 +11,7 @@ import { useLookups } from "../lookups";
 import { Drawer } from "../sales/ui";
 import { Avatar } from "../shell/ui";
 import { CreatePlacementDialog } from "../pipeline/CreatePlacementDialog";
+import { useDebounced } from "../pipeline/SubmissionsPage";
 import { SupportCalendarBlock, SupportCalendarBusy, SupportCalendarCard } from "../calendar/SupportCalendar";
 
 const STATUSES = ["scheduled", "in_progress", "completed", "rescheduled", "cancelled", "no_invite"];
@@ -337,7 +338,7 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
 }) {
   const [displayZone, setDisplayZone] = useState(zone);
   const [clientFilter, setClientFilter] = useState<Named | null>(null);
-  const qc = useQueryClient(); const [from, setFrom] = useState(localInput(new Date().toISOString()).slice(0, 10)); const [to, setTo] = useState(""); const [status, setStatus] = useState(""); const [cleared, setCleared] = useState(""); const [result, setResult] = useState(""); const [locationId, setLocationId] = useState("");
+  const qc = useQueryClient(); const [from, setFrom] = useState(localInput(new Date().toISOString()).slice(0, 10)); const [to, setTo] = useState(""); const [status, setStatus] = useState(""); const [cleared, setCleared] = useState(""); const [result, setResult] = useState(""); const [locationId, setLocationId] = useState(""); const [searchInput, setSearchInput] = useState(""); const search = useDebounced(searchInput.trim());
   // Interview location (B2.3): narrows the board within the caller's scope; the server applies the scope.
   const locations = useLookups().data?.locations ?? [];
   const [schedule, setSchedule] = useState(false);
@@ -352,8 +353,8 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
   const [detailsId, setDetailsId] = useState<string | null>(initialOpenId);
   const [notice, setNotice] = useState("");
   const invalidRange = Boolean(from && to && from > to);
-  const q = useInfiniteQuery({ queryKey: ["interviews", from, to, status, cleared, result, locationId, clientFilter?.id], initialPageParam: "", enabled: !invalidRange, queryFn: ({ pageParam }) => {
-    const p = new URLSearchParams({ limit: "50" }); if (from) p.set("from", dateBoundary(from)); if (to) p.set("to", dateBoundary(to, true)); if (status) p.set("status", status); if (cleared) p.set("cleared", cleared); if (result) p.set("result", result); if (locationId) p.set("locationId", locationId); if (clientFilter) p.set("clientId", clientFilter.id); if (pageParam) p.set("cursor", pageParam);
+  const q = useInfiniteQuery({ queryKey: ["interviews", from, to, status, cleared, result, locationId, clientFilter?.id, search], initialPageParam: "", enabled: !invalidRange, queryFn: ({ pageParam }) => {
+    const p = new URLSearchParams({ limit: "50" }); if (from) p.set("from", dateBoundary(from)); if (to) p.set("to", dateBoundary(to, true)); if (status) p.set("status", status); if (cleared) p.set("cleared", cleared); if (result) p.set("result", result); if (locationId) p.set("locationId", locationId); if (clientFilter) p.set("clientId", clientFilter.id); if (search) p.set("search", search); if (pageParam) p.set("cursor", pageParam);
     return api<Page<Interview>>(`/api/v1/interviews?${p}`);
   }, getNextPageParam: p => p.nextCursor || undefined });
   const done = () => {
@@ -376,13 +377,13 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
   const details = items.find(i => i.id === detailsId) ?? (initial.data?.id === detailsId ? initial.data : undefined);
   const showDetails = (id: string | null) => { setDetailsId(id); onOpenChange?.(id); };
   return <section className="panel"><div className="pagehead"><div><h1>Interviews</h1><p className="sub">Schedule, clear and review interviews. Board times in {displayZone}. Date filters and scheduling use {zone}.</p></div>{can(me, "interview:create") && <button className="btn primary push" onClick={() => setSchedule(true)}>Schedule interview</button>}</div>
-    <div className="toolbar"><Field title="Display timezone"><select value={displayZone} onChange={e => setDisplayZone(e.target.value)}><option value={zone}>{zone} (local)</option>{zone !== "America/New_York" && <option value="America/New_York">America/New_York (EST/EDT)</option>}</select></Field><Field title="From date"><input type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field title="Through date"><input type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>
+    <div className="toolbar"><Field title="Search"><input type="search" placeholder="Candidate or coach name" maxLength={80} value={searchInput} onChange={e => setSearchInput(e.target.value)} /></Field><Field title="Display timezone"><select value={displayZone} onChange={e => setDisplayZone(e.target.value)}><option value={zone}>{zone} (local)</option>{zone !== "America/New_York" && <option value="America/New_York">America/New_York (EST/EDT)</option>}</select></Field><Field title="From date"><input type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field title="Through date"><input type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>
       <Field title="Call status filter"><select value={status} onChange={e => setStatus(e.target.value)}><option value="">All statuses</option>{STATUSES.map(s => <option key={s} value={s}>{label(s)}</option>)}</select></Field>
       <Field title="Clearance filter"><select value={cleared} onChange={e => setCleared(e.target.value)}><option value="">All</option><option value="true">Cleared</option><option value="false">Not cleared</option></select></Field>
       <Field title="Result filter"><select value={result} onChange={e => setResult(e.target.value)}><option value="">All</option>{INTERVIEW_RESULTS.map(r => <option key={r} value={r}>{RESULT_LABELS[r]}</option>)}</select></Field>
       {locations.length > 1 && <Field title="Location filter"><select value={locationId} onChange={e => setLocationId(e.target.value)}><option value="">All locations</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></Field>}
       <button className="btn" onClick={() => { setFrom(localInput(new Date().toISOString()).slice(0,10)); setTo(localInput(new Date().toISOString()).slice(0,10)); }}>Today</button>
-      <button className="btn" onClick={() => { setFrom(""); setTo(""); setStatus(""); setCleared(""); setResult(""); setLocationId(""); setClientFilter(null); }}>Reset filters</button>
+      <button className="btn" onClick={() => { setFrom(""); setTo(""); setStatus(""); setCleared(""); setResult(""); setLocationId(""); setSearchInput(""); setClientFilter(null); }}>Reset filters</button>
     </div>
     {can(me, "calendar:block") && <SupportCalendarCard />}
     {initialOpenId && initial.isError && <p role="alert">That interview is no longer available to you.</p>}
@@ -390,7 +391,7 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
     {notice && <p role="status" className="livemsg">{notice}</p>}{invalidRange && <p role="alert">Through date must be on or after From date.</p>}
     {!invalidRange && q.isPending && <p>Loading interviews…</p>}{q.isError && <p role="alert">Could not load interviews. <button className="btn" onClick={() => void q.refetch()}>Retry</button></p>}
     {!invalidRange && <div className="card tablewrap"><table><thead><tr><th>Candidate / client</th><th>Time / round</th><th>Team / location</th><th>Readiness</th><th>Result</th><th>Candidate feedback</th><th>Recordings</th><th>Actions</th></tr></thead><tbody>{items.map(i => <tr key={i.id} className={i.cleared ? "row-cleared" : undefined}>
-      <td><b>{i.candidate.name ?? "Candidate"}</b><span className="block">{i.client ? <button className="linkbtn" aria-label={`View history for ${i.client.name}`} onClick={() => { setClientFilter(i.client); setFrom(""); setTo(""); setStatus(""); setCleared(""); setResult(""); setLocationId(""); }}>{i.client.name}</button> : "No client"}</span><span className="block">Recruiter: {i.recruiter.name}</span></td>
+      <td><b>{i.candidate.name ?? "Candidate"}</b><span className="block">{i.client ? <button className="linkbtn" aria-label={`View history for ${i.client.name}`} onClick={() => { setClientFilter(i.client); setFrom(""); setTo(""); setStatus(""); setCleared(""); setResult(""); setLocationId(""); setSearchInput(""); }}>{i.client.name}</button> : "No client"}</span><span className="block">Recruiter: {i.recruiter.name}</span></td>
       <td><time dateTime={i.startsAt}>{new Date(i.startsAt).toLocaleString(undefined, { timeZone: displayZone })}</time><span className="block">to {new Date(i.endsAt).toLocaleString(undefined, { timeZone: displayZone })}</span><span className="block">{i.round} · {label(i.callStatus)}{i.interviewType ? ` · ${INTERVIEW_TYPE_LABELS[i.interviewType]}` : ""}</span></td>
       <td>{i.team?.name ?? "—"}<span className="block">{i.location?.name ?? "No location"}</span><span className="block">Coach: {i.coach?.name ?? "Unassigned"}</span></td>
       <td>{i.cleared ? <span className="badge cleared">Cleared</span> : "Not cleared"}<span className="block">{i.inviteReceived ? "Invite received" : "Awaiting invite"}</span><span className="block">{i.consentCaptured ? "Consent captured" : "Consent pending"}</span>{i.systemName && <span className="block">{i.systemName}</span>}</td>
