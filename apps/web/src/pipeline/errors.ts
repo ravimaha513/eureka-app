@@ -20,6 +20,16 @@ export const PIPELINE_ERRORS: Record<string, string> = {
   interview_conflict: "This interview overlaps another interview for the candidate. Pick a different time.",
   consent_required: "Recording links need captured consent.",
   field_not_permitted: "You can't change one of these fields.",
+  submission_placed: "A placement is in progress from this submission, so its details are held by the placement. Correct them in Placements.",
+  client_locked: "Interviews were booked with this client, so the client can't change. Log a new submission for the other client.",
+  invalid_job_title: "Enter a job title of up to 160 characters.",
+  invalid_rate: "Enter an hourly rate between 0 and 1000.",
+  invalid_submitted_at: "The submitted time can't be in the future.",
+  client_not_found: "That client no longer exists. Pick another one.",
+  vendor_not_found: "That vendor no longer exists. Pick another one.",
+  job_not_found: "That job isn't available to you any more. Pick another job or none.",
+  job_client_mismatch: "That job belongs to a different client. Pick a job of this client, or none.",
+  job_not_open: "That job is no longer open. Pick an open job or none.",
   server_managed_field: "One of these fields is set by the system and can't be changed.",
 };
 

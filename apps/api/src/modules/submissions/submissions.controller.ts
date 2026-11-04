@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from "@nestjs/common";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { CreateSubmission, StatusChange, SubmissionListQuery, SubmissionSummaryQuery, SubmissionsService } from "./submissions.service.js";
+import { CreateSubmission, EditSubmission, StatusChange, SubmissionListQuery, SubmissionSummaryQuery, SubmissionsService } from "./submissions.service.js";
 
 export { SubmissionsService };
 
@@ -31,6 +31,13 @@ export class SubmissionsController {
   @RequirePermission("submission:read")
   get(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.svc.get(user, id);
+  }
+
+  /** Detail corrections, lead and above (submission.details:update); enforced again by authz.edit_submission. */
+  @Patch(":id")
+  @RequirePermission("submission.details:update")
+  edit(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.edit(user, id, EditSubmission.parse(body));
   }
 
   /** State machine transition (design B2.6); enforced again by authz.transition_submission. */

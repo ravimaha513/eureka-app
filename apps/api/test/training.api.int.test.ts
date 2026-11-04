@@ -337,9 +337,23 @@ describe("training batches, students and progress (TR-5..TR-11)", () => {
 
   it("an empty batch is deleted (204)", async () => {
     const r = await call("locD", "POST", "/api/v1/training/batches", { name: "Test batch", locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2033-01-10" });
-    expect((await call("coach", "DELETE", `/api/v1/training/batches/${r.json().id}`)).statusCode).toBe(403);
+    // Not on the coach's screen: 404 (rule 6).
+    expect((await call("coach", "DELETE", `/api/v1/training/batches/${r.json().id}`)).statusCode).toBe(404);
     expect((await call("locD", "DELETE", `/api/v1/training/batches/${r.json().id}`)).statusCode).toBe(204);
     expect((await call("locD", "GET", `/api/v1/training/batches/${r.json().id}`)).statusCode).toBe(404);
+  });
+
+  it("Lead and above delete an empty batch at their batch locations; recruiters cannot", async () => {
+    const mk = async (loc: string, d: string) => (await call("m1", "POST", "/api/v1/training/batches", { name: `Lead del ${d}`, locationId: loc, technologyId: TECH_ID, startDate: d })).json().id as string;
+    const dallas = await mk(LOC.dallas, "2033-02-10");
+    const listed = (await call("l1", "GET", "/api/v1/training/batches")).json().items.find((b: { id: string }) => b.id === dallas);
+    expect(listed.actions.delete).toBe(true);
+    expect([403, 404]).toContain((await call("r1a", "DELETE", `/api/v1/training/batches/${dallas}`)).statusCode);
+    expect((await call("l1", "DELETE", `/api/v1/training/batches/${dallas}`)).statusCode).toBe(204);
+    expect(await db.admin.query(`SELECT 1 FROM eureka.batch WHERE id = $1`, [dallas]).then((r) => r.rowCount)).toBe(0);
+    // Manager and CEO too.
+    expect((await call("m1", "DELETE", `/api/v1/training/batches/${await mk(LOC.dallas, "2033-03-10")}`)).statusCode).toBe(204);
+    expect((await call("ceo", "DELETE", `/api/v1/training/batches/${await mk(LOC.austin, "2033-04-10")}`)).statusCode).toBe(204);
   });
 
   it("audit rows carry ids, codes and field names only (rule 5)", async () => {
@@ -370,7 +384,7 @@ describe("batch creators find and fill their batches (TR-3, TR-8, TR-14)", () =>
   it("a Lead sees the empty batch they created, without seeing other teams' students", async () => {
     const id = await create("l1", "2035-01-10");
     const card = (await call("l1", "GET", "/api/v1/training/batches")).json().items.find((b: { id: string }) => b.id === id);
-    expect(card).toMatchObject({ students: 0, actions: { manage: false, delete: false, addStudents: true, removeStudents: true } });
+    expect(card).toMatchObject({ students: 0, actions: { manage: false, delete: true, addStudents: true, removeStudents: true } });
     expect((await call("l1", "GET", `/api/v1/training/batches/${id}`)).statusCode).toBe(200);
     expect((await call("r1a", "GET", `/api/v1/training/batches/${id}`)).statusCode).toBe(404);
     expect((await call("locA", "GET", `/api/v1/training/batches/${id}`)).statusCode).toBe(404);

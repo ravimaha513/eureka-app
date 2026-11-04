@@ -1,5 +1,5 @@
 -- eureka.candidate_column_guard: current definition (repeatable; db/functions/README.md).
--- Earlier bodies: migrations 0006, 0013, 0026, 0065, 0150. Change this file, not a new migration.
+-- Earlier bodies: migrations 0006, 0013, 0026, 0065, 0150. 0430: team delete marker. Change this file, not a new migration.
 
 SET ROLE eureka_owner;
 CREATE OR REPLACE FUNCTION eureka.candidate_column_guard()
@@ -11,6 +11,7 @@ DECLARE
   is_definer boolean := current_user = 'authz_definer';
   owns_old   boolean;
   employment boolean := false;
+  deleting   boolean := false;
 BEGIN
   -- Never changeable through the API.
   IF NEW.id IS DISTINCT FROM OLD.id OR NEW.person_id IS DISTINCT FROM OLD.person_id
@@ -44,8 +45,14 @@ BEGIN
     RAISE EXCEPTION 'not permitted to change visibility' USING ERRCODE = 'insufficient_privilege';
   END IF;
 
-  -- No team (0410) is a starting state only: a candidate never goes back to it.
-  IF OLD.team_id IS NOT NULL AND NEW.team_id IS NULL THEN
+  -- authz.admin_delete_team (0430) moves the team's candidates or clears their team.
+  IF is_definer THEN
+    deleting := coalesce(authz.team_deleting(OLD.team_id), false);
+  END IF;
+
+  -- No team (0410) is a starting state only: a candidate never goes back to it,
+  -- unless their team is being deleted.
+  IF OLD.team_id IS NOT NULL AND NEW.team_id IS NULL AND NOT deleting THEN
     RAISE EXCEPTION 'team cannot be cleared' USING ERRCODE = 'insufficient_privilege';
   END IF;
 
@@ -55,7 +62,7 @@ BEGIN
     -- A candidate with no team (0410) reaches a definer only through
     -- authz.assign_candidate_team, which re-checks candidate:create.
     IF is_definer THEN
-      employment := OLD.team_id IS NULL OR EXISTS (SELECT 1 FROM authz.employment_team_context x
+      employment := OLD.team_id IS NULL OR deleting OR EXISTS (SELECT 1 FROM authz.employment_team_context x
                              WHERE x.xact = pg_catalog.pg_current_xact_id() AND x.candidate_id = OLD.id);
     END IF;
     IF NOT coalesce(employment, false) THEN

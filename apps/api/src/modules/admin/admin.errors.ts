@@ -63,6 +63,7 @@ const CODES: Record<string, (code: string) => HttpException> = {
   not_assigned: (c) => new NotFoundException(c),
   already_assigned: (c) => new ConflictException(c),
   same_team: (c) => new UnprocessableEntityException(c),
+  has_hotlist_candidates: (c) => new UnprocessableEntityException(c),
   lead_of_team: (c) => new UnprocessableEntityException(c),
   has_reports: (c) => new UnprocessableEntityException(c),
   separation_of_duties: (c) => new UnprocessableEntityException(c),

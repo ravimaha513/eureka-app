@@ -1,6 +1,6 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from "@nestjs/common";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { AccessLogQuery, DocumentUpload } from "./documents.schemas.js";
+import { AccessLogQuery, DocumentUpload, ReplaceDocumentFile, UpdateDocument } from "./documents.schemas.js";
 import { DocumentsService } from "./documents.service.js";
 
 /**
@@ -51,6 +51,20 @@ export class DocumentsController {
   @RequirePermission("document:read")
   download(@CurrentUser() user: AuthedUser, @Param("documentId", ParseUUIDPipe) documentId: string) {
     return this.svc.download(user, documentId);
+  }
+
+  /** DOC-4: title and/or a type of the same classification (document:upload over the candidate; checked in the service and the function). */
+  @Patch("documents/:documentId")
+  @RequirePermission("document:upload")
+  update(@CurrentUser() user: AuthedUser, @Param("documentId", ParseUUIDPipe) documentId: string, @Body() body: unknown) {
+    return this.svc.update(user, documentId, () => UpdateDocument.parse(body));
+  }
+
+  /** DOC-5: a presigned POST for a new file of the same document; it replaces the current one once its scan is clean. */
+  @Post("documents/:documentId/replace")
+  @RequirePermission("document:upload")
+  replace(@CurrentUser() user: AuthedUser, @Param("documentId", ParseUUIDPipe) documentId: string, @Body() body: unknown) {
+    return this.svc.requestReplace(user, documentId, () => ReplaceDocumentFile.parse(body));
   }
 
   /** The access log (audit:read: all; document.restricted:read: one restricted document). Checked in the service. */

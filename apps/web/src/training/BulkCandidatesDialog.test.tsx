@@ -32,7 +32,7 @@ const choose = async (dlg: HTMLElement) => {
 };
 
 describe("BulkCandidatesDialog", () => {
-  it("previews the file, then creates with the same rows and team", async () => {
+  it("previews the file with no team by default, then creates with the same rows", async () => {
     sheets.data = [{ sheet: "Instructions", data: [["help"]] }, { sheet: "Candidates", data: [HEAD, ["Asha", "Iyer", "+14695550001", "asha@example.com"], [null, null, null, null]] }];
     const onDone = vi.fn();
     const dlg = open(onDone);
@@ -40,11 +40,11 @@ describe("BulkCandidatesDialog", () => {
     expect(create).toBeDisabled();
     await choose(dlg);
     expect(await within(dlg).findByText("All 1 rows are valid and ready to add.")).toBeInTheDocument();
-    expect(api.writes()[0]!.body).toEqual({ dryRun: true, teamId: "t1", rows: [ASHA] });
+    expect(api.writes()[0]!.body).toEqual({ dryRun: true, teamId: null, rows: [ASHA] });
     expect(within(dlg).getByRole("row", { name: /Asha/ })).toHaveTextContent("OK");
     fireEvent.click(within(dlg).getByRole("button", { name: "Create 1 candidate" }));
     await waitFor(() => expect(onDone).toHaveBeenCalledWith(1));
-    expect(api.writes()[1]!.body).toEqual({ dryRun: false, teamId: "t1", rows: [ASHA] });
+    expect(api.writes()[1]!.body).toEqual({ dryRun: false, teamId: null, rows: [ASHA] });
   });
 
   it("shows why rows fail and keeps Create disabled", async () => {
@@ -67,13 +67,20 @@ describe("BulkCandidatesDialog", () => {
     expect(api.writes()).toEqual([]);
   });
 
-  it("asks for a team first when the caller has several and no default", async () => {
-    api = mockApi({ "GET /api/v1/candidate-create-teams": () => ({ body: { items: [{ id: "t1", name: "A", lead: null }, { id: "t2", name: "B", lead: null }], defaultTeamId: null } }) });
+  it("offers No team yet first and re-checks the file when a team is picked", async () => {
+    sheets.data = [{ sheet: "Candidates", data: [HEAD, ["Asha", "Iyer", "+14695550001", "asha@example.com"]] }];
+    api = mockApi({
+      "GET /api/v1/candidate-create-teams": () => ({ body: { items: [{ id: "t1", name: "A", lead: null }, { id: "t2", name: "B", lead: null }], defaultTeamId: "t1" } }),
+      [BULK]: () => ({ body: report({}) }),
+    });
     const dlg = open();
     const team = await within(dlg).findByRole("combobox", { name: "Team" });
-    expect(within(dlg).getByLabelText("Excel file")).toBeDisabled();
+    expect(team).toHaveValue("none");
+    expect(within(team).getAllByRole("option").map((o) => o.textContent)).toEqual(["No team yet", "A", "B"]);
+    await choose(dlg);
+    await within(dlg).findByText("All 1 rows are valid and ready to add.");
     fireEvent.change(team, { target: { value: "t2" } });
-    expect(within(dlg).getByLabelText("Excel file")).toBeEnabled();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await waitFor(() => expect(api.writes()).toHaveLength(2));
+    expect(api.writes()[1]!.body).toEqual({ dryRun: true, teamId: "t2", rows: [ASHA] });
   });
 });

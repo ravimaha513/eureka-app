@@ -6,8 +6,8 @@ import { CLIENT_ID, apiAs, freshCandidate, login, screen, uniq } from "./support
  * full stack with the dev seed, which publishes fictional sample templates
  * (apps/api/src/db/dev-pipeline.ts). A recruiter's fresh W2 placement gets the
  * sample checklist; HR receives and verifies an item and records the BGC as
- * initiated on the Paperwork & BGC screen; the recruiter then sees the progress
- * and the BGC status in the placement drawer.
+ * initiated, and adds an employer row on the placement's paperwork page; the
+ * recruiter then sees the progress and the BGC status in the placement drawer.
  */
 const FORWARD = ["under_review", "interview_requested", "interview_scheduled", "interview_completed", "selected"];
 
@@ -33,28 +33,44 @@ test("HR works a placement's paperwork and BGC; the recruiter sees the progress"
   const row = queue.locator("tbody tr").filter({ hasText: cand.name });
   await expect(row).toBeVisible();
   await expect(row).toContainText(`0 of ${detail.checklist.length} done`);
-  await row.getByRole("button", { name: `Open paperwork of ${cand.name}` }).click();
-  const drawer = page.getByRole("dialog", { name: `Paperwork · ${cand.name}` });
-  await expect(drawer).toBeVisible();
+  // The candidate name opens the placement's paperwork page.
+  await row.getByRole("link", { name: cand.name }).click();
+  await expect(page.getByRole("heading", { level: 1, name: cand.name })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/paperwork/${placement.id}`));
 
+  await page.getByRole("tab", { name: "Checklist" }).click();
   for (const [status, label] of [["received", "Received"], ["verified", "Verified"]] as const) {
-    await drawer.getByRole("button", { name: `Update ${firstLabel}` }).click();
+    await page.getByRole("button", { name: `Update ${firstLabel}` }).click();
     const dlg = page.getByRole("dialog", { name: `Update ${firstLabel}` });
     await dlg.getByRole("combobox", { name: "Status", exact: true }).selectOption(status);
     await dlg.getByRole("button", { name: "Save" }).click();
     await expect(dlg).toBeHidden();
-    await expect(drawer.getByRole("status")).toHaveText(`${firstLabel} marked ${label}.`);
+    await expect(page.getByText(`${firstLabel} marked ${label}.`)).toBeVisible();
+    await expect(page.getByRole("table", { name: "Paperwork checklist" }).locator("tbody tr").first()).toContainText(label);
   }
 
-  await drawer.getByRole("button", { name: "Update background check" }).click();
-  const bgc = page.getByRole("dialog", { name: "Update background check" });
-  await bgc.getByRole("combobox", { name: "Status", exact: true }).selectOption("initiated");
-  await bgc.getByRole("textbox", { name: "BGC company" }).fill("Fictional Checks LLC");
-  await bgc.getByRole("button", { name: "Save" }).click();
-  await expect(bgc).toBeHidden();
-  await expect(drawer.getByRole("status")).toHaveText("Background check marked Initiated.");
-  await expect(drawer.getByRole("list", { name: "Background check history" })).toContainText("Not started → Initiated");
-  await page.keyboard.press("Escape");
+  await page.getByRole("tab", { name: "Background check" }).click();
+  await page.getByRole("button", { name: "Edit check details" }).click();
+  await page.getByRole("textbox", { name: "BGC company", exact: true }).fill("Fictional Checks LLC");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Check details saved.")).toBeVisible();
+  await page.getByRole("combobox", { name: "Move to", exact: true }).selectOption("initiated");
+  await page.getByRole("button", { name: "Update status" }).click();
+  await expect(page.getByText("Background check marked Initiated.")).toBeVisible();
+
+  // Employment history as rows (PW-12).
+  await page.getByRole("button", { name: "+ Add employer" }).click();
+  const form = page.getByRole("form", { name: "Add employer" });
+  await form.getByRole("textbox", { name: "Employer", exact: true }).fill("Fictional Corp");
+  await form.getByLabel("From", { exact: true }).fill("2019-03");
+  await form.getByRole("checkbox", { name: "Currently works here" }).check();
+  await form.getByRole("textbox", { name: "Notes (optional)", exact: true }).fill("Fictional: confirmed by the vendor");
+  await form.getByRole("button", { name: "Add employer" }).click();
+  await expect(page.getByText("Fictional Corp added.")).toBeVisible();
+  await expect(page.getByRole("table", { name: "Employment history, newest first" })).toContainText("Fictional: confirmed by the vendor");
+
+  await page.getByRole("tab", { name: "Activity" }).click();
+  await expect(page.getByRole("list", { name: "Background check history" })).toContainText("Not started → Initiated");
 
   // Recruiter: progress and BGC status in the placement drawer.
   await page.context().clearCookies();

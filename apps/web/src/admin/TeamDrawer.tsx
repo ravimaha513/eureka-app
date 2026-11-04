@@ -13,12 +13,13 @@ const ADD_PAGE = 50;
 
 /**
  * One team: members on the left, a server-side people search on the right with
- * bulk add (POST /admin/teams/:id/members/bulk). Rename, lead and move open as
+ * bulk add (POST /admin/teams/:id/members/bulk). Rename, lead, delete and move open as
  * dialogs on top (`suspended` hands Escape and focus to them).
  */
-export function TeamDrawer({ team, coaches, canMove, suspended, onClose, onRename, onLead, onMove, onRemove, onChanged }: {
+export function TeamDrawer({ team, coaches, canMove, suspended, onClose, onRename, onLead, onDelete, onMove, onRemove, onChanged }: {
   team: Team; coaches: Coach[]; canMove: boolean; suspended: boolean;
-  onClose: () => void; onRename: () => void; onLead: () => void; onMove: (member: Ref) => void; onRemove: (member: Ref) => void;
+  onClose: () => void; onRename: () => void; onLead: () => void; onDelete: () => void;
+  onMove: (member: Ref) => void; onRemove: (member: Ref) => void;
   onChanged: (msg: string) => void;
 }) {
   const [filter, setFilter] = useState("");
@@ -33,6 +34,7 @@ export function TeamDrawer({ team, coaches, canMove, suspended, onClose, onRenam
         <div className="rowactions">
           <button className="btn sm" onClick={onRename}>Rename</button>
           <button className="btn sm" onClick={onLead}>Change lead</button>
+          <button className="btn sm danger" onClick={onDelete}>Delete team</button>
         </div>
       </div>
       <div className="teamdrawer">

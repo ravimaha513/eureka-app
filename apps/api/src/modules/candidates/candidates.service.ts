@@ -250,13 +250,18 @@ interface ProfileExtraRow {
 /**
  * Profile-only fields of GET /candidates/:id (FR-CAN-04..06), so what Edit
  * profile saves can be read back. `inPersonOk` goes to every profile reader.
- * The marketing contact details follow the phone rule (design B4.6):
- * `candidate.phone:read` over a candidate the caller owns, never through the
- * Open-to-all-teams rule; otherwise both keys are omitted.
+ * The marketing contact details (business identities, not the candidate's
+ * personal phone/email) go to callers who own the candidate through
+ * `candidate.phone:read` or `candidate:update` (the people who edit them in
+ * Edit profile), never through the Open-to-all-teams rule; otherwise both keys
+ * are omitted.
  */
 export function profileExtras(access: UserAccess, ref: CandidateRef, r: ProfileExtraRow) {
-  const phoneScope = resolveScope(access, "candidate.phone:read");
-  const contact = phoneScope !== null && ownsCandidate(phoneScope, ref);
+  const ownsThrough = (p: "candidate.phone:read" | "candidate:update") => {
+    const scope = resolveScope(access, p);
+    return scope !== null && ownsCandidate(scope, ref);
+  };
+  const contact = ownsThrough("candidate.phone:read") || ownsThrough("candidate:update");
   // LinkedIn and the resume link follow the uploaded-resume rule: owners of
   // the candidate (candidate:read through ownership, team, hierarchy, location
   // or org), never through Open to all teams.
@@ -671,7 +676,7 @@ export class CandidatesService implements OnModuleInit {
     const rows = await this.db.withUser(user.id, async (c) => (await c.query<{ id: string; name: string; lead_name: string | null }>(
       `SELECT t.id, t.name, u.display_name AS lead_name
          FROM eureka.team t LEFT JOIN eureka.app_user u ON u.id = t.lead_id
-        ORDER BY lower(t.name), t.id`)).rows);
+        WHERE t.deleted_at IS NULL ORDER BY lower(t.name), t.id`)).rows);
     return { items: rows.map((r) => ({ id: r.id, name: r.name, lead: r.lead_name })) };
   }
 
@@ -684,7 +689,7 @@ export class CandidatesService implements OnModuleInit {
     const rows = await this.db.withUser(user.id, async (c) => (await c.query<{ id: string; name: string; lead_name: string | null }>(
       `SELECT t.id, t.name, u.display_name AS lead_name
          FROM eureka.team t LEFT JOIN eureka.app_user u ON u.id = t.lead_id
-        WHERE $1::uuid[] IS NULL OR t.id = ANY ($1::uuid[])
+        WHERE t.deleted_at IS NULL AND ($1::uuid[] IS NULL OR t.id = ANY ($1::uuid[]))
         ORDER BY t.id IS DISTINCT FROM $2::uuid, lower(t.name), t.id`, [ids, own])).rows);
     return { items: rows.map((r) => ({ id: r.id, name: r.name, lead: r.lead_name })), defaultTeamId: rows.some((r) => r.id === own) ? own : null };
   }
@@ -884,7 +889,8 @@ export class CandidatesService implements OnModuleInit {
         if (!batch) throw new NotFoundException();
         const team = this.creatableTeam(user, body.teamId);
         if (batch.status !== "planned" && batch.status !== "in_training") throw new UnprocessableEntityException("batch_not_allowed");
-        const recruiter = hasTrait(user.access, "recruiter") ? user.id : null;
+        // As in create(): with no team, only the recruiter link keeps the candidates in the caller's scope.
+        const recruiter = (team === null && !resolveScope(user.access, "candidate:create")?.all) || hasTrait(user.access, "recruiter") ? user.id : null;
         const emails = new Set<string>();
         const phones = new Set<string>();
         const rows: Row[] = [];

@@ -164,6 +164,8 @@ export const PERMISSIONS = [
   "submission:read",
   "submission:create",
   "submission:update",
+  /** Corrects job title, client, vendor, rate, job and submitted time (docs/submissions-api.md); status stays a transition. */
+  "submission.details:update",
   // interviews
   "interview:read",
   "interview:create",
@@ -317,13 +319,14 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   "candidate:delete": "Delete candidates and everything recorded about them",
   "candidate.visibility:update": "Open a candidate to all or selected teams",
   "candidate.rating:update": "Rate candidates",
-  "candidate.phone:read": "See candidate phone numbers",
+  "candidate.phone:read": "See candidate personal phone and email (HR, Accounts and CEO only)",
   "candidate.dob:read": "See candidate dates of birth (restricted)",
   "candidate.compliance:update": "E-Verify, offer letter and 1099 links; documents status",
   "hotlist:read": "See the Hot List",
   "submission:read": "See submissions",
   "submission:create": "Submit candidates to clients",
   "submission:update": "Edit submissions",
+  "submission.details:update": "Correct submission details (client, vendor, job, rate, date)",
   "interview:read": "See interviews",
   "interview:create": "Schedule interviews",
   "interview:update": "Edit interviews and outcomes",
@@ -417,7 +420,6 @@ const salesLine = (s: Scope, submitScope: Scope): Grants => ({
   "candidate:read": s,
   "candidate:create": s,
   "candidate:update": s,
-  "candidate.phone:read": s,
   "hotlist:read": s,
   "submission:read": s,
   "submission:create": submitScope,
@@ -474,6 +476,8 @@ export const GRANTS: Record<Role, Grants> = {
   lead: {
     ...salesLine("team", "team"),
     "candidate:assign": "team",
+    // Anyone from lead up corrects submission details; the CEO on any submission
+    "submission.details:update": "team",
     "candidate:delete": "team",
     "candidate.visibility:update": "team",
     "report:export": "team",
@@ -505,6 +509,7 @@ export const GRANTS: Record<Role, Grants> = {
     "technology:create": "org",
     ...salesLine("hierarchy", "hierarchy"),
     "calendar:block": "hierarchy",
+    "submission.details:update": "hierarchy",
     "candidate:assign": "hierarchy",
     "candidate:delete": "hierarchy",
     "candidate.visibility:update": "hierarchy",
@@ -542,6 +547,7 @@ export const GRANTS: Record<Role, Grants> = {
     "technology:create": "org",
     ...salesLine("hierarchy", "hierarchy"),
     "calendar:block": "hierarchy",
+    "submission.details:update": "hierarchy",
     "candidate:assign": "hierarchy",
     "candidate:delete": "hierarchy",
     "candidate.visibility:update": "hierarchy",
@@ -584,6 +590,8 @@ export const GRANTS: Record<Role, Grants> = {
     "candidate:update": "org",
     // A lead or above sets the recruiter; the CEO on any candidate
     "candidate:assign": "org",
+    // Candidate personal phone and email: HR, Accounts and the CEO only
+    "candidate.phone:read": "org",
     "assignment:read": "org",
     "hotlist:read": "org",
     "submission:read": "org",
@@ -594,6 +602,7 @@ export const GRANTS: Record<Role, Grants> = {
     "interview:read": "org",
     // Schedules interviews for any submission: creation is checked against submission:update (design B4.8)
     "submission:update": "org",
+    "submission.details:update": "org",
     "interview:create": "org",
     "interview:update": "org",
     "placement:read": "org",
@@ -625,7 +634,6 @@ export const GRANTS: Record<Role, Grants> = {
   },
   location_incharge: {
     "candidate:read": "location",
-    "candidate.phone:read": "location",
     "candidate.rating:update": "location",
     "hotlist:read": "location",
     "submission:read": "location",
@@ -659,7 +667,6 @@ export const GRANTS: Record<Role, Grants> = {
     "bill:read": "location",
     "bill:manage": "location",
     "candidate:read": "location",
-    "candidate.phone:read": "location",
     "candidate.rating:update": "location",
     "hotlist:read": "location",
     "submission:read": "location",
@@ -720,7 +727,6 @@ export const GRANTS: Record<Role, Grants> = {
   associate_hr: {
     "assignment:read": "org",
     "candidate:read": "org",
-    "candidate.phone:read": "org",
     "placement:read": "org",
     "employee:read": "org",
     "assignment:update": "org",
@@ -737,6 +743,8 @@ export const GRANTS: Record<Role, Grants> = {
   accounts: {
     "assignment:read": "org",
     "candidate:read": "org",
+    // Candidate personal phone and email: HR, Accounts and the CEO only
+    "candidate.phone:read": "org",
     "candidate.compliance:update": "org",
     "placement:read": "org",
     "rate:read": "org",
@@ -760,7 +768,6 @@ export const GRANTS: Record<Role, Grants> = {
     "assignment:read": "org",
     "candidate:read": "org",
     "candidate.compliance:update": "org",
-    "candidate.phone:read": "org",
     "candidate.dob:read": "org",
     "employee:read": "org",
     "document:read": "org",

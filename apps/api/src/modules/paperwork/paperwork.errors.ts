@@ -9,10 +9,12 @@ import { unprocessable } from "../../platform/errors.js";
 const CODES: Record<string, (code: string) => HttpException> = {
   item_not_found: () => new NotFoundException(),
   placement_not_found: () => new NotFoundException(),
+  entry_not_found: () => new NotFoundException(),
   not_permitted: () => new ForbiddenException("Not permitted"),
   version_mismatch: (c) => new ConflictException(c),
   invalid_transition: unprocessable,
   reason_required: unprocessable,
+  actual_start_required: unprocessable,
   invalid_change: unprocessable,
   invalid_assignee: unprocessable,
   invalid_owner_role: unprocessable,
@@ -21,6 +23,7 @@ const CODES: Record<string, (code: string) => HttpException> = {
   invalid_document: unprocessable,
   placement_closed: unprocessable,
   invalid_checklist_template: unprocessable,
+  too_many_entries: unprocessable,
 };
 
 /**

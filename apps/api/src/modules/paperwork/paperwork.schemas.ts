@@ -41,6 +41,8 @@ export const UpdateBgc = z
     reason: reason.optional(),
     bgcCompany: z.string().trim().min(1).max(120).regex(noControl, "no control characters").nullable().optional(),
     initiatedOn: day.nullable().optional(),
+    /** The placement's actual start date: required when clearing the check (0450), only while it is cleared. */
+    actualStart: day.optional(),
     educationLevel: z.string().trim().min(1).max(60).regex(noControl, "no control characters").nullable().optional(),
     /** History checked, in whole years 1-50 (migration 0400). */
     employmentYears: historyYears.nullable().optional(),
@@ -57,6 +59,55 @@ export const UpdateBgc = z
     message: "failPlacement needs the check to be failed", path: ["failPlacement"],
   });
 export type UpdateBgc = z.infer<typeof UpdateBgc>;
+
+/** Employment / address history rows (PW-12, migration 0460): whole months as "YYYY-MM"; no end month = still there. */
+export const BGC_ENTRY_VERIFICATIONS = ["pending", "verified", "unverified"] as const;
+const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "YYYY-MM").refine((m) => m >= "1950-01" && m <= "2100-12", "out of range");
+const line = (max: number) => z.string().trim().min(1).max(max).regex(noControl, "no control characters");
+const entryCommon = {
+  startMonth: month,
+  endMonth: month.nullable().optional(),
+  verification: z.enum(BGC_ENTRY_VERIFICATIONS).optional(),
+  notes: notes.nullable().optional(),
+};
+const monthsInOrder = (b: { startMonth?: string; endMonth?: string | null }) =>
+  !b.startMonth || !b.endMonth || b.endMonth >= b.startMonth;
+
+/** POST /paperwork/placements/:id/bgc/entries. */
+export const CreateBgcEntry = z
+  .discriminatedUnion("kind", [
+    z.object({ kind: z.literal("employment"), employer: line(120), title: line(120).nullable().optional(), ...entryCommon }).strict(),
+    z.object({
+      kind: z.literal("address"), street: line(200).nullable().optional(), city: line(120), region: line(120).nullable().optional(),
+      postalCode: line(20).nullable().optional(), country: line(60), ...entryCommon,
+    }).strict(),
+  ])
+  .refine(monthsInOrder, { message: "end month before start month", path: ["endMonth"] });
+export type CreateBgcEntry = z.infer<typeof CreateBgcEntry>;
+
+/** PATCH /paperwork/placements/:id/bgc/entries/:entryId: only the keys given change; the database refuses keys of the other kind. */
+export const UpdateBgcEntry = z
+  .object({
+    employer: line(120).optional(),
+    title: line(120).nullable().optional(),
+    street: line(200).nullable().optional(),
+    city: line(120).optional(),
+    region: line(120).nullable().optional(),
+    postalCode: line(20).nullable().optional(),
+    country: line(60).optional(),
+    startMonth: month.optional(),
+    endMonth: month.nullable().optional(),
+    verification: z.enum(BGC_ENTRY_VERIFICATIONS).optional(),
+    notes: notes.nullable().optional(),
+    expectedVersion: z.number().int().min(1).optional(),
+  })
+  .strict()
+  .refine((b) => Object.keys(b).some((k) => k !== "expectedVersion"), "nothing to change")
+  .refine(monthsInOrder, { message: "end month before start month", path: ["endMonth"] });
+export type UpdateBgcEntry = z.infer<typeof UpdateBgcEntry>;
+
+/** DELETE /paperwork/placements/:id/bgc/entries/:entryId?expectedVersion=N */
+export const DeleteBgcEntryQuery = z.object({ expectedVersion: z.coerce.number().int().min(1).optional() }).strict();
 
 export const TemplateItem = z
   .object({

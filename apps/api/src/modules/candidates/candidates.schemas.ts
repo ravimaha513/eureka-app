@@ -214,7 +214,8 @@ export type CreateBatch = z.infer<typeof CreateBatch>;
 export const BulkBatchCandidates = z
   .object({
     dryRun: z.boolean(),
-    teamId: uuid.optional(),
+    /** null = "No team yet" (assigned later from the profile; 0410), as on POST /candidates. */
+    teamId: uuid.nullable().optional(),
     rows: z
       .array(
         z

@@ -116,7 +116,7 @@ export const trainingApi = {
   batch: (id: string) => api<BatchDetail>(`${B}/${id}`),
   createBatch: (b: NewBatch) => api<{ id: string }>(B, json("POST", b)),
   candidateTemplate: async () => (await apiFetch("/api/v1/batches/candidate-template")).blob(),
-  bulkAddCandidates: (id: string, b: { dryRun: boolean; teamId?: string; rows: BulkCandidateRow[] }) =>
+  bulkAddCandidates: (id: string, b: { dryRun: boolean; teamId?: string | null; rows: BulkCandidateRow[] }) =>
     api<BulkCandidateReport>(`/api/v1/batches/${id}/candidates/bulk`, json("POST", b)),
   updateBatch: (id: string, version: number, b: BatchPatch) => api<{ id: string; rowVersion: number }>(`${B}/${id}`, json("PATCH", b, ifMatch(version))),
   setStatus: (id: string, to: string) => api<{ status: string }>(`${B}/${id}/status`, json("PUT", { to })),

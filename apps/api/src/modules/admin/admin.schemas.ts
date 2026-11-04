@@ -117,6 +117,9 @@ export const CreateTeam = z
 export type CreateTeam = z.infer<typeof CreateTeam>;
 
 export const RenameTeam = z.object({ name: z.string().trim().min(1).max(120) }).strict();
+/** AD-15: delete a team; its members and candidates move to toTeamId, or are left with no team when it is absent. */
+export const DeleteTeam = z.object({ toTeamId: z.string().uuid().optional() }).strict();
+export type DeleteTeam = z.infer<typeof DeleteTeam>;
 
 const departmentName = z.string().trim().min(1).max(120).refine((v) => !/[\u0000-\u001f\u007f]/.test(v), "remove control characters");
 /** A department, or a sub-department under a top-level one (parentId). docs/admin-api.md, Departments. */

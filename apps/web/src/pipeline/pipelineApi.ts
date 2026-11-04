@@ -24,6 +24,15 @@ export interface SubmissionActions {
   clearAndPlace?: boolean;
   /** The candidate's status when only that stops a placement (another placement in progress); absent on older servers. */
   placeBlocked?: string | null;
+  /** Lead and above (submission.details:update): may correct the details; absent on older servers. */
+  editDetails?: boolean;
+  /** editDetails with rate:read: the rate may be corrected too. */
+  editRate?: boolean;
+}
+
+/** PATCH /api/v1/submissions/:id: only the keys sent change; null clears an optional field. */
+export interface EditSubmission {
+  jobTitle?: string; clientId?: string; vendorId?: string | null; rate?: number | null; jobId?: string | null; submittedAt?: string;
 }
 
 export interface Submission {
@@ -42,8 +51,12 @@ export interface Submission {
   rate?: number | null;
   status: string;
   rejectionReason: string | null;
+  /** jobs-portal: the client requirement this submission answers. */
+  jobId?: string | null;
   submittedAt: string;
   statusChangedAt: string | null;
+  /** Latest detail correction (who and when), or null when never edited. */
+  detailsEdited?: { at: string; byName: string | null } | null;
   /** Booked or held interviews the caller can see (cancelled / no-invite calls excluded). */
   interviewCount?: number;
   lastInterviewAt?: string | null;
@@ -112,6 +125,8 @@ export interface Placement {
   projectCity: string | null;
   projectState: string | null;
   tentativeStart: string;
+  /** Recorded when the background check is cleared (migration 0450); null before, absent on older servers. */
+  actualStart?: string | null;
   isFirstPlacement: boolean;
   /** "Existing consultant re-confirmed", entered on placement entry (migration 0160); absent on older servers. */
   reconfirmed?: boolean;
@@ -201,6 +216,8 @@ export const pipelineApi = {
     api<{ id: string; status: string }>(`/api/v1/submissions/${enc(id)}/status`, {
       method: "PATCH", body: JSON.stringify({ to, ...(rejectionReason ? { rejectionReason } : {}) }),
     }),
+  editSubmission: (id: string, b: EditSubmission) =>
+    api<{ changed: string[]; submission: Submission }>(`/api/v1/submissions/${enc(id)}`, { method: "PATCH", body: JSON.stringify(b) }),
   createInterview: (b: CreateInterview) => api<{ id: string }>("/api/v1/interviews", { method: "POST", body: JSON.stringify(b) }),
   /** Every round of one submission the caller can see, in time order (drawer timeline). */
   submissionInterviews: (submissionId: string) =>

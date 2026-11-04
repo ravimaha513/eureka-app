@@ -344,7 +344,7 @@ describe("background checks", () => {
   it("follow the shared state machine for every pair, created on first write", async () => {
     const reach: Record<string, unknown[]> = {
       not_started: [], initiated: [{ status: "initiated" }], in_progress: [{ status: "initiated" }, { status: "in_progress" }],
-      cleared: [{ status: "initiated" }, { status: "cleared" }],
+      cleared: [{ status: "initiated" }, { status: "cleared", actualStart: "2026-12-01" }],
       failed: [{ status: "initiated" }, { status: "failed", reason: "Fictional finding" }],
     };
     const { id } = await placed();
@@ -358,7 +358,7 @@ describe("background checks", () => {
           if (from === "not_started") await c.query(`SELECT authz.update_bgc($1, '{"notes":"Fictional"}', NULL)`, [id]);
           await c.query("SAVEPOINT s");
           const ok = await c.query(`SELECT * FROM authz.update_bgc($1, $2::jsonb, NULL)`,
-            [id, JSON.stringify({ status: to, reason: "Fictional reason" })]).then(() => true, () => false);
+            [id, JSON.stringify({ status: to, reason: "Fictional reason", ...(to === "cleared" ? { actualStart: "2026-12-01" } : {}) })]).then(() => true, () => false);
           expect(ok, `${from} -> ${to}`).toBe(bgcTransitionAllowed(from, to));
         } finally {
           await c.query("ROLLBACK");
@@ -388,7 +388,7 @@ describe("background checks", () => {
     await expect(updateBgc(U.hr, id, { status: "cleared", failPlacement: true })).rejects.toThrow(/invalid_change/);
     await expect(updateBgc(U.hr, id, { status: "cleared", placementId: id })).rejects.toThrow(/invalid_change/);
     await expect(updateBgc(U.hr, id, { status: "cleared" }, 1)).rejects.toThrow(/version_mismatch/);
-    await updateBgc(U.hr, id, { status: "cleared" }, 2);
+    await updateBgc(U.hr, id, { status: "cleared", actualStart: "2026-12-01" }, 2);
     b = await bgcOf(id);
     expect([b.status, b.completed_on !== null, b.version]).toEqual(["cleared", true, 3]);
     const hist = (await db.admin.query(`SELECT actor_id, from_status, to_status, changed, reason FROM eureka.bgc_event
@@ -398,6 +398,33 @@ describe("background checks", () => {
         changed: ["status", "bgc_company", "initiated_on", "helped_by", "education_level", "employment_years", "address_years", "notes"], reason: null },
       { actor_id: U.hr, from_status: "initiated", to_status: "cleared", changed: ["status", "completed_on"], reason: null },
     ]);
+  });
+
+  it("clearing records the placement's actual start date: required, kept while cleared, never set on other statuses", async () => {
+    const { id } = await placed();
+    const startOf = async () => (await db.admin.query(`SELECT actual_start::text FROM eureka.placement WHERE id = $1`, [id])).rows[0].actual_start;
+    await expect(updateBgc(U.hr, id, { status: "initiated", actualStart: "2026-12-01" })).rejects.toThrow(/invalid_change/);
+    await updateBgc(U.hr, id, { status: "initiated" });
+    await expect(updateBgc(U.hr, id, { actualStart: "2026-12-01" })).rejects.toThrow(/invalid_change/);
+    await expect(updateBgc(U.hr, id, { status: "cleared" })).rejects.toThrow(/actual_start_required/);
+    await expect(updateBgc(U.hr, id, { status: "cleared", actualStart: null })).rejects.toThrow(/actual_start_required/);
+    await expect(updateBgc(U.hr, id, { status: "cleared", actualStart: "1999-12-31" })).rejects.toThrow(/invalid_change/);
+    await expect(updateBgc(U.hr, id, { status: "cleared", actualStart: "12/01/2026" })).rejects.toThrow(/invalid_change/);
+    expect(await startOf()).toBeNull();
+    const r = await updateBgc(U.hr, id, { status: "cleared", actualStart: "2026-12-01" });
+    expect(r.changed).toContain("actual_start");
+    expect(await startOf()).toBe("2026-12-01");
+    // Editable while cleared, never back to null; other edits leave it alone.
+    await updateBgc(U.hr, id, { actualStart: "2026-12-08" });
+    await expect(updateBgc(U.hr, id, { actualStart: null })).rejects.toThrow(/actual_start_required/);
+    await updateBgc(U.hr, id, { notes: "Fictional" });
+    expect(await startOf()).toBe("2026-12-08");
+    // Re-initiating keeps it; clearing again can reuse it.
+    await updateBgc(U.hr, id, { status: "initiated", reason: "Fictional: more documents" });
+    await updateBgc(U.hr, id, { status: "cleared" });
+    expect(await startOf()).toBe("2026-12-08");
+    // Only definer functions write it.
+    await expect(db.admin.query(`UPDATE eureka.placement SET actual_start = '2026-12-09' WHERE id = $1`, [id])).rejects.toThrow();
   });
 
   it("only bgc:update over the placement writes (HR, Manager, AD); 404 without document:read coverage", async () => {
@@ -455,7 +482,7 @@ describe("BGC and the placement state machine (FR-PLC-06): one set of rules in a
     const { id, cand } = await placed();
     for (const to of ["paperwork", "bgc", "ready", "joined"]) await transitionPlacement(db, U.r1a, id, to);
     await updateBgc(U.hr, id, { status: "initiated" });
-    await updateBgc(U.hr, id, { status: "cleared" });
+    await updateBgc(U.hr, id, { status: "cleared", actualStart: "2026-01-15" });
     const r = await withExtraRole(U.m1, "hr", async (c) => {
       await c.query(`SELECT * FROM authz.update_bgc($1, '{"status":"failed","reason":"Fictional later finding","failPlacement":true}', NULL)`, [id]);
       await c.query("RESET ROLE"); // read the result as the superuser, inside the same transaction
@@ -472,7 +499,7 @@ describe("BGC and the placement state machine (FR-PLC-06): one set of rules in a
     const { id } = await placed();
     for (const to of ["paperwork", "bgc", "ready", "joined"]) await transitionPlacement(db, U.r1a, id, to);
     await updateBgc(U.hr, id, { status: "initiated", initiatedOn: "2026-01-05" });
-    await updateBgc(U.hr, id, { status: "cleared", completedOn: "2026-01-20" });
+    await updateBgc(U.hr, id, { status: "cleared", completedOn: "2026-01-20", actualStart: "2026-01-26" });
     await expect(updateBgc(U.hr, id, { status: "initiated" })).rejects.toThrow(/reason_required/);
     await updateBgc(U.hr, id, { status: "initiated", reason: "Vendor asked for more documents" });
     const r = (await db.admin.query(`SELECT (SELECT status FROM eureka.bgc WHERE placement_id = $1) AS bgc,

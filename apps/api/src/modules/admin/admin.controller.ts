@@ -10,6 +10,7 @@ import {
   CreateRole,
   CreateRoleRequest,
   CreateTeam,
+  DeleteTeam,
   OrgChartApply,
   OrgChartPreviewQuery,
   RoleListQuery,
@@ -276,6 +277,18 @@ export class AdminController {
   @HttpCode(204)
   async renameTeam(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
     await this.svc.renameTeam(user, id, RenameTeam.parse(body).name);
+  }
+
+  // AD-15: delete a team (soft), moving its people to ?toTeamId= or leaving them with no team.
+  @Get("teams/:id/delete-impact")
+  teamDeleteImpact(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
+    return this.svc.teamDeleteImpact(user, id);
+  }
+
+  @Delete("teams/:id")
+  @HttpCode(200)
+  deleteTeam(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Query() q: unknown) {
+    return this.svc.deleteTeam(user, id, DeleteTeam.parse(q));
   }
 
   @Put("teams/:id/lead")

@@ -19,7 +19,8 @@ export interface QueueRow {
   candidate: { id: string; name: string | null };
   recruiter: { id: string; name: string | null };
   /** null when the caller cannot read the placement record itself (e.g. Immigration). */
-  placement: { status: string; placementType: string; tentativeStart: string; client: Ref | null } | null;
+  /** actualStart: recorded when the background check is cleared (migration 0450); null before. */
+  placement: { status: string; placementType: string; tentativeStart: string; actualStart?: string | null; client: Ref | null } | null;
   checklist: { total: number; open: number; requiredOpen: number; overdue: number; nextDue: string | null };
   bgc: { status: string };
 }
@@ -54,6 +55,28 @@ export interface HistoryEntry {
 }
 
 export interface BgcActions { update: boolean; transition: string[]; failPlacement: boolean }
+
+/** Employment / address history rows (PW-12, migration 0460). Months are "YYYY-MM"; endMonth null = still there. */
+export const ENTRY_VERIFICATIONS = ["pending", "verified", "unverified"] as const;
+export type EntryVerification = (typeof ENTRY_VERIFICATIONS)[number];
+export type EntryKind = "employment" | "address";
+export interface BgcEntry {
+  id: string;
+  kind: EntryKind;
+  employer: string | null;
+  title: string | null;
+  street: string | null;
+  city: string | null;
+  region: string | null;
+  postalCode: string | null;
+  country: string | null;
+  startMonth: string;
+  endMonth: string | null;
+  verification: EntryVerification;
+  notes: string | null;
+  version: number;
+}
+export type EntryFields = Partial<Omit<BgcEntry, "id" | "kind" | "version">>;
 export interface Bgc {
   status: string;
   bgcCompany: string | null;
@@ -61,6 +84,8 @@ export interface Bgc {
   educationLevel: string | null;
   employmentYears: number | null;
   addressYears: number | null;
+  employment: BgcEntry[];
+  addresses: BgcEntry[];
   notes: string | null;
   statusReason: string | null;
   statusChangedAt: string | null;
@@ -98,6 +123,8 @@ export interface BgcChange {
   reason?: string;
   bgcCompany?: string | null;
   initiatedOn?: string | null;
+  /** Required when clearing the check; only while it is cleared. */
+  actualStart?: string;
   educationLevel?: string | null;
   employmentYears?: number | null;
   addressYears?: number | null;
@@ -131,6 +158,12 @@ export const paperworkApi = {
   itemHistory: (id: string) => api<{ items: HistoryEntry[] }>(`/api/v1/paperwork/items/${enc(id)}/history`),
   updateBgc: (placementId: string, b: BgcChange) =>
     api<Bgc>(`/api/v1/paperwork/placements/${enc(placementId)}/bgc`, { method: "PATCH", body: JSON.stringify(b) }),
+  addEntry: (placementId: string, b: EntryFields & { kind: EntryKind }) =>
+    api<Bgc>(`/api/v1/paperwork/placements/${enc(placementId)}/bgc/entries`, { method: "POST", body: JSON.stringify(b) }),
+  updateEntry: (placementId: string, id: string, b: EntryFields & { expectedVersion?: number }) =>
+    api<Bgc>(`/api/v1/paperwork/placements/${enc(placementId)}/bgc/entries/${enc(id)}`, { method: "PATCH", body: JSON.stringify(b) }),
+  deleteEntry: (placementId: string, id: string, expectedVersion: number) =>
+    api<Bgc>(`/api/v1/paperwork/placements/${enc(placementId)}/bgc/entries/${enc(id)}?expectedVersion=${expectedVersion}`, { method: "DELETE" }),
   templates: () => api<{ canPublish: boolean; templates: TemplateVersion[] }>("/api/v1/paperwork/templates"),
   publishTemplate: (b: { kind: string; placementType: string; items: TemplateItem[]; expectedVersion: number }) =>
     api<{ kind: string; placementType: string; version: number }>("/api/v1/paperwork/templates", { method: "POST", body: JSON.stringify(b) }),
@@ -155,13 +188,15 @@ export const paperworkLabel = (s: string) => {
 export const PAPERWORK_ERRORS: Record<string, string> = {
   invalid_transition: "That status change isn't allowed from the current status. Refresh to see the latest status.",
   reason_required: "Give a reason for this change.",
+  actual_start_required: "Enter the actual start date to clear the background check.",
   invalid_assignee: "The assignee must be an active user who holds the item's owner role.",
   invalid_owner_role: "Pick an existing role as the owner.",
   invalid_due_date: "Pick a due date between 2000 and 2100.",
   invalid_change: "One of the values isn't valid. Check the fields and try again.",
   invalid_document: "That document can't be linked: it must belong to this candidate or placement, be readable by you and not be blocked by the scan.",
   placement_closed: "This placement was backed out; its paperwork can no longer change.",
-  version_mismatch: "Someone else changed this in the meantime. Close and reopen to see the latest version.",
+  version_mismatch: "Someone else changed this in the meantime. Refresh to see the latest version.",
   invalid_checklist_template: "The template isn't valid: document types must be snake_case and unique, owners existing roles.",
   not_permitted: "You don't have permission to do that for this record.",
+  too_many_entries: "A check holds up to 50 rows of each kind.",
 };

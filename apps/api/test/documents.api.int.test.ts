@@ -72,7 +72,7 @@ async function login(email: string, fresh = false): Promise<Session> {
   return s;
 }
 const emailOf = (key: string) => `${key}@eureka.example`;
-async function call(who: string | Session, method: "GET" | "POST", url: string, payload?: unknown) {
+async function call(who: string | Session, method: "GET" | "POST" | "PATCH", url: string, payload?: unknown) {
   const s = typeof who === "string" ? await login(emailOf(who)) : who;
   return app.inject({ method, url, payload: payload as never, headers: { cookie: s.cookie, ...(method !== "GET" ? { "x-csrf-token": s.csrf } : {}) } });
 }
@@ -202,6 +202,101 @@ describe("upload, scan, promote (local driver, fake scanner)", () => {
     expect((await list("r1a", `/api/v1/placements/${placement}/documents`)).items.map((x) => x.docType)).toEqual(["offer_letter"]);
     const r = await call("r1a", "POST", `/api/v1/placements/${placement}/documents`, { docType: "i9", contentType: PDF, size: 10 });
     expect(r.statusCode).toBe(403);
+  });
+});
+
+describe("editing documents: title, type, replacement file (DOC-4..DOC-6, migration 0461)", () => {
+  const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+  type Edited = Doc & { title: string | null; version: number; replacement: null | { status: string; reason: string | null } };
+  const one = async (who: string, candId: string, id: string) =>
+    (await list(who, `/api/v1/candidates/${candId}/documents`)).items.find((d) => d.id === id) as Edited;
+
+  it("renames and retypes within the classification; refuses a classification change, stale versions and outsiders", async () => {
+    const ed = "doc-editor-1";
+    await extraUser(db, ed, "hr"); // its own upload rate limit (10 a minute per user)
+    const cand = await newCandidate(db, { teamId: own().teamId, recruiterId: U.r1a, locationId: own().locationId });
+    const path = `/api/v1/candidates/${cand.id}/documents`;
+    const u = await upload(ed, path, "other", pdf("rename"));
+    await runScan();
+    const url = `/api/v1/documents/${u.id}`;
+    let r = await call(ed, "PATCH", url, { title: " Fictional signed offer ", docType: "offer_letter", expectedVersion: 1 });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(r.json()).toMatchObject({ id: u.id, title: "Fictional signed offer", docType: "offer_letter", version: 2, status: "clean" });
+    expect((await call(ed, "PATCH", url, { title: "Again", expectedVersion: 1 })).statusCode).toBe(409);
+    r = await call(ed, "PATCH", url, { docType: "i9" });
+    expect(r.statusCode).toBe(422);
+    expect(r.json().detail).toBe("classification_change");
+    expect((await call(ed, "PATCH", url, {})).statusCode).toBe(422);
+    expect((await call(ed, "PATCH", url, { classification: "restricted", title: "x" })).statusCode).toBe(422);
+    expect((await call(ed, "PATCH", url, { title: "bad\u0007" })).statusCode).toBe(422);
+    expect((await call("r2a", "PATCH", url, { title: "Not mine" })).statusCode).toBe(404);
+    r = await call(ed, "PATCH", url, { title: null });
+    expect(r.json()).toMatchObject({ title: null, version: 3 });
+    // A restricted document is not visible to the recruiter: 404, not 403.
+    const i9 = await upload(ed, path, "i9", pdf("i9 rename"));
+    expect((await call("r1a", "PATCH", `/api/v1/documents/${i9.id}`, { title: "x" })).statusCode).toBe(404);
+    expect((await call(ed, "PATCH", `/api/v1/documents/${i9.id}`, { docType: "drivers_license" })).json()).toMatchObject({ docType: "drivers_license" });
+    // Rule 5: field names and type keys only.
+    const audit = (await db.admin.query(`SELECT changes FROM eureka.audit_event WHERE action = 'document.updated' AND entity_id = $1 ORDER BY seq`, [u.id])).rows;
+    expect(audit.map((a) => a.changes)).toEqual([
+      { fields: ["doc_type", "title"], fromType: "other", toType: "offer_letter" }, { fields: ["title"] }]);
+    expect(JSON.stringify(audit)).not.toMatch(/Fictional/);
+  });
+
+  it("replaces the file through quarantine: the old one opens until the new one is clean; a refused one leaves it", async () => {
+    const ed = "doc-editor-2";
+    await extraUser(db, ed, "hr"); // its own upload rate limit (10 a minute per user)
+    const cand = await newCandidate(db, { teamId: own().teamId, recruiterId: U.r1a, locationId: own().locationId });
+    const path = `/api/v1/candidates/${cand.id}/documents`;
+    const first = pdf("first version");
+    const u = await upload(ed, path, "offer_letter", first);
+    await runScan();
+    expect((await one(ed, cand.id, u.id)).sha256).toBe(sha(first));
+
+    const second = pdf("second version");
+    let r = await call(ed, "POST", `/api/v1/documents/${u.id}/replace`, { contentType: PDF, size: second.length, expectedVersion: 1 });
+    expect(r.statusCode, r.body).toBe(201);
+    const ticket = r.json() as { fileId: string; upload: Ticket };
+    expect(ticket.upload.fields.key).toBe(`quarantine/documents/${ticket.fileId}`);
+    expect((await app.inject({ method: "POST", url: ticket.upload.url, ...form(ticket.upload.fields, second) })).statusCode).toBe(204);
+    let d = await one(ed, cand.id, u.id);
+    expect(d).toMatchObject({ status: "clean", sha256: sha(first), replacement: { status: "pending", reason: null } });
+    expect((await call(ed, "POST", `/api/v1/documents/${u.id}/download`)).statusCode).toBe(200);
+    await runScan();
+    d = await one(ed, cand.id, u.id);
+    expect(d).toMatchObject({ id: u.id, status: "clean", sha256: sha(second), replacement: null, version: 3 });
+    expect(await readFile(join(dir, "clean/documents", ticket.fileId))).toEqual(second);
+
+    // A replacement that fails the scan is shown with its reason; the current file stays.
+    const bad = pdf(EICAR_TEST_STRING);
+    r = await call(ed, "POST", `/api/v1/documents/${u.id}/replace`, { contentType: PDF, size: bad.length });
+    const t2 = r.json() as { upload: Ticket };
+    await app.inject({ method: "POST", url: t2.upload.url, ...form(t2.upload.fields, bad) });
+    await runScan();
+    d = await one(ed, cand.id, u.id);
+    expect(d).toMatchObject({ status: "clean", sha256: sha(second), replacement: { status: "infected", reason: "THREATS_FOUND" } });
+
+    // Validation, scope and the audit (ids, codes, sizes).
+    expect((await call(ed, "POST", `/api/v1/documents/${u.id}/replace`, { contentType: "text/html", size: 10 })).statusCode).toBe(422);
+    expect((await call(ed, "POST", `/api/v1/documents/${u.id}/replace`, { contentType: PDF, size: 10, expectedVersion: 1 })).statusCode).toBe(409);
+    expect((await call("r2a", "POST", `/api/v1/documents/${u.id}/replace`, { contentType: PDF, size: 10 })).statusCode).toBe(404);
+    const audit = (await db.admin.query(`SELECT changes FROM eureka.audit_event WHERE action = 'document.replace_requested' AND entity_id = $1 ORDER BY seq`, [u.id])).rows;
+    expect(audit[0]!.changes).toEqual({ fileId: ticket.fileId, docType: "offer_letter", classification: "internal", contentType: PDF, sizeBytes: second.length });
+  });
+
+  it("replacements waiting for their scan count toward the five-upload limit", async () => {
+    const ed = "doc-editor-3";
+    await extraUser(db, ed, "hr"); // its own upload rate limit (10 a minute per user)
+    const cand = await newCandidate(db, { teamId: own().teamId, recruiterId: U.r1a, locationId: own().locationId });
+    const path = `/api/v1/candidates/${cand.id}/documents`;
+    const u = await upload(ed, path, "other", pdf("limit"));
+    await runScan();
+    for (let i = 0; i < 4; i++) await upload(ed, path, "other", null);
+    expect((await call(ed, "POST", `/api/v1/documents/${u.id}/replace`, { contentType: PDF, size: 10 })).statusCode).toBe(201);
+    const r = await call(ed, "POST", path, { docType: "other", contentType: PDF, size: 10 });
+    expect(r.json().detail).toBe("too_many_pending");
+    // Asking again replaces the waiting replacement rather than adding one.
+    expect((await call(ed, "POST", `/api/v1/documents/${u.id}/replace`, { contentType: PDF, size: 10 })).statusCode).toBe(201);
   });
 });
 

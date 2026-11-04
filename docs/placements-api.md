@@ -30,7 +30,7 @@ like `/submissions`. Design references: B2.2 (`placement`, `placement_contact`,
   returns 201 `{ id, isFirstPlacement }`.
 - `PATCH /api/v1/placements/:id/status` with `{ to, reason? }` (`placement:update`; `bgc_failed` needs `placement.bgc_status:update`) returns `{ id, status }`.
 
-`Placement` = `{ id, status, placementType, workMode, projectCity, projectState, tentativeStart, isFirstPlacement, rate?, candidate: {id,name}, recruiter: {id,name}, team: {id,name}, location: {id,name}, client: {id,name}, vendor: {id,name}|null, submissionId, createdAt, statusChangedAt, allowedTransitions: string[], contacts?: [...], assignment?: { assignmentNo, startDate, endDate, endReason } }`
+`Placement` = `{ id, status, placementType, workMode, projectCity, projectState, tentativeStart, actualStart|null, isFirstPlacement, rate?, candidate: {id,name}, recruiter: {id,name}, team: {id,name}, location: {id,name}, client: {id,name}, vendor: {id,name}|null, submissionId, createdAt, statusChangedAt, allowedTransitions: string[], contacts?: [...], assignment?: { assignmentNo, startDate, endDate, endReason } }`
 
 ### Lookups (for pickers; replace raw-ID inputs)
 - `GET /api/v1/lookups` (any signed-in user) returns
@@ -67,7 +67,7 @@ and `packages/shared/src/authz/{state-machines,actions}.ts`. Deviations and prec
 - **`bgc_failed`** needs `placement:update` and `placement.bgc_status:update` (Manager, AD).
 - **Side effects of backing out** move the candidate to `active` only if it is still in `confirmation`; a
   candidate terminated meanwhile stays terminated. `joined` requires the candidate in `confirmation`.
-- **Assignment** `startDate` is the day the placement is marked `joined` (not `tentativeStart`);
+- **Assignment** `startDate` is the day the placement is marked `joined` (not `tentativeStart`, nor `actualStart`, which clearing the BGC records);
   `assignmentNo` is the next number per person.
 - **Assignment visibility** follows `assignment:read`, not `placement:read`: the `assignment` key is present
   only when `assignment:read` covers the placement's actor snapshot (recruiter, team, location) or its

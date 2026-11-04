@@ -154,6 +154,31 @@ describe("profile", () => {
     expect(calls.find((c) => c.method === "PUT")!.body).toEqual({ recruiterId: "u-sam" });
   });
 
+  it("changes the batch inline from Details", async () => {
+    const B1 = "00000000-0000-4000-8000-0000000000b1";
+    routes[`GET /api/v1/candidates/${CID}`] = () => ({ body: { ...PROFILE, batch: null } });
+    routes["GET /api/v1/batches"] = () => ({ body: { canCreate: false, items: [
+      { id: B1, label: "Java · Dallas · Nov 2026", location: { id: LOC, name: "Dallas" }, technology: { id: "tech", name: "Java" }, startMonth: "2026-11", status: "planned" },
+      { id: "b-old", label: "Java · Dallas · Jan 2026", location: { id: LOC, name: "Dallas" }, technology: { id: "tech", name: "Java" }, startMonth: "2026-01", status: "completed" },
+    ] } });
+    wrap(<CandidateProfile id={CID} me={meFor("recruiter")} onBack={() => undefined} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Assign batch" }));
+    await screen.findByRole("option", { name: "Java · Dallas · Nov 2026" });
+    expect(screen.queryByRole("option", { name: "Java · Dallas · Jan 2026" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Batch" }), { target: { value: B1 } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
+    expect(calls.find((c) => c.method === "PATCH")!.body).toEqual({ batchId: B1 });
+    expect(calls.find((c) => c.url.pathname === "/api/v1/batches")!.url.searchParams.get("locationId")).toBe(LOC);
+  });
+
+  it("shows the batch read-only without edit rights", async () => {
+    routes[`GET /api/v1/candidates/${CID}`] = () => ({ body: { ...PROFILE, batch: { id: "b1", label: "Java · Dallas · Nov 2026" }, actions: { ...PROFILE.actions, edit: false } } });
+    wrap(<CandidateProfile id={CID} me={meFor("recruiter")} onBack={() => undefined} />);
+    await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
+    expect(screen.queryByRole("button", { name: "Change batch" })).not.toBeInTheDocument();
+  });
+
   it("rejects a non-LinkedIn link before sending", async () => {
     wrap(<CandidateProfile id={CID} me={meFor("recruiter")} onBack={() => undefined} />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit profile" }));

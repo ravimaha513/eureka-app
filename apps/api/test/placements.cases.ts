@@ -191,7 +191,10 @@ describe("per-record actions match what the server allows (submissions)", () => 
     for (const item of items) {
       const id = item.id as string;
       const actions = item.actions as { transition: string[]; createInterview: boolean; createPlacement: boolean };
-      expect(Object.keys(actions).sort()).toEqual(["clearAndPlace", "createInterview", "createPlacement", "placeBlocked", "transition"]);
+      expect(Object.keys(actions).sort()).toEqual(["clearAndPlace", "createInterview", "createPlacement", "editDetails", "editRate", "placeBlocked", "transition"]);
+      // editDetails: a no-op correction (same title) succeeds exactly when the hint says so.
+      const edit = await call(key, "PATCH", `/api/v1/submissions/${id}`, { jobTitle: item.jobTitle });
+      expect(edit.statusCode === 200, `${key} edit ${edit.body}`).toBe((actions as { editDetails?: boolean }).editDetails);
       for (const to of SUBMISSION_STATUSES) {
         const r = await call(key, "PATCH", `/api/v1/submissions/${id}/status`, { to, ...(to === "rejected" ? { rejectionReason: "Probe" } : {}) });
         const ok = actions.transition.includes(to);
@@ -312,7 +315,7 @@ describe.runIf(shard.first)("placements", () => {
       expect(res.statusCode).toBe(200);
       const p = res.json();
       expect(Object.keys(p).sort()).toEqual([
-        "allowedTransitions", "assignment", "bgc", "candidate", "checklist", "client", "contacts", "createdAt", "id", "implementationPartner",
+        "actualStart", "allowedTransitions", "assignment", "bgc", "candidate", "checklist", "client", "contacts", "createdAt", "id", "implementationPartner",
         "isFirstPlacement", "joinedAt", "location", "placementType", "projectCity", "projectState", "rate", "reconfirmed",
         "recruiter", "status", "statusChangedAt", "submissionId", "team", "technology", "tentativeStart", "vendor", "workMode",
       ]);

@@ -233,7 +233,7 @@ upload is also on the batch's Students tab while the batch is open.
 - `GET /api/v1/batches/candidate-template` (`candidate:create`) → `.xlsx` with `First Name`, `Last Name`, `Phone`,
   `Personal Email`: only what a new candidate must have. Technology and location come from the batch.
 - `POST /api/v1/batches/:id/candidates/bulk` (`candidate:create`) `{ dryRun, teamId?, rows: [{ firstName, lastName, phone, email }] }`
-  (1-500 rows) → 200 `{ dryRun, committed, created, failed, rows: [{ row, firstName, lastName, phone, email, status, error? }] }`.
+  (1-500 rows; `teamId: null` = "No team yet", assigned later as for `POST /candidates`) → 200 `{ dryRun, committed, created, failed, rows: [{ row, firstName, lastName, phone, email, status, error? }] }`.
 - All or nothing: one transaction, rolled back when any row fails or on `dryRun`, so the preview is what a real run does.
 - Row errors: `invalid_first_name`, `invalid_last_name`, `missing_country_code`, `trunk_zero`, `invalid` (phone),
   `invalid_email`, `duplicate_in_file`, `duplicate_email`, `duplicate_phone`. Rows name only the value that is taken, not

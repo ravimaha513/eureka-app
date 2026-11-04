@@ -288,11 +288,21 @@ describe("activityVisible", () => {
 describe("field policy", () => {
   const fields = { phone: "(469) 555-0142", dob: "1994-03-12" };
 
-  it("recruiter sees phone of own-team candidate but never DOB", () => {
+  it("recruiter sees a masked phone even for an own-team candidate, and never DOB", () => {
     const r = applyCandidateFieldPolicy(R1a, cand({}), fields);
-    expect(r.phone).toBe(fields.phone);
+    expect(r.phoneMasked).toBe(true);
+    expect(r.phone).toBe("•••-•••-42");
     expect(r.dob).toBeNull();
     expect(r.dobMasked).toBe("•• / •• / 1994");
+  });
+
+  it("candidate personal phone and email: only HR, Accounts and the CEO", () => {
+    const holders = ROLES.filter((r) => GRANTS[r]["candidate.phone:read"] !== undefined);
+    expect([...holders].sort()).toEqual(["accounts", "ceo", "hr"]);
+    for (const role of ["hr", "accounts", "ceo"] as const) {
+      const u = base({ userId: role, roles: [{ role }] });
+      expect(applyCandidateFieldPolicy(u, cand({ recruiterId: "R2a", teamId: "T2" }), fields).phone).toBe(fields.phone);
+    }
   });
 
   it("phone is masked for an Open-to-all-teams candidate of another team", () => {

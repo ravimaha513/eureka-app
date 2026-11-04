@@ -1,47 +1,41 @@
 import { useId, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BGC_HISTORY_YEARS_MAX, BGC_HISTORY_YEARS_MIN, PLACEMENT_STATUSES } from "@eureka/shared";
-import { ApiError, type Me } from "../api";
+import { PLACEMENT_STATUSES } from "@eureka/shared";
+import type { Me } from "../api";
 import { RoleName, RoleOptions } from "../lookups";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
-import { Drawer, Field, fmtDate } from "../sales/ui";
+import { Field, fmtDate } from "../sales/ui";
 import { PLACEMENT_TYPE_LABELS, fmtDateTime, pipelineLabel, type PlacementType } from "../pipeline/pipelineApi";
 import { PipelineStatus } from "../pipeline/ui";
 import { docTypeLabel } from "../lib/format";
-import { DocumentsSection } from "../documents/DocumentsSection";
-import { documentKeys, documentsApi } from "../documents/documentsApi";
+import { useRoutedId } from "../lib/router";
+import { screenPath } from "../nav";
 import {
-  BGC_STATUSES, bgcReasonRequired, ITEM_REASON_REQUIRED, PAPERWORK_ERRORS,
-  paperworkApi, paperworkKeys, paperworkLabel,
-  type Bgc, type BgcChange, type HistoryEntry, type ItemChange, type PaperworkItem, type QueueFilters, type QueueRow,
-  type TemplateItem, type TemplateVersion,
+  BGC_STATUSES, paperworkApi, paperworkKeys, paperworkLabel,
+  type QueueFilters, type QueueRow, type TemplateItem, type TemplateVersion,
 } from "./paperworkApi";
+import { BgcBadge, paperworkError } from "./ui";
+import { PaperworkWorkspace } from "./PaperworkWorkspace";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
 
 const PAGE_SIZE = 50;
 
-export function paperworkError(e: unknown): string {
-  if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";
-  if (e.detail && PAPERWORK_ERRORS[e.detail]) return PAPERWORK_ERRORS[e.detail]!;
-  switch (e.status) {
-    case 401: return "Your session ended. Sign in again.";
-    case 403: return "You don't have permission to do that for this record.";
-    case 404: return "This placement's paperwork doesn't exist or is outside your scope.";
-    case 409: return PAPERWORK_ERRORS.version_mismatch!;
-    case 422: return e.errors?.length ? "Some fields need attention. Check the values and try again." : "The server rejected this change.";
-    default: return e.detail ?? e.title ?? e.message ?? "Something went wrong.";
-  }
-}
-
-export const BgcBadge = ({ status }: { status: string }) => <span className={`badge bgc-${status}`}>{paperworkLabel(status)}</span>;
+export { BgcBadge, paperworkError };
 
 /** "Paperwork & BGC": the work queue (HR, Accounts, Immigration, Documents Team) and, for org-wide roles, the templates. */
-export function PaperworkPage({ me }: { me: Pick<Me, "id" | "roles" | "capabilities"> }) {
+export function PaperworkPage({ me, initialOpenId = null, onOpenChange }: {
+  me: Pick<Me, "id" | "roles" | "capabilities">;
+  /** The open placement from the URL (/paperwork/<placementId>); its page replaces the queue. */
+  initialOpenId?: string | null;
+  onOpenChange?: (id: string | null) => void;
+}) {
+  const [openId, setOpenId] = useRoutedId(initialOpenId, onOpenChange);
   const templates = useQuery({ queryKey: paperworkKeys.templates, queryFn: paperworkApi.templates, retry: false });
   const [tab, setTab] = useState<"queue" | "templates">("queue");
   const showTemplates = templates.isSuccess;
+  if (openId) return <PaperworkWorkspace key={openId} placementId={openId} me={me} onBack={() => setOpenId(null)} />;
   return (
     <>
       <div>
@@ -56,14 +50,14 @@ export function PaperworkPage({ me }: { me: Pick<Me, "id" | "roles" | "capabilit
       )}
       {tab === "templates" && templates.data
         ? <TemplatesPanel templates={templates.data.templates} canPublish={templates.data.canPublish} />
-        : <WorkQueue me={me} />}
+        : <WorkQueue onOpen={setOpenId} />}
     </>
   );
 }
 
 const VIEWS = [["outstanding", "Outstanding"], ["overdue", "Overdue"], ["all", "All"]] as const;
 
-function WorkQueue({ me }: { me: Pick<Me, "id" | "roles" | "capabilities"> }) {
+function WorkQueue({ onOpen }: { onOpen: (placementId: string) => void }) {
   const [view, setViewRaw] = useState<"outstanding" | "overdue" | "all">("outstanding");
   const [ownerRole, setOwnerRaw] = useState("");
   const [mine, setMineRaw] = useState(false);
@@ -72,7 +66,6 @@ function WorkQueue({ me }: { me: Pick<Me, "id" | "roles" | "capabilities"> }) {
   const [placementType, setTypeRaw] = useState("");
   const pager = useCursorPager();
   const { page, reset } = pager;
-  const [openId, setOpenId] = useState<string | null>(null);
   const set = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); reset(); };
 
   const filters: QueueFilters = { view, ownerRole, mine, bgcStatus, placementStatus, placementType, cursor: pager.cursor ?? "", limit: PAGE_SIZE };
@@ -134,7 +127,7 @@ function WorkQueue({ me }: { me: Pick<Me, "id" | "roles" | "capabilities"> }) {
           <div className="tablewrap"><table aria-label="Paperwork queue" aria-busy={q.isFetching || undefined}>
             <thead><tr><th>Candidate</th><th>Placement</th><th>Checklist</th><th>Next due</th><th>BGC</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
-              {rows.map((r) => <QueueTableRow key={r.placementId} r={r} onOpen={() => setOpenId(r.placementId)} />)}
+              {rows.map((r) => <QueueTableRow key={r.placementId} r={r} onOpen={() => onOpen(r.placementId)} />)}
               {rows.length === 0 && (
                 <tr><td colSpan={6} className="empty">{hasFilters ? "No placements match these filters." : "Nothing outstanding. New placements appear here with their paperwork."}</td></tr>
               )}
@@ -146,7 +139,6 @@ function WorkQueue({ me }: { me: Pick<Me, "id" | "roles" | "capabilities"> }) {
         <p role="status" aria-live="polite" className="muted">{countMsg}</p>
         <Pager pager={pager} label="Paperwork pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
       </div>
-      {openId && <PaperworkDrawer placementId={openId} me={me} onClose={() => setOpenId(null)} />}
     </>
   );
 }
@@ -156,7 +148,9 @@ function QueueTableRow({ r, onOpen }: { r: QueueRow; onOpen: () => void }) {
   const name = r.candidate.name ?? "Candidate";
   return (
     <tr>
-      <td><b>{name}</b><span className="block">{r.recruiter.name}</span></td>
+      <td><a className="rowlink" href={screenPath("paperwork", r.placementId)}
+        onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; e.preventDefault(); onOpen(); }}>{name}</a>
+        <span className="block">{r.recruiter.name}</span></td>
       <td>{r.placement ? (
         <><PipelineStatus status={r.placement.status} /><span className="block">
           {PLACEMENT_TYPE_LABELS[r.placement.placementType as PlacementType] ?? r.placement.placementType}
@@ -171,395 +165,6 @@ function QueueTableRow({ r, onOpen }: { r: QueueRow; onOpen: () => void }) {
       <td><BgcBadge status={r.bgc.status} /></td>
       <td className="rowactions"><button type="button" className="btn sm" onClick={onOpen} aria-label={`Open paperwork of ${name}`}>Open</button></td>
     </tr>
-  );
-}
-
-function PaperworkDrawer({ placementId, me, onClose }: { placementId: string; me: Pick<Me, "id" | "roles">; onClose: () => void }) {
-  const hid = useId();
-  const qc = useQueryClient();
-  const q = useQuery({ queryKey: paperworkKeys.detail(placementId), queryFn: () => paperworkApi.detail(placementId) });
-  const [editItem, setEditItem] = useState<PaperworkItem | null>(null);
-  const [editBgc, setEditBgc] = useState(false);
-  const [historyOf, setHistoryOf] = useState<string | null>(null);
-  const [message, setMessage] = useState("");
-  const d = q.data;
-  const done = (m: string) => {
-    setMessage(m);
-    void qc.invalidateQueries({ queryKey: paperworkKeys.all });
-    void qc.invalidateQueries({ queryKey: ["placements"] });
-  };
-  return (
-    <>
-      <Drawer title={d ? `Paperwork · ${d.candidate.name ?? "Candidate"}` : "Paperwork"} onClose={onClose} wide
-        suspended={editItem !== null || editBgc} closeLabel="Close paperwork details">
-        {q.isLoading ? <Loading /> : !d ? <p className="error" role="alert">{paperworkError(q.error)}</p> : (
-          <>
-            <dl className="facts">
-              <dt>Candidate</dt><dd>{d.candidate.name ?? "—"}</dd>
-              <dt>Recruiter</dt><dd>{d.recruiter.name ?? "—"}</dd>
-              {d.placement && <>
-                <dt>Placement</dt><dd><PipelineStatus status={d.placement.status} /> {PLACEMENT_TYPE_LABELS[d.placement.placementType as PlacementType] ?? d.placement.placementType}</dd>
-                <dt>Client</dt><dd>{d.placement.client?.name ?? "—"}</dd>
-                <dt>Tentative start</dt><dd>{fmtDate(d.placement.tentativeStart)}</dd>
-              </>}
-            </dl>
-            <p role="status" aria-live="polite" className="livemsg">{message}</p>
-
-            <section className="manageblock" aria-labelledby={`${hid}-k`}>
-              <h3 id={`${hid}-k`}>Paperwork checklist</h3>
-              {d.items.length === 0 ? <p className="muted">No paperwork checklist for this placement.</p> : (
-                <>
-                  <p className="muted">{d.checklist.total - d.checklist.open} of {d.checklist.total} done
-                    {d.checklist.overdue > 0 && `, ${d.checklist.overdue} overdue`}.</p>
-                  <div className="tablewrap"><table className="mini" aria-labelledby={`${hid}-k`}>
-                    <thead><tr><th>Document</th><th>Owner</th><th>Status</th><th>Due</th><th><span className="sr-only">Actions</span></th></tr></thead>
-                    <tbody>
-                      {d.items.map((i) => (
-                        <tr key={i.id}>
-                          <td>{docTypeLabel(i.docType)}<span className="block">{i.required ? "Required" : "Optional"}
-                            {i.assignee && ` · ${i.assignee.name ?? "assigned"}`}{i.documentId && " · document linked"}</span>
-                            {i.notes && <span className="block note">{i.notes}</span>}</td>
-                          <td><RoleName k={i.ownerRole} /></td>
-                          <td><span className={`badge cl-${i.status}`}>{paperworkLabel(i.status)}</span>
-                            {i.statusReason && <span className="block muted">{i.statusReason}</span>}</td>
-                          <td>{i.dueOn ? fmtDate(i.dueOn) : <span className="muted">—</span>}{i.overdue && <> <span className="badge overdue">Overdue</span></>}</td>
-                          <td className="rowactions">
-                            {(i.actions.transition.length > 0 || i.actions.editNotes || i.actions.assign) && (
-                              <button type="button" className="btn sm" onClick={() => setEditItem(i)} aria-label={`Update ${docTypeLabel(i.docType)}`}>Update</button>
-                            )}
-                            <button type="button" className="btn sm" aria-expanded={historyOf === i.id}
-                              onClick={() => setHistoryOf(historyOf === i.id ? null : i.id)} aria-label={`History of ${docTypeLabel(i.docType)}`}>History</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table></div>
-                  {historyOf && <ItemHistory itemId={historyOf} label={docTypeLabel(d.items.find((i) => i.id === historyOf)?.docType ?? "")} />}
-                </>
-              )}
-            </section>
-
-            {/* Upload and open documents here (0043); a placement the caller cannot read files them on the candidate. */}
-            <DocumentsSection owner={d.placement ? { kind: "placement", id: placementId } : { kind: "candidate", id: d.candidate.id }}
-              title={d.placement ? "Placement documents" : "Candidate documents"} />
-
-            <BgcSection hid={hid} bgc={d.bgc} onEdit={() => setEditBgc(true)} />
-            <BgcNotes key={d.bgc.version ?? 0} hid={hid} placementId={placementId} bgc={d.bgc} onDone={done} />
-          </>
-        )}
-      </Drawer>
-      {d && editItem && (
-        <ItemDialog item={editItem} me={me} candidateId={d.candidate.id} placementId={placementId} onClose={() => setEditItem(null)}
-          onDone={(m) => { setEditItem(null); done(m); }} />
-      )}
-      {d && editBgc && (
-        <BgcDialog placementId={placementId} bgc={d.bgc} onClose={() => setEditBgc(false)}
-          onDone={(m) => { setEditBgc(false); done(m); }} />
-      )}
-    </>
-  );
-}
-
-const CHANGED_LABELS: Record<string, string> = {
-  status: "status", owner_role: "owner role", assignee: "assignee", due_on: "due date", notes: "notes", document: "document link",
-  bgc_company: "BGC company", initiated_on: "initiated date", completed_on: "completed date", helped_by: "helped by",
-  education_level: "education level", employment_years: "employment years", address_years: "address years",
-};
-
-function HistoryList({ entries, label }: { entries: HistoryEntry[]; label: string }) {
-  if (entries.length === 0) return <p className="muted">No changes yet.</p>;
-  return (
-    <ul className="history" aria-label={label}>
-      {entries.map((e, k) => (
-        <li key={k}>
-          <b>{fmtDateTime(e.at)}</b> · {e.actor?.name ?? "System"}:{" "}
-          {e.from !== null && e.to !== null ? `${paperworkLabel(e.from)} → ${paperworkLabel(e.to)}` : "updated"}
-          {e.changed.filter((c) => c !== "status").length > 0 && ` (${e.changed.filter((c) => c !== "status").map((c) => CHANGED_LABELS[c] ?? c).join(", ")})`}
-          {e.reason && <span className="block muted">Reason: {e.reason}</span>}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function ItemHistory({ itemId, label }: { itemId: string; label: string }) {
-  const q = useQuery({ queryKey: paperworkKeys.history(itemId), queryFn: () => paperworkApi.itemHistory(itemId) });
-  return q.isLoading ? <p className="muted">Loading history…</p> : q.error ? <p className="error" role="alert">{paperworkError(q.error)}</p>
-    : <HistoryList entries={q.data!.items} label={`History of ${label}`} />;
-}
-
-function BgcSection({ hid, bgc, onEdit }: { hid: string; bgc: Bgc; onEdit: () => void }) {
-  return (
-    <section className="manageblock" aria-labelledby={`${hid}-b`}>
-      <h3 id={`${hid}-b`}>Background check</h3>
-      <dl className="facts">
-        <dt>Status</dt><dd><BgcBadge status={bgc.status} />{bgc.statusReason && <span className="block muted">{bgc.statusReason}</span>}</dd>
-        <dt>BGC company</dt><dd>{bgc.bgcCompany ?? "—"}</dd>
-        <dt>Initiated</dt><dd>{fmtDate(bgc.initiatedOn)}</dd>
-        <dt>Education level</dt><dd>{bgc.educationLevel ?? "—"}</dd>
-        <dt>Employment history</dt><dd>{yearsText(bgc.employmentYears)}</dd>
-        <dt>Address history</dt><dd>{yearsText(bgc.addressYears)}</dd>
-      </dl>
-      {bgc.actions.update && <button type="button" className="btn sm" style={{ alignSelf: "flex-start" }} onClick={onEdit}>Update background check</button>}
-      <HistoryList entries={bgc.history} label="Background check history" />
-    </section>
-  );
-}
-
-/** The BGC record's notes, saved in place by whoever may update the check; read-only for everyone else. */
-function BgcNotes({ hid, placementId, bgc, onDone }: { hid: string; placementId: string; bgc: Bgc; onDone: (m: string) => void }) {
-  const [notes, setNotes] = useState(bgc.notes ?? "");
-  const submit = useSubmit(paperworkError);
-  const changed = notes.trim() !== (bgc.notes ?? "");
-  return (
-    <section className="manageblock" aria-labelledby={`${hid}-n`}>
-      <h3 id={`${hid}-n`}>Notes</h3>
-      {!bgc.actions.update ? <p className={bgc.notes ? undefined : "muted"}>{bgc.notes ?? "No notes yet."}</p> : (
-        <form noValidate onSubmit={(e) => {
-          e.preventDefault();
-          void submit.run(async () => {
-            await paperworkApi.updateBgc(placementId, { notes: notes.trim() || null, ...(bgc.version === null ? {} : { expectedVersion: bgc.version }) });
-            onDone("Notes saved.");
-          });
-        }}>
-          <Field label="Add or edit notes" hint="Up to 1000 characters. Avoid personal data." error={submit.error || undefined}>
-            {(p) => <textarea {...p} rows={3} maxLength={1000} value={notes} onChange={(e) => setNotes(e.target.value)} />}
-          </Field>
-          <button type="submit" className="btn sm" style={{ alignSelf: "flex-start" }} disabled={!changed || submit.busy}>Save notes</button>
-        </form>
-      )}
-    </section>
-  );
-}
-
-/**
- * Documents (0043) of the item's candidate that may be linked: candidate-level ones and
- * those filed on this placement. The list follows the caller's document scope (restricted
- * documents only for roles that read them); the server checks the link again (PW-5).
- */
-function DocumentPicker({ candidateId, placementId, current, value, onChange }: {
-  candidateId: string; placementId: string; current: string | null; value: string; onChange: (v: string) => void;
-}) {
-  const q = useQuery({ queryKey: documentKeys.list({ kind: "candidate", id: candidateId }), queryFn: () => documentsApi.list({ kind: "candidate", id: candidateId }) });
-  const docs = (q.data?.items ?? []).filter((d) => (d.placementId === null || d.placementId === placementId)
-    && (d.status === "pending" || d.status === "clean"));
-  return (
-    <Field label="Linked document" hint={q.isError ? "Documents could not be loaded." : "Upload new files in the Documents section of this drawer."}>
-      {(p) => (
-        <select {...p} value={value} onChange={(e) => onChange(e.target.value)}>
-          <option value="">No document</option>
-          {current && !docs.some((d) => d.id === current) && <option value={current}>Current document</option>}
-          {docs.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.docTypeLabel} · {fmtDate(d.createdAt)}{d.placementId ? " · this placement" : ""}{d.status === "pending" ? " (scanning)" : ""}
-            </option>
-          ))}
-        </select>
-      )}
-    </Field>
-  );
-}
-
-function ItemDialog({ item, me, candidateId, placementId, onClose, onDone }: {
-  item: PaperworkItem; me: Pick<Me, "id" | "roles">; candidateId: string; placementId: string;
-  onClose: () => void; onDone: (m: string) => void;
-}) {
-  const formRef = useRef<HTMLFormElement>(null);
-  const [status, setStatus] = useState("");
-  const [reason, setReason] = useState("");
-  const [ownerRole, setOwnerRole] = useState(item.ownerRole);
-  const [assignee, setAssignee] = useState(item.assignee?.id ?? "");
-  const [dueOn, setDueOn] = useState(item.dueOn ?? "");
-  const [notes, setNotes] = useState(item.notes ?? "");
-  const [docId, setDocId] = useState(item.documentId ?? "");
-  const [fieldErr, setFieldErr] = useState<{ reason?: string; form?: string }>({});
-  const submit = useSubmit(paperworkError);
-  const a = item.actions;
-  const iHoldOwner = me.roles.some((r) => r.key === ownerRole);
-  const needsReason = status !== "" && ITEM_REASON_REQUIRED.has(status);
-  const name = docTypeLabel(item.docType);
-
-  const build = (): ItemChange => {
-    const b: ItemChange = { expectedVersion: item.version };
-    if (status) { b.status = status; if (reason.trim()) b.reason = reason.trim(); }
-    if (a.assign) {
-      if (ownerRole !== item.ownerRole) b.ownerRole = ownerRole;
-      if (assignee !== (item.assignee?.id ?? "")) b.assigneeId = assignee || null;
-      if (dueOn !== (item.dueOn ?? "")) b.dueOn = dueOn || null;
-    }
-    if (a.editNotes && notes.trim() !== (item.notes ?? "")) b.notes = notes.trim() || null;
-    if (a.editNotes && docId !== (item.documentId ?? "")) b.documentId = docId || null;
-    return b;
-  };
-
-  return (
-    <Dialog title={`Update ${name}`} onClose={onClose}>
-      <form ref={formRef} noValidate onSubmit={(e) => {
-        e.preventDefault();
-        const b = build();
-        if (needsReason && !reason.trim()) { setFieldErr({ reason: "Give a reason." }); formRef.current?.querySelector<HTMLElement>("textarea")?.focus(); return; }
-        if (Object.keys(b).length === 1) { setFieldErr({ form: "Change at least one field." }); return; }
-        setFieldErr({});
-        void submit.run(async () => {
-          const r = await paperworkApi.updateItem(item.id, b);
-          onDone(b.status ? `${name} marked ${paperworkLabel(r.status)}.` : `${name} updated.`);
-        });
-      }}>
-        {a.transition.length > 0 && (
-          <Field label="Status" hint={`Now ${paperworkLabel(item.status)}.`}>
-            {(p) => (
-              <select {...p} value={status} onChange={(e) => setStatus(e.target.value)} data-autofocus>
-                <option value="">No change</option>
-                {a.transition.map((t) => <option key={t} value={t}>{t === "pending" ? "Back to pending (return or reopen)" : paperworkLabel(t)}</option>)}
-              </select>
-            )}
-          </Field>
-        )}
-        {status !== "" && (
-          <Field label={needsReason ? "Reason" : "Reason (optional)"} hint="Up to 500 characters. Visible to paperwork roles; never in the audit log." error={fieldErr.reason}>
-            {(p) => <textarea {...p} rows={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />}
-          </Field>
-        )}
-        {a.assign && (
-          <div className="grid2">
-            <Field label="Owner role">
-              {(p) => (
-                <select {...p} value={ownerRole} onChange={(e) => setOwnerRole(e.target.value)}>
-                  <RoleOptions />
-                </select>
-              )}
-            </Field>
-            <Field label="Due date">
-              {(p) => <input {...p} type="date" min="2000-01-01" max="2100-12-31" value={dueOn} onChange={(e) => setDueOn(e.target.value)} />}
-            </Field>
-            <Field label="Assignee" hint="Assignees must hold the owner role.">
-              {(p) => (
-                <select {...p} value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-                  <option value="">Unassigned</option>
-                  {item.assignee && item.assignee.id !== me.id && <option value={item.assignee.id}>{item.assignee.name ?? "Current assignee"}</option>}
-                  {(iHoldOwner || assignee === me.id) && <option value={me.id}>Me</option>}
-                </select>
-              )}
-            </Field>
-          </div>
-        )}
-        {a.editNotes && (
-          <Field label="Notes" hint="Up to 1000 characters. Avoid personal data such as numbers from documents.">
-            {(p) => <textarea {...p} rows={3} maxLength={1000} value={notes} onChange={(e) => setNotes(e.target.value)} />}
-          </Field>
-        )}
-        {a.editNotes && <DocumentPicker candidateId={candidateId} placementId={placementId} current={item.documentId} value={docId} onChange={setDocId} />}
-        {fieldErr.form && <p className="error" role="alert">{fieldErr.form}</p>}
-        <DialogActions onCancel={onClose} submitLabel="Save" busy={submit.busy} error={submit.error} />
-      </form>
-    </Dialog>
-  );
-}
-
-/** "7 years" / "1 year" (BGC history depth, whole years 1-50 since migration 0400). */
-const yearsText = (n: number | null) => (n === null ? "—" : `${n} ${n === 1 ? "year" : "years"}`);
-
-/** Employment / address history depth: typed in as whole years, with a "years" unit; blank = not recorded. */
-function YearsInput({ value, onChange, ...p }: { id: string; "aria-invalid"?: true; "aria-describedby"?: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <span className="unitinput">
-      <input {...p} type="number" inputMode="numeric" min={BGC_HISTORY_YEARS_MIN} max={BGC_HISTORY_YEARS_MAX} step={1}
-        placeholder="—" value={value} onChange={(e) => onChange(e.target.value)} />
-      <span className="unit" aria-hidden="true">years</span>
-    </span>
-  );
-}
-
-/** "" or a whole number of years in range; otherwise the field error. */
-const yearsError = (v: string) => {
-  if (v.trim() === "") return undefined;
-  const n = Number(v);
-  return Number.isInteger(n) && n >= BGC_HISTORY_YEARS_MIN && n <= BGC_HISTORY_YEARS_MAX ? undefined : `Whole years, ${BGC_HISTORY_YEARS_MIN}-${BGC_HISTORY_YEARS_MAX}.`;
-};
-
-function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string; bgc: Bgc; onClose: () => void; onDone: (m: string) => void }) {
-  const [status, setStatus] = useState("");
-  const [reason, setReason] = useState("");
-  const [company, setCompany] = useState(bgc.bgcCompany ?? "");
-  const [initiatedOn, setInitiated] = useState(bgc.initiatedOn ?? "");
-  const [education, setEducation] = useState(bgc.educationLevel ?? "");
-  const [employment, setEmployment] = useState(bgc.employmentYears === null ? "" : String(bgc.employmentYears));
-  const [address, setAddress] = useState(bgc.addressYears === null ? "" : String(bgc.addressYears));
-  const [failPlacement, setFailPlacement] = useState(false);
-  const [err, setErr] = useState<{ reason?: string; employment?: string; address?: string; form?: string }>({});
-  const submit = useSubmit(paperworkError);
-  const willFail = status === "failed" || (status === "" && bgc.status === "failed");
-  const needsReason = status !== "" && bgcReasonRequired(bgc.status, status);
-  const hid = useId();
-
-  const build = (): BgcChange => {
-    const b: BgcChange = bgc.version === null ? {} : { expectedVersion: bgc.version };
-    const text = (v: string, old: string | null, k: "bgcCompany" | "educationLevel") => { if (v.trim() !== (old ?? "")) b[k] = v.trim() || null; };
-    const num = (v: string, old: number | null, k: "employmentYears" | "addressYears") => { const t = v.trim(); if (t !== (old === null ? "" : String(old))) b[k] = t === "" ? null : Number(t); };
-    if (status) { b.status = status; if (reason.trim()) b.reason = reason.trim(); }
-    text(company, bgc.bgcCompany, "bgcCompany");
-    if (initiatedOn !== (bgc.initiatedOn ?? "")) b.initiatedOn = initiatedOn || null;
-    text(education, bgc.educationLevel, "educationLevel");
-    num(employment, bgc.employmentYears, "employmentYears");
-    num(address, bgc.addressYears, "addressYears");
-    if (failPlacement && willFail && bgc.actions.failPlacement) b.failPlacement = true;
-    return b;
-  };
-
-  return (
-    <Dialog title="Update background check" onClose={onClose}>
-      <form noValidate onSubmit={(e) => {
-        e.preventDefault();
-        const b = build();
-        if (needsReason && !reason.trim()) { setErr({ reason: "Give a reason." }); e.currentTarget.querySelector<HTMLElement>("textarea")?.focus(); return; }
-        const yErr = { employment: yearsError(employment), address: yearsError(address) };
-        if (yErr.employment || yErr.address) { setErr(yErr); e.currentTarget.querySelector<HTMLElement>("[aria-invalid]")?.focus(); return; }
-        if (Object.keys(b).filter((k) => k !== "expectedVersion").length === 0) { setErr({ form: "Change at least one field." }); return; }
-        setErr({});
-        void submit.run(async () => {
-          const r = await paperworkApi.updateBgc(placementId, b);
-          onDone(b.failPlacement ? "Background check failed; placement marked BGC failed." : `Background check ${b.status ? `marked ${paperworkLabel(r.status)}` : "updated"}.`);
-        });
-      }}>
-        {bgc.actions.transition.length > 0 && (
-          <Field label="Status" hint={`Now ${paperworkLabel(bgc.status)}.`}>
-            {(p) => (
-              <select {...p} value={status} onChange={(e) => setStatus(e.target.value)} data-autofocus>
-                <option value="">No change</option>
-                {bgc.actions.transition.map((t) => <option key={t} value={t}>{bgc.status === "cleared" && t === "initiated" ? "Re-initiate (more documents needed)" : paperworkLabel(t)}</option>)}
-              </select>
-            )}
-          </Field>
-        )}
-        {status !== "" && (
-          <Field label={needsReason ? "Reason" : "Reason (optional)"} hint="Up to 500 characters; never in the audit log." error={err.reason}>
-            {(p) => <textarea {...p} rows={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />}
-          </Field>
-        )}
-        {willFail && bgc.actions.failPlacement && (
-          <label className="check"><input type="checkbox" checked={failPlacement} onChange={(e) => setFailPlacement(e.target.checked)} />
-            {" "}Also mark the placement BGC failed (same rules as on Placements)</label>
-        )}
-        <section className="formsect" aria-labelledby={`${hid}-check`}>
-          <h4 id={`${hid}-check`}>Check details</h4>
-          <div className="grid2">
-            <Field label="BGC company">{(p) => <input {...p} maxLength={120} value={company} onChange={(e) => setCompany(e.target.value)} />}</Field>
-            <Field label="Initiated on">{(p) => <input {...p} type="date" value={initiatedOn} onChange={(e) => setInitiated(e.target.value)} />}</Field>
-          </div>
-        </section>
-        <section className="formsect" aria-labelledby={`${hid}-verified`}>
-          <h4 id={`${hid}-verified`}>Verified history</h4>
-          <Field label="Education level">{(p) => <input {...p} maxLength={60} placeholder="e.g. Master's" value={education} onChange={(e) => setEducation(e.target.value)} />}</Field>
-          <div className="grid2">
-            <Field label="Employment history" error={err.employment}>{(p) => <YearsInput {...p} value={employment} onChange={setEmployment} />}</Field>
-            <Field label="Address history" error={err.address}>{(p) => <YearsInput {...p} value={address} onChange={setAddress} />}</Field>
-          </div>
-          <p className="hint">Years checked back. Leave blank if not recorded.</p>
-        </section>
-        {err.form && <p className="error" role="alert">{err.form}</p>}
-        <DialogActions onCancel={onClose} submitLabel="Save" busy={submit.busy} error={submit.error} />
-      </form>
-    </Dialog>
   );
 }
 

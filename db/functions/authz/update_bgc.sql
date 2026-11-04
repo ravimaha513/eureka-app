@@ -1,5 +1,6 @@
 -- authz.update_bgc: current definition (repeatable; db/functions/README.md).
 -- Earlier bodies: migrations 0044, 0053. Change this file, not a new migration.
+-- actualStart (0450): clearing the check records the placement's actual start date.
 
 SET ROLE authz_definer;
 
@@ -14,7 +15,7 @@ DECLARE
   pl record; b record;
   pl_from text; pl_to text; c_from text; c_to text;
   to_st text; reason text;
-  v_company text; v_init date; v_done date; v_helper uuid; v_edu text; v_emp smallint; v_addr smallint; v_notes text;
+  v_company text; v_init date; v_done date; v_helper uuid; v_edu text; v_emp smallint; v_addr smallint; v_notes text; v_start date;
   ch text[] := ARRAY[]::text[];
   fail_pl boolean := false;
 BEGIN
@@ -34,7 +35,8 @@ BEGIN
      OR NOT EXISTS (SELECT 1 FROM pg_catalog.jsonb_object_keys(p_changes))
      OR EXISTS (SELECT 1 FROM pg_catalog.jsonb_object_keys(p_changes) k
                 WHERE k NOT IN ('status', 'reason', 'bgcCompany', 'initiatedOn', 'completedOn', 'helpedBy',
-                                'educationLevel', 'employmentYears', 'addressYears', 'notes', 'failPlacement'))
+                                'educationLevel', 'employmentYears', 'addressYears', 'notes', 'failPlacement',
+                                'actualStart'))
      OR coalesce(p_changes ? 'reason' AND NOT p_changes ? 'status', false) THEN
     RAISE EXCEPTION 'invalid_change' USING ERRCODE = 'check_violation';
   END IF;
@@ -77,7 +79,7 @@ BEGIN
 
   -- JSON types: strings for text/dates/ids, numbers for years, boolean flag.
   IF EXISTS (SELECT 1 FROM pg_catalog.jsonb_each(p_changes) e
-             WHERE (e.key IN ('bgcCompany', 'initiatedOn', 'completedOn', 'helpedBy', 'educationLevel', 'notes')
+             WHERE (e.key IN ('bgcCompany', 'initiatedOn', 'completedOn', 'helpedBy', 'educationLevel', 'notes', 'actualStart')
                     AND pg_catalog.jsonb_typeof(e.value) NOT IN ('string', 'null'))
                 OR (e.key IN ('employmentYears', 'addressYears') AND pg_catalog.jsonb_typeof(e.value) NOT IN ('number', 'null'))
                 OR (e.key = 'failPlacement' AND pg_catalog.jsonb_typeof(e.value) IS DISTINCT FROM 'boolean')) THEN
@@ -92,6 +94,7 @@ BEGIN
     v_emp := CASE WHEN p_changes ? 'employmentYears' THEN (p_changes ->> 'employmentYears')::smallint ELSE b.employment_years END;
     v_addr := CASE WHEN p_changes ? 'addressYears' THEN (p_changes ->> 'addressYears')::smallint ELSE b.address_years END;
     v_notes := CASE WHEN p_changes ? 'notes' THEN nullif(pg_catalog.btrim(p_changes ->> 'notes'), '') ELSE b.notes END;
+    v_start := CASE WHEN p_changes ? 'actualStart' THEN (p_changes ->> 'actualStart')::date ELSE pl.actual_start END;
   EXCEPTION WHEN others THEN
     RAISE EXCEPTION 'invalid_change' USING ERRCODE = 'check_violation';
   END;
@@ -115,6 +118,20 @@ BEGIN
     RAISE EXCEPTION 'invalid_change' USING ERRCODE = 'check_violation';
   END IF;
 
+  -- The actual start belongs to a cleared check: required when clearing it, editable
+  -- while it stays cleared, never cleared to null there, and not set on any other status.
+  IF p_changes ? 'actualStart' AND to_st IS DISTINCT FROM 'cleared' THEN
+    RAISE EXCEPTION 'invalid_change' USING ERRCODE = 'check_violation';
+  END IF;
+  IF coalesce(to_st = 'cleared', false)
+     AND (to_st IS DISTINCT FROM b.status OR p_changes ? 'actualStart') AND v_start IS NULL THEN
+    RAISE EXCEPTION 'actual_start_required' USING ERRCODE = 'check_violation';
+  END IF;
+  IF coalesce(NOT (p_changes ->> 'actualStart') OPERATOR(pg_catalog.~) '^\d{4}-\d{2}-\d{2}$', false)
+     OR coalesce(v_start NOT BETWEEN date '2000-01-01' AND date '2100-12-31', false) THEN
+    RAISE EXCEPTION 'invalid_change' USING ERRCODE = 'check_violation';
+  END IF;
+
   BEGIN
     UPDATE eureka.bgc x
        SET status = to_st,
@@ -125,6 +142,11 @@ BEGIN
   EXCEPTION WHEN check_violation THEN
     RAISE EXCEPTION 'invalid_change' USING ERRCODE = 'check_violation';
   END;
+
+  IF v_start IS DISTINCT FROM pl.actual_start THEN
+    UPDATE eureka.placement x SET actual_start = v_start WHERE x.id = p_placement;
+    ch := ch || 'actual_start'::text;
+  END IF;
 
   IF to_st IS DISTINCT FROM b.status THEN ch := ch || 'status'::text; END IF;
   IF v_company IS DISTINCT FROM b.bgc_company THEN ch := ch || 'bgc_company'::text; END IF;

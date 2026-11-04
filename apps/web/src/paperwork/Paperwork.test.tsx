@@ -24,7 +24,7 @@ const DETAIL: PaperworkDetail = {
   ],
   bgc: {
     status: "initiated", bgcCompany: "Fictional Checks LLC", initiatedOn: "2026-01-01",
-    educationLevel: null, employmentYears: 7, addressYears: null, notes: null, statusReason: null, statusChangedAt: null, version: 2,
+    educationLevel: null, employmentYears: 7, addressYears: null, employment: [], addresses: [], notes: null, statusReason: null, statusChangedAt: null, version: 2,
     history: [{ at: "2026-01-01T10:00:00Z", actor: { id: "u-me", name: "Test User" }, from: "not_started", to: "initiated", changed: ["status", "bgc_company"], reason: null }],
     actions: { update: true, transition: ["in_progress", "cleared", "failed"], failPlacement: false },
   },
@@ -40,27 +40,36 @@ const base = (): Record<string, Handler> => ({
     { at: "2026-01-02T10:00:00Z", actor: { id: "u-me", name: "Test User" }, from: null, to: null, changed: ["due_on", "notes"], reason: null },
   ] } }),
 });
-beforeEach(() => { api = mockApi({ "GET /api/v1/lookups": () => ({ body: EMPTY_LOOKUPS }), ...base() }); });
+beforeEach(() => {
+  window.history.replaceState(null, "", "/paperwork");
+  api = mockApi({
+    "GET /api/v1/lookups": () => ({ body: EMPTY_LOOKUPS }),
+    "GET /api/v1/placements/p1/documents": () => ({ body: { canUpload: true, canUploadRestricted: false, canViewRestricted: false, items: [] } }),
+    ...base(),
+  });
+});
 afterEach(() => vi.restoreAllMocks());
 
 const lastQueue = () => api.gets("/api/v1/paperwork").at(-1)!.url.searchParams;
-const openDrawer = async () => {
-  const row = (await screen.findByText("Asha Iyer", { selector: "b" })).closest("tr")!;
-  fireEvent.click(within(row).getByRole("button", { name: "Open paperwork of Asha Iyer" }));
-  return screen.findByRole("dialog", { name: "Paperwork · Asha Iyer" });
+/** Opens Asha Iyer's page from the queue (the candidate name is the link) and, optionally, a tab. */
+const openPage = async (tab?: string) => {
+  fireEvent.click(await screen.findByRole("link", { name: "Asha Iyer" }));
+  await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
+  if (tab) fireEvent.click(screen.getByRole("tab", { name: tab }));
+  return screen.getByRole("tabpanel");
 };
 
 describe("Paperwork queue", () => {
   it("lists placements with checklist progress, overdue counts and BGC status", async () => {
     wrap(<PaperworkPage me={HR} />);
-    const row = (await screen.findByText("Asha Iyer", { selector: "b" })).closest("tr")!;
+    const row = (await screen.findByRole("link", { name: "Asha Iyer" })).closest("tr")!;
     expect(within(row).getByText(/1 of 3 done/)).toBeInTheDocument();
     expect(within(row).getByText("1 required open")).toBeInTheDocument();
     expect(within(row).getByText("1 overdue")).toHaveClass("badge", "overdue");
     expect(within(row).getByText("Initiated")).toHaveClass("badge", "bgc-initiated");
     expect(within(row).getByText("Paperwork")).toHaveClass("badge", "st-paperwork");
     // Immigration-style row: the placement itself is not readable.
-    const other = (await screen.findByText("Divya Menon", { selector: "b" })).closest("tr")!;
+    const other = (await screen.findByRole("link", { name: "Divya Menon" })).closest("tr")!;
     expect(within(other).getByText("Not visible to you")).toBeInTheDocument();
     expect(within(other).getByText("No checklist")).toBeInTheDocument();
     expect(screen.getByText("2 placements on page 1.")).toBeInTheDocument();
@@ -71,7 +80,7 @@ describe("Paperwork queue", () => {
 
   it("filters by view, owner role, assignment, BGC and placement status", async () => {
     wrap(<PaperworkPage me={HR} />);
-    await screen.findByText("Asha Iyer", { selector: "b" });
+    await screen.findByRole("link", { name: "Asha Iyer" });
     fireEvent.click(within(screen.getByRole("group", { name: "Show" })).getByRole("button", { name: "Overdue" }));
     await waitFor(() => expect(lastQueue().get("view")).toBe("overdue"));
     fireEvent.change(screen.getByRole("combobox", { name: "Owner role" }), { target: { value: "immigration" } });
@@ -94,25 +103,38 @@ describe("Paperwork queue", () => {
   });
 });
 
-describe("Paperwork drawer", () => {
-  it("shows items with notes, overdue flags, the BGC record and its history", async () => {
+describe("Paperwork page", () => {
+  it("opens from the candidate link with documents first; back returns to the queue", async () => {
     wrap(<PaperworkPage me={HR} />);
-    const drawer = await openDrawer();
-    const table = await within(drawer).findByRole("table", { name: "Paperwork checklist" });
+    const panel = await openPage();
+    expect(screen.getByRole("tab", { name: "Documents" })).toHaveAttribute("aria-selected", "true");
+    expect(await within(panel).findByRole("heading", { name: "Placement documents" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const rail = screen.getByRole("complementary", { name: "Placement summary" });
+    expect(within(rail).getByText("Northwind Financial")).toBeInTheDocument();
+    expect(within(rail).getByRole("button", { name: "1 checklist item overdue" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "← Paperwork & BGC" }));
+    expect(await screen.findByRole("table", { name: "Paperwork queue" })).toBeInTheDocument();
+  });
+
+  it("checklist tab shows items with notes, overdue flags and history; activity shows the BGC history", async () => {
+    wrap(<PaperworkPage me={HR} />);
+    const panel = await openPage("Checklist");
+    const table = await within(panel).findByRole("table", { name: "Paperwork checklist" });
     expect(within(table).getByText("Sample doc a")).toBeInTheDocument();
     expect(within(table).getByText("Overdue")).toHaveClass("badge", "overdue");
     expect(within(table).getByText("Fictional note")).toBeInTheDocument();
-    expect(within(drawer).getByText("Fictional Checks LLC")).toBeInTheDocument();
-    expect(within(drawer).getByRole("list", { name: "Background check history" })).toHaveTextContent("Not started → Initiated (BGC company)");
     fireEvent.click(within(table).getByRole("button", { name: "History of Sample doc b" }));
-    expect(await within(drawer).findByRole("list", { name: "History of Sample doc b" })).toHaveTextContent("Received → Verified");
+    expect(await within(panel).findByRole("list", { name: "History of Sample doc b" })).toHaveTextContent("Received → Verified");
+    fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
+    expect(screen.getByRole("list", { name: "Background check history" })).toHaveTextContent("Not started → Initiated (BGC company)");
   });
 
   it("marks an item received with notes and the version it was read at", async () => {
     api.routes["PATCH /api/v1/paperwork/items/i1"] = () => ({ body: { ...DETAIL.items[0], status: "received", version: 2 } });
     wrap(<PaperworkPage me={HR} />);
-    const drawer = await openDrawer();
-    fireEvent.click(await within(drawer).findByRole("button", { name: "Update Sample doc a" }));
+    const panel = await openPage("Checklist");
+    fireEvent.click(await within(panel).findByRole("button", { name: "Update Sample doc a" }));
     const dlg = screen.getByRole("dialog", { name: "Update Sample doc a" });
     expect(within(dlg).getByLabelText("Status")).toHaveFocus();
     fireEvent.change(within(dlg).getByLabelText("Status"), { target: { value: "received" } });
@@ -121,14 +143,14 @@ describe("Paperwork drawer", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Update Sample doc a" })).not.toBeInTheDocument());
     expect(api.writes()[0]).toMatchObject({ method: "PATCH", path: "/api/v1/paperwork/items/i1",
       body: { status: "received", notes: "Fictional: original seen", expectedVersion: 1 } });
-    expect(within(drawer).getByRole("status")).toHaveTextContent("Sample doc a marked Received.");
+    expect(screen.getByText("Sample doc a marked Received.")).toBeInTheDocument();
   });
 
   it("requires a reason to waive, assigns to me and sets a due date", async () => {
     api.routes["PATCH /api/v1/paperwork/items/i1"] = () => ({ body: DETAIL.items[0] });
     wrap(<PaperworkPage me={HR} />);
-    const drawer = await openDrawer();
-    fireEvent.click(await within(drawer).findByRole("button", { name: "Update Sample doc a" }));
+    const panel = await openPage("Checklist");
+    fireEvent.click(await within(panel).findByRole("button", { name: "Update Sample doc a" }));
     const dlg = screen.getByRole("dialog", { name: "Update Sample doc a" });
     fireEvent.change(within(dlg).getByLabelText("Status"), { target: { value: "waived" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
@@ -153,14 +175,12 @@ describe("Paperwork drawer", () => {
       doc("d-cand", {}), doc("d-here", { placementId: "p1", docTypeLabel: "Form I-9" }),
       doc("d-other", { placementId: "p-old", docTypeLabel: "Other placement" }), doc("d-bad", { status: "infected", docTypeLabel: "Blocked" }),
     ] } });
-    api.routes["GET /api/v1/placements/p1/documents"] = () => ({ body: { ...listing, items: [] } });
     api.routes["GET /api/auth/step-up"] = () => ({ body: { active: false, expiresAt: null, method: null, mode: "dev", ttlMinutes: 10 } });
     let reply: "ok" | "bad" = "bad";
     api.routes["PATCH /api/v1/paperwork/items/i1"] = () => (reply === "bad" ? problem(422, { detail: "invalid_document" }) : { body: DETAIL.items[0] });
     wrap(<PaperworkPage me={HR} />);
-    const drawer = await openDrawer();
-    expect(await within(drawer).findByRole("heading", { name: "Placement documents" })).toBeInTheDocument();
-    fireEvent.click(await within(drawer).findByRole("button", { name: "Update Sample doc a" }));
+    const panel = await openPage("Checklist");
+    fireEvent.click(await within(panel).findByRole("button", { name: "Update Sample doc a" }));
     const dlg = screen.getByRole("dialog", { name: "Update Sample doc a" });
     const picker = within(dlg).getByLabelText("Linked document");
     await waitFor(() => expect(within(picker).getAllByRole("option").map((o) => o.textContent)).toEqual([
@@ -177,8 +197,8 @@ describe("Paperwork drawer", () => {
   it("maps a lost update and refuses an empty change", async () => {
     api.routes["PATCH /api/v1/paperwork/items/i1"] = () => problem(409, { detail: "version_mismatch" });
     wrap(<PaperworkPage me={HR} />);
-    const drawer = await openDrawer();
-    fireEvent.click(await within(drawer).findByRole("button", { name: "Update Sample doc a" }));
+    const panel = await openPage("Checklist");
+    fireEvent.click(await within(panel).findByRole("button", { name: "Update Sample doc a" }));
     const dlg = screen.getByRole("dialog", { name: "Update Sample doc a" });
     fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
     expect(within(dlg).getByRole("alert")).toHaveTextContent("Change at least one field.");
@@ -187,78 +207,194 @@ describe("Paperwork drawer", () => {
     fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
     expect(await within(dlg).findByText(/Someone else changed this/)).toBeInTheDocument();
   });
+});
 
-  it("records a failed check with a reason; offers to fail the placement only when allowed", async () => {
+describe("Paperwork page: background check", () => {
+  it("records a failed check with a reason inline; no placement option without the right", async () => {
     api.routes["PATCH /api/v1/paperwork/placements/p1/bgc"] = () => ({ body: { ...DETAIL.bgc, status: "failed" } });
     wrap(<PaperworkPage me={HR} />);
-    const drawer = await openDrawer();
-    fireEvent.click(await within(drawer).findByRole("button", { name: "Update background check" }));
-    let dlg = screen.getByRole("dialog", { name: "Update background check" });
-    fireEvent.change(within(dlg).getByLabelText("Status"), { target: { value: "failed" } });
-    expect(within(dlg).queryByRole("checkbox", { name: /Also mark the placement/ })).not.toBeInTheDocument();
-    fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
+    const panel = await openPage("Background check");
+    expect(within(panel).getByRole("list", { name: "Background check progress" })).toHaveTextContent(/Not started.*Initiated.*In progress.*Cleared \/ Failed/);
+    const move = within(panel).getByRole("combobox", { name: "Move to" });
+    fireEvent.click(within(panel).getByRole("button", { name: "Update status" }));
+    expect(move).toHaveAccessibleDescription(expect.stringContaining("Pick a status."));
+    fireEvent.change(move, { target: { value: "failed" } });
+    expect(within(panel).queryByRole("checkbox", { name: /Also mark the placement/ })).not.toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole("button", { name: "Update status" }));
     expect(api.writes()).toHaveLength(0);
-    fireEvent.change(within(dlg).getByLabelText("Reason"), { target: { value: "Fictional finding" } });
-    fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
+    expect(within(panel).getByLabelText("Reason")).toHaveAccessibleDescription(expect.stringContaining("Give a reason."));
+    fireEvent.change(within(panel).getByLabelText("Reason"), { target: { value: "Fictional finding" } });
+    fireEvent.click(within(panel).getByRole("button", { name: "Update status" }));
     await waitFor(() => expect(api.writes()).toHaveLength(1));
     expect(api.writes()[0]!.body).toEqual({ status: "failed", reason: "Fictional finding", expectedVersion: 2 });
-
-    // A user who also holds the placement rights gets the combined option.
-    api.routes["GET /api/v1/paperwork/placements/p1"] = () => ({ body: { ...DETAIL, bgc: { ...DETAIL.bgc, actions: { ...DETAIL.bgc.actions, failPlacement: true } } } });
-    fireEvent.click(within(drawer).getByRole("button", { name: "Close paperwork details" }));
-    const again = await openDrawer();
-    await waitFor(() => expect(within(again).getByRole("button", { name: "Update background check" })).toBeInTheDocument());
-    fireEvent.click(within(again).getByRole("button", { name: "Update background check" }));
-    dlg = screen.getByRole("dialog", { name: "Update background check" });
-    fireEvent.change(within(dlg).getByLabelText("Status"), { target: { value: "failed" } });
-    fireEvent.change(within(dlg).getByLabelText("Reason"), { target: { value: "Fictional finding" } });
-    fireEvent.click(await within(dlg).findByRole("checkbox", { name: /Also mark the placement BGC failed/ }));
-    fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(api.writes()).toHaveLength(2));
-    expect(api.writes()[1]!.body).toMatchObject({ status: "failed", failPlacement: true });
+    expect(await screen.findByText("Background check marked Failed.")).toBeInTheDocument();
   });
 
-  it("no longer shows Completed or Helped by; saves notes in place when the caller may update", async () => {
+  it("clearing the check requires the actual start date, then shows it on the placement", async () => {
+    api.routes["PATCH /api/v1/paperwork/placements/p1/bgc"] = () => ({ body: { ...DETAIL.bgc, status: "cleared" } });
+    wrap(<PaperworkPage me={HR} />);
+    const panel = await openPage("Background check");
+    expect(within(panel).queryByLabelText("Actual start date")).not.toBeInTheDocument();
+    fireEvent.change(within(panel).getByRole("combobox", { name: "Move to" }), { target: { value: "cleared" } });
+    const start = within(panel).getByLabelText("Actual start date");
+    fireEvent.click(within(panel).getByRole("button", { name: "Update status" }));
+    expect(await within(panel).findByText("Enter the actual start date.")).toBeInTheDocument();
+    expect(start).toHaveAttribute("aria-invalid", "true");
+    expect(api.writes()).toHaveLength(0);
+    fireEvent.change(start, { target: { value: "2031-01-12" } });
+    fireEvent.click(within(panel).getByRole("button", { name: "Update status" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.body).toMatchObject({ status: "cleared", actualStart: "2031-01-12" });
+  });
+
+  it("offers to fail the placement too when the caller holds that right", async () => {
+    api.routes["GET /api/v1/paperwork/placements/p1"] = () => ({ body: { ...DETAIL, bgc: { ...DETAIL.bgc, actions: { ...DETAIL.bgc.actions, failPlacement: true } } } });
+    api.routes["PATCH /api/v1/paperwork/placements/p1/bgc"] = () => ({ body: { ...DETAIL.bgc, status: "failed" } });
+    wrap(<PaperworkPage me={HR} />);
+    const panel = await openPage("Background check");
+    fireEvent.change(within(panel).getByRole("combobox", { name: "Move to" }), { target: { value: "failed" } });
+    fireEvent.change(within(panel).getByLabelText("Reason"), { target: { value: "Fictional finding" } });
+    fireEvent.click(within(panel).getByRole("checkbox", { name: /Also mark the placement BGC failed/ }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Update status" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.body).toMatchObject({ status: "failed", failPlacement: true });
+  });
+
+  it("edits check details in place and saves only what changed", async () => {
+    api.routes["PATCH /api/v1/paperwork/placements/p1/bgc"] = () => ({ body: DETAIL.bgc });
+    wrap(<PaperworkPage me={HR} />);
+    const panel = await openPage("Background check");
+    expect(within(panel).getByText("Fictional Checks LLC")).toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole("button", { name: "Edit check details" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Save" }));
+    expect(within(panel).getByRole("alert")).toHaveTextContent("Change at least one field.");
+    fireEvent.change(within(panel).getByLabelText("Education level"), { target: { value: "Master's" } });
+    fireEvent.click(within(panel).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.body).toEqual({ educationLevel: "Master's", expectedVersion: 2 });
+  });
+
+  it("saves notes in place when the caller may update; read-only otherwise", async () => {
     api.routes["PATCH /api/v1/paperwork/placements/p1/bgc"] = () => ({ body: { ...DETAIL.bgc, notes: "Fictional note" } });
     wrap(<PaperworkPage me={HR} />);
-    const drawer = await openDrawer();
-    await within(drawer).findByRole("heading", { name: "Notes" });
-    expect(within(drawer).queryByText("Completed")).not.toBeInTheDocument();
-    expect(within(drawer).queryByText("Helped by")).not.toBeInTheDocument();
-    const save = within(drawer).getByRole("button", { name: "Save notes" });
+    const panel = await openPage("Background check");
+    const save = within(panel).getByRole("button", { name: "Save notes" });
     expect(save).toBeDisabled();
-    fireEvent.change(within(drawer).getByLabelText("Add or edit notes"), { target: { value: " Fictional note " } });
+    fireEvent.change(within(panel).getByLabelText("Add or edit notes"), { target: { value: " Fictional note " } });
     fireEvent.click(save);
     await waitFor(() => expect(api.writes()).toHaveLength(1));
     expect(api.writes()[0]!.body).toEqual({ notes: "Fictional note", expectedVersion: 2 });
-    expect(await within(drawer).findByText("Notes saved.")).toBeInTheDocument();
+    expect(await screen.findByText("Notes saved.")).toBeInTheDocument();
   });
 
-  it("shows notes read-only without update rights", async () => {
-    api.routes["GET /api/v1/paperwork/placements/p1"] = () => ({ body: { ...DETAIL, bgc: { ...DETAIL.bgc, notes: "Fictional BGC note", actions: { update: false, transition: [], failPlacement: false } } } });
+  it("without update rights: no forms, notes and rows read-only", async () => {
+    api.routes["GET /api/v1/paperwork/placements/p1"] = () => ({ body: { ...DETAIL, bgc: { ...DETAIL.bgc, notes: "Fictional BGC note",
+      employment: [EMP], actions: { update: false, transition: [], failPlacement: false } } } });
     wrap(<PaperworkPage me={HR} />);
-    const drawer = await openDrawer();
-    expect(await within(drawer).findByText("Fictional BGC note")).toBeInTheDocument();
-    expect(within(drawer).queryByRole("button", { name: "Save notes" })).not.toBeInTheDocument();
+    const panel = await openPage("Background check");
+    expect(within(panel).getByText("Fictional BGC note")).toBeInTheDocument();
+    expect(within(panel).getByText("Fictional Corp")).toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: "Save notes" })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: "Update status" })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: /Add employer|Edit|Mark verified/ })).not.toBeInTheDocument();
+  });
+});
+
+const EMP = { id: "e1", kind: "employment" as const, employer: "Fictional Corp", title: "Analyst", street: null, city: null, region: null,
+  postalCode: null, country: null, startMonth: "2019-03", endMonth: "2023-06", verification: "pending" as const, notes: "Fictional employer note", version: 1 };
+const EMP2 = { ...EMP, id: "e2", employer: "Sample Works", title: null, startMonth: "2023-09", endMonth: null, verification: "verified" as const, notes: null };
+
+describe("Paperwork page: employment and address history rows", () => {
+  it("shows the years recorded before rows existed in the empty state", async () => {
+    wrap(<PaperworkPage me={HR} />);
+    const panel = await openPage("Background check");
+    expect(within(panel).getByText(/No employers recorded yet\. Recorded before history rows: 7 years checked back\./)).toBeInTheDocument();
+    expect(within(panel).getByText("No addresses recorded yet.")).toBeInTheDocument();
   });
 
-  it("types employment and address history as whole years (migration 0400)", async () => {
-    api.routes["PATCH /api/v1/paperwork/placements/p1/bgc"] = () => ({ body: { ...DETAIL.bgc, addressYears: 12 } });
+  it("adds an employer with notes; validates required fields and month order", async () => {
+    api.routes["POST /api/v1/paperwork/placements/p1/bgc/entries"] = () => ({ status: 201, body: { ...DETAIL.bgc, employment: [EMP] } });
     wrap(<PaperworkPage me={HR} />);
-    const drawer = await openDrawer();
-    expect(within(drawer).getByText("7 years")).toBeInTheDocument();
-    fireEvent.click(await within(drawer).findByRole("button", { name: "Update background check" }));
-    const dlg = screen.getByRole("dialog", { name: "Update background check" });
-    expect(within(dlg).getByRole("spinbutton", { name: "Employment history" })).toHaveValue(7);
-    const address = within(dlg).getByRole("spinbutton", { name: "Address history" });
-    fireEvent.change(address, { target: { value: "60" } });
-    fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
-    expect(await within(dlg).findByText("Whole years, 1-50.")).toBeInTheDocument();
+    const panel = await openPage("Background check");
+    fireEvent.click(within(panel).getByRole("button", { name: "+ Add employer" }));
+    const form = within(panel).getByRole("form", { name: "Add employer" });
+    fireEvent.click(within(form).getByRole("button", { name: "Add employer" }));
+    expect(within(form).getByLabelText("Employer")).toHaveAccessibleDescription(expect.stringContaining("Enter the employer."));
+    expect(within(form).getByLabelText("From")).toHaveAccessibleDescription(expect.stringContaining("Pick the first month."));
+    fireEvent.change(within(form).getByLabelText("Employer"), { target: { value: " Fictional Corp " } });
+    fireEvent.change(within(form).getByLabelText("Title (optional)"), { target: { value: "Analyst" } });
+    fireEvent.change(within(form).getByLabelText("From"), { target: { value: "2019-03" } });
+    fireEvent.change(within(form).getByLabelText("To"), { target: { value: "2018-01" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Add employer" }));
+    expect(within(form).getByLabelText("To")).toHaveAccessibleDescription(expect.stringContaining("“To” must be on or after “From”."));
     expect(api.writes()).toHaveLength(0);
-    fireEvent.change(address, { target: { value: "12" } });
-    fireEvent.click(within(dlg).getByRole("button", { name: "Save" }));
+    fireEvent.change(within(form).getByLabelText("To"), { target: { value: "2023-06" } });
+    fireEvent.change(within(form).getByLabelText("Notes (optional)"), { target: { value: "Fictional employer note" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Add employer" }));
     await waitFor(() => expect(api.writes()).toHaveLength(1));
-    expect(api.writes()[0]!.body).toEqual({ addressYears: 12, expectedVersion: 2 });
+    expect(api.writes()[0]).toMatchObject({ method: "POST", path: "/api/v1/paperwork/placements/p1/bgc/entries", body: {
+      kind: "employment", employer: "Fictional Corp", title: "Analyst", notes: "Fictional employer note",
+      startMonth: "2019-03", endMonth: "2023-06", verification: "pending" } });
+    expect(await screen.findByText("Fictional Corp added.")).toBeInTheDocument();
+  });
+
+  it("lists rows with notes, flags gaps, marks one verified and edits another", async () => {
+    api.routes["GET /api/v1/paperwork/placements/p1"] = () => ({ body: { ...DETAIL, bgc: { ...DETAIL.bgc, employment: [EMP2, EMP] } } });
+    api.routes["PATCH /api/v1/paperwork/placements/p1/bgc/entries/e1"] = () => ({ body: DETAIL.bgc });
+    wrap(<PaperworkPage me={HR} />);
+    const panel = await openPage("Background check");
+    const table = within(panel).getByRole("table", { name: "Employment history, newest first" });
+    const row = within(table).getByRole("button", { name: "Edit Fictional Corp" }).closest("tr")!;
+    expect(row).toHaveTextContent("Fictional employer note");
+    expect(within(row).getByText("Pending")).toHaveClass("badge", "ver-pending");
+    expect(within(table).getByText("Present")).toBeInTheDocument();
+    expect(within(panel).getByRole("note")).toHaveTextContent(/Gap: Jul 2023 – Aug 2023 \(2 mo\)/);
+    expect(screen.getByRole("tab", { name: "Background check" }).querySelector(".tabdot")).not.toBeNull();
+    fireEvent.click(within(row).getByRole("button", { name: "Mark verified Fictional Corp" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.body).toEqual({ verification: "verified", expectedVersion: 1 });
+
+    fireEvent.click(within(row).getByRole("button", { name: "Edit Fictional Corp" }));
+    const form = within(panel).getByRole("form", { name: "Edit Fictional Corp" });
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+    expect(within(form).getByRole("alert")).toHaveTextContent("Change at least one field.");
+    fireEvent.click(within(form).getByRole("checkbox", { name: "Currently works here" }));
+    fireEvent.change(within(form).getByLabelText("Notes (optional)"), { target: { value: "" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(2));
+    expect(api.writes()[1]!.body).toEqual({ notes: null, endMonth: null, expectedVersion: 1 });
+  });
+
+  it("adds an address without a street and removes one after confirming", async () => {
+    const ADDR = { ...EMP, id: "a1", kind: "address" as const, employer: null, title: null, street: "1 Fictional Way", city: "Old Town",
+      region: "TX", postalCode: "00000", country: "US", startMonth: "2017-06", endMonth: null, notes: null };
+    api.routes["GET /api/v1/paperwork/placements/p1"] = () => ({ body: { ...DETAIL, bgc: { ...DETAIL.bgc, addresses: [ADDR] } } });
+    api.routes["POST /api/v1/paperwork/placements/p1/bgc/entries"] = () => ({ status: 201, body: DETAIL.bgc });
+    api.routes["DELETE /api/v1/paperwork/placements/p1/bgc/entries/a1"] = () => ({ body: DETAIL.bgc });
+    wrap(<PaperworkPage me={HR} />);
+    const panel = await openPage("Background check");
+    const table = within(panel).getByRole("table", { name: "Address history, newest first" });
+    expect(within(table).getByText("1 Fictional Way")).toBeInTheDocument();
+    expect(within(table).getByText("Old Town, TX, 00000")).toBeInTheDocument();
+
+    fireEvent.click(within(panel).getByRole("button", { name: "+ Add address" }));
+    const form = within(panel).getByRole("form", { name: "Add address" });
+    fireEvent.change(within(form).getByLabelText("City"), { target: { value: "Sample City" } });
+    fireEvent.change(within(form).getByLabelText("Country"), { target: { value: "India" } });
+    fireEvent.change(within(form).getByLabelText("From"), { target: { value: "2015-08" } });
+    fireEvent.click(within(form).getByRole("checkbox", { name: "Current address" }));
+    fireEvent.change(within(form).getByLabelText("Verification"), { target: { value: "verified" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Add address" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.body).toEqual({ kind: "address", city: "Sample City", country: "India", startMonth: "2015-08", verification: "verified" });
+
+    fireEvent.click(within(table).getByRole("button", { name: "Edit Old Town, TX, US" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Remove" }));
+    const dlg = screen.getByRole("dialog", { name: "Remove address?" });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(2));
+    expect(api.writes()[1]).toMatchObject({ method: "DELETE", path: "/api/v1/paperwork/placements/p1/bgc/entries/a1" });
+    expect(await screen.findByText("Old Town, TX, US removed.")).toBeInTheDocument();
   });
 });
 

@@ -16,6 +16,7 @@ type Modal =
   | { kind: "create" }
   | { kind: "rename"; team: Team }
   | { kind: "lead"; team: Team }
+  | { kind: "delete"; team: Team }
   | { kind: "move"; team: Team; member: Ref }
   | { kind: "remove"; team: Team; member: Ref };
 
@@ -98,6 +99,7 @@ export function TeamsTab({ onShowUnassigned }: { onShowUnassigned?: () => void }
           onClose={() => setOpenId(null)}
           onRename={() => setModal({ kind: "rename", team: open })}
           onLead={() => setModal({ kind: "lead", team: open })}
+          onDelete={() => setModal({ kind: "delete", team: open })}
           onMove={(member) => setModal({ kind: "move", team: open, member })}
           onRemove={(member) => setModal({ kind: "remove", team: open, member })}
           onChanged={changed} />
@@ -105,6 +107,10 @@ export function TeamsTab({ onShowUnassigned }: { onShowUnassigned?: () => void }
       {modal?.kind === "create" && <CreateTeamDialog onClose={close} onDone={done} />}
       {modal?.kind === "rename" && <RenameTeamDialog team={modal.team} onClose={close} onDone={done} />}
       {modal?.kind === "lead" && <LeadDialog team={modal.team} onClose={close} onDone={done} />}
+      {modal?.kind === "delete" && (
+        <DeleteTeamDialog team={modal.team} teams={items} onClose={close}
+          onDone={(msg) => { setOpenId(null); done(msg); }} />
+      )}
       {modal?.kind === "move" && (
         <MoveMemberDialog team={modal.team} member={modal.member} teams={items} onClose={close}
           onMoved={(msg) => { announce(msg); refresh(); }} />
@@ -201,6 +207,72 @@ function LeadDialog({ team, onClose, onDone }: { team: Team; onClose: () => void
         <p className="hint">Current lead: <b>{team.lead.displayName}</b>. Reporting lines are checked for loops when the lead changes.</p>
         <PersonSelect id="ld-lead" label="New lead" value={leadId} onChange={setLeadId} exclude={[team.lead.id]} required />
         <DialogActions onCancel={onClose} submitLabel="Change lead" busy={busy} error={error} disabled={!leadId} />
+      </form>
+    </Dialog>
+  );
+}
+
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+
+/**
+ * AD-15: delete a team. Its members (and their candidates) move to another team and report
+ * to its lead, or are left with no team. Hot List candidates need a team, so they block the
+ * second choice.
+ */
+function DeleteTeamDialog({ team, teams, onClose, onDone }: {
+  team: Team; teams: Team[]; onClose: () => void; onDone: (m: string) => void;
+}) {
+  const impact = useQuery({ queryKey: [...keys.teams, team.id, "delete-impact"], queryFn: () => adminApi.teamDeleteImpact(team.id) });
+  const [mode, setMode] = useState<"move" | "none">("move");
+  const [toTeamId, setToTeamId] = useState("");
+  const { busy, error, run } = useSubmit((e) => friendlyError(e));
+  const targets = teams.filter((t) => t.id !== team.id);
+  const toTeam = targets.find((t) => t.id === toTeamId);
+  const blocked = (impact.data?.hotlistCandidates ?? 0) > 0;
+  const noneMode = mode === "none" && !blocked;
+  return (
+    <Dialog title={`Delete ${team.name}`} onClose={onClose}>
+      <form onSubmit={(e) => {
+        e.preventDefault();
+        void run(async () => {
+          const r = await adminApi.deleteTeam(team.id, noneMode ? undefined : toTeamId);
+          onDone(noneMode
+            ? `Deleted ${team.name}. ${plural(r.members, "member")} and ${plural(r.unassignedCandidates, "candidate")} now have no team.`
+            : `Deleted ${team.name}. ${plural(r.members, "member")} and ${plural(r.movedCandidates, "candidate")} moved to ${toTeam?.name ?? "the new team"}.`);
+        });
+      }}>
+        {impact.isLoading ? <Loading /> : impact.error ? <p className="error" role="alert">{friendlyError(impact.error)}</p> : (
+          <p className="hint">
+            <b>{team.name}</b> has {plural(impact.data!.members, "member")} and {plural(impact.data!.candidates, "candidate")}
+            {blocked ? `, ${impact.data!.hotlistCandidates} of them on the Hot List` : ""}. Interview coaches are unassigned.
+            Past submissions, interviews and placements keep the team's name.
+          </p>
+        )}
+        <fieldset className="choicelist">
+          <legend>What happens to the members?</legend>
+          <label>
+            <input type="radio" name="dt-mode" checked={mode === "move" || blocked} onChange={() => setMode("move")} />
+            Move them to another team
+          </label>
+          {(mode === "move" || blocked) && (
+            <div className="field"><label htmlFor="dt-team">Move to team</label>
+              <select id="dt-team" required data-autofocus value={toTeamId} onChange={(e) => setToTeamId(e.target.value)}>
+                <option value="" disabled>Choose a team…</option>
+                {targets.map((t) => <option key={t.id} value={t.id}>{t.name} (lead {t.lead.displayName})</option>)}
+              </select>
+              {toTeam && <p className="hint">They will report to <b>{toTeam.lead.displayName}</b>. Candidates follow their recruiter; those held by {team.lead.displayName} go to {toTeam.lead.displayName}.</p>}
+            </div>
+          )}
+          <label>
+            <input type="radio" name="dt-mode" checked={noneMode} disabled={blocked} onChange={() => setMode("none")} />
+            Leave them with no team
+          </label>
+          {blocked
+            ? <p className="hint">Not available: Hot List candidates need a team.</p>
+            : noneMode && <p className="hint">Members keep their manager and show up under “no team”. Candidates stay with their recruiter as “No team yet”.</p>}
+        </fieldset>
+        <DialogActions onCancel={onClose} submitLabel="Delete team" danger busy={busy} error={error}
+          disabled={impact.isLoading || !!impact.error || (!noneMode && !toTeamId)} />
       </form>
     </Dialog>
   );

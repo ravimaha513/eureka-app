@@ -19,7 +19,8 @@ const BASE = `/api/v1/candidates/${CID}/documents`;
 const doc = (id: string, extra: Record<string, unknown> = {}) => ({
   id, candidateId: CID, placementId: null, docType: "offer_letter", docTypeLabel: "Offer letter", classification: "internal",
   status: "clean", reason: null, contentType: PDF, sizeBytes: 120_000, sha256: "a".repeat(64),
-  uploadedBy: { id: "u1", name: "HR One" }, createdAt: "2026-09-20T10:00:00Z", scannedAt: "2026-09-20T10:01:00Z", ...extra,
+  uploadedBy: { id: "u1", name: "HR One" }, createdAt: "2026-09-20T10:00:00Z", scannedAt: "2026-09-20T10:01:00Z",
+  title: null, version: 1, replacement: null, ...extra,
 });
 const i9 = (id = D2, extra: Record<string, unknown> = {}) => doc(id, { docType: "i9", docTypeLabel: "Form I-9", classification: "restricted", ...extra });
 
@@ -102,6 +103,63 @@ describe("Paperwork documents section", () => {
     expect([...form.keys()]).toEqual(["key", "policy", "file"]);
     items = [doc(D1)];
     expect(await screen.findByText("Offer letter is ready.")).toBeInTheDocument();
+  });
+
+  it("edits a title and a type of the same access level; a classification change is explained", async () => {
+    let items: unknown[] = [doc(D1)];
+    routes[`GET ${BASE}`] = () => listing(items)();
+    let reply: Reply = problem(422, "classification_change");
+    routes[`PATCH /api/v1/documents/${D1}`] = () => reply;
+    wrap();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Offer letter" }));
+    const form = screen.getByRole("form", { name: "Edit Offer letter" });
+    const type = within(form).getByRole("combobox", { name: "Document type" });
+    const options = within(type).getAllByRole("option").map((o) => o.textContent);
+    expect(options).toContain("Offer letter");
+    expect(options).not.toContain("Form I-9");
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+    expect(within(form).getByRole("alert")).toHaveTextContent("Change the title, the type or choose a new file.");
+    fireEvent.change(within(form).getByLabelText("Title (optional)"), { target: { value: " Signed offer, v2 " } });
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent("different access level");
+    reply = { body: doc(D1, { title: "Signed offer, v2", version: 2 }) };
+    items = [doc(D1, { title: "Signed offer, v2", version: 2 })];
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Signed offer, v2 saved.")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "PATCH").at(-1)!.body).toEqual({ title: "Signed offer, v2", expectedVersion: 1 });
+    const row = (await screen.findByRole("button", { name: "Edit Signed offer, v2" })).closest("tr")!;
+    expect(row).toHaveTextContent("Offer letter");
+  });
+
+  it("replaces the file: scanned first, the current one stays until it passes; a refused one is explained", async () => {
+    let items: unknown[] = [doc(D1)];
+    routes[`GET ${BASE}`] = () => listing(items)();
+    routes[`POST /api/v1/documents/${D1}/replace`] = (b) => {
+      expect(b).toEqual({ contentType: PDF, size: 2048, expectedVersion: 1 });
+      items = [doc(D1, { replacement: { status: "pending", reason: null, contentType: PDF, sizeBytes: 2048, createdAt: "2026-09-21T10:00:00Z" } })];
+      return { status: 201, body: { id: D1, fileId: D3, classification: "internal", status: "pending",
+        upload: { url: "https://bucket.example/", fields: { key: `quarantine/documents/${D3}` }, expiresAt: "2026-09-21T10:02:00Z" } } };
+    };
+    routes["POST https://bucket.example/"] = () => ({ status: 204 });
+    wrap();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Offer letter" }));
+    const form = screen.getByRole("form", { name: "Edit Offer letter" });
+    fireEvent.change(within(form).getByLabelText("Replace file (optional)"), { target: { files: [new File([new Uint8Array(2048)], "offer_v2.pdf", { type: PDF })] } });
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("New file uploaded. It replaces the current one once the malware scan passes.")).toBeInTheDocument();
+    expect(await screen.findByText("New file scanning; the current file is used until it passes.")).toBeInTheDocument();
+    // The current file still opens meanwhile.
+    expect(screen.getByRole("button", { name: "View Offer letter" })).toBeInTheDocument();
+    items = [doc(D1, { replacement: { status: "infected", reason: "THREATS_FOUND", contentType: PDF, sizeBytes: 2048, createdAt: "2026-09-21T10:00:00Z" } })];
+    expect(await screen.findByText(/New file for Offer letter not accepted\. Blocked: malware found\. The earlier file is still in use\./)).toBeInTheDocument();
+    expect(screen.getByText("New file not accepted: Blocked: malware found.")).toBeInTheDocument();
+  });
+
+  it("offers no Edit without upload rights, or on restricted documents without restricted upload", async () => {
+    routes[`GET ${BASE}`] = listing([doc(D1), i9()], { canUploadRestricted: false });
+    wrap();
+    expect(await screen.findByRole("button", { name: "Edit Offer letter" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit Form I-9" })).toBeNull();
   });
 
   it("refuses unsupported files before contacting the server", async () => {

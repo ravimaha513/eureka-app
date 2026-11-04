@@ -65,6 +65,7 @@ interface PlacementRow {
   project_city: string | null;
   project_state: string | null;
   tentative_start: string;
+  actual_start: string | null;
   is_first_placement: boolean;
   reconfirmed: boolean;
   technology_id: string | null;
@@ -79,7 +80,8 @@ interface PlacementRow {
 const SELECT = `
   SELECT pl.id, pl.submission_id, pl.candidate_id, pl.recruiter_id, pl.team_id, pl.location_id,
          pl.client_id, pl.vendor_id, pl.implementation_partner_id, pl.placement_type, pl.rate, pl.work_mode,
-         pl.project_city, pl.project_state, pl.tentative_start::text AS tentative_start, pl.is_first_placement,
+         pl.project_city, pl.project_state, pl.tentative_start::text AS tentative_start,
+         pl.actual_start::text AS actual_start, pl.is_first_placement,
          pl.reconfirmed, pl.technology_id, tech.name AS technology_name, pl.joined_at,
          pl.status, pl.status_changed_at, pl.created_at, ${toMicros("pl.created_at")} AS k,
          c.recruiter_id AS cand_recruiter_id, c.team_id AS cand_team_id, c.location_id AS cand_location_id,
@@ -123,6 +125,8 @@ export class PlacementsService {
       projectCity: r.project_city,
       projectState: r.project_state,
       tentativeStart: r.tentative_start,
+      /** Recorded when the background check is cleared (0450); null before. */
+      actualStart: r.actual_start,
       isFirstPlacement: r.is_first_placement,
       reconfirmed: r.reconfirmed,
       technology: ref(r.technology_id, r.technology_name),
@@ -238,10 +242,10 @@ export class PlacementsService {
     const day = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
     const csv = toCsv(
       ["Candidate", "Technology", "Status", "Type", "Work mode", "End client", "Vendor", "Implementation partner",
-        "Recruiter", "Team", "Location", "Tentative start", "Joined on", "First placement", "Re-confirmed", "Created on"],
+        "Recruiter", "Team", "Location", "Tentative start", "Actual start", "Joined on", "First placement", "Re-confirmed", "Created on"],
       page.map((r) => [r.candidate_name ?? "(not visible)", r.technology_name, r.status, r.placement_type, r.work_mode,
         r.client_name, r.vendor_name, r.implementation_partner_name, r.recruiter_name, r.team_name, r.location_name,
-        r.tentative_start, day(r.joined_at), r.is_first_placement ? "yes" : "no", r.reconfirmed ? "yes" : "no", day(r.created_at)]),
+        r.tentative_start, r.actual_start, day(r.joined_at), r.is_first_placement ? "yes" : "no", r.reconfirmed ? "yes" : "no", day(r.created_at)]),
     );
     return { csv, rows: page.length, truncated: rows.length > PLACEMENT_EXPORT_ROW_CAP };
   }
