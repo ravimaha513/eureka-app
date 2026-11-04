@@ -66,7 +66,6 @@ export interface Batch {
 /** `canCreate` is a hint (Sales leadership); the server decides. */
 export interface BatchList { items: Batch[]; canCreate: boolean }
 
-export interface CreateBatch { locationId: string; technologyId: string; startMonth: string; sizePlanned?: number }
 
 /** Batches a candidate can join: planned or in training. */
 export const OPEN_BATCH_STATUSES: readonly BatchStatus[] = ["planned", "in_training"];
@@ -270,7 +269,6 @@ export const salesApi = {
     api<Page<TimelineEvent>>(`/api/v1/candidates/${enc(id)}/timeline?limit=50${cursor ? `&cursor=${enc(cursor)}` : ""}`),
   batches: (locationId?: string) =>
     api<BatchList>(`/api/v1/batches${locationId ? `?locationId=${enc(locationId)}` : ""}`),
-  createBatch: (b: CreateBatch) => api<{ id: string }>("/api/v1/batches", { method: "POST", ...json(b) }),
   setCompliance: (id: string, b: ComplianceUpdate) =>
     api<{ id: string }>(`/api/v1/candidates/${enc(id)}/compliance`, { method: "PUT", ...json(b) }),
   complianceCompanies: () => api<{ items: { id: string; name: string; location: string }[] }>("/api/v1/candidate-companies"),

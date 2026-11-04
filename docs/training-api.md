@@ -46,6 +46,7 @@ All under `/api/v1/training` unless noted.
 
 - `GET /batches?status=&cursor=&limit=` (`training:read`) → `{ items: [BatchCard], nextCursor, canCreate }`, newest start month first.
 - `POST /batches` (TR-1a: `canPlanBatch`) `{ locationId, technologyId, startDate, endDate?, name?, trainerId?, sizePlanned?, coverColor?, coverIcon? }` → 201 `{ id }`.
+  The web "New batch" dialog sends `name`, `locationId`, `technologyId` and the month's first day as `startDate`, then offers the bulk candidate upload (docs/candidates-api.md, CA-6a); the rest is set by editing the batch.
 - `GET /batches/:id` (`training:read`) → `BatchCard & { assignedCourses: [{ id, title, description, cover, archived, totalMinutes, modules: [{ id, title, durationMinutes, resources }] }] }`.
 - `PATCH /batches/:id` (`training:manage`, `If-Match`) any of `{ name|null, trainerId|null, startDate, endDate|null, sizePlanned|null, coverColor, coverIcon }` → `{ id, rowVersion }`.
 - `PUT /batches/:id/status` (`training:manage`) `{ to: in_training|completed|cancelled }`; `DELETE /batches/:id` → 204.

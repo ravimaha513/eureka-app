@@ -201,3 +201,28 @@ export const CreateBatch = z
   })
   .strict();
 export type CreateBatch = z.infer<typeof CreateBatch>;
+
+/**
+ * POST /batches/:id/candidates/bulk. Technology and location come from the batch.
+ * Rows are validated one by one in the service so a bad row is reported, not a rejected request.
+ */
+export const BulkBatchCandidates = z
+  .object({
+    dryRun: z.boolean(),
+    teamId: uuid.optional(),
+    rows: z
+      .array(
+        z
+          .object({
+            firstName: z.string().max(200),
+            lastName: z.string().max(200),
+            phone: z.string().max(40),
+            email: z.string().max(254),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(500),
+  })
+  .strict();
+export type BulkBatchCandidates = z.infer<typeof BulkBatchCandidates>;

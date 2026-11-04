@@ -90,21 +90,18 @@ describe("Training Batches", () => {
     api.routes["GET /api/v1/training/batches"] = () => ({ body: { items: [], nextCursor: null, canCreate: true } });
     wrap(<TrainingPage me={LOC} />);
     fireEvent.click(await screen.findByRole("button", { name: "Add training batch" }));
-    const dlg = screen.getByRole("dialog", { name: "Add training batch" });
-    await within(dlg).findByRole("option", { name: "Coach One" });
+    const dlg = screen.getByRole("dialog", { name: "New batch" });
+    await within(dlg).findByRole("option", { name: ".NET" });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create batch" }));
-    expect(await within(dlg).findByText("Choose the first day of training.")).toBeInTheDocument();
+    expect(await within(dlg).findByText("Enter a batch name.")).toBeInTheDocument();
+    expect(within(dlg).getByText("Choose the month training starts.")).toBeInTheDocument();
     expect(api.writes()).toEqual([]);
-    fireEvent.change(within(dlg).getByRole("textbox", { name: /Batch name/ }), { target: { value: ".NET 2026" } });
+    fireEvent.change(within(dlg).getByRole("textbox", { name: "Batch name" }), { target: { value: ".NET 2026" } });
     fireEvent.change(within(dlg).getByRole("combobox", { name: "Location" }), { target: { value: "l1" } });
     fireEvent.change(within(dlg).getByRole("combobox", { name: "Technology" }), { target: { value: "t1" } });
-    fireEvent.change(within(dlg).getByLabelText("Start date"), { target: { value: "2026-09-30" } });
-    fireEvent.change(within(dlg).getByRole("combobox", { name: "Trainer" }), { target: { value: "u-c" } });
+    fireEvent.change(within(dlg).getByLabelText("Month"), { target: { value: "2026-09" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create batch" }));
-    await waitFor(() => expect(api.writes()[0]?.body).toEqual({
-      name: ".NET 2026", locationId: "l1", technologyId: "t1", startDate: "2026-09-30", endDate: null, trainerId: "u-c",
-      sizePlanned: null, coverColor: "indigo", coverIcon: "users",
-    }));
+    await waitFor(() => expect(api.writes()[0]?.body).toEqual({ name: ".NET 2026", locationId: "l1", technologyId: "t1", startDate: "2026-09-01" }));
     // Opens the new batch.
     expect(await screen.findByRole("heading", { level: 1, name: ".NET 2026" })).toBeInTheDocument();
   });

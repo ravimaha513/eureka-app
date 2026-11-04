@@ -111,7 +111,7 @@ describe("Candidates list: batches", () => {
   it("creates a batch: validates first, explains a 403 and a 409, then posts and announces", async () => {
     routes["GET /api/v1/batches"] = () => ({ body: { items: BATCHES, canCreate: true } });
     let n = 0;
-    routes["POST /api/v1/batches"] = () => (++n === 1 ? problem(403, { detail: "location_not_in_scope" })
+    routes["POST /api/v1/training/batches"] = () => (++n === 1 ? problem(403, { detail: "location_not_in_scope" })
       : n === 2 ? problem(409, { detail: "batch_exists" }) : { status: 201, body: { id: "b-new" } });
     wrap(<CandidatesPage me={LEAD} />);
     fireEvent.click(await screen.findByRole("button", { name: "New batch" }));
@@ -119,19 +119,22 @@ describe("Candidates list: batches", () => {
     await within(dlg).findByRole("option", { name: "Dallas" });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create batch" }));
     expect(writes()).toHaveLength(0);
-    expect(within(dlg).getByLabelText("Start month")).toHaveAccessibleDescription(expect.stringContaining("Choose the month training starts."));
+    expect(within(dlg).getByLabelText("Month")).toHaveAccessibleDescription(expect.stringContaining("Choose the month training starts."));
 
+    fireEvent.change(within(dlg).getByLabelText("Batch name"), { target: { value: "Java November" } });
     fireEvent.change(within(dlg).getByLabelText("Location"), { target: { value: LOC } });
     fireEvent.change(within(dlg).getByLabelText("Technology"), { target: { value: TECH } });
-    fireEvent.change(within(dlg).getByLabelText("Start month"), { target: { value: "2026-11" } });
-    fireEvent.change(within(dlg).getByLabelText("Planned size (optional)"), { target: { value: "25" } });
+    fireEvent.change(within(dlg).getByLabelText("Month"), { target: { value: "2026-11" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create batch" }));
-    expect(await within(dlg).findByRole("alert")).toHaveTextContent("only for locations where your teams work");
+    expect(await within(dlg).findByRole("alert")).toHaveTextContent("only at locations you cover");
     fireEvent.click(within(dlg).getByRole("button", { name: "Create batch" }));
     await waitFor(() => expect(within(dlg).getByRole("alert")).toHaveTextContent("already exists"));
-    expect(writes()[0]!.body).toEqual({ locationId: LOC, technologyId: TECH, startMonth: "2026-11", sizePlanned: 25 });
+    expect(writes()[0]!.body).toEqual({ name: "Java November", locationId: LOC, technologyId: TECH, startDate: "2026-11-01" });
 
     fireEvent.click(within(dlg).getByRole("button", { name: "Create batch" }));
+    // Leads add candidates next; skipping keeps the batch.
+    const add = await screen.findByRole("dialog", { name: "Add candidates to Java November" });
+    fireEvent.click(within(add).getByRole("button", { name: "Skip for now" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.getByText("Batch created.")).toHaveAttribute("role", "status");
   });

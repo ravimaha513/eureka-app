@@ -6,7 +6,7 @@ import { ConfirmDialog } from "../ui/Dialog";
 import { fmtDate } from "../sales/ui";
 import { Avatar } from "../shell/ui";
 import { BatchDetailView } from "./BatchDetail";
-import { BatchDialog } from "./BatchDialog";
+import { NewBatchDialog } from "./NewBatchDialog";
 import { BATCH_STATUSES, BATCH_STATUS_LABELS, trainingApi, trainingError, trainingKeys, type BatchCard } from "./trainingApi";
 import { BatchStatusPill, CoverArt } from "./ui";
 import { QueryError } from "../ui/QueryError";
@@ -99,9 +99,9 @@ function BatchList({ me, onOpen, heading, notice, setNotice }: {
         </ul>
       )}
       {creating && (
-        <BatchDialog me={me} onClose={() => setCreating(false)} onSaved={(bid) => {
+        <NewBatchDialog me={me} onClose={() => setCreating(false)} onDone={(bid, _name, added) => {
           setCreating(false);
-          setNotice("Training batch created.");
+          setNotice(added > 0 ? `Training batch created with ${added} candidate${added === 1 ? "" : "s"}.` : "Training batch created.");
           void qc.invalidateQueries({ queryKey: trainingKeys.all });
           onOpen(bid);
         }} />

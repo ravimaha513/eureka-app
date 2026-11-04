@@ -1,8 +1,10 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res } from "@nestjs/common";
+import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { BatchStatusChange } from "../training/training.schemas.js";
 import {
   BatchListQuery,
+  BulkBatchCandidates,
   CandidateListQuery,
   ComplianceUpdate,
   CreateBatch,
@@ -156,6 +158,26 @@ export class CandidatesController {
   @RequirePermission("candidate:create")
   createBatch(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createBatch(user, () => CreateBatch.parse(body));
+  }
+
+  /** The .xlsx for the bulk add below: only the fields a new candidate must have. */
+  @Get("batches/candidate-template")
+  @RequirePermission("candidate:create")
+  async candidateTemplate(@Res({ passthrough: true }) reply: FastifyReply) {
+    const file = await this.svc.candidateTemplate();
+    void reply
+      .header("content-type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("content-disposition", `attachment; filename="batch-candidates-template.xlsx"`)
+      .header("cache-control", "no-store");
+    return file;
+  }
+
+  /** New candidates for a batch; preview with dryRun, all or nothing otherwise. */
+  @Post("batches/:id/candidates/bulk")
+  @HttpCode(200)
+  @RequirePermission("candidate:create")
+  bulkAddToBatch(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.bulkAddToBatch(user, id, BulkBatchCandidates.parse(body));
   }
 
   /** planned -> in_training -> completed, or cancelled before completion; same permission as create. */

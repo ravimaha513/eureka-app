@@ -216,6 +216,25 @@ Tests: `candidate-extras.api.int.test.ts` ("duplicate check"), `api.int.test.ts`
 `applications.api.int.test.ts`, `engine.test.ts` ("adding candidates"), web `CandidateExtras.test.tsx`,
 `Sales.test.tsx`, `Applications.test.tsx`, e2e `candidate-extras.spec.ts`.
 
+## New batch workflow: bulk add from Excel (CA-6a)
+
+The web "New batch" dialog (Candidates and Training Batches) asks for the batch name, location, technology and month
+(`POST /api/v1/training/batches`, month = first day), then lets `candidate:create` holders upload new candidates. The
+upload is also on the batch's Students tab while the batch is open.
+
+- `GET /api/v1/batches/candidate-template` (`candidate:create`) → `.xlsx` with `First Name`, `Last Name`, `Phone`,
+  `Personal Email`: only what a new candidate must have. Technology and location come from the batch.
+- `POST /api/v1/batches/:id/candidates/bulk` (`candidate:create`) `{ dryRun, teamId?, rows: [{ firstName, lastName, phone, email }] }`
+  (1-500 rows) → 200 `{ dryRun, committed, created, failed, rows: [{ row, firstName, lastName, phone, email, status, error? }] }`.
+- All or nothing: one transaction, rolled back when any row fails or on `dryRun`, so the preview is what a real run does.
+- Row errors: `invalid_first_name`, `invalid_last_name`, `missing_country_code`, `trunk_zero`, `invalid` (phone),
+  `invalid_email`, `duplicate_in_file`, `duplicate_email`, `duplicate_phone`. Rows name only the value that is taken, not
+  whose it is.
+- 404 batch not visible; 403 team outside `candidate:create` (same rule as `POST /candidates`); 422 `batch_not_allowed`
+  when the batch is completed or cancelled; 429 after 10 calls a minute per user.
+- Audit (counts and ids only): `candidate.created` per row with `{ batchId, bulk: true }`, `batch.candidates_added`,
+  and `batch.candidates_checked` for a preview or a refused file.
+
 ## Deleting a candidate (CA-7)
 
 `DELETE /api/v1/candidates/:id` → 204. Hard delete, not undoable. Permission

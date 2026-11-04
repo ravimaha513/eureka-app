@@ -1,5 +1,5 @@
 /** Typed client for training batches, courses and progress (docs/training-api.md, migration 0065). */
-import { ApiError, api } from "../api";
+import { ApiError, api, apiFetch } from "../api";
 
 export interface Ref { id: string; name: string | null }
 export interface Cover { color: string; icon: string }
@@ -85,6 +85,11 @@ export interface NewBatch {
   locationId: string; technologyId: string; startDate: string; endDate?: string | null; name?: string | null;
   trainerId?: string | null; sizePlanned?: number | null; coverColor?: string; coverIcon?: string;
 }
+export interface BulkCandidateRow { firstName: string; lastName: string; phone: string; email: string }
+export interface BulkCandidateReport {
+  dryRun: boolean; committed: boolean; created: number; failed: number;
+  rows: (BulkCandidateRow & { row: number; status: "ok" | "error"; error?: string })[];
+}
 export type BatchPatch = Partial<Omit<NewBatch, "locationId" | "technologyId">>;
 export interface NewModule { title: string; durationMinutes: number; resources?: string[] }
 export interface NewCourse { title: string; description?: string | null; coverColor?: string; coverIcon?: string; locationId?: string; modules?: NewModule[] }
@@ -110,6 +115,9 @@ export const trainingApi = {
     api<{ items: BatchCard[]; nextCursor: string | null; canCreate: boolean }>(`${B}?limit=100${status ? `&status=${status}` : ""}`),
   batch: (id: string) => api<BatchDetail>(`${B}/${id}`),
   createBatch: (b: NewBatch) => api<{ id: string }>(B, json("POST", b)),
+  candidateTemplate: async () => (await apiFetch("/api/v1/batches/candidate-template")).blob(),
+  bulkAddCandidates: (id: string, b: { dryRun: boolean; teamId?: string; rows: BulkCandidateRow[] }) =>
+    api<BulkCandidateReport>(`/api/v1/batches/${id}/candidates/bulk`, json("POST", b)),
   updateBatch: (id: string, version: number, b: BatchPatch) => api<{ id: string; rowVersion: number }>(`${B}/${id}`, json("PATCH", b, ifMatch(version))),
   setStatus: (id: string, to: string) => api<{ status: string }>(`${B}/${id}/status`, json("PUT", { to })),
   deleteBatch: (id: string) => api<void>(`${B}/${id}`, json("DELETE")),
@@ -144,6 +152,7 @@ export const trainingApi = {
 };
 
 const MESSAGES: Record<string, string> = {
+  batch_not_allowed: "This batch is no longer open, so candidates can't be added to it.",
   batch_exists: "A batch for this location, technology and month already exists.",
   batch_has_students: "This batch has students, so it can't be deleted. Cancel it instead.",
   location_not_in_scope: "You can manage training only at your own location.",
