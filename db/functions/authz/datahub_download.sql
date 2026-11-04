@@ -7,8 +7,11 @@
 SET ROLE authz_definer;
 
 CREATE OR REPLACE FUNCTION authz.datahub_download(p_version uuid, p_session bytea)
-RETURNS TABLE (outcome text, file_object_id uuid, classification text, content_type text, version integer, access_id uuid)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+ RETURNS TABLE(outcome text, file_object_id uuid, classification text, content_type text, version integer, access_id uuid)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'pg_catalog', 'pg_temp'
+AS $function$
 DECLARE d record; g_id uuid; a_id uuid; strict_level boolean; eff text;
 BEGIN
   IF authz.current_user_id() IS NULL THEN
@@ -47,7 +50,7 @@ BEGIN
             'folderId', d.folder_id, 'versionId', d.id, 'version', d.version, 'fileObjectId', d.file_object_id,
             'level', eff, 'accessId', a_id, 'stepUpGrantId', g_id));
   RETURN QUERY SELECT 'ok'::text, d.file_object_id, d.classification, d.content_type, d.version, a_id;
-END $$;
+END $function$;
 
 REVOKE ALL ON FUNCTION authz.datahub_download(uuid, bytea) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION authz.datahub_download(uuid, bytea) TO eureka_app;

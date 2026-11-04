@@ -9,9 +9,11 @@
 SET ROLE authz_definer;
 
 CREATE OR REPLACE FUNCTION authz.document_download(p_document uuid, p_session bytea)
-RETURNS TABLE (outcome text, file_id uuid, classification text, content_type text, doc_type text,
-               candidate_id uuid, access_id uuid)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+ RETURNS TABLE(outcome text, file_id uuid, classification text, content_type text, doc_type text, candidate_id uuid, access_id uuid)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'pg_catalog', 'pg_temp'
+AS $function$
 DECLARE d record; g_id uuid; a_id uuid;
 BEGIN
   IF authz.current_user_id() IS NULL THEN
@@ -47,7 +49,7 @@ BEGIN
             'candidateId', d.candidate_id, 'placementId', d.placement_id, 'fileId', d.file_id, 'docType', d.doc_type,
             'classification', d.classification, 'accessId', a_id, 'stepUpGrantId', g_id));
   RETURN QUERY SELECT 'ok'::text, d.file_id, d.classification, d.content_type, d.doc_type, d.candidate_id, a_id;
-END $$;
+END $function$;
 
 REVOKE ALL ON FUNCTION authz.document_download(uuid, bytea) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION authz.document_download(uuid, bytea) TO eureka_app;
