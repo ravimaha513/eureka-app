@@ -144,7 +144,6 @@ describe("Create candidate: contacts, batch and duplicate check", () => {
     const batchSel = await within(dlg).findByLabelText("Batch (optional)");
     // Cancelled batches are not offered.
     expect(within(batchSel).getAllByRole("option").map((o) => o.textContent)).toEqual(["No batch", "Java · Dallas · Nov 2026"]);
-    expect(lastGet("/api/v1/batches").url.searchParams.get("locationId")).toBe(LOC);
     fireEvent.change(batchSel, { target: { value: B1 } });
     fireEvent.change(within(dlg).getByLabelText("Phone"), { target: { value: "+1 (469) 555-0199" } });
     fireEvent.change(within(dlg).getByLabelText("Personal email"), { target: { value: " ravi@example.com " } });
@@ -153,6 +152,32 @@ describe("Create candidate: contacts, batch and duplicate check", () => {
     expect(writes()[0]!.body).toEqual({
       firstName: "Ravi", lastName: "Kumar", technologyId: TECH, locationId: LOC, phone: "+14695550199", email: "ravi@example.com", batchId: B1,
     });
+  });
+
+  it("offers the batch field before a location is chosen; picking a batch fills location and technology", async () => {
+    const away = { ...batch(B2, "Java · Austin · Dec 2026"), location: { id: OTHER, name: "Austin" } };
+    routes["GET /api/v1/batches"] = () => ({ body: { items: [batch(B1, "Java · Dallas · Nov 2026"), away], canCreate: false } });
+    wrap(<CandidatesPage me={LEAD} />);
+    fireEvent.click(await screen.findByRole("button", { name: "New candidate" }));
+    const dlg = screen.getByRole("dialog", { name: "New candidate" });
+    await within(dlg).findByRole("option", { name: "Java" });
+    const batchSel = within(dlg).getByLabelText("Batch (optional)");
+    await within(dlg).findByRole("option", { name: "Java · Austin · Dec 2026" });
+    expect(batchSel).toHaveAccessibleDescription("Choosing a batch also fills in its location.");
+    fireEvent.change(batchSel, { target: { value: B1 } });
+    expect(within(dlg).getByLabelText("Location")).toHaveValue(LOC);
+    expect(within(dlg).getByLabelText("Technology")).toHaveValue(TECH);
+    // Now only that location's batches are offered.
+    expect(within(batchSel).getAllByRole("option").map((o) => o.textContent)).toEqual(["No batch", "Java · Dallas · Nov 2026"]);
+    expect(batchSel).toHaveValue(B1);
+  });
+
+  it("says so when the chosen location has no open batch", async () => {
+    routes["GET /api/v1/batches"] = () => ({ body: { items: [batch(B2, "Java · Dallas · Jan 2026", "cancelled")], canCreate: false } });
+    const { dlg } = await openCreate();
+    const batchSel = within(dlg).getByLabelText("Batch (optional)");
+    await waitFor(() => expect(batchSel).toHaveAccessibleDescription("No open batches at this location."));
+    expect(within(batchSel).getAllByRole("option").map((o) => o.textContent)).toEqual(["No batch"]);
   });
 
   it("refuses a phone without a country code before sending", async () => {

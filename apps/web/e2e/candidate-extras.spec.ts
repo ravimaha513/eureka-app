@@ -76,6 +76,27 @@ async function openNewCandidate(page: Page) {
   return dialog;
 }
 
+test("a new candidate joins a batch picked before the location, which fills location and technology", async ({ page, playwright, baseURL }) => {
+  const l1 = await apiAs(playwright, baseURL, "l1@eureka.example");
+  const batch = await freshBatch(l1);
+  await l1.dispose();
+
+  await login(page, "l1@eureka.example");
+  const dialog = await openNewCandidate(page);
+  const last = uniq();
+  await dialog.getByLabel("First name").fill("E2EBatch");
+  await dialog.getByLabel("Last name").fill(last);
+  await dialog.getByLabel("Phone").fill(uniqPhone());
+  await dialog.getByLabel("Personal email").fill(`e2e-batch-${last}@example.test`);
+  await dialog.getByRole("combobox", { name: "Batch (optional)", exact: true }).selectOption({ label: batch.label });
+  await expect(dialog.getByRole("combobox", { name: "Location", exact: true })).toHaveValue(DALLAS);
+  await expect(dialog.getByRole("combobox", { name: "Technology", exact: true })).toHaveValue(JAVA);
+  await dialog.getByRole("button", { name: "Create candidate" }).click();
+
+  await expect(page.getByRole("heading", { level: 1, name: `E2EBatch ${last}` })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Details" }).locator("dt", { hasText: "Batch" }).locator("+ dd")).toHaveText(batch.label);
+});
+
 test("a taken email on create: another team's candidate is named but not linked, and there is no override", async ({ page, playwright, baseURL }) => {
   const email = `e2e-dup-${uniq()}@example.test`;
   // Team Vikram's lead holds a candidate with this email; l1 cannot open that profile.

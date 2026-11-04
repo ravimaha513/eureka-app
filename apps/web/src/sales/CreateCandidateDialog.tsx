@@ -18,6 +18,9 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * becomes the candidate's recruiter.
  * Technology and location come from the lookups pickers; `locations` (the ones
  * the user has already seen) are the fallback when the lookup list is unavailable.
+ * The Batch picker lists every open batch until a location is chosen, then that
+ * location's (the server requires they match); picking a batch first fills in
+ * its location and, when still empty, its technology.
  *
  * Email and phone are required and unique across candidates (CA-6): the
  * server answers 409 `duplicate_contact` when another candidate has either.
@@ -43,13 +46,17 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
     if (k === "phone" || k === "email" || k === "firstName" || k === "lastName") setDuplicates(null);
   };
 
-  const batches = useQuery({
-    queryKey: [...salesKeys.batches, v.locationId],
-    queryFn: () => salesApi.batches(v.locationId),
-    enabled: UUID_RE.test(v.locationId),
-    staleTime: 60_000,
-  });
-  const openBatches = (batches.data?.items ?? []).filter((b) => OPEN_BATCH_STATUSES.includes(b.status));
+  // Refetched on open: a batch just created on the Training screen must be listed.
+  const batches = useQuery({ queryKey: salesKeys.batches, queryFn: () => salesApi.batches(), staleTime: 0 });
+  const openBatches = (batches.data?.items ?? []).filter((b) => OPEN_BATCH_STATUSES.includes(b.status)
+    && (!v.locationId || b.location.id === v.locationId));
+  const batchHint = !batches.isSuccess ? undefined
+    : openBatches.length === 0 ? (v.locationId ? "No open batches at this location." : "No open batches yet.")
+      : v.locationId ? undefined : "Choosing a batch also fills in its location.";
+  const pickBatch = (batchId: string) => {
+    const b = openBatches.find((x) => x.id === batchId);
+    setV((s) => ({ ...s, batchId, ...(b ? { locationId: b.location.id, technologyId: s.technologyId || b.technology.id } : {}) }));
+  };
 
   const teams = useQuery({ queryKey: ["candidate-create-teams"], queryFn: () => salesApi.createTeams(), staleTime: 300_000 });
   const teamItems = teams.data?.items ?? [];
@@ -141,16 +148,14 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
           onChange={(id) => setV((s) => ({ ...s, technologyId: id }))} />
         <LookupPicker kind="locations" label="Location" value={v.locationId} error={errors.locationId} fallback={locations}
           onChange={(id) => setV((s) => ({ ...s, locationId: id, batchId: "" }))} />
-        {openBatches.length > 0 && (
-          <Field label="Batch (optional)" error={errors.batchId}>
-            {(p) => (
-              <select {...p} value={v.batchId} onChange={(e) => setV((s) => ({ ...s, batchId: e.target.value }))}>
-                <option value="">No batch</option>
-                {openBatches.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
-              </select>
-            )}
-          </Field>
-        )}
+        <Field label="Batch (optional)" hint={batchHint} error={errors.batchId}>
+          {(p) => (
+            <select {...p} value={v.batchId} onChange={(e) => pickBatch(e.target.value)}>
+              <option value="">No batch</option>
+              {openBatches.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+            </select>
+          )}
+        </Field>
         {duplicates && <DuplicateWarning duplicates={duplicates} onOpenProfile={onOpenProfile} />}
         <DialogActions onCancel={onClose} submitLabel="Create candidate" busy={busy} error={formError} />
       </form>
