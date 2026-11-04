@@ -136,17 +136,18 @@ describe("profile-only candidate fields on GET /candidates/:id", () => {
     }
   }, 60_000);
 
-  it.each(users)("%s: inPersonOk for every reader, marketing contacts only with candidate.phone:read through ownership", async (key) => {
+  it.each(users)("%s: inPersonOk for every reader, marketing contacts only with candidate.phone:read or candidate:update through ownership", async (key) => {
     const access = toUserAccess(key);
     const read = resolveScope(access, "candidate:read");
     const phone = resolveScope(access, "candidate.phone:read");
+    const update = resolveScope(access, "candidate:update");
     for (const [i, c] of candidates.entries()) {
       if (!candidateVisible(read, c)) continue;
       const res = await call(key, "GET", `/api/v1/candidates/${c.id}`);
       expect(res.statusCode, `${key} ${c.id}`).toBe(200);
       const j = res.json();
       expect(j.inPersonOk).toBe(i % 3 === 0 ? null : i % 3 === 1);
-      const contact = phone !== null && ownsCandidate(phone, c);
+      const contact = (phone !== null && ownsCandidate(phone, c)) || (update !== null && ownsCandidate(update, c));
       expect("marketingEmail" in j, `${key} ${c.id} marketingEmail`).toBe(contact);
       expect("vitelNumber" in j, `${key} ${c.id} vitelNumber`).toBe(contact);
       if (contact) expect([j.marketingEmail, j.vitelNumber]).toEqual([`mkt${i}@eureka-mkt.example`, `+1972555${String(i).padStart(4, "0")}`]);

@@ -194,10 +194,15 @@ describe("candidate endpoints", () => {
       expect(r.statusCode).toBe(422);
     });
 
-  it("phone is shown for own-team candidates and masked for another team's Open-to-all-teams candidate", async () => {
+  it("personal phone: masked for recruiters even on own-team candidates; shown to HR, Accounts and the CEO", async () => {
     const mine = (await call("r1a", "GET", `/api/v1/candidates/${teammate().id}`)).json();
-    expect(mine.phone).toMatch(/^\+1469555/);
-    expect(mine.phoneMasked).toBe(false);
+    expect(mine.phoneMasked).toBe(true);
+    expect(mine.phone).toMatch(/^•••-•••-\d\d$/);
+    for (const k of ["hr", "ceo"] as const) {
+      const seen = (await call(k, "GET", `/api/v1/candidates/${teammate().id}`)).json();
+      expect(seen.phone, k).toMatch(/^\+1469555/);
+      expect(seen.phoneMasked, k).toBe(false);
+    }
     const theirs = (await call("r1a", "GET", `/api/v1/candidates/${otherAllTeams().id}`)).json();
     expect(theirs.phoneMasked).toBe(true);
     expect(theirs.phone).toMatch(/^•••-•••-\d\d$/);
