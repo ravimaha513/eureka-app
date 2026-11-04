@@ -69,6 +69,7 @@ interface CandidateRow {
   technical_rating: number | null;
   row_version: number;
   batch_id: string | null;
+  batch_name: string | null;
   batch_month: string | null;
   batch_technology: string | null;
   batch_location: string | null;
@@ -136,8 +137,12 @@ export function sortKey(sort: ListSort | undefined, c = "c", p = "p"): string | 
   }
 }
 
-/** "Java · Dallas · Nov 2026" from a batch's technology, location and start month (YYYY-MM-DD). */
-export function batchLabel(technology: string, location: string, startMonth: string): string {
+/**
+ * "Java · Dallas · Nov 2026" from a batch's technology, location and start month (YYYY-MM-DD),
+ * or "Fall cohort · Dallas" when the batch has a custom name (Training).
+ */
+export function batchLabel(technology: string, location: string, startMonth: string, name?: string | null): string {
+  if (name?.trim()) return `${name.trim()} · ${location}`;
   const month = new Date(`${startMonth.slice(0, 7)}-01T00:00:00Z`)
     .toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
   return `${technology} · ${location} · ${month}`;
@@ -330,7 +335,7 @@ export class CandidatesService implements OnModuleInit {
            c.team_id, tm.name AS team_name, c.recruiter_id, u.display_name AS recruiter_name,
            c.location_id, l.name AS location_name, c.visibility, c.marketing_status, c.priority,
            c.marketing_start_date::text, c.technical_rating, c.row_version,
-           c.batch_id, b.start_month::text AS batch_month, bt.name AS batch_technology, bl.name AS batch_location,
+           c.batch_id, b.name AS batch_name, b.start_month::text AS batch_month, bt.name AS batch_technology, bl.name AS batch_location,
            c.visa_category, c.documents_status, c.gh_remote, c.gh_location_id, gl.name AS gh_location_name,
            c.team_assigned_at, (c.resume_url IS NOT NULL) AS resume_link,
            lu.display_name AS lead_name, c.in_person_ok
@@ -381,7 +386,7 @@ export class CandidatesService implements OnModuleInit {
       dobMasked: r.dob_year ? `•• / •• / ${r.dob_year}` : null,
       rowVersion: r.row_version,
       batch: r.batch_id && r.batch_month
-        ? { id: r.batch_id, label: batchLabel(r.batch_technology ?? "", r.batch_location ?? "", r.batch_month) }
+        ? { id: r.batch_id, label: batchLabel(r.batch_technology ?? "", r.batch_location ?? "", r.batch_month, r.batch_name) }
         : null,
     };
   }
@@ -879,11 +884,11 @@ export class CandidatesService implements OnModuleInit {
       const { rows } = await c.query<{
         id: string; type: string; at: Date; actor_id: string | null; actor_name: string | null;
         ref_type: string | null; ref_id: string | null; from_value: string | null; to_value: string | null;
-        team_name: string | null; batch_month: string | null; batch_technology: string | null; batch_location: string | null;
+        team_name: string | null; batch_name: string | null; batch_month: string | null; batch_technology: string | null; batch_location: string | null;
       }>(
         `SELECT e.id::text, e.type, e.at, e.actor_id, u.display_name AS actor_name, e.ref_type, e.ref_id,
                 e.from_value, e.to_value, tm.name AS team_name,
-                b.start_month::text AS batch_month, bt.name AS batch_technology, bl.name AS batch_location
+                b.name AS batch_name, b.start_month::text AS batch_month, bt.name AS batch_technology, bl.name AS batch_location
          FROM eureka.candidate_event e
          LEFT JOIN eureka.app_user u ON u.id = e.actor_id
          LEFT JOIN eureka.team tm ON e.ref_type = 'team' AND tm.id = e.ref_id
@@ -904,7 +909,7 @@ export class CandidatesService implements OnModuleInit {
             type: e.ref_type,
             id: e.ref_id,
             label: e.ref_type === "team" ? e.team_name
-              : e.ref_type === "batch" && e.batch_month ? batchLabel(e.batch_technology ?? "", e.batch_location ?? "", e.batch_month)
+              : e.ref_type === "batch" && e.batch_month ? batchLabel(e.batch_technology ?? "", e.batch_location ?? "", e.batch_month, e.batch_name)
               : null,
           } : null,
           from: e.from_value,
@@ -938,7 +943,7 @@ export class CandidatesService implements OnModuleInit {
     return {
       items: rows.map((b) => ({
         id: b.id,
-        label: batchLabel(b.technology_name, b.location_name, b.start_month),
+        label: batchLabel(b.technology_name, b.location_name, b.start_month, b.name),
         customName: b.name,
         location: { id: b.location_id, name: b.location_name },
         technology: { id: b.technology_id, name: b.technology_name },

@@ -119,6 +119,22 @@ describe("batches", () => {
     expect((await call("r1a", "GET", `/api/v1/candidates/${own.id}`)).json().batch).toBeNull();
   });
 
+  it("labels a named batch by its name and location in the list, profile and timeline", async () => {
+    const made = await call("locD", "POST", "/api/v1/training/batches", { name: "Fall cohort", locationId: LOC.dallas, technologyId: TECH_ID, startDate: "2071-03-01" });
+    expect(made.statusCode, made.body).toBe(201);
+    const named = made.json().id;
+    const label = "Fall cohort · Dallas";
+    expect((await call("l1", "GET", "/api/v1/batches")).json().items.find((b: { id: string }) => b.id === named).label).toBe(label);
+    const created = await call("l1", "POST", "/api/v1/candidates", { firstName: "Nam", lastName: "Ed", phone: "+14695558699", email: "nam.ed@example.com", technologyId: TECH_ID, locationId: LOC.dallas, batchId: named });
+    expect(created.statusCode, created.body).toBe(201);
+    const id = created.json().id;
+    expect((await call("l1", "GET", `/api/v1/candidates/${id}`)).json().batch).toEqual({ id: named, label });
+    expect((await call("l1", "PATCH", `/api/v1/candidates/${id}`, { batchId: null })).statusCode).toBe(200);
+    expect((await call("l1", "PATCH", `/api/v1/candidates/${id}`, { batchId: named })).statusCode).toBe(200);
+    const events = (await call("l1", "GET", `/api/v1/candidates/${id}/timeline`)).json().items as { type: string; ref: { id: string; label: string } | null }[];
+    expect(events.find((e) => e.type === "candidate.batch_changed" && e.ref?.id === named)!.ref!.label).toBe(label);
+  });
+
   it("refuses a batch at another location (422 batch_not_allowed) and a teammate's candidate (403)", async () => {
     const austin = candidates.find((c) => c.recruiterId === U.r1a && c.locationId === LOC.austin)!;
     const r = await call("r1a", "PATCH", `/api/v1/candidates/${austin.id}`, { batchId });

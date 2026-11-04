@@ -49,7 +49,7 @@ export type BatchStatus = "planned" | "in_training" | "completed" | "cancelled";
 /** GET /api/v1/batches item (any candidate:read holder). */
 export interface Batch {
   id: string;
-  /** "Java · Dallas · Nov 2026" */
+  /** "Java · Dallas · Nov 2026", or "Fall cohort · Dallas" for a named batch. */
   label: string;
   /** The name given on the Training Batches screen, if any. */
   customName?: string | null;

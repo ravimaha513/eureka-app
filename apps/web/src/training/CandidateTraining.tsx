@@ -106,7 +106,7 @@ function BatchPickerDialog({ candidateId, locationId, currentId, onClose, onSave
           <label htmlFor={`${id}-b`}>Batch</label>
           <select id={`${id}-b`} data-autofocus value={batchId} onChange={(e) => setBatchId(e.target.value)} disabled={q.isLoading}>
             <option value="" disabled>{q.isLoading ? "Loading…" : options.length ? "Choose…" : "No other open batches at this location"}</option>
-            {options.map((b) => <option key={b.id} value={b.id}>{b.customName ? `${b.customName} (${b.label})` : b.label}</option>)}
+            {options.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
           </select>
           <p className="hint">Planned or in-training batches at the candidate's location.</p>
         </div>
