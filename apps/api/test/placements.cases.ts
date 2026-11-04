@@ -315,7 +315,7 @@ describe.runIf(shard.first)("placements", () => {
       expect(res.statusCode).toBe(200);
       const p = res.json();
       expect(Object.keys(p).sort()).toEqual([
-        "allowedTransitions", "assignment", "bgc", "candidate", "checklist", "client", "contacts", "createdAt", "id", "implementationPartner",
+        "actualStart", "allowedTransitions", "assignment", "bgc", "candidate", "checklist", "client", "contacts", "createdAt", "id", "implementationPartner",
         "isFirstPlacement", "joinedAt", "location", "placementType", "projectCity", "projectState", "rate", "reconfirmed",
         "recruiter", "status", "statusChangedAt", "submissionId", "team", "technology", "tentativeStart", "vendor", "workMode",
       ]);

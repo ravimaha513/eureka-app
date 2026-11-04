@@ -201,6 +201,7 @@ function PaperworkDrawer({ placementId, me, onClose }: { placementId: string; me
                 <dt>Placement</dt><dd><PipelineStatus status={d.placement.status} /> {PLACEMENT_TYPE_LABELS[d.placement.placementType as PlacementType] ?? d.placement.placementType}</dd>
                 <dt>Client</dt><dd>{d.placement.client?.name ?? "—"}</dd>
                 <dt>Tentative start</dt><dd>{fmtDate(d.placement.tentativeStart)}</dd>
+                {d.placement.actualStart && <><dt>Actual start</dt><dd>{fmtDate(d.placement.actualStart)}</dd></>}
               </>}
             </dl>
             <p role="status" aria-live="polite" className="livemsg">{message}</p>
@@ -253,7 +254,7 @@ function PaperworkDrawer({ placementId, me, onClose }: { placementId: string; me
           onDone={(m) => { setEditItem(null); done(m); }} />
       )}
       {d && editBgc && (
-        <BgcDialog placementId={placementId} bgc={d.bgc} onClose={() => setEditBgc(false)}
+        <BgcDialog placementId={placementId} bgc={d.bgc} actualStart={d.placement?.actualStart ?? null} onClose={() => setEditBgc(false)}
           onDone={(m) => { setEditBgc(false); done(m); }} />
       )}
     </>
@@ -477,8 +478,11 @@ const yearsError = (v: string) => {
   return Number.isInteger(n) && n >= BGC_HISTORY_YEARS_MIN && n <= BGC_HISTORY_YEARS_MAX ? undefined : `Whole years, ${BGC_HISTORY_YEARS_MIN}-${BGC_HISTORY_YEARS_MAX}.`;
 };
 
-function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string; bgc: Bgc; onClose: () => void; onDone: (m: string) => void }) {
+function BgcDialog({ placementId, bgc, actualStart: currentStart, onClose, onDone }: {
+  placementId: string; bgc: Bgc; actualStart: string | null; onClose: () => void; onDone: (m: string) => void;
+}) {
   const [status, setStatus] = useState("");
+  const [actualStart, setActualStart] = useState(currentStart ?? "");
   const [reason, setReason] = useState("");
   const [company, setCompany] = useState(bgc.bgcCompany ?? "");
   const [initiatedOn, setInitiated] = useState(bgc.initiatedOn ?? "");
@@ -486,10 +490,13 @@ function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string;
   const [employment, setEmployment] = useState(bgc.employmentYears === null ? "" : String(bgc.employmentYears));
   const [address, setAddress] = useState(bgc.addressYears === null ? "" : String(bgc.addressYears));
   const [failPlacement, setFailPlacement] = useState(false);
-  const [err, setErr] = useState<{ reason?: string; employment?: string; address?: string; form?: string }>({});
+  const [err, setErr] = useState<{ reason?: string; actualStart?: string; employment?: string; address?: string; form?: string }>({});
   const submit = useSubmit(paperworkError);
   const willFail = status === "failed" || (status === "" && bgc.status === "failed");
   const needsReason = status !== "" && bgcReasonRequired(bgc.status, status);
+  // Clearing the check records the placement's actual start date (required); editable while it stays cleared.
+  const clearing = status === "cleared";
+  const showStart = clearing || (status === "" && bgc.status === "cleared");
   const hid = useId();
 
   const build = (): BgcChange => {
@@ -499,6 +506,7 @@ function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string;
     if (status) { b.status = status; if (reason.trim()) b.reason = reason.trim(); }
     text(company, bgc.bgcCompany, "bgcCompany");
     if (initiatedOn !== (bgc.initiatedOn ?? "")) b.initiatedOn = initiatedOn || null;
+    if (showStart && actualStart && actualStart !== (currentStart ?? "")) b.actualStart = actualStart;
     text(education, bgc.educationLevel, "educationLevel");
     num(employment, bgc.employmentYears, "employmentYears");
     num(address, bgc.addressYears, "addressYears");
@@ -512,6 +520,7 @@ function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string;
         e.preventDefault();
         const b = build();
         if (needsReason && !reason.trim()) { setErr({ reason: "Give a reason." }); e.currentTarget.querySelector<HTMLElement>("textarea")?.focus(); return; }
+        if (clearing && !actualStart) { setErr({ actualStart: "Enter the actual start date." }); e.currentTarget.querySelector<HTMLElement>("[aria-invalid]")?.focus(); return; }
         const yErr = { employment: yearsError(employment), address: yearsError(address) };
         if (yErr.employment || yErr.address) { setErr(yErr); e.currentTarget.querySelector<HTMLElement>("[aria-invalid]")?.focus(); return; }
         if (Object.keys(b).filter((k) => k !== "expectedVersion").length === 0) { setErr({ form: "Change at least one field." }); return; }
@@ -534,6 +543,11 @@ function BgcDialog({ placementId, bgc, onClose, onDone }: { placementId: string;
         {status !== "" && (
           <Field label={needsReason ? "Reason" : "Reason (optional)"} hint="Up to 500 characters; never in the audit log." error={err.reason}>
             {(p) => <textarea {...p} rows={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />}
+          </Field>
+        )}
+        {showStart && (
+          <Field label="Actual start date" hint={clearing ? "Required to clear the check. Replaces the tentative start." : undefined} error={err.actualStart}>
+            {(p) => <input {...p} type="date" min="2000-01-01" max="2100-12-31" value={actualStart} onChange={(e) => setActualStart(e.target.value)} />}
           </Field>
         )}
         {willFail && bgc.actions.failPlacement && (

@@ -217,7 +217,7 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
           ) : (
             <div className="tablewrap"><table aria-label="Placements" aria-busy={q.isFetching || undefined}>
               <thead><tr>
-                <th>Candidate</th><th>Client / vendor</th><th>Type</th><th>Tentative start</th><th>Status</th><th>Recruiter</th>
+                <th>Candidate</th><th>Client / vendor</th><th>Type</th><th>Start</th><th>Status</th><th>Recruiter</th>
                 {showRate && <th>Rate</th>}
                 <th><span className="sr-only">Actions</span></th>
               </tr></thead>
@@ -228,7 +228,7 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
                       {p.technology && <span className="block">{p.technology.name}</span>}</td>
                     <td>{p.client.name}<span className="block">{p.vendor?.name ?? "No vendor"}</span></td>
                     <td>{PLACEMENT_TYPE_LABELS[p.placementType] ?? p.placementType}<span className="block">{WORK_MODE_LABELS[p.workMode] ?? p.workMode}{where(p) && ` · ${where(p)}`}</span></td>
-                    <td>{fmtDate(p.tentativeStart)}</td>
+                    <td>{p.actualStart ? fmtDate(p.actualStart) : <>{fmtDate(p.tentativeStart)}<span className="block muted">Tentative</span></>}</td>
                     <td><PipelineStatus status={p.status} /></td>
                     <td>{p.recruiter.name}<span className="block">{p.team.name}</span></td>
                     {showRate && <td>{"rate" in p ? fmtRate(p.rate) : <span className="muted">—</span>}</td>}
@@ -312,6 +312,7 @@ function PlacementDrawer({ id, initial, onClose, onNotice, canReadDocuments = fa
               <dt>Work mode</dt><dd>{WORK_MODE_LABELS[p.workMode] ?? p.workMode}</dd>
               <dt>Project location</dt><dd>{where(p) || "—"}</dd>
               <dt>Tentative start</dt><dd>{fmtDate(p.tentativeStart)}</dd>
+              {p.actualStart && <><dt>Actual start</dt><dd>{fmtDate(p.actualStart)}</dd></>}
               {p.joinedAt && <><dt>Joined</dt><dd>{fmtDateTime(p.joinedAt)}</dd></>}
               {"rate" in p && <><dt>Rate</dt><dd>{fmtRate(p.rate)}</dd></>}
               <dt>Recruiter</dt><dd>{p.recruiter.name} · {p.team.name}</dd>
