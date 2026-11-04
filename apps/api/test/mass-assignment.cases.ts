@@ -557,6 +557,33 @@ const CASES: RejectCase[] = [
     },
     forbidden: DOCUMENT_FORBIDDEN,
   },
+  // document edits (DOC-4, DOC-5, migration 0421): owner, classification, files, version and who/when stay the server's
+  {
+    route: "PATCH /api/v1/documents/:documentId", actor: "hr",
+    prepare: async () => {
+      const cand = await freshOwn();
+      const id = await asUser(db.app, U.hr, async (c) => (await c.query(
+        `SELECT document_id FROM authz.create_document_upload($1, NULL, 'other', 'application/pdf', 1234)`, [cand.id])).rows[0].document_id as string, true);
+      return {
+        url: `/api/v1/documents/${id}`, body: { title: "Sample title" },
+        state: () => rows(`SELECT row_to_json(d) AS d FROM eureka.document d WHERE d.id = $1`, [id]),
+      };
+    },
+    forbidden: { ...DOCUMENT_FORBIDDEN, fileId: FOREIGN_ID, pendingFileId: FOREIGN_ID, previousFileIds: [FOREIGN_ID], version: 99, createdBy: U.admin, updatedBy: U.admin },
+  },
+  {
+    route: "POST /api/v1/documents/:documentId/replace", actor: "hr",
+    prepare: async () => {
+      const cand = await freshOwn();
+      const id = await asUser(db.app, U.hr, async (c) => (await c.query(
+        `SELECT document_id FROM authz.create_document_upload($1, NULL, 'other', 'application/pdf', 1234)`, [cand.id])).rows[0].document_id as string, true);
+      return {
+        url: `/api/v1/documents/${id}/replace`, body: { contentType: PDF, size: 1234 },
+        state: () => rows(`SELECT (SELECT row_to_json(d) FROM eureka.document d WHERE d.id = $1) AS d, (SELECT count(*)::int FROM eureka.file_object) AS f`, [id]),
+      };
+    },
+    forbidden: { ...DOCUMENT_FORBIDDEN, fileId: FOREIGN_ID, docType: "i9", title: "x", key: "clean/documents/x" },
+  },
   // work authorization (FR-VIS-01, migration 0042): person, ciphertext, key, audit columns and row version are the server's
   {
     route: "POST /api/v1/candidates/:id/work-authorizations", actor: "imm",

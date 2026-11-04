@@ -19,7 +19,8 @@ import { RateLimiter } from "../../platform/rate-limit.js";
 import { documentDownloadName, documentQuarantineKey, documentStoredKey } from "../../platform/storage/content.js";
 import { DOCUMENT_STORAGE, type DocumentStorage } from "../../platform/storage/document-storage.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
-import type { AccessLogQuery, DocumentUpload } from "./documents.schemas.js";
+import type { AccessLogQuery, DocumentUpload, ReplaceDocumentFile, UpdateDocument } from "./documents.schemas.js";
+import { AuditService } from "../../platform/audit.service.js";
 import type { z } from "zod";
 import { dbErrorMapper } from "../../platform/errors.js";
 
@@ -46,11 +47,21 @@ interface DocumentRow {
   uploader_name: string | null;
   created_at: Date;
   scanned_at: Date | null;
+  title: string | null;
+  version: number;
+  p_status: string | null;
+  p_result: string | null;
+  p_content_type: DocumentContentType | null;
+  p_size_bytes: number | null;
+  p_created_at: Date | null;
 }
 
 const DOCUMENT_COLUMNS = `d.id, d.candidate_id, d.placement_id, d.doc_type, d.classification, d.file_id, f.status, f.scan_result,
-  f.content_type, f.size_bytes, f.sha256_hex, d.created_by, u.display_name AS uploader_name, d.created_at, f.scanned_at`;
-const DOCUMENT_FROM = `eureka.document d JOIN eureka.file_object f ON f.id = d.file_id LEFT JOIN eureka.app_user u ON u.id = d.created_by`;
+  f.content_type, f.size_bytes, f.sha256_hex, d.created_by, u.display_name AS uploader_name, d.created_at, f.scanned_at,
+  d.title, d.version, pf.status AS p_status, pf.scan_result AS p_result, pf.content_type AS p_content_type,
+  pf.size_bytes AS p_size_bytes, pf.created_at AS p_created_at`;
+const DOCUMENT_FROM = `eureka.document d JOIN eureka.file_object f ON f.id = d.file_id LEFT JOIN eureka.app_user u ON u.id = d.created_by
+  LEFT JOIN eureka.file_object pf ON pf.id = d.pending_file_id`;
 
 /**
  * The response shape. `id` is the stable document id the paperwork checklist
@@ -72,6 +83,14 @@ const present = (r: DocumentRow) => ({
   uploadedBy: { id: r.created_by, name: r.uploader_name },
   createdAt: r.created_at.toISOString(),
   scannedAt: r.scanned_at?.toISOString() ?? null,
+  /** Display name given after upload (DOC-4); null = show the type. */
+  title: r.title,
+  version: r.version,
+  /** A new file waiting for (or refused by) its scan (DOC-5); the current file keeps opening meanwhile. */
+  replacement: r.p_status === null ? null : {
+    status: r.p_status, reason: r.p_status === "clean" ? null : r.p_result, contentType: r.p_content_type,
+    sizeBytes: r.p_size_bytes, createdAt: r.p_created_at!.toISOString(),
+  },
 });
 
 const DB_ERRORS: Record<string, () => HttpException> = {
@@ -79,6 +98,9 @@ const DB_ERRORS: Record<string, () => HttpException> = {
   not_permitted: () => new ForbiddenException("Not permitted"),
   invalid_upload: () => new UnprocessableEntityException("invalid_upload"),
   too_many_pending: () => new ConflictException("too_many_pending"),
+  invalid_change: () => new UnprocessableEntityException("invalid_change"),
+  classification_change: () => new UnprocessableEntityException("classification_change"),
+  version_mismatch: () => new ConflictException("version_mismatch"),
 };
 
 const mapDbError: (err: unknown) => never = dbErrorMapper(DB_ERRORS);
@@ -102,6 +124,7 @@ export class DocumentsService {
   constructor(
     private readonly db: DbService,
     @Inject(DOCUMENT_STORAGE) private readonly storage: DocumentStorage,
+    private readonly audit: AuditService,
   ) {}
 
   /** The candidate as the caller sees it under candidate:read; 404 when not readable. */
@@ -163,6 +186,59 @@ export class DocumentsService {
         key: documentQuarantineKey(row.file_id), contentType: body.contentType, size: body.size, expiresSeconds: DOCUMENT_UPLOAD_TTL_SECONDS,
       });
       return { id: row.document_id, fileId: row.file_id, classification: row.classification, status: "pending", upload };
+    });
+  }
+
+  /**
+   * A candidate document the caller may edit: 404 when it is not readable (as a download), 403 without
+   * document:upload (or, for restricted documents, restricted upload). Bill invoices are not edited here.
+   */
+  private async editable(c: pg.PoolClient, user: AuthedUser, documentId: string): Promise<DocumentRow> {
+    const d = (await c.query<DocumentRow>(`SELECT ${DOCUMENT_COLUMNS} FROM ${DOCUMENT_FROM} WHERE d.id = $1`, [documentId])).rows[0];
+    if (!d || d.candidate_id === null) throw new NotFoundException();
+    const access = documentAccess(user.access, await this.candidate(c, user, d.candidate_id));
+    if (!access.read || (d.classification === "restricted" && !access.readRestricted)) throw new NotFoundException();
+    if (!access.upload || (d.classification === "restricted" && !access.uploadRestricted)) throw new ForbiddenException("Not permitted");
+    return d;
+  }
+
+  /** DOC-4: title and/or type (same classification). Returns the document. Rule 5: the title never reaches the audit. */
+  async update(user: AuthedUser, documentId: string, parse: () => UpdateDocument) {
+    return this.db.withUser(user.id, async (c) => {
+      await this.editable(c, user, documentId);
+      const { expectedVersion, ...changes } = parse();
+      const r = (await c.query<{ changed: string[]; from_type: string; to_type: string }>(
+        `SELECT * FROM authz.update_document($1, $2::jsonb, $3)`, [documentId, JSON.stringify(changes), expectedVersion ?? null],
+      ).catch(mapDbError)).rows[0]!;
+      if (r.changed.length > 0) {
+        await this.audit.record(c, {
+          actorId: user.id, action: "document.updated", entityType: "document", entityId: documentId,
+          changes: { fields: r.changed, ...(r.changed.includes("doc_type") ? { fromType: r.from_type, toType: r.to_type } : {}) },
+        });
+      }
+      return present((await c.query<DocumentRow>(`SELECT ${DOCUMENT_COLUMNS} FROM ${DOCUMENT_FROM} WHERE d.id = $1`, [documentId])).rows[0]!);
+    });
+  }
+
+  /** DOC-5: a presigned POST for the replacement file; the scan swaps it in when clean. */
+  async requestReplace(user: AuthedUser, documentId: string, parse: () => ReplaceDocumentFile) {
+    return this.db.withUser(user.id, async (c) => {
+      const d = await this.editable(c, user, documentId);
+      const body = parse();
+      if (!this.uploadLimiter.take(user.id)) {
+        throw new HttpException("Too many uploads; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
+      }
+      const r = (await c.query<{ file_id: string; classification: DocumentClassification }>(
+        `SELECT * FROM authz.replace_document_file($1, $2, $3, $4)`, [documentId, body.contentType, body.size, body.expectedVersion ?? null],
+      ).catch(mapDbError)).rows[0]!;
+      await this.audit.record(c, {
+        actorId: user.id, action: "document.replace_requested", entityType: "document", entityId: documentId,
+        changes: { fileId: r.file_id, docType: d.doc_type, classification: r.classification, contentType: body.contentType, sizeBytes: body.size },
+      });
+      const upload = await this.storage.presignUpload({
+        key: documentQuarantineKey(r.file_id), contentType: body.contentType, size: body.size, expiresSeconds: DOCUMENT_UPLOAD_TTL_SECONDS,
+      });
+      return { id: documentId, fileId: r.file_id, classification: r.classification, status: "pending", upload };
     });
   }
 
