@@ -13,6 +13,7 @@ import {
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
+import { likeContains } from "../../platform/sql.js";
 import { inPickerScope, pickerScopePerm } from "../../platform/people-scope.js";
 import { likeContains } from "../../platform/sql.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
@@ -227,6 +228,10 @@ export class InterviewsService {
     if (q.submissionId) where.push(`i.submission_id = ${p(q.submissionId)}`);
     if (q.cleared !== undefined) where.push(`i.cleared = ${p(q.cleared)}`);
     if (q.result) where.push(`i.result = ${p(q.result)}`);
+    if (q.search) {
+      const pat = p(likeContains(q.search));
+      where.push(`(${CANDIDATE_NAME} ILIKE ${pat} ESCAPE '\\' OR cu.display_name ILIKE ${pat} ESCAPE '\\')`);
+    }
     const desc = q.sort === "desc";
     if (q.cursor) {
       const [k, id] = splitCursor(q.cursor);
