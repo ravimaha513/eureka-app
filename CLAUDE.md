@@ -12,7 +12,7 @@ Internal talent-ops platform. pnpm monorepo, Node 22+, Postgres 16.
 ## Commands
 - `pnpm local` — full stack (Docker PG :55432, API :3000, web :5173)
 - `pnpm -r typecheck` and `pnpm -r test` before commit
-- API tests: `pnpm test:api` (full suite, ~4 min) or `pnpm test:api test/<file> --reporter=dot`. Starts the throwaway tmpfs Postgres `testdb` on :55433 (durability off, 600 connections); the dev DB on :55432 allows only 100, too few for the default fork count. Migrated template is cached by hash (`TEST_FRESH_TEMPLATE=1` rebuilds); `TEST_MAX_FORKS` caps parallelism. Don't run web + api suites at once
+- API tests: `pnpm test:api` (full suite, ~4 min) or `pnpm test:api test/<file> --reporter=dot`. Starts the throwaway tmpfs Postgres `testdb` on :55433 (durability off, 600 connections); the dev DB on :55432 allows only 100, too few for the default fork count. Migrated template is cached by hash (`TEST_FRESH_TEMPLATE=1` rebuilds); `TEST_MAX_FORKS` caps parallelism. Runs queue across sessions (`scripts/test-api-gate.sh`): one full suite at a time with 6 forks, 3 filtered runs with 2 forks each; never call `vitest` directly, it skips the queue. Don't run web + api suites at once
 - A file too slow to run alone gets split: cases module + `<name>.N.api.int.test.ts` shard files (`test/shard.ts`, e.g. mass-assignment)
 
 ## Parallel sessions
