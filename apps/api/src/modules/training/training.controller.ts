@@ -65,9 +65,10 @@ export class TrainingController {
     return this.svc.setStatus(user, id, BatchStatusChange.parse(body).to);
   }
 
+  /** Training managers and Sales leadership (Lead and above) at their batch locations; checked in the service and the database. */
   @Delete("batches/:id")
   @HttpCode(204)
-  @RequirePermission("training:manage")
+  @RequirePermission("training:read")
   async deleteBatch(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
     await this.svc.deleteBatch(user, id);
   }

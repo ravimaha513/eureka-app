@@ -57,6 +57,7 @@ interface BatchRow {
   students: number;
   courses: number;
   staffable: boolean;
+  deletable: boolean;
 }
 
 interface CourseModuleRow {
@@ -78,7 +79,8 @@ const BATCH_SELECT = `
          b.technology_id, t.name AS technology_name, b.trainer_id, u.display_name AS trainer_name,
          v.covered, v.students,
          (SELECT count(*)::int FROM eureka.batch_course bc WHERE bc.batch_id = b.id) AS courses,
-         coalesce(b.location_id = ANY ((SELECT authz.batch_staff_location_ids())::uuid[]), false) AS staffable
+         coalesce(b.location_id = ANY ((SELECT authz.batch_staff_location_ids())::uuid[]), false) AS staffable,
+         coalesce(b.location_id = ANY ((SELECT authz.batch_manage_location_ids())::uuid[]), false) AS deletable
   FROM authz.training_batches() v
   JOIN eureka.batch b ON b.id = v.batch_id
   JOIN eureka.location l ON l.id = b.location_id
@@ -118,7 +120,8 @@ export class TrainingService {
       /** UI hints (TR-12); every write is checked again. */
       actions: {
         manage,
-        delete: manage && b.covered && b.students === 0,
+        /** Training managers and Sales leadership (Lead and above) at their batch locations; the database refuses a batch with students. */
+        delete: b.deletable && b.students === 0,
         updateProgress: trainingBatchCovered(access, "training.progress:update", ref) && ["planned", "in_training"].includes(b.status),
         addStudents: b.staffable && ["planned", "in_training"].includes(b.status),
         removeStudents: b.staffable,
@@ -242,7 +245,7 @@ export class TrainingService {
 
   async deleteBatch(user: AuthedUser, id: string) {
     await this.db.withUser(user.id, async (c) => {
-      await this.loadBatch(c, id);
+      if (!(await this.loadBatch(c, id)).deletable) throw new ForbiddenException("Not permitted");
       await c.query(`SELECT authz.delete_batch($1)`, [id]).catch(mapTrainingError);
       await this.audit.record(c, { actorId: user.id, action: "batch.deleted", entityType: "batch", entityId: id });
     });

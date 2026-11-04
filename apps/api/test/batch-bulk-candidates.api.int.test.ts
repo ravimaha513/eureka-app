@@ -78,6 +78,14 @@ describe("bulk add", () => {
     expect(made).toEqual([{ batch_id: batchId, technology_id: TECH_ID, location_id: LOC.dallas, team_id: T.t1 }]);
   });
 
+  it("creates with no team (teamId null), keeping the creator as recruiter so they still see them", async () => {
+    const done = await bulk("l1", { dryRun: false, teamId: null, rows: [row(40)] });
+    expect(done.json()).toMatchObject({ committed: true, created: 1, failed: 0 });
+    const { rows: made } = await db.admin.query(
+      `SELECT c.team_id, c.recruiter_id FROM eureka.candidate c JOIN eureka.person p ON p.id = c.person_id WHERE p.personal_email = 'bulk40@example.com'`);
+    expect(made).toEqual([{ team_id: null, recruiter_id: U.l1 }]);
+  });
+
   it("creates nothing when any row fails, and says why per row", async () => {
     const res = await bulk("l1", { dryRun: false, rows: [
       row(10),
