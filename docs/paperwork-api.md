@@ -88,6 +88,6 @@ rows of that kind, and no longer edits them. The API still accepts them.
 ## Web: the paperwork page
 
 The candidate name in the work queue (and its Open button) opens `/paperwork/<placementId>`, which replaced the drawer: tabs for
-Documents (upload, view, download), Checklist (item updates and history), Background check (status with a progress bar,
+Documents (upload, view, download, and edit: title, type, replacement file; docs/documents-api.md), Checklist (item updates and history), Background check (status with a progress bar,
 check details, employment and address rows with a coverage bar and gap warnings, notes) and Activity (the check's history),
 plus a summary rail with "Needs attention" links. The tab is kept in `?tab=`.

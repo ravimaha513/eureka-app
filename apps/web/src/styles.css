@@ -1070,3 +1070,8 @@ tr.editing:hover td { background: var(--surface2); }
 .covlegend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
 @media (max-width: 1100px) { .pwlayout { grid-template-columns: minmax(0, 1fr); } .pwrail { position: static; } }
 @media (max-width: 640px) { .pwgrid, .pwdetails { grid-template-columns: minmax(0, 1fr); } .pwspan2 { grid-column: auto; } .pwstats > div { flex: 1; min-width: 0; } }
+/* Document editor (inline row in DocumentsSection): title, type of the same access level, replacement file */
+.doceditor { display: flex; flex-direction: column; gap: 8px; }
+.doceditgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 12px; }
+.doceditgrid .field input, .doceditgrid .field select { min-width: 0; width: 100%; }
+@media (max-width: 640px) { .doceditgrid { grid-template-columns: minmax(0, 1fr); } }
