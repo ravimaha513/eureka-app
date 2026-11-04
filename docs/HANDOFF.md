@@ -287,6 +287,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Candidate and batch filters on lists (no migrations): `candidate` (name contains) and `batchId` on `GET /placements` + export, `/interviews`, `/submissions` + `/summary`; Candidate box and Batch select on all three tabs and Cleared interviews; Submissions' two-step picker replaced; Interviews search drops the default from-today date.
 - New batch workflow (no migrations): name, location, technology, month, then optional bulk upload of new candidates from an Excel template (preview, all or nothing; `docs/candidates-api.md` CA-6a); upload also on the batch's Students tab; `BatchDialog` is edit-only.
 - Candidate with no team yet (0410): "No team yet" in the New candidate Team picker; Assign team on the profile (`PUT /candidates/:id/team`, `authz.assign_candidate_team`); no Hot List until assigned.
+- Combined #98–#105 (#106): New candidate starts on "Not yet assigned" team, Status select (`initialStatus`), "Several candidates" tab; batch name required on both create paths (PATCH can't clear it); named batches labelled "name · location"; `GET /interviews?search=` (candidate or coach name, API only); `docs/eureka-app-4-gaps.md`; mass-assignment cases for 5 uncovered write routes.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
