@@ -20,6 +20,7 @@ export function salesError(e: unknown, ctx: SalesErrorContext = "generic"): stri
     case 422:
       if (e.errors?.length) return "Some fields need attention. Check the highlighted fields.";
       if (e.detail === "batch_not_allowed") return "That batch is at another location or no longer open. Choose another batch.";
+      if (e.detail === "team_required") return "Assign a team before adding this candidate to the Hot List.";
       if (ctx === "transition") return "That status change isn't allowed from the candidate's current status.";
       return "The server rejected this change. Check the values and try again.";
     case 429: return e.detail ?? "Too many requests. Try again in a minute.";

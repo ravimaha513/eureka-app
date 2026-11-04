@@ -26,7 +26,8 @@ export interface Candidate {
   visibility: "team" | "all_teams" | "selected_teams";
   priority: "P1" | "P2" | "P3";
   /** `lead`: the team lead's name (the sheet's "Lead"); absent on older servers. */
-  team: { id: string; name: string; lead?: string | null };
+  /** `id` null: no team yet ("name" says so); the profile offers Assign team. */
+  team: { id: string | null; name: string; lead?: string | null };
   recruiter: { id: string; name: string } | null;
   location: { id: string; name: string };
   /** In-person candidate; null when not recorded. */

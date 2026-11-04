@@ -31,6 +31,10 @@ BEGIN
       ('bench','terminated')), false) THEN
     RAISE EXCEPTION 'invalid transition % -> %', c.marketing_status, p_to USING ERRCODE = 'check_violation';
   END IF;
+  -- The Hot List is team-owned: a candidate with no team (0390) gets one first.
+  IF p_to = 'active' AND c.team_id IS NULL THEN
+    RAISE EXCEPTION 'team_required' USING ERRCODE = 'check_violation';
+  END IF;
   IF EXISTS (SELECT 1 FROM eureka.placement p
              WHERE p.candidate_id = p_candidate AND p.status IN ('confirmed', 'paperwork', 'bgc', 'ready')) THEN
     RAISE EXCEPTION 'placement_open' USING ERRCODE = 'check_violation';

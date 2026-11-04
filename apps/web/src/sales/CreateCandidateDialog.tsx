@@ -9,13 +9,15 @@ import { OPEN_BATCH_STATUSES, salesApi, salesKeys, type CreateCandidate, type Du
 import { Field, useFocusAfterFailure } from "./ui";
 
 const FIELDS = ["firstName", "lastName", "phone", "email", "teamId", "technologyId", "locationId", "batchId"] as const;
+const NO_TEAM = "none";
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * New candidate (POST /api/v1/candidates). The Team picker lists the teams in
  * the caller's candidate:create scope (GET /candidate-create-teams), preset to
- * their own team; it is hidden when there is only one. A recruiter creator
- * becomes the candidate's recruiter.
+ * their own team; it is hidden when there is only one. "No team yet" leaves the
+ * team for later (Assign team on the profile). A recruiter creator becomes the
+ * candidate's recruiter.
  * Technology and location come from the lookups pickers; `locations` (the ones
  * the user has already seen) are the fallback when the lookup list is unavailable.
  *
@@ -59,7 +61,7 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
 
   const validate = () => {
     const e: Record<string, string> = {};
-    if (teams.isSuccess && !teamItems.some((t) => t.id === teamId)) e.teamId = "Choose a team.";
+    if (teams.isSuccess && teamId !== NO_TEAM && !teamItems.some((t) => t.id === teamId)) e.teamId = "Choose a team.";
     if (!v.firstName.trim()) e.firstName = "Enter a first name.";
     if (!v.lastName.trim()) e.lastName = "Enter a last name.";
     if (!v.phone.trim()) e.phone = "Enter a phone number.";
@@ -84,7 +86,7 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
       technologyId: v.technologyId.trim(), locationId: v.locationId.trim(),
       phone: normalizePhoneE164(v.phone)!, email: v.email.trim(),
       ...(v.batchId && openBatches.some((b) => b.id === v.batchId) ? { batchId: v.batchId } : {}),
-      ...(teamId ? { teamId } : {}),
+      ...(teamId === NO_TEAM ? { teamId: null } : teamId ? { teamId } : {}),
     };
     setBusy(true);
     try {
@@ -128,11 +130,12 @@ export function CreateCandidateDialog({ locations, onClose, onCreated, onOpenPro
           <p className="note warn" role="alert">You aren't on a team you can add candidates to. Ask an admin to add you to a team.</p>
         )}
         {teamItems.length > 1 && (
-          <Field label="Team" error={errors.teamId}>
+          <Field label="Team" hint={teamId === NO_TEAM ? "You can assign the team later from the candidate's profile." : undefined} error={errors.teamId}>
             {(p) => (
               <select {...p} required value={teamId} onChange={(e) => setPickedTeam(e.target.value)}>
-                {!teamItems.some((t) => t.id === teamId) && <option value="">Choose a team</option>}
+                {teamId !== NO_TEAM && !teamItems.some((t) => t.id === teamId) && <option value="">Choose a team</option>}
                 {teamItems.map((t) => <option key={t.id} value={t.id}>{t.lead ? `${t.name} (${t.lead})` : t.name}</option>)}
+                <option value={NO_TEAM}>No team yet</option>
               </select>
             )}
           </Field>

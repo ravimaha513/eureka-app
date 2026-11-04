@@ -56,8 +56,8 @@ interface CandidateRow {
   phone_e164: string | null;
   dob_year: number | null;
   technology: string;
-  team_id: string;
-  team_name: string;
+  team_id: string | null;
+  team_name: string | null;
   recruiter_id: string | null;
   recruiter_name: string | null;
   location_id: string;
@@ -337,7 +337,7 @@ export class CandidatesService implements OnModuleInit {
     FROM eureka.candidate c
     JOIN eureka.person p ON p.id = c.person_id
     JOIN eureka.technology t ON t.id = c.technology_id
-    JOIN eureka.team tm ON tm.id = c.team_id
+    LEFT JOIN eureka.team tm ON tm.id = c.team_id
     JOIN eureka.location l ON l.id = c.location_id
     LEFT JOIN eureka.app_user u ON u.id = c.recruiter_id
     LEFT JOIN eureka.app_user lu ON lu.id = tm.lead_id
@@ -363,7 +363,7 @@ export class CandidatesService implements OnModuleInit {
       statusLabel: marketingStatusLabel(r.marketing_status, r.visibility, r.gh_remote),
       visibility: r.visibility,
       priority: r.priority,
-      team: { id: r.team_id, name: r.team_name, lead: r.lead_name },
+      team: { id: r.team_id, name: r.team_name ?? "No team yet", lead: r.lead_name },
       teamAssignedAt: r.team_assigned_at.toISOString(),
       inPersonOk: r.in_person_ok,
       recruiter: r.recruiter_id ? { id: r.recruiter_id, name: r.recruiter_name } : null,
@@ -553,6 +553,7 @@ export class CandidatesService implements OnModuleInit {
     if (!found) throw new NotFoundException();
     const ref = toRef(found.row);
     const readScope = resolveScope(user.access, "candidate:read");
+    const createScope = resolveScope(user.access, "candidate:create");
     const complianceScope = resolveScope(user.access, "candidate.compliance:update");
     const canCompliance = complianceScope !== null && ownsCandidate(complianceScope, ref);
     const showCompanies = canCompliance || (readScope !== null && ownsCandidate(readScope, ref));
@@ -567,6 +568,8 @@ export class CandidatesService implements OnModuleInit {
       /** Owners and compliance editors only (E-Verify, offer letter and 1099 companies). */
       ...(showCompanies ? { companies: { everify: link("everify"), offerLetter: link("offerLetter"), form1099: link("form1099") } } : {}),
       canEditCompliance: canCompliance,
+      /** No team yet (0390) and the caller may give it one: PUT /candidates/:id/team. */
+      canAssignTeam: found.row.team_id === null && createScope !== null && ownsCandidate(createScope, ref),
       /** Owners only: the teams a "Selected teams" candidate is shared with. */
       ...(readScope !== null && ownsCandidate(readScope, ref) ? { sharedTeams: found.sharedTeams } : {}),
       /** Hints for the UI (docs/placements-api.md); every write is checked again. */
@@ -668,6 +671,24 @@ export class CandidatesService implements OnModuleInit {
     return { items: rows.map((r) => ({ id: r.id, name: r.name, lead: r.lead_name })), defaultTeamId: rows.some((r) => r.id === own) ? own : null };
   }
 
+  /** Gives a candidate with no team (0390) their team, from the same teams the New candidate dialog offers. */
+  async assignTeam(user: AuthedUser, id: string, teamId: string) {
+    const scope = resolveScope(user.access, "candidate:create");
+    if (!scope || !(scope.all || scope.teamIds.has(teamId))) throw new ForbiddenException("Not permitted to assign candidates to this team");
+    return this.db.withUser(user.id, async (c) => {
+      const row = await this.loadForWrite(c, user, id, "candidate:create");
+      if (row.team_id !== null) throw new ConflictException("team_already_assigned");
+      try {
+        await c.query(`SELECT authz.assign_candidate_team($1, $2)`, [id, teamId]);
+      } catch (err) {
+        if ((err as { message?: string }).message === "invalid_team") throw new UnprocessableEntityException("invalid_team");
+        throw err;
+      }
+      await this.audit.record(c, { actorId: user.id, action: "candidate.team_assigned", entityType: "candidate", entityId: id, changes: { teamId } });
+      return { id, teamId };
+    });
+  }
+
   async setVisibility(user: AuthedUser, id: string, visibility: CandidateVisibility, teamIds: string[] = []) {
     return this.db.withUser(user.id, async (c) => {
       await this.loadForWrite(c, user, id, "candidate.visibility:update");
@@ -705,6 +726,7 @@ export class CandidatesService implements OnModuleInit {
       } catch (err) {
         // The placement drives the candidate until it joins or backs out (migration 0022).
         if ((err as { message?: string }).message === "placement_open") throw new UnprocessableEntityException("placement_open");
+        if ((err as { message?: string }).message === "team_required") throw new UnprocessableEntityException("team_required");
         throw err;
       }
       await this.audit.record(c, { actorId: user.id, action: "candidate.transition", entityType: "candidate", entityId: id, changes: { from: row.marketing_status, to } });
@@ -731,10 +753,11 @@ export class CandidatesService implements OnModuleInit {
    * linking the hired application), so both commit or neither does.
    */
   async create(user: AuthedUser, body: CreateCandidate, then?: (c: pg.PoolClient, candidateId: string) => Promise<void>) {
-    const team = body.teamId ?? user.access.teamIds[0];
-    if (!team) throw new ForbiddenException("No team to assign");
+    // null: no team yet (0390). Omitted: the caller's first team.
+    const team = body.teamId === null ? null : body.teamId ?? user.access.teamIds[0];
+    if (team === undefined) throw new ForbiddenException("No team to assign");
     const scope = resolveScope(user.access, "candidate:create");
-    const teamAllowed = scope && (scope.all || scope.teamIds.has(team)
+    const teamAllowed = scope && (team === null || scope.all || scope.teamIds.has(team)
       || (scope.recruiterIds.has(user.id) && user.access.teamIds[0] === team));
     if (!teamAllowed) throw new ForbiddenException("Not permitted to create candidates in this team");
 
@@ -748,8 +771,9 @@ export class CandidatesService implements OnModuleInit {
     if ((await this.duplicates(user, body)).length > 0) throw new ConflictException("duplicate_contact");
 
     return this.db.withUser(user.id, async (c) => {
-      const recruiter = body.recruiterId === undefined
-        ? (hasTrait(user.access, "recruiter") ? user.id : null)
+      // With no team, only the recruiter link keeps the candidate in the creator's scope (org scope needs none).
+      const recruiter = team === null && !scope!.all ? user.id
+        : body.recruiterId === undefined ? (hasTrait(user.access, "recruiter") ? user.id : null)
         : body.recruiterId;
       // The person row becomes visible only through its candidate, so its id is
       // generated here rather than read back with RETURNING (RLS would hide it).

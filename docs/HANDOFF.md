@@ -280,6 +280,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - BGC re-initiate (no migrations): `cleared → initiated` with a required reason (vendor asks for more documents, also after joining; placement/assignment untouched); `authz.update_bgc` moved to `db/functions/authz/update_bgc.sql`; placement drawer offers Initiate / Re-initiate BGC to `bgc:update` holders (docs/paperwork-api.md PW-7).
 - Create placement scope (no migrations): CEO gets `placement:create` (org); `authz.create_placement` no longer needs the candidate visible, so the submission's team can place after visibility is withdrawn; `submissionActions` follows (PL-1).
 - BGC: Completed and Helped by removed from the drawer and API (`completed_on` stays server-set); Manager and AD hold `bgc:update` over their hierarchy; Notes block saves in place in the paperwork drawer.
+- Candidate with no team yet (0390): "No team yet" in the New candidate Team picker; Assign team on the profile (`PUT /candidates/:id/team`, `authz.assign_candidate_team`); no Hot List until assigned.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
