@@ -159,7 +159,9 @@ describe("students and progress (TR-8..TR-10)", () => {
     await expect(q(U.locD, `SELECT authz.set_batch_student($1, gen_random_uuid(), true)`, [batch])).rejects.toThrow(/candidate_not_eligible/);
     await expect(q(U.coach, `SELECT authz.set_batch_student($1, $2, true)`, [batch, outsider.id])).rejects.toThrow(/not_permitted/);
     await expect(q(U.locA, `SELECT authz.set_batch_student($1, $2, true)`, [batch, outsider.id])).rejects.toThrow(/batch_not_found/);
-    await expect(q(U.l1, `SELECT authz.set_batch_student($1, $2, true)`, [batch, s1.id])).rejects.toThrow(/batch_not_found/);
+    // A Lead plans batches at their teams' locations (TR-8): they may place their own candidates, not others'.
+    await expect(q(U.l1, `SELECT authz.set_batch_student($1, $2, true)`, [batch, outsider.id])).rejects.toThrow(/candidate_not_eligible/);
+    await q(U.l1, `SELECT authz.set_batch_student($1, $2, true)`, [batch, s1.id]);
     await expect(q(U.locD, `SELECT authz.set_batch_student($1, $2, false)`, [batch, outsider.id])).rejects.toThrow(/not_in_batch/);
     // Location roles hold no candidate:update: a direct edit stays refused by the column guard.
     await expect(q(U.locD, `UPDATE eureka.candidate SET batch_id = $1 WHERE id = $2`, [batch, outsider.id])).rejects.toThrow(/not permitted to update profile fields/);
@@ -206,7 +208,9 @@ describe("students and progress (TR-8..TR-10)", () => {
       .map((r) => r.candidate_id).sort();
     expect(listed).toEqual(expected);
     const [b] = await q<{ covered: boolean; students: number }>(U[key], `SELECT covered, students FROM authz.training_batches() WHERE batch_id = $1`, [batch]);
-    if (expected.length === 0) expect(b).toBeUndefined();
+    // A batch at a location where the caller plans batches is listed even with no student of theirs (TR-3).
+    const planner = (await q<{ ok: boolean }>(U[key], `SELECT $1 = ANY (authz.batch_staff_location_ids()) AS ok`, [LOC.dallas]))[0]!.ok;
+    if (expected.length === 0 && !planner) expect(b).toBeUndefined();
     else expect(b).toEqual({ covered: batchLevel, students: expected.length });
   });
 

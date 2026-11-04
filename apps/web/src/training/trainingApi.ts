@@ -37,7 +37,7 @@ export interface BatchCard {
   students: number;
   courses: number;
   rowVersion: number;
-  actions: { manage: boolean; delete: boolean; updateProgress: boolean };
+  actions: { manage: boolean; delete: boolean; updateProgress: boolean; addStudents: boolean; removeStudents: boolean };
 }
 
 export interface Module { id: string; title: string; durationMinutes: number; resources: string[] }
@@ -72,6 +72,9 @@ export interface CourseDetail {
 
 export interface CandidateTraining {
   batch: { id: string; name: string; status: string; startDate: string; endDate: string | null } | null;
+  /** The caller may attach, change or clear the batch (UI hint, TR-14). */
+  canChangeBatch: boolean;
+  locationId: string;
   percent?: number;
   completedMinutes?: number;
   totalMinutes?: number;
@@ -118,6 +121,8 @@ export const trainingApi = {
   eligible: (id: string, search: string) =>
     api<{ items: EligibleStudent[] }>(`${B}/${id}/eligible-students${search ? `?search=${encodeURIComponent(search)}` : ""}`),
   addStudent: (id: string, candidateId: string) => api(`${B}/${id}/students`, json("POST", { candidateId })),
+  addStudents: (id: string, candidateIds: string[]) =>
+    api<{ added: number; skipped: string[] }>(`${B}/${id}/students/bulk`, json("POST", { candidateIds })),
   removeStudent: (id: string, candidateId: string) => api<void>(`${B}/${id}/students/${candidateId}`, json("DELETE")),
   setModule: (id: string, candidateId: string, moduleId: string, completed: boolean) =>
     api<{ completed: boolean; completedAt: string | null }>(`${B}/${id}/students/${candidateId}/modules/${moduleId}`, json("PUT", { completed })),
@@ -135,6 +140,7 @@ export const trainingApi = {
   deleteModule: (id: string, moduleId: string) => api<void>(`${C}/${id}/modules/${moduleId}`, json("DELETE")),
   reorderModules: (id: string, moduleIds: string[]) => api(`${C}/${id}/modules/order`, json("PUT", { moduleIds })),
   candidate: (id: string) => api<CandidateTraining>(`/api/v1/candidates/${id}/training`),
+  setCandidateBatch: (id: string, batchId: string | null) => api(`/api/v1/candidates/${id}/training/batch`, json("PUT", { batchId })),
 };
 
 const MESSAGES: Record<string, string> = {
@@ -149,6 +155,7 @@ const MESSAGES: Record<string, string> = {
   course_already_assigned: "That course is already assigned to this batch.",
   invalid_course: "That course no longer exists.",
   candidate_not_eligible: "Only candidates at the batch's location can join it.",
+  batch_not_allowed: "That batch is at another location or no longer open. Choose another batch.",
   not_in_batch: "That candidate is no longer in this batch.",
   module_not_in_batch: "That module is not part of this batch's courses any more.",
   course_in_use: "This course is assigned to a batch or has recorded progress. Archive it instead.",

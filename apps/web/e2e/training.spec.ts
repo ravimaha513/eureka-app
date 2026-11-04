@@ -68,12 +68,12 @@ test("a location admin runs a batch; the recruiter sees the student's progress",
 
   // Add the student and tick the module.
   await page.getByRole("tab", { name: /View Students/ }).click();
-  await page.getByRole("button", { name: "Add student" }).click();
-  const addStudent = page.getByRole("dialog", { name: "Add student" });
+  await page.getByRole("button", { name: "Add students" }).click();
+  const addStudent = page.getByRole("dialog", { name: "Add students" });
   await addStudent.getByRole("searchbox", { name: "Search candidates" }).fill(student.name);
-  await addStudent.getByRole("button", { name: `Add ${student.name}` }).click();
+  await addStudent.getByRole("checkbox", { name: new RegExp(`^${student.name}`) }).check();
+  await addStudent.getByRole("button", { name: "Add 1 student" }).click();
   await expect(page.getByRole("status").filter({ hasText: `${student.name} added to the batch.` })).toBeVisible();
-  await addStudent.getByRole("button", { name: "Done" }).click();
   await page.getByRole("button", { name: new RegExp(`^${student.name}`) }).click();
   await page.getByRole("checkbox", { name: /Intro/ }).check();
   await expect(page.getByRole("status").filter({ hasText: `Intro marked complete for ${student.name}.` })).toBeVisible();

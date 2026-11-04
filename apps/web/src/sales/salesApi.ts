@@ -51,6 +51,8 @@ export interface Batch {
   id: string;
   /** "Java · Dallas · Nov 2026" */
   label: string;
+  /** The name given on the Training Batches screen, if any. */
+  customName?: string | null;
   location: { id: string; name: string };
   technology: { id: string; name: string };
   /** YYYY-MM */

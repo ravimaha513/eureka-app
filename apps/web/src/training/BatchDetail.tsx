@@ -1,8 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isSafeHttpsUrl } from "@eureka/shared";
-import { BookOpen, CalendarDays, ChevronDown, ChevronUp, GraduationCap, Pencil, Plus, Trash2, UserMinus, Users } from "lucide-react";
-import type { Me } from "../api";
+import { BookOpen, CalendarDays, ChevronDown, ChevronUp, ExternalLink, GraduationCap, Pencil, Plus, Trash2, UserMinus, Users } from "lucide-react";
+import { can, type Me } from "../api";
+import { navigate } from "../lib/router";
+import { screenPath } from "../nav";
 import { ConfirmDialog, Dialog } from "../ui/Dialog";
 import { fmtDate } from "../sales/ui";
 import { BatchDialog } from "./BatchDialog";
@@ -20,7 +22,7 @@ export function BatchDetailView({ id, me, onBack, onDeleted }: {
 }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: trainingKeys.batch(id), queryFn: () => trainingApi.batch(id) });
-  const [tab, setTab] = useState<"courses" | "students">("courses");
+  const [picked, setTab] = useState<"courses" | "students" | null>(null);
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [statusTo, setStatusTo] = useState<{ to: string; label: string } | null>(null);
@@ -40,6 +42,8 @@ export function BatchDetailView({ id, me, onBack, onDeleted }: {
     );
   }
   const b = q.data;
+  // Who cannot edit the course list comes here to see or fill the batch.
+  const tab = picked ?? (b.actions.manage ? "courses" : "students");
   return (
     <>
       <nav className="tr-crumbs" aria-label="Breadcrumb">
@@ -85,7 +89,7 @@ export function BatchDetailView({ id, me, onBack, onDeleted }: {
         </div>
       ) : (
         <div role="tabpanel" id={`${tabsId}-ps`} aria-labelledby={`${tabsId}-ts`}>
-          <StudentsPanel batch={b} onNotice={setNotice} />
+          <StudentsPanel batch={b} canOpenProfile={can(me, "candidate:read")} onNotice={setNotice} />
         </div>
       )}
 
@@ -228,7 +232,7 @@ function AddCourseDialog({ batch, onClose, onAdded }: { batch: BatchDetail; onCl
   );
 }
 
-function StudentsPanel({ batch, onNotice }: { batch: BatchDetail; onNotice: (s: string) => void }) {
+function StudentsPanel({ batch, canOpenProfile, onNotice }: { batch: BatchDetail; canOpenProfile: boolean; onNotice: (s: string) => void }) {
   const qc = useQueryClient();
   const id = useId();
   const [text, setText] = useState("");
@@ -240,7 +244,6 @@ function StudentsPanel({ batch, onNotice }: { batch: BatchDetail; onNotice: (s: 
   const [removing, setRemoving] = useState<Student | null>(null);
   const [error, setError] = useState("");
   const refresh = () => qc.invalidateQueries({ queryKey: trainingKeys.all });
-  const manage = batch.actions.manage;
   const items = q.data?.items ?? [];
 
   // The box shows the new state at once; it falls back to the server's answer after the refetch (or an error).
@@ -267,7 +270,7 @@ function StudentsPanel({ batch, onNotice }: { batch: BatchDetail; onNotice: (s: 
             <label htmlFor={`${id}-q`}>Search students</label>
             <input id={`${id}-q`} type="search" value={text} maxLength={80} onChange={(e) => setText(e.target.value)} />
           </div>
-          {manage && <button type="button" className="btn sm" onClick={() => setAdding(true)}><Plus size={14} aria-hidden="true" />Add student</button>}
+          {batch.actions.addStudents && <button type="button" className="btn sm" onClick={() => setAdding(true)}><Plus size={14} aria-hidden="true" />Add students</button>}
         </div>
       </div>
       {error && <p className="banner error" role="alert">{error}</p>}
@@ -287,7 +290,12 @@ function StudentsPanel({ batch, onNotice }: { batch: BatchDetail; onNotice: (s: 
                       <ChevronDown size={18} aria-hidden="true" className="tr-caret" />
                     </button>
                     <ProgressBar percent={s.percent} label={`Overall progress of ${s.name}`} />
-                    {manage && (
+                    {canOpenProfile && (
+                      <button type="button" className="iconbtn" aria-label={`Open profile of ${s.name}`} onClick={() => navigate(screenPath("candidates", s.candidateId))}>
+                        <ExternalLink size={16} aria-hidden="true" />
+                      </button>
+                    )}
+                    {batch.actions.removeStudents && (
                       <button type="button" className="iconbtn" aria-label={`Remove ${s.name} from the batch`} onClick={() => setRemoving(s)}>
                         <UserMinus size={16} aria-hidden="true" />
                       </button>
@@ -328,8 +336,8 @@ function StudentsPanel({ batch, onNotice }: { batch: BatchDetail; onNotice: (s: 
             })}
           </ul>
         )}
-      {adding && <AddStudentDialog batch={batch} onClose={() => setAdding(false)}
-        onAdded={(name) => { onNotice(`${name} added to the batch.`); void refresh(); }} />}
+      {adding && <AddStudentsDialog batch={batch} onClose={() => setAdding(false)}
+        onAdded={(message) => { onNotice(message); void refresh(); }} />}
       {removing && (
         <ConfirmDialog title={`Remove ${removing.name}?`} confirmLabel="Remove student" danger formatError={trainingError}
           action={() => trainingApi.removeStudent(batch.id, removing.candidateId)} onClose={() => setRemoving(null)}
@@ -341,42 +349,74 @@ function StudentsPanel({ batch, onNotice }: { batch: BatchDetail; onNotice: (s: 
   );
 }
 
-function AddStudentDialog({ batch, onClose, onAdded }: { batch: BatchDetail; onClose: () => void; onAdded: (name: string) => void }) {
-  const qc = useQueryClient();
+/** Most students one add takes (POST /students/bulk). */
+const MAX_BULK = 200;
+
+/** Tick candidates, across searches, and add them in one go (TR-8). */
+function AddStudentsDialog({ batch, onClose, onAdded }: { batch: BatchDetail; onClose: () => void; onAdded: (message: string) => void }) {
   const id = useId();
   const [text, setText] = useState("");
   const [search, setSearch] = useState("");
   useEffect(() => { const t = setTimeout(() => setSearch(text.trim()), 300); return () => clearTimeout(t); }, [text]);
   const q = useQuery({ queryKey: ["training", "eligible", batch.id, search], queryFn: () => trainingApi.eligible(batch.id, search) });
+  const [picked, setPicked] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const shown = q.data?.items ?? [];
+  const allShown = shown.length > 0 && shown.every((c) => picked.has(c.candidateId));
+  const count = picked.size;
+  const pick = (entries: { candidateId: string; name: string }[], on: boolean) => setPicked((old) => {
+    const next = new Map(old);
+    for (const c of entries) { if (on) next.set(c.candidateId, c.name); else next.delete(c.candidateId); }
+    return next;
+  });
+  const submit = async () => {
+    setBusy(true); setError("");
+    try {
+      const r = await trainingApi.addStudents(batch.id, [...picked.keys()]);
+      const who = r.added === 1 && count === 1 ? [...picked.values()][0]! : `${r.added} ${r.added === 1 ? "student" : "students"}`;
+      if (r.skipped.length === 0) { onAdded(`${who} added to the batch.`); onClose(); return; }
+      // Keep the ones that were refused ticked, so the user sees who they are.
+      onAdded(`${who} added to the batch.`);
+      setPicked((old) => new Map([...old].filter(([cid]) => r.skipped.includes(cid))));
+      setError(`${r.skipped.length} couldn't be added: they are no longer at ${batch.location.name} or visible to you.`);
+    } catch (e) { setError(trainingError(e)); } finally { setBusy(false); }
+  };
   return (
-    <Dialog title="Add student" onClose={onClose}>
+    <Dialog title="Add students" onClose={onClose}>
       <p className="hint">Candidates at {batch.location.name}. Adding someone from another batch moves them here.</p>
       <div className="field">
         <label htmlFor={`${id}-q`}>Search candidates</label>
-        <input id={`${id}-q`} data-autofocus type="search" value={text} maxLength={80} onChange={(e) => setText(e.target.value)} />
+        <input id={`${id}-q`} data-autofocus type="search" placeholder="Name or technology" value={text} maxLength={80} onChange={(e) => setText(e.target.value)} />
       </div>
       {error && <p className="error formerr" role="alert" tabIndex={-1}>{error}</p>}
-      {q.isLoading ? <p className="muted">Loading…</p> : (
-        <ul className="tr-pick" aria-label="Candidates">
-          {(q.data?.items ?? []).map((c) => (
-            <li key={c.candidateId}>
-              <span><b>{c.name}</b><small className="block muted">{c.technology}{c.currentBatch ? ` · now in ${c.currentBatch.name}` : ""}</small></span>
-              <button type="button" className="btn sm" disabled={busy !== null} aria-label={`Add ${c.name}`} onClick={async () => {
-                setBusy(c.candidateId); setError("");
-                try {
-                  await trainingApi.addStudent(batch.id, c.candidateId);
-                  onAdded(c.name);
-                  await qc.invalidateQueries({ queryKey: ["training", "eligible", batch.id] });
-                } catch (e) { setError(trainingError(e)); } finally { setBusy(null); }
-              }}>{busy === c.candidateId ? "Adding…" : "Add"}</button>
-            </li>
-          ))}
-          {q.data?.items.length === 0 && <li className="muted">No candidates found.</li>}
-        </ul>
+      {q.isLoading ? <p className="muted">Loading…</p> : q.error ? <p className="error formerr" role="alert">{trainingError(q.error)}</p> : (
+        <>
+          {shown.length > 0 && (
+            <label className="check">
+              <input type="checkbox" checked={allShown} onChange={(e) => pick(shown, e.target.checked)} /> Select all shown ({shown.length})
+            </label>
+          )}
+          <ul className="tr-pick" aria-label="Candidates">
+            {shown.map((c) => (
+              <li key={c.candidateId}>
+                <label className="check">
+                  <input type="checkbox" checked={picked.has(c.candidateId)} onChange={(e) => pick([c], e.target.checked)} />
+                  <span><b>{c.name}</b><small className="block muted">{c.technology}{c.currentBatch ? ` · now in ${c.currentBatch.name}` : ""}</small></span>
+                </label>
+              </li>
+            ))}
+            {shown.length === 0 && <li className="muted">No candidates found.</li>}
+          </ul>
+        </>
       )}
-      <div className="actions"><button type="button" className="btn" onClick={onClose}>Done</button></div>
+      {count > MAX_BULK && <p className="error formerr" role="alert">Add at most {MAX_BULK} students at a time.</p>}
+      <div className="actions">
+        <button type="button" className="btn" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn primary" disabled={busy || count === 0 || count > MAX_BULK} onClick={() => void submit()}>
+          {busy ? "Adding…" : count === 0 ? "Add students" : `Add ${count} ${count === 1 ? "student" : "students"}`}
+        </button>
+      </div>
     </Dialog>
   );
 }

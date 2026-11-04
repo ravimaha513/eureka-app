@@ -15,10 +15,10 @@ const CARD: BatchCard = {
   id: "b1", name: ".NET 2026", customName: ".NET 2026", status: "planned", cover: { color: "violet", icon: "users" },
   location: { id: "l1", name: "Dallas" }, technology: { id: "t1", name: ".NET" }, trainer: { id: "u-c", name: "Coach One" },
   startMonth: "2026-09", startDate: "2026-09-30", startDateSet: true, endDate: "2027-06-30", batchYear: 2026, sizePlanned: 20,
-  students: 1, courses: 1, rowVersion: 3, actions: { manage: true, delete: false, updateProgress: true },
+  students: 1, courses: 1, rowVersion: 3, actions: { manage: true, delete: false, updateProgress: true, addStudents: true, removeStudents: true },
 };
 const EMPTY: BatchCard = { ...CARD, id: "b2", name: "Java Oct 2026", customName: null, status: "in_training", students: 0, trainer: null,
-  actions: { manage: true, delete: true, updateProgress: true } };
+  actions: { manage: true, delete: true, updateProgress: true, addStudents: true, removeStudents: true } };
 const DETAIL: BatchDetail = {
   ...CARD,
   assignedCourses: [{
@@ -147,6 +147,35 @@ describe("batch detail", () => {
     expect(await screen.findByText("Indexes marked complete for Asha Iyer.")).toBeInTheDocument();
   });
 
+  it("adds several students at once and reports the ones refused", async () => {
+    api.routes["GET /api/v1/training/batches/b1/eligible-students"] = () => ({ body: { items: [
+      { candidateId: "c1", name: "Ravi Kumar", technology: ".NET", status: "in_training", currentBatch: null },
+      { candidateId: "c2", name: "Meera Das", technology: ".NET", status: "in_training", currentBatch: { id: "b9", name: "Old Batch" } },
+    ] } });
+    api.routes["POST /api/v1/training/batches/b1/students/bulk"] = () => ({ status: 201, body: { added: 1, skipped: ["c2"] } });
+    await open();
+    fireEvent.click(screen.getByRole("tab", { name: /View Students/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add students" }));
+    const dlg = screen.getByRole("dialog", { name: "Add students" });
+    expect(await within(dlg).findByText(/now in Old Batch/)).toBeInTheDocument();
+    fireEvent.click(within(dlg).getByRole("checkbox", { name: /Select all shown/ }));
+    fireEvent.click(within(dlg).getByRole("button", { name: "Add 2 students" }));
+    await waitFor(() => expect(api.writes()[0]?.body).toEqual({ candidateIds: ["c1", "c2"] }));
+    expect(await within(dlg).findByRole("alert")).toHaveTextContent("1 couldn't be added");
+    expect(within(dlg).getByRole("button", { name: "Add 1 student" })).toBeInTheDocument();
+    expect(screen.getByText("1 student added to the batch.")).toBeInTheDocument();
+  });
+
+  it("hides adding and removing students without the hint", async () => {
+    api.routes["GET /api/v1/training/batches/b1"] = () => ({ body: { ...DETAIL, actions: { ...DETAIL.actions, manage: false, addStudents: false, removeStudents: false } } });
+    await open();
+    // Without course rights the batch opens on its students.
+    expect(screen.getByRole("tab", { name: /View Students/ })).toHaveAttribute("aria-selected", "true");
+    await screen.findByRole("progressbar", { name: "Overall progress of Asha Iyer" });
+    expect(screen.queryByRole("button", { name: "Add students" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove Asha Iyer from the batch" })).not.toBeInTheDocument();
+  });
+
   it("explains a refused change in plain language", async () => {
     api.routes["PUT /api/v1/training/batches/b1/students/s1/modules/m2"] = () => problem(422, { detail: "batch_closed" });
     await open();
@@ -198,13 +227,39 @@ describe("course library", () => {
 describe("profile card", () => {
   it("shows overall and per-course progress", async () => {
     api.routes["GET /api/v1/candidates/c9/training"] = () => ({ body: {
-      batch: { id: "b1", name: ".NET 2026", status: "in_training", startDate: "2026-09-30", endDate: null },
+      batch: { id: "b1", name: ".NET 2026", status: "in_training", startDate: "2026-09-30", endDate: null }, canChangeBatch: false, locationId: "l1",
       percent: 40, completedMinutes: 96, totalMinutes: 240, courses: [{ id: "c1", title: "Database", percent: 40, completedModules: 1, totalModules: 2 }],
     } });
     wrap(<CandidateTraining candidateId="c9" />);
     expect(await screen.findByRole("progressbar", { name: "Overall training progress" })).toHaveAttribute("aria-valuenow", "40");
     expect(screen.getByText("In training")).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "Database progress" })).toHaveAttribute("aria-valuenow", "40");
+  });
+
+  it("attaches the candidate to an open batch at their location", async () => {
+    api.routes["GET /api/v1/candidates/c9/training"] = () => ({ body: { batch: null, canChangeBatch: true, locationId: "l1" } });
+    api.routes["GET /api/v1/batches"] = () => ({ body: { canCreate: false, items: [
+      { id: "b1", label: ".NET · Dallas · Sep 2026", customName: ".NET 2026", status: "planned" },
+      { id: "b3", label: "Java · Dallas · Jan 2026", customName: null, status: "cancelled" },
+    ] } });
+    api.routes["PUT /api/v1/candidates/c9/training/batch"] = (_u, body) => ({ body: { candidateId: "c9", ...(body as object) } });
+    const onChanged = vi.fn();
+    wrap(<CandidateTraining candidateId="c9" onChanged={onChanged} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add to batch" }));
+    const dlg = screen.getByRole("dialog", { name: "Add to batch" });
+    await within(dlg).findByRole("option", { name: ".NET 2026 (.NET · Dallas · Sep 2026)" });
+    expect(within(dlg).queryByRole("option", { name: /Java/ })).not.toBeInTheDocument();
+    fireEvent.change(within(dlg).getByRole("combobox", { name: "Batch" }), { target: { value: "b1" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save batch" }));
+    await waitFor(() => expect(api.writes()[0]?.body).toEqual({ batchId: "b1" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it("offers no batch actions without the hint", async () => {
+    api.routes["GET /api/v1/candidates/c9/training"] = () => ({ body: { batch: null, canChangeBatch: false, locationId: "l1" } });
+    wrap(<CandidateTraining candidateId="c9" />);
+    expect(await screen.findByText("Not in a training batch.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add to batch" })).not.toBeInTheDocument();
   });
 
   it("stays hidden when the caller's scope does not cover the candidate", async () => {

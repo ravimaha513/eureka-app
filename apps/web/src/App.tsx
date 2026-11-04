@@ -482,7 +482,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
               : current.key === "companies" ? <CompaniesPage key="companies" me={me} />
               : current.key === "facilities" ? <FacilitiesPage key="facilities" me={me} />
               : current.key === "datahub" ? <DataHubPage />
-              : current.key === "training" ? <TrainingPage me={me} />
+              : current.key === "training" ? <TrainingPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("training", id)} />
               : current.key === "courses" ? <CoursesPage me={me} />
               : current.key === "settings" ? <SettingsPage me={me} />
               : current.key === "chat" ? <ChatPage me={me} initialConversationId={recordId} onOpenChange={(id) => go("chat", id)} />

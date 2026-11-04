@@ -58,6 +58,8 @@ export const ReorderCourses = z.object({ courseIds: z.array(uuid).min(1).max(100
 export const ReorderModules = z.object({ moduleIds: z.array(uuid).min(1).max(1000).refine((a) => new Set(a).size === a.length, "ids must be unique") }).strict();
 
 export const AddStudent = z.object({ candidateId: uuid }).strict();
+export const AddStudents = z.object({ candidateIds: z.array(uuid).min(1).max(200) }).strict();
+export const SetCandidateBatch = z.object({ batchId: uuid.nullable() }).strict();
 export const StudentQuery = z.object({ search: z.string().trim().max(80).optional() }).strict();
 export const ModuleCompletion = z.object({ completed: z.boolean() }).strict();
 

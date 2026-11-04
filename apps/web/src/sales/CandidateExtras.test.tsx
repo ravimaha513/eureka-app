@@ -260,7 +260,7 @@ describe("Candidate profile: batch and timeline", () => {
       ], nextCursor: "3" } });
     renderProfile();
     await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
-    expect(screen.getByText("Java · Dallas · Nov 2026", { selector: "dd" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Java · Dallas · Nov 2026" }).closest("dd")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
     const list = await screen.findByRole("list", { name: "Candidate activity, newest first" });
     expect(within(list).getAllByRole("listitem").map((li) => li.textContent)).toEqual([

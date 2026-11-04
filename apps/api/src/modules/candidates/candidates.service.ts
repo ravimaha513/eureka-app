@@ -882,10 +882,10 @@ export class CandidatesService implements OnModuleInit {
     if (q.technologyId) { params.push(q.technologyId); where.push(`b.technology_id = $${params.length}`); }
     if (q.status) { params.push(q.status); where.push(`b.status = $${params.length}`); }
     const rows = await this.db.withUser(user.id, async (c) => (await c.query<{
-      id: string; start_month: string; size_planned: number | null; status: string;
+      id: string; name: string | null; start_month: string; size_planned: number | null; status: string;
       location_id: string; location_name: string; technology_id: string; technology_name: string; candidates: number;
     }>(
-      `SELECT b.id, b.start_month::text, b.size_planned, b.status,
+      `SELECT b.id, b.name, b.start_month::text, b.size_planned, b.status,
               b.location_id, l.name AS location_name, b.technology_id, t.name AS technology_name,
               (SELECT count(*)::int FROM eureka.candidate c WHERE c.batch_id = b.id) AS candidates
        FROM eureka.batch b
@@ -898,6 +898,7 @@ export class CandidatesService implements OnModuleInit {
       items: rows.map((b) => ({
         id: b.id,
         label: batchLabel(b.technology_name, b.location_name, b.start_month),
+        customName: b.name,
         location: { id: b.location_id, name: b.location_name },
         technology: { id: b.technology_id, name: b.technology_name },
         startMonth: b.start_month.slice(0, 7),

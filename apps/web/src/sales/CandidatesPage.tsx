@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { salesError } from "./errors";
+import { navigate } from "../lib/router";
+import { screenPath } from "../nav";
 import { CreateBatchDialog } from "./CreateBatchDialog";
 import { CreateCandidateDialog } from "./CreateCandidateDialog";
 import { CandidateName, type ListPageProps } from "./HotListPage";
@@ -83,10 +85,12 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
         <CreateBatchDialog
           canAddTechnology={caps.includes("technology:create")}
           onClose={() => setCreating(null)}
-          onCreated={() => {
+          onCreated={(id) => {
             setCreating(null);
             setMessage("Batch created.");
             void qc.invalidateQueries({ queryKey: salesKeys.batches });
+            // Straight to the new batch, where students are added.
+            if (caps.includes("training:read")) navigate(screenPath("training", id));
           }}
         />
       )}

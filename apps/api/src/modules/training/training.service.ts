@@ -56,6 +56,7 @@ interface BatchRow {
   covered: boolean;
   students: number;
   courses: number;
+  staffable: boolean;
 }
 
 interface CourseModuleRow {
@@ -76,7 +77,8 @@ const BATCH_SELECT = `
          b.cover_color, b.cover_icon, b.row_version, b.location_id, l.name AS location_name,
          b.technology_id, t.name AS technology_name, b.trainer_id, u.display_name AS trainer_name,
          v.covered, v.students,
-         (SELECT count(*)::int FROM eureka.batch_course bc WHERE bc.batch_id = b.id) AS courses
+         (SELECT count(*)::int FROM eureka.batch_course bc WHERE bc.batch_id = b.id) AS courses,
+         coalesce(b.location_id = ANY ((SELECT authz.batch_staff_location_ids())::uuid[]), false) AS staffable
   FROM authz.training_batches() v
   JOIN eureka.batch b ON b.id = v.batch_id
   JOIN eureka.location l ON l.id = b.location_id
@@ -118,6 +120,8 @@ export class TrainingService {
         manage,
         delete: manage && b.covered && b.students === 0,
         updateProgress: trainingBatchCovered(access, "training.progress:update", ref) && ["planned", "in_training"].includes(b.status),
+        addStudents: b.staffable && ["planned", "in_training"].includes(b.status),
+        removeStudents: b.staffable,
       },
     };
   }
@@ -336,7 +340,7 @@ export class TrainingService {
   async eligibleStudents(user: AuthedUser, id: string, search: string | undefined) {
     return this.db.withUser(user.id, async (c) => {
       const b = await this.loadBatch(c, id);
-      if (!(await this.coveredFor(c, id, "training:manage"))) throw new ForbiddenException("Not permitted");
+      if (!b.staffable) throw new ForbiddenException("Not permitted");
       const scope = resolveScope(user.access, "candidate:read");
       if (!scope) return { items: [], nextCursor: null };
       const params: unknown[] = [b.location_id, id, search ? likeContains(search) : null];
@@ -352,9 +356,9 @@ export class TrainingService {
          LEFT JOIN eureka.batch ob ON ob.id = c.batch_id
          LEFT JOIN eureka.technology obt ON obt.id = ob.technology_id
          WHERE c.location_id = $1 AND c.batch_id IS DISTINCT FROM $2
-           AND ($3::text IS NULL OR (p.first_name || ' ' || p.last_name) ILIKE $3)
+           AND ($3::text IS NULL OR (p.first_name || ' ' || p.last_name) ILIKE $3 OR t.name ILIKE $3)
            AND ${scopePredicate({ ...scope, allTeams: false, hotlistOpen: false }, params)}
-         ORDER BY p.first_name, p.last_name, c.id LIMIT 50`, params);
+         ORDER BY c.batch_id IS NOT NULL, p.first_name, p.last_name, c.id LIMIT 200`, params);
       return {
         items: rows.map((r) => ({
           candidateId: r.id, name: `${r.first_name} ${r.last_name}`, technology: r.technology, status: r.marketing_status,
@@ -368,16 +372,47 @@ export class TrainingService {
 
   async addStudent(user: AuthedUser, id: string, candidateId: string) {
     return this.db.withUser(user.id, async (c) => {
-      await this.loadBatch(c, id);
+      if (!(await this.loadBatch(c, id)).staffable) throw new ForbiddenException("Not permitted");
       await c.query(`SELECT authz.set_batch_student($1, $2, true)`, [id, candidateId]).catch(mapTrainingError);
       await this.audit.record(c, { actorId: user.id, action: "training.student_added", entityType: "batch", entityId: id, changes: { candidateId } });
       return { batchId: id, candidateId };
     });
   }
 
+  /**
+   * Bulk add (TR-8): candidates that turn out not to be eligible are reported and the rest
+   * still join, so one stale row in a long selection does not undo the others.
+   */
+  async addStudents(user: AuthedUser, id: string, candidateIds: string[]) {
+    return this.db.withUser(user.id, async (c) => {
+      const b = await this.loadBatch(c, id);
+      if (!b.staffable) throw new ForbiddenException("Not permitted");
+      if (!["planned", "in_training"].includes(b.status)) throw new UnprocessableEntityException("batch_closed");
+      const added: string[] = [];
+      const skipped: string[] = [];
+      for (const candidateId of new Set(candidateIds)) {
+        await c.query("SAVEPOINT add_student");
+        try {
+          await c.query(`SELECT authz.set_batch_student($1, $2, true)`, [id, candidateId]);
+          added.push(candidateId);
+        } catch (err) {
+          if ((err as { message?: string }).message !== "candidate_not_eligible") return mapTrainingError(err);
+          await c.query("ROLLBACK TO SAVEPOINT add_student");
+          skipped.push(candidateId);
+        }
+        await c.query("RELEASE SAVEPOINT add_student");
+      }
+      await this.audit.record(c, {
+        actorId: user.id, action: "training.students_added", entityType: "batch", entityId: id,
+        changes: { candidateIds: added, skipped: skipped.length },
+      });
+      return { batchId: id, added: added.length, skipped };
+    });
+  }
+
   async removeStudent(user: AuthedUser, id: string, candidateId: string) {
     await this.db.withUser(user.id, async (c) => {
-      await this.loadBatch(c, id);
+      if (!(await this.loadBatch(c, id)).staffable) throw new ForbiddenException("Not permitted");
       await c.query(`SELECT authz.set_batch_student($1, $2, false)`, [id, candidateId]).catch(mapTrainingError);
       await this.audit.record(c, { actorId: user.id, action: "training.student_removed", entityType: "batch", entityId: id, changes: { candidateId } });
     });
@@ -428,9 +463,10 @@ export class TrainingService {
           FROM eureka.candidate c WHERE c.id = $1 AND ${scopePredicate(readScope, params)}`, params)).rows[0];
       if (!r) throw new NotFoundException();
       const ref: CandidateRef = { id: candidateId, recruiterId: r.recruiter_id, teamId: r.team_id, locationId: r.location_id, visibility: r.visibility, marketingStatus: r.marketing_status };
+      const canChangeBatch = (await c.query<{ ok: boolean }>(`SELECT authz.candidate_batch_editable($1) AS ok`, [candidateId])).rows[0]!.ok;
       if (!r.batch_id) {
         if (!trainingCandidateCovered(user.access, ref)) throw new ForbiddenException("Not permitted");
-        return { batch: null };
+        return { batch: null, canChangeBatch, locationId: r.location_id };
       }
       const b = (await c.query<{ name: string | null; status: string; start_month: string; start_date: string | null; end_date: string | null;
         technology: string; trainer_id: string | null; location_id: string; covered: boolean }>(
@@ -449,6 +485,8 @@ export class TrainingService {
           id: r.batch_id, name: batchDisplayName(b.name, b.technology, b.start_month), status: b.status,
           startDate: b.start_date ?? b.start_month, endDate: b.end_date,
         },
+        canChangeBatch,
+        locationId: r.location_id,
         percent: p.percent,
         completedMinutes: p.completedMinutes,
         totalMinutes: p.totalMinutes,
@@ -457,6 +495,26 @@ export class TrainingService {
           completedModules: pc.get(co.id)?.completedModules ?? 0, totalModules: co.modules.length,
         })),
       };
+    });
+  }
+
+  /** The profile's batch picker (TR-14); null takes the candidate out of its batch. */
+  async setCandidateBatch(user: AuthedUser, candidateId: string, batchId: string | null) {
+    const readScope = resolveScope(user.access, "candidate:read");
+    if (!readScope) throw new NotFoundException();
+    return this.db.withUser(user.id, async (c) => {
+      const params: unknown[] = [candidateId];
+      const r = (await c.query<{ batch_id: string | null }>(
+        `SELECT c.batch_id FROM eureka.candidate c WHERE c.id = $1 AND ${scopePredicate(readScope, params)}`, params)).rows[0];
+      if (!r) throw new NotFoundException();
+      await c.query(`SELECT authz.set_candidate_batch($1, $2)`, [candidateId, batchId]).catch(mapTrainingError);
+      if (r.batch_id !== batchId) {
+        await this.audit.record(c, {
+          actorId: user.id, action: "training.candidate_batch_changed", entityType: "candidate", entityId: candidateId,
+          changes: { from: r.batch_id, to: batchId },
+        });
+      }
+      return { candidateId, batchId };
     });
   }
 

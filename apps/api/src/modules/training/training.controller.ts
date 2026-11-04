@@ -6,6 +6,7 @@ import { parseIfMatch } from "../../platform/http/if-match.js";
 import {
   AddBatchCourse,
   AddStudent,
+  AddStudents,
   BatchListQuery,
   BatchStatusChange,
   CourseListQuery,
@@ -15,6 +16,7 @@ import {
   ModuleCompletion,
   ReorderCourses,
   ReorderModules,
+  SetCandidateBatch,
   StudentQuery,
   UpdateCourse,
   UpdateModule,
@@ -99,21 +101,28 @@ export class TrainingController {
     return this.svc.students(user, id, StudentQuery.parse(q).search || undefined);
   }
 
+  /** Adding and removing students: whoever plans batches at the batch location (TR-8, checked in the service and the database). */
   @Get("batches/:id/eligible-students")
-  @RequirePermission("training:manage")
+  @RequirePermission("training:read")
   eligible(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Query() q: unknown) {
     return this.svc.eligibleStudents(user, id, StudentQuery.parse(q).search || undefined);
   }
 
   @Post("batches/:id/students")
-  @RequirePermission("training:manage")
+  @RequirePermission("training:read")
   addStudent(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.addStudent(user, id, AddStudent.parse(body).candidateId);
   }
 
+  @Post("batches/:id/students/bulk")
+  @RequirePermission("training:read")
+  addStudents(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.addStudents(user, id, AddStudents.parse(body).candidateIds);
+  }
+
   @Delete("batches/:id/students/:candidateId")
   @HttpCode(204)
-  @RequirePermission("training:manage")
+  @RequirePermission("training:read")
   async removeStudent(
     @CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Param("candidateId", ParseUUIDPipe) candidateId: string,
   ) {
@@ -212,5 +221,12 @@ export class CandidateTrainingController {
   @RequirePermission("training:read")
   training(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.svc.candidateTraining(user, id);
+  }
+
+  /** Attach, change or clear the candidate's batch from the profile (TR-14). */
+  @Put(":id/training/batch")
+  @RequirePermission("training:read")
+  setBatch(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.setCandidateBatch(user, id, SetCandidateBatch.parse(body).batchId);
   }
 }

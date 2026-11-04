@@ -166,9 +166,10 @@ describe("review fixes (TR-4)", () => {
     expect(await code(await call("locD", "PATCH", `/api/v1/training/courses/${id}`, { archived: true }, { "if-match": String(course.rowVersion) }))).toEqual([409, "course_shared"]);
     // Titles still change.
     expect((await call("locD", "PATCH", `/api/v1/training/courses/${id}/modules/${a!.id}`, { title: "Renamed" }, { "if-match": String(a!.rowVersion) })).statusCode).toBe(200);
-    // The batches count: Dallas does not see the Austin batch; Austin does; Sales see none.
+    // The batches count: Austin sees its batch; so does the Dallas Ops Admin, who may plan batches
+    // at any location (training.batch:create, TR-3); Sales see none.
     const count = async (k: keyof typeof U) => (await call(k, "GET", "/api/v1/training/courses")).json().items.find((c: { id: string }) => c.id === id)?.batches;
-    expect([await count("locD"), await count("locA"), await count("r1a")]).toEqual([0, 1, 0]);
+    expect([await count("locD"), await count("locA"), await count("r1a")]).toEqual([1, 1, 0]);
   });
 });
 
@@ -215,7 +216,7 @@ describe("training batches, students and progress (TR-5..TR-11)", () => {
     expect(card).toMatchObject({
       name: "Secret Batch Name", status: "planned", trainer: { id: U.coach, name: "coach" }, students: 0, courses: 0,
       startDate: "2032-09-30", endDate: "2033-06-30", batchYear: 2032, cover: { color: "violet", icon: "users" },
-      actions: { manage: true, delete: true, updateProgress: true },
+      actions: { manage: true, delete: true, updateProgress: true, addStudents: true, removeStudents: true },
     });
     rowVersion = card.rowVersion;
   });
@@ -228,7 +229,7 @@ describe("training batches, students and progress (TR-5..TR-11)", () => {
     expect(await ids("r1a")).not.toContain(batchId);
     expect((await call("locA", "GET", `/api/v1/training/batches/${batchId}`)).statusCode).toBe(404);
     const coachCard = (await call("coach", "GET", `/api/v1/training/batches/${batchId}`)).json();
-    expect(coachCard.actions).toEqual({ manage: false, delete: false, updateProgress: true });
+    expect(coachCard.actions).toEqual({ manage: false, delete: false, updateProgress: true, addStudents: false, removeStudents: false });
   });
 
   it("PATCH needs If-Match and a manager; a derived name appears when the name is cleared", async () => {
@@ -334,5 +335,85 @@ describe("training batches, students and progress (TR-5..TR-11)", () => {
       "training.course_created", "training.course_updated", "batch.created", "batch.updated", "training.batch_course_added",
       "training.student_added", "training.progress", "batch.status", "batch.deleted",
     ]));
+  });
+});
+
+describe("batch creators find and fill their batches (TR-3, TR-8, TR-14)", () => {
+  const dallasOf = (recruiter: string) => candidates.find((c) => c.recruiterId === recruiter && c.locationId === LOC.dallas)!;
+  const create = async (k: keyof typeof U, startDate: string) => {
+    const r = await call(k, "POST", "/api/v1/training/batches", { locationId: LOC.dallas, technologyId: TECH_ID, startDate });
+    expect(r.statusCode, r.body).toBe(201);
+    return r.json().id as string;
+  };
+  const bulk = (k: keyof typeof U, id: string, candidateIds: string[]) =>
+    call(k, "POST", `/api/v1/training/batches/${id}/students/bulk`, { candidateIds });
+
+  it("a Lead sees the empty batch they created, without seeing other teams' students", async () => {
+    const id = await create("l1", "2035-01-10");
+    const card = (await call("l1", "GET", "/api/v1/training/batches")).json().items.find((b: { id: string }) => b.id === id);
+    expect(card).toMatchObject({ students: 0, actions: { manage: false, delete: false, addStudents: true, removeStudents: true } });
+    expect((await call("l1", "GET", `/api/v1/training/batches/${id}`)).statusCode).toBe(200);
+    expect((await call("r1a", "GET", `/api/v1/training/batches/${id}`)).statusCode).toBe(404);
+    expect((await call("locA", "GET", `/api/v1/training/batches/${id}`)).statusCode).toBe(404);
+  });
+
+  it("a Lead bulk adds their own candidates; refused ones are reported and the rest join", async () => {
+    const id = await create("l1", "2035-02-10");
+    const mine = dallasOf(U.r1a);
+    const austin = candidates.find((c) => c.locationId === LOC.austin)!;
+    const eligible = (await call("l1", "GET", `/api/v1/training/batches/${id}/eligible-students`)).json().items;
+    expect(eligible.map((e: { candidateId: string }) => e.candidateId)).toContain(mine.id);
+    const r = await bulk("l1", id, [mine.id, austin.id, mine.id]);
+    expect(r.statusCode, r.body).toBe(201);
+    expect(r.json()).toMatchObject({ added: 1, skipped: [austin.id] });
+    const students = (await call("l1", "GET", `/api/v1/training/batches/${id}/students`)).json().items;
+    expect(students.map((s: { candidateId: string }) => s.candidateId)).toEqual([mine.id]);
+    expect((await call("l1", "GET", `/api/v1/candidates/${mine.id}/training`)).json().batch.id).toBe(id);
+    const { rows } = await db.admin.query<{ changes: unknown }>(
+      `SELECT changes FROM eureka.audit_event WHERE action = 'training.students_added' AND entity_id = $1`, [id]);
+    expect(rows[0]!.changes).toEqual({ candidateIds: [mine.id], skipped: 1 });
+    expect((await call("l1", "DELETE", `/api/v1/training/batches/${id}/students/${mine.id}`)).statusCode).toBe(204);
+  });
+
+  it("the CEO and HR fill batches anywhere; a coach and a recruiter cannot", async () => {
+    const id = await create("hr", "2035-03-10");
+    const c1 = dallasOf(U.r1a);
+    expect((await call("ceo", "GET", `/api/v1/training/batches/${id}`)).json().actions.addStudents).toBe(true);
+    expect((await bulk("ceo", id, [c1.id])).json().added).toBe(1);
+    expect((await call("hr", "GET", `/api/v1/training/batches/${id}/students`)).json().items).toHaveLength(1);
+    expect((await bulk("coach", id, [c1.id])).statusCode).toBe(404); // not their batch: not visible
+    expect((await call("coach", "GET", `/api/v1/training/batches/${id}/eligible-students`)).statusCode).toBe(404);
+    expect((await bulk("r1a", id, [c1.id])).statusCode).toBe(403);
+    expect((await call("r1a", "DELETE", `/api/v1/training/batches/${id}/students/${c1.id}`)).statusCode).toBe(403);
+    expect((await call("ceo", "DELETE", `/api/v1/training/batches/${id}/students/${c1.id}`)).statusCode).toBe(204);
+  });
+
+  it("a closed batch takes no one; an oversized or empty list is refused", async () => {
+    const id = await create("locD", "2035-04-10");
+    expect((await bulk("locD", id, [])).statusCode).toBe(422);
+    expect((await bulk("locD", id, Array.from({ length: 201 }, () => dallasOf(U.r1a).id))).statusCode).toBe(422);
+    expect((await call("locD", "PUT", `/api/v1/training/batches/${id}/status`, { to: "cancelled" })).statusCode).toBe(200);
+    expect((await call("locD", "GET", `/api/v1/training/batches/${id}`)).json().actions).toMatchObject({ addStudents: false, removeStudents: true });
+    expect((await bulk("locD", id, [dallasOf(U.r1a).id])).json().detail).toBe("batch_closed");
+  });
+
+  it("the profile attaches, changes and clears the batch for whoever edits the candidate (TR-14)", async () => {
+    const [a, b, closed] = [await create("l1", "2035-05-10"), await create("l1", "2035-06-10"), await create("locD", "2035-07-10")];
+    expect((await call("locD", "PUT", `/api/v1/training/batches/${closed}/status`, { to: "cancelled" })).statusCode).toBe(200);
+    const mine = dallasOf(U.r1a);
+    const url = `/api/v1/candidates/${mine.id}/training`;
+    await call("ceo", "PUT", `${url}/batch`, { batchId: null });
+    expect((await call("r1a", "GET", url)).json()).toMatchObject({ batch: null, canChangeBatch: true, locationId: LOC.dallas });
+    expect((await call("r1a", "PUT", `${url}/batch`, { batchId: a })).statusCode).toBe(200);
+    expect((await call("r1a", "GET", url)).json()).toMatchObject({ batch: { id: a }, canChangeBatch: true });
+    expect((await call("l1", "PUT", `${url}/batch`, { batchId: b })).statusCode).toBe(200);
+    expect((await call("r1a", "GET", url)).json().batch.id).toBe(b);
+    expect((await call("r1a", "PUT", `${url}/batch`, { batchId: closed })).json().detail).toBe("batch_not_allowed");
+    expect((await call("r1a", "PUT", `${url}/batch`, { batchId: null })).statusCode).toBe(200);
+    expect((await call("r1a", "GET", url)).json().batch).toBeNull();
+    // Another recruiter's candidate: not readable, so not found.
+    expect((await call("r3a", "PUT", `${url}/batch`, { batchId: a })).statusCode).toBe(404);
+    const { rows } = await db.admin.query(`SELECT 1 FROM eureka.candidate_event WHERE candidate_id = $1 AND type = 'candidate.batch_changed'`, [mine.id]);
+    expect(rows.length).toBeGreaterThan(0);
   });
 });

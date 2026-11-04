@@ -13,8 +13,14 @@ import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
 
 /** Training Batches (docs/training-api.md): cards with status filter; a card opens the batch. */
-export function TrainingPage({ me }: { me: Me }) {
-  const [openId, setOpenId] = useState<string | null>(null);
+export function TrainingPage({ me, initialOpenId = null, onOpenChange }: {
+  me: Me; initialOpenId?: string | null;
+  /** Keeps the open batch in the address bar (/training/<id>). */
+  onOpenChange?: (id: string | null) => void;
+}) {
+  const [openId, setOpen] = useState<string | null>(initialOpenId);
+  useEffect(() => { setOpen(initialOpenId); }, [initialOpenId]);
+  const setOpenId = (next: string | null) => { setOpen(next); onOpenChange?.(next); };
   const [notice, setNotice] = useState("");
   const heading = useRef<HTMLHeadingElement>(null);
   const [returned, setReturned] = useState(false);

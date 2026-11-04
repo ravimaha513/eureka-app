@@ -10,6 +10,8 @@ import { CandidateTimeline } from "./CandidateTimeline";
 import { NonResponseCard } from "../pipelinereport/NonResponseCard";
 import { CandidateWorkAuthorization } from "../workauth/CandidateWorkAuthorization";
 import { CandidateTraining } from "../training/CandidateTraining";
+import { navigate } from "../lib/router";
+import { screenPath } from "../nav";
 import { CandidateSubmissions } from "../pipeline/CandidateSubmissions";
 import { pipelineKeys } from "../pipeline/pipelineApi";
 import { EditProfileDialog } from "./EditProfileDialog";
@@ -117,7 +119,12 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
     c.confirmations !== undefined && { label: "Confirmations", value: c.confirmations },
     c.linkedinUrl !== undefined && { label: "LinkedIn", value: link(c.linkedinUrl, "Open profile") },
     c.resumeUrl !== undefined && { label: "Resume link", value: link(c.resumeUrl, "Open resume") },
-    c.batch !== undefined && { label: "Batch", value: c.batch?.label ?? "No batch" },
+    c.batch !== undefined && {
+      label: "Batch",
+      value: !c.batch ? "No batch" : caps.has("training:read")
+        ? <button type="button" className="linkbtn" onClick={() => navigate(screenPath("training", c.batch!.id))}>{c.batch.label}</button>
+        : c.batch.label,
+    },
     { label: "Marketing since", value: fmtDate(c.marketingStartDate) },
     { label: "Days in market", value: c.daysInMarket ?? "—" },
     { label: "Technical rating", value: c.technicalRating ? `${c.technicalRating} / 5` : "Not rated" },
@@ -263,7 +270,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
         )}
 
         {current === "submissions" && <CandidateSubmissions candidateId={c.id} />}
-        {current === "training" && <CandidateTraining candidateId={c.id} />}
+        {current === "training" && <CandidateTraining candidateId={c.id} onChanged={refresh} />}
         {current === "activity" && <CandidateTimeline id={c.id} />}
       </div>
 
