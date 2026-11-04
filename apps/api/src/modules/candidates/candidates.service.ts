@@ -884,7 +884,8 @@ export class CandidatesService implements OnModuleInit {
         if (!batch) throw new NotFoundException();
         const team = this.creatableTeam(user, body.teamId);
         if (batch.status !== "planned" && batch.status !== "in_training") throw new UnprocessableEntityException("batch_not_allowed");
-        const recruiter = hasTrait(user.access, "recruiter") ? user.id : null;
+        // As in create(): with no team, only the recruiter link keeps the candidates in the caller's scope.
+        const recruiter = (team === null && !resolveScope(user.access, "candidate:create")?.all) || hasTrait(user.access, "recruiter") ? user.id : null;
         const emails = new Set<string>();
         const phones = new Set<string>();
         const rows: Row[] = [];

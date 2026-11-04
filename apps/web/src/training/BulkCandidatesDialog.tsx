@@ -4,6 +4,7 @@ import { PHONE_PROBLEM_MESSAGES } from "@eureka/shared";
 import { isXlsx } from "../admin/xlsx";
 import { saveBlob } from "../lib/download";
 import { salesApi } from "../sales/salesApi";
+import { NO_TEAM } from "../sales/useCreateTeam";
 import { Field } from "../sales/ui";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { readCandidateSheet } from "./candidateSheet";
@@ -23,9 +24,9 @@ const plural = (n: number) => `${n} candidate${n === 1 ? "" : "s"}`;
 
 /**
  * New candidates for a batch from the Excel template (POST /api/v1/batches/:id/candidates/bulk).
- * Choosing a file previews it; nothing is created unless every row is valid. The Team
- * picker works as in New candidate: the caller's candidate:create teams, hidden when
- * there is only one.
+ * Choosing a file previews it; nothing is created unless every row is valid. The team is
+ * optional: "No team yet" (the default, `teamId: null`, assigned later from each profile)
+ * or one of the caller's candidate:create teams.
  */
 export function BulkCandidatesDialog({ batch, cancelLabel, onClose, onDone }: {
   batch: { id: string; name: string }; cancelLabel?: string; onClose: () => void; onDone: (created: number) => void;
@@ -38,27 +39,43 @@ export function BulkCandidatesDialog({ batch, cancelLabel, onClose, onDone }: {
 
   const teams = useQuery({ queryKey: ["candidate-create-teams"], queryFn: () => salesApi.createTeams(), staleTime: 300_000 });
   const teamItems = teams.data?.items ?? [];
-  const [pickedTeam, setPickedTeam] = useState<string | null>(null);
-  const teamId = pickedTeam ?? teams.data?.defaultTeamId ?? (teamItems.length === 1 ? teamItems[0]!.id : "");
-  const noTeams = teams.isSuccess && teamItems.length === 0;
+  const [picked, setPicked] = useState(NO_TEAM);
+  const teamId = teamItems.some((t) => t.id === picked) ? picked : null;
 
-  async function onFile(file: File | undefined) {
-    setRows(null); setReport(null); setFileError(undefined);
-    if (!file) return;
+  async function preview(parsed: BulkCandidateRow[], team: string | null) {
+    setReport(null); setFileError(undefined);
+    setChecking(true);
     try {
-      if (!isXlsx(file)) throw new Error("Choose an Excel file (.xlsx). Use the template.");
-      const parsed = await readCandidateSheet(file);
-      if (parsed.length === 0) throw new Error("The file has a header but no candidates.");
-      if (parsed.length > 500) throw new Error("A file can have at most 500 candidates. Split it and upload it in parts.");
-      setRows(parsed);
-      setChecking(true);
-      setReport(await trainingApi.bulkAddCandidates(batch.id, { dryRun: true, teamId, rows: parsed }));
+      setReport(await trainingApi.bulkAddCandidates(batch.id, { dryRun: true, teamId: team, rows: parsed }));
     } catch (e) {
       setFileError(trainingError(e));
     } finally {
       setChecking(false);
     }
   }
+
+  async function onFile(file: File | undefined) {
+    setRows(null); setReport(null); setFileError(undefined);
+    if (!file) return;
+    let parsed: BulkCandidateRow[];
+    try {
+      if (!isXlsx(file)) throw new Error("Choose an Excel file (.xlsx). Use the template.");
+      parsed = await readCandidateSheet(file);
+      if (parsed.length === 0) throw new Error("The file has a header but no candidates.");
+      if (parsed.length > 500) throw new Error("A file can have at most 500 candidates. Split it and upload it in parts.");
+    } catch (e) {
+      setFileError(trainingError(e));
+      return;
+    }
+    setRows(parsed);
+    await preview(parsed, teamId);
+  }
+
+  /** A new team re-checks the chosen file, so Create always matches what was previewed. */
+  const pickTeam = (v: string) => {
+    setPicked(v);
+    if (rows) void preview(rows, teamItems.some((t) => t.id === v) ? v : null);
+  };
 
   const downloadTemplate = () => {
     setError("");
@@ -82,12 +99,11 @@ export function BulkCandidatesDialog({ batch, cancelLabel, onClose, onDone }: {
           fill in one new candidate per row (<b>first name</b>, <b>last name</b>, <b>phone</b> and <b>personal email</b>), then choose the file.
           Technology and location come from the batch. Nothing is created unless every row is valid.
         </p>
-        {noTeams && <p className="note warn" role="alert">You aren't on a team you can add candidates to. Ask an admin to add you to a team.</p>}
-        {teamItems.length > 1 && (
-          <Field label="Team">
+        {teamItems.length > 0 && (
+          <Field label="Team" hint={teamId === null ? "Optional. You can assign the team later from each candidate's profile." : undefined}>
             {(p) => (
-              <select {...p} required value={teamId} onChange={(e) => setPickedTeam(e.target.value)}>
-                {!teamItems.some((t) => t.id === teamId) && <option value="">Choose a team</option>}
+              <select {...p} value={teamId ?? NO_TEAM} onChange={(e) => pickTeam(e.target.value)}>
+                <option value={NO_TEAM}>No team yet</option>
                 {teamItems.map((t) => <option key={t.id} value={t.id}>{t.lead ? `${t.name} (${t.lead})` : t.name}</option>)}
               </select>
             )}
@@ -95,7 +111,7 @@ export function BulkCandidatesDialog({ batch, cancelLabel, onClose, onDone }: {
         )}
         <div className="field"><label htmlFor="batch-file">Excel file</label>
           <input id="batch-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            data-autofocus disabled={!teamId} onChange={(e) => void onFile(e.target.files?.[0])} /></div>
+            data-autofocus disabled={teams.isPending} onChange={(e) => void onFile(e.target.files?.[0])} /></div>
         {fileError && <p className="error" role="alert">{fileError}</p>}
         {checking && <p className="muted" role="status">Checking {rows?.length} rows…</p>}
         {report && (
