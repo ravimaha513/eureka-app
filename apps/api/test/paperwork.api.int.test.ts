@@ -55,7 +55,7 @@ async function login(key: Key) {
   return s;
 }
 
-async function call(key: Key, method: "GET" | "POST" | "PATCH", url: string, payload?: unknown) {
+async function call(key: Key, method: "GET" | "POST" | "PATCH" | "DELETE", url: string, payload?: unknown) {
   const s = await login(key);
   return app.inject({
     method, url, payload: payload as never,
@@ -302,6 +302,88 @@ describe("BGC", () => {
     expect(audit.filter((a) => a.action === "bgc.update").map((a) => a.changes)).toEqual([
       { fields: ["status", "bgc_company", "initiated_on", "employment_years"], from: "not_started", to: "initiated" }]);
     expect(JSON.stringify(audit)).not.toMatch(/Fictional/);
+  });
+});
+
+describe("BGC history rows (PW-12, migration 0420)", () => {
+  it("HR adds, edits and removes employment and address rows; scope, kinds, months and the audit are checked", async () => {
+    const m = await placed();
+    const base = `/api/v1/paperwork/placements/${m.id}/bgc/entries`;
+    // Others: 403 without bgc:update, 404 outside document:read scope.
+    const emp = { kind: "employment", employer: "Fictional Corp", title: "Analyst", startMonth: "2019-03", endMonth: "2023-07",
+      notes: "Fictional employer note" };
+    expect((await call("l1", "POST", base, emp)).statusCode).toBe(403);
+    expect((await call("hr", "POST", "/api/v1/paperwork/placements/00000000-0000-4000-8000-000000000999/bgc/entries", emp)).statusCode).toBe(404);
+
+    let res = await call("hr", "POST", base, emp);
+    expect(res.statusCode, res.body).toBe(201);
+    expect(res.json().employment).toEqual([expect.objectContaining({
+      kind: "employment", employer: "Fictional Corp", title: "Analyst", startMonth: "2019-03", endMonth: "2023-07",
+      verification: "pending", notes: "Fictional employer note", version: 1, street: null, city: null })]);
+    const empId = res.json().employment[0].id as string;
+
+    // Address: street optional; still there = no end month; newest first.
+    res = await call("hr", "POST", base, { kind: "address", city: "Fictional City", region: "TX", country: "US", startMonth: "2021-01" });
+    expect(res.statusCode, res.body).toBe(201);
+    res = await call("hr", "POST", base, { kind: "address", street: "1 Fictional Way", city: "Old Town", postalCode: "00000",
+      country: "US", startMonth: "2017-06", endMonth: "2020-12", verification: "verified" });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(res.json().addresses.map((a: { city: string; street: string | null }) => [a.city, a.street]))
+      .toEqual([["Fictional City", null], ["Old Town", "1 Fictional Way"]]);
+    const addrId = res.json().addresses[1].id as string;
+
+    // Validation: kind fields, months, unknown and server keys.
+    expect((await call("hr", "POST", base, { kind: "employment", startMonth: "2019-01" })).statusCode).toBe(422);
+    expect((await call("hr", "POST", base, { kind: "address", city: "X", startMonth: "2019-01" })).statusCode).toBe(422);
+    expect((await call("hr", "POST", base, { ...emp, endMonth: "2018-01" })).statusCode).toBe(422);
+    expect((await call("hr", "POST", base, { ...emp, startMonth: "2019-13" })).statusCode).toBe(422);
+    expect((await call("hr", "POST", base, { ...emp, street: "1 Fictional Way" })).statusCode).toBe(422);
+    expect((await call("hr", "POST", base, { ...emp, version: 5 })).statusCode).toBe(422);
+    expect((await call("hr", "PATCH", `${base}/${empId}`, { city: "Wrong kind" })).json().detail).toBe("invalid_change");
+    expect((await call("hr", "PATCH", `${base}/${empId}`, { endMonth: "2010-01" })).json().detail).toBe("invalid_change");
+
+    res = await call("hr", "PATCH", `${base}/${empId}`, { verification: "verified", notes: null, expectedVersion: 1 });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().employment[0]).toMatchObject({ verification: "verified", notes: null, version: 2 });
+    expect((await call("hr", "PATCH", `${base}/${empId}`, { verification: "pending", expectedVersion: 1 })).statusCode).toBe(409);
+    expect((await call("l1", "PATCH", `${base}/${empId}`, { verification: "pending" })).statusCode).toBe(403);
+    // A row of another placement is not found through this one.
+    const other = await placed();
+    expect((await call("hr", "PATCH", `/api/v1/paperwork/placements/${other.id}/bgc/entries/${empId}`, { verification: "pending" })).statusCode).toBe(404);
+
+    expect((await call("l1", "DELETE", `${base}/${addrId}`)).statusCode).toBe(403);
+    res = await call("hr", "DELETE", `${base}/${addrId}?expectedVersion=1`);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().addresses).toHaveLength(1);
+    expect((await call("hr", "DELETE", `${base}/${addrId}`)).statusCode).toBe(404);
+
+    // The check's history names the rows; the audit has ids, kinds and field names only (rule 5).
+    const detail = (await call("hr", "GET", `/api/v1/paperwork/placements/${m.id}`)).json();
+    expect(detail.bgc.history.map((e: { changed: string[] }) => e.changed[0]))
+      .toEqual(["address_history", "employment_history", "address_history", "address_history", "employment_history"]);
+    const audit = (await auditOf(m.id)).filter((a) => String(a.action).startsWith("bgc.entry"));
+    expect(audit.map((a) => [a.action, a.changes.kind])).toEqual([
+      ["bgc.entry.create", "employment"], ["bgc.entry.create", "address"], ["bgc.entry.create", "address"],
+      ["bgc.entry.update", "employment"], ["bgc.entry.delete", "address"]]);
+    expect(audit[3]!.changes.fields).toEqual(["verification", "notes"]);
+    expect(JSON.stringify(audit)).not.toMatch(/Fictional|Old Town|00000/);
+
+    // RLS: rows follow the check's document:read scope (a location role reads the placement, not its BGC).
+    const seen = (u: string) => asUser(db.app, u, async (c) => (await c.query(
+      `SELECT count(*)::int AS n FROM eureka.bgc_entry WHERE placement_id = $1`, [m.id])).rows[0].n as number);
+    expect(await seen(U.hr)).toBe(2);
+    expect(await seen(U.locD)).toBe(0);
+  });
+
+  it("a backed-out placement's rows can no longer change", async () => {
+    const m = await placed();
+    const base = `/api/v1/paperwork/placements/${m.id}/bgc/entries`;
+    const res = await call("hr", "POST", base, { kind: "employment", employer: "Fictional Corp", startMonth: "2020-01" });
+    expect(res.statusCode, res.body).toBe(201);
+    const id = res.json().employment[0].id as string;
+    await transitionPlacement(db, U.r1a, m.id, "backout", "Fictional reason");
+    expect((await call("hr", "PATCH", `${base}/${id}`, { verification: "verified" })).json().detail).toBe("placement_closed");
+    expect((await call("hr", "DELETE", `${base}/${id}`)).json().detail).toBe("placement_closed");
   });
 });
 

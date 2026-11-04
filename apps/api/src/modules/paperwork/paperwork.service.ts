@@ -21,7 +21,9 @@ import { DbService } from "../../platform/db.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import { splitCursor } from "../submissions/pipeline.js";
 import { mapPaperworkError } from "./paperwork.errors.js";
-import type { PaperworkQueueQuery, PublishTemplate, UpdateBgc, UpdateChecklistItem } from "./paperwork.schemas.js";
+import type {
+  CreateBgcEntry, PaperworkQueueQuery, PublishTemplate, UpdateBgc, UpdateBgcEntry, UpdateChecklistItem,
+} from "./paperwork.schemas.js";
 
 /**
  * Paperwork checklist progress, background checks and checklist templates
@@ -153,6 +155,18 @@ const activityRef = (r: HeaderRow): ActivityRef => ({
 
 const ref = (id: string | null, name: string | null) => (id ? { id, name } : null);
 
+/** One employment or address row of a check (migration 0420). Personal data: never audited by value. */
+interface EntryRow {
+  id: string; kind: "employment" | "address"; employer: string | null; title: string | null; street: string | null;
+  city: string | null; region: string | null; postal_code: string | null; country: string | null;
+  start_month: string; end_month: string | null; verification: string; notes: string | null; version: number;
+}
+const presentEntry = (e: EntryRow) => ({
+  id: e.id, kind: e.kind, employer: e.employer, title: e.title, street: e.street, city: e.city, region: e.region,
+  postalCode: e.postal_code, country: e.country, startMonth: e.start_month, endMonth: e.end_month,
+  verification: e.verification, notes: e.notes, version: e.version,
+});
+
 @Injectable()
 export class PaperworkService {
   constructor(private readonly db: DbService, private readonly audit: AuditService) {}
@@ -258,6 +272,13 @@ export class PaperworkService {
       `SELECT e.at, e.actor_id, u.display_name AS actor_name, e.from_status, e.to_status, e.changed, e.reason
          FROM eureka.bgc_event e LEFT JOIN eureka.app_user u ON u.id = e.actor_id
         WHERE e.bgc_id = $1 ORDER BY e.at DESC, e.id DESC LIMIT 50`, [b.id])).rows : [];
+    // Newest first: rows still running (no end month) on top, then by start month.
+    const entries = b ? (await c.query<EntryRow>(
+      `SELECT e.id, e.kind, e.employer, e.title, e.street, e.city, e.region, e.postal_code, e.country,
+              to_char(e.start_month, 'YYYY-MM') AS start_month, to_char(e.end_month, 'YYYY-MM') AS end_month,
+              e.verification, e.notes, e.version
+         FROM eureka.bgc_entry e WHERE e.bgc_id = $1
+        ORDER BY e.end_month DESC NULLS FIRST, e.start_month DESC, e.created_at DESC`, [b.id])).rows : [];
     const status = b?.status ?? "not_started";
     return {
       status,
@@ -266,6 +287,9 @@ export class PaperworkService {
       educationLevel: b?.education_level ?? null,
       employmentYears: b?.employment_years ?? null,
       addressYears: b?.address_years ?? null,
+      /** PW-12 rows; employmentYears / addressYears above are the older summary, kept for checks recorded before 0420. */
+      employment: entries.filter((e) => e.kind === "employment").map(presentEntry),
+      addresses: entries.filter((e) => e.kind === "address").map(presentEntry),
       notes: b?.notes ?? null,
       statusReason: b?.status_reason ?? null,
       statusChangedAt: b?.status_changed_at ?? null,
@@ -421,6 +445,53 @@ export class PaperworkService {
       }
       const fresh = await this.header(c, user, placementId);
       return this.bgcDetail(c, user.access, fresh);
+    });
+  }
+
+  /** PW-12: 404 without document:read over the placement; 403 without bgc:update. The function checks both again. */
+  private async entryWrite(user: AuthedUser, placementId: string,
+    write: (c: pg.PoolClient) => Promise<{ action: string; changes: Record<string, unknown> }>) {
+    return this.db.withUser(user.id, async (c) => {
+      const h = await this.header(c, user, placementId);
+      const current = (await c.query<{ status: string }>(`SELECT status FROM eureka.bgc WHERE placement_id = $1`, [placementId])).rows[0];
+      const acts = bgcActions(user.access, paperworkRef(h), current?.status ?? "not_started", h.placement_status);
+      // A backed-out placement goes on to the function, which answers placement_closed.
+      if (h.placement_status !== "backout" && !acts.update) throw new ForbiddenException("Not permitted");
+      let audit: { action: string; changes: Record<string, unknown> };
+      try {
+        audit = await write(c);
+      } catch (err) {
+        mapPaperworkError(err);
+      }
+      // Rule 5: the row id, its kind and the changed field names; never employer, address or notes text.
+      await this.audit.record(c, { actorId: user.id, action: audit.action, entityType: "placement", entityId: placementId, changes: audit.changes });
+      return this.bgcDetail(c, user.access, await this.header(c, user, placementId));
+    });
+  }
+
+  async addBgcEntry(user: AuthedUser, placementId: string, body: CreateBgcEntry) {
+    const { kind, ...fields } = body;
+    return this.entryWrite(user, placementId, async (c) => {
+      const r = (await c.query<{ entry_id: string }>(`SELECT * FROM authz.save_bgc_entry($1, NULL, $2, $3::jsonb, NULL)`,
+        [placementId, kind, JSON.stringify(fields)])).rows[0]!;
+      return { action: "bgc.entry.create", changes: { entryId: r.entry_id, kind } };
+    });
+  }
+
+  async updateBgcEntry(user: AuthedUser, placementId: string, entryId: string, body: UpdateBgcEntry) {
+    const { expectedVersion, ...fields } = body;
+    return this.entryWrite(user, placementId, async (c) => {
+      const r = (await c.query<{ entry_kind: string; changed: string[] }>(`SELECT * FROM authz.save_bgc_entry($1, $2, NULL, $3::jsonb, $4)`,
+        [placementId, entryId, JSON.stringify(fields), expectedVersion ?? null])).rows[0]!;
+      return { action: "bgc.entry.update", changes: { entryId, kind: r.entry_kind, fields: r.changed } };
+    });
+  }
+
+  async deleteBgcEntry(user: AuthedUser, placementId: string, entryId: string, expectedVersion: number | undefined) {
+    return this.entryWrite(user, placementId, async (c) => {
+      const r = (await c.query<{ kind: string }>(`SELECT authz.delete_bgc_entry($1, $2, $3) AS kind`,
+        [placementId, entryId, expectedVersion ?? null])).rows[0]!;
+      return { action: "bgc.entry.delete", changes: { entryId, kind: r.kind } };
     });
   }
 

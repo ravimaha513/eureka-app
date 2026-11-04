@@ -42,7 +42,10 @@ BEGIN
   v_apps := ARRAY(SELECT a.id FROM eureka.job_application a WHERE a.candidate_id = p_candidate);
   v_app_ivs := ARRAY(SELECT ai.id FROM eureka.application_interview ai WHERE ai.application_id = ANY (v_apps));
   v_docs := ARRAY(SELECT d.id FROM eureka.document d WHERE d.candidate_id = p_candidate);
-  v_files := ARRAY(SELECT d.file_id FROM eureka.document d WHERE d.id = ANY (v_docs) AND d.file_id IS NOT NULL);
+  -- The current file, a replacement waiting for its scan and earlier files (migration 0421).
+  v_files := ARRAY(SELECT x FROM eureka.document d,
+                     LATERAL pg_catalog.unnest(ARRAY[d.file_id, d.pending_file_id] || d.previous_file_ids) x
+                    WHERE d.id = ANY (v_docs) AND x IS NOT NULL);
   v_items := ARRAY(SELECT ci.id FROM eureka.checklist_item ci WHERE ci.candidate_id = p_candidate);
   v_bgcs := ARRAY(SELECT b.id FROM eureka.bgc b WHERE b.candidate_id = p_candidate);
   v_resumes := ARRAY(SELECT r.id FROM eureka.resume r WHERE r.candidate_id = p_candidate);
@@ -73,12 +76,13 @@ BEGIN
   -- Paperwork, documents, resumes
   DELETE FROM eureka.checklist_item_event WHERE item_id = ANY (v_items);
   DELETE FROM eureka.checklist_item WHERE id = ANY (v_items);
+  DELETE FROM eureka.bgc_entry WHERE bgc_id = ANY (v_bgcs);
   DELETE FROM eureka.bgc_event WHERE bgc_id = ANY (v_bgcs);
   DELETE FROM eureka.bgc WHERE id = ANY (v_bgcs);
   DELETE FROM eureka.document_access WHERE document_id = ANY (v_docs);
   DELETE FROM eureka.document WHERE id = ANY (v_docs);
   DELETE FROM eureka.file_object f WHERE f.id = ANY (v_files)
-     AND NOT EXISTS (SELECT 1 FROM eureka.document d WHERE d.file_id = f.id)
+     AND NOT EXISTS (SELECT 1 FROM eureka.document d WHERE f.id IN (d.file_id, d.pending_file_id) OR f.id = ANY (d.previous_file_ids))
      AND NOT EXISTS (SELECT 1 FROM eureka.chat_attachment ca WHERE ca.file_id = f.id)
      AND NOT EXISTS (SELECT 1 FROM eureka.datahub_file_version v WHERE v.file_object_id = f.id);
   DELETE FROM eureka.resume WHERE id = ANY (v_resumes);

@@ -22,7 +22,15 @@ export interface DocumentItem {
   uploadedBy: { id: string; name: string | null };
   createdAt: string;
   scannedAt: string | null;
+  /** Display name given after upload; null = show the type. */
+  title: string | null;
+  version: number;
+  /** A new file waiting for (or refused by) its scan; the current file keeps opening meanwhile. */
+  replacement: { status: DocumentFileStatus; reason: string | null; contentType: DocumentContentType; sizeBytes: number; createdAt: string } | null;
 }
+
+/** What the list shows for a document: its title, else its type. */
+export const documentName = (d: Pick<DocumentItem, "title" | "docTypeLabel">) => d.title ?? d.docTypeLabel;
 
 /** The can* flags are hints for this candidate; the server decides. */
 export interface DocumentList { items: DocumentItem[]; canUpload: boolean; canUploadRestricted: boolean; canViewRestricted: boolean }
@@ -45,6 +53,11 @@ export const documentsApi = {
   requestUpload: (o: DocumentOwner, docType: DocumentType, contentType: DocumentContentType, size: number) =>
     api<{ id: string; fileId: string; classification: DocumentClassification; status: "pending"; upload: UploadTicket }>(base(o),
       { method: "POST", ...json({ docType, contentType, size }) }),
+  update: (documentId: string, b: { title?: string | null; docType?: DocumentType; expectedVersion?: number }) =>
+    api<DocumentItem>(`/api/v1/documents/${enc(documentId)}`, { method: "PATCH", ...json(b) }),
+  requestReplace: (documentId: string, contentType: DocumentContentType, size: number, expectedVersion?: number) =>
+    api<{ id: string; fileId: string; classification: DocumentClassification; status: "pending"; upload: UploadTicket }>(
+      `/api/v1/documents/${enc(documentId)}/replace`, { method: "POST", ...json({ contentType, size, expectedVersion }) }),
   downloadLink: (documentId: string) =>
     api<{ url: string; expiresAt: string }>(`/api/v1/documents/${enc(documentId)}/download`, { method: "POST" }),
   accessLog: (documentId: string) => api<{ items: AccessLogEntry[] }>(`/api/v1/document-access?documentId=${enc(documentId)}`),
