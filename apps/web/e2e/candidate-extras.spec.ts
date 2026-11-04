@@ -12,7 +12,7 @@ async function freshBatch(lead: Api): Promise<{ id: string; label: string }> {
   for (let attempt = 0; attempt < 8; attempt++) {
     const year = 2040 + Math.floor(Math.random() * 60);
     const month = String(1 + Math.floor(Math.random() * 12)).padStart(2, "0");
-    const created = await lead.send("POST", "/api/v1/batches", { locationId: DALLAS, technologyId: JAVA, startMonth: `${year}-${month}` }).catch(() => null);
+    const created = await lead.send("POST", "/api/v1/batches", { name: `E2E batch ${year}-${month}`, locationId: DALLAS, technologyId: JAVA, startMonth: `${year}-${month}` }).catch(() => null);
     if (!created) continue;
     const { items } = await lead.get(`/api/v1/batches?locationId=${DALLAS}`);
     return items.find((b: { id: string }) => b.id === created.id);

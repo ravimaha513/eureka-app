@@ -64,7 +64,7 @@ export interface Batch {
 /** `canCreate` is a hint (Sales leadership); the server decides. */
 export interface BatchList { items: Batch[]; canCreate: boolean }
 
-export interface CreateBatch { locationId: string; technologyId: string; startMonth: string; sizePlanned?: number }
+export interface CreateBatch { name: string; locationId: string; technologyId: string; startMonth: string; sizePlanned?: number }
 
 /** Batches a candidate can join: planned or in training. */
 export const OPEN_BATCH_STATUSES: readonly BatchStatus[] = ["planned", "in_training"];

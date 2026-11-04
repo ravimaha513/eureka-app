@@ -29,7 +29,6 @@ export const BatchListQuery = z
 export type BatchListQuery = z.infer<typeof BatchListQuery>;
 
 const batchDetails = {
-  name: line(80).nullable().optional(),
   trainerId: uuid.nullable().optional(),
   endDate: day.nullable().optional(),
   sizePlanned: z.number().int().min(1).max(500).nullable().optional(),
@@ -39,14 +38,14 @@ const batchDetails = {
 
 /** POST /training/batches (TR-5): the 0026 batch plus the training details. */
 export const CreateTrainingBatch = z
-  .object({ locationId: uuid, technologyId: uuid, startDate: day, ...batchDetails })
+  .object({ locationId: uuid, technologyId: uuid, startDate: day, name: line(80), ...batchDetails })
   .strict()
   .refine((b) => !b.endDate || b.endDate >= b.startDate, { message: "endDate must not be before startDate", path: ["endDate"] });
 export type CreateTrainingBatch = z.infer<typeof CreateTrainingBatch>;
 
-/** PATCH /training/batches/:id (TR-6): only the keys present change; `null` clears. */
+/** PATCH /training/batches/:id (TR-6): only the keys present change; `null` clears (never the name, TR-5). */
 export const UpdateTrainingBatch = z
-  .object({ startDate: day.optional(), ...batchDetails })
+  .object({ startDate: day.optional(), name: line(80).optional(), ...batchDetails })
   .strict()
   .refine((b) => Object.keys(b).length > 0, "nothing to change");
 export type UpdateTrainingBatch = z.infer<typeof UpdateTrainingBatch>;

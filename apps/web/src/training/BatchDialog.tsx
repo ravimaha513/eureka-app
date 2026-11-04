@@ -21,7 +21,8 @@ export function BatchDialog({ me, batch, onClose, onSaved }: {
   const myLocations = new Set(anyLocation ? [] : me.roles.map((r) => r.locationId).filter(Boolean));
   const locations = (lookups.data?.locations ?? []).filter((l) => myLocations.size === 0 || myLocations.has(l.id));
   const [v, setV] = useState({
-    name: batch?.customName ?? "", locationId: "", technologyId: "", startDate: batch?.startDate ?? "", endDate: batch?.endDate ?? "",
+    // A batch from before names were mandatory starts with its generated name.
+    name: batch?.customName ?? batch?.name ?? "", locationId: "", technologyId: "", startDate: batch?.startDate ?? "", endDate: batch?.endDate ?? "",
     trainerId: batch?.trainer?.id ?? "", sizePlanned: batch?.sizePlanned ? String(batch.sizePlanned) : "",
   });
   const [cover, setCover] = useState<Cover>(batch?.cover ?? { color: "indigo", icon: "users" });
@@ -44,13 +45,14 @@ export function BatchDialog({ me, batch, onClose, onSaved }: {
     if (v.endDate && v.startDate && v.endDate < v.startDate) e.endDate = "The end date must not be before the start date.";
     const size = v.sizePlanned.trim() ? Number(v.sizePlanned) : null;
     if (size !== null && !(Number.isInteger(size) && size >= 1 && size <= 500)) e.sizePlanned = "Use a whole number from 1 to 500.";
-    if (v.name.trim().length > 80) e.name = "Use at most 80 characters.";
+    if (!v.name.trim()) e.name = "Enter a batch name.";
+    else if (v.name.trim().length > 80) e.name = "Use at most 80 characters.";
     setErrors(e); setFormError("");
     if (Object.keys(e).length) { failed(); return; }
     setBusy(true);
     try {
       const details = {
-        name: v.name.trim() || null, startDate: v.startDate, endDate: v.endDate || null, trainerId: v.trainerId || null,
+        name: v.name.trim(), startDate: v.startDate, endDate: v.endDate || null, trainerId: v.trainerId || null,
         sizePlanned: size, coverColor: cover.color, coverIcon: cover.icon,
       };
       if (batch) {
@@ -72,7 +74,7 @@ export function BatchDialog({ me, batch, onClose, onSaved }: {
   return (
     <Dialog title={batch ? `Edit ${batch.name}` : "Add training batch"} onClose={onClose}>
       <form ref={form} onSubmit={submit} noValidate>
-        <Field label="Batch name (optional)" error={errors.name} hint="Leave empty to use the technology and start month, e.g. “Java Sep 2026”.">
+        <Field label="Batch name" error={errors.name}>
           {(p) => <input {...p} data-autofocus value={v.name} maxLength={80} onChange={set("name")} />}
         </Field>
         {!batch && (

@@ -3,6 +3,7 @@ import { GRANTS, RESTRICTED_PERMISSIONS, ROLES, isRestrictedRole, type Role } fr
 import type { CandidateRef, UserAccess } from "./engine.js";
 import {
   batchDisplayName,
+  canManageBatchStudents,
   canManageTraining,
   canPlanBatch,
   trainingBatchCovered,
@@ -115,5 +116,20 @@ describe("batch display name", () => {
     expect(batchDisplayName(" .NET 2026 ", "Java", "2026-09-01")).toBe(".NET 2026");
     expect(batchDisplayName(null, "Java", "2026-09-01")).toBe("Java Sep 2026");
     expect(batchDisplayName("", "Java", "2026-11")).toBe("Java Nov 2026");
+  });
+});
+
+describe("canManageBatchStudents (TR-8)", () => {
+  const batch = { locationId: LOC_D, trainerId: "C", createdBy: "H" };
+  it("training managers covering the batch and its creator; not other readers, not the trainer", () => {
+    expect(canManageBatchStudents(LOCD, batch)).toBe(true);
+    expect(canManageBatchStudents(HR, batch)).toBe(true);
+    expect(canManageBatchStudents(user("H2", "hr"), batch)).toBe(false);
+    expect(canManageBatchStudents(CEO, batch)).toBe(false);
+    expect(canManageBatchStudents(COACH, batch)).toBe(false);
+    expect(canManageBatchStudents(INCH, batch)).toBe(false);
+  });
+  it("a creator who may no longer plan batches loses it", () => {
+    expect(canManageBatchStudents(R1a, { ...batch, createdBy: "R1a" })).toBe(false);
   });
 });

@@ -37,7 +37,7 @@ export interface BatchCard {
   students: number;
   courses: number;
   rowVersion: number;
-  actions: { manage: boolean; delete: boolean; updateProgress: boolean };
+  actions: { manage: boolean; manageStudents: boolean; delete: boolean; updateProgress: boolean };
 }
 
 export interface Module { id: string; title: string; durationMinutes: number; resources: string[] }
@@ -79,7 +79,7 @@ export interface CandidateTraining {
 }
 
 export interface NewBatch {
-  locationId: string; technologyId: string; startDate: string; endDate?: string | null; name?: string | null;
+  locationId: string; technologyId: string; startDate: string; endDate?: string | null; name: string;
   trainerId?: string | null; sizePlanned?: number | null; coverColor?: string; coverIcon?: string;
 }
 export type BatchPatch = Partial<Omit<NewBatch, "locationId" | "technologyId">>;

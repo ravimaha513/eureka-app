@@ -99,21 +99,22 @@ export class TrainingController {
     return this.svc.students(user, id, StudentQuery.parse(q).search || undefined);
   }
 
+  /** Training managers and the batch's creator (TR-8); the service and authz.set_batch_student decide. */
   @Get("batches/:id/eligible-students")
-  @RequirePermission("training:manage")
+  @RequirePermission("training:read")
   eligible(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Query() q: unknown) {
     return this.svc.eligibleStudents(user, id, StudentQuery.parse(q).search || undefined);
   }
 
   @Post("batches/:id/students")
-  @RequirePermission("training:manage")
+  @RequirePermission("training:read")
   addStudent(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.addStudent(user, id, AddStudent.parse(body).candidateId);
   }
 
   @Delete("batches/:id/students/:candidateId")
   @HttpCode(204)
-  @RequirePermission("training:manage")
+  @RequirePermission("training:read")
   async removeStudent(
     @CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Param("candidateId", ParseUUIDPipe) candidateId: string,
   ) {

@@ -240,7 +240,7 @@ function StudentsPanel({ batch, onNotice }: { batch: BatchDetail; onNotice: (s: 
   const [removing, setRemoving] = useState<Student | null>(null);
   const [error, setError] = useState("");
   const refresh = () => qc.invalidateQueries({ queryKey: trainingKeys.all });
-  const manage = batch.actions.manage;
+  const manage = batch.actions.manageStudents;
   const items = q.data?.items ?? [];
 
   // The box shows the new state at once; it falls back to the server's answer after the refetch (or an error).

@@ -15,10 +15,10 @@ const CARD: BatchCard = {
   id: "b1", name: ".NET 2026", customName: ".NET 2026", status: "planned", cover: { color: "violet", icon: "users" },
   location: { id: "l1", name: "Dallas" }, technology: { id: "t1", name: ".NET" }, trainer: { id: "u-c", name: "Coach One" },
   startMonth: "2026-09", startDate: "2026-09-30", startDateSet: true, endDate: "2027-06-30", batchYear: 2026, sizePlanned: 20,
-  students: 1, courses: 1, rowVersion: 3, actions: { manage: true, delete: false, updateProgress: true },
+  students: 1, courses: 1, rowVersion: 3, actions: { manage: true, manageStudents: true, delete: false, updateProgress: true },
 };
 const EMPTY: BatchCard = { ...CARD, id: "b2", name: "Java Oct 2026", customName: null, status: "in_training", students: 0, trainer: null,
-  actions: { manage: true, delete: true, updateProgress: true } };
+  actions: { manage: true, manageStudents: true, delete: true, updateProgress: true } };
 const DETAIL: BatchDetail = {
   ...CARD,
   assignedCourses: [{
@@ -94,6 +94,7 @@ describe("Training Batches", () => {
     await within(dlg).findByRole("option", { name: "Coach One" });
     fireEvent.click(within(dlg).getByRole("button", { name: "Create batch" }));
     expect(await within(dlg).findByText("Choose the first day of training.")).toBeInTheDocument();
+    expect(within(dlg).getByText("Enter a batch name.")).toBeInTheDocument();
     expect(api.writes()).toEqual([]);
     fireEvent.change(within(dlg).getByRole("textbox", { name: /Batch name/ }), { target: { value: ".NET 2026" } });
     fireEvent.change(within(dlg).getByRole("combobox", { name: "Location" }), { target: { value: "l1" } });
@@ -145,6 +146,24 @@ describe("batch detail", () => {
       ["/api/v1/training/batches/b1/students/s1/modules/m2", { completed: true }],
     ]));
     expect(await screen.findByText("Indexes marked complete for Asha Iyer.")).toBeInTheDocument();
+  });
+
+  it("a batch's creator adds students without managing the rest of the batch", async () => {
+    const creator = { manage: false, manageStudents: true, delete: false, updateProgress: false };
+    api.routes["GET /api/v1/training/batches/b1"] = () => ({ body: { ...DETAIL, actions: creator } });
+    api.routes["GET /api/v1/training/batches/b1/eligible-students"] = () => ({
+      body: { items: [{ candidateId: "s2", name: "Ravi Rao", technology: ".NET", status: "in_training", currentBatch: null }], nextCursor: null },
+    });
+    api.routes["POST /api/v1/training/batches/b1/students"] = () => ({ status: 201, body: { batchId: "b1", candidateId: "s2" } });
+    await open();
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /View Students/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add student" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add Ravi Rao" }));
+    await waitFor(() => expect(api.writes().map((c) => [c.path, c.body])).toEqual([
+      ["/api/v1/training/batches/b1/students", { candidateId: "s2" }],
+    ]));
+    expect(await screen.findByText("Ravi Rao added to the batch.")).toBeInTheDocument();
   });
 
   it("explains a refused change in plain language", async () => {

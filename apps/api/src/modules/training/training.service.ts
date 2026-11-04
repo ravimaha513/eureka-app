@@ -11,6 +11,7 @@ import type pg from "pg";
 import {
   batchDisplayName,
   canManageTraining,
+  canManageBatchStudents,
   canPlanBatch,
   resolveScope,
   trainingBatchCovered,
@@ -53,6 +54,7 @@ interface BatchRow {
   technology_name: string;
   trainer_id: string | null;
   trainer_name: string | null;
+  created_by: string;
   covered: boolean;
   students: number;
   courses: number;
@@ -74,7 +76,7 @@ interface CourseModuleRow {
 const BATCH_SELECT = `
   SELECT b.id, b.name, b.status, b.start_month::text, b.start_date::text, b.end_date::text, b.size_planned,
          b.cover_color, b.cover_icon, b.row_version, b.location_id, l.name AS location_name,
-         b.technology_id, t.name AS technology_name, b.trainer_id, u.display_name AS trainer_name,
+         b.technology_id, t.name AS technology_name, b.trainer_id, u.display_name AS trainer_name, b.created_by,
          v.covered, v.students,
          (SELECT count(*)::int FROM eureka.batch_course bc WHERE bc.batch_id = b.id) AS courses
   FROM authz.training_batches() v
@@ -116,6 +118,7 @@ export class TrainingService {
       /** UI hints (TR-12); every write is checked again. */
       actions: {
         manage,
+        manageStudents: canManageBatchStudents(access, { ...ref, createdBy: b.created_by }),
         delete: manage && b.covered && b.students === 0,
         updateProgress: trainingBatchCovered(access, "training.progress:update", ref) && ["planned", "in_training"].includes(b.status),
       },
@@ -336,7 +339,9 @@ export class TrainingService {
   async eligibleStudents(user: AuthedUser, id: string, search: string | undefined) {
     return this.db.withUser(user.id, async (c) => {
       const b = await this.loadBatch(c, id);
-      if (!(await this.coveredFor(c, id, "training:manage"))) throw new ForbiddenException("Not permitted");
+      if (!canManageBatchStudents(user.access, { locationId: b.location_id, trainerId: b.trainer_id, createdBy: b.created_by })) {
+        throw new ForbiddenException("Not permitted");
+      }
       const scope = resolveScope(user.access, "candidate:read");
       if (!scope) return { items: [], nextCursor: null };
       const params: unknown[] = [b.location_id, id, search ? likeContains(search) : null];

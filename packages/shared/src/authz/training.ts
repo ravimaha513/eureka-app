@@ -60,6 +60,15 @@ export function canPlanBatch(user: UserAccess): boolean {
   return canCreateBatch(user) || canManageTraining(user) || resolveScope(user, "training.batch:create") !== null;
 }
 
+/**
+ * May add and remove the students of this batch (TR-8): training:manage covering
+ * the batch, or the batch's creator while they may still plan batches. Mirrors
+ * authz.set_batch_student.
+ */
+export function canManageBatchStudents(user: UserAccess, b: TrainingBatchRef & { createdBy: string }): boolean {
+  return trainingBatchCovered(user, "training:manage", b) || (b.createdBy === user.userId && canPlanBatch(user));
+}
+
 /** Locations where a training:manage grant applies; `all` for an org grant. */
 export function trainingManageLocations(user: UserAccess): { all: boolean; locationIds: string[] } {
   const scope = resolveScope(user, "training:manage");

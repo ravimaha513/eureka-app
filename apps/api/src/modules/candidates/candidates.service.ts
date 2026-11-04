@@ -918,7 +918,11 @@ export class CandidatesService implements OnModuleInit {
       const { rows } = await c.query<{ id: string }>(`SELECT authz.create_batch($1, $2, $3::date, $4) AS id`,
         [body.locationId, body.technologyId, `${body.startMonth}-01`, body.sizePlanned ?? null]).catch(mapBatchError);
       const id = rows[0]!.id;
-      await this.audit.record(c, { actorId: user.id, action: "batch.created", entityType: "batch", entityId: id, changes: { ...body } });
+      // Named in the same transaction (TR-1a); the name itself stays out of the audit row (rule 5).
+      await c.query(`SELECT authz.update_batch($1, 1, $2, NULL, NULL, NULL, $3, 'indigo', 'users')`,
+        [id, body.name, body.sizePlanned ?? null]).catch(mapBatchError);
+      const { name: _name, ...details } = body;
+      await this.audit.record(c, { actorId: user.id, action: "batch.created", entityType: "batch", entityId: id, changes: { ...details, named: true } });
       return { id };
     });
   }

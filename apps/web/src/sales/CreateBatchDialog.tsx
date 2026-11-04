@@ -6,7 +6,7 @@ import { UUID_RE, fieldErrors, salesError } from "./errors";
 import { salesApi, type CreateBatch } from "./salesApi";
 import { Field } from "./ui";
 
-const FIELDS = ["locationId", "technologyId", "startMonth", "sizePlanned"] as const;
+const FIELDS = ["name", "locationId", "technologyId", "startMonth", "sizePlanned"] as const;
 
 /**
  * New training batch (POST /api/v1/batches, FR-CAN-02). Offered to Sales
@@ -17,7 +17,7 @@ export function CreateBatchDialog({ onClose, onCreated, canAddTechnology = false
   /** technology:create: the Technology picker offers "Add a new technology…". */
   canAddTechnology?: boolean;
 }) {
-  const [v, setV] = useState({ locationId: "", technologyId: "", startMonth: "", sizePlanned: "" });
+  const [v, setV] = useState({ name: "", locationId: "", technologyId: "", startMonth: "", sizePlanned: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -25,6 +25,7 @@ export function CreateBatchDialog({ onClose, onCreated, canAddTechnology = false
   const submit = async (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
     const e: Record<string, string> = {};
+    if (!v.name.trim()) e.name = "Enter a batch name.";
     if (!UUID_RE.test(v.locationId)) e.locationId = "Choose a location.";
     if (!UUID_RE.test(v.technologyId)) e.technologyId = "Choose a technology.";
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(v.startMonth)) e.startMonth = "Choose the month training starts.";
@@ -33,7 +34,7 @@ export function CreateBatchDialog({ onClose, onCreated, canAddTechnology = false
     setErrors(e); setFormError("");
     if (Object.keys(e).length) { ev.currentTarget.querySelector<HTMLElement>("[aria-invalid='true']")?.focus(); return; }
 
-    const body: CreateBatch = { locationId: v.locationId, technologyId: v.technologyId, startMonth: v.startMonth, ...(size ? { sizePlanned: size } : {}) };
+    const body: CreateBatch = { name: v.name.trim(), locationId: v.locationId, technologyId: v.technologyId, startMonth: v.startMonth, ...(size ? { sizePlanned: size } : {}) };
     setBusy(true);
     try {
       onCreated((await salesApi.createBatch(body)).id);
@@ -53,7 +54,10 @@ export function CreateBatchDialog({ onClose, onCreated, canAddTechnology = false
   return (
     <Dialog title="New batch" onClose={onClose}>
       <form onSubmit={submit} noValidate>
-        <LookupPicker kind="locations" label="Location" value={v.locationId} error={errors.locationId} autoFocus
+        <Field label="Batch name" error={errors.name}>
+          {(p) => <input {...p} data-autofocus value={v.name} maxLength={80} onChange={(e) => setV((s) => ({ ...s, name: e.target.value }))} />}
+        </Field>
+        <LookupPicker kind="locations" label="Location" value={v.locationId} error={errors.locationId}
           onChange={(id) => setV((s) => ({ ...s, locationId: id }))} />
         <LookupPicker kind="technologies" label="Technology" value={v.technologyId} error={errors.technologyId} canAdd={canAddTechnology}
           onChange={(id) => setV((s) => ({ ...s, technologyId: id }))} />
