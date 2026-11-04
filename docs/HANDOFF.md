@@ -284,6 +284,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - BGC: Completed and Helped by removed from the drawer and API (`completed_on` stays server-set); Manager and AD hold `bgc:update` over their hierarchy; Notes block saves in place in the paperwork drawer.
 - Candidate recruiter (no migrations): lead (team), manager/AD (hierarchy) and CEO (org, new `candidate:assign` grant) set it with `PUT /candidates/:id/recruiter`, from the active members and lead of the candidate's team (`GET .../recruiter-options`); picker on the profile's Recruiter row, `actions.assign` hint. Timeline still shows the team name for a recruiter-only change.
 - API test runs queue across sessions (`scripts/test-api-gate.sh`): one full suite with 6 forks, 3 filtered runs with 2 forks each; CI skips the queue.
+- Candidate and batch filters on lists (no migrations): `candidate` (name contains) and `batchId` on `GET /placements` + export, `/interviews`, `/submissions` + `/summary`; Candidate box and Batch select on all three tabs and Cleared interviews; Submissions' two-step picker replaced; Interviews search drops the default from-today date.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

@@ -3,7 +3,6 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { can, type Me } from "../api";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { useLookupName } from "../lookups";
-import { salesApi } from "../sales/salesApi";
 import { Drawer, Field } from "../sales/ui";
 import { AssessmentsSection } from "../pipelinereport/AssessmentsSection";
 import type { Interview } from "../interviews/InterviewsPage";
@@ -14,7 +13,7 @@ import {
 } from "./pipelineApi";
 import { ScheduleInterviewButton, ScheduleInterviewDialog } from "./ScheduleInterviewDialog";
 import { RejectRoundDialog, SubmissionRounds, refreshRounds } from "./SubmissionRounds";
-import { PipelineFunnel, PipelineStatus, ReachedFilter, StageTrail, StatusChips, parseReached, reachedValue, type Reached } from "./ui";
+import { PipelineFunnel, PipelineStatus, ReachedFilter, StageTrail, StatusChips, parseReached, reachedValue, useBatchOptions, useDebounced, type Reached } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
@@ -39,21 +38,24 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
   const status = (SUBMISSION_STATUSES as readonly string[]).includes(statusParam) ? statusParam : "";
   const from = ISO_DAY.test(fromParam) ? fromParam : "";
   const to = ISO_DAY.test(toParam) ? toParam : "";
-  const [candidateId, setCandidateRaw] = useState("");
+  const [candidateInput, setCandidateInput] = useState("");
+  const candidate = useDebounced(candidateInput.trim());
+  const [batchId, setBatchIdRaw] = useSearchParam("batchId");
+  const batches = useBatchOptions(me);
   const pager = useCursorPager();
   const { page, reset } = pager;
   const setStatus = (v: string) => { setStatusRaw(v); reset(); };
   const setFrom = (v: string) => { setFromRaw(v); reset(); };
   const setTo = (v: string) => { setToRaw(v); reset(); };
-  const setCandidate = (v: string) => { setCandidateRaw(v); reset(); };
+  const setBatchId = (v: string) => { setBatchIdRaw(v); reset(); };
   const setReached = (v: Reached) => { setReachedRaw(reachedValue(v)); reset(); };
-  useEffect(() => { reset(); }, [search, reset]);
+  useEffect(() => { reset(); }, [search, candidate, reset]);
   const invalidRange = Boolean(from && to && from > to);
   const [openId, setOpenId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
 
   const filters = {
-    status, candidateId, ...reached, search,
+    status, candidate, batchId, ...reached, search,
     from: from ? dayBoundary(from) : "", to: to ? dayBoundary(to, true) : "",
     cursor: pager.cursor ?? "", limit: PAGE_SIZE,
   };
@@ -64,7 +66,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
     enabled: !invalidRange,
   });
   // Funnel for the same filters except status and "reached" (those are what the funnel breaks down).
-  const sumFilters = { candidateId, search, from: filters.from, to: filters.to };
+  const sumFilters = { candidate, batchId, search, from: filters.from, to: filters.to };
   const summary = useQuery({
     queryKey: [...pipelineKeys.submissions, "summary", sumFilters],
     queryFn: () => pipelineApi.submissionSummary(sumFilters),
@@ -73,7 +75,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
   });
   const items = q.data?.items ?? [];
   const showRate = items.some((s) => "rate" in s);
-  const hasFilters = Boolean(status || from || to || candidateId || reached.interviewed || reached.stage || search);
+  const hasFilters = Boolean(status || from || to || candidate || batchId || reached.interviewed || reached.stage || search);
   const open = items.find((s) => s.id === openId) ?? null;
   const n = items.length;
   const countMsg = q.isLoading || q.error || invalidRange ? ""
@@ -98,14 +100,28 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
             <input id={`${id}-to`} type="date" value={to} onChange={(e) => setTo(e.target.value)}
               aria-invalid={invalidRange || undefined} aria-describedby={invalidRange ? `${id}-range` : undefined} />
           </div>
-          {canSearchCandidates && <CandidateFilter value={candidateId} onChange={setCandidate} />}
+          {canSearchCandidates && (
+            <div className="field inline">
+              <label htmlFor={`${id}-candidate`}>Candidate</label>
+              <input id={`${id}-candidate`} type="search" placeholder="Search by name" value={candidateInput} onChange={(e) => setCandidateInput(e.target.value)} />
+            </div>
+          )}
+          {batches.length > 0 && (
+            <div className="field inline">
+              <label htmlFor={`${id}-batch`}>Batch</label>
+              <select id={`${id}-batch`} value={batchId} onChange={(e) => setBatchId(e.target.value)}>
+                <option value="">All</option>
+                {batches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+          )}
           <div className="field inline">
             <label htmlFor={`${id}-job`}>Job or client</label>
             <input id={`${id}-job`} type="search" placeholder="e.g. Java, Meta" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
           </div>
           <ReachedFilter value={reached} onChange={setReached} />
           {hasFilters && (
-            <button type="button" className="btn" onClick={() => { setStatusRaw(""); setFromRaw(""); setToRaw(""); setCandidateRaw(""); setReachedRaw(""); setSearchInput(""); reset(); }}>
+            <button type="button" className="btn" onClick={() => { setStatusRaw(""); setFromRaw(""); setToRaw(""); setCandidateInput(""); setBatchIdRaw(""); setReachedRaw(""); setSearchInput(""); reset(); }}>
               Clear filters
             </button>
           )}
@@ -162,48 +178,6 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
       {openId && (
         <SubmissionDrawer id={openId} initial={open} onClose={() => setOpenId(null)} onNotice={setNotice} onOpenPlacement={onOpenPlacement} />
       )}
-    </>
-  );
-}
-
-/** The value once it has stopped changing for 250 ms (search boxes). */
-export function useDebounced(value: string, ms = 250) {
-  const [v, setV] = useState(value);
-  useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value, ms]);
-  return v;
-}
-
-/** Candidate name search: finds candidates, then filters submissions by the one picked (server-side). */
-function CandidateFilter({ value, onChange }: { value: string; onChange: (id: string) => void }) {
-  const id = useId();
-  const [input, setInput] = useState("");
-  const [term, setTerm] = useState("");
-  useEffect(() => { const t = setTimeout(() => setTerm(input.trim()), 250); return () => clearTimeout(t); }, [input]);
-  const q = useQuery({
-    queryKey: ["submissions", "candidate-search", term],
-    queryFn: () => salesApi.candidates({ search: term, limit: 20 }),
-    enabled: term.length >= 2,
-    staleTime: 60_000,
-  });
-  const matches = q.data?.items ?? [];
-  return (
-    <>
-      <div className="field inline">
-        <label htmlFor={`${id}-search`}>Candidate search</label>
-        <input id={`${id}-search`} type="search" placeholder="Type 2+ letters of a name" value={input}
-          onChange={(e) => { setInput(e.target.value); if (value) onChange(""); }} aria-describedby={`${id}-msg`} />
-      </div>
-      <div className="field inline">
-        <label htmlFor={`${id}-pick`}>Candidate</label>
-        <select id={`${id}-pick`} value={value} onChange={(e) => onChange(e.target.value)} disabled={term.length < 2 || q.isLoading}>
-          <option value="">Any candidate</option>
-          {matches.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.team.name}</option>)}
-        </select>
-      </div>
-      <span id={`${id}-msg`} className="sr-only" aria-live="polite">
-        {term.length >= 2 && q.data ? `${matches.length} matching ${matches.length === 1 ? "candidate" : "candidates"}. Pick one in the Candidate list.` : ""}
-        {q.error ? "Candidate search is unavailable." : ""}
-      </span>
     </>
   );
 }

@@ -308,6 +308,20 @@ describe("Placements team filter and cleared interviews (migration 0360)", () =>
     await waitFor(() => expect(lastList().get("teamId")).toBe("t2"));
   });
 
+  it("filters placements and exports by candidate name and batch, kept in the URL", async () => {
+    api.routes["GET /api/v1/batches"] = () => ({ body: { items: [{ id: "b1", label: "Java · Dallas · Nov 2026" }], canCreate: false } });
+    wrap(<PlacementsPage me={RECRUITER} />);
+    fireEvent.change(await screen.findByLabelText("Candidate"), { target: { value: " asha " } });
+    await waitFor(() => expect(lastList().get("candidate")).toBe("asha"));
+    expect(new URLSearchParams(window.location.search).get("candidate")).toBe(" asha ");
+    await screen.findByRole("option", { name: "Java · Dallas · Nov 2026" });
+    fireEvent.change(screen.getByRole("combobox", { name: /^Batch$/ }), { target: { value: "b1" } });
+    await waitFor(() => expect(lastList().get("batchId")).toBe("b1"));
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByLabelText("Candidate")).toHaveValue("");
+    await waitFor(() => expect(lastList().get("batchId")).toBeNull());
+  });
+
   it("hides the team filter for a single team (a team lead)", async () => {
     api.routes["GET /api/v1/placements/teams"] = () => ({ body: { items: [TEAMS.items[0]] } });
     wrap(<PlacementsPage me={RECRUITER} />);

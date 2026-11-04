@@ -47,6 +47,10 @@ export type PlacementStatusChange = z.infer<typeof PlacementStatusChange>;
 const PlacementFilters = {
   status: z.enum(PLACEMENT_STATUSES).optional(),
   candidateId: uuid.optional(),
+  /** Candidate name contains this text. */
+  candidate: z.string().trim().min(1).max(100).optional(),
+  /** The candidate's training batch (candidate.batch_id). */
+  batchId: uuid.optional(),
   recruiterId: uuid.optional(),
   /** Team snapshot (placement.team_id). */
   teamId: uuid.optional(),

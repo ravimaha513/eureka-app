@@ -78,6 +78,20 @@ describe("interview board", () => {
    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
    expect(select).toHaveValue("");
  });
+ it("searches by candidate across every date unless the user picked dates", async () => {
+   const fetch = setup(); await screen.findByText("Alex Doe");
+   const last = () => new URL(String(fetch.mock.calls.filter(([u]) => String(u).startsWith("/api/v1/interviews?")).at(-1)![0]), "http://x").searchParams;
+   expect(last().has("from")).toBe(true);
+   fireEvent.change(screen.getByLabelText("Candidate"), { target: { value: " alex " } });
+   await waitFor(() => expect(last().get("candidate")).toBe("alex"));
+   expect(last().has("from")).toBe(false);
+   fireEvent.change(screen.getByLabelText("From date"), { target: { value: "2026-10-01" } });
+   fireEvent.change(screen.getByLabelText("Candidate"), { target: { value: "alexa" } });
+   await waitFor(() => expect(last().get("candidate")).toBe("alexa"));
+   expect(last().has("from")).toBe(true);
+   fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+   expect(screen.getByLabelText("Candidate")).toHaveValue("");
+ });
  it("offers no location filter with a single location", async () => {
    const fetch = setup(); await screen.findByText("Alex Doe");
    await waitFor(() => expect(fetch.mock.calls.some(([u]) => String(u).includes("/lookups"))).toBe(true));

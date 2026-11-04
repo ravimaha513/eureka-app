@@ -11,6 +11,7 @@ import { useLookups } from "../lookups";
 import { Drawer } from "../sales/ui";
 import { Avatar } from "../shell/ui";
 import { CreatePlacementDialog } from "../pipeline/CreatePlacementDialog";
+import { useBatchOptions, useDebounced } from "../pipeline/ui";
 import { SupportCalendarBlock, SupportCalendarBusy, SupportCalendarCard } from "../calendar/SupportCalendar";
 
 const STATUSES = ["scheduled", "in_progress", "completed", "rescheduled", "cancelled", "no_invite"];
@@ -340,6 +341,10 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
   const qc = useQueryClient(); const [from, setFrom] = useState(localInput(new Date().toISOString()).slice(0, 10)); const [to, setTo] = useState(""); const [status, setStatus] = useState(""); const [cleared, setCleared] = useState(""); const [result, setResult] = useState(""); const [locationId, setLocationId] = useState("");
   // Interview location (B2.3): narrows the board within the caller's scope; the server applies the scope.
   const locations = useLookups().data?.locations ?? [];
+  const batches = useBatchOptions(me);
+  const [candidateInput, setCandidateInput] = useState(""); const candidate = useDebounced(candidateInput.trim()); const [batchId, setBatchId] = useState("");
+  // The board opens on today onward; finding a candidate or batch looks at every date, unless the user picked some.
+  const searchAllDates = () => { if (from === localInput(new Date().toISOString()).slice(0, 10) && !to) setFrom(""); };
   const [schedule, setSchedule] = useState(false);
   const [edit, setEdit] = useState<Interview | null>(null);
   const [feedback, setFeedback] = useState<Interview | null>(null);
@@ -352,8 +357,8 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
   const [detailsId, setDetailsId] = useState<string | null>(initialOpenId);
   const [notice, setNotice] = useState("");
   const invalidRange = Boolean(from && to && from > to);
-  const q = useInfiniteQuery({ queryKey: ["interviews", from, to, status, cleared, result, locationId, clientFilter?.id], initialPageParam: "", enabled: !invalidRange, queryFn: ({ pageParam }) => {
-    const p = new URLSearchParams({ limit: "50" }); if (from) p.set("from", dateBoundary(from)); if (to) p.set("to", dateBoundary(to, true)); if (status) p.set("status", status); if (cleared) p.set("cleared", cleared); if (result) p.set("result", result); if (locationId) p.set("locationId", locationId); if (clientFilter) p.set("clientId", clientFilter.id); if (pageParam) p.set("cursor", pageParam);
+  const q = useInfiniteQuery({ queryKey: ["interviews", from, to, status, cleared, result, locationId, clientFilter?.id, candidate, batchId], initialPageParam: "", enabled: !invalidRange, queryFn: ({ pageParam }) => {
+    const p = new URLSearchParams({ limit: "50" }); if (from) p.set("from", dateBoundary(from)); if (to) p.set("to", dateBoundary(to, true)); if (status) p.set("status", status); if (cleared) p.set("cleared", cleared); if (result) p.set("result", result); if (locationId) p.set("locationId", locationId); if (clientFilter) p.set("clientId", clientFilter.id); if (candidate) p.set("candidate", candidate); if (batchId) p.set("batchId", batchId); if (pageParam) p.set("cursor", pageParam);
     return api<Page<Interview>>(`/api/v1/interviews?${p}`);
   }, getNextPageParam: p => p.nextCursor || undefined });
   const done = () => {
@@ -376,13 +381,13 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange }: {
   const details = items.find(i => i.id === detailsId) ?? (initial.data?.id === detailsId ? initial.data : undefined);
   const showDetails = (id: string | null) => { setDetailsId(id); onOpenChange?.(id); };
   return <section className="panel"><div className="pagehead"><div><h1>Interviews</h1><p className="sub">Schedule, clear and review interviews. Board times in {displayZone}. Date filters and scheduling use {zone}.</p></div>{can(me, "interview:create") && <button className="btn primary push" onClick={() => setSchedule(true)}>Schedule interview</button>}</div>
-    <div className="toolbar"><Field title="Display timezone"><select value={displayZone} onChange={e => setDisplayZone(e.target.value)}><option value={zone}>{zone} (local)</option>{zone !== "America/New_York" && <option value="America/New_York">America/New_York (EST/EDT)</option>}</select></Field><Field title="From date"><input type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field title="Through date"><input type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>
+    <div className="toolbar"><Field title="Display timezone"><select value={displayZone} onChange={e => setDisplayZone(e.target.value)}><option value={zone}>{zone} (local)</option>{zone !== "America/New_York" && <option value="America/New_York">America/New_York (EST/EDT)</option>}</select></Field><Field title="Candidate"><input type="search" placeholder="Search by name" value={candidateInput} onChange={e => { setCandidateInput(e.target.value); searchAllDates(); }} /></Field>{batches.length > 0 && <Field title="Batch"><select value={batchId} onChange={e => { setBatchId(e.target.value); searchAllDates(); }}><option value="">All batches</option>{batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></Field>}<Field title="From date"><input type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field title="Through date"><input type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>
       <Field title="Call status filter"><select value={status} onChange={e => setStatus(e.target.value)}><option value="">All statuses</option>{STATUSES.map(s => <option key={s} value={s}>{label(s)}</option>)}</select></Field>
       <Field title="Clearance filter"><select value={cleared} onChange={e => setCleared(e.target.value)}><option value="">All</option><option value="true">Cleared</option><option value="false">Not cleared</option></select></Field>
       <Field title="Result filter"><select value={result} onChange={e => setResult(e.target.value)}><option value="">All</option>{INTERVIEW_RESULTS.map(r => <option key={r} value={r}>{RESULT_LABELS[r]}</option>)}</select></Field>
       {locations.length > 1 && <Field title="Location filter"><select value={locationId} onChange={e => setLocationId(e.target.value)}><option value="">All locations</option>{locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}</select></Field>}
       <button className="btn" onClick={() => { setFrom(localInput(new Date().toISOString()).slice(0,10)); setTo(localInput(new Date().toISOString()).slice(0,10)); }}>Today</button>
-      <button className="btn" onClick={() => { setFrom(""); setTo(""); setStatus(""); setCleared(""); setResult(""); setLocationId(""); setClientFilter(null); }}>Reset filters</button>
+      <button className="btn" onClick={() => { setFrom(""); setTo(""); setStatus(""); setCleared(""); setResult(""); setLocationId(""); setClientFilter(null); setCandidateInput(""); setBatchId(""); }}>Reset filters</button>
     </div>
     {can(me, "calendar:block") && <SupportCalendarCard />}
     {initialOpenId && initial.isError && <p role="alert">That interview is no longer available to you.</p>}

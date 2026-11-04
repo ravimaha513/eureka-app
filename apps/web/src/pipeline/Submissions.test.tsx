@@ -99,21 +99,24 @@ describe("Submissions list", () => {
     expect(api.gets("/api/v1/submissions").slice(before).some((c) => c.url.searchParams.get("from") === dayBoundary("2026-09-10") && c.url.searchParams.has("to"))).toBe(false);
   });
 
-  it("searches candidates by name and filters submissions by the one picked", async () => {
-    api.routes["GET /api/v1/candidates"] = () => ({ body: { items: [{ id: "cand-9", name: "Asha Iyer", team: { id: "t1", name: "Team Rohit" } }], nextCursor: null } });
+  it("filters submissions and the funnel by candidate name and batch", async () => {
+    api.routes["GET /api/v1/batches"] = () => ({ body: { items: [{ id: "b1", label: "Java · Dallas · Nov 2026" }], canCreate: false } });
     wrap(<SubmissionsPage me={RECRUITER} />);
     await rowOf("Asha Iyer");
-    fireEvent.change(screen.getByLabelText("Candidate search"), { target: { value: "asha" } });
-    const option = await screen.findByRole("option", { name: "Asha Iyer · Team Rohit" });
-    expect(api.gets("/api/v1/candidates").at(-1)!.url.searchParams.get("search")).toBe("asha");
-    fireEvent.change(screen.getByLabelText("Candidate"), { target: { value: (option as HTMLOptionElement).value } });
-    await waitFor(() => expect(lastList().get("candidateId")).toBe("cand-9"));
+    fireEvent.change(screen.getByLabelText("Candidate"), { target: { value: " asha " } });
+    await waitFor(() => expect(lastList().get("candidate")).toBe("asha"));
+    expect(api.gets("/api/v1/submissions/summary").at(-1)!.url.searchParams.get("candidate")).toBe("asha");
+    await screen.findByRole("option", { name: "Java · Dallas · Nov 2026" });
+    fireEvent.change(screen.getByRole("combobox", { name: /^Batch$/ }), { target: { value: "b1" } });
+    await waitFor(() => expect(lastList().get("batchId")).toBe("b1"));
+    expect(api.gets("/api/v1/submissions/summary").at(-1)!.url.searchParams.get("batchId")).toBe("b1");
   });
 
   it("hides candidate search without candidate:read", async () => {
     wrap(<SubmissionsPage me={{ capabilities: ["submission:read"] }} />);
     await rowOf("Asha Iyer");
-    expect(screen.queryByLabelText("Candidate search")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Candidate")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Batch")).not.toBeInTheDocument();
   });
 });
 

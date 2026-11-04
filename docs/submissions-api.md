@@ -7,9 +7,10 @@ candidate), rate field policy and the state machine are described in
 ## `GET /api/v1/submissions` (`submission:read`)
 
 Query: `status`, `candidateId`, `recruiterId`, `from`, `to` (submitted_at, `to`
-exclusive), `search`, `interviewed`, `stage`, `cursor`, `limit` (1–200, default 50).
+exclusive), `candidate`, `batchId`, `search`, `interviewed`, `stage`, `cursor`, `limit` (1–200, default 50).
 
 - `search`: job title or client name contains the text (case-insensitive, `%`/`_` literal).
+- `candidate`: candidate name contains the text (same matching; only names the caller can read). `batchId`: the candidate's training batch. Both apply to `/summary` too.
 - `interviewed=true|false`: the submission got an interview — its status is
   `interview_requested`, `interview_scheduled`, `interview_completed` or `selected`,
   or a visible interview exists whose `call_status` is not `cancelled` / `no_invite`.

@@ -4,7 +4,8 @@ import { SUBMISSION_STATUSES, fmtDateTime, fmtRate, pipelineApi, pipelineKeys } 
 import { pipelineError } from "./errors";
 import { CreatePlacementButton } from "./CreatePlacementDialog";
 import { ScheduleInterviewButton } from "./ScheduleInterviewDialog";
-import { SubmissionDrawer, useDebounced } from "./SubmissionsPage";
+import { SubmissionDrawer } from "./SubmissionsPage";
+import { useDebounced } from "./ui";
 import { PipelineFunnel, PipelineStatus, ReachedFilter, StageTrail, StatusChips, type Reached } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";

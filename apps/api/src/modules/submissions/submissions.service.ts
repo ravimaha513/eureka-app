@@ -48,6 +48,10 @@ export const SubmissionListQuery = z
   .object({
     status: z.enum(SUBMISSION_STATUSES).optional(),
     candidateId: uuid.optional(),
+    /** Candidate name contains this text. */
+    candidate: z.string().trim().min(1).max(100).optional(),
+    /** The candidate's training batch (candidate.batch_id). */
+    batchId: uuid.optional(),
     recruiterId: uuid.optional(),
     from: QueryInstant.optional(),
     to: QueryInstant.optional(),
@@ -262,6 +266,8 @@ export class SubmissionsService {
     const where = [activityPredicate(scope, params)];
     if (q.status) where.push(`s.status = ${p(q.status)}`);
     if (q.candidateId) where.push(`s.candidate_id = ${p(q.candidateId)}`);
+    if (q.candidate) where.push(`(p.first_name || ' ' || p.last_name) ILIKE ${p(likeContains(q.candidate))} ESCAPE '\\'`);
+    if (q.batchId) where.push(`c.batch_id = ${p(q.batchId)}::uuid`);
     if (q.recruiterId) where.push(`s.recruiter_id = ${p(q.recruiterId)}`);
     if (q.from) where.push(`s.submitted_at >= ${p(q.from)}::timestamptz`);
     if (q.to) where.push(`s.submitted_at < ${p(q.to)}::timestamptz`);
@@ -288,6 +294,7 @@ export class SubmissionsService {
         FROM eureka.submission s
         JOIN eureka.client cl ON cl.id = s.client_id
         LEFT JOIN eureka.candidate c ON c.id = s.candidate_id
+        LEFT JOIN eureka.person p ON p.id = c.person_id
         WHERE ${where.join(" AND ")}),
       st AS (
         SELECT DISTINCT i.submission_id, ${interviewStageSql("i.round")} AS stage, i.result = 'cleared' AS cleared

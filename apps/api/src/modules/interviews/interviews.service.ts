@@ -14,6 +14,7 @@ import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { inPickerScope, pickerScopePerm } from "../../platform/people-scope.js";
+import { likeContains } from "../../platform/sql.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import { TERMINAL_SUBMISSION_STATUSES, fromMicros, mapPipelineError, splitCursor, toMicros } from "../submissions/pipeline.js";
 import { interviewTimesProblem } from "../submissions/pipeline.js";
@@ -77,14 +78,17 @@ interface InterviewRow {
   c_location: string | null;
 }
 
+/** The name the board shows: an org-wide reader whose candidate join came back empty (RLS) still gets it (0141). */
+const CANDIDATE_NAME = `CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name
+              ELSE authz.interview_candidate_name(i.id) END`;
+
 const SELECT = `
   SELECT i.id, i.submission_id, i.candidate_id, i.recruiter_id, i.team_id, i.location_id, i.client_id,
          i.round, i.starts_at, i.ends_at, i.coach_id, i.invite_received, i.call_status, i.cleared, i.cleared_at,
          i.result, i.result_at, sub.status AS submission_status, pl.id AS placement_id, pl.status AS placement_status,
          i.otter_url, i.recording_url, i.consent_captured, i.system_name, i.interview_type, i.meeting_url,
          i.updated_at, ${toMicros("i.starts_at")} AS k,
-         CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name
-              ELSE authz.interview_candidate_name(i.id) END AS candidate_name,
+         ${CANDIDATE_NAME} AS candidate_name,
          ru.display_name AS recruiter_name, cu.display_name AS coach_name,
          tm.name AS team_name, l.name AS location_name, cl.name AS client_name,
          c.recruiter_id AS c_recruiter, c.team_id AS c_team, c.location_id AS c_location,
@@ -217,6 +221,8 @@ export class InterviewsService {
     if (q.teamId) where.push(`i.team_id = ${p(q.teamId)}`);
     if (q.locationId) where.push(`i.location_id = ${p(q.locationId)}`);
     if (q.candidateId) where.push(`i.candidate_id = ${p(q.candidateId)}`);
+    if (q.candidate) where.push(`(${CANDIDATE_NAME}) ILIKE ${p(likeContains(q.candidate))} ESCAPE '\\'`);
+    if (q.batchId) where.push(`c.batch_id = ${p(q.batchId)}::uuid`);
     if (q.clientId) where.push(`i.client_id = ${p(q.clientId)}`);
     if (q.submissionId) where.push(`i.submission_id = ${p(q.submissionId)}`);
     if (q.cleared !== undefined) where.push(`i.cleared = ${p(q.cleared)}`);

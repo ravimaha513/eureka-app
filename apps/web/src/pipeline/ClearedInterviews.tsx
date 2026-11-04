@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { Interview } from "../interviews/InterviewsPage";
 import { navigate } from "../lib/router";
@@ -16,9 +17,13 @@ const PAGE_SIZE = 50;
  * "cleared", latest first, in the caller's interview scope (a team lead sees
  * their team; Manager, AD and CEO every team, narrowed by the Team filter).
  */
-export function ClearedInterviews({ teamId, onOpenPlacement }: { teamId: string; onOpenPlacement: (id: string) => void }) {
+export function ClearedInterviews({ teamId, candidate, batchId, onOpenPlacement }: {
+  teamId: string; candidate: string; batchId: string; onOpenPlacement: (id: string) => void;
+}) {
   const pager = useCursorPager();
-  const filters = { result: "cleared", sort: "desc", teamId, cursor: pager.cursor ?? "", limit: PAGE_SIZE };
+  const { reset } = pager;
+  useEffect(() => { reset(); }, [teamId, candidate, batchId, reset]);
+  const filters = { result: "cleared", sort: "desc", teamId, candidate, batchId, cursor: pager.cursor ?? "", limit: PAGE_SIZE };
   const q = useQuery({
     queryKey: [...pipelineKeys.placements, "cleared", filters],
     queryFn: () => pipelineApi.clearedInterviews(filters),
@@ -58,7 +63,7 @@ export function ClearedInterviews({ teamId, onOpenPlacement }: { teamId: string;
                       </td>
                     </tr>
                   ))}
-                  {!items.length && <tr><td colSpan={6} className="empty">No cleared interviews yet. Mark a round's result as Cleared on the Interviews board.</td></tr>}
+                  {!items.length && <tr><td colSpan={6} className="empty">{teamId || candidate || batchId ? "No cleared interviews match these filters." : "No cleared interviews yet. Mark a round's result as Cleared on the Interviews board."}</td></tr>}
                 </tbody>
               </table>
             </div>

@@ -16,7 +16,7 @@ import {
   CONTACT_KIND_LABELS, PLACEMENT_EXPORT_ROW_CAP, PLACEMENT_STATUSES, PLACEMENT_TYPE_LABELS, WORK_MODE_LABELS,
   ISO_DAY, dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Placement, type PlacementFilters,
 } from "./pipelineApi";
-import { FirstPlacementBadge, PipelineStatus, StatusChips } from "./ui";
+import { FirstPlacementBadge, PipelineStatus, StatusChips, useBatchOptions, useDebounced } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
@@ -80,6 +80,9 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
   const [technologyId, setTechnologyId] = useSearchParam("technologyId");
   const [locationId, setLocationId] = useSearchParam("locationId");
   const [teamId, setTeamId] = useSearchParam("teamId");
+  const [batchId, setBatchId] = useSearchParam("batchId");
+  const [candidateParam, setCandidateParam] = useSearchParam("candidate");
+  const candidate = useDebounced(candidateParam.trim());
   // ?view=cleared: rounds marked Cleared on the Interviews board (migration 0360).
   const [viewParam, setView] = useSearchParam("view");
   const canSeeCleared = can(me, "interview:read");
@@ -88,28 +91,30 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
   const from = ISO_DAY.test(fromParam) ? fromParam : "";
   const to = ISO_DAY.test(toParam) ? toParam : "";
   // Lookup ids from a link go to the API as they are (it validates them); an unknown one matches nothing.
-  const report = { vendorId, clientId, technologyId, locationId, teamId };
-  const reportSetters = { vendorId: setVendorId, clientId: setClientId, technologyId: setTechnologyId, locationId: setLocationId, teamId: setTeamId };
+  const report = { vendorId, clientId, technologyId, locationId, teamId, batchId };
+  const reportSetters = { vendorId: setVendorId, clientId: setClientId, technologyId: setTechnologyId, locationId: setLocationId, teamId: setTeamId, batchId: setBatchId };
   const setReportKey = (k: keyof typeof report) => (v: string) => { reportSetters[k](v); reset(); };
   const lookups = useLookups();
+  const batches = useBatchOptions(me);
   // A team lead's scope is one team: the filter shows only when there is more than one to pick.
   const teams = useQuery({ queryKey: [...pipelineKeys.placements, "teams"], queryFn: () => pipelineApi.placementTeams(), staleTime: 60_000 });
   const teamItems = (teams.data?.items.length ?? 0) > 1 ? teams.data!.items : [];
   const canExport = can(me, "report:export");
   const exportRun = useMutation({
     mutationFn: () => pipelineApi.exportPlacements({
-      status, from: from ? dayBoundary(from) : "", to: to ? dayBoundary(to, true) : "", ...report,
+      status, from: from ? dayBoundary(from) : "", to: to ? dayBoundary(to, true) : "", ...report, candidate,
     }),
     onSuccess: (r) => saveBlob(r.blob, r.filename),
   });
   const pager = useCursorPager();
   const { page, reset } = pager;
+  useEffect(() => { reset(); }, [candidate, reset]);
   const invalidRange = Boolean(from && to && from > to);
   const [openId, setOpenId] = useRoutedId(initialOpenId, onOpenChange);
   const [notice, setNotice] = useState("");
 
   const filters = {
-    status, from: from ? dayBoundary(from) : "", to: to ? dayBoundary(to, true) : "", ...report, cursor: pager.cursor ?? "", limit: PAGE_SIZE,
+    status, from: from ? dayBoundary(from) : "", to: to ? dayBoundary(to, true) : "", ...report, candidate, cursor: pager.cursor ?? "", limit: PAGE_SIZE,
   };
   const q = useQuery({
     queryKey: [...pipelineKeys.placements, "list", filters],
@@ -119,7 +124,7 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
   });
   const items = q.data?.items ?? [];
   const showRate = items.some((p) => "rate" in p);
-  const hasFilters = Boolean(status || from || to || Object.values(report).some(Boolean));
+  const hasFilters = Boolean(status || from || to || candidate || Object.values(report).some(Boolean));
   const n = items.length;
   const countMsg = q.isLoading || q.error || invalidRange ? ""
     : `${n} ${n === 1 ? "placement" : "placements"} on page ${page + 1}${q.data?.nextCursor ? ", more on the next page" : ""}.`;
@@ -129,6 +134,13 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
     // Opened from another screen, there's no row to return to: land on the heading.
     setTimeout(() => { if (document.activeElement === document.body) headingRef.current?.focus(); });
   };
+
+  const candidateField = (
+    <div className="field inline">
+      <label htmlFor={`${id}-candidate`}>Candidate</label>
+      <input id={`${id}-candidate`} type="search" placeholder="Search by name" value={candidateParam} onChange={(e) => setCandidateParam(e.target.value)} />
+    </div>
+  );
 
   return (
     <>
@@ -150,15 +162,18 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
         <section role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-tab-cleared`}>
           <form className="filters" role="search" aria-label="Cleared interview filters" onSubmit={(e) => e.preventDefault()}>
             <div className="toolbar">
+              {candidateField}
+              <LookupFilter id={`${id}-cbatch`} label="Batch" items={batches} value={batchId} onChange={setBatchId} />
               <LookupFilter id={`${id}-cteam`} label="Team" items={teamItems} value={teamId} onChange={setTeamId} />
             </div>
           </form>
-          <ClearedInterviews teamId={teamId} onOpenPlacement={(pid) => setOpenId(pid)} />
+          <ClearedInterviews teamId={teamId} candidate={candidate} batchId={batchId} onOpenPlacement={(pid) => setOpenId(pid)} />
         </section>
       ) : <>
       <form className="filters" role="search" aria-label="Placement filters" onSubmit={(e) => e.preventDefault()}>
         <StatusChips label="Status" statuses={PLACEMENT_STATUSES} value={status} onChange={(v) => { setStatusRaw(v); reset(); }} />
         <div className="toolbar">
+          {candidateField}
           <div className="field inline">
             <label htmlFor={`${id}-from`}>Created from</label>
             <input id={`${id}-from`} type="date" value={from} onChange={(e) => { setFromRaw(e.target.value); reset(); }} />
@@ -168,13 +183,14 @@ export function PlacementsPage({ me, initialOpenId = null, onOpenChange }: {
             <input id={`${id}-to`} type="date" value={to} onChange={(e) => { setToRaw(e.target.value); reset(); }}
               aria-invalid={invalidRange || undefined} aria-describedby={invalidRange ? `${id}-range` : undefined} />
           </div>
+          <LookupFilter id={`${id}-batch`} label="Batch" items={batches} value={report.batchId} onChange={setReportKey("batchId")} />
           <LookupFilter id={`${id}-vendor`} label="Vendor" items={lookups.data?.vendors ?? []} value={report.vendorId} onChange={setReportKey("vendorId")} />
           <LookupFilter id={`${id}-client`} label="End client" items={lookups.data?.clients ?? []} value={report.clientId} onChange={setReportKey("clientId")} />
           <LookupFilter id={`${id}-tech`} label="Technology" items={lookups.data?.technologies ?? []} value={report.technologyId} onChange={setReportKey("technologyId")} />
           <LookupFilter id={`${id}-team`} label="Team" items={teamItems} value={report.teamId} onChange={setReportKey("teamId")} />
           <LookupFilter id={`${id}-loc`} label="Location" items={lookups.data?.locations ?? []} value={report.locationId} onChange={setReportKey("locationId")} />
           {hasFilters && <button type="button" className="btn" onClick={() => {
-            setStatusRaw(""); setFromRaw(""); setToRaw(""); for (const set of Object.values(reportSetters)) set(""); reset();
+            setStatusRaw(""); setFromRaw(""); setToRaw(""); setCandidateParam(""); for (const set of Object.values(reportSetters)) set(""); reset();
           }}>Clear filters</button>}
         </div>
         {canExport && (

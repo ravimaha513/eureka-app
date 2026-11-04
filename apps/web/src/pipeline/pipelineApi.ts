@@ -57,6 +57,10 @@ export interface Submission {
 export interface SubmissionFilters {
   status?: string;
   candidateId?: string;
+  /** Candidate name contains this text. */
+  candidate?: string;
+  /** The candidate's training batch. */
+  batchId?: string;
   from?: string;
   to?: string;
   /** Job title or client name contains this text. */
@@ -154,6 +158,10 @@ export interface PlacementFilters {
   vendorId?: string; clientId?: string; technologyId?: string; locationId?: string;
   /** Team snapshot (Placements Team filter, migration 0360). */
   teamId?: string;
+  /** Candidate name contains this text. */
+  candidate?: string;
+  /** The candidate's training batch. */
+  batchId?: string;
 }
 
 /** Rows in one placements CSV export (PLACEMENT_EXPORT_ROW_CAP in the API). */
@@ -208,7 +216,7 @@ export const pipelineApi = {
   /** Teams for the Placements Team filter (placements and cleared interviews in the caller's scope). */
   placementTeams: () => api<{ items: { id: string; name: string }[] }>("/api/v1/placements/teams"),
   /** Placements → Cleared interviews: GET /interviews?result=cleared, latest first. */
-  clearedInterviews: (f: { result: string; sort: string; teamId?: string; cursor?: string; limit?: number }) =>
+  clearedInterviews: (f: { result: string; sort: string; teamId?: string; candidate?: string; batchId?: string; cursor?: string; limit?: number }) =>
     api<Page<Interview>>(`/api/v1/interviews?${qs(f)}`),
   /** Placements report CSV: the list filters without paging; capped and audited by the server. */
   exportPlacements: (f: Omit<PlacementFilters, "cursor" | "limit">) =>

@@ -87,7 +87,8 @@ and `packages/shared/src/authz/{state-machines,actions}.ts`. Deviations and prec
   be `null` (the actor had no team); `candidate.name` is `null` when the caller cannot read the candidate's
   person row; `assignment` is `null` (not omitted) before joining when the caller may read it. Lookups add
   `implementationPartners: [{id,name}]` (new reference table `implementation_partner`).
-- **List filters** `from`/`to` apply to `createdAt`; order is `createdAt` descending.
+- **List filters** `from`/`to` apply to `createdAt`; order is `createdAt` descending. `candidate` (name contains, only names the
+  caller can read) and `batchId` (the candidate's training batch) apply to the list and the export; `GET /interviews` takes the same two.
 - **Validation** (422): `rate` > 0 and ≤ 1000 with two decimals (hourly, same bound as submissions);
   `projectCity` ≤ 80 characters; `projectState` 2–40 letters (name or code); `tentativeStart` between
   2000-01-01 and 2100-12-31; up to 10 contacts, contact `name` ≤ 120, `email` valid ≤ 254, `phone` E.164.

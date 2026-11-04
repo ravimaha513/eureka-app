@@ -1,6 +1,22 @@
-import { useId } from "react";
+import { useEffect, useId, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { INTERVIEW_STAGE_LABELS, type InterviewStage } from "@eureka/shared";
+import { can, type Me } from "../api";
+import { salesApi, salesKeys } from "../sales/salesApi";
 import { fmtDateTime, pipelineLabel, type Submission, type SubmissionSummary, type TrailStep } from "./pipelineApi";
+
+/** The value once it has stopped changing for 250 ms (search boxes). */
+export function useDebounced(value: string, ms = 250) {
+  const [v, setV] = useState(value);
+  useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value, ms]);
+  return v;
+}
+
+/** Training batches for a list's Batch filter; empty without candidate:read (the server withholds them). */
+export function useBatchOptions(me?: Pick<Me, "capabilities">) {
+  const q = useQuery({ queryKey: salesKeys.batches, queryFn: () => salesApi.batches(), staleTime: 60_000, enabled: can(me, "candidate:read") });
+  return (q.data?.items ?? []).map((b) => ({ id: b.id, name: b.label }));
+}
 
 /** Status chip for submissions and placements (colour by status class, text always present). */
 export const PipelineStatus = ({ status }: { status: string }) => <span className={`badge st-${status}`}>{pipelineLabel(status)}</span>;

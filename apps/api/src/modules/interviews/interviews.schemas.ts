@@ -16,6 +16,10 @@ export const InterviewListQuery = z
     teamId: uuid.optional(),
     locationId: uuid.optional(),
     candidateId: uuid.optional(),
+    /** Candidate name contains this text. */
+    candidate: z.string().trim().min(1).max(100).optional(),
+    /** The candidate's training batch (candidate.batch_id). */
+    batchId: uuid.optional(),
     clientId: uuid.optional(),
     submissionId: uuid.optional(),
     cleared: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
