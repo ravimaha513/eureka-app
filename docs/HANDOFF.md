@@ -278,6 +278,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Several placements in progress per candidate (0380, PL-10): create while in Confirmation; backout keeps Confirmation while another is open; second join refused (`candidate_on_assignment`).
 - Team = reporting line: joining a team (drawer, My team, admin, import, move) or a lead change sets the member's manager to the team's lead, so AD/manager hierarchy scope (Hot List, candidates) follows the teams; existing members backfilled (migration 0370, docs/admin-api.md AD-9).
 - BGC re-initiate (no migrations): `cleared → initiated` with a required reason (vendor asks for more documents, also after joining; placement/assignment untouched); `authz.update_bgc` moved to `db/functions/authz/update_bgc.sql`; placement drawer offers Initiate / Re-initiate BGC to `bgc:update` holders (docs/paperwork-api.md PW-7).
+- Create placement scope (no migrations): CEO gets `placement:create` (org); `authz.create_placement` no longer needs the candidate visible, so the submission's team can place after visibility is withdrawn; `submissionActions` follows (PL-1).
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

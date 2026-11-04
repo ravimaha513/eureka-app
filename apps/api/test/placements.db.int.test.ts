@@ -81,7 +81,6 @@ describe("create_placement", () => {
     ["another recruiter of the same team (not visible: own scope)", U.r1b, /submission_not_found/],
     ["another team's recruiter", U.r3a, /submission_not_found/],
     ["location admin (reads, cannot create)", U.locD, /not_permitted/],
-    ["CEO (org read only)", U.ceo, /not_permitted/],
     ["HR (no submission:read)", U.hr, /submission_not_found/],
   ])("refuses %s", async (_n, actor, err) => {
     const { cand, sub } = await ready();
@@ -89,8 +88,8 @@ describe("create_placement", () => {
     expect((await candStatus(cand.id)).marketing_status).toBe("active");
   });
 
-  it("the team lead and the manager above may place the recruiter's submission", async () => {
-    for (const actor of [U.l1, U.m1, U.ad]) {
+  it("the team lead, the managers above and the CEO may place the recruiter's submission", async () => {
+    for (const actor of [U.l1, U.m1, U.ad, U.ceo]) {
       const { sub } = await ready();
       const r = await createPlacement(db, actor, sub);
       const p = await placement(r.id);
@@ -174,7 +173,7 @@ describe("create_placement", () => {
     await expect(createPlacement(db, U.r1a, sub)).rejects.toThrow(/candidate_not_available/);
   });
 
-  it("Open-to-all-teams: another team's recruiter places its own submission; the candidate must stay visible", async () => {
+  it("Open-to-all-teams: another team's recruiter places its own submission, even after visibility is withdrawn", async () => {
     const cand = await newCandidate(db, { teamId: T.t3, recruiterId: U.r3a, locationId: LOC.austin, visibility: "all_teams" });
     const sub = await selectedSubmission(db, U.r2a, cand.id);
     const hidden = await selectedSubmission(db, U.r2a, (await newCandidate(db,
@@ -185,7 +184,7 @@ describe("create_placement", () => {
     await expect(createPlacement(db, U.l3, hidden)).rejects.toThrow(/not_permitted/);
     // Visibility withdrawn: r2a still owns the submission but no longer sees the candidate.
     await force(`UPDATE eureka.candidate SET visibility = 'team' WHERE id = (SELECT candidate_id FROM eureka.submission WHERE id = $1)`, [hidden]);
-    await expect(createPlacement(db, U.r2a, hidden)).rejects.toThrow(/not_permitted/);
+    expect((await placement((await createPlacement(db, U.r2a, hidden)).id)).team_id).toBe(T.t2);
   });
 });
 

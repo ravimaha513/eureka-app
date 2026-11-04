@@ -591,6 +591,8 @@ export const GRANTS: Record<Role, Grants> = {
     "interview:create": "org",
     "interview:update": "org",
     "placement:read": "org",
+    // Places any submission; needs submission:update too (PL-1)
+    "placement:create": "org",
     "rate:read": "org",
     "employee:read": "org",
     "invoice:read": "org",

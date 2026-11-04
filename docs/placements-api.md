@@ -53,8 +53,8 @@ Built in migration `0022_placements.sql`, `apps/api/src/modules/placements`, `ap
 and `packages/shared/src/authz/{state-machines,actions}.ts`. Deviations and precisions:
 
 - **PL-1 authorization.** Creating needs `placement:create` **and** `submission:update` on the submission's
-  actor snapshot (like interviews), and the candidate must be visible for `placement:create` (the
-  Open-to-all-teams rule applies, as for `submission:create`). Order of checks: 404 submission not visible,
+  actor snapshot (like interviews). The candidate need not be visible to the caller: a team placing its own
+  submission still can after the candidate's team withdraws Open to all teams. Order of checks: 404 submission not visible,
   403 not placeable, 422 `submission_not_selected`, 409 `placement_exists`, 422 `candidate_not_available`,
   403 candidate no longer visible.
 - **Candidate status at creation.** The candidate must be `active` or `full_of_interviews`

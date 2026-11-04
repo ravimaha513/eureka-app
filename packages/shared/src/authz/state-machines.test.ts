@@ -64,7 +64,8 @@ describe("action hints", () => {
   it("submission actions: createPlacement needs selected, update + create rights and an available candidate", () => {
     expect(submissionActions(R1a, r1aAct, "selected", own)).toEqual({ transition: [], createInterview: false, createPlacement: true, clearAndPlace: true, placeBlocked: null });
     expect(submissionActions(R1a, r1aAct, "selected", { ...own, marketingStatus: "on_hold" }).createPlacement).toBe(false);
-    expect(submissionActions(R1a, r1aAct, "selected", null).createPlacement).toBe(false);
+    // A candidate hidden from the caller does not stop them placing their own submission.
+    expect(submissionActions(R1a, r1aAct, "selected", null).createPlacement).toBe(true);
     expect(submissionActions(R1a, r1aAct, "submitted", own)).toEqual({
       transition: ["under_review", "rejected", "withdrawn"], createInterview: true, createPlacement: false, clearAndPlace: true, placeBlocked: null,
     });

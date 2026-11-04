@@ -44,7 +44,7 @@ async function login(key: Key) {
   sessions.set(key, s);
   return s;
 }
-async function call(key: Key, method: "GET" | "POST" | "PATCH", url: string, payload?: unknown, headers: Record<string, string> = {}) {
+async function call(key: Key, method: "GET" | "POST" | "PATCH" | "PUT", url: string, payload?: unknown, headers: Record<string, string> = {}) {
   const s = await login(key);
   return app.inject({ method, url, payload: payload as never,
     headers: { cookie: s.cookie, ...(method !== "GET" ? { "x-csrf-token": s.csrf } : {}), ...headers } });
@@ -130,5 +130,34 @@ describe("interview clear-and-select", () => {
     expect(row.rows).toEqual([{ result: "pending", status: "submitted" }]);
     expect((await clear("l1", interviewId)).statusCode).toBe(201);
     expect((await call("l1", "GET", `/api/v1/submissions/${submissionId}`)).json().status).toBe("selected");
+  });
+
+  const place = (key: Key, submissionId: string) => call(key, "POST", "/api/v1/placements",
+    { submissionId, placementType: "c2c", workMode: "onsite", tentativeStart: "2031-04-01" }, { "idempotency-key": randomUUID() });
+
+  it("the submission's lead places it after the candidate's team hides the candidate", async () => {
+    const cand = await newCandidate(db, { teamId: T.t3, recruiterId: U.r3a, locationId: LOC.austin, visibility: "all_teams" });
+    const submissionId = await selectedSubmission(db, U.r1a, cand.id, "submitted");
+    const iv = await call("r1a", "POST", "/api/v1/interviews",
+      { submissionId, round: "L1", startsAt: new Date(Date.parse("2031-07-01T14:00:00Z")).toISOString(), durationMin: 60 });
+    expect(iv.statusCode, iv.body).toBe(201);
+    const hide = await call("l3", "PUT", `/api/v1/candidates/${cand.id}/visibility`, { visibility: "team" });
+    expect(hide.statusCode, hide.body).toBe(200);
+
+    expect((await clear("l1", iv.json().id)).statusCode).toBe(201);
+    expect((await call("l1", "GET", `/api/v1/submissions/${submissionId}`)).json().actions.createPlacement).toBe(true);
+    const placed = await place("l1", submissionId);
+    expect(placed.statusCode, placed.body).toBe(201);
+    // The candidate's own team has no update right on the submission.
+    const other = await selectedSubmission(db, U.r1a, (await newCandidate(db, { teamId: T.t3, recruiterId: U.r3a, locationId: LOC.austin, visibility: "all_teams" })).id);
+    expect((await place("l3", other)).statusCode).toBe(403);
+  });
+
+  it("the CEO clears a round and places the submission", async () => {
+    const { submissionId, interviewId } = await round("submitted");
+    expect((await clear("ceo", interviewId)).statusCode).toBe(201);
+    expect((await call("ceo", "GET", `/api/v1/submissions/${submissionId}`)).json().actions.createPlacement).toBe(true);
+    const placed = await place("ceo", submissionId);
+    expect(placed.statusCode, placed.body).toBe(201);
   });
 });

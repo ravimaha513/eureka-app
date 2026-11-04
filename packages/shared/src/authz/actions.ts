@@ -81,12 +81,10 @@ export function submissionActions(
   candidate: CandidateRef | null,
 ): SubmissionActions {
   const canUpdate = ownsActivity(resolveScope(user, "submission:update"), s);
-  const placeScope =
-    canUpdate &&
-    ownsActivity(resolveScope(user, "placement:create"), s) &&
-    candidate !== null &&
-    candidateVisible(resolveScope(user, "placement:create"), candidate);
-  const canPlace = placeScope && PLACEABLE_CANDIDATE_STATUSES.has(candidate!.marketingStatus);
+  // PL-1: the submission decides who may place, even once its candidate is hidden from them.
+  // The status of a hidden candidate is unknown here; the server still refuses an unavailable one.
+  const placeScope = canUpdate && ownsActivity(resolveScope(user, "placement:create"), s);
+  const canPlace = placeScope && (candidate === null || PLACEABLE_CANDIDATE_STATUSES.has(candidate.marketingStatus));
   const open = status === "selected" || !TERMINAL_SUBMISSION_STATUSES.has(status);
   return {
     transition: canUpdate ? submissionTransitionTargets(status) : [],

@@ -37,9 +37,6 @@ BEGIN
   IF NOT FOUND OR c.marketing_status IS NULL OR c.marketing_status NOT IN ('active', 'full_of_interviews', 'confirmation') THEN
     RAISE EXCEPTION 'candidate_not_available' USING ERRCODE = 'check_violation';
   END IF;
-  IF NOT coalesce(authz.candidate_visible(c.id, 'placement:create'), false) THEN
-    RAISE EXCEPTION 'not_permitted' USING ERRCODE = 'insufficient_privilege';
-  END IF;
   IF p_type IS NULL OR p_work_mode IS NULL OR p_start IS NULL
      OR NOT coalesce(p_type IN ('c2c', 'w2', '1099') AND p_work_mode IN ('onsite', 'remote', 'hybrid'), false) THEN
     RAISE EXCEPTION 'invalid_placement' USING ERRCODE = 'check_violation';
