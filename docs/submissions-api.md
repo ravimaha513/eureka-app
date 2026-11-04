@@ -57,7 +57,7 @@ Returns `{ changed: string[], submission }` (`changed` empty when every value ma
   `invalid_submitted_at` (not in the future), `client_not_found`, `vendor_not_found`, and the
   job rules of create (`job_not_found`, `job_client_mismatch`, `job_not_open`; re-checked when
   the job or client changes).
-- Enforced again by `authz.edit_submission` (migration 0420). `details_edited_at/by` are
+- Enforced again by `authz.edit_submission` (migration 0440). `details_edited_at/by` are
   server-managed; items add `detailsEdited: { at, byName } | null` and `actions.editDetails`,
   `actions.editRate`. Audit `submission.edited` keeps the field names only.
 

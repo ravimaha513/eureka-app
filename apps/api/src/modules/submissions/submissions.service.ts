@@ -202,7 +202,7 @@ export function activityPredicate(scope: EffectiveScope, params: unknown[], acti
   return `(${actor} OR ${owner})`;
 }
 
-/** Detail-edit refusals from authz.edit_submission (migration 0420). */
+/** Detail-edit refusals from authz.edit_submission (migration 0440). */
 const EDIT_CONFLICTS = new Set(["submission_placed", "client_locked"]);
 const EDIT_INVALID = new Set(["invalid_job_title", "invalid_rate", "invalid_submitted_at", "client_not_found", "vendor_not_found", "invalid_change",
   "job_not_found", "job_client_mismatch", "job_not_open"]);

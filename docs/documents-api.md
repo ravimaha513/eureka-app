@@ -6,7 +6,7 @@ Paperwork and compliance documents on a candidate or one of the candidate's plac
 `restricted/documents/` (restricted, own KMS key). Restricted types (I-9, driving license, work authorization) are
 listed and opened only under `document.restricted:read`; every opening is in the access log.
 
-This file starts with migration 0421 (editing); the upload, download and access-log endpoints below are as built in 0043.
+This file starts with migration 0461 (editing); the upload, download and access-log endpoints below are as built in 0043.
 
 ## Rules
 
@@ -14,7 +14,7 @@ This file starts with migration 0421 (editing); the upload, download and access-
 |---|------|
 | DOC-1 | The server derives owner, classification (from the type), key, status and file name; a client sends the type, content type and exact size only. |
 | DOC-2 | Reads: `document:read` over the candidate (and `document.restricted:read` for restricted documents); 404 when not visible. |
-| DOC-3 | At most five files of a candidate wait for their scan at once (409 `too_many_pending`); since 0421 a waiting replacement counts. |
+| DOC-3 | At most five files of a candidate wait for their scan at once (409 `too_many_pending`); since 0461 a waiting replacement counts. |
 | DOC-4 | After upload, holders of `document:upload` over the candidate (restricted documents: also restricted upload) may set a display **title** (1-120 characters, `null` clears it) and change the **type** to another of the **same classification**. A change between internal and restricted is 422 `classification_change`: the stored key and its encryption follow the classification, so that is a new upload. The download file name stays derived from the type (no user text in `Content-Disposition`). |
 | DOC-5 | **Replacing the file**: a new `file_object` for the same document, through quarantine and the scan like any upload. The current file keeps opening until the new one is clean; then `authz.document_scan_finish` swaps it in. A refused replacement is shown (`replacement.status`, `reason`) and changes nothing. Asking again drops a waiting replacement. The document id stays, so checklist links (`checklist_item.document_id`) survive. Earlier files are kept in `document.previous_file_ids` (never opened again) and are removed with the candidate (`authz.delete_candidate`). |
 | DOC-6 | Audit (rule 5): `document.updated` with field names and, for a type change, the type keys; `document.replace_requested` with the file id, type key, classification, content type and size. Never the title. |

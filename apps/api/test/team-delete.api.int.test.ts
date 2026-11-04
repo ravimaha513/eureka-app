@@ -6,7 +6,7 @@ import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, T, TECH_ID, U, seedFixtures } from "./fixtures.js";
 
 /**
- * Deleting a team (docs/admin-api.md AD-15, migration 0420): members and candidates move to
+ * Deleting a team (docs/admin-api.md AD-15, migration 0430): members and candidates move to
  * another team or are left with no team, and the deleted team grants nothing afterwards.
  */
 let db: TestDb;

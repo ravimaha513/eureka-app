@@ -155,7 +155,7 @@ const activityRef = (r: HeaderRow): ActivityRef => ({
 
 const ref = (id: string | null, name: string | null) => (id ? { id, name } : null);
 
-/** One employment or address row of a check (migration 0420). Personal data: never audited by value. */
+/** One employment or address row of a check (migration 0460). Personal data: never audited by value. */
 interface EntryRow {
   id: string; kind: "employment" | "address"; employer: string | null; title: string | null; street: string | null;
   city: string | null; region: string | null; postal_code: string | null; country: string | null;
@@ -185,7 +185,7 @@ export class PaperworkService {
       /** null when the caller cannot read the placement record itself. */
       placement: r.placement_status === null ? null : {
         status: r.placement_status, placementType: r.placement_type, tentativeStart: r.tentative_start,
-        /** Set when the background check is cleared (0420); null before. */
+        /** Set when the background check is cleared (0450); null before. */
         actualStart: r.actual_start,
         client: ref(r.client_id, r.client_name),
       },
@@ -287,7 +287,7 @@ export class PaperworkService {
       educationLevel: b?.education_level ?? null,
       employmentYears: b?.employment_years ?? null,
       addressYears: b?.address_years ?? null,
-      /** PW-12 rows; employmentYears / addressYears above are the older summary, kept for checks recorded before 0420. */
+      /** PW-12 rows; employmentYears / addressYears above are the older summary, kept for checks recorded before 0460. */
       employment: entries.filter((e) => e.kind === "employment").map(presentEntry),
       addresses: entries.filter((e) => e.kind === "address").map(presentEntry),
       notes: b?.notes ?? null,

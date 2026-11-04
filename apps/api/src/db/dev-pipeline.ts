@@ -184,7 +184,7 @@ export async function seedDevPipeline(admin: pg.Pool): Promise<DevPipelineResult
                 JSON.stringify({ status: "initiated", bgcCompany: "Fictional Checks LLC", employmentYears: 7, addressYears: 7 })]);
             }
             if (steps2.includes("joined")) {
-              // Clearing records the actual start (0420); the seed keeps the tentative one.
+              // Clearing records the actual start (0450); the seed keeps the tentative one.
               await c.query(`SELECT authz.update_bgc($1, jsonb_build_object('status', 'cleared', 'actualStart',
                 (SELECT p.tentative_start::text FROM eureka.placement p WHERE p.id = $1)), NULL)`, [placementId]);
             }

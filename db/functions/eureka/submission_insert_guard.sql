@@ -1,6 +1,6 @@
 -- eureka.submission_insert_guard: current definition (repeatable; db/functions/README.md).
 -- Earlier body: migration 0019. Change this file, not a new migration.
--- New rows start clean: status and the details-edited stamps (0420) are server-managed.
+-- New rows start clean: status and the details-edited stamps (0440) are server-managed.
 
 SET ROLE eureka_owner;
 CREATE OR REPLACE FUNCTION eureka.submission_insert_guard()

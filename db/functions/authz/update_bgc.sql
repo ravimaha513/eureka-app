@@ -1,6 +1,6 @@
 -- authz.update_bgc: current definition (repeatable; db/functions/README.md).
 -- Earlier bodies: migrations 0044, 0053. Change this file, not a new migration.
--- actualStart (0420): clearing the check records the placement's actual start date.
+-- actualStart (0450): clearing the check records the placement's actual start date.
 
 SET ROLE authz_definer;
 

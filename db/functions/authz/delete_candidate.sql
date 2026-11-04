@@ -42,7 +42,7 @@ BEGIN
   v_apps := ARRAY(SELECT a.id FROM eureka.job_application a WHERE a.candidate_id = p_candidate);
   v_app_ivs := ARRAY(SELECT ai.id FROM eureka.application_interview ai WHERE ai.application_id = ANY (v_apps));
   v_docs := ARRAY(SELECT d.id FROM eureka.document d WHERE d.candidate_id = p_candidate);
-  -- The current file, a replacement waiting for its scan and earlier files (migration 0421).
+  -- The current file, a replacement waiting for its scan and earlier files (migration 0461).
   v_files := ARRAY(SELECT x FROM eureka.document d,
                      LATERAL pg_catalog.unnest(ARRAY[d.file_id, d.pending_file_id] || d.previous_file_ids) x
                     WHERE d.id = ANY (v_docs) AND x IS NOT NULL);

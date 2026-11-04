@@ -1,5 +1,5 @@
 -- authz.admin_delete_team: current definition (repeatable; db/functions/README.md).
--- An admin (access:manage) deletes a team (docs/admin-api.md AD-15, migration 0420).
+-- An admin (access:manage) deletes a team (docs/admin-api.md AD-15, migration 0430).
 -- With p_to_team, its current members move to that team (and report to its lead,
 -- eureka.team_reporting_sync) and its candidates go with them: a candidate keeps a
 -- recruiter who is now in the target team, otherwise they go to the target's lead.

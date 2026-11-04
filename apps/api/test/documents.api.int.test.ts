@@ -205,7 +205,7 @@ describe("upload, scan, promote (local driver, fake scanner)", () => {
   });
 });
 
-describe("editing documents: title, type, replacement file (DOC-4..DOC-6, migration 0421)", () => {
+describe("editing documents: title, type, replacement file (DOC-4..DOC-6, migration 0461)", () => {
   const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
   type Edited = Doc & { title: string | null; version: number; replacement: null | { status: string; reason: string | null } };
   const one = async (who: string, candId: string, id: string) =>

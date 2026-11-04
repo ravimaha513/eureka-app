@@ -1,5 +1,5 @@
 -- authz.edit_submission: current definition (repeatable; db/functions/README.md).
--- Corrects a submission's details (0420, docs/submissions-api.md "Editing details").
+-- Corrects a submission's details (0440, docs/submissions-api.md "Editing details").
 -- submission.details:update on the actor snapshot (lead: team, manager / AD: hierarchy,
 -- CEO: org); the rate also needs rate:read there, since a rate you cannot see is not
 -- one you can correct. Status is not editable here (authz.transition_submission).

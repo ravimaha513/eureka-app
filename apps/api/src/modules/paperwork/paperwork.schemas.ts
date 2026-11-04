@@ -41,7 +41,7 @@ export const UpdateBgc = z
     reason: reason.optional(),
     bgcCompany: z.string().trim().min(1).max(120).regex(noControl, "no control characters").nullable().optional(),
     initiatedOn: day.nullable().optional(),
-    /** The placement's actual start date: required when clearing the check (0420), only while it is cleared. */
+    /** The placement's actual start date: required when clearing the check (0450), only while it is cleared. */
     actualStart: day.optional(),
     educationLevel: z.string().trim().min(1).max(60).regex(noControl, "no control characters").nullable().optional(),
     /** History checked, in whole years 1-50 (migration 0400). */
@@ -60,7 +60,7 @@ export const UpdateBgc = z
   });
 export type UpdateBgc = z.infer<typeof UpdateBgc>;
 
-/** Employment / address history rows (PW-12, migration 0420): whole months as "YYYY-MM"; no end month = still there. */
+/** Employment / address history rows (PW-12, migration 0460): whole months as "YYYY-MM"; no end month = still there. */
 export const BGC_ENTRY_VERIFICATIONS = ["pending", "verified", "unverified"] as const;
 const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "YYYY-MM").refine((m) => m >= "1950-01" && m <= "2100-12", "out of range");
 const line = (max: number) => z.string().trim().min(1).max(max).regex(noControl, "no control characters");

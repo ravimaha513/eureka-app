@@ -125,7 +125,7 @@ export class PlacementsService {
       projectCity: r.project_city,
       projectState: r.project_state,
       tentativeStart: r.tentative_start,
-      /** Recorded when the background check is cleared (0420); null before. */
+      /** Recorded when the background check is cleared (0450); null before. */
       actualStart: r.actual_start,
       isFirstPlacement: r.is_first_placement,
       reconfirmed: r.reconfirmed,

@@ -5,7 +5,7 @@ import { loadConfig } from "../src/platform/config.js";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { CLIENT_ID, U, seedFixtures, type FixtureCandidate } from "./fixtures.js";
 
-// PATCH /api/v1/submissions/:id (docs/submissions-api.md "Editing details", migration 0420).
+// PATCH /api/v1/submissions/:id (docs/submissions-api.md "Editing details", migration 0440).
 let db: TestDb;
 let app: NestFastifyApplication;
 let candidates: FixtureCandidate[];

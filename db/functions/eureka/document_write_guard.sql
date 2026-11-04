@@ -1,6 +1,6 @@
 -- eureka.document_write_guard: current definition (repeatable; db/functions/README.md).
 -- Earlier bodies: migrations 0043, 0054. Change this file, not a new migration.
--- Updates (migration 0421): title, a type of the same classification, a replacement file
+-- Updates (migration 0461): title, a type of the same classification, a replacement file
 -- (pending_file_id) and its swap-in once clean; owner, classification and creation stay fixed.
 
 SET ROLE eureka_owner;

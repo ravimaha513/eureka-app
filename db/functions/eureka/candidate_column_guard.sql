@@ -1,5 +1,5 @@
 -- eureka.candidate_column_guard: current definition (repeatable; db/functions/README.md).
--- Earlier bodies: migrations 0006, 0013, 0026, 0065, 0150. 0420: team delete marker. Change this file, not a new migration.
+-- Earlier bodies: migrations 0006, 0013, 0026, 0065, 0150. 0430: team delete marker. Change this file, not a new migration.
 
 SET ROLE eureka_owner;
 CREATE OR REPLACE FUNCTION eureka.candidate_column_guard()
@@ -45,7 +45,7 @@ BEGIN
     RAISE EXCEPTION 'not permitted to change visibility' USING ERRCODE = 'insufficient_privilege';
   END IF;
 
-  -- authz.admin_delete_team (0420) moves the team's candidates or clears their team.
+  -- authz.admin_delete_team (0430) moves the team's candidates or clears their team.
   IF is_definer THEN
     deleting := coalesce(authz.team_deleting(OLD.team_id), false);
   END IF;

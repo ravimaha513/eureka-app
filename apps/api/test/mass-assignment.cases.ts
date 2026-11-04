@@ -557,7 +557,7 @@ const CASES: RejectCase[] = [
     },
     forbidden: DOCUMENT_FORBIDDEN,
   },
-  // document edits (DOC-4, DOC-5, migration 0421): owner, classification, files, version and who/when stay the server's
+  // document edits (DOC-4, DOC-5, migration 0461): owner, classification, files, version and who/when stay the server's
   {
     route: "PATCH /api/v1/documents/:documentId", actor: "hr",
     prepare: async () => {
@@ -900,7 +900,7 @@ const CASES: RejectCase[] = [
     forbidden: { status: "selected", recruiterId: U.r1b, teamId: T.t2, candidateId: FOREIGN_ID, statusChangedAt: PAST, statusChangedBy: U.l1, from: "selected" },
   },
   {
-    // Detail corrections (lead and above, migration 0420): snapshots, status and the edit stamps stay server-managed.
+    // Detail corrections (lead and above, migration 0440): snapshots, status and the edit stamps stay server-managed.
     route: "PATCH /api/v1/submissions/:id", actor: "l1",
     prepare: async () => {
       const { submissionId } = await interviewOf();
