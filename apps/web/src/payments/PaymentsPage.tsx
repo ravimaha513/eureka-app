@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { INVOICE_STATUSES, MAX_TERMS_DAYS, PAYMENT_TERMS_DAYS, expectedPaymentDate } from "@eureka/shared";
@@ -13,6 +13,12 @@ import {
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
+import { FilterBar } from "../ui/FilterBar";
+import { Menu } from "../ui/Menu";
+import { useRoutedId, useSearchParams } from "../lib/router";
+import { IconInput } from "../sites/ui";
+import { DueDate, ToggleGroup, fmtDay, fmtUsd, fromControl } from "./cells";
+import "./payments.css";
 
 const PAGE_SIZE = 50;
 
@@ -25,29 +31,39 @@ export const InvoiceStatusBadge = ({ status, delayDays }: { status: string; dela
 const nameOf = (r: { candidate: Named }) => r.candidate.name ?? "Name hidden";
 const who = (n: Named | null) => n?.name ?? "—";
 
+const FILTER_KEYS = ["status", "from", "to", "q"] as const;
+type FilterKey = (typeof FILTER_KEYS)[number];
+const late = (n: number) => `${n} ${n === 1 ? "day" : "days"} late`;
+
 /**
  * Payments / incentive dashboard (gap L1, docs/payments-api.md): one row per
  * invoice with the placement data joined, the computed expected date, status
  * and delay. Accounts raises invoices and records payments; Sales see their
  * placements' invoices by hierarchy (amounts only with rate:read).
  */
-export function PaymentsPage({ me }: { me?: Pick<Me, "capabilities"> }) {
+export function PaymentsPage({ me, initialOpenId = null, onOpenChange }: {
+  me?: Pick<Me, "capabilities">;
+  /** The open invoice from the URL (/payments/<id>), when the app routes it. */
+  initialOpenId?: string | null;
+  onOpenChange?: (id: string | null) => void;
+}) {
   const id = useId();
   const qc = useQueryClient();
-  const [status, setStatus] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [searchText, setSearchText] = useState("");
-  const [search, setSearch] = useState("");
+  const [p, setP] = useSearchParams(FILTER_KEYS);
+  const status = (INVOICE_STATUSES as readonly string[]).includes(p.status) ? p.status : "";
+  const { from, to } = p;
+  const search = p.q;
+  const [searchText, setSearchText] = useState(p.q);
   const pager = useCursorPager();
   const { page, reset } = pager;
-  const [openId, setOpenId] = useState<string | null>(null);
+  const set = (patch: Partial<Record<FilterKey, string>>) => { setP(patch); reset(); };
+  const [openId, setOpenId] = useRoutedId(initialOpenId, onOpenChange);
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState("");
   const canEdit = can(me, "invoice:update");
 
   useEffect(() => {
-    const t = setTimeout(() => { setSearch(searchText.trim()); reset(); }, 300);
+    const t = setTimeout(() => { if (searchText.trim() !== search) set({ q: searchText.trim() }); }, 300);
     return () => clearTimeout(t);
   }, [searchText]);
 
@@ -63,6 +79,16 @@ export function PaymentsPage({ me }: { me?: Pick<Me, "capabilities"> }) {
     : `${n} ${n === 1 ? "invoice" : "invoices"} on page ${page + 1}${q.data?.nextCursor ? ", more on the next page" : ""}.`;
   const done = (m: string) => { setNotice(m); void qc.invalidateQueries({ queryKey: paymentKeys.all }); };
   const s = summary.data;
+  const scoped = Boolean(from || to || search);
+  const cols = showMoney ? 14 : 12;
+  /** A summary tile that is also the status filter (pressed while that status is shown). */
+  const tile = (key: string, label: string, value: ReactNode, hint: string) => (
+    <li>
+      <button type="button" className="card tile pay-tile" aria-pressed={status === key} onClick={() => set({ status: status === key ? "" : key })}>
+        <span className="tilelabel">{label}</span><span className="tilevalue">{value}</span><span className="tilehint">{hint}</span>
+      </button>
+    </li>
+  );
 
   return (
     <>
@@ -72,95 +98,93 @@ export function PaymentsPage({ me }: { me?: Pick<Me, "capabilities"> }) {
           <p className="sub">Vendor invoices per placement, expected payment dates and delays. The recruiter and team lead are alerted when a payment is late.</p>
         </div>
         {canEdit && (
-          <button type="button" className="btn primary push" onClick={() => setCreating(true)}><Plus size={15} aria-hidden="true" /> New invoice</button>
+          <div className="pageactions">
+            <button type="button" className="btn primary" onClick={() => setCreating(true)}><Plus size={15} aria-hidden="true" /> New invoice</button>
+          </div>
         )}
       </div>
 
       {s && (
-        <ul className="tiles" aria-label="Payment summary">
-          <li className="card tile"><span className="tilelabel">Pending</span><span className="tilevalue">{s.counts.pending}</span><span className="tilehint">Not yet due</span></li>
-          <li className="card tile"><span className="tilelabel">Delayed</span><span className="tilevalue">{s.counts.delayed}</span>
-            <span className="tilehint">{s.counts.delayed ? `Longest delay ${s.maxDelayDays} ${s.maxDelayDays === 1 ? "day" : "days"}` : "Nothing overdue"}</span></li>
-          <li className="card tile"><span className="tilelabel">Received</span><span className="tilevalue">{s.counts.received}</span><span className="tilehint">Fully paid</span></li>
-          {s.totals && (
-            <li className="card tile"><span className="tilelabel">Outstanding</span><span className="tilevalue">{fmtMoney(s.totals.outstanding)}</span>
-              <span className="tilehint">{fmtMoney(s.totals.received)} received of {fmtMoney(s.totals.invoiced)} invoiced{s.amountsHidden ? ` (${s.amountsHidden} without visible amounts)` : ""}</span></li>
+        <ul className="tiles pay-tiles" aria-label="Payment summary">
+          {showMoney && s.totals && (
+            <li className="card tile pay-outstanding"><span className="tilelabel">Outstanding</span><span className="tilevalue">{fmtUsd(s.totals.outstanding)}</span>
+              <span className="tilehint">{fmtUsd(s.totals.received)} received of {fmtUsd(s.totals.invoiced)} invoiced{s.amountsHidden ? ` (${s.amountsHidden} without visible amounts)` : ""}{scoped ? " · for these filters" : ""}</span></li>
           )}
+          {tile("delayed", "Delayed", s.counts.delayed, s.counts.delayed ? `Longest delay ${s.maxDelayDays} ${s.maxDelayDays === 1 ? "day" : "days"}` : "Nothing overdue")}
+          {tile("pending", "Pending", s.counts.pending, "Not yet due")}
+          {tile("received", "Received", s.counts.received, "Fully paid")}
         </ul>
       )}
 
-      <form className="filters" role="search" aria-label="Invoice filters" onSubmit={(e) => e.preventDefault()}>
-        <div className="chipfilter">
-          <span id={`${id}-st`} className="chiplabel">Payment status</span>
-          <div className="tabs wrap" role="group" aria-labelledby={`${id}-st`}>
-            <button type="button" className="tab" aria-pressed={status === ""} onClick={() => { setStatus(""); reset(); }}>All</button>
-            {INVOICE_STATUSES.map((v) => (
-              <button key={v} type="button" className="tab" aria-pressed={status === v} onClick={() => { setStatus(status === v ? "" : v); reset(); }}>
-                {invoiceStatusLabel(v)}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="toolbar">
-          <div className="field inline">
+      <FilterBar label="Invoice filters" moreCount={0} activeCount={[status, from, to].filter(Boolean).length}
+        hasFilters={hasFilters} onClear={() => { setSearchText(""); set({ status: "", from: "", to: "", q: "" }); }}
+        search={
+          <div className="field inline fb-search">
             <label htmlFor={`${id}-q`}>Candidate</label>
-            <input id={`${id}-q`} type="search" value={searchText} maxLength={80} onChange={(e) => setSearchText(e.target.value)} />
+            <input id={`${id}-q`} type="search" placeholder="Candidate name" value={searchText} maxLength={80} onChange={(e) => setSearchText(e.target.value)} />
           </div>
-          <div className="field inline">
-            <label htmlFor={`${id}-from`}>Invoiced from</label>
-            <input id={`${id}-from`} type="date" value={from} max={to || undefined} onChange={(e) => { setFrom(e.target.value); reset(); }} />
-          </div>
-          <div className="field inline">
-            <label htmlFor={`${id}-to`}>to</label>
-            <input id={`${id}-to`} type="date" value={to} min={from || undefined} onChange={(e) => { setTo(e.target.value); reset(); }} />
-          </div>
-          {hasFilters && (
-            <button type="button" className="btn" onClick={() => { setStatus(""); setFrom(""); setTo(""); setSearchText(""); setSearch(""); reset(); }}>Clear filters</button>
-          )}
-        </div>
-      </form>
+        }
+        primary={
+          <>
+            <ToggleGroup label="Payment status" options={[["", "All"], ...INVOICE_STATUSES.map((v) => [v, invoiceStatusLabel(v)] as const)]}
+              value={status} onChange={(v) => set({ status: v === status ? "" : v })} />
+            <div className="field inline pay-date">
+              <label htmlFor={`${id}-from`}>Invoiced from</label>
+              <input id={`${id}-from`} type="date" value={from} max={to || undefined} onChange={(e) => set({ from: e.target.value })} />
+            </div>
+            <div className="field inline pay-date">
+              <label htmlFor={`${id}-to`}>Invoiced to</label>
+              <input id={`${id}-to`} type="date" value={to} min={from || undefined} onChange={(e) => set({ to: e.target.value })} />
+            </div>
+          </>
+        }
+        summaryEnd={!q.isLoading && !q.error ? <span className="muted pay-count">{n}{q.data?.nextCursor ? "+" : ""} {n === 1 ? "invoice" : "invoices"}</span> : null} />
 
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
 
-      <div className="card tablewrap">
+      <div className="card tablewrap listcard">
         {q.isLoading ? <Loading /> : q.error ? (
           <QueryError query={q} message={paymentError(q.error)} />
         ) : (
-          <div className="tablewrap"><table aria-label="Invoices" aria-busy={q.isFetching || undefined}>
+          <table className="dtable paytable" aria-label="Invoices" aria-busy={q.isFetching || undefined}>
             <thead><tr>
-              <th>Candidate</th><th>Client / vendor</th>{showMoney && <th>Rate / part</th>}<th>Joined</th><th>Timesheet</th>
-              <th>Invoice</th><th>Expected</th><th>Status</th><th>Received</th><th>Hours</th><th>Recruiter / TL</th><th>Manager / AD</th>
-              <th><span className="sr-only">Actions</span></th>
+              <th>Candidate</th><th>Status</th><th>Invoice</th>{showMoney && <th className="num">Amount</th>}<th>Expected</th><th>Received</th>
+              <th>Client / vendor</th><th>Recruiter / TL</th><th className="p2">Manager / AD</th>
+              {showMoney && <th className="p3 num">Rate / part</th>}<th className="p3">Joined</th><th className="p3">Timesheet</th><th className="p3 num">Hours</th>
+              <th className="c-act"><span className="sr-only">Actions</span></th>
             </tr></thead>
             <tbody>
-              {items.map((r) => (
-                <tr key={r.id}>
-                  <td><b>{nameOf(r)}</b><span className="block muted">{r.technology ?? ""}</span></td>
-                  <td>{r.client.name}{r.implementationPartner && <span className="block muted">via {r.implementationPartner.name}</span>}
-                    <span className="block muted">{r.vendor?.name ?? "No vendor"}</span></td>
-                  {showMoney && <td>{"rate" in r ? <>{r.rate === null || r.rate === undefined ? "—" : `${fmtMoney(r.rate)}/h`}<span className="block muted">{r.incentiveAmount !== null && r.incentiveAmount !== undefined ? `Part ${fmtMoney(r.incentiveAmount)}` : ""}</span></> : <span className="muted">Hidden</span>}</td>}
-                  <td>{fmtDate(r.placement.joinedOn)}</td>
-                  <td>{fmtDate(r.timesheetSubmittedOn)}</td>
-                  <td>{r.invoiceNo ?? <span className="muted">No number</span>}<span className="block muted">{fmtDate(r.invoiceDate)} · Net {r.termsDays}</span>
-                    {"amount" in r && r.amount !== null && <span className="block muted">{fmtMoney(r.amount)}</span>}</td>
-                  <td>{fmtDate(r.expectedDate)}</td>
-                  <td><InvoiceStatusBadge status={r.status} delayDays={r.delayDays} />
-                    {r.status === "received" && r.delayDays ? <span className="block muted">{r.delayDays} {r.delayDays === 1 ? "day" : "days"} late</span> : null}</td>
-                  <td>{r.receivedOn ? fmtDate(r.receivedOn) : r.paymentCount ? <span className="muted">Part paid</span> : "—"}
-                    {"paidAmount" in r && r.paymentCount > 0 && <span className="block muted">{fmtMoney(r.paidAmount)}</span>}</td>
-                  <td>{r.hours ?? "—"}</td>
-                  <td>{r.recruiter.name ?? "—"}<span className="block muted">TL {who(r.lead)}</span></td>
-                  <td>{who(r.manager)}<span className="block muted">AD {who(r.associateDirector)}</span></td>
-                  <td className="rowactions">
-                    <button type="button" className="btn sm" onClick={() => setOpenId(r.id)} aria-label={`Open invoice for ${nameOf(r)}`}>Open</button>
-                  </td>
-                </tr>
-              ))}
+              {items.map((r) => {
+                const settled = r.status === "received" || r.status === "void";
+                return (
+                  <tr key={r.id} className="rowopen" onClick={(e) => { if (!fromControl(e)) setOpenId(r.id); }}>
+                    <td className="c-primary"><b>{nameOf(r)}</b><span className="block">{r.technology ?? ""}</span></td>
+                    <td className="c-badge" data-label="Status"><InvoiceStatusBadge status={r.status} delayDays={r.delayDays} />
+                      {r.status === "received" && r.delayDays ? <span className="block">{late(r.delayDays)}</span> : null}</td>
+                    <td data-label="Invoice">{r.invoiceNo ?? <span className="muted">No number</span>}<span className="block">{fmtDay(r.invoiceDate)} · Net {r.termsDays}</span></td>
+                    {showMoney && <td className="num" data-label="Amount">{"amount" in r ? fmtUsd(r.amount) : <span className="muted">Hidden</span>}</td>}
+                    <td data-label="Expected"><DueDate on={r.expectedDate} done={settled} lateWord="late" /></td>
+                    <td data-label="Received">{r.receivedOn ? fmtDay(r.receivedOn) : r.paymentCount ? <span className="muted">Part paid</span> : "—"}
+                      {"paidAmount" in r && r.paymentCount > 0 && <span className="block">{fmtUsd(r.paidAmount)}</span>}</td>
+                    <td data-label="Client">{r.client.name}{r.implementationPartner && <span className="block">via {r.implementationPartner.name}</span>}
+                      <span className="block">{r.vendor?.name ?? "No vendor"}</span></td>
+                    <td data-label="Recruiter">{r.recruiter.name ?? "—"}<span className="block">TL {who(r.lead)}</span></td>
+                    <td className="p2" data-label="Manager">{who(r.manager)}<span className="block">AD {who(r.associateDirector)}</span></td>
+                    {showMoney && <td className="p3 num" data-label="Rate">{"rate" in r ? <>{r.rate === null || r.rate === undefined ? "—" : `${fmtUsd(r.rate)}/h`}<span className="block">{r.incentiveAmount !== null && r.incentiveAmount !== undefined ? `Part ${fmtUsd(r.incentiveAmount)}` : ""}</span></> : <span className="muted">Hidden</span>}</td>}
+                    <td className="p3" data-label="Joined">{fmtDay(r.placement.joinedOn)}</td>
+                    <td className="p3" data-label="Timesheet">{fmtDay(r.timesheetSubmittedOn)}</td>
+                    <td className="p3 num" data-label="Hours">{r.hours ?? "—"}</td>
+                    <td className="c-act">
+                      <button type="button" className="btn sm" onClick={() => setOpenId(r.id)} aria-label={`Open invoice for ${nameOf(r)}`}>Open</button>
+                    </td>
+                  </tr>
+                );
+              })}
               {items.length === 0 && (
-                <tr><td colSpan={showMoney ? 13 : 12} className="empty">{hasFilters ? "No invoices match these filters." : "No invoices yet. Accounts raises invoices on joined placements."}</td></tr>
+                <tr><td colSpan={cols} className="empty">{hasFilters ? "No invoices match these filters." : "No invoices yet. Accounts raises invoices on joined placements."}</td></tr>
               )}
             </tbody>
-          </table></div>
+          </table>
         )}
       </div>
       <div className="listfoot">
@@ -200,44 +224,66 @@ function InvoiceDrawer({ id, initial, onClose, onNotice }: {
           <p className="error" role="alert">{paymentError(q.error)}</p>
         ) : (
           <>
-            <p><InvoiceStatusBadge status={r.status} delayDays={r.delayDays} /></p>
-            <dl className="facts">
-              <dt>Candidate</dt><dd>{nameOf(r)}{r.technology ? ` · ${r.technology}` : ""}</dd>
-              <dt>Client</dt><dd>{r.client.name}{r.implementationPartner ? ` (via ${r.implementationPartner.name})` : ""}</dd>
-              <dt>Vendor</dt><dd>{who(r.vendor)}</dd>
-              {money && <><dt>Rate</dt><dd>{r.rate === null || r.rate === undefined ? "—" : `${fmtMoney(r.rate)}/h`}</dd></>}
-              <dt>Joined</dt><dd>{fmtDate(r.placement.joinedOn)}</dd>
-              <dt>Timesheet to Accounts</dt><dd>{fmtDate(r.timesheetSubmittedOn)}</dd>
-              <dt>Billing period</dt><dd>{r.periodStart || r.periodEnd ? `${fmtDate(r.periodStart)} – ${fmtDate(r.periodEnd)}` : "—"}</dd>
-              <dt>Invoice</dt><dd>{r.invoiceNo ?? "No number"} · {fmtDate(r.invoiceDate)}</dd>
-              <dt>Payment terms</dt><dd>Net {r.termsDays}</dd>
-              <dt>Expected payment</dt><dd>{fmtDate(r.expectedDate)}</dd>
-              <dt>Delay</dt><dd>{r.delayDays === null ? "—" : `${r.delayDays} ${r.delayDays === 1 ? "day" : "days"}`}</dd>
-              <dt>Hours billed</dt><dd>{r.hours ?? "—"}</dd>
-              {money && <>
-                <dt>Invoice amount</dt><dd>{fmtMoney(r.amount)}</dd>
-                <dt>Incentive part</dt><dd>{fmtMoney(r.incentiveAmount)}</dd>
-                <dt>Received</dt><dd>{fmtMoney(r.paidAmount)}{r.receivedOn ? ` on ${fmtDate(r.receivedOn)}` : ""}</dd>
-              </>}
-              {!money && <><dt>Received</dt><dd>{r.receivedOn ? fmtDate(r.receivedOn) : r.paymentCount ? "Partly" : "Not yet"}</dd></>}
-              <dt>Recruiter</dt><dd>{who(r.recruiter)}</dd>
-              <dt>Team lead</dt><dd>{who(r.lead)}{r.team?.name ? ` · ${r.team.name}` : ""}</dd>
-              <dt>Manager</dt><dd>{who(r.manager)}</dd>
-              <dt>Associate director</dt><dd>{who(r.associateDirector)}</dd>
-            </dl>
+            {/* Action strip: status, what is still due and the next step (Record payment) before the facts. */}
+            <div className="actionstrip pay-strip">
+              <div className="as-status">
+                <InvoiceStatusBadge status={r.status} delayDays={r.delayDays} />
+                <span className="as-note">
+                  Expected <DueDate on={r.expectedDate} done={r.status === "received" || r.status === "void"} lateWord="late" />
+                  {due !== null && due > 0 && <> · <b className="pay-due">{fmtUsd(due)}</b> still due</>}
+                </span>
+              </div>
+              {(r.actions.edit || r.actions.recordPayment || r.actions.void) && (
+                <div className="as-actions" role="group" aria-label="Actions">
+                  {r.actions.recordPayment && <button type="button" className="btn primary" onClick={() => setAction("pay")}>Record payment…</button>}
+                  {r.actions.edit && <button type="button" className="btn" onClick={() => setAction("edit")}>Edit invoice…</button>}
+                  <Menu label={`More actions for the invoice of ${nameOf(r)}`} text="More"
+                    items={[r.actions.void && { label: "Void invoice…", danger: true, onSelect: () => setAction("void") }]} />
+                </div>
+              )}
+            </div>
 
             <p role="status" aria-live="polite" className="livemsg">{message}</p>
 
-            {(r.actions.edit || r.actions.recordPayment || r.actions.void) && (
-              <section className="manageblock" aria-labelledby={`${hid}-act`}>
-                <h3 id={`${hid}-act`}>Actions</h3>
-                <div className="rowactions" role="group" aria-labelledby={`${hid}-act`}>
-                  {r.actions.recordPayment && <button type="button" className="btn sm primary" onClick={() => setAction("pay")}>Record payment…</button>}
-                  {r.actions.edit && <button type="button" className="btn sm" onClick={() => setAction("edit")}>Edit invoice…</button>}
-                  {r.actions.void && <button type="button" className="btn sm danger" onClick={() => setAction("void")}>Void invoice…</button>}
-                </div>
-              </section>
-            )}
+            <section className="bo-group" aria-labelledby={`${hid}-inv`}>
+              <h3 id={`${hid}-inv`}>Invoice</h3>
+              <dl className="bo-facts">
+                <div><dt>Invoice</dt><dd>{r.invoiceNo ?? "No number"} · {fmtDay(r.invoiceDate)}</dd></div>
+                <div><dt>Payment terms</dt><dd>Net {r.termsDays}</dd></div>
+                <div><dt>Expected payment</dt><dd>{fmtDay(r.expectedDate)}</dd></div>
+                <div><dt>Delay</dt><dd>{r.delayDays === null ? "—" : `${r.delayDays} ${r.delayDays === 1 ? "day" : "days"}`}</dd></div>
+                {money && <>
+                  <div><dt>Invoice amount</dt><dd>{fmtUsd(r.amount)}</dd></div>
+                  <div><dt>Incentive part</dt><dd>{fmtUsd(r.incentiveAmount)}</dd></div>
+                  <div><dt>Received</dt><dd>{fmtUsd(r.paidAmount)}{r.receivedOn ? ` on ${fmtDay(r.receivedOn)}` : ""}</dd></div>
+                </>}
+                {!money && <div><dt>Received</dt><dd>{r.receivedOn ? fmtDay(r.receivedOn) : r.paymentCount ? "Partly" : "Not yet"}</dd></div>}
+              </dl>
+            </section>
+
+            <section className="bo-group" aria-labelledby={`${hid}-pl`}>
+              <h3 id={`${hid}-pl`}>Placement</h3>
+              <dl className="bo-facts">
+                <div><dt>Candidate</dt><dd>{nameOf(r)}{r.technology ? ` · ${r.technology}` : ""}</dd></div>
+                <div><dt>Client</dt><dd>{r.client.name}{r.implementationPartner ? ` (via ${r.implementationPartner.name})` : ""}</dd></div>
+                <div><dt>Vendor</dt><dd>{who(r.vendor)}</dd></div>
+                {money && <div><dt>Rate</dt><dd>{r.rate === null || r.rate === undefined ? "—" : `${fmtUsd(r.rate)}/h`}</dd></div>}
+                <div><dt>Joined</dt><dd>{fmtDay(r.placement.joinedOn)}</dd></div>
+                <div><dt>Timesheet to Accounts</dt><dd>{fmtDay(r.timesheetSubmittedOn)}</dd></div>
+                <div><dt>Billing period</dt><dd>{r.periodStart || r.periodEnd ? `${fmtDay(r.periodStart)} – ${fmtDay(r.periodEnd)}` : "—"}</dd></div>
+                <div><dt>Hours billed</dt><dd>{r.hours ?? "—"}</dd></div>
+              </dl>
+            </section>
+
+            <section className="bo-group" aria-labelledby={`${hid}-pp`}>
+              <h3 id={`${hid}-pp`}>People</h3>
+              <dl className="bo-facts">
+                <div><dt>Recruiter</dt><dd>{who(r.recruiter)}</dd></div>
+                <div><dt>Team lead</dt><dd>{who(r.lead)}{r.team?.name ? ` · ${r.team.name}` : ""}</dd></div>
+                <div><dt>Manager</dt><dd>{who(r.manager)}</dd></div>
+                <div><dt>Associate director</dt><dd>{who(r.associateDirector)}</dd></div>
+              </dl>
+            </section>
 
             <section className="manageblock" aria-labelledby={`${hid}-p`}>
               <h3 id={`${hid}-p`}>Payments received</h3>
@@ -289,6 +335,7 @@ const moneyOk = (v: number | null, min = 0) => v === null || (Number.isFinite(v)
 function InvoiceDialog({ invoice, onClose, onDone }: { invoice?: InvoiceDetail; onClose: () => void; onDone: (m: string) => void }) {
   const today = localToday();
   const editing = invoice !== undefined;
+  const pid = useId();
   const [placement, setPlacement] = useState<BillablePlacement | null>(null);
   const [pSearch, setPSearch] = useState("");
   const [pSearchQ, setPSearchQ] = useState("");
@@ -369,7 +416,7 @@ function InvoiceDialog({ invoice, onClose, onDone }: { invoice?: InvoiceDetail; 
         }).then(() => failed());
       }}>
         {!editing && (
-          <fieldset className="field spanall">
+          <fieldset className="spanall pay-fieldset">
             <legend>Placement</legend>
             <label className="field">Search joined placements
               <input type="search" value={pSearch} maxLength={80} onChange={(e) => setPSearch(e.target.value)} data-autofocus />
@@ -378,7 +425,7 @@ function InvoiceDialog({ invoice, onClose, onDone }: { invoice?: InvoiceDetail; 
               <p className="muted">No joined placement matches.</p>
             ) : (
               <label className="field">Placement
-                <select value={placement?.id ?? ""} aria-invalid={errs.placement ? true : undefined}
+                <select value={placement?.id ?? ""} aria-invalid={errs.placement ? true : undefined} aria-describedby={errs.placement ? `${pid}-err` : undefined}
                   onChange={(e) => setPlacement(choices.find((p) => p.id === e.target.value) ?? null)}>
                   <option value="">Choose…</option>
                   {choices.map((p) => (
@@ -389,24 +436,10 @@ function InvoiceDialog({ invoice, onClose, onDone }: { invoice?: InvoiceDetail; 
                 </select>
               </label>
             )}
-            {errs.placement && <small className="error fielderr">{errs.placement}</small>}
+            {errs.placement && <small id={`${pid}-err`} className="error fielderr">{errs.placement}</small>}
           </fieldset>
         )}
         <div className="formgrid cols2 paygrid">
-          <Field label="Invoice number" hint="Optional; unique among live invoices.">
-            {(p) => <input {...p} value={invoiceNo} maxLength={60} onChange={(e) => setInvoiceNo(e.target.value)} data-autofocus={editing || undefined} />}
-          </Field>
-          <Field label="Invoice date" error={errs.invoiceDate}>
-            {(p) => <input {...p} type="date" value={invoiceDate} max={today} onChange={(e) => setInvoiceDate(e.target.value)} />}
-          </Field>
-          <Field label="Payment terms (days)" error={errs.terms} hint={expected ? `Expected payment ${fmtDate(expected)}` : undefined}>
-            {(p) => (
-              <>
-                <input {...p} type="number" min={0} max={MAX_TERMS_DAYS} step={1} list="pay-terms" value={terms} onChange={(e) => setTerms(e.target.value)} />
-                <datalist id="pay-terms">{PAYMENT_TERMS_DAYS.map((d) => <option key={d} value={d}>Net {d}</option>)}</datalist>
-              </>
-            )}
-          </Field>
           <Field label="Timesheet sent to Accounts" error={errs.timesheet} hint="After client approval.">
             {(p) => <input {...p} type="date" value={timesheet} max={today} onChange={(e) => setTimesheet(e.target.value)} />}
           </Field>
@@ -422,13 +455,27 @@ function InvoiceDialog({ invoice, onClose, onDone }: { invoice?: InvoiceDetail; 
           {showMoney && (
             <>
               <Field label="Invoice amount (USD)" error={errs.amount}>
-                {(p) => <input {...p} type="number" min={0} step="0.01" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />}
+                {(p) => <IconInput prefix="$"><input {...p} type="number" min={0} step="0.01" inputMode="decimal" value={amount} onWheel={(e) => e.currentTarget.blur()} onChange={(e) => setAmount(e.target.value)} /></IconInput>}
               </Field>
               <Field label="Incentive part (USD)" error={errs.incentive}>
-                {(p) => <input {...p} type="number" min={0} step="0.01" inputMode="decimal" value={incentive} onChange={(e) => setIncentive(e.target.value)} />}
+                {(p) => <IconInput prefix="$"><input {...p} type="number" min={0} step="0.01" inputMode="decimal" value={incentive} onWheel={(e) => e.currentTarget.blur()} onChange={(e) => setIncentive(e.target.value)} /></IconInput>}
               </Field>
             </>
           )}
+          <Field label="Invoice number" hint="Optional; unique among live invoices.">
+            {(p) => <input {...p} value={invoiceNo} maxLength={60} onChange={(e) => setInvoiceNo(e.target.value)} data-autofocus={editing || undefined} />}
+          </Field>
+          <Field label="Invoice date" error={errs.invoiceDate}>
+            {(p) => <input {...p} type="date" value={invoiceDate} max={today} onChange={(e) => setInvoiceDate(e.target.value)} />}
+          </Field>
+          <Field label="Payment terms (days)" error={errs.terms} hint={expected ? `Expected payment ${fmtDate(expected)}` : undefined}>
+            {(p) => (
+              <>
+                <input {...p} type="number" min={0} max={MAX_TERMS_DAYS} step={1} list="pay-terms" value={terms} onChange={(e) => setTerms(e.target.value)} />
+                <datalist id="pay-terms">{PAYMENT_TERMS_DAYS.map((d) => <option key={d} value={d}>Net {d}</option>)}</datalist>
+              </>
+            )}
+          </Field>
         </div>
         {placement && placement.rate !== undefined && <p className="muted">Placement rate {placement.rate === null ? "not set" : `${fmtMoney(placement.rate)}/h`}.</p>}
         <DialogActions onCancel={onClose} submitLabel={editing ? "Save invoice" : "Raise invoice"} busy={submit.busy} error={submit.error} />
@@ -470,7 +517,7 @@ function PaymentDialog({ invoice, due, onClose, onDone }: { invoice: InvoiceDeta
           {(p) => <input {...p} type="date" value={receivedOn} min={invoice.invoiceDate} max={today} onChange={(e) => setReceivedOn(e.target.value)} data-autofocus />}
         </Field>
         <Field label="Amount received (USD)" error={errs.amount}>
-          {(p) => <input {...p} type="number" min={0} step="0.01" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />}
+          {(p) => <IconInput prefix="$"><input {...p} type="number" min={0} step="0.01" inputMode="decimal" value={amount} onWheel={(e) => e.currentTarget.blur()} onChange={(e) => setAmount(e.target.value)} /></IconInput>}
         </Field>
         <DialogActions onCancel={onClose} submitLabel="Record payment" busy={submit.busy} error={submit.error} />
       </form>

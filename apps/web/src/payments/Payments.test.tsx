@@ -37,6 +37,7 @@ const base = (): Record<string, Handler> => ({
   "GET /api/v1/invoices/i2": () => ({ body: detail(I2, { payments: [{ id: "pay1", receivedOn: "2026-09-21", amount: 6400, recordedBy: "Acct", recordedAt: "2026-09-21T12:00:00Z", voidedAt: null, actions: { void: false } }] }) }),
 });
 beforeEach(() => {
+  window.history.replaceState(null, "", "/payments");
   api = mockApi(base());
   vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date("2026-10-03T12:00:00") });
 });
@@ -74,6 +75,19 @@ describe("Payments dashboard", () => {
     fireEvent.change(screen.getByLabelText("Candidate"), { target: { value: "Asha" } });
     await waitFor(() => expect(api.gets("/api/v1/invoices").at(-1)!.url.searchParams.get("search")).toBe("Asha"));
     expect(api.gets("/api/v1/invoices/summary").at(-1)!.url.searchParams.get("search")).toBe("Asha");
+    // Filters live in the URL, so a refresh or a shared link keeps them.
+    expect(window.location.search).toContain("status=delayed");
+  });
+
+  it("summary tiles are shortcuts to their status filter", async () => {
+    wrap(<PaymentsPage me={meFor("accounts")} />);
+    const tiles = await screen.findByRole("list", { name: "Payment summary" });
+    const pending = within(tiles).getByRole("button", { name: /^Pending/ });
+    fireEvent.click(pending);
+    await waitFor(() => expect(api.gets("/api/v1/invoices").at(-1)!.url.searchParams.get("status")).toBe("pending"));
+    expect(pending).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(pending);
+    await waitFor(() => expect(api.gets("/api/v1/invoices").at(-1)!.url.searchParams.get("status")).toBeNull());
   });
 
   it("Sales without money see no rate column and no New invoice button", async () => {
