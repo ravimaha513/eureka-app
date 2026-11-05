@@ -45,6 +45,7 @@ colors:
   neutral-fg: "#474d5e"
   violet-bg: "#f1edfb"
   violet-fg: "#5b3aa8"
+  violet-solid: "#5b3aa8"
 typography:
   display:
     fontFamily: "Archivo Variable, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
@@ -171,8 +172,8 @@ components:
     backgroundColor: "{colors.info-bg}"
     textColor: "{colors.info-fg}"
   status-chip-open-to-all:
-    backgroundColor: "{colors.violet-bg}"
-    textColor: "{colors.violet-fg}"
+    backgroundColor: "{colors.violet-solid}"
+    textColor: "#ffffff"
   priority-p1:
     backgroundColor: "{colors.carbon-ink}"
     textColor: "{colors.on-ink}"
@@ -370,7 +371,7 @@ Squared-off and quiet: carbon ink for the one primary action, outlined surface f
 - **Icon buttons:** 34px square (38px on phones), no border, muted glyph, hover wash.
 
 ### Chips
-- **Status chip:** a 4px-cornered tinted label in plain words (Active, On hold, Open to all teams), 12px/600. No dots, no icons, no outlines.
+- **Status chip:** a 4px-cornered tinted label in plain words (Active, On hold, Open to all teams), 12px/600. No dots, no icons, no outlines. One exception: Open to all teams is a solid violet chip (white text, 700), and its Hot List row takes a violet tint and a 3px left bar, so shared candidates stand out while scanning. Selected teams stays tinted.
 - **Priority chip:** P1 carbon fill with on-ink text, P2 warn tint, P3 neutral tint; 11.5px/700, tabular figures.
 - **Filter chip:** an active filter shown as a surface chip with a strong-rule outline, 500 weight, and a 24px close button whose hover turns bad-red.
 - **Count box:** the result count beside the h1 ("38", "50+"), muted 15px/600 in a 4px outlined box.

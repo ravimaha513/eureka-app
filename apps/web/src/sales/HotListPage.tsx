@@ -115,7 +115,7 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
               {items.map((c) => {
                 const openable = Boolean(onOpenProfile) && profileOpenable(c, caps);
                 return (
-                <tr key={c.id} aria-selected={canBulk ? selected.has(c.id) : undefined} className={openable ? "rowopen" : undefined}
+                <tr key={c.id} aria-selected={canBulk ? selected.has(c.id) : undefined} className={[openable && "rowopen", c.visibility === "all_teams" && "opentoall"].filter(Boolean).join(" ") || undefined}
                   onClick={openable ? (e) => { if (!fromControl(e)) onOpenProfile!(c.id); } : undefined}>
                   {canBulk && (
                     <td className="c-sel">

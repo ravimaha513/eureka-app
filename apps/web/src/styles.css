@@ -16,7 +16,7 @@
   --bad-bg: #fdeeee; --bad-fg: #b3261e; --bad-line: #f5c6c4;
   --info-bg: #e9f0fb; --info-fg: #1e4f9c; --info-line: #c5d7f2;
   --neutral-bg: #eff1f4; --neutral-fg: #474d5e;
-  --violet-bg: #f1edfb; --violet-fg: #5b3aa8;
+  --violet-bg: #f1edfb; --violet-fg: #5b3aa8; --violet-solid: #5b3aa8;
   --t-indigo: #3a4386; --t-indigo-bg: #e8eaf5; --t-teal: #0f6d64; --t-teal-bg: #e2f2ef; --t-amber: #8f5a00; --t-amber-bg: #fbf0dc;
   --t-rose: #a8323d; --t-rose-bg: #f9e8ea; --t-violet: #5b3aa8; --t-violet-bg: #efeaf9; --t-sky: #1d5f8c; --t-sky-bg: #e3eff8;
   /* Charts: categorical series (no red: red means error). Use in order; never for status. */
@@ -44,7 +44,7 @@
   --bad-bg: rgba(244, 63, 94, .14); --bad-fg: #ff7f86; --bad-line: rgba(244, 63, 94, .35);
   --info-bg: rgba(96, 145, 230, .16); --info-fg: #9dbcf2; --info-line: rgba(96, 145, 230, .35);
   --neutral-bg: #222639; --neutral-fg: #b3b8c9;
-  --violet-bg: rgba(139, 92, 246, .16); --violet-fg: #c4b5fd;
+  --violet-bg: rgba(139, 92, 246, .16); --violet-fg: #c4b5fd; --violet-solid: #7c5ce0;
   --t-indigo: #b4bbf0; --t-indigo-bg: rgba(99, 102, 241, .18); --t-teal: #5eead4; --t-teal-bg: rgba(20, 184, 166, .16); --t-amber: #fcd34d; --t-amber-bg: rgba(245, 158, 11, .16);
   --t-rose: #fda4af; --t-rose-bg: rgba(244, 63, 94, .16); --t-violet: #c4b5fd; --t-violet-bg: rgba(139, 92, 246, .18); --t-sky: #7dd3fc; --t-sky-bg: rgba(14, 165, 233, .16);
   --chart-1: #9aa5f2; --chart-2: #3cc7b4; --chart-3: #f0b44c; --chart-4: #6cb3ee; --chart-5: #b59cf5; --chart-6: #a3aabc;
@@ -139,7 +139,7 @@ tbody tr:hover td { background: var(--surface2); }
 tbody tr[aria-selected="true"] td, tbody tr.selected td { background: var(--sel); }
 .badge { display: inline-block; padding: 2px 7px; border-radius: var(--r-sm); font-size: 12px; line-height: 1.35; font-weight: 600; background: var(--neutral-bg); color: var(--neutral-fg); white-space: nowrap; }
 .badge.active { background: var(--ok-bg); color: var(--ok-fg); } .badge.on_hold { background: var(--warn-bg); color: var(--warn-fg); }
-.badge.full_of_interviews { background: var(--info-bg); color: var(--info-fg); } .badge.all_teams { background: var(--violet-bg); color: var(--violet-fg); }
+.badge.full_of_interviews { background: var(--info-bg); color: var(--info-fg); } .badge.all_teams { background: var(--violet-solid); color: #fff; font-weight: 700; } .badge.shared_teams { background: var(--violet-bg); color: var(--violet-fg); }
 .prio { font-weight: 700; font-size: 11.5px; padding: 1px 6px; border-radius: var(--r-sm); background: var(--neutral-bg); color: var(--neutral-fg); font-variant-numeric: tabular-nums; }
 .prio.P1 { background: var(--pri-btn); color: var(--on-pri); } .prio.P2 { background: var(--warn-bg); color: var(--warn-fg); }
 .masked { color: var(--muted); }
@@ -1257,6 +1257,10 @@ tr.rowopen:hover .linkbtn b { text-decoration: underline; text-underline-offset:
 thead .c-act { background: var(--surface2); }
 tbody tr:hover td.c-act { background: var(--surface2); }
 tbody tr[aria-selected="true"] td.c-act { background: var(--sel); }
+/* Hot List: candidates open to all teams. Opaque mix because td.c-act is sticky; selection still wins. */
+tbody tr.opentoall:not([aria-selected="true"]) td { background: color-mix(in srgb, var(--violet-solid) 10%, var(--surface)); }
+tbody tr.opentoall:not([aria-selected="true"]):hover td { background: color-mix(in srgb, var(--violet-solid) 16%, var(--surface)); }
+tbody tr.opentoall > td:first-child { box-shadow: inset 3px 0 0 var(--violet-solid); }
 @media (max-width: 1699px) { .cardtable .p3 { display: none; } }
 @media (max-width: 1499px) { .cardtable .p2 { display: none; } }
 @media (max-width: 768px) {
@@ -1303,6 +1307,7 @@ tbody tr[aria-selected="true"] td.c-act { background: var(--sel); }
   .cardtable tbody { display: grid; gap: 8px; }
   .cardtable tr { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
     grid-template-areas: "sel name pri" "sel status status" "sel tech days" "sel team rec" "sel phone act"; }
+  .cardtable tr.opentoall { background: color-mix(in srgb, var(--violet-solid) 10%, var(--surface)); border-color: var(--violet-solid); border-left-width: 4px; }
   .cardtable tr[aria-selected="true"] { background: var(--sel); border-color: var(--sel-line); }
   .cardtable td { display: block; padding: 0; border: 0; background: none !important; box-shadow: none !important; position: static !important; white-space: normal; font-size: 13.5px; min-width: 0; }
   .cardtable td.p2, .cardtable td.p3 { display: none; }

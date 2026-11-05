@@ -104,6 +104,8 @@ describe("Hot List", () => {
     expect(within(phoneCell).getByText("•••-•••-42")).toHaveAttribute("aria-hidden", "true");
     expect(within(phoneCell).getByText(/Phone hidden, ends in 42\. Not your team's candidate\./)).toHaveClass("sr-only");
     expect(within(foreign).getByText("Open to all teams")).toHaveClass("badge");
+    expect(foreign).toHaveClass("opentoall");
+    expect(await rowOf("Asha Iyer")).not.toHaveClass("opentoall");
     expect(within(await rowOf("Asha Iyer")).getByText("+14695550001")).toBeInTheDocument();
     expect(screen.queryByText(/date of birth|1994/i)).not.toBeInTheDocument();
     expect(screen.getByText("2 candidates on page 1, more on the next page.")).toHaveAttribute("role", "status");
