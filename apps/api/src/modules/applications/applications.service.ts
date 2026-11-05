@@ -12,7 +12,7 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { MAIL_PORT, type MailPort } from "../../platform/mail.js";
-import { RateLimiter } from "../../platform/rate-limit.js";
+import { SharedRateLimiter } from "../../platform/rate-limit.js";
 import { CandidatesService } from "../candidates/candidates.service.js";
 import { toCsv } from "../hotlist/csv.js";
 import { JobsService, JOB_SELECT, companyNames, type JobRow } from "../jobs/jobs.service.js";
@@ -79,7 +79,8 @@ const fullName = (r: { first_name: string | null; last_name: string | null }) =>
 @Injectable()
 export class ApplicationsService {
   private readonly log = new Logger("Applications");
-  private readonly exportLimiter = new RateLimiter(10, 10 * 60_000);
+  // Per user, shared by all tasks and kept across deploys (R-24, F-06).
+  private readonly exportLimiter = new SharedRateLimiter("applications.export", 10, 10 * 60_000);
 
   constructor(
     private readonly db: DbService,
@@ -166,7 +167,7 @@ export class ApplicationsService {
 
   async exportCsv(user: AuthedUser, q: ApplicationExport) {
     if (!can(user.access, "application:read")) throw new ForbiddenException();
-    if (!this.exportLimiter.take(user.id)) throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
+    if (!(await this.exportLimiter.take(user.id, this.db))) throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
     // Same field rule as JSON (A-04): without applicant:read at org scope the Email cells stay empty; the header does not change.
     const emails = this.emailVisible(user.access);
     return this.db.withUser(user.id, async (c) => {
@@ -406,7 +407,7 @@ export class ApplicationsService {
   }
 
   async exportApplicants(user: AuthedUser, q: { search?: string }) {
-    if (!this.exportLimiter.take(user.id)) throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
+    if (!(await this.exportLimiter.take(user.id, this.db))) throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
     return this.db.withUser(user.id, async (c) => {
       const rows = await this.applicants(user, { ...q, limit: EXPORT_ROW_CAP }, EXPORT_ROW_CAP + 1, c);
       const page = rows.slice(0, EXPORT_ROW_CAP);

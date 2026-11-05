@@ -17,7 +17,7 @@ import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { toProblem } from "../../platform/errors.js";
-import { RateLimiter } from "../../platform/rate-limit.js";
+import { RateLimiter, SharedRateLimiter } from "../../platform/rate-limit.js";
 import { ReportExecutor } from "../../platform/report-executor.js";
 import { auditSafeProfile, moreFilters, scopePredicate } from "../candidates/candidates.service.js";
 import { toCsv } from "./csv.js";
@@ -100,7 +100,8 @@ const presentView = (r: ViewRow) => ({
 @Injectable()
 export class HotlistService {
   private readonly log = new Logger(HotlistService.name);
-  private readonly exportLimiter = new RateLimiter(EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
+  // Per user, shared by all tasks and kept across deploys (R-24, F-06).
+  private readonly exportLimiter = new SharedRateLimiter("hotlist.export", EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
   private readonly bulkLimiter = new RateLimiter(BULK_REQUESTS_PER_MINUTE, 60_000);
 
   constructor(
@@ -272,7 +273,7 @@ export class HotlistService {
    */
   async exportCsv(user: AuthedUser, f: HotlistFilters): Promise<{ csv: string; rows: number; truncated: boolean }> {
     if (!resolveScope(user.access, "report:export")) throw new ForbiddenException();
-    if (!this.exportLimiter.take(user.id)) {
+    if (!(await this.exportLimiter.take(user.id, this.db))) {
       throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
     }
     // design N9: separate export timeout (report executor: at most 25 s, limited concurrency, 503 + Retry-After).

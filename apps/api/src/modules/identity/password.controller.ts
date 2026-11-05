@@ -7,7 +7,7 @@ import { clientInfo } from "../../platform/client-info.js";
 import { clientIp, ipKey } from "../../platform/client-ip.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
-import { RateLimiter } from "../../platform/rate-limit.js";
+import { SharedRateLimiter } from "../../platform/rate-limit.js";
 import { SessionService } from "../../platform/session.service.js";
 
 const PasswordLogin = z.object({ email: z.string().trim().email().max(254), password: z.string().min(1).max(200) }).strict();
@@ -24,7 +24,8 @@ const ChangePassword = z.object({ currentPassword: z.string().min(1).max(200), n
  */
 @Controller("api/auth")
 export class PasswordController {
-  private readonly perIp = new RateLimiter(30, 10 * 60_000);
+  // Shared across tasks and deploys (R-24): sign-in and set-password together, per IP.
+  private readonly perIp = new SharedRateLimiter("auth.password.ip", 30, 10 * 60_000);
 
   constructor(
     @Inject(CONFIG) private readonly config: AppConfig,
@@ -52,7 +53,7 @@ export class PasswordController {
   @HttpCode(200)
   async login(@Body() body: unknown, @Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply) {
     this.enabled();
-    if (!this.perIp.take(ipKey(clientIp(req, this.config)))) throw new HttpException("too_many_attempts", HttpStatus.TOO_MANY_REQUESTS);
+    if (!(await this.perIp.take(ipKey(clientIp(req, this.config)), this.db))) throw new HttpException("too_many_attempts", HttpStatus.TOO_MANY_REQUESTS);
     const { email, password } = PasswordLogin.parse(body);
     const r = await this.db.system(async (c) => (await c.query<{ user_id: string | null; outcome: string; must_change: boolean }>(
       `SELECT user_id, outcome, must_change FROM authz.password_login($1, $2, $3, $4)`,
@@ -74,7 +75,7 @@ export class PasswordController {
   @HttpCode(200)
   async setup(@Body() body: unknown, @Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply) {
     this.enabled();
-    if (!this.perIp.take(ipKey(clientIp(req, this.config)))) throw new HttpException("too_many_attempts", HttpStatus.TOO_MANY_REQUESTS);
+    if (!(await this.perIp.take(ipKey(clientIp(req, this.config)), this.db))) throw new HttpException("too_many_attempts", HttpStatus.TOO_MANY_REQUESTS);
     const parsed = SetupPassword.safeParse(body);
     if (!parsed.success) throw new BadRequestException("invalid_link");
     const { token, newPassword } = parsed.data;

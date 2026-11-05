@@ -6,7 +6,7 @@ import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { MAIL_PORT, type MailPort } from "../../platform/mail.js";
 import { PortalSessionService } from "../../platform/portal-session.service.js";
-import { RateLimiter } from "../../platform/rate-limit.js";
+import { SharedRateLimiter } from "../../platform/rate-limit.js";
 import type { RequestLink, SignUp } from "./portal.schemas.js";
 
 /**
@@ -20,8 +20,8 @@ import type { RequestLink, SignUp } from "./portal.schemas.js";
  * Only the per-client-address limiter (429) is synchronous: it says nothing
  * about accounts.
  *
- * Limits: per client address in memory per task (IPv6 keyed by /64, bounded
- * map); everything per email or global is in the database, shared by all
+ * Limits: per client address shared by all tasks and kept across deploys
+ * (SharedRateLimiter, R-24; IPv6 keyed by /64, stored hashed); everything per email or global is in the database, shared by all
  * tasks and counted only for links actually issued, so asking for a link for
  * somebody else's address cannot lock them out: one link per 60 s and 10 an
  * hour per applicant, and database-wide hourly caps on new accounts and on links
@@ -52,8 +52,8 @@ const DUMMY_HASH = sha256("eureka-portal-no-such-link");
 @Injectable()
 export class PortalAuthService {
   private readonly log = new Logger("PortalAuth");
-  private readonly ipLimiter = new RateLimiter(REQUESTS_PER_IP, 15 * 60_000);
-  private readonly verifyLimiter = new RateLimiter(VERIFY_PER_IP, 15 * 60_000);
+  private readonly ipLimiter = new SharedRateLimiter("portal.request.ip", REQUESTS_PER_IP, 15 * 60_000);
+  private readonly verifyLimiter = new SharedRateLimiter("portal.verify.ip", VERIFY_PER_IP, 15 * 60_000);
   private readonly pending = new Set<Promise<void>>();
 
   constructor(
@@ -64,8 +64,8 @@ export class PortalAuthService {
     @Inject(MAIL_PORT) private readonly mail: MailPort,
   ) {}
 
-  private takeIp(limiter: RateLimiter, ip: string) {
-    if (!limiter.take(`ip:${ipKey(ip)}`)) throw new HttpException("Too many requests; try again later", HttpStatus.TOO_MANY_REQUESTS);
+  private async takeIp(limiter: SharedRateLimiter, ip: string) {
+    if (!(await limiter.take(`ip:${ipKey(ip)}`, this.db))) throw new HttpException("Too many requests; try again later", HttpStatus.TOO_MANY_REQUESTS);
   }
 
   /** Runs `work` after the reply; failures are logged by class only (messages can carry addresses). */
@@ -109,7 +109,7 @@ export class PortalAuthService {
   }
 
   async signUp(body: SignUp, ip: string) {
-    this.takeIp(this.ipLimiter, ip);
+    await this.takeIp(this.ipLimiter, ip);
     this.defer("sign-up", async () => {
       const link = this.newLink();
       const r = await this.db.system(async (c) => {
@@ -135,7 +135,7 @@ export class PortalAuthService {
   }
 
   async requestLink(body: RequestLink, ip: string) {
-    this.takeIp(this.ipLimiter, ip);
+    await this.takeIp(this.ipLimiter, ip);
     this.defer("request-link", async () => {
       const link = this.newLink();
       const r = await this.db.system(async (c) => (await c.query<{ applicant_id: string; issued: boolean; cap_reached: string | null }>(
@@ -149,7 +149,7 @@ export class PortalAuthService {
 
   /** Redeems a link (once): returns the new session id for the cookie. 400 `link_invalid` for anything else. */
   async verify(token: string, ip: string): Promise<{ sid: string; applicantId: string }> {
-    this.takeIp(this.verifyLimiter, ip);
+    await this.takeIp(this.verifyLimiter, ip);
     const m = TOKEN.exec(token);
     const invalid = () => new BadRequestException("link_invalid");
     if (!m) throw invalid();

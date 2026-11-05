@@ -17,7 +17,7 @@ import {
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { inPickerScope, pickerScopePerm } from "../../platform/people-scope.js";
-import { RateLimiter } from "../../platform/rate-limit.js";
+import { SharedRateLimiter } from "../../platform/rate-limit.js";
 import { documentQuarantineKey, documentStoredKey } from "../../platform/storage/content.js";
 import { DOCUMENT_STORAGE, type DocumentStorage } from "../../platform/storage/document-storage.js";
 import { noteRestrictedOpen, restrictedOpenError } from "../documents/documents.errors.js";
@@ -147,8 +147,9 @@ const LogCursor = z.object({ at: z.string().datetime({ offset: true }), id: z.st
  */
 @Injectable()
 export class DatahubService {
-  private readonly uploadLimiter = new RateLimiter(DATAHUB_UPLOADS_PER_MINUTE, 60_000);
-  private readonly downloadLimiter = new RateLimiter(DATAHUB_DOWNLOADS_PER_MINUTE, 60_000);
+  // Per user, shared by all tasks and kept across deploys (R-24, B-09); taken in the request transaction.
+  private readonly uploadLimiter = new SharedRateLimiter("datahub.upload", DATAHUB_UPLOADS_PER_MINUTE, 60_000);
+  private readonly downloadLimiter = new SharedRateLimiter("datahub.download", DATAHUB_DOWNLOADS_PER_MINUTE, 60_000);
 
   constructor(
     private readonly db: DbService,
@@ -331,7 +332,7 @@ export class DatahubService {
       if (!folder.readable) throw new ForbiddenException("not_member");
       if (!folder.managed && !folder.members_can_upload) throw new ForbiddenException("Not permitted");
       const body = parse();
-      if (!this.uploadLimiter.take(user.id)) {
+      if (!(await this.uploadLimiter.take(user.id, c))) {
         throw new HttpException("Too many uploads; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
       }
       const row = (await c.query<{ file_id: string; version_id: string; version: number; file_object_id: string; classification: DocumentClassification }>(
@@ -370,7 +371,7 @@ export class DatahubService {
       const v = (await c.query<{ name: string; content_type: DocumentContentType }>(
         `SELECT f.name, o.content_type FROM ${VERSION_FROM} JOIN eureka.datahub_file f ON f.id = v.file_id WHERE v.id = $1`, [versionId])).rows[0];
       if (!v) throw new NotFoundException();
-      if (!this.downloadLimiter.take(user.id)) {
+      if (!(await this.downloadLimiter.take(user.id, c))) {
         throw new HttpException("Too many downloads; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
       }
       const r = (await c.query<{ outcome: string; file_object_id: string | null; classification: DocumentClassification; version: number;

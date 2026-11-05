@@ -99,8 +99,8 @@ run afterwards (so latency cannot tell known from unknown addresses). The mail c
 typed name) because it goes to an unverified address. An existing applicant row is never overwritten by a sign-up: what a sign-up submitted travels on the
 link it issued and is applied, to an *unverified* row only, when that link is redeemed (the mailbox owner confirms it).
 
-Limits (JP-13b): per client address in memory per task (20 sign-up/link requests, 30 verifications per 15 minutes; IPv6 keyed by its /64; the map is hard-capped
-with oldest-first eviction); everything per email or global is **database-backed and shared by all tasks, counted only for links actually issued**, so asking
+Limits (JP-13b): per client address, shared by all API tasks and kept across deploys (20 sign-up/link requests, 30 verifications per 15 minutes; IPv6 keyed by its /64;
+counted in `authz.rate_take`, migration 0486, which stores the key only as a digest, behind a hard-capped per-task in-memory first gate); everything per email or global is **database-backed and shared by all tasks, counted only for links actually issued**, so asking
 for somebody else's link cannot lock them out: one link per 60 s and 10 per hour per applicant, and database-wide hourly caps of 600 links **to
 unverified addresses** and 200 new accounts (`eureka.portal_throttle`, definer-only). Links to **verified** applicants are exempt from the global link
 cap (migration 0473, security review E-01): only the per-applicant limits apply to them, so a burst of sign-ups for made-up addresses cannot stop
@@ -145,7 +145,7 @@ scheduled interviews.
 | Route | Rule |
 |---|---|
 | `GET /api/v1/applications` | JP-17: filters `status`, `jobId`, `search`; RLS: HR all, hiring manager their jobs', interviewer those they interview for |
-| `POST /applications/export` | JP-19: `application:read`; CSV (formula-neutralised, no phone), capped at 5,000 rows, audited, 10 exports per 10 minutes; the Email column follows the JSON rule: filled only with `applicant:read` at org scope, empty otherwise (header unchanged) |
+| `POST /applications/export` | JP-19: `application:read`; CSV (formula-neutralised, no phone), capped at 5,000 rows, audited, 10 exports per 10 minutes per user (shared by all API tasks, 0486); the Email column follows the JSON rule: filled only with `applicant:read` at org scope, empty otherwise (header unchanged) |
 | `GET /applications/:id` | JP-18: application + job + applicant + interviews with scorecards + history (internal comments visible to staff only) |
 | `POST /applications/:id/status` | JP-20: `{ to, comment? }`, `If-Match` rowVersion; emails the applicant ("status is now …"), **never the comment** |
 | `POST /applications/:id/interviews` | JP-27: type phone/video/in_person, round, lead user, panel (≤10), slot, duration, meeting link **https only**; moves applied/shortlisted to interview_scheduled; emails the applicant |
