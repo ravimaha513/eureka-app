@@ -180,6 +180,22 @@ describe("interview board", () => {
    expect(within(card).getByRole("img", { name: "Overall rating: 4 out of 5" })).toBeInTheDocument();
    expect(within(card).getByText("Interview coach")).toBeInTheDocument();
  });
+ it("dialogs opened from the details drawer stack above it", async () => {
+   setup();
+   await screen.findByText("Alex Doe");
+   fireEvent.click(screen.getByRole("button", { name: "Details of the interview with Alex Doe" }));
+   const drawer = await screen.findByRole("dialog", { name: "Interview details" });
+   // Backdrops share a z-index, so the later one paints on top and takes the clicks.
+   const expectAboveDrawer = (dialog: HTMLElement) => expect(drawer.compareDocumentPosition(dialog) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+   fireEvent.click(within(drawer).getByRole("button", { name: "Edit interview" }));
+   const edit = screen.getByRole("dialog", { name: "Edit interview · Alex Doe" });
+   expectAboveDrawer(edit);
+   fireEvent.click(within(edit).getByRole("button", { name: "Cancel" }));
+   // Closing the dialog goes back to the drawer, which stayed open.
+   expect(screen.getByRole("dialog", { name: "Interview details" })).toBe(drawer);
+   fireEvent.click(within(drawer).getByRole("button", { name: "Feedback" }));
+   expectAboveDrawer(screen.getByRole("dialog", { name: "Feedback · Alex Doe" }));
+ });
  it("sends a scorecard with coach feedback only when all four criteria are rated", async () => {
    const fetch = setup({ ...row, editableFields: [], feedbackKinds: ["coach"] }, ["interview:read"]);
    await screen.findByText("Alex Doe");

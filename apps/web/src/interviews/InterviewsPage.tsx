@@ -558,6 +558,10 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange, onOpenS
       </div>
     )}
     {q.hasNextPage && <div className="listfoot"><button type="button" className="btn" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Load more interviews</button></div>}
+    {/* Before the dialogs: backdrops share a z-index, so later in the DOM paints on top, and the drawer opens Edit, Feedback and Place. */}
+    {details && <InterviewDrawer item={details} displayZone={zone} onClose={() => showDetails(null)} actions={actionsFor(details)}
+      suspended={Boolean(edit || feedback || placing)} canOpenCandidate={can(me, "candidate:read")} canOpenPlacement={can(me, "placement:read")}
+      onOpenSubmission={onOpenSubmission} />}
     {schedule && <ScheduleInterviewDialog pickSubmission withPanel defaultType="video" onClose={() => setSchedule(false)}
       onScheduled={() => { setSchedule(false); setNotice("Interview scheduled."); refreshAfterSchedule(qc); void qc.invalidateQueries({ queryKey: ["interview"] }); }} />}
     {edit && <Edit item={edit} zone={zone} onClose={() => setEdit(null)} onDone={done} />}
@@ -568,8 +572,5 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange, onOpenS
       onClose={() => setPlacing(null)}
       onSelectedOnly={() => { setPlacing(null); setNotice(`${placing.round} cleared and the submission moved to Selected.`); void qc.invalidateQueries({ queryKey: ["interviews"] }); void qc.invalidateQueries({ queryKey: ["submissions"] }); }}
       onCreated={() => { setPlacing(null); setNotice(`Placement created for ${placing.candidate.name ?? "the candidate"} from ${placing.round}.`); void qc.invalidateQueries({ queryKey: ["interviews"] }); void qc.invalidateQueries({ queryKey: ["submissions"] }); void qc.invalidateQueries({ queryKey: ["placements"] }); }} />}
-    {details && <InterviewDrawer item={details} displayZone={zone} onClose={() => showDetails(null)} actions={actionsFor(details)}
-      suspended={Boolean(edit || feedback || placing)} canOpenCandidate={can(me, "candidate:read")} canOpenPlacement={can(me, "placement:read")}
-      onOpenSubmission={onOpenSubmission} />}
   </section>;
 }
