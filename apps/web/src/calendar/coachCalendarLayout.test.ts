@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, hourRange, layOutLanes, minutesWithinDay, mondayOf } from "./coachCalendarLayout";
+import { addDays, hourRange, layOutLanes, minutesWithinDay, mondayOf, coversDay, mergeGoogleEvents } from "./coachCalendarLayout";
 
 const span = (s: { start: number; end: number }) => s;
 
@@ -31,5 +31,27 @@ describe("coach calendar layout", () => {
   it("reuses a freed lane within one overlapping group", () => {
     const a = { start: 0, end: 100 }, b = { start: 10, end: 20 }, c = { start: 30, end: 40 };
     expect(layOutLanes([a, b, c], span).map((x) => [x.lane, x.lanes])).toEqual([[0, 2], [1, 2], [1, 2]]);
+  });
+});
+
+describe("Google events on the grid", () => {
+  const at = (coachId: string, startsAt: string, endsAt: string, title?: string) => ({ coachId, startsAt, endsAt, title });
+  it("drops a Google event at exactly a coach's interview time, whatever the offset says", () => {
+    const merged = mergeGoogleEvents(
+      [at("a", "2033-03-02T15:00:00.000Z", "2033-03-02T16:00:00.000Z")],
+      [at("a", "2033-03-02T10:00:00-05:00", "2033-03-02T11:00:00-05:00", "Interview invite")],
+    );
+    expect(merged).toHaveLength(1);
+  });
+  it("keeps a real overlap, and the same time on another coach", () => {
+    const merged = mergeGoogleEvents(
+      [at("a", "2033-03-02T15:00:00.000Z", "2033-03-02T16:00:00.000Z")],
+      [at("a", "2033-03-02T15:30:00.000Z", "2033-03-02T16:00:00.000Z"), at("b", "2033-03-02T15:00:00.000Z", "2033-03-02T16:00:00.000Z")],
+    );
+    expect(merged).toHaveLength(3);
+  });
+  it("treats an all-day end date as exclusive", () => {
+    const e = { startDate: "2033-03-02", endDate: "2033-03-04" };
+    expect(["2033-03-01", "2033-03-02", "2033-03-03", "2033-03-04"].map((d) => coversDay(e, d))).toEqual([false, true, true, false]);
   });
 });

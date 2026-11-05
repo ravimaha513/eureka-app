@@ -300,6 +300,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Interview details drawer: Edit, Feedback and Place dialogs stack above it, so it no longer has to be closed first.
 - Coach calendar (migration 0540, `docs/coach-calendar-api.md`): day and week grids of every coach's interviews; only the `ceo` role decides who else sees them, by role or user.
 - Bulk action bar is opaque in dark mode. `deploy.yml` can auto-deploy staging after CI on main; off until repository variable `STAGING_AUTO_DEPLOY` is `true`, and the deploy train must not run while it is on.
+- Coaches' Google Calendars on the coach grid (migration 0550, `docs/coach-calendar-api.md` CC-6..CC-8): each coach connects their own account; events are read live and never stored; CEO grants still decide who sees them, with titles for full-detail viewers only.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

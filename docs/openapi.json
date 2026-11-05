@@ -8806,6 +8806,177 @@
         }
       }
     },
+    "/api/v1/coach-calendar/google": {
+      "get": {
+        "operationId": "CoachGoogleController_events",
+        "tags": [
+          "calendar"
+        ],
+        "description": "Any signed-in staff user; data scope from RLS or a check in the service.",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "self-service",
+        "parameters": [
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              ]
+            },
+            "required": true,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              ]
+            },
+            "required": true,
+            "name": "to",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/coach-calendar/google/callback": {
+      "get": {
+        "operationId": "CoachGoogleController_callback",
+        "tags": [
+          "calendar"
+        ],
+        "description": "Any signed-in staff user; data scope from RLS or a check in the service.",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "self-service",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "required": false,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "required": false,
+            "name": "error",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "state",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/coach-calendar/google/connect": {
+      "get": {
+        "operationId": "CoachGoogleController_connect",
+        "tags": [
+          "calendar"
+        ],
+        "description": "Any signed-in staff user; data scope from RLS or a check in the service.",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "self-service",
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/coach-calendar/google/connection": {
+      "delete": {
+        "operationId": "CoachGoogleController_disconnect",
+        "tags": [
+          "calendar"
+        ],
+        "description": "Any signed-in staff user; data scope from RLS or a check in the service.",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "self-service",
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
     "/api/v1/coach-calendar/grants": {
       "get": {
         "operationId": "CoachCalendarController_grants",

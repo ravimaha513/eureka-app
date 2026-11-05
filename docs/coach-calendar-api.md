@@ -28,8 +28,7 @@ status; `busy` = times only.
 
 **Coaches** are active holders of the `interview_coach` role, the set the scheduling picker offers;
 an Interview Lead has no column. **Source:** `eureka.interview` by `coach_id`; `cancelled`, `rescheduled` and `no_invite` are left
-out. Not personal calendars: coaches have no Google connection, so other meetings and leave do not
-show. **Limit:** this gates the grid only. `interview:read` still shows interviews and their coach
+out. A coach's own Google events are layered on once they connect (CC-6 below). **Limit:** this gates the grid only. `interview:read` still shows interviews and their coach
 on the Interviews page, on its own scope.
 
 | Id | Route | Permission | Notes |
@@ -43,3 +42,39 @@ on the Interviews page, on its own scope.
 CC-4 and CC-5 are audited (`coach_calendar.granted`, `coach_calendar.revoked`) with ids and settings
 only, so past access can be rebuilt from the log. A grant also adds `coach_calendar:read` to the capabilities `GET /api/v1/me` returns, which
 opens the sidebar entry; the API re-checks on every read.
+
+## Coaches' Google Calendars (CC-6..CC-8, migration 0550)
+
+A coach connects their own Google account from the calendar screen; who may then see them is still
+the grants above. **Never stored:** events are read live from Google on each request. The only thing
+kept is the refresh token, AES-256-GCM under `CALENDAR_TOKEN_KEY`, in
+`eureka.coach_google_connection`, which `eureka_app` cannot read directly.
+
+| Id | Route | Who | Notes |
+|---|---|---|---|
+| CC-6 | `GET /api/v1/coach-calendar/google?from&to` | CEO, coach or a grant, else 403 | Up to 31 days; 60 calls a minute per user, else 429; waits at most 20 seconds, and coaches still pending show as `unavailable`. `{ enabled, me: { canConnect, connected, accountEmail }, coaches: [{ coachId, status }], events: [{ coachId, startsAt, endsAt, title }], allDay: [{ coachId, startDate, endDate, title }] }`. `endDate` is exclusive. `status`: `connected`, `not_connected`, `reconnect`, `unavailable`. One coach failing never fails the rest |
+| CC-7 | `GET /api/v1/coach-calendar/google/connect`, then `.../callback` | Holders of `interview_coach` only, else 403 at connect | Browser navigation to Google and back to `/coach-calendar?google=connected\|cancelled\|wrong_account\|scope_missing\|failed` |
+| CC-8 | `DELETE /api/v1/coach-calendar/google/connection` | Self | 204, also when nothing was connected. Revokes at Google, best effort, except when that account also holds the support calendar: Google revokes per account and OAuth client, so it would end that for everyone |
+
+- **Whose account:** the Google email must be verified and equal the coach's Eureka login (checked in
+  `authz.coach_google_connect`). A refused token is dropped, not revoked, for the reason in CC-8.
+- **Google scope:** `calendar.events.readonly` plus `openid email`. Read-only. Google lets that scope
+  read all the account's calendars; Eureka's code only ever asks for the primary one.
+- **Fields asked of Google:** title, times, status, visibility and the coach's own response.
+  Locations, descriptions, meeting links and other attendees are not requested.
+- **What shows:** private and confidential events show without a title. Declined, cancelled,
+  working-location and birthday entries do not show.
+- **Titles:** `detail = full` viewers only. Busy-only viewers get times.
+- **Duplicates:** the screen hides a Google event at exactly a coach's interview time for that coach.
+  At any other time, an overlap with an interview shows that interview as double-booked.
+- **Removal:** disconnecting, losing the coach role through `authz.revoke_role`, and deactivation all
+  delete the row. Only disconnecting also revokes at Google, because the database cannot decrypt the
+  token; the others stop Eureka's use of it but leave the grant in the person's Google account until
+  it is removed there. A role that simply expires by date keeps the row, unused.
+
+CC-7 and CC-8 are audited (`coach_calendar.google_connected`, `.google_disconnected`) with the
+provider only. Reads are not audited.
+
+**Setup:** add `<PUBLIC_BASE_URL>/api/v1/coach-calendar/google/callback` to the OAuth client's
+authorised redirect URIs, and `calendar.events.readonly` to the consent screen. That scope is
+sensitive: an **Internal** consent screen needs no Google review, an External one does.

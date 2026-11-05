@@ -51,7 +51,7 @@ interface BlockRow { id: string; calendar_id: string; external_id: string; start
  */
 @Injectable()
 export class CalendarService {
-  private readonly tokenKey: string;
+  readonly tokenKey: string;
   constructor(
     private readonly db: DbService, private readonly audit: AuditService,
     @Inject(CONFIG) private readonly config: AppConfig, @Inject(CALENDAR_PROVIDER) private readonly provider: CalendarProvider,

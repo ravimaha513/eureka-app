@@ -30,6 +30,10 @@ const SELF_SERVICE: readonly string[] = [
   "GET /api/v1/calendar/support/busy",
   // Coach calendar: a CEO grant is data, so the service checks authz.coach_calendar_can_view().
   "GET /api/v1/coach-calendar",
+  "GET /api/v1/coach-calendar/google",
+  "GET /api/v1/coach-calendar/google/connect",
+  "GET /api/v1/coach-calendar/google/callback",
+  "DELETE /api/v1/coach-calendar/google/connection",
   // identity: own session, profile, preferences and step-up state
   "POST /api/auth/logout",
   "POST /api/auth/password/change",

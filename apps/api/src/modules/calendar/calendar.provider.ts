@@ -17,12 +17,28 @@ import { randomUUID } from "node:crypto";
 export interface CalendarEventInput { summary: string; description: string; startsAt: Date; endsAt: Date }
 /** A busy period: the interval only (CA-7). Titles and attendees never leave the provider. */
 export interface BusyInterval { startsAt: Date; endsAt: Date }
+/**
+ * An event on a coach's own calendar (CC-6). `title` is null for an event the coach marked private
+ * or confidential. Location, description, attendees and links are never requested from Google.
+ */
+export type CoachEvent =
+  | { allDay: false; startsAt: Date; endsAt: Date; title: string | null }
+  /** `endDate` is exclusive, as Google gives it. */
+  | { allDay: true; startDate: string; endDate: string; title: string | null };
 export interface CalendarProvider {
   readonly kind: "google" | "dev";
+  /** The consent page for a coach's own calendar (read-only); `loginHint` preselects their account. */
+  coachAuthUrl(redirectUri: string, state: string, loginHint: string): string;
+  /** Whether these granted scopes can read events (the consent screen lets people untick a scope). */
+  coachEventsGranted(scopes: string): boolean;
+  /** The coach's primary calendar between `from` and `to`, without declined or cancelled events. */
+  coachEvents(refreshToken: string, from: Date, to: Date): Promise<CoachEvent[]>;
+  /** Ends the access at the provider; an already dead token counts as revoked. */
+  revoke(refreshToken: string): Promise<void>;
   /** Where the browser goes to authorise; the callback returns to `redirectUri` with `code` and `state`. */
   authUrl(redirectUri: string, state: string): string;
   /** Exchanges the authorisation code for the refresh token, the authorising account's email and the scopes granted. */
-  exchange(code: string, redirectUri: string): Promise<{ refreshToken: string; email: string; scopes: string }>;
+  exchange(code: string, redirectUri: string): Promise<{ refreshToken: string; email: string; emailVerified: boolean; scopes: string }>;
   /** Whether a connection made with these granted scopes can answer freeBusy (older connections need a reconnect). */
   freeBusyGranted(scopes: string): boolean;
   /** Creates a busy event on `calendarId`; returns the provider's event id. */
@@ -55,6 +71,39 @@ export const SCOPE = "openid email https://www.googleapis.com/auth/calendar.even
 
 const grantedFreeBusy = (scopes: string) => scopes.split(/\s+/).some((s) => FREEBUSY_SCOPES.includes(s));
 
+/** A coach's connection is read-only: it can never change their calendar. */
+const COACH_EVENTS_SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly";
+export const COACH_SCOPE = `openid email ${COACH_EVENTS_SCOPE}`;
+const COACH_EVENT_READ_SCOPES = [COACH_EVENTS_SCOPE, "https://www.googleapis.com/auth/calendar.readonly"];
+const grantedCoachEvents = (scopes: string) => scopes.split(/\s+/).some((s) => COACH_EVENT_READ_SCOPES.includes(s));
+/** Only what the grid shows, plus what decides whether to hide or mask an event. */
+const COACH_EVENT_FIELDS = "nextPageToken,items(summary,start,end,status,visibility,attendees(self,responseStatus))";
+const COACH_EVENT_PAGES = 4;
+
+interface GoogleEventItem {
+  summary?: unknown; status?: unknown; visibility?: unknown;
+  start?: { dateTime?: unknown; date?: unknown }; end?: { dateTime?: unknown; date?: unknown };
+  attendees?: { self?: unknown; responseStatus?: unknown }[];
+}
+
+/** One Google event as the grid sees it, or null when it should not show. Exported for its unit test. */
+export function toCoachEvent(ev: GoogleEventItem): CoachEvent | null {
+  if (ev.status === "cancelled") return null;
+  if (ev.attendees?.some((a) => a.self === true && a.responseStatus === "declined")) return null;
+  // The owner's own token returns private titles too, so masking them is on us.
+  const hidden = ev.visibility === "private" || ev.visibility === "confidential";
+  const summary = !hidden && typeof ev.summary === "string" ? ev.summary.trim().slice(0, 200) : "";
+  const title = summary || null;
+  if (typeof ev.start?.date === "string" && typeof ev.end?.date === "string") {
+    return { allDay: true, startDate: ev.start.date, endDate: ev.end.date, title };
+  }
+  if (typeof ev.start?.dateTime !== "string" || typeof ev.end?.dateTime !== "string") return null;
+  const startsAt = new Date(ev.start.dateTime);
+  const endsAt = new Date(ev.end.dateTime);
+  if (Number.isNaN(+startsAt) || Number.isNaN(+endsAt) || endsAt <= startsAt) return null;
+  return { allDay: false, startsAt, endsAt, title };
+}
+
 export class GoogleCalendarProvider implements CalendarProvider {
   readonly kind = "google" as const;
   fetchImpl: typeof fetch = fetch;
@@ -66,6 +115,51 @@ export class GoogleCalendarProvider implements CalendarProvider {
       access_type: "offline", prompt: "consent", include_granted_scopes: "false",
     });
     return `${GOOGLE_AUTH}?${params}`;
+  }
+
+  coachAuthUrl(redirectUri: string, state: string, loginHint: string): string {
+    const params = new URLSearchParams({
+      client_id: this.clientId, redirect_uri: redirectUri, response_type: "code", scope: COACH_SCOPE, state,
+      access_type: "offline", prompt: "consent", include_granted_scopes: "false", login_hint: loginHint,
+    });
+    return `${GOOGLE_AUTH}?${params}`;
+  }
+
+  coachEventsGranted(scopes: string): boolean { return grantedCoachEvents(scopes); }
+
+  async coachEvents(refreshToken: string, from: Date, to: Date): Promise<CoachEvent[]> {
+    const access = await this.accessToken(refreshToken);
+    const out: CoachEvent[] = [];
+    let pageToken: string | undefined;
+    for (let page = 0; page < COACH_EVENT_PAGES; page++) {
+      const params = new URLSearchParams({
+        timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: "true", orderBy: "startTime",
+        maxResults: "250", maxAttendees: "1", fields: COACH_EVENT_FIELDS,
+      });
+      // Working-location and birthday entries are not meetings.
+      for (const t of ["default", "focusTime", "outOfOffice"]) params.append("eventTypes", t);
+      if (pageToken) params.set("pageToken", pageToken);
+      const res = await this.fetchImpl(`${GOOGLE_CALENDAR}/calendars/primary/events?${params}`, {
+        headers: { authorization: `Bearer ${access}` }, signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) throw new Error(`calendar events read failed (${res.status})`);
+      const body = (await res.json()) as { items?: GoogleEventItem[]; nextPageToken?: unknown };
+      for (const item of body.items ?? []) {
+        const ev = toCoachEvent(item);
+        if (ev) out.push(ev);
+      }
+      pageToken = typeof body.nextPageToken === "string" ? body.nextPageToken : undefined;
+      if (!pageToken) break;
+    }
+    return out;
+  }
+
+  async revoke(refreshToken: string): Promise<void> {
+    const res = await this.fetchImpl("https://oauth2.googleapis.com/revoke", {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token: refreshToken }), signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok && res.status !== 400) throw new Error(`calendar revoke failed (${res.status})`);
   }
 
   private async token(body: Record<string, string>): Promise<Record<string, unknown>> {
@@ -86,11 +180,16 @@ export class GoogleCalendarProvider implements CalendarProvider {
     const idToken = typeof t.id_token === "string" ? t.id_token : "";
     const payload = idToken.split(".")[1];
     let email = "";
-    try { email = payload ? String((JSON.parse(Buffer.from(payload, "base64url").toString()) as { email?: unknown }).email ?? "") : ""; } catch { email = ""; }
+    let emailVerified = false;
+    try {
+      const claims = payload ? JSON.parse(Buffer.from(payload, "base64url").toString()) as { email?: unknown; email_verified?: unknown } : {};
+      email = String(claims.email ?? "");
+      emailVerified = claims.email_verified === true || claims.email_verified === "true";
+    } catch { email = ""; }
     if (!email) throw new Error("calendar authorisation returned no account email");
     // The scopes the user actually granted (the consent screen lets them untick some).
     const scopes = typeof t.scope === "string" ? t.scope.trim() : "";
-    return { refreshToken, email: email.toLowerCase(), scopes };
+    return { refreshToken, email: email.toLowerCase(), emailVerified, scopes };
   }
 
   freeBusyGranted(scopes: string): boolean { return grantedFreeBusy(scopes); }
@@ -161,6 +260,11 @@ export class DevCalendarProvider implements CalendarProvider {
   failNextDelete: Error | null = null;
   /** When set, runs once inside the next createEvent, before it returns (tests: changes made while the provider is called). */
   duringCreate: (() => Promise<void>) | null = null;
+  /** Tests: what the next coach consent returns instead of the hinted account and full scopes. */
+  nextCoachExchange: { refreshToken?: string; email?: string; emailVerified?: boolean; scopes?: string } | null = null;
+  /** Tests: the events of a refresh token. A token with no entry gets sample events, for trying the screen locally. */
+  readonly coachCalendars = new Map<string, CoachEvent[] | Error>();
+  readonly revoked: string[] = [];
 
   authUrl(redirectUri: string, state: string): string {
     const u = new URL(redirectUri);
@@ -168,10 +272,42 @@ export class DevCalendarProvider implements CalendarProvider {
     u.searchParams.set("state", state);
     return u.toString();
   }
-  async exchange(code: string) {
-    if (code !== "dev") throw new Error("calendar token request failed (400)");
-    return { refreshToken: `dev-refresh-${randomUUID()}`, email: "support@eureka.example", scopes: SCOPE };
+  coachAuthUrl(redirectUri: string, state: string, loginHint: string): string {
+    const u = new URL(redirectUri);
+    u.searchParams.set("code", `dev:${loginHint}`);
+    u.searchParams.set("state", state);
+    return u.toString();
   }
+  async exchange(code: string) {
+    if (code.startsWith("dev:")) {
+      const next = this.nextCoachExchange;
+      this.nextCoachExchange = null;
+      return {
+        refreshToken: next?.refreshToken ?? `dev-refresh-${randomUUID()}`,
+        email: next?.email ?? code.slice(4).toLowerCase(), emailVerified: next?.emailVerified ?? true, scopes: next?.scopes ?? COACH_SCOPE,
+      };
+    }
+    if (code !== "dev") throw new Error("calendar token request failed (400)");
+    return { refreshToken: `dev-refresh-${randomUUID()}`, email: "support@eureka.example", emailVerified: true, scopes: SCOPE };
+  }
+  coachEventsGranted(scopes: string): boolean { return grantedCoachEvents(scopes); }
+  async coachEvents(refreshToken: string, from: Date, to: Date): Promise<CoachEvent[]> {
+    const set = this.coachCalendars.get(refreshToken);
+    if (set instanceof Error) throw set;
+    if (set) {
+      return set.filter((e) => e.allDay
+        ? e.startDate < to.toISOString().slice(0, 10) && e.endDate > from.toISOString().slice(0, 10)
+        : e.startsAt < to && e.endsAt > from);
+    }
+    const out: CoachEvent[] = [];
+    for (let day = new Date(from); day < to; day = new Date(+day + 86_400_000)) {
+      const at = (h: number, m = 0) => new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), h, m));
+      out.push({ allDay: false, startsAt: at(15), endsAt: at(15, 45), title: "Team sync" });
+      out.push({ allDay: false, startsAt: at(18), endsAt: at(18, 30), title: null });
+    }
+    return out;
+  }
+  async revoke(refreshToken: string): Promise<void> { this.revoked.push(refreshToken); }
   freeBusyGranted(scopes: string): boolean { return grantedFreeBusy(scopes); }
   async createEvent(_token: string, calendarId: string, ev: CalendarEventInput): Promise<string> {
     if (this.failNext) { const e = this.failNext; this.failNext = null; throw e; }

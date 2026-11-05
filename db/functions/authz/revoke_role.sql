@@ -1,4 +1,5 @@
 -- authz.revoke_role: current definition (repeatable; db/functions/README.md).
+-- since: 0550
 -- Earlier bodies: migrations 0013, 0014, 0018. Change this file, not a new migration.
 
 SET ROLE authz_definer;
@@ -18,6 +19,12 @@ BEGIN
   GET DIAGNOSTICS n = ROW_COUNT;
   IF n = 0 THEN
     RAISE EXCEPTION 'role_not_held' USING ERRCODE = 'no_data_found';
+  END IF;
+  -- Someone who is no longer a coach has no column, so their Google token has no reason to stay (0550).
+  IF p_role = 'interview_coach' AND NOT EXISTS (
+       SELECT 1 FROM eureka.user_role ur
+        WHERE ur.user_id = p_user AND ur.role_key = 'interview_coach' AND ur.valid @> pg_catalog.now()) THEN
+    DELETE FROM eureka.coach_google_connection k WHERE k.user_id = p_user;
   END IF;
   IF p_role = 'org_admin' THEN
     UPDATE eureka.role_request SET status = 'rejected', decided_by = actor, decided_at = pg_catalog.now()

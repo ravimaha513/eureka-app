@@ -9,6 +9,18 @@ export interface CalendarEvent {
   interviewId: string | null; candidateName: string | null; round: string | null; callStatus: string | null;
 }
 export interface CoachCalendar { canManage: boolean; coaches: CalendarCoach[]; events: CalendarEvent[] }
+/** Live from a coach's Google Calendar. `title` is null for busy-only viewers and private events. */
+export interface GoogleEvent { coachId: string; startsAt: string; endsAt: string; title: string | null }
+/** `endDate` is exclusive. */
+export interface GoogleAllDayEvent { coachId: string; startDate: string; endDate: string; title: string | null }
+export type GoogleCoachStatus = "connected" | "not_connected" | "reconnect" | "unavailable";
+export interface CoachGoogle {
+  enabled: boolean;
+  me: { canConnect: boolean; connected: boolean; accountEmail: string | null };
+  coaches: { coachId: string; status: GoogleCoachStatus }[];
+  events: GoogleEvent[];
+  allDay: GoogleAllDayEvent[];
+}
 export interface NamedId { id: string; name: string }
 export interface CoachGrant {
   id: string;
@@ -21,14 +33,19 @@ export interface SetCoachGrant {
 }
 
 const enc = encodeURIComponent;
+/** Full navigation, not a fetch: the browser goes to Google and comes back. */
+export const GOOGLE_CONNECT_URL = "/api/v1/coach-calendar/google/connect";
 export const coachCalendarKeys = {
   all: ["coach-calendar"] as const,
   calendar: (from: string, to: string) => ["coach-calendar", "grid", from, to] as const,
+  google: (from: string, to: string) => ["coach-calendar", "google", from, to] as const,
   grants: ["coach-calendar", "grants"] as const,
   people: (q: string) => ["coach-calendar", "people", q] as const,
 };
 export const coachCalendarApi = {
   calendar: (from: string, to: string) => api<CoachCalendar>(`/api/v1/coach-calendar?from=${enc(from)}&to=${enc(to)}`),
+  google: (from: string, to: string) => api<CoachGoogle>(`/api/v1/coach-calendar/google?from=${enc(from)}&to=${enc(to)}`),
+  disconnectGoogle: () => api<void>("/api/v1/coach-calendar/google/connection", { method: "DELETE" }),
   grants: () => api<CoachGrants>("/api/v1/coach-calendar/grants"),
   people: (q: string) => api<{ items: NamedId[] }>(`/api/v1/coach-calendar/people?q=${enc(q)}`),
   setGrant: (b: SetCoachGrant) => api<{ id: string }>("/api/v1/coach-calendar/grants", { method: "POST", body: JSON.stringify(b) }),

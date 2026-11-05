@@ -516,6 +516,8 @@ free/busy check in scheduling, migration 0090; `calendar.events` alone does not 
 `freebusy.query`). Both are listed as non-sensitive scopes, so the OAuth consent screen needs no
 verification review for them; a calendar connected before 2026-10-16 shows a "Reconnect" button on the
 Interviews page until it is reconnected with the new scope (blocking keeps working meanwhile).
+Coaches connect their own calendars with the same OAuth client and token key: see
+`docs/coach-calendar-api.md` "Setup" for the extra redirect URI and consent screen scope.
 
 To turn it on, set `worker_desired_count = 1` in `infra/live/<env>/env.hcl` and
 deploy (one task is enough; more are safe but idle). The worker needs

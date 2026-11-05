@@ -1,5 +1,5 @@
 -- authz.admin_set_user_status: current definition (repeatable; db/functions/README.md).
--- since: 0540
+-- since: 0550
 -- Earlier bodies: migrations 0013, 0014, 0018. Change this file, not a new migration.
 
 -- 0311: branches on role traits (authz.user_has_trait), never on the role key (docs/roles-api.md).
@@ -34,6 +34,8 @@ BEGIN
     access_version = access_version + 1 WHERE id = p_user;
   -- Reactivating must not bring coach calendar access back without the CEO deciding again.
   DELETE FROM eureka.coach_calendar_grant g WHERE g.grantee_user = p_user;
+  -- A deactivated coach's Google token goes too; reactivating needs a fresh connect (0550).
+  DELETE FROM eureka.coach_google_connection k WHERE k.user_id = p_user;
   UPDATE eureka.user_role SET valid = authz.ended(valid)
     WHERE user_id = p_user AND (pg_catalog.upper_inf(valid) OR pg_catalog.upper(valid) > pg_catalog.now());
   UPDATE eureka.team_member SET valid = authz.ended(valid)

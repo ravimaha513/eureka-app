@@ -83,6 +83,8 @@ import { CalendarController, InterviewCalendarController } from "./modules/calen
 import { CalendarService } from "./modules/calendar/calendar.service.js";
 import { CoachCalendarController } from "./modules/calendar/coach-calendar.controller.js";
 import { CoachCalendarService } from "./modules/calendar/coach-calendar.service.js";
+import { CoachGoogleController } from "./modules/calendar/coach-google.controller.js";
+import { CoachGoogleService } from "./modules/calendar/coach-google.service.js";
 import { CALENDAR_PROVIDER, DevCalendarProvider, GoogleCalendarProvider } from "./modules/calendar/calendar.provider.js";
 import { StaffBirthdaysController, StaffBirthdaysService } from "./modules/staff/birthdays.controller.js";
 import { PaymentsController, PaymentsService } from "./modules/payments/payments.controller.js";
@@ -154,7 +156,7 @@ export class AppModule {
         JobsController, PortalAuthController, PortalMeController, PortalDevMailboxController,
         ApplicationsController, ApplicationInterviewsController, ApplicantsController, PortalJobsController,
         // interview-alerts
-        ContractsController, CalendarController, InterviewCalendarController, CoachCalendarController, StaffBirthdaysController,
+        ContractsController, CalendarController, InterviewCalendarController, CoachCalendarController, CoachGoogleController, StaffBirthdaysController,
         // payments
         PaymentsController,
         // performance
@@ -182,7 +184,7 @@ export class AppModule {
         JobsService, PortalSessionService, PortalAuthService, { provide: MAIL_PORT, useFactory: () => createMailPort(config) },
         ApplicationsService, PortalJobsService,
         // interview-alerts
-        ContractsService, CalendarService, CoachCalendarService, StaffBirthdaysService,
+        ContractsService, CalendarService, CoachCalendarService, CoachGoogleService, StaffBirthdaysService,
         // performance
         PerformanceService,
         { provide: CALENDAR_PROVIDER, useFactory: () => config.CALENDAR_MODE === "google"

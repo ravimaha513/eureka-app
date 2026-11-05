@@ -66,3 +66,18 @@ export function layOutLanes<T>(items: readonly T[], span: (t: T) => { start: num
   close();
   return out;
 }
+
+/**
+ * Interviews plus Google events for the grid. A Google event at exactly a coach's interview time is
+ * almost always that interview's own invite, so it is dropped rather than shown as a clash.
+ */
+export function mergeGoogleEvents<I extends { coachId: string; startsAt: string; endsAt: string }, G extends { coachId: string; startsAt: string; endsAt: string }>(
+  interviews: readonly I[], google: readonly G[],
+): (I | G)[] {
+  const slot = (e: { coachId: string; startsAt: string; endsAt: string }) => `${e.coachId}|${Date.parse(e.startsAt)}|${Date.parse(e.endsAt)}`;
+  const taken = new Set(interviews.map(slot));
+  return [...interviews, ...google.filter((g) => !taken.has(slot(g)))];
+}
+
+/** Whether an all-day event (end date exclusive) covers a day. */
+export const coversDay = (e: { startDate: string; endDate: string }, day: string) => e.startDate <= day && day < e.endDate;
