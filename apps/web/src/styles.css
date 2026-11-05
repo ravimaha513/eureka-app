@@ -1118,28 +1118,9 @@ tr.editing:hover td { background: var(--surface2); }
 .doceditgrid .field input, .doceditgrid .field select { min-width: 0; width: 100%; }
 @media (max-width: 640px) { .doceditgrid { grid-template-columns: minmax(0, 1fr); } }
 
-/* Candidate list filters (sales/ListControls): main row, "More filters" panel (bottom sheet on phones), chips, combobox, segmented. */
+/* Candidate list filters (sales/ListControls): combobox, segmented. */
 .filterbar { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 12px; }
-.lf-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
-.lf-row .grow { flex: 1 1 220px; }
-.lf-row .grow input { min-width: 0; width: 100%; }
 .filterbar .field select { height: 40px; }
-.morefilters { height: 40px; }
-.morefilters.on { background: var(--pri-50); border-color: var(--pri-200); color: var(--pri-700); }
-.morefilters .count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--pri-btn); color: #fff; font-size: 11px; line-height: 18px; }
-.lf-panel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 14px 16px; box-shadow: var(--shadow-sm); }
-.lf-panel[hidden] { display: none; }
-.lf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px 16px; align-items: end; }
-.lf-grid .field select, .lf-grid .field input { min-width: 0; width: 100%; }
-.lf-sheethead, .lf-sheetfoot, .lf-scrim { display: none; }
-.activefilters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.filterchips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.fchip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 12px; border: 1px solid var(--pri-200); border-radius: 999px; background: var(--pri-50); color: var(--text); font-size: 13px; }
-.fchip .k { color: var(--muted); }
-.fchip b { font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fchip button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 999px; background: none; color: var(--muted); padding: 0; }
-.fchip button:hover { background: var(--pri-100); color: var(--bad-fg); }
-.fchip button:focus-visible { outline: 2px solid var(--pri); outline-offset: 1px; }
 .updating { font-size: 12px; }
 /* Combobox (ui/Combobox) */
 .combo { position: relative; }
@@ -1166,19 +1147,6 @@ tr.editing:hover td { background: var(--surface2); }
 .nomatch { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 18px 8px; }
 .nomatch p { margin: 0; }
 .nomatch ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
-@media (max-width: 768px) {
-  .lf-row > .field, .lf-row > .btn { flex: 1 1 calc(50% - 6px); min-width: 0; }
-  .lf-row > .field.grow { flex-basis: 100%; }
-  .lf-row .field select, .lf-row .field input { min-width: 0; width: 100%; }
-  .lf-panel:not([hidden]) { position: fixed; z-index: 60; left: 0; right: 0; bottom: 0; max-height: 85vh; display: flex; flex-direction: column; border-radius: 18px 18px 0 0; padding: 0; box-shadow: var(--shadow-lg); }
-  .lf-panel .lf-sheethead { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 8px; }
-  .lf-panel .lf-sheethead h2 { margin: 0; font-size: 17px; }
-  .lf-panel .lf-grid { grid-template-columns: minmax(0, 1fr); padding: 4px 16px 16px; overflow-y: auto; }
-  .lf-panel .lf-sheetfoot { display: flex; gap: 10px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
-  .lf-panel .lf-sheetfoot .primary { flex: 1; height: 46px; }
-  .lf-panel .lf-sheetfoot .btn:first-child { height: 46px; }
-  .lf-scrim { display: block; position: fixed; inset: 0; z-index: 59; background: var(--scrim); }
-}
 
 /* Dashboard layout: header with filters on the right, paired cards, ranked bars, filter sheet */
 .dashhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
@@ -1277,7 +1245,7 @@ tr.editing:hover td { background: var(--surface2); }
 .fb-more[hidden] { display: none; }
 .fb-more .field select { width: 170px; }
 .fb-morebtn[aria-expanded="true"] { background: var(--pri-50); border-color: var(--pri-200); }
-.fb-mobilebtn, .fb-sheethead { display: none; }
+.fb-mobilebtn, .fb-sheethead, .fb-sheetfoot { display: none; }
 .fb-summary { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; min-height: 30px; }
 .fb-summary .chips { gap: 6px; }
 .fb-summary .chip { padding: 2px 2px 2px 8px; background: var(--surface); border: 1px solid var(--line-strong); color: var(--text); font-weight: 500; }
@@ -1334,6 +1302,9 @@ tbody tr[aria-selected="true"] td.c-act { background: var(--sel); }
   .filterbar.open::before { content: ""; position: fixed; inset: 0; background: var(--scrim); z-index: 59; }
   .filterbar.open .fb-sheethead { display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: var(--surface); padding: 14px 0 10px; z-index: 1; }
   .fb-sheethead h2 { font-size: 17px; }
+  .filterbar.open .fb-sheetfoot { display: flex; gap: 8px; position: sticky; bottom: -24px; margin: 8px -16px -24px; padding: 12px 16px 16px; background: var(--surface); border-top: 1px solid var(--line); }
+  .fb-sheetfoot .btn { height: 44px; }
+  .fb-sheetfoot .btn.primary { flex: 1; }
   .filterbar.open .fb-all .field input, .filterbar.open .fb-all .field select, .filterbar.open .fb-more .field select { width: 100%; height: 44px; }
   .filterbar.open .fb-more { padding: 0; border: 0; background: none; flex-direction: column; flex-wrap: nowrap; }
   .fb-sort select { width: auto; }
@@ -1484,8 +1455,6 @@ tbody tr[aria-selected="true"] td.c-act { background: var(--sel); }
 .combo-list li .n { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .combo-list li.zero { color: var(--faint); }
 .combo-foot { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 4px 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
-.fchip.not, .fb-summary .chip.not { border-color: var(--warn-line); background: var(--warn-bg); }
-.fchip .op { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--warn-fg); }
 .nomatch .back { color: var(--ok-fg); font-weight: 700; }
 .savedviews .checkline { display: inline-flex; align-items: center; gap: 8px; height: 40px; font-size: 13px; color: var(--text2); }
 
