@@ -71,8 +71,13 @@ export const CreateRoleRequest = z
 export type CreateRoleRequest = z.infer<typeof CreateRoleRequest>;
 
 export const RoleRequestListQuery = z
-  .object({ status: z.enum(["pending", "approved", "rejected", "expired"]).optional() })
+  .object({
+    status: z.enum(["pending", "approved", "rejected", "expired"]).optional(),
+    // Opaque keyset cursor: the previous page's nextCursor (audit C-09).
+    cursor: z.string().max(400).optional(),
+  })
   .strict();
+export type RoleRequestListQuery = z.infer<typeof RoleRequestListQuery>;
 
 export const RevokeRoleQuery = z.object({ locationId: uuid.optional() }).strict();
 

@@ -54,6 +54,7 @@ describe("org chart", () => {
     expect(people.find((p) => p.id === U.ceo)).toMatchObject({ managerId: null, team: null });
     expect(people.find((p) => p.id === U.admin)).toMatchObject({ canMove: false });
     expect(r.json().teams).toEqual(expect.arrayContaining([{ id: T.t1, name: "Team Rohit", leadId: U.l1 }]));
+    expect(r.json().truncated).toBe(false);
     expect((await call("l1", "GET", "/api/v1/admin/org-chart")).statusCode).toBe(403);
   });
 

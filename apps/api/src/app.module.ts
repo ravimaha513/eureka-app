@@ -31,7 +31,7 @@ import { InterviewsController } from "./modules/interviews/interviews.controller
 import { InterviewsService } from "./modules/interviews/interviews.service.js";
 import { AdminController, CoachAssignmentsController, TeamsController, UserDesignationController } from "./modules/admin/admin.controller.js";
 import { PerformanceController, PerformanceService } from "./modules/performance/performance.controller.js";
-import { AdminService } from "./modules/admin/admin.service.js";
+import { ADMIN_PROVIDERS } from "./modules/admin/admin.providers.js";
 import { PlacementsController } from "./modules/placements/placements.controller.js";
 import { PlacementsService } from "./modules/placements/placements.service.js";
 import { LookupsController, LookupsService } from "./modules/lookups/lookups.controller.js";
@@ -162,7 +162,7 @@ export class AppModule {
       providers: [
         { provide: CONFIG, useValue: config },
         DbService, SessionService, AccessService, AuditService, OidcService, SettingsService, ReportExecutor,
-        CandidatesService, CandidateMetricsService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
+        CandidatesService, CandidateMetricsService, SubmissionsService, InterviewsService, ...ADMIN_PROVIDERS, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
         PaperworkService,
         ResumesService, NotificationsService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
         WorkAuthorizationService, OwnersService, UtilitiesService, BillsService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
