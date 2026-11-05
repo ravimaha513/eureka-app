@@ -66,7 +66,9 @@ Query (strict): `groupBy` (`technology` default, `batch`, `location`, `team`, `l
 ```
 
 `placedBetween` is `null` and every `placedInPeriod` is `null` without a window. 30 requests per user per
-minute (429); 60 s statement timeout (503).
+minute (429); 25 s statement timeout (503 + `Retry-After: 30`); when every report slot of the API task is taken
+(`REPORT_MAX_CONCURRENT`, default 2) 503 + `Retry-After: 5`. The JSON view is cached per user, query and scope for
+60 s (`asOf` is when it was computed); the CSV export is never cached.
 
 ## MR-2 `POST /api/v1/reports/market/export`
 

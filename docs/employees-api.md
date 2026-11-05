@@ -57,10 +57,11 @@ advisory lock, assignment row, employee row.
   (RLS plus the engine's `assignment:read` and `report:read` predicates on the placement's actor snapshot or owned
   candidate), so the counts equal what the role can list; callers with `report:read` but no `assignment:read` (location
   roles) get zeros. Totals and `byTeam` are SQL counts over every matching assignment (no cap); up to 1,000 items in
-  the view (`truncated`), newest first. 30 requests per user per minute (429), 60 s timeout (503).
+  the view (`truncated`), newest first. 30 requests per user per minute (429), 25 s timeout (503 + `Retry-After: 30`); report slots
+  per API task (`REPORT_MAX_CONCURRENT`, default 2): all taken → 503 + `Retry-After: 5`.
 - `POST /api/v1/reports/joinings-exits/export` `{ from, to }` (`report:export`) → CSV (`Event, Date, Candidate, Assignment
   no., Client, Team, Recruiter, Location, First placement, End reason`), additionally limited to the `report:export` scope,
-  capped at 50,000 lines (`x-export-truncated`), 60 s timeout, 5 per user per 10 minutes, formula-injection safe, audited
+  capped at 50,000 lines (`x-export-truncated`), 25 s timeout, 5 per user per 10 minutes, formula-injection safe, audited
   as `report.export` `{ report: "joinings_exits", from, to, rows, truncated, cap }`. No phone, email, rate or reason text.
 - interviews-settings (`docs/interviews-settings-api.md` EM-C1, EM-X1): list and detail items carry
   `contact: { email, phone, masked }` (masked unless `candidate.phone:read` over the candidate), and
@@ -72,7 +73,7 @@ actions: { endAssignment, setEndDate, exit, returnToMarket } }`. `actions` are h
 
 Error codes (`detail`): `assignment_closed`, `invalid_end_date`, `invalid_reason`, `invalid_transition`, `unchanged`,
 `bgc_failed_last`, `candidate_not_on_bench` (422); 404 not visible; 403 not permitted; 429 export rate limit; 503 report
-timeout.
+timeout or report slots busy (with `Retry-After`).
 
 Audit actions: `assignment.ended` `{ endDate, reason, employeeFrom, employeeTo }`, `assignment.planned_end` `{ from, to }`,
 `employee.exited` `{ from, to, exitDate, reason }`, `employee.returned_to_market` `{ candidateId }`, and

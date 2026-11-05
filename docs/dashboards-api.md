@@ -29,7 +29,7 @@ Every number is a count of rows the caller could list themselves:
    `totals` and `groups`; the same holds for the needs-attention lists. HR, for example, gets
    placements and candidates only.
 
-Org-scoped callers get a 60-second statement timeout for the request (design B4.8 N9); everyone
+Org-scoped callers get a 25-second statement timeout for the request (design B4.8 N9); everyone
 else keeps the 5-second default.
 
 ## Limits and errors
@@ -39,9 +39,12 @@ else keeps the 5-second default.
   "Too many dashboard requests; try again in a minute". Requests rejected with 403 or 422 by the
   period check are not counted.
 - **Timeout:** when the statement timeout fires (SQLSTATE 57014), the endpoint answers 503 with
-  detail "The report took too long; narrow the period and try again". The mapping is local to
-  this endpoint; other endpoints still answer 500 on a timeout (`platform/errors.ts` is unchanged,
-  so their behaviour does not shift silently).
+  detail "The report took too long; narrow the period and try again" and `Retry-After: 30`. The
+  mapping is done by the report executor (`platform/report-executor.ts`), not globally.
+- **Report executor (R-03):** org-wide callers get a 25 s statement timeout (below API Gateway's
+  29 s; others keep 5 s) and one of `REPORT_MAX_CONCURRENT` (default 2) report slots per API
+  task; when all are taken the request answers 503 + `Retry-After: 5` at once. `needsAttention`
+  (independent of the period) is cached per user and scope for 60 s, so it may lag by up to a minute.
 
 ## Request
 

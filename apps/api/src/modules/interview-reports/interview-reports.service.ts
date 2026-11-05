@@ -1,5 +1,5 @@
 import type pg from "pg";
-import { ForbiddenException, HttpException, HttpStatus, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { ForbiddenException, HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import {
   INTERVIEW_DURATION_BUCKETS,
   INTERVIEW_REPORT_EXCLUDED_STATUSES,
@@ -11,6 +11,7 @@ import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
+import { ReportExecutor } from "../../platform/report-executor.js";
 import { toCsv } from "../hotlist/csv.js";
 import { EXPORTS_PER_WINDOW, EXPORT_ROW_CAP, EXPORT_WINDOW_MS } from "../hotlist/hotlist.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
@@ -77,14 +78,8 @@ export interface InterviewReportGroupItem {
   avgDurationMin: number | null;
 }
 
-async function timed<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    if ((err as { code?: string }).code === "57014") throw new ServiceUnavailableException("The report took too long. Choose a shorter period.");
-    throw err;
-  }
-}
+/** Report executor options: the statement timeout (57014) becomes 503 + Retry-After with this hint. */
+const REPORT_RUN = { timeoutDetail: "The report took too long. Choose a shorter period." };
 
 const num = (v: string | null) => (v === null ? 0 : Number(v));
 const fallbackLabel: Record<InterviewReportGroup, string> = {
@@ -97,7 +92,7 @@ export class InterviewReportsService {
   private readonly exportLimiter = new RateLimiter(EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
   private readonly viewLimiter = new RateLimiter(INTERVIEW_REPORT_VIEWS_PER_MINUTE, 60_000);
 
-  constructor(private readonly db: DbService, private readonly audit: AuditService) {}
+  constructor(private readonly db: DbService, private readonly audit: AuditService, private readonly reports: ReportExecutor) {}
 
   /** interview:read AND report:read; [] when the caller can read no interview (empty report, not an error). */
   private readScopes(user: AuthedUser): EffectiveScope[] {
@@ -131,9 +126,8 @@ export class InterviewReportsService {
 
   private async run<T extends pg.QueryResultRow>(user: AuthedUser, sql: string, params: unknown[],
     after?: (c: pg.PoolClient, rows: T[]) => Promise<void>): Promise<T[]> {
-    return this.db.withUser(user.id, async (c) => {
-      await c.query(`SET LOCAL statement_timeout = '60s'`); // design N9: org-wide reports
-      const rows = (await timed(() => c.query<T>(sql, params))).rows;
+    return this.reports.run(user.id, REPORT_RUN, async (c) => { // design N9: org-wide reports
+      const rows = (await c.query<T>(sql, params)).rows;
       if (after) await after(c, rows);
       return rows;
     });
