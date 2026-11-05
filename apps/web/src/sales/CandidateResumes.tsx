@@ -113,7 +113,9 @@ export function CandidateResumes({ candidateId, pollMs = RESUME_POLL_MS }: { can
     <section className="card pad" aria-labelledby="resumes-h">
       <h2 id="resumes-h">Resume</h2>
       {/* aria-live without role="status": the profile page owns the page-level status region. */}
-      <p aria-live="polite" aria-atomic="true" className="livemsg">{message}</p>
+      {/* Tone: green only once a version is ready; refused in the error tone; uploading, scanning and downloading are info. */}
+      <p aria-live="polite" aria-atomic="true"
+        className={`livemsg${/is ready\.$/.test(message) ? "" : /not accepted/.test(message) ? " error" : " info"}`}>{message}</p>
       {error && <p id={errId} className="banner error formerr" role="alert" tabIndex={-1}>{error}</p>}
 
       {q.isLoading ? <p className="muted">Loading…</p>
@@ -147,7 +149,7 @@ export function CandidateResumes({ candidateId, pollMs = RESUME_POLL_MS }: { can
               onChange={(e) => { setFile(e.target.files?.[0] ?? null); setError(""); }} />
             <small id={hintId} className="hint">PDF or Word (.docx), up to 15 MB. Files are scanned for malware before anyone can open them.</small>
           </div>
-          <button type="submit" className="btn primary" disabled={busy !== null} aria-busy={busy === "upload" || undefined}>Upload resume</button>
+          <button type="submit" className="btn resume-submit" disabled={busy !== null} aria-busy={busy === "upload" || undefined}>Upload resume</button>
         </form>
       )}
 

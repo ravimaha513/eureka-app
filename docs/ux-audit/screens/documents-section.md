@@ -1,5 +1,5 @@
 # Documents section (shared component) — used on `/paperwork/<id>`, `/placements/<id>`, `/candidates/<id>`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: shown to `document:read` holders, and hidden entirely on 403/404 (:198 `return null`). Upload when `list.canUpload`; restricted types (I-9, driving licence, work authorization) only for HR/Accounts/Immigration; each opening of a restricted document is logged.
 Source: `apps/web/src/documents/DocumentsSection.tsx` (344 lines), `DocumentViewer.tsx`, `documentsApi.ts`. Call sites: `paperwork/PaperworkWorkspace.tsx:106`, `pipeline/PlacementsPage.tsx:420`, `sales/CandidateProfile.tsx:275`.
 Evidence: `paperwork-detail-hr-documents-desktop.png`, `paperwork-detail-hr-documents-mobile.png`, `paperwork-detail-desktop.png` (read-only ceo: no upload form), `paperwork-detail-itemdialog-desktop.png` (Linked document picker), `candidate-profile-tab-documents-desktop.png` (other auditor's capture, same component)
@@ -64,3 +64,18 @@ DocumentsSection.tsx (layout, uploader extraction, progress via a `postToStorage
 
 ## Validation
 Visual inspection: desktop 1440 and mobile 390 on the paperwork Documents tab as hr (upload form) and ceo (read-only). The seed has no documents, so the populated table, the inline editor and the viewer were reviewed from source (`DocumentsSection.tsx:253-305`). Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Mismatched label patterns (Medium) | Both upload fields use stacked `<label htmlFor>` labels ("Document type", "Document file") in one row: type (180–280px), file (fills), Upload. On phones they stack full width with a 44px file field and button. | `after/documents-section-desktop.png`, `after/documents-section-mobile.png` |
+| #2 Upload then link is a cross-tab round trip (High) | The API has no single "upload and link" call: upload is `POST …/documents` and linking is the checklist item update (`documentId`). The upload form is now an exported `DocumentUploader` (`documents/DocumentsSection.tsx`) whose `onUploaded({ id })` returns the new document id while it is scanned, so the paperwork item dialog can upload and link in one step. Embedding it in `PaperworkWorkspace.tsx` (not this area) is handed to the paperwork owner (see shared request). | code + test "shows the upload as info…" |
+| #3 "Uploading…" shown as success; no progress (Medium) | Upload goes through `documentStorage.post` (XMLHttpRequest with upload progress, same contract as `postToStorage`). While sending: a progress bar with "Uploading… n%" in the info tone. After: "Uploaded. Scanning…" in the info tone; "is ready" stays green; "not accepted" uses the error tone. Same tone rule applied to the resume uploader. | `after/documents-section-desktop.png` (upload in progress); test "shows the upload as info (progress, then scanning), not as success" |
+| #4 Chosen file not echoed (Low) | The hint adds "Chosen: name, size" once a file is picked. No drop target (not a standard control here). | `after/documents-section-desktop.png` |
+| #5 Full-width primary Upload (Low) | Upload is a secondary-weight button at its own width on desktop (full width only on phones); the resume "Upload resume" button matches. | `after/documents-section-profile-tab-desktop.png` |
+| #6 Four actions force sideways scroll on phones (Medium) | Table is the kit `.dtable`: on phones each document is a card (name + Restricted chip, status chip top right, Uploaded and Size rows, actions wrap at 40px). Actions stay explicit buttons (View, Download, Access log, Edit) rather than a menu, so the existing labelled buttons and tests keep working. No horizontal scroll at 390. | `after/documents-section-mobile.png`, `after/documents-section-dark-mobile.png` |
+| #7 Load error not announced (Low) | The load error is now a polite live region (`aria-live="polite"`). `role="alert"` was tried and dropped: it collides with the placement drawer's own alert assertions in `Placements.test.tsx`. | code |
+| #8 Read-only dead end (Low) | Without upload rights the empty state reads "No documents yet. HR, Accounts and Immigration upload paperwork here." | test "tells read-only users who uploads paperwork" |
+
+### Validation (wave 2)
+Live at 1440 and 390, light and dark, as hr on a candidate's Documents tab. The populated table and an in-flight upload were captured by intercepting the documents list and storage POST in Playwright (`page.route`), so nothing was written to the shared DB. `scrollWidth` 1440 / 390. Unit tests: `src/documents` (2 new), and the paperwork, placements and DataHub suites that render this section all pass.

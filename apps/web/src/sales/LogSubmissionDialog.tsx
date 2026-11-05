@@ -5,7 +5,7 @@ import { ApiError } from "../api";
 import { Dialog, DialogActions } from "../ui/Dialog";
 import { LookupPicker } from "../lookups";
 import { UUID_RE, fieldErrors, salesError } from "./errors";
-import { salesApi, type CreateSubmission } from "./salesApi";
+import { salesApi, statusLabel, type CreateSubmission } from "./salesApi";
 import { Field, useFocusAfterFailure } from "./ui";
 
 const FIELDS = ["jobTitle", "clientId", "vendorId", "rate", "jobId"] as const;
@@ -19,7 +19,8 @@ export const DUPLICATE_WARNING =
  * to the same client within 90 days; that warning is shown before closing.
  */
 export function LogSubmissionDialog({ candidate, onClose, onLogged, canAddClient = false, canAddVendor = false }: {
-  candidate: { id: string; name: string }; onClose: () => void; onLogged: (r: { id: string; duplicateWarning: boolean }) => void;
+  /** `status` (marketing status) adds a caution for a stopped or terminated candidate; the server decides. */
+  candidate: { id: string; name: string; status?: string }; onClose: () => void; onLogged: (r: { id: string; duplicateWarning: boolean }) => void;
   /** client:create / vendor:create: the pickers offer "Add a new client/vendor…". */
   canAddClient?: boolean; canAddVendor?: boolean;
 }) {
@@ -97,6 +98,9 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged, canAddClient
   return (
     <Dialog key="form" title={`Log submission for ${candidate.name}`} onClose={onClose}>
       <form ref={formRef} onSubmit={submit} noValidate>
+        {(candidate.status === "terminated" || candidate.status === "stopped") && (
+          <p className="note warn">{candidate.name} is {statusLabel(candidate.status)}. Check with your lead before submitting this candidate.</p>
+        )}
         {openJobs.length > 0 && (
           <Field label="Job (optional)" error={errors.jobId} hint="Pick the client requirement this submission answers; it fills in the title and client.">
             {(p) => (
@@ -112,7 +116,7 @@ export function LogSubmissionDialog({ candidate, onClose, onLogged, canAddClient
         </Field>
         <LookupPicker kind="clients" label="Client" value={v.clientId} onChange={pick("clientId")} error={errors.clientId} canAdd={canAddClient} />
         <LookupPicker kind="vendors" label="Vendor" value={v.vendorId} onChange={pick("vendorId")} error={errors.vendorId} canAdd={canAddVendor} />
-        <Field label="Rate per hour" error={errors.rate}>
+        <Field label="Rate per hour" error={errors.rate} hint="US dollars per hour, up to 1,000.">
           {(p) => <input {...p} type="number" inputMode="decimal" min="0" max="1000" step="0.01" value={v.rate} onChange={set("rate")} />}
         </Field>
         {conflict && <p className="note warn">{DUPLICATE_WARNING}</p>}
