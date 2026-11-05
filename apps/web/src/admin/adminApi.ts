@@ -41,7 +41,8 @@ export const TRAIT_LABELS: Record<keyof RoleTraits, { label: string; hint: strin
   coach: { label: "Interview coach", hint: "Can be assigned to coach sales teams and train batches." },
 };
 /** "interview_prep" → "Interview prep". */
-export const trackLabel = (t: string) => t.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+const ACRONYMS = new Set(["hr", "it", "bgc", "ai"]);
+export const trackLabel = (t: string) => t.split("_").map((w, i) => (ACRONYMS.has(w) ? w.toUpperCase() : i === 0 ? w.replace(/^./, (c) => c.toUpperCase()) : w)).join(" ");
 export const LOCATION_KINDS = ["training", "gh", "office", "remote"] as const;
 export type LocationKind = (typeof LOCATION_KINDS)[number];
 export interface AdminMeta { roles: RoleMeta[]; locations: Place[]; singleAdminMode?: boolean }

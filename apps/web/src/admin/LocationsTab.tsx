@@ -40,7 +40,7 @@ export function LocationsTab() {
                 <button type="button" className="card loccard" onClick={() => setSelected(l.id)}>
                   <span className="loccardhead"><b>{l.name}</b><span className="chip">{KIND_LABELS[l.kind] ?? l.kind}</span></span>
                   <span className="muted">{[l.state, l.timezone].filter(Boolean).join(" · ")}</span>
-                  <span className="loccounts"><span><b>{l.peopleCount}</b> people</span><span><b>{l.teamCount}</b> teams</span></span>
+                  <span className="loccounts"><span><b>{l.peopleCount}</b> {l.peopleCount === 1 ? "person" : "people"}</span><span><b>{l.teamCount}</b> {l.teamCount === 1 ? "team" : "teams"}</span></span>
                   {incharge.length
                     ? <span className="muted">Incharge · {incharge.map((h) => h.displayName).join(", ")}</span>
                     : <span className="warntext">No incharge</span>}

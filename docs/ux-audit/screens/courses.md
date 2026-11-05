@@ -1,5 +1,5 @@
 # Courses — `/courses`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `training:manage` (nav.ts:34) — location ops (locD), training managers
 Source: `apps/web/src/training/CoursesPage.tsx`, `training/ui.tsx`
 Evidence: `courses-desktop.png`, `courses-desktop-full.png`, `courses-mobile.png`, `courses-mobile-full.png`, new: `courses-drawer-desktop.png`, `courses-drawer-mobile.png`
@@ -53,3 +53,16 @@ CoursesPage.tsx + styles. No API change.
 
 ## Validation
 Visual inspection: locD at 1440 and 390, course drawer opened on both. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Cover takes ~45% of the card (Medium) | 40px chip; compact cards (title, location, Modules · Duration · Batches). | `after/courses-desktop.png`, `after/courses-mobile.png` |
+| #2 Empty course not flagged (Medium) | "No modules" warn chip on the card, a page note ("1 course has no modules yet…"), and a warning in the drawer. | `after/courses-desktop.png`, `after/courses-drawer-empty-desktop.png` |
+| #3 No search / location filter; 13px checkbox (Low) | Title search, Location select (when more than one), 18px "Show archived" checkbox. | — |
+| #4 "1 Batches" (Low) | Singular/plural for Module and Batch. | — |
+| #6 Delete next to Edit (Low) | Drawer Delete is "Delete course", pushed to the far right of the action row. | `after/courses-drawer-empty-desktop.png` |
+| #7 Inert link-coloured title + Open button (Low) | Whole card is the "Open course <title>" button; no separate Open. | — |
+| #5 Reorder by single steps (Low) | Not changed. | — |
+
+Validation (wave 2, 2026-11-05): `pnpm --filter @eureka/web typecheck` clean; full web unit suite 552/552 (admin, staff, training, team suites updated only where markup/interaction changed). Visual check at 1440×900 and 390×844, light and dark, in Playwright against a fixture API built from the `*Api.ts` shapes, because the shared API on :3000 and its Postgres were not running in this environment. Page width at 390 = 390 on every screen below; row actions visible at 1440. Live-data re-check against the seeded API is still owed.

@@ -118,7 +118,7 @@ describe("batch detail", () => {
     await open();
     const stats = screen.getByRole("list", { name: "Batch figures" });
     expect(within(stats).getByText("Batch year").previousSibling).toHaveTextContent("2026");
-    expect(screen.getByRole("tab", { name: /View Courses/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /^Courses/ })).toHaveAttribute("aria-selected", "true");
     const toggle = screen.getByRole("button", { name: /^Database/ });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(within(toggle).getByText("2 modules · 4h")).toBeInTheDocument();
@@ -130,7 +130,7 @@ describe("batch detail", () => {
 
   it("lists students with progress; a trainer ticks a module", async () => {
     await open();
-    fireEvent.click(screen.getByRole("tab", { name: /View Students/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Students/ }));
     const bar = await screen.findByRole("progressbar", { name: "Overall progress of Asha Iyer" });
     expect(bar).toHaveAttribute("aria-valuenow", "25");
     fireEvent.click(screen.getByRole("button", { name: /^Asha Iyer/ }));
@@ -151,7 +151,7 @@ describe("batch detail", () => {
     ] } });
     api.routes["POST /api/v1/training/batches/b1/students/bulk"] = () => ({ status: 201, body: { added: 1, skipped: ["c2"] } });
     await open();
-    fireEvent.click(screen.getByRole("tab", { name: /View Students/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Students/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Add students" }));
     const dlg = screen.getByRole("dialog", { name: "Add students" });
     expect(await within(dlg).findByText(/now in Old Batch/)).toBeInTheDocument();
@@ -167,7 +167,7 @@ describe("batch detail", () => {
     api.routes["GET /api/v1/training/batches/b1"] = () => ({ body: { ...DETAIL, actions: { ...DETAIL.actions, manage: false, addStudents: false, removeStudents: false } } });
     await open();
     // Without course rights the batch opens on its students.
-    expect(screen.getByRole("tab", { name: /View Students/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /^Students/ })).toHaveAttribute("aria-selected", "true");
     await screen.findByRole("progressbar", { name: "Overall progress of Asha Iyer" });
     expect(screen.queryByRole("button", { name: "Add students" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Remove Asha Iyer from the batch" })).not.toBeInTheDocument();
@@ -176,7 +176,7 @@ describe("batch detail", () => {
   it("explains a refused change in plain language", async () => {
     api.routes["PUT /api/v1/training/batches/b1/students/s1/modules/m2"] = () => problem(422, { detail: "batch_closed" });
     await open();
-    fireEvent.click(screen.getByRole("tab", { name: /View Students/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Students/ }));
     fireEvent.click(await screen.findByRole("button", { name: /^Asha Iyer/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: /Indexes/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("This batch is completed or cancelled; it can't be changed.");

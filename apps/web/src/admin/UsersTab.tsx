@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { Phone as PhoneIcon, Users as UsersIcon } from "lucide-react";
+import { Phone as PhoneIcon, X } from "lucide-react";
 import { Person } from "../shell/ui";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { can } from "../api";
@@ -7,7 +7,10 @@ import { adminApi, departmentLabel, type AdminUser, type BulkReport, type Depart
 import { csvToRows, tableToRows, type BulkRow } from "./csv";
 import { isXlsx, readUserSheet } from "./xlsx";
 import { saveBlob } from "../lib/download";
+import { useSearchParams } from "../lib/router";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
+import { FilterBar, type FilterChip } from "../ui/FilterBar";
+import { Menu } from "../ui/Menu";
 import { friendlyError, skipReason } from "./errors";
 import { departmentOptions, keys, useAccess, useDepartments, useMeta, usePeople } from "./shared";
 import { Pager, useCursorPager } from "../ui/Pager";
@@ -17,10 +20,11 @@ import { QueryError } from "../ui/QueryError";
 
 const PAGE_SIZE = 50;
 
-/** Filters another tab opens Users with (Teams tab "Assign them"). */
 const shortDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 
-export interface UsersPreset { team?: string; status?: "active" | "inactive" }
+/** Users filters live in the address bar (`/access?team=none&status=active`), so other tabs can open Users filtered. */
+export const USER_FILTER_KEYS = ["q", "status", "dept", "team", "role", "loc"] as const;
+export type UserFilterKey = (typeof USER_FILTER_KEYS)[number];
 
 type Modal =
   | { kind: "create" }
@@ -38,38 +42,37 @@ type Modal =
   | { kind: "addToTeam" }
   | { kind: "moveToTeam" };
 
-const TINTS = ["indigo", "teal", "amber", "rose", "violet", "sky"] as const;
-
 const roleText = (r: { label: string; locationName: string | null }) => (r.locationName ? `${r.label} · ${r.locationName}` : r.label);
 
-export function UsersTab({ preset }: { preset?: UsersPreset } = {}) {
+export function UsersTab() {
   const { me, announce } = useAccess();
   const qc = useQueryClient();
   const meta = useMeta();
   const teams = useQuery({ queryKey: keys.teams, queryFn: adminApi.teams });
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<"" | "active" | "inactive">(preset?.status ?? "");
-  const [departmentId, setDepartmentId] = useState("");
-  const [team, setTeam] = useState(preset?.team ?? "");
-  const [role, setRole] = useState("");
-  const [locationId, setLocationId] = useState("");
+  const [f, setF] = useSearchParams(USER_FILTER_KEYS);
+  const [searchInput, setSearchInput] = useState(f.q);
+  const search = f.q;
+  const status = f.status as "" | "active" | "inactive";
+  const { dept: departmentId, team, role, loc: locationId } = f;
   // Kept across pages and filters, so a bulk team action can span several searches.
   const [selected, setSelected] = useState<Map<string, AdminUser>>(new Map());
   // Presentation only: the API checks team:move_member over both teams (AD-8).
   const canMove = can(me, "team:move_member");
   const departments = useDepartments();
   const pager = useCursorPager();
-  const { page } = pager;
   const [modal, setModal] = useState<Modal | null>(null);
   const passwordLogin = usePasswordLogin();
 
+  // Another tab (or back/forward) changed the search in the URL: show it in the box.
+  useEffect(() => { setSearchInput((cur) => (cur.trim() === f.q ? cur : f.q)); }, [f.q]);
   useEffect(() => {
     // Only a changed search resets paging; otherwise the mount-time run would undo an early Next.
     if (searchInput.trim() === search) return;
-    const t = setTimeout(() => { setSearch(searchInput.trim()); pager.reset(); }, 250);
+    const t = setTimeout(() => { setF({ q: searchInput.trim() }); pager.reset(); }, 250);
     return () => clearTimeout(t);
-  }, [searchInput, search]);
+  }, [searchInput, search]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setFilter = (patch: Partial<Record<UserFilterKey, string>>) => { setF(patch); pager.reset(); };
 
   const q = useQuery({
     queryKey: [...keys.users, { search, status, departmentId, team, role, locationId, cursor: pager.cursor }],
@@ -107,135 +110,169 @@ export function UsersTab({ preset }: { preset?: UsersPreset } = {}) {
   });
   const bulkDone = (msg: string) => { setSelected(new Map()); done(msg); };
 
+  const deptOpts = useMemo(() => departmentOptions(departments.data ?? []), [departments.data]);
+  const deptName = departmentId === "none" ? "No department" : deptOpts.find((d) => d.id === departmentId)?.label ?? "Department";
+  const teamName = team === "none" ? "No team" : teams.data?.items.find((t) => t.id === team)?.name ?? "Team";
+  const locName = meta.data?.locations.find((l) => l.id === locationId)?.name ?? "Location";
+  const chips: FilterChip[] = [
+    departmentId && { key: "dept", label: deptName, onRemove: () => setFilter({ dept: "" }) },
+    team && { key: "team", label: teamName, onRemove: () => setFilter({ team: "" }) },
+    locationId && { key: "loc", label: locName, onRemove: () => setFilter({ loc: "" }) },
+  ].filter(Boolean) as FilterChip[];
+  const activeCount = [status, role, departmentId, team, locationId].filter(Boolean).length;
+  const hasFilters = activeCount > 0 || Boolean(search);
+  const clearAll = () => { setSearchInput(""); setFilter({ q: "", status: "", dept: "", team: "", role: "", loc: "" }); };
+  const colCount = contact ? 8 : 7;
+
   return (
-    <>
-      {summary.data && summary.data.roles.length > 0 && (
-        <ul className="tiles rolecounts" aria-label="Active users per role">
-          {summary.data.roles.map((r, i) => (
-            <li key={r.key} className="tile card">
-              <span className="tilehead"><span className={`tileicon tint-${TINTS[i % TINTS.length]}`} aria-hidden="true"><UsersIcon size={18} /></span>
-                <span className="tilelabel">{r.label}</span></span>
-              <span className="tilevalue">{r.count}</span>
-              <span className="tilehint">{r.count === 1 ? "active user" : "active users"}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="toolbar">
-        <div className="field inline">
-          <label htmlFor="user-search">Search users</label>
-          <input id="user-search" type="search" placeholder="Name or email" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
-        </div>
-        <div className="field inline">
-          <label htmlFor="user-status">Status</label>
-          <select id="user-status" value={status} onChange={(e) => { setStatus(e.target.value as typeof status); pager.reset(); }}>
-            <option value="">All</option><option value="active">Active</option><option value="inactive">Inactive</option>
-          </select>
-        </div>
-        <div className="field inline">
-          <label htmlFor="user-department">Department</label>
-          <select id="user-department" value={departmentId} onChange={(e) => { setDepartmentId(e.target.value); pager.reset(); }}>
-            <option value="">All</option>
-            <option value="none">No department</option>
-            {departmentOptions(departments.data ?? []).map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
-          </select>
-        </div>
-        <div className="field inline">
-          <label htmlFor="user-team">Team</label>
-          <select id="user-team" value={team} onChange={(e) => { setTeam(e.target.value); pager.reset(); }}>
-            <option value="">All</option>
-            <option value="none">No team</option>
-            {teams.data?.items.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        </div>
-        <div className="field inline">
-          <label htmlFor="user-role">Role</label>
-          <select id="user-role" value={role} onChange={(e) => { setRole(e.target.value); pager.reset(); }}>
-            <option value="">All</option>
-            {meta.data?.roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
-          </select>
-        </div>
-        <div className="field inline">
-          <label htmlFor="user-location">Location</label>
-          <select id="user-location" value={locationId} onChange={(e) => { setLocationId(e.target.value); pager.reset(); }}>
-            <option value="">All</option>
-            {meta.data?.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        </div>
-        <button className="btn push" onClick={() => setModal({ kind: "departments" })}>Departments</button>
-        <button className="btn" onClick={() => setModal({ kind: "bulk" })}>Import users</button>
-        <button className="btn primary" onClick={() => setModal({ kind: "create" })}>New user</button>
+    <div className="ua-users">
+      <div className="ua-tools">
+        {summary.data && (
+          <div className="ua-rolesum">
+            <span className="ua-total"><b>{summary.data.active}</b> active{summary.data.inactive ? <> · <b>{summary.data.inactive}</b> inactive</> : null}</span>
+            {/* Each count is also a Role filter toggle. */}
+            <ul className="ua-rolelist" aria-label="Active users per role">
+              {summary.data.roles.map((r) => (
+                <li key={r.key}>
+                  <button type="button" className="ua-rolechip" aria-pressed={role === r.key}
+                    onClick={() => setFilter({ role: role === r.key ? "" : r.key })}>
+                    {r.label}<span className="ua-rolecount">{r.count}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
-      <div className="card">
+      <div className="ua-filterrow">
+        <div className="ua-actions">
+          <button className="btn" onClick={() => setModal({ kind: "departments" })}>Departments</button>
+          <button className="btn" onClick={() => setModal({ kind: "bulk" })}>Import users</button>
+          <button className="btn primary" onClick={() => setModal({ kind: "create" })}>New user</button>
+        </div>
+      <FilterBar label="Users filters"
+        search={<div className="field inline fb-search"><label htmlFor="user-search">Search users</label>
+          <input id="user-search" type="search" placeholder="Name or email" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} /></div>}
+        primary={<>
+          <div className="field inline">
+            <label htmlFor="user-role">Role</label>
+            <select id="user-role" value={role} onChange={(e) => setFilter({ role: e.target.value })}>
+              <option value="">All</option>
+              {meta.data?.roles.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+            </select>
+          </div>
+          <div className="field inline">
+            <label htmlFor="user-status">Status</label>
+            <select id="user-status" value={status} onChange={(e) => setFilter({ status: e.target.value })}>
+              <option value="">All</option><option value="active">Active</option><option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </>}
+        more={<>
+          <div className="field inline">
+            <label htmlFor="user-department">Department</label>
+            <select id="user-department" value={departmentId} onChange={(e) => setFilter({ dept: e.target.value })}>
+              <option value="">All</option>
+              <option value="none">No department</option>
+              {deptOpts.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+            </select>
+          </div>
+          <div className="field inline">
+            <label htmlFor="user-team">Team</label>
+            <select id="user-team" value={team} onChange={(e) => setFilter({ team: e.target.value })}>
+              <option value="">All</option>
+              <option value="none">No team</option>
+              {teams.data?.items.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <div className="field inline">
+            <label htmlFor="user-location">Location</label>
+            <select id="user-location" value={locationId} onChange={(e) => setFilter({ loc: e.target.value })}>
+              <option value="">All</option>
+              {meta.data?.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+          </div>
+        </>}
+        chips={chips} activeCount={activeCount} hasFilters={hasFilters} onClear={clearAll}
+        summaryEnd={q.data ? <span className="ua-count" aria-live="polite">{q.data.items.length}{q.data.nextCursor ? "+" : ""} {q.data.items.length === 1 && !q.data.nextCursor ? "user" : "users"}{pager.page > 1 ? ` on page ${pager.page}` : ""}</span> : null}
+        selecting={selected.size > 0}
+        selection={selected.size > 0 && (
+          <div className="bulkbar" role="region" aria-label="Selected users">
+            <div className="toolbar">
+              <span><b>{selected.size} selected</b></span>
+              <button className="btn" onClick={() => setModal({ kind: "addToTeam" })}>Add to team…</button>
+              {canMove && <button className="btn" onClick={() => setModal({ kind: "moveToTeam" })}>Move to team…</button>}
+              <button className="btn ghost" onClick={() => setSelected(new Map())}>Clear</button>
+            </div>
+          </div>
+        )} />
+      </div>
+
+      <div className="card tablewrap listcard ua-tablecard">
         {q.isLoading ? <Loading /> : q.error ? <QueryError query={q} message={friendlyError(q.error)} /> : (
-          <div className="tablewrap"><table aria-label="Users" aria-busy={q.isFetching || undefined}>
+          <table className="dtable ua-table" aria-label="Users" aria-busy={q.isFetching || undefined}>
             <thead><tr>
-              <th className="selcol"><input type="checkbox" aria-label="Select all users on this page" checked={allOnPage} onChange={togglePage} disabled={pageRows.length === 0} /></th>
-              <th>User</th><th>Designation</th><th>Department</th>{contact && <th>Phone</th>}<th>Status</th><th>Roles</th><th>Teams</th><th>Manager</th><th><span className="sr-only">Actions</span></th></tr></thead>
+              <th className="c-sel"><input type="checkbox" aria-label="Select all users on this page" checked={allOnPage} onChange={togglePage} disabled={pageRows.length === 0} /></th>
+              <th>User</th><th className="p2">Designation</th><th>Roles</th><th>Team</th>{contact && <th className="p3">Phone</th>}<th>Status</th>
+              <th className="c-act"><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {q.data!.items.map((u) => {
                 const self = u.id === me.id;
+                const active = u.status === "active";
                 return (
-                  <tr key={u.id} className={selected.has(u.id) ? "selected" : undefined}>
-                    <td className="selcol">
+                  <tr key={u.id} aria-selected={selected.has(u.id) || undefined}>
+                    <td className="c-sel">
                       {!self && <input type="checkbox" aria-label={`Select ${u.displayName}`} checked={selected.has(u.id)} onChange={() => toggle(u)} />}
                     </td>
-                    <td><Person name={u.displayName}><b>{u.displayName}</b>{self && <span className="tag">you</span>}<small className="block">{u.email}</small></Person></td>
-                    <td>{u.designation ?? "—"}</td>
-                    <td>{u.department ? departmentLabel(u.department) : "—"}</td>
-                    {contact && <td>{u.phone ? <a className="contactlink" href={`tel:${u.phone}`}><PhoneIcon size={14} aria-hidden="true" />{u.phone}</a> : "—"}</td>}
-                    <td><span className={`badge ${u.status}`}>{u.status}</span>{u.deletesAt && <small className="block muted">Deletes {shortDate(u.deletesAt)}</small>}</td>
-                    <td>
-                      <ul className="chips" aria-label={`Roles of ${u.displayName}`}>
+                    <td className="c-primary ua-user"><Person name={u.displayName}><span className="ua-name"><b>{u.displayName}</b>{self && <span className="tag">you</span>}</span><small className="block">{u.email}</small></Person></td>
+                    <td className="p2" data-label="Designation">{u.designation ?? "—"}
+                      <small className="block ua-dept">{u.department ? departmentLabel(u.department) : "No department"}</small></td>
+                    <td data-label="Roles">
+                      <ul className="chips ua-roles" aria-label={`Roles of ${u.displayName}`}>
                         {u.roles.map((r) => (
                           <li key={`${r.key}:${r.locationId ?? ""}`} className="chip">
                             {roleText(r)}
                             {!self && (
-                              <button className="chipx" aria-label={`Revoke ${roleText(r)} from ${u.displayName}`}
-                                onClick={() => setModal({ kind: "revoke", user: u, role: r })}>×</button>
+                              <button type="button" className="chipx" aria-label={`Revoke ${roleText(r)} from ${u.displayName}`} title={`Revoke ${roleText(r)}`}
+                                onClick={() => setModal({ kind: "revoke", user: u, role: r })}><X size={14} aria-hidden="true" /></button>
                             )}
                           </li>
                         ))}
                         {u.roles.length === 0 && <li className="muted">No roles</li>}
                       </ul>
                     </td>
-                    <td>{u.teams.length ? u.teams.map((t) => <div key={t.id}>{t.name}{t.asLead && <span className="tag">lead</span>}</div>) : "—"}</td>
-                    <td>{u.manager?.displayName ?? "—"}</td>
-                    <td className="rowactions">
-                      {self ? <span className="muted">Your own account: ask another admin.</span> : (
-                        <>
-                          {u.status === "active" && <button className="btn sm" aria-label={`Grant role to ${u.displayName}`} onClick={() => setModal({ kind: "grant", user: u })}>Grant role</button>}
-                          {passwordLogin && u.status === "active" && <button className="btn sm" aria-label={`Email password link to ${u.displayName}`} onClick={() => setModal({ kind: "invite", user: u })}>Email invite</button>}
-                          {passwordLogin && u.status === "active" && <button className="btn sm" aria-label={`Set password for ${u.displayName}`} onClick={() => setModal({ kind: "password", user: u })}>Set password</button>}
-                          <button className="btn sm" aria-label={`Set manager for ${u.displayName}`} onClick={() => setModal({ kind: "manager", user: u })}>Manager</button>
-                          <button className="btn sm" aria-label={`Set department for ${u.displayName}`} onClick={() => setModal({ kind: "department", user: u })}>Department</button>
-                          {u.status === "active"
-                            ? <button className="btn sm danger" aria-label={`Deactivate ${u.displayName}`} onClick={() => setModal({ kind: "deactivate", user: u })}>Deactivate</button>
-                            : <>
-                              <button className="btn sm" aria-label={`Reactivate ${u.displayName}`} onClick={() => setModal({ kind: "reactivate", user: u })}>Reactivate</button>
-                              <button className="btn sm danger" aria-label={`Delete ${u.displayName}`} onClick={() => setModal({ kind: "delete", user: u })}>Delete now</button>
-                            </>}
-                        </>
+                    <td data-label="Team" className="ua-team"><div>{u.teams.length ? u.teams.map((t) => <div key={t.id}>{t.name}{t.asLead && <span className="tag">lead</span>}</div>) : <span className="muted">No team</span>}
+                      <small className="block ua-mgr">{u.manager ? <>Reports to <span>{u.manager.displayName}</span></> : "No manager"}</small></div></td>
+                    {contact && <td className="p3" data-label="Phone">{u.phone ? <a className="contactlink" href={`tel:${u.phone}`}><PhoneIcon size={14} aria-hidden="true" />{u.phone}</a> : "—"}</td>}
+                    <td className="c-badge"><span className={`badge ${u.status}`}>{active ? "Active" : "Inactive"}</span>{u.deletesAt && <small className="block muted">Deletes {shortDate(u.deletesAt)}</small>}</td>
+                    <td className="c-act">
+                      {self ? <span className="muted ua-self">Your own account: ask another admin.</span> : (
+                        <span className="ua-act">
+                          {active
+                            ? <button className="btn sm" aria-label={`Grant role to ${u.displayName}`} onClick={() => setModal({ kind: "grant", user: u })}>Grant role</button>
+                            : <button className="btn sm" aria-label={`Reactivate ${u.displayName}`} onClick={() => setModal({ kind: "reactivate", user: u })}>Reactivate</button>}
+                          <Menu label={`More actions for ${u.displayName}`} items={[
+                            passwordLogin && active && { label: "Email password link", onSelect: () => setModal({ kind: "invite", user: u }) },
+                            passwordLogin && active && { label: "Set temporary password", onSelect: () => setModal({ kind: "password", user: u }) },
+                            { label: "Set manager", onSelect: () => setModal({ kind: "manager", user: u }) },
+                            { label: "Set department", onSelect: () => setModal({ kind: "department", user: u }) },
+                            active
+                              ? { label: "Deactivate…", danger: true, onSelect: () => setModal({ kind: "deactivate", user: u }) }
+                              : { label: "Delete now…", danger: true, onSelect: () => setModal({ kind: "delete", user: u }) },
+                          ]} />
+                        </span>
                       )}
                     </td>
                   </tr>
                 );
               })}
-              {q.data!.items.length === 0 && <tr><td colSpan={contact ? 10 : 9} className="empty">No users match.</td></tr>}
+              {q.data!.items.length === 0 && <tr><td colSpan={colCount} className="empty">No users match.{hasFilters && <> <button type="button" className="linkbtn" onClick={clearAll}>Clear filters</button></>}</td></tr>}
             </tbody>
-          </table></div>
+          </table>
         )}
       </div>
       <Pager pager={pager} label="Users pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
-      {selected.size > 0 && (
-        <div className="selectionbar" role="region" aria-label="Selected users">
-          <b>{selected.size} selected</b>
-          <button className="btn" onClick={() => setModal({ kind: "addToTeam" })}>Add to team…</button>
-          {canMove && <button className="btn" onClick={() => setModal({ kind: "moveToTeam" })}>Move to team…</button>}
-          <button className="btn" onClick={() => setSelected(new Map())}>Clear</button>
-        </div>
-      )}
       {modal?.kind === "addToTeam" && (
         <AddToTeamDialog users={[...selected.values()]} onClose={close} onDone={bulkDone} />
       )}
@@ -295,7 +332,7 @@ export function UsersTab({ preset }: { preset?: UsersPreset } = {}) {
           <p>{modal.user.displayName} loses this role immediately. No approval is needed to remove access.</p>
         </ConfirmDialog>
       )}
-    </>
+    </div>
   );
 }
 

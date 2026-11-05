@@ -1,0 +1,20 @@
+/* My team and Coach assignments (team/*); CoachList is also shown in the Users & Access team drawer. Tokens only. */
+.tm-page { display: flex; flex-direction: column; gap: 12px; }
+.tm-summary { margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; color: var(--text2); }
+.badge.tm-warn { background: var(--warn-bg); color: var(--warn-fg); }
+.tm-card { gap: 12px; }
+.tm-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tm-head h2 { font-size: 16px; font-weight: 700; margin-right: auto; }
+.tm-count { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tm-lead { padding-bottom: 10px; border-bottom: 1px solid var(--line2); }
+/* Section label inside a card: smaller than the card's team-name h2 (it rendered larger before). */
+.tm-label, .tm-coaches > h3 { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
+.tm-coaches { display: flex; flex-direction: column; gap: 8px; }
+.tm-card .members li, .tm-coaches .members li { min-height: 36px; }
+.tm-add { align-self: flex-start; }
+
+@media (max-width: 768px) {
+  .tm-card .btn.sm, .tm-coaches .btn.sm { height: 44px; padding: 0 14px; }
+  .tm-add { align-self: stretch; justify-content: center; }
+  .tm-card .members li, .tm-coaches .members li { min-height: 48px; }
+}

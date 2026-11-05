@@ -1,5 +1,5 @@
 # Coach assignments — `/coaching`
-Status: Audited · Redesign proposed (minor)
+Status: Audited · Redesign proposed (minor) · Implemented (rebrand wave 2)
 Who / permission: `coach:assign` (nav.ts:45) — only the `interview_lead` role (packages/shared/src/authz/catalog.ts:811). Audited live as `il@eureka.example` (Interview Lead; not in the brief's user list but seeded).
 Source: `apps/web/src/team/CoachingPage.tsx`, `team/Coaches.tsx` (CoachList, AddCoachDialog, shared with Users & Access), `team/coachApi.ts`, styles.css:237-240
 Evidence: new: `coaching-desktop.png`, `coaching-desktop-full.png`, `coaching-mobile.png`, `coaching-mobile-full.png`
@@ -55,3 +55,16 @@ CoachingPage.tsx, Coaches.tsx (shared with Users & Access — check that screen 
 
 ## Validation
 Visual inspection: desktop 1440 + mobile 390 as `il@eureka.example` (seeded Interview Lead); targets/overflow measured. Add/Remove not exercised (would change seed data). Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 "Coaches" h3 larger than the team h2 (Medium) | h3 kept for structure, styled as a 12.5px muted label; team name h2 16px/700. | `after/coaching-desktop.png` |
+| #2 Uncovered teams not flagged (Medium) | "No coach" warn chip on the card, uncovered teams sorted first, summary "2 of 3 teams have no coach". | `after/coaching-desktop.png` |
+| #3 Remove acts immediately (Low) | Remove opens a confirm ("Remove <coach> from <team>?", danger "Remove coach"), errors shown in the dialog; same in the Users & Access team drawer (shared CoachList). | `after/coaching-remove-confirm-desktop-dark.png` |
+| #4 Card differs from My team (Low) | Shared header + lead row with avatar. | — |
+| #6 30px targets (Low) | 44px on phones. | `after/coaching-mobile.png` |
+| #7 Plain loading / error (Low) | `Loading` and `QueryError`. | — |
+| #5 Per-coach view (Low) | Not built (new feature). | — |
+
+Validation (wave 2, 2026-11-05): `pnpm --filter @eureka/web typecheck` clean; full web unit suite 552/552 (admin, staff, training, team suites updated only where markup/interaction changed). Visual check at 1440×900 and 390×844, light and dark, in Playwright against a fixture API built from the `*Api.ts` shapes, because the shared API on :3000 and its Postgres were not running in this environment. Page width at 390 = 390 on every screen below; row actions visible at 1440. Live-data re-check against the seeded API is still owed.

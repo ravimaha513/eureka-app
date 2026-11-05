@@ -1,5 +1,5 @@
 # Training Batches — `/training`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `training:read` (nav.ts:33). Create needs `canCreate` from the API (location ops / training managers)
 Source: `apps/web/src/training/TrainingPage.tsx`, `training/ui.tsx` (CoverArt, BatchStatusPill), `styles.css:765-771`
 Evidence: `training-desktop.png`, `training-desktop-full.png`, `training-mobile.png`, `training-mobile-full.png`
@@ -51,3 +51,14 @@ TrainingPage.tsx + styles (tr-card). No API change.
 
 ## Validation
 Visual inspection: CEO at 1440 and 390. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Only a small arrow opens a batch (High) | The whole card is one button ("Open <name>") stretched over the card; hover underlines the title; focus ring on the card. Delete stays a separate 34px icon button above it. | `after/training-desktop.png` |
+| #2 128px placeholder cover (Medium) | Cover replaced by the 40px chip of the batch's own colour/icon; cards are ~40% shorter. | `after/training-desktop.png`, `after/training-mobile.png` |
+| #3 No progress on the card (Medium) | Schedule progress from the dates already loaded: "Week 5 of 11" / "Starts in 11 days" / "Finished" with a bar (labelled "Schedule of …"). Student averages are not in the list API, so they are not shown (no API change). | `after/training-desktop.png` |
+| #4 Status filter only (Low) | Client-side search over batch, technology, location and trainer next to Status; result count and h1 count. | — |
+| #5 Trainer reads as a stat (Low) | Trainer on its own line with avatar; counts as "4 Students · 4 Courses". | — |
+
+Validation (wave 2, 2026-11-05): `pnpm --filter @eureka/web typecheck` clean; full web unit suite 552/552 (admin, staff, training, team suites updated only where markup/interaction changed). Visual check at 1440×900 and 390×844, light and dark, in Playwright against a fixture API built from the `*Api.ts` shapes, because the shared API on :3000 and its Postgres were not running in this environment. Page width at 390 = 390 on every screen below; row actions visible at 1440. Live-data re-check against the seeded API is still owed.

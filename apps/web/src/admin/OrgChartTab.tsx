@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type DragEvent, type ReactElement } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Search } from "lucide-react";
 import { Avatar } from "../shell/ui";
 import { adminApi, type OrgChart, type OrgPerson, type OrgPreview } from "./adminApi";
 import { friendlyError } from "./errors";
@@ -198,15 +199,19 @@ export function OrgChartTab() {
   const renderTeam = (teamId: string) => {
     const t = view.teams.find((x) => x.id === teamId)!;
     const members = people.filter((p) => p.team?.id === teamId && !p.team.asLead);
+    // Members who report to the lead are drawn as cards right below; chip only the others.
+    const chipped = members.filter((m) => m.managerId !== t.leadId);
+    const below = members.length - chipped.length;
     return (
       <div className={`orgteam${overClass(`team:${teamId}`)}`} {...dropProps(`team:${teamId}`, (d) => joinProblem(d.id, teamId), (d) => joinTeam(d.id, teamId))}>
         <div className="teamhead"><span className="tag team">Team</span>{t.name} · {members.length} {members.length === 1 ? "member" : "members"}</div>
         <div className="chips">
-          {members.map((m) => (
+          {chipped.map((m) => (
             <span key={m.id} className={`chip${changedIds.has(m.id) ? " changed" : ""}`} onClick={(e) => { e.stopPropagation(); setSelected(m.id); }}>
               <Avatar name={m.displayName} />{m.displayName}
             </span>
           ))}
+          {below > 0 && <span className="muted">{chipped.length > 0 ? "and " : ""}{below} shown below as {below === 1 ? "a card" : "cards"}</span>}
           {members.length === 0 && <span className="muted">No members yet. Drop unassigned recruiters here.</span>}
         </div>
       </div>
@@ -231,7 +236,11 @@ export function OrgChartTab() {
     <>
       <div className="toolbar">
         <p className="hint">Drag a card onto its new manager, or an unassigned recruiter onto a team. Hierarchy scope follows the reporting line; roles don't change. Nothing is saved until you apply.</p>
-        <input type="search" className="push" placeholder="Find a person" aria-label="Find a person" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <div className="field inline searchfield push">
+          <label htmlFor="org-find" className="sr-only">Find a person</label>
+          <Search size={15} aria-hidden="true" />
+          <input id="org-find" type="search" placeholder="Find a person" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        </div>
         <button className="btn" onClick={() => setCollapsed(new Set())}>Expand all</button>
       </div>
       <div className="orglayout">

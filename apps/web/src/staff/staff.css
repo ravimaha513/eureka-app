@@ -1,0 +1,36 @@
+/* Staff birthdays (staff/*). Tokens only (DESIGN.md). */
+.bd-page { display: flex; flex-direction: column; gap: 12px; }
+.bd-kpi { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); font-variant-numeric: tabular-nums; }
+.bd-kpinum { font-size: 15px; color: var(--text); }
+.bd-kpinum b { font-weight: 700; }
+.bd-meter { display: block; flex: 0 1 240px; min-width: 120px; height: 8px; border-radius: var(--r-sm); background: var(--line2); overflow: hidden; }
+.bd-meter > span { display: block; height: 100%; background: var(--ok-fg); }
+.bd-kpi .muted { font-size: 13px; }
+.bd-toolbar { align-items: flex-end; gap: 8px 12px; }
+.bd-search input { width: 260px; }
+.bd-sort select { width: 160px; }
+.bd-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; font-size: 13.5px; font-weight: 600; color: var(--text2); cursor: pointer; }
+.bd-toggle input { width: 18px; height: 18px; margin: 0; accent-color: var(--pri); }
+.bd-table td { vertical-align: middle; }
+.bd-table td.c-primary { white-space: normal; min-width: 220px; }
+.bd-table .bd-cell .birthdayfields { flex-wrap: nowrap; }
+.bd-missing { background: var(--warn-bg); color: var(--warn-fg); }
+.bd-soon { color: var(--text); font-weight: 600; }
+.bd-acts { display: inline-flex; gap: 4px; justify-content: flex-end; }
+.bd-edit { margin: 0; }
+
+@media (max-width: 768px) {
+  .bd-kpi { padding: 10px 12px; }
+  .bd-meter { flex: 1 1 100%; order: 3; }
+  .bd-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  .bd-search { grid-column: 1 / -1; }
+  .bd-search input { width: 100%; height: 44px; font-size: 16px; }
+  .bd-sort select { width: 100%; height: 44px; }
+  .bd-toggle { min-height: 44px; }
+  .bd-table td.c-primary { min-width: 0; }
+  /* Editing on a phone: month and day share the full card width at touch size. */
+  .bd-cell .birthdayfields { display: grid; grid-template-columns: minmax(0, 1fr) 88px; gap: 8px; }
+  .bd-cell .birthdayfields select, .bd-cell .birthdayfields input { height: 44px; font-size: 16px; width: 100% !important; min-width: 0 !important; }
+  .bd-acts { width: 100%; justify-content: flex-end; }
+  .bd-acts .btn { height: 44px; }
+}
