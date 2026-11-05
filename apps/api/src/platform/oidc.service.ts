@@ -14,6 +14,23 @@ export interface OidcStart { url: string; state: string; nonce: string; verifier
 export interface VerifiedIdentity { sub: string; email: string; authTime: Date }
 
 /**
+ * Error codes the staff sign-in callback redirects with (`/login?error=<code>`,
+ * docs/admin-api.md). Fixed codes only: never an email or provider message.
+ */
+export type SignInError = "expired" | "cancelled" | "signin_failed" | "unavailable" | "domain" | "not_provisioned";
+
+/** A classified OIDC failure; anything else (JOSE errors, nonce mismatch) is `signin_failed`. */
+export class OidcFailure extends Error {
+  constructor(readonly reason: SignInError, message: string) {
+    super(message);
+    this.name = "OidcFailure";
+  }
+}
+
+/** Google's token endpoint must answer within this; a hung call otherwise holds the request until the gateway limit. */
+export const TOKEN_EXCHANGE_TIMEOUT_MS = 10_000;
+
+/**
  * Google OIDC for the BFF (design A6.1): Authorization Code + PKCE,
  * server-side code exchange, ID token validation including the hosted
  * domain (hd) claim.
@@ -22,6 +39,8 @@ export interface VerifiedIdentity { sub: string; email: string; authTime: Date }
 export class OidcService {
   private jwks: JWTVerifyGetKey;
   fetchImpl: typeof fetch = fetch;
+  /** Test hook: token exchange timeout. */
+  exchangeTimeoutMs = TOKEN_EXCHANGE_TIMEOUT_MS;
 
   constructor(@Inject(CONFIG) private readonly config: AppConfig) {
     this.jwks = createRemoteJWKSet(new URL(GOOGLE_JWKS));
@@ -73,21 +92,31 @@ export class OidcService {
   }
 
   async exchange(code: string, verifier: string, redirectUri: string): Promise<string> {
-    const res = await this.fetchImpl(GOOGLE_TOKEN, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        code,
-        code_verifier: verifier,
-        client_id: this.config.GOOGLE_CLIENT_ID ?? "",
-        client_secret: this.config.GOOGLE_CLIENT_SECRET ?? "",
-        redirect_uri: redirectUri,
-        grant_type: "authorization_code",
-      }),
-    });
-    if (!res.ok) throw new Error(`token exchange failed: ${res.status}`);
-    const body = (await res.json()) as { id_token?: string };
-    if (!body.id_token) throw new Error("no id_token in token response");
+    const signal = AbortSignal.timeout(this.exchangeTimeoutMs);
+    let body: { id_token?: string };
+    try {
+      const res = await this.fetchImpl(GOOGLE_TOKEN, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          code,
+          code_verifier: verifier,
+          client_id: this.config.GOOGLE_CLIENT_ID ?? "",
+          client_secret: this.config.GOOGLE_CLIENT_SECRET ?? "",
+          redirect_uri: redirectUri,
+          grant_type: "authorization_code",
+        }),
+        signal,
+      });
+      // 4xx: a replayed, expired or foreign code; the user starts again.
+      if (!res.ok) throw new OidcFailure(res.status >= 500 ? "unavailable" : "signin_failed", `token exchange failed: ${res.status}`);
+      body = (await res.json()) as { id_token?: string };
+    } catch (err) {
+      if (err instanceof OidcFailure) throw err;
+      // Timeout (AbortSignal) or network failure.
+      throw new OidcFailure("unavailable", signal.aborted ? "token exchange timed out" : "token exchange unreachable");
+    }
+    if (!body.id_token) throw new OidcFailure("signin_failed", "no id_token in token response");
     return body.id_token;
   }
 
@@ -109,13 +138,13 @@ export class OidcService {
     // config): an exact, verified email; no hd claim or domain needed.
     const testUser = parseEmailList(this.config.AUTH_TEST_EMAILS).includes(email);
     if (!testUser) {
-      if (payload.hd !== this.config.GOOGLE_HOSTED_DOMAIN) throw new Error("account is not in the company domain");
+      if (payload.hd !== this.config.GOOGLE_HOSTED_DOMAIN) throw new OidcFailure("domain", "account is not in the company domain");
       // Users are linked by email (design A6.1), so the email itself must be in
       // the company domain too, not only the hd claim.
       const domain = (this.config.GOOGLE_HOSTED_DOMAIN ?? "").trim().toLowerCase();
       const parts = email.split("@");
       if (!domain || parts.length !== 2 || !parts[0] || parts[1] !== domain) {
-        throw new Error("email is not in the company domain");
+        throw new OidcFailure("domain", "email is not in the company domain");
       }
     }
     const authTime = typeof payload.auth_time === "number" ? payload.auth_time : payload.iat ?? Date.now() / 1000;

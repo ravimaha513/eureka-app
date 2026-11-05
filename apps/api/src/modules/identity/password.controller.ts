@@ -8,7 +8,7 @@ import { clientIp, ipKey } from "../../platform/client-ip.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
-import { SESSION_COOKIE, SessionService } from "../../platform/session.service.js";
+import { SessionService } from "../../platform/session.service.js";
 
 const PasswordLogin = z.object({ email: z.string().trim().email().max(254), password: z.string().min(1).max(200) }).strict();
 const SetupPassword = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/), newPassword: z.string().min(1).max(200) }).strict();
@@ -59,11 +59,7 @@ export class PasswordController {
       [email, password, this.config.PASSWORD_MAX_FAILURES, this.config.PASSWORD_LOCK_MINUTES])).rows[0]!);
     if (r.outcome === "locked") throw new HttpException("account_locked", HttpStatus.TOO_MANY_REQUESTS);
     if (r.outcome !== "ok" || !r.user_id) throw new UnauthorizedException("Invalid email or password");
-    const sid = await this.sessions.create(r.user_id, new Date(), clientInfo(req, this.config));
-    void reply.setCookie(SESSION_COOKIE, sid, {
-      httpOnly: true, secure: this.config.NODE_ENV === "production", sameSite: "lax", path: "/",
-      maxAge: this.config.SESSION_ABSOLUTE_HOURS * 3600,
-    });
+    this.sessions.setSessionCookie(reply, await this.sessions.create(r.user_id, new Date(), clientInfo(req, this.config)));
     return { mustChangePassword: r.must_change };
   }
 
@@ -87,11 +83,7 @@ export class PasswordController {
       [createHash("sha256").update(token).digest(), newPassword])).rows[0]!);
     if (r.outcome === "weak") throw new HttpException("password_weak", HttpStatus.UNPROCESSABLE_ENTITY);
     if (r.outcome !== "ok" || !r.user_id) throw new BadRequestException("invalid_link");
-    const sid = await this.sessions.create(r.user_id, new Date(), clientInfo(req, this.config));
-    void reply.setCookie(SESSION_COOKIE, sid, {
-      httpOnly: true, secure: this.config.NODE_ENV === "production", sameSite: "lax", path: "/",
-      maxAge: this.config.SESSION_ABSOLUTE_HOURS * 3600,
-    });
+    this.sessions.setSessionCookie(reply, await this.sessions.create(r.user_id, new Date(), clientInfo(req, this.config)));
     return { mustChangePassword: false };
   }
 

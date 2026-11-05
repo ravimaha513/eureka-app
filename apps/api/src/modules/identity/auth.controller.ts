@@ -6,9 +6,11 @@ import { clientInfo } from "../../platform/client-info.js";
 import { AllowPasswordChange, CurrentUser, Public, type AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
-import { OidcService } from "../../platform/oidc.service.js";
+import { apiLog } from "../../platform/logger.js";
+import { OidcFailure, OidcService, type SignInError, type VerifiedIdentity } from "../../platform/oidc.service.js";
+import { requestLogFields } from "../../platform/request-context.js";
 import { openCookie, sealCookie } from "../../platform/sealed-cookie.js";
-import { SESSION_COOKIE, SessionService } from "../../platform/session.service.js";
+import { SessionService } from "../../platform/session.service.js";
 
 const OIDC_COOKIE = "eureka_oidc";
 const DevLogin = z.object({ email: z.string().email() }).strict();
@@ -27,16 +29,6 @@ export class AuthController {
     return new URL("/api/auth/callback", this.config.PUBLIC_BASE_URL).toString();
   }
 
-  private setSessionCookie(reply: FastifyReply, sid: string): void {
-    void reply.setCookie(SESSION_COOKIE, sid, {
-      httpOnly: true,
-      secure: this.config.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: this.config.SESSION_ABSOLUTE_HOURS * 3600,
-    });
-  }
-
   @Public()
   @Get("login")
   login(@Res() reply: FastifyReply): void {
@@ -44,25 +36,57 @@ export class AuthController {
     const s = this.oidc.start(this.redirectUri());
     void reply
       .setCookie(OIDC_COOKIE, sealCookie(this.config.SESSION_SECRET, { state: s.state, nonce: s.nonce, verifier: s.verifier }), {
-        httpOnly: true, secure: this.config.NODE_ENV === "production", sameSite: "lax", path: "/api/auth", maxAge: 600,
+        httpOnly: true, secure: this.sessions.secureCookies, sameSite: "lax", path: "/api/auth", maxAge: 600,
       })
       .redirect(s.url, 302);
   }
 
+  /**
+   * Google redirects the browser here (top-level navigation). Every expected
+   * failure (expired or mismatched state, cancelled at Google, token refused or
+   * timed out, outside the company domain, no Eureka account) is a 302 to the
+   * sign-in page with `?error=<code>` (SIGN_IN_ERRORS), logged at warn with the
+   * code only. Unexpected server errors still surface as problem responses.
+   */
   @Public()
   @Get("callback")
-  async callback(@Query("code") code: string, @Query("state") state: string, @Req() req: FastifyRequest, @Res() reply: FastifyReply) {
+  async callback(
+    @Query("code") code: string | undefined, @Query("state") state: string | undefined, @Query("error") error: string | undefined,
+    @Req() req: FastifyRequest, @Res() reply: FastifyReply,
+  ) {
     if (this.config.AUTH_MODE !== "google") throw new NotFoundException();
     const saved = openCookie<{ state: string; nonce: string; verifier: string }>(this.config.SESSION_SECRET, req.cookies?.[OIDC_COOKIE]);
-    if (!saved) throw new ForbiddenException("Sign-in expired, please try again");
-    if (!state || state !== saved.state || !code) throw new ForbiddenException("Sign-in state mismatch");
+    void reply.clearCookie(OIDC_COOKIE, { path: "/api/auth" }); // single use, on every path
+    if (!saved) return this.signInFailed(req, reply, "expired");
+    if (typeof state !== "string" || state !== saved.state) return this.signInFailed(req, reply, "signin_failed");
+    if (typeof error === "string" && error) return this.signInFailed(req, reply, "cancelled");
+    if (typeof code !== "string" || !code) return this.signInFailed(req, reply, "signin_failed");
 
-    const idToken = await this.oidc.exchange(code, saved.verifier, this.redirectUri());
-    const identity = await this.oidc.verify(idToken, saved.nonce);
-    const userId = await this.linkUser(identity.sub, identity.email);
+    let identity: VerifiedIdentity;
+    try {
+      identity = await this.oidc.verify(await this.oidc.exchange(code, saved.verifier, this.redirectUri()), saved.nonce);
+    } catch (err) {
+      return this.signInFailed(req, reply, err instanceof OidcFailure ? err.reason : "signin_failed", err);
+    }
+    let userId: string;
+    try {
+      userId = await this.linkUser(identity.sub, identity.email);
+    } catch (err) {
+      // linkUser commits the auth.denied audit row before it throws.
+      if (err instanceof ForbiddenException) return this.signInFailed(req, reply, "not_provisioned");
+      throw err;
+    }
     const sid = await this.sessions.create(userId, identity.authTime, clientInfo(req, this.config));
-    this.setSessionCookie(reply, sid);
-    void reply.clearCookie(OIDC_COOKIE, { path: "/api/auth" }).redirect(this.config.PUBLIC_BASE_URL, 302);
+    this.sessions.setSessionCookie(reply, sid);
+    void reply.redirect(this.config.PUBLIC_BASE_URL, 302);
+  }
+
+  private signInFailed(req: FastifyRequest, reply: FastifyReply, reason: SignInError, err?: unknown): void {
+    const e = err instanceof Error ? { err: err.message, errName: err.name } : {};
+    apiLog.warn("sign-in failed", { ...requestLogFields(req), reason, ...e });
+    const target = new URL("/login", this.config.PUBLIC_BASE_URL);
+    target.searchParams.set("error", reason);
+    void reply.redirect(target.toString(), 302);
   }
 
   /** Link by Google sub; email only once for a pre-provisioned user without a sub (design A6.1). */
@@ -102,7 +126,7 @@ export class AuthController {
     const { rows } = await this.db.system((c) =>
       c.query<{ id: string }>(`SELECT id FROM eureka.app_user WHERE email = $1 AND status = 'active'`, [email]));
     if (!rows[0]) throw new ForbiddenException("Unknown user");
-    this.setSessionCookie(reply, await this.sessions.create(rows[0].id, new Date(), clientInfo(req, this.config)));
+    this.sessions.setSessionCookie(reply, await this.sessions.create(rows[0].id, new Date(), clientInfo(req, this.config)));
   }
 
   @Post("logout")
@@ -110,6 +134,6 @@ export class AuthController {
   @HttpCode(204)
   async logout(@CurrentUser() user: AuthedUser, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
     await this.sessions.revoke(user.sessionHash);
-    void reply.clearCookie(SESSION_COOKIE, { path: "/" });
+    this.sessions.clearSessionCookie(reply);
   }
 }

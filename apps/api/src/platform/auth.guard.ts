@@ -14,7 +14,7 @@ import { can, type Permission, type UserAccess } from "@eureka/shared";
 import { AccessService } from "./access.service.js";
 import { CONFIG, type AppConfig } from "./config.js";
 import { DbService } from "./db.service.js";
-import { SESSION_COOKIE, SessionService } from "./session.service.js";
+import { SessionService } from "./session.service.js";
 import { PORTAL_HEADER, PortalSessionService } from "./portal-session.service.js";
 
 export interface AuthedUser {
@@ -92,7 +92,7 @@ export class AuthGuard implements CanActivate {
     if (/^\/api\/portal(\/|\?|$)/.test(req.url)) throw new UnauthorizedException("Applicant sign-in required");
     if (this.reflector.getAllAndOverride<boolean>(PUBLIC_ROUTE, targets)) return true;
 
-    const session = await this.sessions.resolve(req.cookies?.[SESSION_COOKIE]);
+    const session = await this.sessions.resolve(this.sessions.readSessionId(req.cookies));
     if (!session) throw new UnauthorizedException("Sign in required");
 
     if (!SAFE_METHODS.has(req.method)) {

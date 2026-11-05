@@ -17,6 +17,9 @@ const ConfigSchema = z
     // and a rolling deploy can briefly run twice the API tasks plus the worker,
     // so keep this small in AWS (the task definitions set 5).
     DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(10),
+    // Longest a request waits for a pooled connection (a free slot or a new
+    // connection) before it fails with a retryable 503 instead of hanging.
+    DB_CONNECT_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(3000),
     // Seconds to keep serving after SIGTERM before closing, so API Gateway and
     // Cloud Map stop routing to this task before its connections go away.
     DRAIN_SECONDS: z.coerce.number().int().min(0).max(25).default(15), // ECS stopTimeout is 30 s

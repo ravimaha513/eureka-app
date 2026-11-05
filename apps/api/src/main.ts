@@ -1,10 +1,11 @@
 import { createApp } from "./app.module.js";
 import { loadConfig } from "./platform/config.js";
+import { apiLog, errorFields } from "./platform/logger.js";
 
 const config = loadConfig();
 const app = await createApp(config);
 await app.listen(Number(process.env.PORT ?? 3000), "0.0.0.0");
-console.log(`Eureka API listening on ${await app.getUrl()} (auth mode: ${config.AUTH_MODE})`);
+apiLog.info(`Eureka API listening on ${await app.getUrl()} (auth mode: ${config.AUTH_MODE})`);
 
 // Graceful shutdown. On SIGTERM ECS deregisters the task from Cloud Map, but the
 // API Gateway VPC link can keep routing to it for a few seconds (SRV TTL). Keep
@@ -18,7 +19,7 @@ async function close(): Promise<void> {
   try {
     await app.close();
   } catch (err) {
-    console.error("error during shutdown", err);
+    apiLog.error("error during shutdown", errorFields(err));
     code = 1;
   }
   process.exit(code);
@@ -27,7 +28,7 @@ async function close(): Promise<void> {
 process.on("SIGTERM", () => {
   if (stopping) return;
   stopping = true;
-  console.log(`SIGTERM received; draining for ${config.DRAIN_SECONDS}s before shutdown`);
+  apiLog.info(`SIGTERM received; draining for ${config.DRAIN_SECONDS}s before shutdown`);
   setTimeout(() => void close(), config.DRAIN_SECONDS * 1000);
 });
 
