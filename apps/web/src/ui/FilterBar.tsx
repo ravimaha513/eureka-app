@@ -1,7 +1,13 @@
 import { useId, useRef, useState, type ReactNode } from "react";
 import { SlidersHorizontal, X } from "lucide-react";
 
-export interface FilterChip { key: string; label: string; onRemove: () => void }
+export interface FilterChip {
+  key: string; label: string; onRemove: () => void;
+  /** Short filter name for the remove button ("Remove Location filter"); default the whole label. */
+  name?: string;
+  /** An inverted ("is none of") filter: styled as a warning. */
+  not?: boolean;
+}
 
 /**
  * List-screen filter bar (the Hot List pattern, `fb-*` classes in styles.css "List screens").
@@ -87,13 +93,13 @@ export function FilterBar({ label, search, primary, more, moreCount, activeCount
         </div>
       </form>
       {selection}
-      {!selecting && (
+      {!selecting && (chips.length > 0 || hasFilters || summaryEnd) && (
         <div className="fb-summary">
           {chips.length > 0 && (
             <ul className="chips" aria-label="Active filters">
               {chips.map((c) => (
-                <li key={c.key} className="chip">{c.label}
-                  <button type="button" className="chipx" aria-label={`Remove filter ${c.label}`} onClick={c.onRemove}><X size={14} aria-hidden="true" /></button>
+                <li key={c.key} className={`chip${c.not ? " not" : ""}`}>{c.label}
+                  <button type="button" className="chipx" aria-label={c.name ? `Remove ${c.name} filter` : `Remove filter ${c.label}`} onClick={c.onRemove}><X size={14} aria-hidden="true" /></button>
                 </li>
               ))}
             </ul>

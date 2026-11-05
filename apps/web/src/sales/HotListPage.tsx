@@ -4,7 +4,7 @@ import type { Permission } from "@eureka/shared";
 import type { Candidate, Me } from "../api";
 import { salesError } from "./errors";
 import { BulkBar, ExportButton, SavedViews } from "./HotListExtras";
-import { ListFilters, ListFooter, resultCount } from "./ListControls";
+import { ListFilters, ListFooter, NoMatches, resultCount } from "./ListControls";
 import { useQuery } from "@tanstack/react-query";
 import { HOTLIST_STATUS_OPTIONS, hotlistApi, salesKeys } from "./salesApi";
 import { Drawer, OpenToAllBadge, SharedBadge, Phone, Priority, StatusBadge, fmtDate } from "./ui";
@@ -148,7 +148,7 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
                 </tr>
                 );
               })}
-              {items.length === 0 && <tr><td colSpan={cols} className="empty">{s.hasFilters ? "No candidates match these filters." : "No candidates on the Hot List."}</td></tr>}
+              {items.length === 0 && <tr><td colSpan={cols} className="empty">{s.hasFilters ? <NoMatches s={s} statuses={HOTLIST_STATUS_OPTIONS} options={options.data} /> : "No candidates on the Hot List."}</td></tr>}
             </tbody>
           </table>
         )}

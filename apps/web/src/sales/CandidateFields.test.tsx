@@ -5,6 +5,7 @@ import { capabilities, type Role } from "@eureka/shared";
 import { setCsrf, type Me } from "../api";
 import { CandidateProfile } from "./CandidateProfile";
 import { HotListPage } from "./HotListPage";
+import { openMoreFilters, pickOption, pickSegment } from "../ui/testHelpers";
 
 /** Eureka App 4 candidate fields in the UI: Hot List filters, profile fields, companies and documents. */
 const meFor = (role: Role): Me => ({
@@ -73,17 +74,16 @@ describe("Hot List filters and columns", () => {
   it("sends the location, visa, documents, resume and stay filters", async () => {
     wrap(<HotListPage me={meFor("recruiter")} onOpenProfile={() => undefined} />);
     await screen.findByText("Asha Iyer", { selector: "b" });
-    // Location, visa, documents, resume and stay sit behind "More filters".
-    fireEvent.click(screen.getByRole("button", { name: "More filters" }));
-    await waitFor(() => expect(screen.getByRole("option", { name: "Dallas" })).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText("Location"), { target: { value: LOC } });
-    fireEvent.change(screen.getByLabelText("Visa"), { target: { value: "h1b" } });
-    fireEvent.change(screen.getByLabelText("Documents"), { target: { value: "none" } });
-    fireEvent.change(screen.getByLabelText("Resume"), { target: { value: "yes" } });
-    fireEvent.change(screen.getByLabelText("Stay"), { target: { value: "remote" } });
+    openMoreFilters();
+    await pickOption("Location", "Dallas");
+    await pickOption("Visa", "H-1B");
+    await pickOption("Documents", "Not recorded", "Pending");
+    pickSegment("Resume", "On file");
+    pickSegment("Stay", "Remote");
+    expect(within(screen.getByRole("list", { name: "Active filters" })).getByRole("button", { name: "Remove Location filter" })).toBeInTheDocument();
     await waitFor(() => expect(lastHotlist().get("stay")).toBe("remote"));
     const p = lastHotlist();
-    expect([p.get("locationId"), p.get("visa"), p.get("documents"), p.get("resume")]).toEqual([LOC, "h1b", "none", "yes"]);
+    expect([p.getAll("locationId"), p.getAll("visa"), p.getAll("documents"), p.get("resume")]).toEqual([[LOC], ["h1b"], ["none", "pending"], "yes"]);
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     await waitFor(() => expect(lastHotlist().get("stay")).toBeNull());
   });

@@ -8,6 +8,7 @@ import { CandidateProfile } from "./CandidateProfile";
 import { CandidatesPage } from "./CandidatesPage";
 import { HotListPage } from "./HotListPage";
 import { DUPLICATE_WARNING } from "./LogSubmissionDialog";
+import { negate, openMoreFilters, pickOption } from "../ui/testHelpers";
 
 // ---- fixtures (shapes from apps/api/src/modules/candidates/candidates.service.ts) ---------------
 
@@ -130,18 +131,24 @@ describe("Hot List", () => {
     await waitFor(() => expect(lastGet("/api/v1/hotlist").url.searchParams.get("cursor")).toBe(OTHER));
     expect(screen.getByText("Page 2")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "on_hold" } });
-    fireEvent.change(screen.getByLabelText("Visibility"), { target: { value: "all_teams" } });
+    await pickOption("Status", "On hold", "Bench");
+    openMoreFilters();
+    await pickOption("Visibility", "Open to all teams");
+    negate("Visibility");
     fireEvent.change(screen.getByLabelText("Search name"), { target: { value: " divya " } });
-    fireEvent.change(screen.getByLabelText("Technology"), { target: { value: "Java" } });
+    await pickOption("Technology", "Java");
     await waitFor(() => {
       const p = lastGet("/api/v1/hotlist").url.searchParams;
       expect(p.get("search")).toBe("divya");
       expect(p.get("technology")).toBe("Java");
     });
     const p = lastGet("/api/v1/hotlist").url.searchParams;
-    expect(p.get("status")).toBe("on_hold");
+    expect(p.getAll("status")).toEqual(["on_hold", "bench"]);
     expect(p.get("visibility")).toBe("all_teams");
+    expect(p.getAll("not")).toEqual(["visibility"]);
+    // Counts are asked for with the same filters, without paging.
+    const f = lastGet("/api/v1/hotlist/facets").url.searchParams;
+    expect([f.getAll("status"), f.get("search"), f.get("limit")]).toEqual([["on_hold", "bench"], "divya", null]);
     expect(p.get("cursor")).toBeNull();
     expect(screen.getByText("Page 1")).toBeInTheDocument();
 
@@ -899,7 +906,7 @@ describe("Sales navigation", () => {
   it("opens a profile from the Hot List and returns to the same filtered list", async () => {
     wrap(<Shell me={RECRUITER} onSignOut={() => undefined} />);
     await rowOf("Asha Iyer");
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "active" } });
+    await pickOption("Status", "Active");
     const link = await screen.findByRole("button", { name: "Open profile of Asha Iyer" });
     link.focus();
     fireEvent.click(link);
@@ -909,7 +916,7 @@ describe("Sales navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "← Back to Hot List" }));
     expect(screen.getByRole("table", { name: "Hot List" })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/hotlist");
-    expect(screen.getByLabelText("Status")).toHaveValue("active");
+    expect(screen.getByRole("combobox", { name: "Status" })).toHaveValue("Active");
     await waitFor(() => expect(screen.getByRole("button", { name: "Open profile of Asha Iyer" })).toHaveFocus());
   });
 

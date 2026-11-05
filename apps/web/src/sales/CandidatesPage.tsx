@@ -5,7 +5,8 @@ import { navigate } from "../lib/router";
 import { screenPath } from "../nav";
 import { CreateCandidateDialog } from "./CreateCandidateDialog";
 import { CandidateName, profileOpenable, type ListPageProps } from "./HotListPage";
-import { ListFilters, ListFooter, resultCount } from "./ListControls";
+import { ListFilters, ListFooter, NoMatches, resultCount } from "./ListControls";
+import { SavedViews } from "./HotListExtras";
 import { STATUSES, salesApi, salesKeys } from "./salesApi";
 import { OpenToAllBadge, SharedBadge, Phone, Priority, StatusBadge } from "./ui";
 import { useCandidateList } from "./useCandidateList";
@@ -31,7 +32,8 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
     <>
       <div className="pagehead">
         <div><h1 tabIndex={-1}>Candidates{resultCount(s) && <span className="h1count" aria-label={`, ${resultCount(s)} candidates`}>{resultCount(s)}</span>}</h1><p className="sub">Candidates in your scope: your own, your team's, and those you manage.</p></div>
-        <div className="rowactions push">
+        <div className="pageactions">
+          <SavedViews s={s} list="candidates" />
           {batches.data?.canCreate && (
             <button type="button" className="btn" onClick={() => setCreating("batch")}>New batch</button>
           )}
@@ -67,7 +69,7 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
                 </tr>
                 );
               })}
-              {items.length === 0 && <tr><td colSpan={9} className="empty">{s.hasFilters ? "No candidates match these filters." : "No candidates in your scope yet."}</td></tr>}
+              {items.length === 0 && <tr><td colSpan={9} className="empty">{s.hasFilters ? <NoMatches s={s} statuses={STATUSES} batches={batches.data?.items ?? []} /> : "No candidates in your scope yet."}</td></tr>}
             </tbody>
           </table>
         )}

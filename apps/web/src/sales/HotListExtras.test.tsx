@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { capabilities, type Role } from "@eureka/shared";
 import { setCsrf, type Me } from "../api";
 import { HotListPage } from "./HotListPage";
+import { negate, openMoreFilters, pickOption, pickSegment } from "../ui/testHelpers";
 
 // ---- fixtures (shapes from apps/api/src/modules/hotlist) ---------------------------------------
 
@@ -28,7 +29,10 @@ const ITEMS = [
   cand(B, "Bala Rao"),
   cand(C, "Chitra Das", { team: { id: "t2", name: "Team Anjali" }, phone: "•••-•••-42", phoneMasked: true, canOpenProfile: false }),
 ];
-const VIEW = { id: V1, name: "Bench Java", filters: { status: "bench", technology: "Java" }, createdAt: "2026-09-30T00:00:00Z", updatedAt: "2026-09-30T00:00:00Z" };
+const VIEW = {
+  id: V1, name: "Bench Java", filters: { status: ["bench"], technology: ["Java"] }, shared: false, mine: true, owner: null,
+  createdAt: "2026-09-30T00:00:00Z", updatedAt: "2026-09-30T00:00:00Z",
+};
 
 // ---- fetch router ------------------------------------------------------------------------------
 
@@ -83,8 +87,8 @@ describe("Hot List saved views", () => {
       expect(p.get("status")).toBe("bench");
       expect(p.get("technology")).toBe("Java");
     });
-    expect(screen.getByLabelText("Status")).toHaveValue("bench");
-    expect(screen.getByLabelText("Technology")).toHaveValue("Java");
+    expect(screen.getByRole("combobox", { name: "Status" })).toHaveValue("Bench");
+    expect(screen.getByRole("combobox", { name: "Technology" })).toHaveValue("Java");
     expect(within(views()).getByRole("status")).toHaveTextContent("Showing saved view “Bench Java”.");
   });
 
@@ -92,13 +96,43 @@ describe("Hot List saved views", () => {
     routes["POST /api/v1/hotlist/views"] = (_u, b) => ({ status: 201, body: { ...VIEW, id: "new", ...(b as object) } });
     wrap(<HotListPage me={meFor("recruiter")} />);
     await rowOf("Asha Iyer");
-    fireEvent.change(screen.getByLabelText("Visibility"), { target: { value: "all_teams" } });
+    openMoreFilters();
+    await pickOption("Visibility", "Open to all teams");
     fireEvent.click(within(views()).getByRole("button", { name: "Save current filters…" }));
     const form = within(views()).getByRole("form", { name: "Save view" });
     fireEvent.change(within(form).getByLabelText("View name"), { target: { value: "  Open to all  " } });
+    fireEvent.click(within(form).getByRole("checkbox", { name: "Share with my team" }));
     fireEvent.click(within(form).getByRole("button", { name: "Save view" }));
-    await waitFor(() => expect(lastCall("POST", "/api/v1/hotlist/views")?.body).toEqual({ name: "Open to all", filters: { visibility: "all_teams" } }));
-    expect(await within(views()).findByText("Saved view “Open to all”.")).toBeInTheDocument();
+    await waitFor(() => expect(lastCall("POST", "/api/v1/hotlist/views")?.body)
+      .toEqual({ name: "Open to all", filters: { visibility: ["all_teams"] }, shared: true }));
+    expect(await within(views()).findByText("Saved view “Open to all”, shared with your team.")).toBeInTheDocument();
+  });
+
+  it("lists views a teammate shared apart from my own; they apply but only the owner changes them", async () => {
+    const TEAM = { ...VIEW, id: "22222222-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Rohit's P1s", filters: { priority: ["P1"] }, shared: true, mine: false, owner: "Rohit Rao" };
+    routes["GET /api/v1/hotlist/views"] = () => ({ body: { items: [VIEW, TEAM] } });
+    wrap(<HotListPage me={meFor("recruiter")} />);
+    await rowOf("Asha Iyer");
+    const picker = within(views()).getByLabelText("Saved view");
+    const team = await within(picker).findByRole("group", { name: "Shared by my team" });
+    expect(within(team).getByRole("option", { name: "Rohit's P1s · Rohit Rao" })).toBeInTheDocument();
+    expect(within(within(picker).getByRole("group", { name: "My views" })).getByRole("option", { name: "Bench Java" })).toBeInTheDocument();
+    fireEvent.change(picker, { target: { value: TEAM.id } });
+    await waitFor(() => expect(lastCall("GET", "/api/v1/hotlist")!.url.searchParams.getAll("priority")).toEqual(["P1"]));
+    expect(within(views()).getByText("Shared by Rohit Rao")).toBeInTheDocument();
+    expect(within(views()).queryByRole("button", { name: "Rename" })).not.toBeInTheDocument();
+    expect(within(views()).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+  });
+
+  it("shows how many candidates each value has, from the facet counts", async () => {
+    routes["GET /api/v1/hotlist/facets"] = () => ({ body: { total: 9, facets: { status: [{ value: "active", count: 7 }, { value: "bench", count: 2 }] } } });
+    wrap(<HotListPage me={meFor("recruiter")} />);
+    await rowOf("Asha Iyer");
+    await waitFor(() => expect(lastCall("GET", "/api/v1/hotlist/facets")).toBeDefined());
+    fireEvent.click(screen.getByRole("combobox", { name: "Status" }));
+    expect(await screen.findByRole("option", { name: "Active, 7 candidates" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Bench, 2 candidates" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "On hold, 0 candidates" })).toHaveClass("zero");
   });
 
   it("explains a duplicate name", async () => {
@@ -128,10 +162,13 @@ describe("Hot List saved views", () => {
     fireEvent.click(within(views()).getByRole("button", { name: "Save name" }));
     await waitFor(() => expect(lastCall("PATCH", `/api/v1/hotlist/views/${V1}`)?.body).toEqual({ name: "Java on bench" }));
 
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "active" } });
+    await pickOption("Status", "Bench", "Active"); // untick Bench, tick Active
     fireEvent.click(within(views()).getByRole("button", { name: "Update with current filters" }));
     await waitFor(() => expect(lastCall("PATCH", `/api/v1/hotlist/views/${V1}`)?.body)
-      .toEqual({ filters: { status: "active", technology: "Java" } }));
+      .toEqual({ filters: { status: ["active"], technology: ["Java"] } }));
+
+    fireEvent.click(within(views()).getByRole("button", { name: "Share with my team" }));
+    await waitFor(() => expect(lastCall("PATCH", `/api/v1/hotlist/views/${V1}`)?.body).toEqual({ shared: true }));
 
     fireEvent.click(within(views()).getByRole("button", { name: "Delete" }));
     expect(lastCall("DELETE", `/api/v1/hotlist/views/${V1}`)).toBeUndefined();
@@ -165,10 +202,11 @@ describe("Hot List export", () => {
     });
     wrap(<HotListPage me={meFor("lead")} />);
     await rowOf("Asha Iyer");
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "bench" } });
+    await pickOption("Status", "Bench");
+    negate("Status");
     fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
     expect(await screen.findByText("Exported 2 rows.")).toBeInTheDocument();
-    expect(lastCall("POST", "/api/v1/hotlist/export")?.body).toEqual({ status: "bench" });
+    expect(lastCall("POST", "/api/v1/hotlist/export")?.body).toEqual({ status: ["bench"], not: ["status"] });
     expect(clicked).toEqual(["hotlist-2026-10-01.csv"]);
     expect(created).toHaveLength(1);
     expect(screen.getByText(/Phones are masked/)).toBeInTheDocument();
@@ -295,20 +333,19 @@ describe("Hot List sheet filters, sort and columns", () => {
   it("filters by priority, team, recruiter, in person and guest house, and sorts; the sort is not a filter", async () => {
     wrap(<HotListPage me={meFor("recruiter")} />);
     await rowOf("Asha Iyer");
-    const team = screen.getByLabelText("Team");
-    await within(team).findByRole("option", { name: "Team Rohit (Rohit Rao)" });
     fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "priority" } });
     await waitFor(() => expect(lastCall("GET", "/api/v1/hotlist")!.url.searchParams.get("sort")).toBe("priority"));
     expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Priority"), { target: { value: "P1" } });
-    fireEvent.change(team, { target: { value: "t1" } });
-    fireEvent.change(screen.getByLabelText("Recruiter"), { target: { value: "r1" } });
-    fireEvent.change(screen.getByLabelText("In person"), { target: { value: "yes" } });
-    fireEvent.change(screen.getByLabelText("Guest house"), { target: { value: "gh1" } });
+    openMoreFilters();
+    await pickOption("Priority", "P1", "P2");
+    await pickOption("Team", "Team Rohit (Rohit Rao)");
+    await pickOption("Recruiter", "Sanjana");
+    pickSegment("In person", "Yes");
+    await pickOption("Guest house", "Dallas GH");
     await waitFor(() => {
       const p = lastCall("GET", "/api/v1/hotlist")!.url.searchParams;
-      expect(Object.fromEntries(["priority", "teamId", "recruiterId", "inPerson", "ghLocationId", "sort"].map((k) => [k, p.get(k)])))
-        .toEqual({ priority: "P1", teamId: "t1", recruiterId: "r1", inPerson: "yes", ghLocationId: "gh1", sort: "priority" });
+      expect(Object.fromEntries(["priority", "teamId", "recruiterId", "inPerson", "ghLocationId", "sort"].map((k) => [k, p.getAll(k)])))
+        .toEqual({ priority: ["P1", "P2"], teamId: ["t1"], recruiterId: ["r1"], inPerson: ["yes"], ghLocationId: ["gh1"], sort: ["priority"] });
     });
     expect(screen.getByRole("button", { name: "Clear filters" })).toBeInTheDocument();
   });

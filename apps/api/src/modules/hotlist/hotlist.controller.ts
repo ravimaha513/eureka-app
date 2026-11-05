@@ -3,51 +3,85 @@ import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { BulkPriority, BulkStatus, BulkVisibility, CreateView, HotlistFilters, UpdateView } from "./hotlist.schemas.js";
 import { HotlistService } from "./hotlist.service.js";
+import { CandidateViewFilters } from "../candidates/candidates.schemas.js";
+import type { ZodType } from "zod";
 
-@Controller("api/v1/hotlist")
+/** The body with its filters parsed by the list's own filter schema (422 on an unknown filter). */
+function viewBody<B extends { filters?: Record<string, unknown> }>(b: B, filters: ZodType): B {
+  return b.filters === undefined ? b : { ...b, filters: filters.parse(b.filters) as Record<string, unknown> };
+}
+
+@Controller("api/v1")
 export class HotlistController {
   constructor(private readonly svc: HotlistService) {}
 
-  @Get("views")
+  // ---- saved views: one set per list; the filters are checked against that list's filters ----
+
+  @Get("hotlist/views")
   @RequirePermission("hotlist:read")
   listViews(@CurrentUser() user: AuthedUser) {
-    return this.svc.listViews(user);
+    return this.svc.listViews(user, "hotlist");
   }
 
-  @Post("views")
+  @Post("hotlist/views")
   @RequirePermission("hotlist:read")
   createView(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
-    return this.svc.createView(user, CreateView.parse(body));
+    return this.svc.createView(user, "hotlist", viewBody(CreateView.parse(body), HotlistFilters));
   }
 
-  @Patch("views/:id")
+  @Patch("hotlist/views/:id")
   @RequirePermission("hotlist:read")
   updateView(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.svc.updateView(user, id, UpdateView.parse(body));
+    return this.svc.updateView(user, "hotlist", id, viewBody(UpdateView.parse(body), HotlistFilters));
   }
 
-  @Delete("views/:id")
+  @Delete("hotlist/views/:id")
   @RequirePermission("hotlist:read")
   @HttpCode(204)
   async deleteView(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string): Promise<void> {
-    await this.svc.deleteView(user, id);
+    await this.svc.deleteView(user, "hotlist", id);
   }
 
-  @Post("bulk/visibility")
+  @Get("candidates/views")
+  @RequirePermission("candidate:read")
+  listCandidateViews(@CurrentUser() user: AuthedUser) {
+    return this.svc.listViews(user, "candidates");
+  }
+
+  @Post("candidates/views")
+  @RequirePermission("candidate:read")
+  createCandidateView(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
+    return this.svc.createView(user, "candidates", viewBody(CreateView.parse(body), CandidateViewFilters));
+  }
+
+  @Patch("candidates/views/:id")
+  @RequirePermission("candidate:read")
+  updateCandidateView(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+    return this.svc.updateView(user, "candidates", id, viewBody(UpdateView.parse(body), CandidateViewFilters));
+  }
+
+  @Delete("candidates/views/:id")
+  @RequirePermission("candidate:read")
+  @HttpCode(204)
+  async deleteCandidateView(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string): Promise<void> {
+    await this.svc.deleteView(user, "candidates", id);
+  }
+
+  @Post("hotlist/bulk/visibility")
   @HttpCode(200)
   @RequirePermission("candidate.visibility:update")
   bulkVisibility(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.bulkVisibility(user, BulkVisibility.parse(body));
   }
 
-  @Post("bulk/status")
+  @Post("hotlist/bulk/status")
   @HttpCode(200)
   @RequirePermission("candidate:update")
   bulkStatus(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.bulkStatus(user, BulkStatus.parse(body));
   }
 
-  @Post("bulk/priority")
+  @Post("hotlist/bulk/priority")
   @HttpCode(200)
   @RequirePermission("candidate:update")
   bulkPriority(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
@@ -55,14 +89,14 @@ export class HotlistController {
   }
 
   /** Choices for the team, recruiter and guest-house filters (names only). */
-  @Get("filter-options")
+  @Get("hotlist/filter-options")
   @RequirePermission("hotlist:read")
   filterOptions(@CurrentUser() user: AuthedUser) {
     return this.svc.filterOptions(user);
   }
 
   /** POST, not GET: it is audited and needs the CSRF token (a cross-site link cannot start it). */
-  @Post("export")
+  @Post("hotlist/export")
   @HttpCode(200)
   @RequirePermission("report:export")
   async export(@CurrentUser() user: AuthedUser, @Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply) {

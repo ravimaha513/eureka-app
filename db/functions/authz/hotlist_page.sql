@@ -2,6 +2,7 @@
 -- Earlier bodies: migrations 0011, 0015, 0034, 0140. Change this file, not a new migration.
 -- 0290 (signature dropped there): p_more carries the Hot List sheet filters and the sort,
 -- so later filters need no new signature; returns the team lead and in-person.
+-- Filters UI: p_more.f holds multi-value filters (arrays) and p_more.not the inverted keys.
 
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.hotlist_page(p_status text, p_technology text, p_visibility text, p_search text, p_cursor uuid, p_limit integer, p_location uuid DEFAULT NULL::uuid, p_visa text DEFAULT NULL::text, p_documents text DEFAULT NULL::text, p_resume boolean DEFAULT NULL::boolean, p_stay text DEFAULT NULL::text, p_more jsonb DEFAULT NULL::jsonb)
@@ -63,6 +64,28 @@ BEGIN
       AND ($12::jsonb ->> 'recruiterId' IS NULL OR c.recruiter_id = ($12::jsonb ->> 'recruiterId')::uuid)
       AND ($12::jsonb ->> 'inPerson' IS NULL OR c.in_person_ok IS NOT DISTINCT FROM ($12::jsonb ->> 'inPerson' = 'yes'))
       AND ($12::jsonb ->> 'ghLocationId' IS NULL OR c.gh_location_id = ($12::jsonb ->> 'ghLocationId')::uuid)
+      -- $12 -> 'f': multi-value filters (arrays); $12 -> 'not': the keys to invert. A NULL column
+      -- never matches a list, so "none of" keeps it. Mirrors the API's filterPredicates (list-filters.ts).
+      AND ($12::jsonb #> '{f,status}' IS NULL
+           OR coalesce(c.marketing_status = ANY (ARRAY(SELECT x FROM jsonb_array_elements_text($12::jsonb #> '{f,status}') x)), false) <> coalesce(($12::jsonb -> 'not') ? 'status', false))
+      AND ($12::jsonb #> '{f,technology}' IS NULL
+           OR coalesce(t.name = ANY (ARRAY(SELECT x FROM jsonb_array_elements_text($12::jsonb #> '{f,technology}') x)), false) <> coalesce(($12::jsonb -> 'not') ? 'technology', false))
+      AND ($12::jsonb #> '{f,visibility}' IS NULL
+           OR coalesce(c.visibility = ANY (ARRAY(SELECT x FROM jsonb_array_elements_text($12::jsonb #> '{f,visibility}') x)), false) <> coalesce(($12::jsonb -> 'not') ? 'visibility', false))
+      AND ($12::jsonb #> '{f,locationId}' IS NULL
+           OR coalesce(c.location_id = ANY (ARRAY(SELECT x::uuid FROM jsonb_array_elements_text($12::jsonb #> '{f,locationId}') x)), false) <> coalesce(($12::jsonb -> 'not') ? 'locationId', false))
+      AND ($12::jsonb #> '{f,visa}' IS NULL
+           OR coalesce(c.visa_category = ANY (ARRAY(SELECT x FROM jsonb_array_elements_text($12::jsonb #> '{f,visa}') x)), false) <> coalesce(($12::jsonb -> 'not') ? 'visa', false))
+      AND ($12::jsonb #> '{f,documents}' IS NULL
+           OR coalesce(c.documents_status = ANY (ARRAY(SELECT x FROM jsonb_array_elements_text($12::jsonb #> '{f,documents}') x)) OR (c.documents_status IS NULL AND 'none' = ANY (ARRAY(SELECT x FROM jsonb_array_elements_text($12::jsonb #> '{f,documents}') x))), false) <> coalesce(($12::jsonb -> 'not') ? 'documents', false))
+      AND ($12::jsonb #> '{f,priority}' IS NULL
+           OR coalesce(c.priority = ANY (ARRAY(SELECT x FROM jsonb_array_elements_text($12::jsonb #> '{f,priority}') x)), false) <> coalesce(($12::jsonb -> 'not') ? 'priority', false))
+      AND ($12::jsonb #> '{f,teamId}' IS NULL
+           OR coalesce(c.team_id = ANY (ARRAY(SELECT x::uuid FROM jsonb_array_elements_text($12::jsonb #> '{f,teamId}') x)), false) <> coalesce(($12::jsonb -> 'not') ? 'teamId', false))
+      AND ($12::jsonb #> '{f,recruiterId}' IS NULL
+           OR coalesce(c.recruiter_id = ANY (ARRAY(SELECT x::uuid FROM jsonb_array_elements_text($12::jsonb #> '{f,recruiterId}') x)), false) <> coalesce(($12::jsonb -> 'not') ? 'recruiterId', false))
+      AND ($12::jsonb #> '{f,ghLocationId}' IS NULL
+           OR coalesce(c.gh_location_id = ANY (ARRAY(SELECT x::uuid FROM jsonb_array_elements_text($12::jsonb #> '{f,ghLocationId}') x)), false) <> coalesce(($12::jsonb -> 'not') ? 'ghLocationId', false))
   ),
   after AS (
     SELECT h.* FROM page h

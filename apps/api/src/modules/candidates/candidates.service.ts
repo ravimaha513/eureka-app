@@ -50,6 +50,9 @@ import type {
   TimelineQuery,
 } from "./candidates.schemas.js";
 import { Email } from "./candidates.schemas.js";
+import {
+  FACET_KEYS, facetQuery, filterPredicates, filterSummary, hotlistMore, shapeFacets, type FacetCounts, type ListFilter,
+} from "./list-filters.js";
 import { buildCandidateImportTemplate } from "./candidate-import-template.js";
 import { likeContains } from "../../platform/sql.js";
 import { dbErrorMapper } from "../../platform/errors.js";
@@ -93,41 +96,6 @@ interface CandidateRow {
 /** Guest house or remote (Hot List "stay"), from the two columns behind it. */
 const stayOf = (r: { gh_remote: boolean; gh_location_name: string | null }) =>
   r.gh_remote ? "remote" : r.gh_location_name !== null ? "guest_house" : null;
-
-/**
- * Hot List / Candidates list filters added for the Eureka App 4 spec, as
- * parameterized predicates (the open Hot List applies the same in
- * authz.hotlist_page). The resume filter reads authz.resume_candidate_ids once
- * per statement (InitPlan feeding a hashed SubPlan, rule 3).
- */
-export function extraFilterPredicates(q: CandidateListQuery, params: unknown[], alias = "c"): string[] {
-  const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
-  const where: string[] = [];
-  if (q.locationId) where.push(`${alias}.location_id = ${p(q.locationId)}`);
-  if (q.visa) where.push(`${alias}.visa_category = ${p(q.visa)}`);
-  if (q.documents === "none") where.push(`${alias}.documents_status IS NULL`);
-  else if (q.documents) where.push(`${alias}.documents_status = ${p(q.documents)}`);
-  if (q.resume) {
-    const has = `(${alias}.resume_url IS NOT NULL OR ${alias}.id IN (SELECT pg_catalog.unnest((SELECT authz.resume_candidate_ids()))))`;
-    where.push(q.resume === "yes" ? has : `NOT ${has}`);
-  }
-  if (q.stay === "remote") where.push(`${alias}.gh_remote`);
-  if (q.stay === "guest_house") where.push(`${alias}.gh_location_id IS NOT NULL`);
-  if (q.priority) where.push(`${alias}.priority = ${p(q.priority)}`);
-  if (q.teamId) where.push(`${alias}.team_id = ${p(q.teamId)}`);
-  if (q.recruiterId) where.push(`${alias}.recruiter_id = ${p(q.recruiterId)}`);
-  if (q.inPerson) where.push(`${alias}.in_person_ok IS ${q.inPerson === "yes" ? "TRUE" : "FALSE"}`);
-  if (q.ghLocationId) where.push(`${alias}.gh_location_id = ${p(q.ghLocationId)}`);
-  return where;
-}
-
-/** The 0290 filters and sort for authz.hotlist_page / hotlist_export (one jsonb argument, so new keys need no new signature). */
-export function moreFilters(q: Pick<CandidateListQuery, "priority" | "teamId" | "recruiterId" | "inPerson" | "ghLocationId" | "sort">) {
-  return {
-    priority: q.priority ?? null, teamId: q.teamId ?? null, recruiterId: q.recruiterId ?? null,
-    inPerson: q.inPerson ?? null, ghLocationId: q.ghLocationId ?? null, sort: q.sort ?? null,
-  };
-}
 
 /**
  * Order key of a list sort (null: id order). Paging is keyset on (key, id),
@@ -315,6 +283,8 @@ export const HOTLIST_PAGES_PER_MINUTE = 60;
 export class CandidatesService implements OnModuleInit {
   private readonly log = new Logger(CandidatesService.name);
   private readonly hotlistLimiter = new RateLimiter(HOTLIST_PAGES_PER_MINUTE, 60_000);
+  /** Facet counts have their own budget: each filter change asks for a page and its counts. */
+  private readonly facetLimiter = new RateLimiter(HOTLIST_PAGES_PER_MINUTE, 60_000);
   private readonly duplicateLimiter = new RateLimiter(DUPLICATE_CHECKS_PER_MINUTE, 60_000);
   private readonly bulkCandidateLimiter = new RateLimiter(BULK_CANDIDATE_CALLS_PER_MINUTE, 60_000);
   /** The database is the source of truth for the Hot List switch (cached briefly). */
@@ -423,11 +393,7 @@ export class CandidatesService implements OnModuleInit {
     const params: unknown[] = [];
     const where = [scopePredicate(scope, params)];
     if (perm === "hotlist:read") { params.push([...HOTLIST_STATUSES]); where.push(`c.marketing_status = ANY($${params.length}::text[])`); }
-    if (q.status) { params.push(q.status); where.push(`c.marketing_status = $${params.length}`); }
-    if (q.technology) { params.push(q.technology); where.push(`t.name = $${params.length}`); }
-    if (q.visibility) { params.push(q.visibility); where.push(`c.visibility = $${params.length}`); }
-    if (q.batchId) { params.push(q.batchId); where.push(`c.batch_id = $${params.length}`); }
-    where.push(...extraFilterPredicates(q, params));
+    where.push(...Object.values(filterPredicates(q, params)));
     if (q.search) {
       params.push(likeContains(q.search));
       where.push(`(p.first_name || ' ' || p.last_name) ILIKE $${params.length}`);
@@ -462,18 +428,46 @@ export class CandidatesService implements OnModuleInit {
     };
   }
 
+  /**
+   * Facet counts for the list filters: per filter, how many candidates in the caller's list carry
+   * each value when every other filter applies. Same scope as `list` (the open Hot List through
+   * authz.hotlist_facets). Aggregates only, so not audited per read; the Hot List's are rate-limited.
+   */
+  async facets(user: AuthedUser, perm: "candidate:read" | "hotlist:read", q: ListFilter): Promise<FacetCounts> {
+    const scope = perm === "hotlist:read"
+      ? resolveScope(user.access, perm, await this.currentHotlistPolicy())
+      : resolveScope(user.access, perm);
+    if (!scope) throw new ForbiddenException();
+    const keys = perm === "hotlist:read" ? FACET_KEYS.filter((k) => k !== "batchId") : FACET_KEYS;
+    const search = q.search ? likeContains(q.search) : null;
+    if (perm === "hotlist:read") {
+      if (!this.facetLimiter.take(user.id)) {
+        throw new HttpException("Too many Hot List requests; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
+      }
+      if (scope.hotlistOpen) {
+        const rows = await this.db.withUser(user.id, async (c) => (await c.query<{ facet: string; value: string | null; n: string }>(
+          `SELECT * FROM authz.hotlist_facets($1, $2, $3, $4)`,
+          [search, q.resume === undefined ? null : q.resume === "yes", q.stay ?? null, hotlistMore(q)])).rows);
+        return shapeFacets(rows, keys);
+      }
+    }
+    const params: unknown[] = [];
+    const where = [scopePredicate(scope, params)];
+    if (perm === "hotlist:read") { params.push([...HOTLIST_STATUSES]); where.push(`c.marketing_status = ANY($${params.length}::text[])`); }
+    if (search) { params.push(search); where.push(`(p.first_name || ' ' || p.last_name) ILIKE $${params.length}`); }
+    const sql = facetQuery(where, filterPredicates(q, params), keys);
+    const rows = await this.db.withUser(user.id, async (c) =>
+      (await c.query<{ facet: string; value: string | null; n: string }>(sql, params)).rows);
+    return shapeFacets(rows, keys);
+  }
+
   /** Audit row of one Hot List page: who, filter summary (free text as a flag only, rule 5), row count and id range. */
   private async auditHotlistPage(c: pg.PoolClient, user: AuthedUser, q: CandidateListQuery, r: { id: string }[]) {
     const n = Math.min(r.length, q.limit);
     await this.audit.record(c, {
       actorId: user.id, action: "hotlist.read", entityType: "candidate",
       changes: {
-        filters: {
-          status: q.status, technology: q.technology, visibility: q.visibility, search: q.search ? true : undefined,
-          locationId: q.locationId, visa: q.visa, documents: q.documents, resume: q.resume, stay: q.stay,
-          priority: q.priority, teamId: q.teamId, recruiterId: q.recruiterId, inPerson: q.inPerson,
-          ghLocationId: q.ghLocationId, sort: q.sort,
-        },
+        filters: filterSummary(q),
         rows: n, firstId: r[0]?.id ?? null, lastId: r[n - 1]?.id ?? null,
       },
     });
@@ -488,10 +482,8 @@ export class CandidatesService implements OnModuleInit {
     const search = q.search ? likeContains(q.search) : null;
     const rows = await this.db.withUser(user.id, async (c) => {
       const r = (await c.query<HotlistRow>(
-        `SELECT * FROM authz.hotlist_page($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-        [q.status ?? null, q.technology ?? null, q.visibility ?? null, search, q.cursor ?? null, q.limit + 1,
-          q.locationId ?? null, q.visa ?? null, q.documents ?? null, q.resume === undefined ? null : q.resume === "yes",
-          q.stay ?? null, moreFilters(q)],
+        `SELECT * FROM authz.hotlist_page(NULL, NULL, NULL, $1, $2, $3, NULL, NULL, NULL, $4, $5, $6)`,
+        [search, q.cursor ?? null, q.limit + 1, q.resume === undefined ? null : q.resume === "yes", q.stay ?? null, hotlistMore(q)],
       )).rows;
       await this.auditHotlistPage(c, user, q, r);
       return r;
