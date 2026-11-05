@@ -1,57 +1,89 @@
 import { useId } from "react";
+import { INTERVIEW_DURATIONS } from "@eureka/shared";
+import { LOCAL_ZONE, todayIn, wallToInstant, zoneAbbr, zoneOptions } from "./zones";
 
-/** A slot as the picker holds it: local day (YYYY-MM-DD), local time (HH:MM) and length. */
+/** A slot as the picker holds it: day (YYYY-MM-DD) and time (HH:MM) in the picker's zone, and length. */
 export interface Slot { day: string; time: string; durationMin: number }
 
-export const DURATIONS = [30, 45, 60, 90] as const;
+/** Lengths offered (minutes); the API accepts 15..240. */
+export const DURATIONS = INTERVIEW_DURATIONS;
 const DAY_CHIPS = 5;
-const FIRST_SLOT = 6 * 60;
-const LAST_SLOT = 22 * 60 + 45;
 
 const pad = (n: number) => String(n).padStart(2, "0");
 export const isoDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const at = (day: string, time: string) => new Date(`${day}T${time}:00`);
 
-/** The slot's start as an instant, or null while day or time is missing. */
-export function slotStart(s: Slot): Date | null {
+/** The slot's start as an instant (its day and time read in `zone`), or null while day or time is missing. */
+export function slotStart(s: Slot, zone: string = LOCAL_ZONE): Date | null {
   if (!s.day || !s.time) return null;
-  const d = at(s.day, s.time);
-  return Number.isNaN(+d) ? null : d;
+  return wallToInstant(s.day, s.time, zone);
 }
 
-const timeLabel = (d: Date) => d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+export const durationLabel = (m: number) => (m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} hr` : `${Math.floor(m / 60)} hr ${m % 60} min`);
+const timeLabel = (hhmm: string) => new Date(`2000-01-03T${hhmm}:00`).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+const inZone = (d: Date, zone: string, o: Intl.DateTimeFormatOptions) => d.toLocaleString(undefined, { timeZone: zone, ...o });
+
+/** The next `n` working days (Mon–Fri) from `today` (YYYY-MM-DD), today included when it is one. */
+function workingDays(today: string, n: number): Date[] {
+  const [y, m, d] = today.split("-").map(Number) as [number, number, number];
+  const out: Date[] = [];
+  for (let i = 0; out.length < n && i < 14; i++) {
+    const day = new Date(y, m - 1, d + i);
+    if (day.getDay() !== 0 && day.getDay() !== 6) out.push(day);
+  }
+  return out;
+}
 
 /** "Today", "Tomorrow", then "Wed 4". */
-function dayLabel(d: Date, i: number) {
-  if (i === 0) return "Today";
-  if (i === 1) return "Tomorrow";
+function dayLabel(d: Date, today: string) {
+  const t = new Date(`${today}T00:00:00`);
+  const diff = Math.round((+new Date(d.getFullYear(), d.getMonth(), d.getDate()) - +t) / 86_400_000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Tomorrow";
   return `${d.toLocaleDateString(undefined, { weekday: "short" })} ${d.getDate()}`;
 }
 
 /**
- * Interview slot: day chips for the coming week (plus any other date), a
- * 15-minute start list and duration chips, with the resulting window spelled
- * out underneath. Replaces two native datetime pickers.
+ * Interview slot, the one form used everywhere an interview is booked: the time zone first (the
+ * times below are read in it), day chips for the next five working days plus any other date, a
+ * 15-minute start list, the length, then the resulting window spelled out, with the viewer's own
+ * time when the zone is another one.
  */
-export function SlotPicker({ value, onChange, zone, errors = {} }: {
-  value: Slot; onChange: (s: Slot) => void; zone: string;
+export function SlotPicker({ value, onChange, zone, onZoneChange, errors = {} }: {
+  value: Slot; onChange: (s: Slot) => void;
+  /** Zone the day and time are entered in. */
+  zone: string;
+  /** Lets the user change the zone (the select is shown first); without it the zone is only named. */
+  onZoneChange?: (zone: string) => void;
   errors?: Partial<Record<"day" | "time", string>>;
 }) {
   const id = useId();
-  const today = new Date();
-  const days = Array.from({ length: DAY_CHIPS }, (_, i) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + i));
+  const today = todayIn(zone);
+  const days = workingDays(today, DAY_CHIPS);
   const chipDays = days.map(isoDay);
   const otherDay = value.day && !chipDays.includes(value.day) ? value.day : "";
   const set = (patch: Partial<Slot>) => onChange({ ...value, ...patch });
 
   const times: string[] = [];
-  for (let m = FIRST_SLOT; m <= LAST_SLOT; m += 15) times.push(`${pad(Math.floor(m / 60))}:${pad(m % 60)}`);
+  for (let m = 0; m < 24 * 60; m += 15) times.push(`${pad(Math.floor(m / 60))}:${pad(m % 60)}`);
+  const durations: number[] = (DURATIONS as readonly number[]).includes(value.durationMin) ? [...DURATIONS] : [...DURATIONS, value.durationMin].sort((a, b) => a - b);
 
-  const start = slotStart(value);
+  const start = slotStart(value, zone);
   const end = start && new Date(+start + value.durationMin * 60_000);
+  const abbr = zoneAbbr(zone, start ?? new Date());
 
   return (
-    <div className="slotpicker">
+    <fieldset className="slotpicker">
+      <legend className="sr-only">Interview slot</legend>
+      {onZoneChange ? (
+        <div className="field slot-zone">
+          <label htmlFor={`${id}-zone`}>Time zone</label>
+          <select id={`${id}-zone`} value={zone} onChange={(e) => onZoneChange(e.target.value)}>
+            {zoneOptions(zone).map(([z, l]) => <option key={z} value={z}>{l}</option>)}
+          </select>
+        </div>
+      ) : (
+        <p className="hint slot-zonenote">Times in {zone} ({abbr}).</p>
+      )}
       <div className="field">
         <span className="slot-label" id={`${id}-day`}>Day</span>
         <div className="slotchips" role="group" aria-labelledby={`${id}-day`} aria-describedby={errors.day ? `${id}-day-err` : undefined}>
@@ -59,12 +91,12 @@ export function SlotPicker({ value, onChange, zone, errors = {} }: {
             <button key={chipDays[i]} type="button" className="slotchip" aria-pressed={value.day === chipDays[i]}
               aria-label={d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
               onClick={() => set({ day: chipDays[i]! })}>
-              {dayLabel(d, i)}
+              {dayLabel(d, today)}
             </button>
           ))}
           <label className={`slotchip slotdate${otherDay ? " on" : ""}`}>
             <span className="sr-only">Other date</span>
-            <input type="date" min={chipDays[0]} value={otherDay} aria-label="Other date"
+            <input type="date" value={otherDay} aria-label="Other date"
               onChange={(e) => e.target.value && set({ day: e.target.value })} />
           </label>
         </div>
@@ -75,31 +107,31 @@ export function SlotPicker({ value, onChange, zone, errors = {} }: {
         <div className="field">
           <label htmlFor={`${id}-time`}>Start time</label>
           <select id={`${id}-time`} value={value.time} onChange={(e) => set({ time: e.target.value })}
-            aria-invalid={errors.time ? true : undefined} aria-describedby={errors.time ? `${id}-time-err` : undefined}>
+            aria-invalid={errors.time ? true : undefined} aria-describedby={errors.time ? `${id}-time-err` : `${id}-tz`}>
             <option value="" disabled>Choose…</option>
-            {times.map((t) => (
-              <option key={t} value={t}>{timeLabel(at("2000-01-03", t))}</option>
-            ))}
+            {times.map((t) => <option key={t} value={t}>{timeLabel(t)}</option>)}
           </select>
-          {errors.time && <small id={`${id}-time-err`} className="error fielderr">{errors.time}</small>}
+          {errors.time ? <small id={`${id}-time-err`} className="error fielderr">{errors.time}</small>
+            : <small id={`${id}-tz`} className="hint">{abbr}</small>}
         </div>
         <div className="field">
-          <span className="slot-label" id={`${id}-dur`}>Duration</span>
-          <div className="slotchips" role="group" aria-labelledby={`${id}-dur`}>
-            {DURATIONS.map((m) => (
-              <button key={m} type="button" className="slotchip" aria-pressed={value.durationMin === m} onClick={() => set({ durationMin: m })}>
-                {m < 60 ? `${m} min` : m === 60 ? "1 hr" : `${m / 60} hr`}
-              </button>
-            ))}
-          </div>
+          <label htmlFor={`${id}-dur`}>Duration</label>
+          <select id={`${id}-dur`} value={value.durationMin} onChange={(e) => set({ durationMin: Number(e.target.value) })}>
+            {durations.map((m) => <option key={m} value={m}>{durationLabel(m)}</option>)}
+          </select>
         </div>
       </div>
 
       <p className="slot-summary" aria-live="polite">
-        {start && end
-          ? <><b>{start.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</b> · {timeLabel(start)} – {timeLabel(end)} <span className="muted">({zone})</span></>
-          : <span className="muted">Pick a day and a start time.</span>}
+        {start && end ? (
+          <>
+            <b>{inZone(start, zone, { weekday: "long", day: "numeric", month: "long" })}</b> · {inZone(start, zone, { hour: "numeric", minute: "2-digit" })} – {inZone(end, zone, { hour: "numeric", minute: "2-digit" })} <span className="muted">{abbr} ({zone})</span>
+            {zone !== LOCAL_ZONE && (
+              <span className="block muted">Your time: {inZone(start, LOCAL_ZONE, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })} – {inZone(end, LOCAL_ZONE, { hour: "numeric", minute: "2-digit" })} {zoneAbbr(LOCAL_ZONE, start)}</span>
+            )}
+          </>
+        ) : <span className="muted">Pick a day and a start time ({abbr}).</span>}
       </p>
-    </div>
+    </fieldset>
   );
 }

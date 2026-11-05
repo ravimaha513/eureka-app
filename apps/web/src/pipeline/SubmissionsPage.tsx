@@ -1,60 +1,83 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type MouseEvent } from "react";
 import { Pencil } from "lucide-react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { INTERVIEW_STAGE_LABELS } from "@eureka/shared";
 import { can, type Me } from "../api";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
+import { FilterBar, type FilterChip } from "../ui/FilterBar";
+import { Menu } from "../ui/Menu";
+import { RecordLink } from "../ui/RecordLink";
 import { useLookupName } from "../lookups";
 import { Drawer, Field } from "../sales/ui";
 import { AssessmentsSection } from "../pipelinereport/AssessmentsSection";
 import type { Interview } from "../interviews/InterviewsPage";
-import { CreatePlacementButton, CreatePlacementDialog } from "./CreatePlacementDialog";
+import { CreatePlacementDialog, rowPlacement } from "./CreatePlacementDialog";
 import { EditSubmissionDialog } from "./EditSubmissionDialog";
 import { pipelineError } from "./errors";
 import {
   ISO_DAY, SUBMISSION_STATUSES, dayBoundary, fmtDateTime, fmtRate, pipelineApi, pipelineKeys, pipelineLabel, type Submission,
 } from "./pipelineApi";
-import { ScheduleInterviewButton, ScheduleInterviewDialog } from "./ScheduleInterviewDialog";
-import { RejectRoundDialog, SubmissionRounds, refreshRounds } from "./SubmissionRounds";
-import { PipelineFunnel, PipelineStatus, ReachedFilter, StageTrail, StatusChips, parseReached, reachedValue, useBatchOptions, useDebounced, type Reached } from "./ui";
+import { ScheduleInterviewDialog, nextRoundOf, refreshAfterSchedule } from "./ScheduleInterviewDialog";
+import { RejectRoundDialog, SubmissionRounds, nextRoundName, refreshRounds } from "./SubmissionRounds";
+import { PipelineFunnel, PipelineStatus, ReachedFilter, StageTrail, parseReached, reachedValue, useBatchOptions, useDebouncedParam, type Reached } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
-import { useSearchParam } from "../lib/router";
+import { useRoutedId, useSearchParams } from "../lib/router";
+import "./pipeline.css";
 
 const PAGE_SIZE = 50;
 const CLOSING = new Set(["rejected", "withdrawn"]);
+const PARAMS = ["status", "from", "to", "reached", "batchId"] as const;
+
+/** "Sep 20, 2026" (the time is in the drawer). */
+export const fmtDay = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" }) : "—");
+
+/** Ignore row clicks that land on a control inside the row (links, buttons, fields). */
+export const fromControl = (e: MouseEvent) => Boolean((e.target as HTMLElement).closest("a, button, input, select, textarea, label, [role='menu']"));
+
+/** "Reached L1", "Got an interview", … for the Interview filter chip. */
+function reachedLabel(r: Reached): string {
+  if (r.stage === "placed") return "Placed";
+  if (r.stage) return `Reached ${INTERVIEW_STAGE_LABELS[r.stage as keyof typeof INTERVIEW_STAGE_LABELS] ?? r.stage}`;
+  return r.interviewed === "true" ? "Got an interview" : r.interviewed === "false" ? "No interview yet" : "";
+}
+
+type RowModal = { kind: "schedule"; s: Submission } | { kind: "place"; s: Submission };
 
 /** Submissions list (GET /api/v1/submissions) with a detail drawer for status changes and next steps. */
-export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabilities">; onOpenPlacement?: (id: string) => void }) {
+export function SubmissionsPage({ me, onOpenPlacement, initialOpenId = null, onOpenChange }: {
+  me: Pick<Me, "capabilities">; onOpenPlacement?: (id: string) => void;
+  /** The submission open in the drawer (/submissions/<id>). */
+  initialOpenId?: string | null;
+  /** The open submission changed (the shell keeps it in the URL). */
+  onOpenChange?: (id: string | null) => void;
+}) {
   const id = useId();
+  const qc = useQueryClient();
   const canSearchCandidates = can(me, "candidate:read");
-  // Status and dates live in the address bar (?status=&from=&to=), so a refresh or a shared link keeps them.
-  const [statusParam, setStatusRaw] = useSearchParam("status");
-  const [fromParam, setFromRaw] = useSearchParam("from");
-  const [toParam, setToRaw] = useSearchParam("to");
-  // ?reached=true|false|stage:l1|stage:placed (how far the submission got)
-  const [reachedParam, setReachedRaw] = useSearchParam("reached");
-  const reached = parseReached(reachedParam);
-  const [searchInput, setSearchInput] = useState("");
-  const search = useDebounced(searchInput.trim());
-  const status = (SUBMISSION_STATUSES as readonly string[]).includes(statusParam) ? statusParam : "";
-  const from = ISO_DAY.test(fromParam) ? fromParam : "";
-  const to = ISO_DAY.test(toParam) ? toParam : "";
-  const [candidateInput, setCandidateInput] = useState("");
-  const candidate = useDebounced(candidateInput.trim());
-  const [batchId, setBatchIdRaw] = useSearchParam("batchId");
+  const canOpenInterview = can(me, "interview:read");
+  // Every filter lives in the address bar (?status=&from=&to=&reached=&batchId=&candidate=&q=), so a refresh or a shared link keeps it.
+  const [url, setUrl] = useSearchParams(PARAMS);
+  const reached = parseReached(url.reached);
+  const [searchInput, setSearchInput, search] = useDebouncedParam("q");
+  const [candidateInput, setCandidateInput, candidate] = useDebouncedParam("candidate");
+  const status = (SUBMISSION_STATUSES as readonly string[]).includes(url.status) ? url.status : "";
+  const from = ISO_DAY.test(url.from) ? url.from : "";
+  const to = ISO_DAY.test(url.to) ? url.to : "";
+  const batchId = url.batchId;
   const batches = useBatchOptions(me);
   const pager = useCursorPager();
   const { page, reset } = pager;
-  const setStatus = (v: string) => { setStatusRaw(v); reset(); };
-  const setFrom = (v: string) => { setFromRaw(v); reset(); };
-  const setTo = (v: string) => { setToRaw(v); reset(); };
-  const setBatchId = (v: string) => { setBatchIdRaw(v); reset(); };
-  const setReached = (v: Reached) => { setReachedRaw(reachedValue(v)); reset(); };
+  const patch = (p: Partial<Record<(typeof PARAMS)[number], string>>) => { setUrl(p); reset(); };
+  const setReached = (v: Reached) => patch({ reached: reachedValue(v) });
   useEffect(() => { reset(); }, [search, candidate, reset]);
   const invalidRange = Boolean(from && to && from > to);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useRoutedId(initialOpenId, onOpenChange);
   const [notice, setNotice] = useState("");
+  const [created, setCreated] = useState<string | null>(null);
+  const [rowModal, setRowModal] = useState<RowModal | null>(null);
+  const say = (m: string, placementId: string | null = null) => { setNotice(m); setCreated(placementId); };
 
   const filters = {
     status, candidate, batchId, ...reached, search,
@@ -67,7 +90,7 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
     placeholderData: keepPreviousData,
     enabled: !invalidRange,
   });
-  // Funnel for the same filters except status and "reached" (those are what the funnel breaks down).
+  // Funnel and status counts for the same filters except status and "reached" (those are what they break down).
   const sumFilters = { candidate, batchId, search, from: filters.from, to: filters.to };
   const summary = useQuery({
     queryKey: [...pipelineKeys.submissions, "summary", sumFilters],
@@ -82,93 +105,132 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
   const n = items.length;
   const countMsg = q.isLoading || q.error || invalidRange ? ""
     : `${n} ${n === 1 ? "submission" : "submissions"} on page ${page + 1}${q.data?.nextCursor ? ", more on the next page" : ""}.`;
+  const counts = summary.data?.byStatus;
+  const clear = () => { setUrl({ status: "", from: "", to: "", reached: "", batchId: "" }); setCandidateInput(""); setSearchInput(""); reset(); };
+
+  const chips: FilterChip[] = [];
+  if (batchId) chips.push({ key: "batch", label: `Batch: ${batches.find((b) => b.id === batchId)?.name ?? "Selected batch"}`, onRemove: () => patch({ batchId: "" }) });
+  if (reached.interviewed || reached.stage) chips.push({ key: "reached", label: reachedLabel(reached), onRemove: () => patch({ reached: "" }) });
+  const activeCount = [status, from, to, candidate, search].filter(Boolean).length + chips.length;
+
+  const jobField = (
+    <div className={`field inline${canSearchCandidates ? "" : " fb-search"}`}>
+      <label htmlFor={`${id}-job`}>Job or client</label>
+      <input id={`${id}-job`} type="search" placeholder="e.g. Java, Meta" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
+    </div>
+  );
 
   return (
-    <>
-      <div>
-        <h1 tabIndex={-1}>Submissions</h1>
-        <p className="sub">Track each submission from first send to a decision. Open one to move it forward, schedule an interview or create a placement.</p>
+    <section className="panel plpage">
+      <div className="pagehead">
+        <div>
+          <h1 tabIndex={-1}>Submissions{!q.isLoading && !q.error && !invalidRange && <span className="h1count">{n}{q.data?.nextCursor ? "+" : ""}</span>}</h1>
+          <p className="sub">Track each submission from first send to a decision. Open one to move it forward, schedule an interview or create a placement.</p>
+        </div>
       </div>
 
-      <form className="filters" role="search" aria-label="Submission filters" onSubmit={(e) => e.preventDefault()}>
-        <StatusChips label="Status" statuses={SUBMISSION_STATUSES} value={status} onChange={setStatus} />
-        <div className="toolbar">
-          <div className="field inline">
-            <label htmlFor={`${id}-from`}>Submitted from</label>
-            <input id={`${id}-from`} type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+      <FilterBar label="Submission filters" hasFilters={hasFilters} onClear={clear} chips={chips} moreCount={chips.length} activeCount={activeCount}
+        search={canSearchCandidates ? (
+          <div className="field inline fb-search">
+            <label htmlFor={`${id}-candidate`}>Candidate</label>
+            <input id={`${id}-candidate`} type="search" placeholder="Search by name" value={candidateInput} onChange={(e) => setCandidateInput(e.target.value)} />
           </div>
-          <div className="field inline">
-            <label htmlFor={`${id}-to`}>Submitted through</label>
-            <input id={`${id}-to`} type="date" value={to} onChange={(e) => setTo(e.target.value)}
-              aria-invalid={invalidRange || undefined} aria-describedby={invalidRange ? `${id}-range` : undefined} />
-          </div>
-          {canSearchCandidates && (
-            <div className="field inline">
-              <label htmlFor={`${id}-candidate`}>Candidate</label>
-              <input id={`${id}-candidate`} type="search" placeholder="Search by name" value={candidateInput} onChange={(e) => setCandidateInput(e.target.value)} />
-            </div>
-          )}
-          {batches.length > 0 && (
-            <div className="field inline">
-              <label htmlFor={`${id}-batch`}>Batch</label>
-              <select id={`${id}-batch`} value={batchId} onChange={(e) => setBatchId(e.target.value)}>
-                <option value="">All</option>
-                {batches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        ) : jobField}
+        primary={
+          <>
+            <div className="field inline fb-status">
+              <label htmlFor={`${id}-status`}>Status</label>
+              <select id={`${id}-status`} value={status} onChange={(e) => patch({ status: e.target.value })}>
+                <option value="">Any status{summary.data ? ` · ${summary.data.total}` : ""}</option>
+                {SUBMISSION_STATUSES.map((st) => <option key={st} value={st}>{pipelineLabel(st)}{counts ? ` · ${counts[st] ?? 0}` : ""}</option>)}
               </select>
             </div>
-          )}
-          <div className="field inline">
-            <label htmlFor={`${id}-job`}>Job or client</label>
-            <input id={`${id}-job`} type="search" placeholder="e.g. Java, Meta" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
-          </div>
-          <ReachedFilter value={reached} onChange={setReached} />
-          {hasFilters && (
-            <button type="button" className="btn" onClick={() => { setStatusRaw(""); setFromRaw(""); setToRaw(""); setCandidateInput(""); setBatchIdRaw(""); setReachedRaw(""); setSearchInput(""); reset(); }}>
-              Clear filters
-            </button>
-          )}
-        </div>
-        {invalidRange && <p id={`${id}-range`} className="error" role="alert">“Submitted through” must be on or after “Submitted from”.</p>}
-      </form>
+            {canSearchCandidates && jobField}
+            <div className="field inline pl-date">
+              <label htmlFor={`${id}-from`}>Submitted from</label>
+              <input id={`${id}-from`} type="date" value={from} onChange={(e) => patch({ from: e.target.value })} />
+            </div>
+            <div className="field inline pl-date">
+              <label htmlFor={`${id}-to`}>Submitted through</label>
+              <input id={`${id}-to`} type="date" value={to} onChange={(e) => patch({ to: e.target.value })}
+                aria-invalid={invalidRange || undefined} aria-describedby={invalidRange ? `${id}-range` : undefined} />
+            </div>
+          </>
+        }
+        more={
+          <>
+            {batches.length > 0 && (
+              <div className="field inline">
+                <label htmlFor={`${id}-batch`}>Batch</label>
+                <select id={`${id}-batch`} value={batchId} onChange={(e) => patch({ batchId: e.target.value })}>
+                  <option value="">All</option>
+                  {batches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+            )}
+            <ReachedFilter value={reached} onChange={setReached} />
+          </>
+        }
+      />
+      {invalidRange && <p id={`${id}-range`} className="error" role="alert">“Submitted through” must be on or after “Submitted from”.</p>}
 
       {!invalidRange && summary.data && <PipelineFunnel summary={summary.data} value={reached} onPick={setReached} />}
 
-      <p role="status" aria-live="polite" className="livemsg">{notice}</p>
+      <div className="pl-notice">
+        <p role="status" aria-live="polite" className="livemsg">{notice}</p>
+        {created && onOpenPlacement && notice && <button type="button" className="btn sm" onClick={() => onOpenPlacement(created)}>Open placement</button>}
+      </div>
 
       {!invalidRange && (
-        <div className="card tablewrap">
+        <div className="card tablewrap listcard">
           {q.isLoading ? <Loading /> : q.error ? (
             <QueryError query={q} message={pipelineError(q.error)} />
           ) : (
-            <div className="tablewrap"><table aria-label="Submissions" aria-busy={q.isFetching || undefined}>
+            <table className="dtable pl-subs" aria-label="Submissions" aria-busy={q.isFetching || undefined}>
               <thead><tr>
-                <th>Candidate</th><th>Job / client</th><th>Status</th><th>Interview rounds</th><th>Submitted</th><th>Recruiter</th>
-                {showRate && <th>Rate</th>}
-                <th><span className="sr-only">Actions</span></th>
+                <th>Candidate</th><th>Job / client</th><th>Status</th><th>Interview rounds</th><th>Submitted</th>
+                {showRate && <th className="num p2">Rate</th>}
+                <th className="c-act"><span className="sr-only">Actions</span></th>
               </tr></thead>
               <tbody>
-                {items.map((s) => (
-                  <tr key={s.id}>
-                    <td><b>{s.candidateName ?? "Candidate"}</b></td>
-                    <td>{s.jobTitle}<span className="block">{s.client}</span></td>
-                    <td><PipelineStatus status={s.status} /></td>
-                    <td><StageTrail s={s} /></td>
-                    <td>{fmtDateTime(s.submittedAt)}</td>
-                    <td>{s.recruiterName ?? "—"}</td>
-                    {showRate && <td>{"rate" in s ? fmtRate(s.rate) : <span className="muted">—</span>}</td>}
-                    <td className="rowactions">
-                      <button type="button" className="btn sm" onClick={() => setOpenId(s.id)}
-                        aria-label={`Open submission of ${s.candidateName ?? "candidate"} for ${s.jobTitle} at ${s.client}`}>Open</button>
-                      <ScheduleInterviewButton submission={s} onNotice={setNotice} />
-                      <CreatePlacementButton submission={s} onNotice={setNotice} />
-                    </td>
-                  </tr>
-                ))}
+                {items.map((s) => {
+                  const name = s.candidateName ?? "Candidate";
+                  const place = rowPlacement(s);
+                  const next = nextRoundOf(s);
+                  const schedule = s.actions?.createInterview ? {
+                    label: next.held ? "Schedule next round" : "Schedule interview",
+                    aria: `Schedule ${next.held ? "next round" : "interview"} for ${name}, ${s.jobTitle} at ${s.client}`,
+                    run: () => setRowModal({ kind: "schedule", s }),
+                  } : null;
+                  const placeAct = place ? { label: "Create placement", aria: `Create placement for ${name}, ${s.jobTitle} at ${s.client}`, run: () => setRowModal({ kind: "place", s }) } : null;
+                  const primary = placeAct ?? schedule;
+                  const extra = placeAct && schedule ? schedule : null;
+                  return (
+                    <tr key={s.id} className="rowopen" onClick={(e) => { if (!fromControl(e)) setOpenId(s.id); }}>
+                      <td className="c-primary">
+                        <RecordLink kind="candidate" id={s.candidateId} allowed={canSearchCandidates}><b>{name}</b></RecordLink>
+                      </td>
+                      <td data-label="Job">{s.jobTitle}<small className="block muted">{s.client}</small></td>
+                      <td className="c-badge"><PipelineStatus status={s.status} /></td>
+                      <td data-label="Rounds"><StageTrail s={s} /></td>
+                      <td data-label="Submitted" className="pl-nowrap">{fmtDay(s.submittedAt)}<small className="block muted">{s.recruiterName ?? "—"}</small></td>
+                      {showRate && <td className="num p2" data-label="Rate">{"rate" in s ? fmtRate(s.rate) : <span className="muted">—</span>}</td>}
+                      <td className="c-act">
+                        <div className="pl-act">
+                          {primary && <button type="button" className="btn sm" aria-label={primary.aria} onClick={primary.run}>{primary.label}</button>}
+                          <button type="button" className="btn sm" onClick={() => setOpenId(s.id)}
+                            aria-label={`Open submission of ${name} for ${s.jobTitle} at ${s.client}`}>Open</button>
+                          {extra && <Menu label={`More actions for ${name}`} items={[{ label: extra.label, onSelect: extra.run }]} />}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
                 {items.length === 0 && (
-                  <tr><td colSpan={showRate ? 8 : 7} className="empty">{hasFilters ? "No submissions match these filters." : "No submissions yet. Log one from a candidate profile."}</td></tr>
+                  <tr><td colSpan={showRate ? 7 : 6} className="empty">{hasFilters ? "No submissions match these filters." : "No submissions yet. Log one from a candidate profile."}</td></tr>
                 )}
               </tbody>
-            </table></div>
+            </table>
           )}
         </div>
       )}
@@ -177,26 +239,65 @@ export function SubmissionsPage({ me, onOpenPlacement }: { me: Pick<Me, "capabil
         <Pager pager={pager} label="Submission pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
       </div>
 
-      {openId && (
-        <SubmissionDrawer id={openId} initial={open} onClose={() => setOpenId(null)} onNotice={setNotice} onOpenPlacement={onOpenPlacement} />
+      {rowModal?.kind === "schedule" && (
+        <ScheduleInterviewDialog submission={rowModal.s} defaultRound={nextRoundOf(rowModal.s).round} onClose={() => setRowModal(null)}
+          onScheduled={() => { const s = rowModal.s; setRowModal(null); say(`Interview scheduled for ${s.candidateName ?? "the candidate"}.`); refreshAfterSchedule(qc); }} />
       )}
-    </>
+      {rowModal?.kind === "place" && (() => {
+        const s = rowModal.s;
+        const from = rowPlacement(s);
+        const refresh = () => {
+          void qc.invalidateQueries({ queryKey: pipelineKeys.submissions });
+          void qc.invalidateQueries({ queryKey: pipelineKeys.placements });
+          void qc.invalidateQueries({ queryKey: ["interviews"] });
+        };
+        return (
+          <CreatePlacementDialog submission={s} onClose={() => setRowModal(null)}
+            clearRound={from?.round && { id: from.round.id!, round: from.round.round, pending: false }}
+            onSelectedOnly={from?.round ? () => { setRowModal(null); say("Submission moved to Selected."); refresh(); } : undefined}
+            onCreated={(r) => {
+              setRowModal(null); refresh();
+              say(r.isFirstPlacement ? `Placement created for ${s.candidateName ?? "the candidate"}. This is their first placement.` : `Placement created for ${s.candidateName ?? "the candidate"}.`, r.id);
+            }} />
+        );
+      })()}
+
+      {openId && (
+        <SubmissionDrawer id={openId} initial={open} onClose={() => setOpenId(null)} onNotice={(m) => say(m)} onOpenPlacement={onOpenPlacement}
+          canOpenCandidate={canSearchCandidates} canOpenInterview={canOpenInterview} />
+      )}
+    </section>
   );
 }
 
 type Modal = { kind: "edit" } | { kind: "reject" } | { kind: "withdraw" } | { kind: "interview"; defaultRound?: string }
   | { kind: "placement"; round?: Interview } | { kind: "rejectRound"; round: Interview };
 
-export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlacement }: {
+const dead = (i: Pick<Interview, "callStatus">) => i.callStatus === "cancelled" || i.callStatus === "no_invite";
+/** Statuses where booking an interview usually means "Interview scheduled" next. */
+const BEFORE_SCHEDULED = new Set(["submitted", "under_review", "interview_requested"]);
+
+/**
+ * Submission drawer. The action strip comes first: status, what is next (the upcoming round or the
+ * last change), the next action (create placement, or schedule the next round), the allowed status
+ * moves, then Reject / Withdraw under More. Then the details, the rounds and assessments.
+ */
+export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlacement, canOpenCandidate = false, canOpenInterview = false }: {
   id: string; initial: Submission | null; onClose: () => void; onNotice: (m: string) => void; onOpenPlacement?: (id: string) => void;
+  /** Link the candidate name to their profile (candidate:read). */
+  canOpenCandidate?: boolean;
+  /** Link each round to the Interviews board (interview:read). */
+  canOpenInterview?: boolean;
 }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: pipelineKeys.submission(id), queryFn: () => pipelineApi.submission(id), placeholderData: initial ?? undefined });
+  const rounds = useQuery({ queryKey: pipelineKeys.rounds(id), queryFn: () => pipelineApi.submissionInterviews(id) });
   const [modal, setModal] = useState<Modal | null>(null);
   const [message, setMessage] = useState("");
   const [created, setCreated] = useState<{ id: string; isFirstPlacement: boolean } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [scheduledHint, setScheduledHint] = useState(false);
   const s = q.data;
   const vendorName = useLookupName("vendors", s?.vendorId);
   const title = s ? `${s.candidateName ?? "Candidate"} · ${s.jobTitle}` : "Submission";
@@ -207,7 +308,7 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
   const announce = (m: string) => { setError(""); setMessage(m); onNotice(m); };
 
   const move = async (to: string) => {
-    setBusy(to); setError(""); setMessage("");
+    setBusy(to); setError(""); setMessage(""); setScheduledHint(false);
     try { await pipelineApi.changeSubmissionStatus(id, to); announce(`Status changed to ${pipelineLabel(to)}.`); refresh(); }
     catch (e) { setError(pipelineError(e, "submission")); }
     finally { setBusy(null); }
@@ -217,7 +318,15 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
   const forward = actions?.transition.filter((t) => !CLOSING.has(t)) ?? [];
   const canReject = actions?.transition.includes("rejected") ?? false;
   const canWithdraw = actions?.transition.includes("withdrawn") ?? false;
-  const anyAction = Boolean(actions && (actions.transition.length || actions.createPlacement));
+  const live = (rounds.data?.items ?? []).filter((r) => !dead(r));
+  const latest = live[live.length - 1];
+  const upcoming = live.find((r) => r.result === "pending" && Date.parse(r.startsAt) > Date.now());
+  const placement = (rounds.data?.items ?? []).find((r) => r.placement)?.placement ?? null;
+  const scheduleLabel = live.length ? "Schedule next round" : "Schedule interview";
+  const note = !s ? "" : upcoming ? `Next: ${upcoming.round}, ${fmtDateTime(upcoming.startsAt)}`
+    : s.status === "rejected" && s.rejectionReason ? `Rejected: ${s.rejectionReason}`
+      : `Last change ${fmtDateTime(s.statusChangedAt ?? s.submittedAt)}`;
+  const anyAction = Boolean(actions && (actions.transition.length || actions.createPlacement || actions.createInterview));
 
   return (
     <>
@@ -226,6 +335,43 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
           <p className="error" role="alert">{pipelineError(q.error, "submission")}</p>
         ) : (
           <>
+            <div className="actionstrip pl-strip">
+              <div className="as-status"><PipelineStatus status={s.status} /><span className="as-note">{note}</span></div>
+              {anyAction && actions && (
+                <div className="as-actions">
+                  {actions.createPlacement && <button type="button" className="btn primary" onClick={() => setModal({ kind: "placement" })}>Create placement</button>}
+                  {actions.createInterview && (
+                    <button type="button" className={actions.createPlacement ? "btn" : "btn primary"}
+                      onClick={() => setModal({ kind: "interview", defaultRound: nextRoundName(latest?.round) })}>{scheduleLabel}</button>
+                  )}
+                  {forward.length > 0 && (
+                    <div className="pl-moves" role="group" aria-label="Change status">
+                      {forward.map((t) => (
+                        <button key={t} type="button" className="btn" disabled={busy !== null} aria-busy={busy === t || undefined}
+                          onClick={() => void move(t)}>Move to {pipelineLabel(t)}</button>
+                      ))}
+                    </div>
+                  )}
+                  <Menu label="More status actions" text="More" items={[
+                    canReject && { label: "Reject…", danger: true, disabled: busy !== null, onSelect: () => setModal({ kind: "reject" }) },
+                    canWithdraw && { label: "Withdraw…", danger: true, disabled: busy !== null, onSelect: () => setModal({ kind: "withdraw" }) },
+                  ]} />
+                </div>
+              )}
+            </div>
+
+            <p role="status" aria-live="polite" className="livemsg">{message}</p>
+            {scheduledHint && forward.includes("interview_scheduled") && BEFORE_SCHEDULED.has(s.status) && (
+              <p className="banner info pl-hint">
+                <span>The interview is booked. The status is still {pipelineLabel(s.status)}.</span>
+                <button type="button" className="btn sm" disabled={busy !== null} onClick={() => void move("interview_scheduled")}>Move to Interview scheduled</button>
+              </p>
+            )}
+            {created && onOpenPlacement && (
+              <button type="button" className="btn" onClick={() => { onClose(); onOpenPlacement(created.id); }}>Open the new placement</button>
+            )}
+            {error && <p className="banner error" role="alert">{error}</p>}
+
             <section aria-labelledby={`${id}-details`}>
               <div className="factshead">
                 <h3 id={`${id}-details`}>Details</h3>
@@ -236,53 +382,30 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
                 )}
               </div>
               <dl className="facts">
-                <dt>Candidate</dt><dd>{s.candidateName ?? "—"}</dd>
+                <dt>Candidate</dt><dd>{s.candidateName ? <RecordLink kind="candidate" id={s.candidateId} allowed={canOpenCandidate}>{s.candidateName}</RecordLink> : "—"}</dd>
                 <dt>Job title</dt><dd>{s.jobTitle}</dd>
                 <dt>Client</dt><dd>{s.client}</dd>
                 <dt>Vendor</dt><dd>{s.vendorId ? vendorName ?? "Vendor on file" : "None"}</dd>
-                <dt>Status</dt><dd><PipelineStatus status={s.status} /></dd>
                 {s.rejectionReason && <><dt>Rejection reason</dt><dd>{s.rejectionReason}</dd></>}
                 <dt>Recruiter</dt><dd>{s.recruiterName ?? "—"}</dd>
                 {"rate" in s && <><dt>Rate</dt><dd>{fmtRate(s.rate)}</dd></>}
                 <dt>Submitted</dt><dd>{fmtDateTime(s.submittedAt)}</dd>
                 <dt>Last status change</dt><dd>{fmtDateTime(s.statusChangedAt)}</dd>
+                {placement && <><dt>Placement</dt><dd>
+                  <RecordLink kind="placement" id={placement.id} allowed={Boolean(onOpenPlacement)} onOpen={onOpenPlacement ? (pid) => { onClose(); onOpenPlacement(pid); } : undefined}>
+                    {pipelineLabel(placement.status)}
+                  </RecordLink>
+                </dd></>}
               </dl>
               {s.detailsEdited && (
                 <p className="muted factsnote">Details edited {fmtDateTime(s.detailsEdited.at)}{s.detailsEdited.byName ? ` by ${s.detailsEdited.byName}` : ""}.</p>
               )}
             </section>
 
-            <p role="status" aria-live="polite" className="livemsg">{message}</p>
-            {created && onOpenPlacement && (
-              <button type="button" className="btn" onClick={() => { onClose(); onOpenPlacement(created.id); }}>Open the new placement</button>
-            )}
-            {error && <p className="banner error" role="alert">{error}</p>}
-
-            <SubmissionRounds submission={s} onNotice={announce}
+            <SubmissionRounds submission={s} onNotice={announce} canOpenInterview={canOpenInterview}
               onPlace={(round) => setModal({ kind: "placement", round })}
-              onReject={(round) => setModal({ kind: "rejectRound", round })}
-              onSchedule={(defaultRound) => setModal({ kind: "interview", defaultRound })} />
+              onReject={(round) => setModal({ kind: "rejectRound", round })} />
 
-            {anyAction && actions && (
-              <section className="manageblock" aria-labelledby={`${id}-next`}>
-                <h3 id={`${id}-next`}>Next steps</h3>
-                {actions.transition.length > 0 && (
-                  <div className="rowactions" role="group" aria-label="Change status">
-                    {forward.map((t) => (
-                      <button key={t} type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === t || undefined}
-                        onClick={() => void move(t)}>Move to {pipelineLabel(t)}</button>
-                    ))}
-                    {canReject && <button type="button" className="btn sm danger" disabled={busy !== null} onClick={() => setModal({ kind: "reject" })}>Reject…</button>}
-                    {canWithdraw && <button type="button" className="btn sm danger" disabled={busy !== null} onClick={() => setModal({ kind: "withdraw" })}>Withdraw…</button>}
-                  </div>
-                )}
-                {actions.createPlacement && (
-                  <div className="rowactions">
-                    <button type="button" className="btn primary" onClick={() => setModal({ kind: "placement" })}>Create placement</button>
-                  </div>
-                )}
-              </section>
-            )}
             <AssessmentsSection submissionId={s.id} />
           </>
         )}
@@ -318,8 +441,8 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
       {s && modal?.kind === "interview" && (
         <ScheduleInterviewDialog submission={s} defaultRound={modal.defaultRound} onClose={() => setModal(null)}
           onScheduled={() => {
-            setModal(null); announce("Interview scheduled.");
-            void qc.invalidateQueries({ queryKey: ["interviews"] }); refresh();
+            setModal(null); announce("Interview scheduled."); setScheduledHint(true);
+            refreshRounds(qc, s.id);
           }} />
       )}
       {s && modal?.kind === "placement" && (
@@ -344,7 +467,7 @@ function RejectDialog({ submission, onClose, onDone }: { submission: Submission;
   const [fieldErr, setFieldErr] = useState("");
   const submit = useSubmit((e) => pipelineError(e, "submission"));
   return (
-    <Dialog title="Reject this submission?" onClose={onClose}>
+    <Dialog title="Reject this submission?" onClose={onClose} dirty={reason.trim() !== ""}>
       <form noValidate onSubmit={(e) => {
         e.preventDefault();
         const r = reason.trim();
