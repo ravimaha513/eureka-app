@@ -53,7 +53,9 @@ jobs:
             pnpm --filter @eureka/api exec tsx src/db/migrate.ts
       # Unit tests, SRS golden expectations, RLS/differential and API authorization matrix.
       # API test files run in parallel, each on a copy of one migrated template database.
-      - run: pnpm -r test
+      # One package at a time (CLAUDE.md: don't run web + api suites at once): run together, the API
+      # suite's load slows the web suite's first lazy-screen imports past Testing Library's 1 s wait.
+      - run: pnpm -r --workspace-concurrency=1 test
       # Deploy builds the web app only after the API is live; catch a broken build here.
       - run: pnpm --filter @eureka/web build
       - name: Grants table in docs is up to date
