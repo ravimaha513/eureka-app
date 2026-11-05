@@ -299,6 +299,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Sales can edit interview system name (Edit interview form; API allowlist + guard, migration 0530, IS-14). Create still refuses it; `cleared` / `consent_captured` stay location-only.
 - Interview details drawer: Edit, Feedback and Place dialogs stack above it, so it no longer has to be closed first.
 - Coach calendar (migration 0540, `docs/coach-calendar-api.md`): day and week grids of every coach's interviews; only the `ceo` role decides who else sees them, by role or user.
+- Bulk action bar is opaque in dark mode. `deploy.yml` can auto-deploy staging after CI on main; off until repository variable `STAGING_AUTO_DEPLOY` is `true`, and the deploy train must not run while it is on.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 
