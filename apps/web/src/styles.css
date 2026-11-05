@@ -232,7 +232,7 @@ tbody tr[aria-selected="true"] td, tbody tr.selected td { background: var(--sel)
 .btn.primary { background: var(--pri-btn); border-color: var(--pri-btn); color: var(--on-pri); }
 .btn.primary:hover:not(:disabled) { background: var(--pri-btn-hover); }
 .btn.danger { color: var(--bad-fg); border-color: var(--bad-line); background: var(--surface); }
-.btn[type="submit"].danger { background: var(--bad-fg); border-color: var(--bad-fg); color: var(--surface); }
+.dialog .btn[type="submit"].danger { background: var(--bad-fg); border-color: var(--bad-fg); color: var(--surface); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .badge.inactive { background: var(--bad-bg); color: var(--bad-fg); }
 .tag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: var(--r-sm); background: var(--pri-50); color: var(--pri-700); font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
@@ -438,7 +438,7 @@ h1:focus { outline: none; }
 .fl-hint { font-size: 11px; color: var(--muted); }
 .fl-other { margin: 8px 0 0; font-size: 12px; display: flex; align-items: center; gap: 8px; }
 .trail { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.trail-step { padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; border: 1px solid var(--line); background: var(--surface2); color: var(--text2); }
+.trail-step { padding: 1px 8px; border-radius: var(--r-sm); font-size: 12px; font-weight: 600; white-space: nowrap; border: 1px solid var(--line); background: var(--surface2); color: var(--text2); }
 .trail-step { position: relative; }
 .trail-step + .trail-step { margin-left: 12px; }
 .trail-step + .trail-step::before { content: "›"; position: absolute; left: -12px; color: var(--muted); font-weight: 400; text-decoration: none; }
@@ -446,7 +446,7 @@ h1:focus { outline: none; }
 .trail-step.no { background: var(--bad-bg); border-color: var(--bad-line); color: var(--bad-fg); }
 .trail-step.next { background: var(--pri-50); border-color: var(--pri-50); color: var(--pri-700); }
 .trail-step.dead { text-decoration: line-through; color: var(--muted); }
-.trail-step.placed { background: var(--ok-fg); border-color: var(--ok-fg); color: var(--surface); }
+.trail-step.placed { background: var(--ok-bg); border-color: var(--ok-line); color: var(--ok-fg); }
 .chipcount { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--line2); color: var(--text2); font-size: 11px; font-variant-numeric: tabular-nums; }
 .tabs.wrap { flex-wrap: wrap; }
 .badge.st-under_review, .badge.st-paperwork, .badge.st-bgc { background: var(--warn-bg); color: var(--warn-fg); }
@@ -803,7 +803,7 @@ td.rowactions > .iconbtn + .iconbtn { margin-left: 2px; }
 .tr-meta .tr-trainer { align-items: flex-start; }
 .tr-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--line2); padding-top: 8px; }
 .tr-foot .muted { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
-.badge.tr-planned { background: var(--violet-bg); color: var(--violet-fg); }
+.badge.tr-planned { background: var(--neutral-bg); color: var(--neutral-fg); }
 .badge.tr-in_training { background: var(--warn-bg); color: var(--warn-fg); }
 .badge.tr-completed { background: var(--ok-bg); color: var(--ok-fg); }
 .badge.tr-cancelled { background: var(--neutral-bg); color: var(--neutral-fg); }
@@ -1232,7 +1232,7 @@ tr.editing:hover td { background: var(--surface2); }
 .fb-spacer { margin-left: auto; }
 /* The lead shows in its own column on wide screens; narrower, it rides with the team (tooltip + screen readers). */
 .leadnote { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-@media (max-width: 1599px) { .cardtable .c-team { text-decoration: underline dotted var(--faint); text-underline-offset: 3px; } }
+@media (max-width: 1699px) { .cardtable .c-team { text-decoration: underline dotted var(--faint); text-underline-offset: 3px; } }
 @media (min-width: 769px) { .filterbar > .bulkbar { position: static; } }
 .listcard td, .listcard th { padding-inline: 10px; }
 td.num, th.num { text-align: right; }
@@ -1244,8 +1244,8 @@ tr.rowopen:hover .linkbtn b { text-decoration: underline; text-underline-offset:
 thead .c-act { background: var(--surface2); }
 tbody tr:hover td.c-act { background: var(--surface2); }
 tbody tr[aria-selected="true"] td.c-act { background: var(--sel); }
-@media (max-width: 1599px) { .cardtable .p3 { display: none; } }
-@media (max-width: 1399px) { .cardtable .p2 { display: none; } }
+@media (max-width: 1699px) { .cardtable .p3 { display: none; } }
+@media (max-width: 1499px) { .cardtable .p2 { display: none; } }
 @media (max-width: 768px) {
   .pagehead .sub { display: none; }
   .pageactions { width: 100%; display: flex; flex-wrap: nowrap; gap: 8px; align-items: center; }
@@ -1371,8 +1371,8 @@ tbody tr[aria-selected="true"] td.c-act { background: var(--sel); }
    p2/p3 hidden, every other cell = "label value" from its data-label (no data-label: value only). td.c-sel
    (checkbox) sits top left. An empty-state row is <td colSpan class="empty">. */
 .dtable td.c-primary b { color: var(--text); }
-@media (max-width: 1599px) { .dtable .p3 { display: none; } }
-@media (max-width: 1399px) { .dtable .p2 { display: none; } }
+@media (max-width: 1699px) { .dtable .p3 { display: none; } }
+@media (max-width: 1499px) { .dtable .p2 { display: none; } }
 @media (max-width: 768px) {
   .tablewrap > table.dtable { min-width: 0; }
   .dtable thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

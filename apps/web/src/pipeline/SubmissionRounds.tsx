@@ -93,7 +93,7 @@ export function SubmissionRounds({ submission: s, onPlace, onReject, onSchedule,
                             onClick={() => void setResult(r, "pending")}>Reset to pending</button>
                         )}
                         {canPlace && r.result !== "rejected" && (
-                          <button type="button" className="btn sm primary" disabled={busy !== null} onClick={() => onPlace(r)}>
+                          <button type="button" className="btn sm" disabled={busy !== null} onClick={() => onPlace(r)}>
                             {r.result === "cleared" ? "Create placement" : "Clear and place"}
                           </button>
                         )}

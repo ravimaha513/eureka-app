@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
-  BadgeCheck, BookOpen, BriefcaseBusiness, Building2, CalendarClock, ChartColumn, ChevronDown, Database, FileBarChart, FileCheck2, FolderOpen, Flame, LayoutDashboard, LogOut, MessageCircle, Moon,
+  BadgeCheck, BookOpen, Cake, BriefcaseBusiness, Building2, CalendarClock, ChartColumn, ChevronDown, Database, FileBarChart, FileCheck2, FolderOpen, Flame, LayoutDashboard, LogOut, MessageCircle, Moon,
   GraduationCap, GitBranch, Handshake, House, Network, Send, Settings, ShieldCheck, Sun, TrendingUp, Users, UsersRound, UserRoundCheck, UserRoundSearch, Wallet, type LucideIcon,
 } from "lucide-react";
 import type { Theme } from "./theme";
@@ -9,7 +9,7 @@ import type { Theme } from "./theme";
 export const NAV_ICONS: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard, hotlist: Flame, candidates: Users, submissions: Send, interviews: CalendarClock,
   placements: BadgeCheck, paperwork: FileCheck2, employees: UserRoundCheck, payments: Wallet,
-  companies: Building2, facilities: House, performance: TrendingUp, reports: FileBarChart, access: ShieldCheck, settings: Settings,
+  companies: Building2, facilities: House, performance: TrendingUp, reports: FileBarChart, access: ShieldCheck, settings: Settings, birthdays: Cake,
   // datahub
   datahub: Database,
   // training
