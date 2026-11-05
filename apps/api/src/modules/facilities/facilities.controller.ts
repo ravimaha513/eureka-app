@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { parseIfMatch } from "../../platform/http/if-match.js";
+import { optionalIfMatch, parseIfMatch } from "../../platform/http/if-match.js";
 import { BillsService } from "./bills.service.js";
 import { KINDS, type OwnerKind } from "./facilities.common.js";
 import {
@@ -233,7 +233,7 @@ export class BillsController {
   @RequirePermission("bill:manage")
   void(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
     @Headers("if-match") ifMatch: string | undefined) {
-    return this.svc.void(user, id, () => BillVoid.parse(body), parseIfMatch(ifMatch));
+    return this.svc.void(user, id, () => BillVoid.parse(body), optionalIfMatch(ifMatch));
   }
 
   /** Presigned POST into quarantine (2 minutes); the invoice opens after a clean scan. */

@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Headers, HttpCode, HttpException, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { parseIfMatch } from "../../platform/http/if-match.js";
+import { optionalIfMatch } from "../../platform/http/if-match.js";
 import { BatchStatusChange } from "../training/training.schemas.js";
 import {
   BatchListQuery,
@@ -28,12 +28,7 @@ import { CandidatesService } from "./candidates.service.js";
  * concurrency"): no header (or `*`) -> null, no check; a version -> 412 when stale;
  * anything else can never match -> 412.
  */
-function expectedVersion(header: string | undefined): number | null {
-  if (header === undefined || header.trim() === "" || header.trim() === "*") return null;
-  const v = parseIfMatch(header);
-  if (v === null) throw new HttpException("stale", HttpStatus.PRECONDITION_FAILED);
-  return v;
-}
+const expectedVersion = optionalIfMatch;
 
 @Controller("api/v1")
 export class CandidatesController {

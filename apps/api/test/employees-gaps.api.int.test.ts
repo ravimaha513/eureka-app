@@ -226,7 +226,11 @@ describe("employment facts through the API", () => {
     // Version 0 (no row) cannot be claimed stale-free with a positive tag.
     const early = await call("hr", "PATCH", `/api/v1/assignments/${j.assignmentId}/employment`, { everifyDate: addDays(today, -10) }, { "if-match": '"1"' });
     expect([early.statusCode, early.json().detail]).toEqual([412, "stale"]);
-    expect((await employment(j.assignmentId, { everifyDate: addDays(today, -10) })).json().rowVersion).toBe(1);
+    // A malformed tag is 412, never a silent skip of the check.
+    expect((await call("hr", "PATCH", `/api/v1/assignments/${j.assignmentId}/employment`, { everifyDate: addDays(today, -10) }, { "if-match": "abc" })).statusCode).toBe(412);
+    // The advertised 0 ("nothing stored yet") is checked: the first write with If-Match "0" succeeds.
+    const first = await call("hr", "PATCH", `/api/v1/assignments/${j.assignmentId}/employment`, { everifyDate: addDays(today, -10) }, { "if-match": '"0"' });
+    expect([first.statusCode, first.json().rowVersion]).toEqual([200, 1]);
     // Accounts edits the pay rate meanwhile; HR's form still holds version 1.
     expect((await call("acct", "PATCH", `/api/v1/assignments/${j.assignmentId}/employment`, { payRate: 50 }, { "if-match": "1" })).json().rowVersion).toBe(2);
     const stale = await call("hr", "PATCH", `/api/v1/assignments/${j.assignmentId}/employment`, { everifyDate: addDays(today, -9) }, { "if-match": "1" });

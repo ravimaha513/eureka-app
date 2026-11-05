@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { parseIfMatch } from "../../platform/http/if-match.js";
+import { optionalIfMatch } from "../../platform/http/if-match.js";
 import { CreateFeedback, CreateInterview, InterviewListQuery, UpdateInterview } from "./interviews.schemas.js";
 import { InterviewsService } from "./interviews.service.js";
 
@@ -46,7 +46,7 @@ export class InterviewsController {
   @RequirePermission("interview:update")
   update(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
     @Headers("if-match") ifMatch: string | undefined) {
-    return this.svc.update(user, id, UpdateInterview.parse(body), parseIfMatch(ifMatch));
+    return this.svc.update(user, id, UpdateInterview.parse(body), optionalIfMatch(ifMatch));
   }
 
   /** IS-11: mark the round cleared and move its submission to selected (ready for a placement). */
@@ -54,7 +54,7 @@ export class InterviewsController {
   @RequirePermission("interview:update")
   clearAndSelect(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string,
     @Headers("if-match") ifMatch: string | undefined) {
-    return this.svc.clearAndSelect(user, id, parseIfMatch(ifMatch));
+    return this.svc.clearAndSelect(user, id, optionalIfMatch(ifMatch));
   }
 
   /** IS-7: calendar file of a scheduled interview. */

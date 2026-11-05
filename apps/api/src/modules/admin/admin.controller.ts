@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
-import { parseIfMatch } from "../../platform/http/if-match.js";
+import { optionalIfMatch } from "../../platform/http/if-match.js";
 import {
   AddMember,
   AddMembers,
@@ -167,7 +167,7 @@ export class AdminController {
     @CurrentUser() user: AuthedUser, @Param("key") key: string, @Body() body: unknown,
     @Headers("if-match") ifMatch: string | undefined, @Res({ passthrough: true }) res: FastifyReply,
   ): Promise<void> {
-    const v = await this.svc.updateRole(user, RoleKey.parse(key), UpdateRole.parse(body), parseIfMatch(ifMatch));
+    const v = await this.svc.updateRole(user, RoleKey.parse(key), UpdateRole.parse(body), optionalIfMatch(ifMatch));
     void res.header("etag", `"${v}"`);
   }
 
@@ -177,7 +177,7 @@ export class AdminController {
     @CurrentUser() user: AuthedUser, @Param("key") key: string, @Body() body: unknown,
     @Headers("if-match") ifMatch: string | undefined, @Res({ passthrough: true }) res: FastifyReply,
   ): Promise<void> {
-    const v = await this.svc.setRoleGrants(user, RoleKey.parse(key), SetRoleGrants.parse(body), parseIfMatch(ifMatch));
+    const v = await this.svc.setRoleGrants(user, RoleKey.parse(key), SetRoleGrants.parse(body), optionalIfMatch(ifMatch));
     void res.header("etag", `"${v}"`);
   }
 

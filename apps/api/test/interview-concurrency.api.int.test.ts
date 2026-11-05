@@ -90,6 +90,16 @@ describe("If-Match on interview edits (IS-12)", () => {
     expect(now).toMatchObject({ round: "L2", rowVersion: 2, panel: [] });
   });
 
+  it("a malformed If-Match is 412 and changes nothing; `*` skips the check", async () => {
+    const id = await created({ startsAt: "2033-01-12T14:00:00Z" });
+    for (const tag of ["abc", '"x1"', "-1"]) {
+      const bad = await patch(id, { round: "Bad tag" }, { "if-match": tag });
+      expect([bad.statusCode, bad.json().detail]).toEqual([412, "stale"]);
+    }
+    expect((await get(id)).rowVersion).toBe(1);
+    expect((await patch(id, { round: "Any" }, { "if-match": "*" })).statusCode).toBe(200);
+  });
+
   it("the stale check follows the permission checks (404 / 403 / 422 first)", async () => {
     const id = await created({ startsAt: "2033-01-12T14:00:00Z" });
     expect([403, 404]).toContain((await patch(id, { round: "x" }, { "if-match": "9" }, "r2a")).statusCode);

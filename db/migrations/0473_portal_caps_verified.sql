@@ -36,7 +36,7 @@ RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 DECLARE n integer; verified boolean;
 BEGIN
-  IF p_link IS NULL OR p_hash IS NULL OR octet_length(p_hash) IS DISTINCT FROM 32
+  IF p_link IS NULL OR p_hash IS NULL OR pg_catalog.octet_length(p_hash) IS DISTINCT FROM 32
      OR p_ttl_minutes IS NULL OR p_ttl_minutes < 1 OR p_ttl_minutes > 30 OR p_max IS NULL OR p_max < 1 OR p_max > 60
      OR p_cooldown IS NULL OR p_cooldown < 0 OR p_cooldown > 3600 OR p_global IS NULL OR p_global < 1 THEN
     RAISE EXCEPTION 'invalid_link_request' USING ERRCODE = 'check_violation';
@@ -47,7 +47,7 @@ BEGIN
               AND l.created_at > pg_catalog.now() - pg_catalog.make_interval(secs => p_cooldown)) THEN
     RETURN 'limited';
   END IF;
-  SELECT count(*) INTO n FROM eureka.applicant_login_link l
+  SELECT pg_catalog.count(*) INTO n FROM eureka.applicant_login_link l
    WHERE l.applicant_id = p_applicant AND l.created_at > pg_catalog.now() - interval '1 hour';
   IF coalesce(n, 0) >= p_max THEN
     RETURN 'limited';
