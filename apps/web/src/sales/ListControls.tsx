@@ -1,5 +1,6 @@
-import { useId, useRef, useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, SlidersHorizontal, X } from "lucide-react";
+import { useId, type ReactNode } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { FilterBar } from "../ui/FilterBar";
 import { DOCUMENTS_STATUSES, LIST_SORTS, LIST_SORT_LABELS, VISA_CATEGORIES, type ListSort } from "@eureka/shared";
 import { useLookups } from "../lookups";
 import type { useCandidateList } from "./useCandidateList";
@@ -25,13 +26,7 @@ export function ListFilters({ s, label, statuses, batches, options, actions, sel
   selecting?: boolean;
 }) {
   const id = useId();
-  const [open, setOpen] = useState(false);
-  const panel = useRef<HTMLDivElement>(null);
   const locations = useLookups().data?.locations ?? [];
-  const toggle = () => setOpen((o) => {
-    if (!o) requestAnimationFrame(() => panel.current?.querySelector<HTMLElement>("select, input")?.focus());
-    return !o;
-  });
   const sel = (key: keyof ListState["extra"], text: string, opts: [string, string][], any: string) => (
     <div className={`field inline fb-${key}`}>
       <label htmlFor={`${id}-${key}`}>{text}</label>
@@ -59,21 +54,18 @@ export function ListFilters({ s, label, statuses, batches, options, actions, sel
   const primarySet = [s.searchInput, s.technologyInput, s.status, s.batchId, ...(options ? [s.extra.priority, s.extra.teamId, s.extra.recruiterId] : [])].filter(Boolean).length;
 
   return (
-    <div className={`filterbar${open ? " open" : ""}`}
-      onKeyDown={(e) => { if (e.key === "Escape" && open) { e.preventDefault(); setOpen(false); } }}>
-      <form className="fb-row" role="search" aria-label={`${label} filters`} onSubmit={(e) => e.preventDefault()}>
+    <FilterBar label={`${label} filters`} selection={selection} selecting={selecting}
+      moreCount={chips.length} activeCount={primarySet + chips.length}
+      chips={chips.map(([key, text, clear]) => ({ key, label: text, onRemove: clear }))}
+      hasFilters={s.hasFilters} onClear={s.clear}
+      search={
         <div className="field inline fb-search">
           <label htmlFor={`${id}-search`}>Search name</label>
           <input id={`${id}-search`} type="search" placeholder="Candidate name" value={s.searchInput} onChange={(e) => s.setSearchInput(e.target.value)} />
         </div>
-        <button type="button" className="btn fb-mobilebtn" aria-expanded={open} aria-controls={`${id}-all`} onClick={toggle}>
-          <SlidersHorizontal size={15} aria-hidden="true" />Filters{primarySet + chips.length ? ` · ${primarySet + chips.length}` : ""}
-        </button>
-        <div className="fb-all" id={`${id}-all`} ref={panel}>
-          <div className="fb-sheethead">
-            <h2>Filters</h2>
-            <button type="button" className="btn" onClick={() => setOpen(false)}>Done</button>
-          </div>
+      }
+      primary={
+        <>
           <div className="field inline">
             <label htmlFor={`${id}-tech`}>Technology</label>
             <input id={`${id}-tech`} type="search" placeholder="e.g. Java" value={s.technologyInput} onChange={(e) => s.setTechnologyInput(e.target.value)} />
@@ -102,58 +94,47 @@ export function ListFilters({ s, label, statuses, batches, options, actions, sel
               </select>
             </div>
           )}
-          <button type="button" className="btn fb-morebtn" aria-expanded={open} aria-controls={`${id}-more`} onClick={toggle}>
-            <SlidersHorizontal size={15} aria-hidden="true" />More filters{chips.length ? ` · ${chips.length}` : ""}
-          </button>
-          <div className="fb-more" id={`${id}-more`} hidden={!open} role="group" aria-label="More filters">
-            <div className="field inline">
-              <label htmlFor={`${id}-vis`}>Visibility</label>
-              <select id={`${id}-vis`} value={s.visibility} onChange={(e) => s.setVisibility(e.target.value as ListState["visibility"])}>
-                <option value="">Any visibility</option>
-                <option value="team">Team only</option>
-                <option value="all_teams">Open to all teams</option>
-                <option value="selected_teams">Selected teams</option>
-              </select>
-            </div>
-            {sel("locationId", "Location", locOpts, "Any location")}
-            {sel("visa", "Visa", Object.entries(VISA_CATEGORIES), "Any visa")}
-            {sel("documents", "Documents", docOpts, "Any documents status")}
-            {sel("resume", "Resume", [["yes", "Resume on file"], ["no", "No resume"]], "Any resume")}
-            {sel("stay", "Stay", [["guest_house", "Guest house"], ["remote", "Remote"]], "Any stay")}
-            {options && (
-              <>
-                {sel("inPerson", "In person", [["yes", "In person"], ["no", "Not in person"]], "Any")}
-                {sel("ghLocationId", "Guest house", ghOpts, "Any guest house")}
-              </>
-            )}
-          </div>
-        </div>
-      </form>
-      {selection}
-      {!selecting && <div className="fb-summary">
-        {chips.length > 0 && (
-          <ul className="chips" aria-label="Active filters">
-            {chips.map(([k, text, clear]) => (
-              <li key={k} className="chip">{text}
-                <button type="button" className="chipx" aria-label={`Remove filter ${text}`} onClick={clear}><X size={14} aria-hidden="true" /></button>
-              </li>
-            ))}
-          </ul>
-        )}
-        {s.hasFilters && <button type="button" className="linkbtn" onClick={s.clear}>Clear filters</button>}
-        <span className="fb-spacer" />
-        {options && (
-          <div className="field inline fb-sort">
-            <label htmlFor={`${id}-sort`}>Sort by</label>
-            <select id={`${id}-sort`} value={s.extra.sort || "default"}
-              onChange={(e) => s.setExtra("sort", e.target.value === "default" ? "" : e.target.value as ListSort)}>
-              {LIST_SORTS.map((k) => <option key={k} value={k}>{LIST_SORT_LABELS[k]}</option>)}
+        </>
+      }
+      more={
+        <>
+          <div className="field inline">
+            <label htmlFor={`${id}-vis`}>Visibility</label>
+            <select id={`${id}-vis`} value={s.visibility} onChange={(e) => s.setVisibility(e.target.value as ListState["visibility"])}>
+              <option value="">Any visibility</option>
+              <option value="team">Team only</option>
+              <option value="all_teams">Open to all teams</option>
+              <option value="selected_teams">Selected teams</option>
             </select>
           </div>
-        )}
-        {actions}
-      </div>}
-    </div>
+          {sel("locationId", "Location", locOpts, "Any location")}
+          {sel("visa", "Visa", Object.entries(VISA_CATEGORIES), "Any visa")}
+          {sel("documents", "Documents", docOpts, "Any documents status")}
+          {sel("resume", "Resume", [["yes", "Resume on file"], ["no", "No resume"]], "Any resume")}
+          {sel("stay", "Stay", [["guest_house", "Guest house"], ["remote", "Remote"]], "Any stay")}
+          {options && (
+            <>
+              {sel("inPerson", "In person", [["yes", "In person"], ["no", "Not in person"]], "Any")}
+              {sel("ghLocationId", "Guest house", ghOpts, "Any guest house")}
+            </>
+          )}
+        </>
+      }
+      summaryEnd={
+        <>
+          {options && (
+            <div className="field inline fb-sort">
+              <label htmlFor={`${id}-sort`}>Sort by</label>
+              <select id={`${id}-sort`} value={s.extra.sort || "default"}
+                onChange={(e) => s.setExtra("sort", e.target.value === "default" ? "" : e.target.value as ListSort)}>
+                {LIST_SORTS.map((k) => <option key={k} value={k}>{LIST_SORT_LABELS[k]}</option>)}
+              </select>
+            </div>
+          )}
+          {actions}
+        </>
+      }
+    />
   );
 }
 

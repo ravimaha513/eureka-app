@@ -19,6 +19,8 @@
   --violet-bg: #f1edfb; --violet-fg: #5b3aa8;
   --t-indigo: #3a4386; --t-indigo-bg: #e8eaf5; --t-teal: #0f6d64; --t-teal-bg: #e2f2ef; --t-amber: #8f5a00; --t-amber-bg: #fbf0dc;
   --t-rose: #a8323d; --t-rose-bg: #f9e8ea; --t-violet: #5b3aa8; --t-violet-bg: #efeaf9; --t-sky: #1d5f8c; --t-sky-bg: #e3eff8;
+  /* Charts: categorical series (no red: red means error). Use in order; never for status. */
+  --chart-1: #3d4a9c; --chart-2: #0f8b7d; --chart-3: #b8740a; --chart-4: #2f7fc1; --chart-5: #7a55c7; --chart-6: #6b7385;
   --shadow-sm: none;
   --shadow-lg: 0 16px 40px rgba(17, 20, 40, .16), 0 2px 6px rgba(17, 20, 40, .08);
   --scrim: rgba(17, 20, 40, .42);
@@ -45,6 +47,7 @@
   --violet-bg: rgba(139, 92, 246, .16); --violet-fg: #c4b5fd;
   --t-indigo: #b4bbf0; --t-indigo-bg: rgba(99, 102, 241, .18); --t-teal: #5eead4; --t-teal-bg: rgba(20, 184, 166, .16); --t-amber: #fcd34d; --t-amber-bg: rgba(245, 158, 11, .16);
   --t-rose: #fda4af; --t-rose-bg: rgba(244, 63, 94, .16); --t-violet: #c4b5fd; --t-violet-bg: rgba(139, 92, 246, .18); --t-sky: #7dd3fc; --t-sky-bg: rgba(14, 165, 233, .16);
+  --chart-1: #9aa5f2; --chart-2: #3cc7b4; --chart-3: #f0b44c; --chart-4: #6cb3ee; --chart-5: #b59cf5; --chart-6: #a3aabc;
   --shadow-sm: none;
   --shadow-lg: 0 20px 50px rgba(0, 0, 0, .55);
   --scrim: rgba(2, 4, 12, .62);
@@ -221,7 +224,7 @@ tbody tr[aria-selected="true"] td, tbody tr.selected td { background: var(--sel)
 .field input, .field select { height: var(--h-control); border-radius: var(--r-md); border: 1px solid var(--field-line); padding: 0 10px; background: var(--surface); font: inherit; color: var(--text); min-width: 200px; }
 .field select[multiple] { height: auto; min-height: 120px; padding: 4px; }
 .field input[type="checkbox"], .field input[type="radio"] { height: 16px; min-width: 0; padding: 0; }
-.field input::placeholder, .field textarea::placeholder { color: var(--faint); }
+.field input::placeholder, .field textarea::placeholder { color: var(--muted); }
 .btn { height: var(--h-control); padding: 0 14px; border-radius: var(--r-md); border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); font-weight: 600; font-size: 13.5px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
 .btn:hover:not(:disabled) { background: var(--hover); }
 .btn.ghost { border-color: transparent; background: none; }
@@ -312,8 +315,8 @@ td.rowactions > button + button { margin-left: 6px; }
 .teamdrawer h3 { font-size: 14px; }
 .addpeople { border-left: 1px solid var(--line); padding-left: 20px; }
 .filterrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.filterrow select { height: 30px; width: auto; font-size: 12.5px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); color: var(--text2); font-weight: 600; }
-.togglechip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: 12.5px; font-weight: 600; color: var(--text2); cursor: pointer; }
+.filterrow select { height: 30px; width: auto; font-size: 12.5px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface); color: var(--text2); font-weight: 600; }
+.togglechip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); font-size: 12.5px; font-weight: 600; color: var(--text2); cursor: pointer; }
 .togglechip:has(input:checked) { background: var(--pri-50); color: var(--pri-700); border-color: var(--pri-200); }
 .pickrows { list-style: none; padding: 0; border: 1px solid var(--line); border-radius: var(--r-md); max-height: 52vh; overflow: auto; }
 .pickrows li { border-bottom: 1px solid var(--line2); }
@@ -324,7 +327,7 @@ td.rowactions > button + button { margin-left: 6px; }
 .pickrows .badge { margin-left: auto; }
 .addbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; position: sticky; bottom: 0; padding: 10px 0 2px; background: var(--surface); }
 .selcol { width: 36px; }
-tr.selected > td { background: var(--pri-50); }
+tr.selected > td { background: var(--sel); }
 .selectionbar { position: sticky; bottom: 16px; z-index: 5; display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); }
 .selectionbar b { margin-right: auto; }
 @media (max-width: 760px) {
@@ -332,7 +335,7 @@ tr.selected > td { background: var(--pri-50); }
   .addpeople { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 16px; }
 }
 .backdrop { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; z-index: 50; padding: 16px; }
-.dialog { background: var(--surface); border-radius: var(--r-lg); border: 1px solid var(--line); width: min(460px, 100%); padding: 22px 24px; box-shadow: 0 20px 50px rgba(15, 23, 42, .25); max-height: 90vh; overflow: auto; }
+.dialog { background: var(--surface); border-radius: var(--r-lg); border: 1px solid var(--line); width: min(460px, 100%); padding: 22px 24px; box-shadow: var(--shadow-lg); max-height: 90vh; overflow: auto; }
 .dialog:focus { outline: none; }
 .dialog h2 { font-size: 18px; margin-bottom: 16px; letter-spacing: -.01em; }
 .dialog .field input, .dialog .field select { width: 100%; }
@@ -355,7 +358,7 @@ h1:focus { outline: none; }
 .badge.confirmation, .badge.placed { background: var(--ok-bg); color: var(--ok-fg); }
 .backbtn { align-self: flex-start; }
 .drawerback { place-items: stretch end; padding: 0; }
-.drawer { background: var(--surface); width: min(440px, 100%); height: 100vh; height: 100dvh; padding: 0 24px 24px; overflow: auto; box-shadow: -12px 0 40px rgba(15, 23, 42, .2); display: flex; flex-direction: column; gap: 16px; }
+.drawer { background: var(--surface); width: min(440px, 100%); height: 100vh; height: 100dvh; padding: 0 24px 24px; overflow: auto; box-shadow: var(--shadow-lg); display: flex; flex-direction: column; gap: 16px; }
 /* The drawer itself scrolls: its children keep their height (a .card clips, so it would otherwise collapse). */
 .drawer > * { flex-shrink: 0; }
 .drawer:focus { outline: none; }
@@ -558,7 +561,7 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .bell:hover { background: var(--hover); }
 .bell:focus-visible, .linkish:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; }
 .bell-count { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--bad-fg); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
-.inbox { position: absolute; right: 0; top: 44px; z-index: 30; width: min(380px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: 0 20px 50px rgba(15, 23, 42, .2); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.inbox { position: absolute; right: 0; top: 44px; z-index: 30; width: min(380px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
 .inbox-head { display: flex; align-items: center; gap: 8px; }
 .inbox-head h2 { font-size: 15px; margin: 0 auto 0 0; }
 .inbox-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -593,7 +596,7 @@ a.btn { text-decoration: none; }
 .searchbox { position: relative; display: inline-flex; align-items: center; }
 .searchbox input { height: 38px; width: 240px; border-radius: var(--r-md); border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); font: inherit; padding: 0 12px 0 36px; }
 .searchbox input:focus { border-color: var(--pri); box-shadow: 0 0 0 3px var(--pri-100); outline: none; }
-.searchbox input::placeholder { color: var(--faint); }
+.searchbox input::placeholder { color: var(--muted); }
 .inicon { position: absolute; left: 12px; color: var(--muted); pointer-events: none; }
 .inicon.prefix { font-weight: 600; font-size: 14px; }
 .iconinput { position: relative; display: flex; align-items: center; }
@@ -659,7 +662,7 @@ td.rowactions > .iconbtn + .iconbtn { margin-left: 2px; }
 @media (max-width: 768px) {
   .app { grid-template-columns: minmax(0, 1fr); }
   .side { position: fixed; inset: 0 auto 0 0; z-index: 60; width: min(280px, 85vw); overflow-y: auto; transform: translateX(-100%); visibility: hidden; transition: transform .2s ease, visibility .2s; }
-  .side.open { transform: none; visibility: visible; box-shadow: 12px 0 40px rgba(15, 23, 42, .35); }
+  .side.open { transform: none; visibility: visible; box-shadow: var(--shadow-lg); }
   .navscrim { display: block; position: fixed; inset: 0; z-index: 55; background: var(--scrim); }
   .menubtn { display: grid; place-items: center; width: 40px; height: 40px; flex: none; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--surface); color: var(--text); }
   .menubtn:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; }
@@ -987,9 +990,9 @@ form.stack { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
   /* Touch targets */
   .tab { min-height: 38px; }
   .pager > button, .pager-page { height: 40px; }
-  .btn.sm { height: 34px; }
-  .iconbtn { width: 38px; height: 38px; }
-  .iconbtn.sm { width: 34px; height: 34px; }
+  .btn.sm { height: 40px; }
+  .iconbtn { width: 40px; height: 40px; }
+  .iconbtn.sm { width: 40px; height: 40px; }
   .filterrow select { height: 36px; }
   /* 16px text inputs: iOS Safari zooms the page on focus below that */
   :root input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]), :root select, :root textarea { font-size: 16px; }
@@ -1133,9 +1136,10 @@ tr.editing:hover td { background: var(--surface2); }
 .dashrow.wide { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
 @media (max-width: 1100px) { .dashrow.wide { grid-template-columns: minmax(0, 1fr); } }
 .legendtabs .tab.sm { border-color: transparent; background: none; }
-.legendtabs .tab.sm[aria-pressed="false"] { opacity: .5; }
+.legendtabs .tab.sm[aria-pressed="false"] { color: var(--muted); }
+.legendtabs .tab.sm[aria-pressed="false"] .dot { box-shadow: inset 0 0 0 8px var(--surface); }
 .legendtabs .tab.sm[aria-pressed="true"] { color: var(--text2); }
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; margin-right: 6px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; margin-right: 6px; border: 2px solid transparent; background-clip: border-box; }
 .ranklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
 .ranklist li { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.4fr) 36px 56px; align-items: center; gap: 12px; }
 .rankname { color: var(--text2); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1300,7 +1304,7 @@ tbody tr[aria-selected="true"] td.c-act { background: var(--sel); }
   .cardtable td.c-rec { grid-area: rec; text-align: right; color: var(--muted); }
   .cardtable td.c-phone { grid-area: phone; }
   .cardtable td.c-act { grid-area: act; justify-self: end; width: auto; }
-  .cardtable td.c-act .btn { height: 36px; }
+  .cardtable td.c-act .btn, .cardtable td.c-act .btn.sm { height: 40px; }
   .cardtable .cardonly { display: inline; }
   .cardtable:not(:has(.c-sel)) tr { grid-template-areas: "name name pri" "status status status" "tech tech days" "team team rec" "phone phone act"; }
   .cardtable td.empty { grid-column: 1 / -1; }
@@ -1310,3 +1314,94 @@ tbody tr[aria-selected="true"] td.c-act { background: var(--sel); }
   .filterbar.open .fb-all { animation: sheet-in .2s cubic-bezier(.2, .8, .2, 1); }
 }
 @keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } }
+
+/* ---- Kit: shared patterns for every screen (src/ui/*). Tokens only; see DESIGN.md. ----------------------
+   FilterBar (ui/FilterBar.tsx) reuses the fb-* rules above. Tabs (ui/Tabs.tsx) use [role="tablist"] .tab.
+   Menu (ui/Menu.tsx) .menubutton + .menu. RecordLink (ui/RecordLink.tsx) .recordlink.
+   Dialog (ui/Dialog.tsx): sticky .actions footer, .dialog-discard bar. */
+.tab .tabcount { border-radius: var(--r-sm); font-variant-numeric: tabular-nums; }
+.recordlink { color: var(--pri-700); text-decoration: none; }
+.recordlink:hover { text-decoration: underline; text-underline-offset: 2px; }
+.recordlink:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; border-radius: var(--r-sm); }
+
+/* Menu: fixed popup so it escapes .tablewrap overflow; floats, so it takes the float shadow. */
+.menubutton.btn { gap: 4px; }
+.menu { position: fixed; z-index: 70; min-width: 180px; max-width: min(320px, calc(100vw - 16px)); max-height: min(360px, 70vh); overflow-y: auto; padding: 4px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; }
+.menu [role="menuitem"] { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 0 10px; border: 0; border-radius: var(--r-sm);
+  background: none; color: var(--text); font-size: 13.5px; text-align: left; white-space: nowrap; }
+.menu [role="menuitem"]:hover, .menu [role="menuitem"]:focus { background: var(--hover); outline: none; }
+.menu [role="menuitem"]:focus-visible { outline: 2px solid var(--pri); outline-offset: -2px; }
+.menu [role="menuitem"].danger { color: var(--bad-fg); }
+.menu [role="menuitem"].danger:hover, .menu [role="menuitem"].danger:focus { background: var(--bad-bg); }
+.menu [role="menuitem"]:disabled { opacity: .5; cursor: not-allowed; background: none; }
+
+/* Dialog: the closing footer sticks to the bottom of a scrolling dialog; the discard bar sits above it. */
+.dialog { --dlg-px: 24px; --dlg-pb: 22px; }
+.dialog > form > .actions:last-child, .dialog > .actions:last-child, .dialog-discard {
+  position: sticky; bottom: calc(-1 * var(--dlg-pb)); z-index: 2; background: var(--surface);
+  margin: 6px calc(-1 * var(--dlg-px)) calc(-1 * var(--dlg-pb)); padding: 12px var(--dlg-px) var(--dlg-pb); border-top: 1px solid var(--line2); }
+.dialog-discard { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--warn-bg); border-top-color: var(--warn-line); }
+.dialog-discard p { margin-right: auto; color: var(--warn-fg); font-weight: 600; font-size: 13.5px; }
+.dialog:has(.dialog-discard) > form > .actions:last-child { position: static; margin-bottom: 0; padding-bottom: 0; border-top: 0; }
+
+/* ActionStrip: the top of a record view. Status first, then the one next action, secondary actions, More menu.
+   <div class="actionstrip">
+     <div class="as-status"><span class="badge active">Active</span><span class="as-note">Interview Tue 10:00 with Acme</span></div>
+     <div class="as-actions"><button class="btn primary">Schedule interview</button><button class="btn">Edit</button><Menu …/></div>
+   </div>
+   Page h1 count: <h1>Hot List<span class="h1count">38</span></h1> ("38", "50+"; defined in List screens). */
+.actionstrip { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
+.as-status { display: flex; align-items: center; gap: 8px; flex: 1 1 240px; min-width: 0; flex-wrap: wrap; }
+.as-note { color: var(--muted); font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.as-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+
+/* dtable: generic dense table that becomes record cards on phones.
+   <div class="card tablewrap listcard"><table class="dtable">
+     <thead><tr><th>Name</th><th>Status</th><th class="num">Rate</th><th class="p2">Location</th><th class="c-act"><span class="sr-only">Actions</span></th></tr></thead>
+     <tbody><tr>
+       <td class="c-primary"><RecordLink …><b>Jane Doe</b></RecordLink></td>
+       <td class="c-badge" data-label="Status"><span class="badge active">Active</span></td>
+       <td class="num" data-label="Rate">…</td>
+       <td class="p2" data-label="Location">…</td>
+       <td class="c-act"><button class="btn sm">Open</button><Menu …/></td>
+     </tr></tbody></table></div>
+   Desktop: .listcard metrics (7px rows, 10px cells); .p3 hides <1600px, .p2 <1400px; td.c-act is pinned right.
+   Phone (≤768px): each row is a card. c-primary = title (row 1), c-badge = top right, c-act = bottom right,
+   p2/p3 hidden, every other cell = "label value" from its data-label (no data-label: value only). td.c-sel
+   (checkbox) sits top left. An empty-state row is <td colSpan class="empty">. */
+.dtable td.c-primary b { color: var(--text); }
+@media (max-width: 1599px) { .dtable .p3 { display: none; } }
+@media (max-width: 1399px) { .dtable .p2 { display: none; } }
+@media (max-width: 768px) {
+  .tablewrap > table.dtable { min-width: 0; }
+  .dtable thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .dtable, .dtable tbody { display: block; }
+  .dtable tbody { display: grid; gap: 8px; }
+  .dtable tr { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 12px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
+  .dtable tr:has(> td.c-sel) { padding-left: 44px; }
+  .dtable tr[aria-selected="true"], .dtable tr.selected { background: var(--sel); border-color: var(--sel-line); }
+  .dtable td { display: grid; grid-template-columns: minmax(88px, 36%) minmax(0, 1fr); gap: 8px; grid-column: 1 / -1; padding: 0; border: 0;
+    background: none !important; box-shadow: none !important; position: static !important; white-space: normal; font-size: 13.5px; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+  .dtable td:not([data-label]) { display: block; }
+  .dtable td[data-label]::before { content: attr(data-label); color: var(--muted); font-size: 12.5px; }
+  .dtable td.p2, .dtable td.p3 { display: none; }
+  .dtable td.c-primary { display: block; grid-column: 1; grid-row: 1; font-size: 15px; }
+  .dtable td.c-primary::before, .dtable td.c-badge::before, .dtable td.c-act::before { content: none; }
+  .dtable td.c-badge { display: block; grid-column: 2; grid-row: 1; justify-self: end; }
+  .dtable td.c-act { display: flex; gap: 8px; justify-content: flex-end; order: 1; width: auto; margin-top: 4px; }
+  .dtable td.c-act .btn, .dtable td.c-act .btn.sm { height: 40px; }
+  .dtable td.c-act .iconbtn { width: 40px; height: 40px; }
+  .dtable td.c-sel { position: absolute !important; top: 12px; left: 12px; display: block; width: auto; }
+  .dtable td.c-sel input { width: 20px; height: 20px; }
+  .dtable td.empty { display: block; }
+  .dtable tr:has(> td.empty) { display: block; padding: 0; }
+  .menu [role="menuitem"] { min-height: 44px; }
+  .actionstrip { padding: 12px; }
+  .as-actions { width: 100%; margin-left: 0; }
+  .as-actions > .btn { height: 44px; }
+  .as-actions > .btn.primary { flex: 1 1 100%; }
+  .dialog { --dlg-px: 16px; --dlg-pb: 16px; }
+  .dialog.sheet { --dlg-px: 18px; --dlg-pb: calc(16px + env(safe-area-inset-bottom)); }
+}
