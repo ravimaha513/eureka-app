@@ -1,5 +1,5 @@
 # Staff birthdays — `/birthdays`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `staff.birthday:manage` (nav.ts:48) — HR
 Source: `apps/web/src/staff/BirthdaysPage.tsx`, `staff/BirthdayFields.tsx`
 Evidence: `birthdays-desktop.png`, `birthdays-desktop-full.png`, `birthdays-mobile.png`, `birthdays-mobile-full.png`, new: `birthdays-editing-desktop.png`, `birthdays-mobile-scrolled.png`
@@ -54,3 +54,15 @@ BirthdaysPage.tsx + styles. No API change.
 
 ## Validation
 Visual inspection: hr at 1440 (normal + editing) and 390 (default + table scrolled). Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Mobile: Birthday and Set off-screen (High) | Kit `.dtable` record cards: name, location, birthday, next, action bottom-right (44px). Editing puts month + day side by side at 44px/16px. | `after/birthdays-mobile.png`, `after/birthdays-editing-mobile-dark.png` |
+| #2 Focus lost after a filtered save (Medium) | After Save/Clear, focus moves to the next row's Set/Change button (also when the saved row leaves "Only without a birthday"); Set focuses the month select; Escape or Cancel returns focus to Set; result announced in a live region; Enter in the day field saves. | — |
+| #3 KPI hidden (Medium) | Completeness strip: "**8** missing", a meter (`role=progressbar`, "6 of 14"), and the count in the h1 box; the toggle shows the missing count. Default of the toggle left off (no silent view change). | `after/birthdays-desktop.png` |
+| #4 Mixed secondary line (Low) | Secondary line is always "designation · email". | — |
+| #5 No upcoming order (Low) | "Next" column ("Tomorrow", "In 12 days"; bold within a week) and Sort: Name / Next birthday. | `after/birthdays-desktop.png` |
+| #6 13px checkbox, long label (Low) | 18px checkbox in a 36px (44px phone) label; filter label "Filter" with a placeholder. | — |
+
+Validation (wave 2, 2026-11-05): `pnpm --filter @eureka/web typecheck` clean; full web unit suite 552/552 (admin, staff, training, team suites updated only where markup/interaction changed). Visual check at 1440×900 and 390×844, light and dark, in Playwright against a fixture API built from the `*Api.ts` shapes, because the shared API on :3000 and its Postgres were not running in this environment. Page width at 390 = 390 on every screen below; row actions visible at 1440. Live-data re-check against the seeded API is still owed.

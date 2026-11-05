@@ -1,5 +1,5 @@
 # My team — `/myteam`
-Status: Audited · Redesign proposed (minor)
+Status: Audited · Redesign proposed (minor) · Implemented (rebrand wave 2)
 Who / permission: `team:add_member` (nav.ts:43) — leads (own team), managers / associate directors (every team in their hierarchy).
 Source: `apps/web/src/team/MyTeamPage.tsx`, `team/RemoveMemberDialog.tsx`, `team/teamApi.ts`, styles.css:237-240 (`.teamgrid`, `.team`)
 Evidence: `myteam-desktop.png`, `myteam-desktop-full.png`, `myteam-mobile.png`, `myteam-mobile-full.png`, new: `myteam-add-dialog-desktop.png`
@@ -55,3 +55,16 @@ MyTeamPage.tsx, styles.css (touch sizes). No API changes.
 
 ## Validation
 Visual inspection: desktop 1440 + mobile 390 as l1, Add dialog opened; targets measured. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 N primary buttons for managers (Low) | Add member is primary only when there is one team; otherwise secondary on each card. | `after/myteam-desktop.png` |
+| #2 Count excludes the lead (Low) | "2 members + lead". | `after/myteam-desktop.png` |
+| #3 30px buttons on touch (Low) | 44px Remove / Add member on phones; Add member full width. | `after/myteam-mobile.png` |
+| #5 Add with nobody free (Low) | Add member disabled with "No unassigned recruiters right now" (aria-describedby). | — |
+| #6 Plain loading / error (Low) | `Loading` and `QueryError` (retry). | — |
+| Shared card | Same header, lead row and "Members"/"Coaches" label as Coach assignments. Remove still confirms (RemoveMemberDialog). | — |
+| #4 Member → Hot List link (Low) | Not changed (needs Hot List URL filters by recruiter; outside this area). | — |
+
+Validation (wave 2, 2026-11-05): `pnpm --filter @eureka/web typecheck` clean; full web unit suite 552/552 (admin, staff, training, team suites updated only where markup/interaction changed). Visual check at 1440×900 and 390×844, light and dark, in Playwright against a fixture API built from the `*Api.ts` shapes, because the shared API on :3000 and its Postgres were not running in this environment. Page width at 390 = 390 on every screen below; row actions visible at 1440. Live-data re-check against the seeded API is still owed.

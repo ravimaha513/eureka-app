@@ -1,5 +1,5 @@
 # Users & Access — `/access`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `access:manage` (nav.ts:46) — org admin
 Source: `apps/web/src/admin/AccessPage.tsx`, `UsersTab.tsx` (757 lines), `ApprovalsTab.tsx`, `TeamsTab.tsx`, `TeamDrawer.tsx`, `LocationsTab.tsx`, `LocationDetail.tsx`, `RolesTab.tsx`, `OrgChartTab.tsx`
 Evidence: `access-desktop.png`, `access-desktop-full.png`, `access-mobile.png`, `access-mobile-full.png`, new: `access-users-action-desktop.png`, `access-users-mobile-scrolled.png`, `access-users-mobile-row.png`, `access-approvals-desktop-full.png`, `access-teams-desktop-full.png`, `access-teamdrawer-desktop.png`, `access-locations-desktop-full.png`, `access-locationdetail-desktop-full.png`, `access-roles-desktop-full.png`, `access-orgchart-desktop-full.png`
@@ -72,3 +72,19 @@ UsersTab.tsx (largest change: tiles, filters, columns, menu), AccessPage.tsx (ba
 
 ## Validation
 Visual inspection: admin at 1440 for all 6 tabs plus team drawer, location detail and the row-action state; Users at 390 (two scroll positions). Target sizes measured with Playwright at 390. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Table below the fold (High) | 14 role tiles → one row of role toggle buttons with counts (`aria-pressed`, apply the Role filter); "14 active · 1 inactive" summary. First row at y≈430 (was ≈880). | `after/access-desktop.png` |
+| #2 Row actions off-screen, 6 buttons per row, Deactivate far right (High) | Table rebuilt as a kit `.dtable`: User, Designation+department (p2), Roles, Team+"Reports to" manager, Phone (p3), Status, actions. One **Grant role** (or **Reactivate**) button + kit `Menu` (Email password link, Set temporary password, Set manager, Set department, then **Deactivate…/Delete now…** last in bad red, still confirmed). Fits 1440 with no sideways scroll. | `after/access-desktop.png`, `after/access-menu-desktop-dark.png` |
+| #3 18px revoke × (Medium) | Revoke is a 24px target (32px on phones) with an X icon, a title and the same aria-label; confirm dialog unchanged. | `after/access-desktop.png` |
+| #4 Filters wrap, no active-filter state, no reset (Medium) | Kit `FilterBar`: Search, Role, Status inline; Department, Team, Location under "More filters · n" with removable chips and "Clear filters". All filters in the URL (`?role=&team=…`); Teams "Assign them" sets `team=none&status=active`. Page actions (Departments, Import users, New user) sit at the right of the filter row. | `after/access-desktop.png` |
+| #5 Approvals tab has no pending count (Medium) | Kit `Tabs` (roving tabindex, `?tab=`); Approvals shows the pending count (`.tabcount`, name "Approvals, pending: n"), sharing the Approvals tab's query cache. | `after/access-approvals-desktop.png` |
+| #6 Roles columns jump between tracks, "Hr" (Medium) | Track tables share fixed column widths (Traits/Holders/Permissions line up, numbers right-aligned); `trackLabel` upper-cases HR/IT/BGC. | — |
+| #7 Org-chart find unstyled; team members shown twice (Medium) | Find uses the Teams `.searchfield` (icon, label). Team strip chips only members who don't report to the lead; the rest are counted as "shown below as cards". | — |
+| #8 "1 people" (Low) | "1 person", "1 team". | — |
+| #10 Mobile targets (Medium) | Rows become record cards: name + status, roles, team; Grant role + ⋯ at 40px; 20px checkboxes; filters in the bottom sheet; role toggles scroll sideways inside their own strip. | `after/access-mobile.png`, `after/access-filters-mobile.png` |
+| #9 Team drawer picker (Low) | Not changed (TeamDrawer behaviour kept). | — |
+
+Validation (wave 2, 2026-11-05): `pnpm --filter @eureka/web typecheck` clean; full web unit suite 552/552 (admin, staff, training, team suites updated only where markup/interaction changed). Visual check at 1440×900 and 390×844, light and dark, in Playwright against a fixture API built from the `*Api.ts` shapes, because the shared API on :3000 and its Postgres were not running in this environment. Page width at 390 = 390 on every screen below; row actions visible at 1440. Live-data re-check against the seeded API is still owed.
