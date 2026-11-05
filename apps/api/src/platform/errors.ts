@@ -1,11 +1,18 @@
 import {
-  type ArgumentsHost, Catch, type ExceptionFilter, HttpException, Logger, UnprocessableEntityException,
+  type ArgumentsHost, Catch, type ExceptionFilter, HttpException, Logger, ServiceUnavailableException, UnprocessableEntityException,
 } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { ZodError } from "zod";
 
 /** A 422 whose title and detail are the coded error `c` (module error maps: `placement_not_joined` and so on). */
 export const unprocessable = (c: string) => new UnprocessableEntityException(c);
+
+/** A 503 the client may retry: the problem response carries `Retry-After: <seconds>` (overload, pool exhaustion). */
+export class RetryableUnavailable extends ServiceUnavailableException {
+  constructor(detail: string, readonly retryAfterSeconds: number) {
+    super(detail);
+  }
+}
 
 /**
  * Maps errors to RFC 9457 problem details. Database errors are mapped to
@@ -19,6 +26,7 @@ export class ProblemFilter implements ExceptionFilter {
     const reply = host.switchToHttp().getResponse<FastifyReply>();
     const { status, title, detail, errors } = toProblem(err);
     if (status >= 500) this.log.error(err);
+    if (err instanceof RetryableUnavailable) void reply.header("retry-after", String(err.retryAfterSeconds));
     void reply
       .status(status)
       .header("content-type", "application/problem+json")
