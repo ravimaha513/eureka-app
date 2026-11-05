@@ -11,7 +11,7 @@ import {
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
-import { RateLimiter } from "../../platform/rate-limit.js";
+import { SharedRateLimiter } from "../../platform/rate-limit.js";
 import { toCsv } from "../hotlist/csv.js";
 import { EXPORTS_PER_WINDOW, EXPORT_ROW_CAP, EXPORT_WINDOW_MS } from "../hotlist/hotlist.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
@@ -211,7 +211,8 @@ export class EmployeesService {
     };
   }
 
-  private readonly exportLimiter = new RateLimiter(EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
+  /** Shared across API tasks and deploys (R-24); an in-memory first gate per task. */
+  private readonly exportLimiter = new SharedRateLimiter("employees.export", EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
 
   /**
    * EM-X1: CSV of the employee list with the same filters, for report:export
@@ -222,7 +223,7 @@ export class EmployeesService {
   async exportCsv(user: AuthedUser, q: EmployeeExportQuery): Promise<{ csv: string; rows: number; truncated: boolean }> {
     this.requireEmployeeRead(user.access);
     if (!resolveScope(user.access, "report:export")) throw new ForbiddenException();
-    if (!this.exportLimiter.take(user.id)) {
+    if (!(await this.exportLimiter.take(user.id, this.db))) {
       throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
     }
     const { sql, params } = this.listSql(q, EXPORT_ROW_CAP + 1);

@@ -9,6 +9,7 @@ import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { OidcService } from "../../platform/oidc.service.js";
 import { openCookie, sealCookie } from "../../platform/sealed-cookie.js";
+import { stepUpStatus } from "../../platform/step-up.js";
 import { ApiBody } from "../../platform/http/api-doc.js";
 
 const STEP_UP_COOKIE = "eureka_stepup";
@@ -67,10 +68,8 @@ export class StepUpController {
   /** Whether this session holds a live step-up grant, and which modes the server offers. */
   @Get()
   async status(@CurrentUser() user: AuthedUser) {
-    const g = await this.db.withUser(user.id, async (c) => (await c.query<{ method: string; expires_at: Date }>(
-      `SELECT method, expires_at FROM authz.step_up_current($1)`, [user.sessionHash])).rows[0]);
-    const hasPassword = this.config.PASSWORD_LOGIN === "on" && await this.db.withUser(user.id, async (c) =>
-      (await c.query<{ h: boolean }>(`SELECT authz.password_has_credential() AS h`)).rows[0]!.h);
+    // One transaction, one round trip (R-25).
+    const { grant: g, hasPassword } = await this.db.withUser(user.id, (c) => stepUpStatus(c, user, this.config.PASSWORD_LOGIN === "on"));
     return {
       active: Boolean(g),
       expiresAt: g?.expires_at.toISOString() ?? null,

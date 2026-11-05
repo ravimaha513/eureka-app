@@ -9,6 +9,7 @@ import {
   type UserAccess,
 } from "./engine.js";
 import {
+  PAPERWORK_LOCKED_PLACEMENT_STATUSES,
   PLACEABLE_CANDIDATE_STATUSES,
   TERMINAL_SUBMISSION_STATUSES,
   bgcTransitionTargets,
@@ -161,7 +162,7 @@ export interface ChecklistItemActions {
 export function checklistItemActions(
   user: UserAccess, r: PaperworkRef, status: string, placementStatus: string | null,
 ): ChecklistItemActions {
-  if (placementStatus === "backout") return { transition: [], editNotes: false, assign: false };
+  if (placementStatus !== null && PAPERWORK_LOCKED_PLACEMENT_STATUSES.has(placementStatus)) return { transition: [], editNotes: false, assign: false };
   const upload = paperworkCovered(user, "document:upload", r);
   const verify = paperworkCovered(user, "document:verify", r);
   return {
@@ -182,11 +183,11 @@ export interface BgcActions {
 }
 
 export function bgcActions(user: UserAccess, r: PaperworkRef, status: string, placementStatus: string | null): BgcActions {
-  const update = placementStatus !== "backout" && paperworkCovered(user, "bgc:update", r);
+  const update = !(placementStatus !== null && PAPERWORK_LOCKED_PLACEMENT_STATUSES.has(placementStatus)) && paperworkCovered(user, "bgc:update", r);
   const canFail = status === "failed" || bgcTransitionTargets(status).includes("failed");
   // Whoever may mark the placement BGC failed may also mark the check initiated (status only), even without bgc:update.
   const scope = resolveScope(user, "placement.bgc_status:update");
-  const initiate = placementStatus !== null && placementStatus !== "backout" && scope !== null && ownsActivity(scope, r);
+  const initiate = placementStatus !== null && !PAPERWORK_LOCKED_PLACEMENT_STATUSES.has(placementStatus) && scope !== null && ownsActivity(scope, r);
   return {
     update,
     transition: update ? bgcTransitionTargets(status) : initiate ? bgcTransitionTargets(status).filter((t) => t === "initiated") : [],
