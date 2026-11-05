@@ -24,12 +24,25 @@ const filter = (page: Page, name: string) => filters(page).getByRole("combobox",
 /** The list footer's result count (other live regions: saved views, export, bulk results). */
 const resultCount = (page: Page) => page.getByRole("status").filter({ hasText: / on page \d+/ });
 
+/** Ticks one option in a filter's search combobox (options may read "Active, 3 candidates"). */
+async function pickFilter(page: Page, name: string, option: string) {
+  const box = filter(page, name);
+  await box.click();
+  await filters(page).getByRole("listbox", { name }).getByRole("option", { name: new RegExp(`^${option}(,|$)`) }).click();
+  await box.press("Escape");
+  await expect(box).toHaveValue(option);
+}
+
+/** The one live region saying this (other status regions: result count, offline banners). */
+const statusSaying = (page: Page, text: string) => expect(page.getByRole("status").filter({ hasText: text })).toHaveText(text);
+
 /** Filters to active, team-only candidates and waits for the result count to settle. */
 async function filterActiveTeamOnly(page: Page) {
-  await filter(page, "Status").selectOption({ label: "Active" });
-  // Visibility sits behind "More filters".
-  await filters(page).getByRole("button", { name: /^More filters/ }).click();
-  await filter(page, "Visibility").selectOption({ label: "Team only" });
+  await pickFilter(page, "Status", "Active");
+  // Visibility sits behind "More filters", which stays open once opened.
+  const more = filters(page).getByRole("button", { name: /^More filters/ });
+  if (await more.getAttribute("aria-expanded") !== "true") await more.click();
+  await pickFilter(page, "Visibility", "Team only");
   await expect(resultCount(page)).toContainText("on page 1");
   await expect(hotlist(page)).not.toHaveAttribute("aria-busy", "true");
 }
@@ -70,7 +83,7 @@ test("recruiter filters the Hot List, opens an own candidate and logs submission
     await expect(await cell(hotlist(page), row, "Status")).toContainText("Active");
     await expect(row.getByText("Open to all teams")).toHaveCount(0);
     // Team-only candidates of other teams are not on this Hot List (team policy).
-    await expect(await cell(hotlist(page), row, "Team")).toHaveText("Team Rohit");
+    await expect(await cell(hotlist(page), row, "Team")).toContainText(/^\s*Team Rohit\b/);
   }
 
   // Name search narrows the list (debounced).
@@ -103,14 +116,21 @@ test("recruiter filters the Hot List, opens an own candidate and logs submission
   await expect(dlg.getByLabel("Job title")).toHaveAttribute("aria-invalid", "true");
   await dlg.getByLabel("Job title").fill(job);
   await dlg.getByRole("combobox", { name: "Client", exact: true }).selectOption(CLIENT_ID);
-  await dlg.getByRole("combobox", { name: "Vendor", exact: true }).selectOption({ index: 1 });
+  // Its own vendor: the seed has none, and the picker offers to add one.
+  const vendor = `E2E Vendor ${run}`;
+  const vendorBox = dlg.getByRole("combobox", { name: "Vendor", exact: true });
+  await vendorBox.selectOption({ label: "Add a new vendor…" });
+  await dlg.getByLabel("New vendor").fill(vendor);
+  await dlg.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(dlg.getByLabel("New vendor")).toBeHidden();
+  await expect(vendorBox).not.toHaveValue("");
   await dlg.getByLabel("Rate per hour").fill("65");
   await dlg.getByRole("button", { name: "Log submission" }).click();
 
   // On a fresh database the first one is clean; on a repeat run it's already a duplicate.
   const done = page.getByRole("dialog", { name: "Submission logged" });
   await expect(dlg.or(done)).toHaveCount(1);
-  await expect(page.getByRole("status")).toHaveText("Submission logged.");
+  await statusSaying(page, "Submission logged.");
   if (await done.isVisible()) await done.getByRole("button", { name: "Done" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
@@ -119,7 +139,7 @@ test("recruiter filters the Hot List, opens an own candidate and logs submission
   dlg = page.getByRole("dialog", { name: `Log submission for ${name}` });
   await dlg.getByLabel("Job title").fill(`${job} (again)`);
   await dlg.getByRole("combobox", { name: "Client", exact: true }).selectOption(CLIENT_ID);
-  await dlg.getByRole("combobox", { name: "Vendor", exact: true }).selectOption({ index: 1 });
+  await dlg.getByRole("combobox", { name: "Vendor", exact: true }).selectOption({ label: vendor });
   await dlg.getByLabel("Rate per hour").fill("65");
   await dlg.getByRole("button", { name: "Log submission" }).click();
   await expect(done.getByRole("alert")).toContainText("already submitted to this client in the last 90 days");
@@ -129,8 +149,8 @@ test("recruiter filters the Hot List, opens an own candidate and logs submission
 
   // Back to the list with the filters kept.
   await page.getByRole("button", { name: "← Back to Hot List" }).click();
-  await expect(filter(page, "Status")).toHaveValue("active");
-  await expect(filter(page, "Visibility")).toHaveValue("team");
+  await expect(filter(page, "Status")).toHaveValue("Active");
+  await expect(filter(page, "Visibility")).toHaveValue("Team only");
 });
 
 test("lead toggles a candidate's Open to all teams visibility", async ({ page }) => {
@@ -140,14 +160,18 @@ test("lead toggles a candidate's Open to all teams visibility", async ({ page })
 
   const sw = page.getByRole("switch", { name: "Open to all teams" });
   await expect(sw).toHaveAttribute("aria-checked", "false");
+  const label = page.getByText("Open to all teams", { exact: true });
+  const before = await label.count();
   await sw.click();
-  await expect(page.getByRole("status")).toHaveText(`${name} is now open to all teams.`);
+  await statusSaying(page, `${name} is now open to all teams.`);
   await expect(sw).toHaveAttribute("aria-checked", "true");
-  await expect(page.getByRole("heading", { level: 1, name }).locator("..").getByText("Open to all teams")).toBeVisible();
+  // The header chip appears; it goes again on restore.
+  await expect(label).not.toHaveCount(before);
   await page.screenshot({ path: "e2e-artifacts/lead-visibility.png", fullPage: true });
 
   // Restore, so the run is repeatable.
   await sw.click();
-  await expect(page.getByRole("status")).toHaveText(`${name} is now visible to your team only.`);
+  await statusSaying(page, `${name} is now visible to your team only.`);
   await expect(sw).toHaveAttribute("aria-checked", "false");
+  await expect(label).toHaveCount(before);
 });
