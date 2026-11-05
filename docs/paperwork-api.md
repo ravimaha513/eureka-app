@@ -57,7 +57,7 @@ Concurrency vocabulary (audit B-03, migration 0478 review): paperwork items, the
 ## Error codes
 
 `invalid_transition`, `reason_required`, `invalid_change`, `invalid_assignee`, `invalid_owner_role`, `invalid_due_date`,
-`invalid_helper`, `invalid_document`, `placement_closed` (backed-out placement), `invalid_checklist_template`, `too_many_entries` (422); `version_mismatch` (409);
+`invalid_helper`, `invalid_document`, `placement_closed` (backed-out placement: `PAPERWORK_LOCKED_PLACEMENT_STATUSES` in `packages/shared` state-machines.ts, mirrored by the definers' `pl.status = 'backout'`; parity in `test/state-machine-parity.db.int.test.ts`), `invalid_checklist_template`, `too_many_entries` (422); `version_mismatch` (409);
 `not_permitted` (403); not found (404, also `entry_not_found`). With `failPlacement`, the placement codes of `authz.transition_placement` apply too.
 
 ## Dev seed

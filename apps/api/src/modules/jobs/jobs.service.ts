@@ -4,7 +4,7 @@ import {
 } from "@nestjs/common";
 import type pg from "pg";
 import {
-  can, creatableJobKinds, jobAllowed, resolveScope, type JobKind, type JobRef, type RichDoc, type UserAccess,
+  can, creatableJobKinds, jobAllowed, jobTransitionAllowed, jobTransitionTargets, resolveScope, type JobKind, type JobRef, type RichDoc, type UserAccess,
 } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
@@ -120,6 +120,7 @@ const CODES: Record<string, () => HttpException> = {
   invalid_hiring_manager: () => new UnprocessableEntityException("invalid_hiring_manager"),
   client_locked: () => new UnprocessableEntityException("client_locked"),
   server_managed_field: () => new UnprocessableEntityException("server_managed_field"),
+  invalid_transition: () => new UnprocessableEntityException("invalid_transition"),
 };
 
 /** Maps the job guard's coded errors and constraint violations (migration 0060) to problem details. */
@@ -142,6 +143,7 @@ export class JobsService {
   present(access: UserAccess, r: JobRow, companies?: ReadonlyMap<string, string>) {
     const pay = r.pay_amount !== null && payVisible(access, r)
       ? { amount: Number(r.pay_amount), frequency: r.pay_frequency, currency: r.pay_currency } : null;
+    const edit = jobAllowed(access, "job:manage", jobRef(r));
     return {
       id: r.id,
       kind: r.kind,
@@ -170,7 +172,8 @@ export class JobsService {
       updatedAt: r.updated_at,
       postedAt: r.posted_at,
       rowVersion: r.row_version,
-      actions: { edit: jobAllowed(access, "job:manage", jobRef(r)) },
+      /** JP-3a: `statusTargets` lists the statuses a PATCH may move the job to (state-machines.ts). */
+      actions: { edit, statusTargets: edit ? jobTransitionTargets(r.status) : [] },
     };
   }
 
@@ -305,6 +308,10 @@ export class JobsService {
       if (kind === "client_requirement" && (b.companyId != null || b.clientId === null)) throw new UnprocessableEntityException("invalid_job_reference");
       if (kind === "internal_opening" && b.clientId != null) throw new UnprocessableEntityException("client_not_allowed");
       if (kind === "client_requirement" && b.publishedToPortal === true) throw new UnprocessableEntityException("portal_internal_only");
+      // JP-3a: the job lifecycle (state-machines.ts); eureka.job_guard re-checks it. An unchanged status is no transition.
+      if (b.status !== undefined && b.status !== cur.status && !jobTransitionAllowed(cur.status, b.status)) {
+        throw new UnprocessableEntityException("invalid_transition");
+      }
       const sets: string[] = [];
       const params: unknown[] = [];
       const p = (v: unknown) => { params.push(v); return `$${params.length}`; };

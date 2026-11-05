@@ -231,7 +231,8 @@ describe("training batches, students and progress (TR-5..TR-11)", () => {
     expect(card).toMatchObject({
       name: "Secret Batch Name", status: "planned", trainer: { id: U.coach, name: "coach" }, students: 0, courses: 0,
       startDate: "2032-09-30", endDate: "2033-06-30", batchYear: 2032, cover: { color: "violet", icon: "users" },
-      actions: { manage: true, delete: true, updateProgress: true, addStudents: true, removeStudents: true },
+      actions: { manage: true, delete: true, updateProgress: true, addStudents: true, removeStudents: true,
+        changeStatus: true, statusTargets: ["in_training", "cancelled"] },
     });
     rowVersion = card.rowVersion;
   });
@@ -244,7 +245,9 @@ describe("training batches, students and progress (TR-5..TR-11)", () => {
     expect(await ids("r1a")).not.toContain(batchId);
     expect((await call("locA", "GET", `/api/v1/training/batches/${batchId}`)).statusCode).toBe(404);
     const coachCard = (await call("coach", "GET", `/api/v1/training/batches/${batchId}`)).json();
-    expect(coachCard.actions).toEqual({ manage: false, delete: false, updateProgress: true, addStudents: false, removeStudents: false });
+    expect(coachCard.actions).toEqual({
+      manage: false, delete: false, updateProgress: true, addStudents: false, removeStudents: false, changeStatus: false, statusTargets: [],
+    });
   });
 
   it("PATCH needs If-Match and a manager; the name can change but not be cleared", async () => {
@@ -419,6 +422,29 @@ describe("batch creators find and fill their batches (TR-3, TR-8, TR-14)", () =>
     expect((await bulk("r1a", id, [c1.id])).statusCode).toBe(403);
     expect((await call("r1a", "DELETE", `/api/v1/training/batches/${id}/students/${c1.id}`)).statusCode).toBe(403);
     expect((await call("ceo", "DELETE", `/api/v1/training/batches/${id}/students/${c1.id}`)).statusCode).toBe(204);
+  });
+
+  it("status changes follow the DB rule (TR-1, D-07): Sales leadership at their planning locations; not other creators, coaches or recruiters", async () => {
+    const id = await create("l1", "2035-08-10");
+    const card = async (k: keyof typeof U) => (await call(k, "GET", `/api/v1/training/batches/${id}`)).json();
+    expect((await card("l1")).actions).toMatchObject({ manage: false, changeStatus: true, statusTargets: ["in_training", "cancelled"] });
+    expect((await card("hr")).actions).toMatchObject({ changeStatus: false, statusTargets: [] });
+    expect((await call("r1a", "PUT", `/api/v1/training/batches/${id}/status`, { to: "in_training" })).statusCode).toBe(404);
+    // HR plans batches anywhere (training.batch:create) but changes no status without training:manage (TR-1a).
+    expect((await call("hr", "PUT", `/api/v1/training/batches/${id}/status`, { to: "in_training" })).statusCode).toBe(403);
+    // The Austin incharge manages training elsewhere: not on their screen.
+    expect((await call("locA", "PUT", `/api/v1/training/batches/${id}/status`, { to: "in_training" })).statusCode).toBe(404);
+    const bad = await call("l1", "PUT", `/api/v1/training/batches/${id}/status`, { to: "completed" });
+    expect([bad.statusCode, bad.json().detail]).toEqual([422, "invalid_transition"]);
+    expect((await call("l1", "PUT", `/api/v1/training/batches/${id}/status`, { to: "in_training" })).json()).toEqual({ id, status: "in_training" });
+    expect((await card("l1")).actions.statusTargets).toEqual(["completed", "cancelled"]);
+    expect((await call("m1", "PUT", `/api/v1/training/batches/${id}/status`, { to: "completed" })).statusCode).toBe(200);
+    expect((await card("l1")).actions).toMatchObject({ changeStatus: true, statusTargets: [], addStudents: false });
+    expect((await call("l1", "PUT", `/api/v1/training/batches/${id}/status`, { to: "cancelled" })).json().detail).toBe("invalid_transition");
+    const { rows } = await db.admin.query<{ actor_id: string; changes: unknown }>(
+      `SELECT actor_id, changes FROM eureka.audit_event WHERE action = 'batch.status' AND entity_id = $1 ORDER BY seq`, [id]);
+    expect(rows).toEqual([
+      { actor_id: U.l1, changes: { from: "planned", to: "in_training" } }, { actor_id: U.m1, changes: { from: "in_training", to: "completed" } }]);
   });
 
   it("a closed batch takes no one; an oversized or empty list is refused", async () => {
