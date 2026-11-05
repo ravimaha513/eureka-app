@@ -39,6 +39,9 @@ export const BULK_CANDIDATE_CALLS_PER_MINUTE = 10;
  */
 export const BULK_CANDIDATE_ROWS_PER_DAY = 2000;
 
+/** Batches per GET /batches page (newest first); `truncated` says when more match (A-12). */
+export const BATCH_LIST_CAP = 200;
+
 /** Thrown inside the transaction to roll a bulk add back and still answer with its report. */
 class BulkCandidatesRollback extends Error {
   constructor(readonly report: unknown) { super("bulk_rollback"); }
@@ -63,7 +66,7 @@ export class CandidateBatchesService {
     if (q.locationId) { params.push(q.locationId); where.push(`b.location_id = $${params.length}`); }
     if (q.technologyId) { params.push(q.technologyId); where.push(`b.technology_id = $${params.length}`); }
     if (q.status) { params.push(q.status); where.push(`b.status = $${params.length}`); }
-    const rows = await this.db.withUser(user.id, async (c) => (await c.query<{
+    const fetched = await this.db.withUser(user.id, async (c) => (await c.query<{
       id: string; name: string | null; start_month: string; size_planned: number | null; status: string;
       location_id: string; location_name: string; technology_id: string; technology_name: string; candidates: number;
     }>(
@@ -75,7 +78,9 @@ export class CandidateBatchesService {
        JOIN eureka.technology t ON t.id = b.technology_id
        WHERE ${where.join(" AND ")}
        ORDER BY b.start_month DESC, l.name, t.name, b.id
-       LIMIT 200`, params)).rows);
+       LIMIT ${BATCH_LIST_CAP + 1}`, params)).rows);
+    // One extra row tells the client the list was cut at the cap (A-12; additive).
+    const rows = fetched.slice(0, BATCH_LIST_CAP);
     return {
       items: rows.map((b) => ({
         id: b.id,
@@ -89,6 +94,7 @@ export class CandidateBatchesService {
         /** Candidates in this batch that the caller can read. */
         candidatesInScope: b.candidates,
       })),
+      truncated: fetched.length > BATCH_LIST_CAP,
       canCreate: canCreateBatch(user.access),
     };
   }
@@ -120,8 +126,9 @@ export class CandidateBatchesService {
       const b = (await c.query<{ status: string }>(`SELECT status FROM eureka.batch WHERE id = $1`, [id])).rows[0];
       if (!b) throw new NotFoundException();
       if (!canCreateBatch(user.access)) throw new ForbiddenException("Not permitted");
-      await c.query(`SELECT authz.set_batch_status($1, $2)`, [id, to]).catch(mapBatchError);
-      await this.audit.record(c, { actorId: user.id, action: "batch.status", entityType: "batch", entityId: id, changes: { from: b.status, to } });
+      // The function returns the status it locked and changed (0490), the true `from` under concurrent changes.
+      const from = (await c.query<{ s: string }>(`SELECT authz.set_batch_status($1, $2) AS s`, [id, to]).catch(mapBatchError)).rows[0]!.s;
+      await this.audit.record(c, { actorId: user.id, action: "batch.status", entityType: "batch", entityId: id, changes: { from, to } });
       return { id, status: to };
     });
   }
