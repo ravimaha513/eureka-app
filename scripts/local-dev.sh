@@ -14,28 +14,12 @@ WEB_PORT="${WEB_PORT:-5173}"
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mxx\033[0m %s\n' "$*" >&2; exit 1; }
 
-node_major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
-[ "$node_major" -ge 22 ] || die "Node 22+ is required (found: $(node -v 2>/dev/null || echo none)). Try: nvm install 22 && nvm use 22"
-command -v pnpm >/dev/null || { say "Enabling pnpm via corepack"; corepack enable; }
-
-if [ -z "${EUREKA_ADMIN_URL:-}" ]; then
-  command -v docker >/dev/null || die "Docker is required for the local database (or set EUREKA_ADMIN_URL to an existing Postgres 16)."
-  docker info >/dev/null 2>&1 || die "Docker is installed but not running. Start Docker Desktop and retry."
-  if [ "${1:-}" = "--reset" ]; then say "Resetting the local database"; docker compose down -v; fi
-  say "Starting Postgres 16 (docker compose)"
-  docker compose up -d --wait db
-fi
-
 for p in "$API_PORT" "$WEB_PORT"; do
   if command -v lsof >/dev/null && lsof -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; then die "Port $p is in use. Stop that process or set API_PORT / WEB_PORT."; fi
 done
 
-say "Installing dependencies"
-pnpm install --frozen-lockfile
-
-say "Applying migrations and seeding fictional data"
-MIGRATION_DATABASE_URL="$ADMIN_URL" APP_DB_PASSWORD="$APP_PASSWORD" WORKER_DB_PASSWORD="$APP_PASSWORD" \
-  pnpm --filter @eureka/api exec tsx src/db/seed-dev.ts
+# Deps, Postgres, migrations, seed (idempotent).
+APP_DB_PASSWORD="$APP_PASSWORD" ./scripts/dev-up.sh "$@"
 
 # Same host/database as the admin URL, but as the least-privilege API and worker roles.
 APP_URL="postgres://eureka_app:${APP_PASSWORD}@${ADMIN_URL#*@}"

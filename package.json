@@ -8,6 +8,7 @@
     "typecheck": "pnpm -r typecheck",
     "docs:grants": "pnpm --filter @eureka/shared exec tsx scripts/grants-table.ts",
     "local": "./scripts/local-dev.sh",
+    "dev:up": "./scripts/dev-up.sh",
     "test:api": "docker compose --profile test up -d --wait testdb && TEST_PG_ADMIN_URL=postgres://postgres:postgres@127.0.0.1:55433 pnpm --filter @eureka/api test"
   },
   "engines": {
