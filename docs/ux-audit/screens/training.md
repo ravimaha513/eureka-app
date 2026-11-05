@@ -13,7 +13,7 @@ Header with a Status select + "Add training batch". A card grid (`tr-grid`), one
 ## Problems
 | # | Problem (evidence) | Category | Severity |
 |---|---|---|---|
-| 1 | Only the 18px arrow `iconbtn` opens a batch (TrainingPage.tsx:93-95). The title is styled like a link (`.tr-title { color: var(--pri-700) }`, styles.css:771) but is a plain `h2` (L81), and clicking the card does nothing. Teams cards in Access open on whole-card click (`.cardopen::after`, styles.css:279-280), so the two card patterns behave differently. | Efficiency / Consistency | High |
+| 1 | Only the small arrow `iconbtn` (icon 18px) opens a batch (TrainingPage.tsx:93-95). The title is styled like a link (`.tr-title { color: var(--pri-700) }`, styles.css:771) but is a plain `h2` (L81), and clicking the card does nothing. Teams cards in Access open on whole-card click (`.cardopen::after`, styles.css:279-280), so the two card patterns behave differently. | Efficiency / Consistency | High |
 | 2 | The 128px cover (`.tr-cover.md`, styles.css:767) shows a generic icon and the words "Training batch" on every card (L74). That's ~40% of the card with no information (`training-desktop.png`). | Visual | Medium |
 | 3 | The card leaves out progress, which is the reason to open a batch (average completion, students behind), even though the detail view has per-student %. | Efficiency | Medium |
 | 4 | There's no search, location or technology filter, only Status (L53-58). Fine for 1 batch; with many locations × technologies it becomes a scroll hunt. | Efficiency | Low |
@@ -30,7 +30,7 @@ Existing: `.cardopen` (TeamsTab), `CoverArt size="sm"`, `BatchStatusPill`. New: 
 ## Before/after interaction comparison
 | Task | Before | After |
 |---|---|---|
-| Open a batch | Find and hit an 18px arrow (title looks clickable but isn't) | Click anywhere on the card |
+| Open a batch | Find and hit the small arrow button (title looks clickable but isn't) | Click anywhere on the card |
 | Scan 6 batches | ~2.5 card rows of mostly cover art | One screen |
 
 ## Expected benefit
