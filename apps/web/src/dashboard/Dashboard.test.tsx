@@ -56,7 +56,7 @@ describe("Dashboard", () => {
   it("shows totals as tiles and a breakdown by the server's grouping", async () => {
     wrap(<DashboardPage />);
     const tiles = await screen.findByRole("list", { name: "Activity totals" });
-    const tile = (label: string) => within(tiles).getByText(label, { selector: ".tilelabel" }).closest("li")!;
+    const tile = (label: string) => within(tiles).getByText(label, { selector: ".tilelabel > span" }).closest("li")!;
     expect(within(tile("Submissions")).getByText("4")).toBeInTheDocument();
     expect(within(tile("Joined")).getByText("1")).toBeInTheDocument();
     expect(within(tile("Candidates added")).getByText("2")).toBeInTheDocument();
@@ -69,15 +69,18 @@ describe("Dashboard", () => {
     expect(screen.getByLabelText("Group by")).toHaveValue("recruiter");
   });
 
-  it("charts activity over time, the funnel, the mix, the share by group and the needs-attention split", async () => {
+  it("charts activity over time and lists pipeline activity as period counts, with no bar for zero", async () => {
+    api.routes["GET /api/v1/dashboard"] = () => ({ body: { ...LEAD, totals: { ...LEAD.totals, interviewsCleared: 0 } } });
     wrap(<DashboardPage />);
     expect(await screen.findByRole("img", { name: /^Activity per day: Submissions 4 in total, Interviews 2 in total, Interviews cleared 0 in total$/ })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /^Pipeline funnel: Submissions 4, Interviews 2/ })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /^Activity mix: Submissions 4, Interviews 2/ })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Submissions by recruiter: Priya Shah 3, Unassigned 1" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /^Needs attention by kind: Stale submissions 3/ })).toBeInTheDocument();
-    fireEvent.click(within(screen.getByRole("group", { name: "Metric to chart" })).getByRole("button", { name: "Joined" }));
-    expect(screen.getByRole("img", { name: "Joined by recruiter: Priya Shah 1, Unassigned 0" })).toBeInTheDocument();
+    const stages = screen.getByRole("list", { name: "Pipeline activity in the period" });
+    const items = within(stages).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent)).toEqual(["Submissions4", "Interviews2", "Interviews cleared0", "Placements2", "Joined1"]);
+    expect(items[2]!.querySelector(".dash-bar > span")).toBeNull();
+    expect(items[0]!.querySelector(".dash-bar > span")).not.toBeNull();
+    expect(screen.getByText(/not a cohort/)).toBeInTheDocument();
+    // No part-to-whole charts of unrelated counts.
+    expect(screen.queryByRole("img", { name: /^Activity mix/ })).not.toBeInTheDocument();
   });
 
   it("lets the user choose which metrics the time chart plots", async () => {
@@ -120,7 +123,7 @@ describe("Dashboard", () => {
     const table = await screen.findByRole("table", { name: "Activity by location" });
     expect(within(table).queryByRole("columnheader", { name: "Submissions" })).not.toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "Placements" })).toBeInTheDocument();
-    expect(screen.queryByText("Submissions", { selector: ".tilelabel" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Submissions", { selector: ".tilelabel > span" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: /^Stale submissions/ })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: /^Placements awaiting/ })).toBeInTheDocument();
   });
@@ -158,12 +161,41 @@ describe("Dashboard", () => {
     expect(rows[0]).toHaveTextContent("Priya Shah");
     expect(rows[0]).toHaveTextContent("3");
     expect(rows[1]).toHaveTextContent("Unassigned");
+    fireEvent.change(screen.getByLabelText("Metric to rank"), { target: { value: "placementsJoined" } });
+    expect(within(screen.getByRole("list", { name: "Most active by recruiter" })).getAllByRole("listitem")[0]).toHaveTextContent(/Priya Shah1/);
 
-    const summary = screen.getByRole("region", { name: /^Needs attention 4 open$/ });
-    expect(within(summary).getByRole("button", { name: /3 stale submissions/ })).toBeInTheDocument();
-    expect(within(summary).getByRole("button", { name: /0 interviews without feedback/ })).toBeInTheDocument();
-    fireEvent.click(within(summary).getByRole("button", { name: /1 placement awaiting/ }));
-    expect(document.activeElement).toHaveTextContent(/^Placements awaiting the next step/);
+    expect(screen.getByRole("region", { name: /^Needs attention 4 open$/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^All 2 rows in the table/ }));
+    expect(document.activeElement).toBe(screen.getByRole("table", { name: "Activity by recruiter" }).parentElement);
+  });
+
+  it("lists needs attention before the activity counts and shows five rows until asked for all", async () => {
+    const many = Array.from({ length: 7 }, (_, n) => item(`s${n}`, `Cand ${n}`, { ageDays: 20 - n }));
+    api.routes["GET /api/v1/dashboard"] = () => ({ body: { ...LEAD, needsAttention: { ...LEAD.needsAttention,
+      sections: [{ kind: "submissionStale", total: 7, items: many }] } } });
+    wrap(<DashboardPage canOpen={() => true} onOpen={vi.fn()} />);
+    const stale = await screen.findByRole("region", { name: /^Stale submissions/ });
+    const attention = screen.getByRole("region", { name: /^Needs attention/ });
+    const totals = screen.getByRole("list", { name: "Activity totals" });
+    expect(attention.compareDocumentPosition(totals) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(stale).getAllByRole("button", { name: /^Open Cand/ })).toHaveLength(5);
+    fireEvent.click(within(stale).getByRole("button", { name: /^Show all 7/ }));
+    expect(within(stale).getAllByRole("button", { name: /^Open Cand/ })).toHaveLength(7);
+    expect(within(stale).getByRole("button", { name: /^Show fewer/ })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("states each change against the previous period as an absolute and a percent, and a zero base as new", async () => {
+    let call = 0;
+    api.routes["GET /api/v1/dashboard"] = () => (++call % 2 === 1 ? { body: LEAD }
+      : { body: { ...LEAD, totals: { submissions: 2, interviewsScheduled: 2, interviewsCleared: 0, placementsCreated: 4, placementsJoined: 1, candidatesAdded: 2 } } });
+    wrap(<DashboardPage />);
+    const tiles = await screen.findByRole("list", { name: "Activity totals" });
+    const tile = (label: string) => within(tiles).getByText(label).closest("li")!;
+    await waitFor(() => expect(tile("Submissions")).toHaveTextContent("+2 (+100%)"));
+    expect(tile("Interviews")).toHaveTextContent("No change");
+    expect(tile("Interviews cleared")).toHaveTextContent("New·prev 0");
+    expect(tile("Placements")).toHaveTextContent("−2 (−50%)");
+    expect(screen.getByText("Change vs previous 7 days")).toBeInTheDocument();
   });
 
   it("applies the small-screen filter sheet only on Apply", async () => {
