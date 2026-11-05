@@ -279,7 +279,7 @@ export async function loadForWrite(c: pg.PoolClient, user: AuthedUser, id: strin
 
 /**
  * Optional If-Match for writes through definer functions: locks the candidate
- * (authz.candidate_version_lock, 0475) and compares its row_version, so no other
+ * (authz.candidate_version_lock, 0505) and compares its row_version, so no other
  * write lands between the check and this transaction's own. `null`: no check.
  */
 export async function checkVersion(c: pg.PoolClient, id: string, expected: number | null) {

@@ -122,7 +122,7 @@ type Owner = { kind: "candidate"; id: string } | { kind: "placement"; id: string
  * restricted types) does not cover the candidate. RLS (document_read) and the
  * definer functions of migration 0043 apply the same rules in the database;
  * authz.document_download writes the access log and enforces the per-user cap
- * on restricted opens (no step-up: B-01 owner decision; migration 0474).
+ * on restricted opens (no step-up: B-01 owner decision; migration 0504).
  */
 @Injectable()
 export class DocumentsService {

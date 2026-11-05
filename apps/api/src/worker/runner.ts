@@ -9,7 +9,7 @@ export interface JobDefinition {
   /** Does the work for one run key. Must be idempotent. Returns detail for job_run. */
   run(runKey: string, ctx: JobContext): Promise<Record<string, unknown>>;
   /**
-   * Dead-letter policy (migration 0488): from this many failed attempts on, the
+   * Dead-letter policy (migration 0518): from this many failed attempts on, the
    * key is not retried. `mark` runs first (e.g. the outbox flags its event);
    * then job_run records the terminal status `dead`, kept for inspection and
    * never claimed again. Without it a key is retried with backoff for ever.

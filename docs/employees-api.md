@@ -42,7 +42,7 @@ advisory lock, assignment row, employee row.
   is open). `bgc_failed` is set only by the placement flow.
 - `PUT /api/v1/assignments/:id/planned-end-date` `{ plannedEndDate }` (`assignment:update`) → `{ id, plannedEndDate,
   previousPlannedEndDate, rowVersion }`. Set, extend or bring forward the planned end of an open assignment (today or later, not before
-  the start); a change re-arms the ending-soon notice. Optional `If-Match: "<plannedEndDateVersion>"` (migration 0478,
+  the start); a change re-arms the ending-soon notice. Optional `If-Match: "<plannedEndDateVersion>"` (migration 0508,
   audit B-03): stale → 412 `stale`, checked by `authz.set_assignment_end_date(uuid, date, integer)` under the assignment
   lock after 404/403; without the header the last write wins as before. The worker's ending-soon mark does not move the
   version. Employee detail `assignments[]` carry `plannedEndDateVersion` and `employmentVersion` (0 = nothing stored yet;
@@ -65,7 +65,7 @@ advisory lock, assignment row, employee row.
   per API task (`REPORT_MAX_CONCURRENT`, default 2): all taken → 503 + `Retry-After: 5`.
 - `POST /api/v1/reports/joinings-exits/export` `{ from, to }` (`report:export`) → CSV (`Event, Date, Candidate, Assignment
   no., Client, Team, Recruiter, Location, First placement, End reason`), additionally limited to the `report:export` scope,
-  capped at 50,000 lines (`x-export-truncated`), 25 s timeout, 5 per user per 10 minutes (counted across all API tasks, migration 0486), formula-injection safe, audited
+  capped at 50,000 lines (`x-export-truncated`), 25 s timeout, 5 per user per 10 minutes (counted across all API tasks, migration 0516), formula-injection safe, audited
   as `report.export` `{ report: "joinings_exits", from, to, rows, truncated, cap }`. No phone, email, rate or reason text.
 - interviews-settings (`docs/interviews-settings-api.md` EM-C1, EM-X1): list and detail items carry
   `contact: { email, phone, masked }` (masked unless `candidate.phone:read` over the candidate), and
@@ -144,7 +144,7 @@ Endpoints (additions):
 - `PATCH /api/v1/assignments/:id/employment` `{ payrollCompanyId?: uuid|null, everifyDate?: date|null, onboardedDate?: date|null,
   payRate?: number|null }` (at least one; `assignment:update`) → `{ id, changed: [field], payrollCompany, everifyDate,
   onboardedDate, payRate?, rowVersion }`. A new company must be active. Audit `assignment.employment_updated` `{ fields, payrollCompanyId? }`.
-  Optional `If-Match: "<employmentVersion>"` (0478, B-03): stale → 412 `stale` (one version for the whole row, so HR's
+  Optional `If-Match: "<employmentVersion>"` (0508, B-03): stale → 412 `stale` (one version for the whole row, so HR's
   date edit and Accounts' pay-rate edit see each other), checked by `authz.set_assignment_employment(uuid, jsonb, integer)`.
 - `POST /api/v1/employees/:id/assign-team` `{ teamId }` (`assignment:update`) → `{ id, candidateId, team: {id,name}, recruiter: null }`.
   Audit `employee.team_assigned` `{ candidateId, fromTeamId, toTeamId }`.

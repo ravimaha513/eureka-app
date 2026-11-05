@@ -3,7 +3,7 @@ export const likeContains = (s: string): string => `%${s.replace(/[%_\\]/g, "\\$
 
 /**
  * Full name of an eureka.person / eureka.applicant row (`alias`). The GIN trigram indexes
- * person_name_trgm / applicant_name_trgm (migration 0479) are built on exactly this expression;
+ * person_name_trgm / applicant_name_trgm (migration 0509) are built on exactly this expression;
  * change both together or name search goes back to scanning every row.
  */
 export const personName = (alias: string): string => `(${alias}.first_name || ' ' || ${alias}.last_name)`;

@@ -69,7 +69,7 @@ export class OrgChartService {
   /**
    * All or nothing: each move and team add runs its own definer function and audit row.
    * The reporting closure is rebuilt once, at the end (authz.reporting_closure_defer / flush,
-   * 0476); a loop is still refused on the move that closes it.
+   * 0506); a loop is still refused on the move that closes it.
    */
   async orgChartApply(user: AuthedUser, body: OrgChartApply) {
     const ids = [...body.moves.map((m) => m.userId), ...body.teamAdds.map((t) => t.userId)];

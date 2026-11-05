@@ -19,7 +19,7 @@ export type RoleRow = {
   is_sales: boolean; is_location_bound: boolean; is_admin: boolean; is_recruiter: boolean; is_coach: boolean;
   track: string; level: number; department_id: string | null; department_name: string | null; cloned_from: string | null;
   archived_at: Date | null; holders: number; row_version: number;
-  /** Admin separation class (authz.role_classes, migration 0480; docs/roles-api.md "Admin separation"). */
+  /** Admin separation class (authz.role_classes, migration 0510; docs/roles-api.md "Admin separation"). */
   classification: "admin" | "data" | "admin_compatible_only";
 };
 const ROLE_ROWS_SQL = `

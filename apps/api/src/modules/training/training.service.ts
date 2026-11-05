@@ -250,7 +250,7 @@ export class TrainingService {
       const b = await this.loadBatch(c, id);
       if (!b.deletable) throw new ForbiddenException("Not permitted");
       if (!batchTransitionAllowed(b.status, to)) throw new UnprocessableEntityException("invalid_transition");
-      // The function returns the status it locked and changed (0490), the true `from` under concurrent changes.
+      // The function returns the status it locked and changed (0520), the true `from` under concurrent changes.
       const from = (await c.query<{ s: string }>(`SELECT authz.set_batch_status($1, $2) AS s`, [id, to]).catch(mapTrainingError)).rows[0]!.s;
       await this.audit.record(c, { actorId: user.id, action: "batch.status", entityType: "batch", entityId: id, changes: { from, to } });
       return { id, status: to };
@@ -405,7 +405,7 @@ export class TrainingService {
       const b = await this.loadBatch(c, id);
       if (!b.staffable) throw new ForbiddenException("Not permitted");
       if (!BATCH_OPEN_STATUSES.has(b.status)) throw new UnprocessableEntityException("batch_closed");
-      // One call (0476): the rules of authz.set_batch_student per candidate, scope sets computed once,
+      // One call (0506): the rules of authz.set_batch_student per candidate, scope sets computed once,
       // candidates locked in id order; one row per distinct candidate, in request order.
       const outcomes = (await c.query<{ candidate_id: string; outcome: "added" | "skipped" }>(
         `SELECT candidate_id, outcome FROM authz.set_batch_students($1, $2::uuid[])`, [id, candidateIds]).catch(mapTrainingError)).rows;

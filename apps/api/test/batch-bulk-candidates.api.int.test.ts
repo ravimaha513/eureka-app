@@ -135,7 +135,7 @@ describe("bulk add", () => {
   });
 });
 
-/** Daily row budget (A-01) and the set-based contact check (A-07), migration 0475. */
+/** Daily row budget (A-01) and the set-based contact check (A-07), migration 0505. */
 describe("bulk add: daily row budget and set-based check", () => {
   const used = async (id: string) => (await db.admin.query(
     `SELECT rows_checked FROM eureka.bulk_candidate_budget WHERE user_id = $1 AND day = (now() AT TIME ZONE 'UTC')::date`, [id])).rows[0]?.rows_checked as number | undefined;

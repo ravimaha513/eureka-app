@@ -11,7 +11,7 @@ apps no `auth_time`, so Google users could never step up). A live step-up grant 
 access-log row. Compensating controls instead:
 - **Per-user cap**: at most `restricted_opens_per_day` restricted opens per user in any 24 hours (default **200**), counted
   across candidate documents and restricted DataHub folders and enforced in SQL by `authz.document_download` /
-  `authz.datahub_download` (migration 0474). Over it: 429 `too_many_restricted_opens`, nothing logged as opened. The value
+  `authz.datahub_download` (migration 0504). Over it: 429 `too_many_restricted_opens`, nothing logged as opened. The value
   is `authz.policy_setting` key `restricted_opens_per_day` (1-99999; not writable by the app: change it as the migration
   owner, e.g. `UPDATE authz.policy_setting SET value = '300' WHERE key = 'restricted_opens_per_day'`).
 - **60-second links**: the presigned GET of a restricted file lives 60 s, as an internal one (was 5 minutes).
@@ -56,7 +56,7 @@ uploadedBy: {id,name}, createdAt, scannedAt, title, version, replacement: { stat
 ## Error codes
 
 `invalid_upload`, `invalid_change`, `classification_change` (422); `too_many_pending`, `version_mismatch`, `not_available` (409);
-not permitted (403); not found (404); too many uploads or downloads (per user per minute, counted across all API tasks since migration 0486), `too_many_restricted_opens` (429). No document route
+not permitted (403); not found (404); too many uploads or downloads (per user per minute, counted across all API tasks since migration 0516), `too_many_restricted_opens` (429). No document route
 answers `step_up_required`: restricted documents need no step-up (see above).
 
 ## Web

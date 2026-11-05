@@ -46,7 +46,7 @@ const NO_RLS_INTERNAL: Record<string, string> = {
   "authz.placement_status_context": "transaction-local context of authz.transition_placement",
   "authz.employment_team_context": "transaction-local context of the employment definers",
   "authz.checklist_template": "read by checklist definers",
-  "authz.rate_window": "shared rate-limit windows (0486); only authz.rate_take / rate_purge (definers) touch it, keys stored hashed",
+  "authz.rate_window": "shared rate-limit windows (0516); only authz.rate_take / rate_purge (definers) touch it, keys stored hashed",
   "authz.user_credential": "password hashes; password_* definers only",
   "authz.password_setup_token": "token hashes; password_setup_* definers only",
   "authz.reporting_closure_pending": "deferred closure rebuild queue",
@@ -113,7 +113,7 @@ const MULTI_ROLE_DEFINERS: Record<string, string[]> = {
   "eureka.candidate_team_invariant()": ["authz_definer", "eureka_app", "eureka_worker"],
 };
 
-/** CHECK constraints allowed to stay NOT VALID on a fresh database (0484 validated the last ones). */
+/** CHECK constraints allowed to stay NOT VALID on a fresh database (0514 validated the last ones). */
 const NOT_VALID_CHECKS: Record<string, string> = {};
 
 describe("catalog lint: row-level security", () => {
@@ -217,7 +217,7 @@ describe("catalog lint: constraints (G-09, G-10)", () => {
     expect(got.map((r) => r.c).sort()).toEqual(Object.keys(NOT_VALID_CHECKS).sort());
   });
 
-  it("core free-text and contact columns carry their length / control-character CHECK (0484)", async () => {
+  it("core free-text and contact columns carry their length / control-character CHECK (0514)", async () => {
     const got = await rows<{ c: string }>(
       `SELECT conrelid::regclass::text || ' ' || conname AS c FROM pg_constraint WHERE contype = 'c' AND conname = ANY ($1)`,
       [["person_first_name_text", "person_last_name_text", "person_personal_email_shape", "candidate_marketing_email_shape",

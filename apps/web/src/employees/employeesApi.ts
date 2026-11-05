@@ -33,7 +33,7 @@ export interface EmployeeAssignment {
   /** Present (number or null) only when the caller may see and set it (rate:read over the placement). */
   payRate?: number | null;
   /**
-   * Detail `assignments[]` only (migration 0478): the optional If-Match values of the planned end date and the
+   * Detail `assignments[]` only (migration 0508): the optional If-Match values of the planned end date and the
    * employment facts. 0 = nothing stored yet (still sent: it is a real version).
    */
   plannedEndDateVersion?: number;

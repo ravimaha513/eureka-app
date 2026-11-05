@@ -34,7 +34,7 @@ export const BULK_CANDIDATE_CALLS_PER_MINUTE = 10;
 /**
  * Rows per user per UTC day that the bulk add may check against existing
  * candidates' contacts, previews included (A-01). Stored in the database
- * (eureka.bulk_candidate_budget, 0475), so it holds across API tasks.
+ * (eureka.bulk_candidate_budget, 0505), so it holds across API tasks.
  * docs/candidates-api.md "Bulk add to a batch".
  */
 export const BULK_CANDIDATE_ROWS_PER_DAY = 2000;
@@ -47,7 +47,7 @@ class BulkCandidatesRollback extends Error {
   constructor(readonly report: unknown) { super("bulk_rollback"); }
 }
 
-/** The bulk add's daily row budget (0475): 429 once spent. */
+/** The bulk add's daily row budget (0505): 429 once spent. */
 const mapBudgetError: (err: unknown) => never = dbErrorMapper({
   bulk_budget_exceeded: () => new HttpException("bulk_budget_exceeded", HttpStatus.TOO_MANY_REQUESTS),
 });
@@ -126,7 +126,7 @@ export class CandidateBatchesService {
       const b = (await c.query<{ status: string }>(`SELECT status FROM eureka.batch WHERE id = $1`, [id])).rows[0];
       if (!b) throw new NotFoundException();
       if (!canCreateBatch(user.access)) throw new ForbiddenException("Not permitted");
-      // The function returns the status it locked and changed (0490), the true `from` under concurrent changes.
+      // The function returns the status it locked and changed (0520), the true `from` under concurrent changes.
       const from = (await c.query<{ s: string }>(`SELECT authz.set_batch_status($1, $2) AS s`, [id, to]).catch(mapBatchError)).rows[0]!.s;
       await this.audit.record(c, { actorId: user.id, action: "batch.status", entityType: "batch", entityId: id, changes: { from, to } });
       return { id, status: to };
@@ -154,7 +154,7 @@ export class CandidateBatchesService {
    * fails or when `dryRun` is set, so a preview shows exactly what a real run would
    * do. Each row is the single create's insert and audit event; technology and
    * location come from the batch. Rows are validated in memory, then their contacts
-   * are checked in one call (authz.candidate_contacts_taken, 0475, which holds the
+   * are checked in one call (authz.candidate_contacts_taken, 0505, which holds the
    * contact lock until the transaction ends) and the rest inserted set-based; the
    * trigger authz.candidate_contact_unique (0260) stays the backstop. A row reports
    * only which value is taken, not whose it is. Rows checked against existing

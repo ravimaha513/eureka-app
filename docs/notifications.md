@@ -102,7 +102,7 @@ It records `(job, key)` in `eureka.notification_ledger` and writes the event onl
 event id, or NULL when already emitted). Nobody but `authz_definer` can execute it; expose your own narrow
 definer function (like `authz.emit_bench_time(day, threshold)`) to `eureka_worker`, and refuse future days.
 
-## Worker lanes and dead letter (migration 0488, audit F-10)
+## Worker lanes and dead letter (migration 0518, audit F-10)
 
 - **Two lanes, one process.** `worker.ts` runs two `JobRunner`s on one pool: the scheduled lane (every job below,
   `JOB_TICK_SECONDS`, default 60) and the outbox lane (`outbox-delivery` only, `OUTBOX_TICK_SECONDS`, default 10).
@@ -133,9 +133,9 @@ definer function (like `authz.emit_bench_time(day, threshold)`) to `eureka_worke
 | `bench-time` | daily 07:45 America/New_York | the New York date | Only when `NOTIFY_BENCH_DAYS` is set (threshold is OD-05, open). One `employee.bench_time` per candidate and bench period (ledger key `candidate:bench_since`, whatever the threshold; a changed threshold does not re-notify), only for candidates whose N-th bench day falls within the last `NOTIFY_BENCH_WINDOW_DAYS` (default 7) days, so a first enable does not notify the whole bench; a worker down longer than the window misses those crossings. The database refuses a future day (0051) |
 | `birthday-digest` | daily 08:00 America/New_York | the New York date | interview-alerts (0087). One `staff.birthdays_today` per day with at least one staff birthday (ledger key = the date); 29 February counts on 28 February in non-leap years; the database refuses a future day |
 | `performance-below-target` | daily 07:15 America/New_York | the New York date | performance (0112). One `performance.below_target` per target whose period ended within the last 14 days with a metric short of its target (ledger key = the target id); the database refuses a future day |
-| `session-retention` | daily 05:15 America/New_York | UTC date (maintenance) | Always on (0488, audit G-08). Deletes staff sessions that ended (expired or revoked) more than `SESSION_RETENTION_DAYS` (default and floor 30, the Settings login-activity window) ago with their step-up rows, step-up challenges/grants expired more than `STEP_UP_RETENTION_DAYS` (default 7) ago, and ended applicant (portal) sessions after `SESSION_RETENTION_DAYS`, verified applicants included. Definer functions `eureka.prune_staff_sessions`, `eureka.prune_step_up`, `authz.prune_applicant_sessions` (worker-only EXECUTE; the database refuses shorter retention). Counts only in `job_run` |
+| `session-retention` | daily 05:15 America/New_York | UTC date (maintenance) | Always on (0518, audit G-08). Deletes staff sessions that ended (expired or revoked) more than `SESSION_RETENTION_DAYS` (default and floor 30, the Settings login-activity window) ago with their step-up rows, step-up challenges/grants expired more than `STEP_UP_RETENTION_DAYS` (default 7) ago, and ended applicant (portal) sessions after `SESSION_RETENTION_DAYS`, verified applicants included. Definer functions `eureka.prune_staff_sessions`, `eureka.prune_step_up`, `authz.prune_applicant_sessions` (worker-only EXECUTE; the database refuses shorter retention). Counts only in `job_run` |
 | `audit-retention` | daily 05:30 America/New_York | UTC date (maintenance) | **Off unless `AUDIT_RETENTION_DAYS` is set** (see "Retention") |
-| `rate-limit-purge` | hourly (5 min past) | UTC hour `YYYY-MM-DDTHH` | Calls `authz.rate_purge()` (shared rate limiter, migrations 0486/0487) when `to_regprocedure('authz.rate_purge()')` exists; until then records `available: false` and does nothing |
+| `rate-limit-purge` | hourly (5 min past) | UTC hour `YYYY-MM-DDTHH` | Calls `authz.rate_purge()` (shared rate limiter, migrations 0516/0517) when `to_regprocedure('authz.rate_purge()')` exists; until then records `available: false` and does nothing |
 | `notification-prune` | daily 04:30 America/New_York | UTC date (maintenance) | Deletes inbox rows older than `NOTIFICATION_RETENTION_DAYS` (default 180); the database refuses fewer than 30 days |
 | `candidate-nonresponse` | daily 07:40 America/New_York | the New York date | Always on. Open "not responding" flags raised at least `NONRESPONSE_HOLD_DAYS` (default 3) New York days before reach the hold stage once (`hold_reached_at`, ledger key `<flag>:hold`); the database refuses a future day and a delay outside 1-60 (0171) |
 | `candidate-nonresponse-mail` | every tick | `<flag id>:<stage>` | Only with a candidate mail transport (`FEEDBACK_MAIL_MODE`). The warning and hold emails to the candidate's personal email (fixed text), at most once per flag and stage, within 14 days of the stage, never after the flag is resolved (0171, docs/pipeline-vendors-api.md PV-8) |
@@ -174,7 +174,7 @@ placement or candidate when the user has that screen.
   updates only of `read_at` by the app, deletes only by the worker past 30 days, no TRUNCATE; markers go only
   with their pruned event; the ledger is append-only.
 
-## Retention (migration 0488, audit G-08)
+## Retention (migration 0518, audit G-08)
 
 - **Sessions and step-up rows:** `session-retention` above. Personal metadata (masked IP, browser, device) of ended
   sessions is kept 30 days by default.

@@ -1,5 +1,5 @@
 -- Security gate (wave 3), "admin is only admin" under concurrency. The role_permission admin-holder
--- guard (0480) and authz.role_separation counted a user's roles with `valid @> now()`. now() is the
+-- guard (0510) and authz.role_separation counted a user's roles with `valid @> now()`. now() is the
 -- transaction START, so a grant edit that began before a concurrent admin approval (and waited on
 -- its lock) saw the newly granted row's lower bound in its future and missed the new admin holder.
 -- Both now count holdings valid now OR LATER (`valid && tstzrange(now(), NULL)`); role_separation is

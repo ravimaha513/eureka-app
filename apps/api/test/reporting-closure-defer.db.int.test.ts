@@ -4,7 +4,7 @@ import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, TECH_ID, U, seedFixtures, type FixtureCandidate } from "./fixtures.js";
 
 /**
- * R-12 / C-03 (migration 0476): bulk flows defer the reporting-closure rebuild and do it once
+ * R-12 / C-03 (migration 0506): bulk flows defer the reporting-closure rebuild and do it once
  * (authz.reporting_closure_defer / flush, commit-time constraint trigger), with the per-row cycle
  * check kept. D-04: authz.set_batch_students.
  */

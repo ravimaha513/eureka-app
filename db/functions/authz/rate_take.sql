@@ -1,5 +1,6 @@
 -- authz.rate_take: current definition (repeatable; db/functions/README.md).
--- Created for migration 0486 (R-24). Change this file, not a new migration.
+-- since: 0521
+-- Created for migration 0516 (R-24). Change this file, not a new migration.
 --
 -- Shared fixed-window rate limiter: takes one unit for p_key in the current
 -- window of p_window_seconds (windows are aligned to the epoch, so every API task

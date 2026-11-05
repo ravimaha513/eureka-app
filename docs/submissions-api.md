@@ -64,7 +64,7 @@ Returns `{ changed: string[], submission }` (`changed` empty when every value ma
 UI: the submission drawer's **Details** section has its own **Edit details** button
 (separate from **Next steps**, which moves the status) opening the Edit submission details dialog.
 
-## Concurrency and retries (migration 0477; audit R-10 / R-14)
+## Concurrency and retries (migration 0507; audit R-10 / R-14)
 
 - **`rowVersion`**: every submission item (list, detail, `PATCH` responses) carries it.
   `eureka.submission.row_version` is server-managed: 1 on insert (the insert guard refuses

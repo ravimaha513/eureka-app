@@ -1,4 +1,5 @@
 -- API: authorizes one download (or in-app view) of a document's file and logs
+-- since: 0521
 -- it (access log + audit, same transaction). Not visible (candidate,
 -- document:read or, for restricted documents, document.restricted:read) ->
 -- not_found. The role and scope checks decide: restricted documents need no
@@ -7,7 +8,7 @@
 -- only recorded when the session holds one. Compensating control: a restricted
 -- open counts toward the caller's cap of restricted opens in any 24 hours
 -- (authz.restricted_open_take, policy_setting restricted_opens_per_day,
--- migration 0474) -> 'too_many_restricted_opens' over it; restricted_opens /
+-- migration 0504) -> 'too_many_restricted_opens' over it; restricted_opens /
 -- restricted_cap return the count after this open and the cap (NULL for
 -- internal files). File not clean -> 'not_available' (not counted). 'ok'
 -- returns what the API needs to sign the link: never a key chosen by the

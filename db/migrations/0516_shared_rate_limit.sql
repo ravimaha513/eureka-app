@@ -14,7 +14,7 @@
 -- Keys are stored only as SHA-256 digests (the API also hashes before sending),
 -- never as raw IPs, emails or user ids (rule 5 spirit). The table lives in the
 -- authz schema, owned by authz_definer with no grants to anyone else (the
--- 0476 reporting_closure_pending pattern): the app reaches it only through the
+-- 0506 reporting_closure_pending pattern): the app reaches it only through the
 -- two functions.
 
 SET ROLE authz_definer;

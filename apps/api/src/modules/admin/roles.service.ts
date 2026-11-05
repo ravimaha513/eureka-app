@@ -123,7 +123,7 @@ export class RolesService {
   }
 
   /**
-   * Users holding admin and data roles at once (docs/roles-api.md "Admin separation", migration 0480);
+   * Users holding admin and data roles at once (docs/roles-api.md "Admin separation", migration 0510);
    * read-only report, nothing is stripped.
    */
   async listUserViolations(user: AuthedUser) {

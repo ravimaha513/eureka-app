@@ -11,7 +11,7 @@ import { U, seedFixtures } from "./fixtures.js";
 
 /**
  * Worker lanes (F-10: outbox delivery never waits behind long jobs) and the
- * retention jobs of migration 0488 (G-08): sessions, step-up rows, applicant
+ * retention jobs of migration 0518 (G-08): sessions, step-up rows, applicant
  * sessions, opt-in audit archival, the shared rate-limit purge.
  */
 let db: TestDb;
@@ -119,7 +119,7 @@ describe("worker lanes (F-10)", () => {
   });
 });
 
-describe("session retention (G-08, migration 0488)", () => {
+describe("session retention (G-08, migration 0518)", () => {
   it("deletes ended staff sessions (with their step-up rows), expired step-up rows and ended applicant sessions past the cut-off only", async () => {
     const old = await staffSession(40);              // expired 40 days ago
     const revoked = await staffSession(-1, 35);      // revoked 35 days ago (would still be live)
@@ -230,7 +230,7 @@ describe("audit retention (opt-in archival)", () => {
     const left = (await db.admin.query("SELECT seq::text FROM eureka.audit_event WHERE action = 'retention.test'")).rows.map((x) => x.seq);
     expect(left.sort()).toEqual([unexportedOld, outOfRange, lateA, lateB, recent].sort());
 
-    // The owner's delete policy (0488) still bounds any owner-run delete: unexported, out-of-range and
+    // The owner's delete policy (0518) still bounds any owner-run delete: unexported, out-of-range and
     // young rows never go. (The late-commit count rule lives in the function only; a policy cannot
     // read its own table.)
     const c = await db.admin.connect();
@@ -247,7 +247,7 @@ describe("audit retention (opt-in archival)", () => {
   });
 });
 
-describe("rate-limit purge (shared limiter, migrations 0486/0487)", () => {
+describe("rate-limit purge (shared limiter, migrations 0516/0517)", () => {
   it("is a no-op until authz.rate_purge() exists, then calls it hourly", async () => {
     const job = rateLimitPurgeJob();
     expect(job.dueKeys(new Date("2026-11-05T14:03:00Z"), { pool: db.worker, log: silentLogger })).toEqual(["2026-11-05T13"]);

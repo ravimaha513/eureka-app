@@ -1,11 +1,12 @@
 -- API: authorizes one download (or in-app view) of a file version and logs it
+-- since: 0521
 -- (access log + audit, same transaction). Not readable -> not_found. Folder
 -- membership and level decide; a restricted folder (or a file stored as
 -- restricted) needs no step-up (owner decision on security review B-01); a
 -- step-up grant is only recorded when the session holds one. Compensating
 -- control: a restricted open counts toward the caller's cap of restricted
 -- opens in any 24 hours, shared with candidate documents
--- (authz.restricted_open_take, migration 0474) -> 'too_many_restricted_opens'
+-- (authz.restricted_open_take, migration 0504) -> 'too_many_restricted_opens'
 -- over it; restricted_opens / restricted_cap return the count after this open
 -- and the cap (NULL otherwise). File not clean -> 'not_available' (not
 -- counted). 'ok' returns what the API needs to sign the link. First defined

@@ -1,4 +1,5 @@
 -- authz.interview_name_candidate_ids: current definition (repeatable; db/functions/README.md).
+-- since: 0521
 -- Created for E-09 (docs/backend-audit/perf-baseline.md "R-13b"). Change this file, not a new migration.
 --
 -- The candidate ids whose name, as the Interviews board shows it, matches p_pattern (a

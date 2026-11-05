@@ -582,7 +582,7 @@ describe("authz.document_download: restricted access matrix, access log and audi
     await expect(db.admin.query(`UPDATE eureka.document_access SET user_id = $1`, [U.hr])).rejects.toThrow(/definer functions|append-only/);
   });
 
-  describe("per-user cap on restricted opens (B-01: no step-up; compensating control, migration 0474)", () => {
+  describe("per-user cap on restricted opens (B-01: no step-up; compensating control, migration 0504)", () => {
     const setCap = (n: number | string) => db.admin.query(`UPDATE authz.policy_setting SET value = $1 WHERE key = 'restricted_opens_per_day'`, [String(n)]);
     const used = async (user: string) => Number((await db.admin.query(`SELECT
         (SELECT count(*) FROM eureka.document_access WHERE user_id = $1 AND classification = 'restricted' AND at > now() - interval '24 hours')

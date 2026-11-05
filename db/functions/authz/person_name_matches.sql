@@ -1,4 +1,5 @@
 -- authz.person_name_matches: current definition (repeatable; db/functions/README.md).
+-- since: 0521
 -- Created for R-13b (docs/backend-audit/perf-baseline.md "R-13b"). Change this file, not a new migration.
 --
 -- The ids of the persons whose full name matches p_pattern (a likeContains() pattern, ILIKE with
@@ -11,7 +12,7 @@
 -- user and pins the candidate_read text: change both together.
 --
 -- Why: as eureka_app the RLS security barrier keeps the (not leakproof) ILIKE off the trigram index
--- person_name_trgm (0479); here, as authz_definer, the match is index-backed. Callers use it as an
+-- person_name_trgm (0509); here, as authz_definer, the match is index-backed. Callers use it as an
 -- InitPlan id set (rule 3) next to the unchanged ILIKE, e.g.
 --   p.id IN (SELECT pg_catalog.unnest((SELECT authz.person_name_matches($n))))
 -- (nameMatch() in apps/api/src/platform/sql.ts). EXECUTE ... USING plans the search with the bound

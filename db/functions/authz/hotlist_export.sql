@@ -1,9 +1,10 @@
 -- authz.hotlist_export: current definition (repeatable; db/functions/README.md).
+-- since: 0521
 -- Earlier bodies: migrations 0025, 0030, 0038, 0140. Change this file, not a new migration.
 -- 0290 (signature dropped there): p_more carries the Hot List sheet filters and the sort
 -- (as authz.hotlist_page); returns the team lead and in-person.
 -- $4 name search: the same expression and form as nameSearch() (apps/api/src/platform/sql.ts), so
--- the trigram index person_name_trgm (0479) serves it; EXECUTE ... USING plans it with the bound value.
+-- the trigram index person_name_trgm (0509) serves it; EXECUTE ... USING plans it with the bound value.
 
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.hotlist_export(p_status text, p_technology text, p_visibility text, p_search text, p_limit integer, p_location uuid DEFAULT NULL::uuid, p_visa text DEFAULT NULL::text, p_documents text DEFAULT NULL::text, p_resume boolean DEFAULT NULL::boolean, p_stay text DEFAULT NULL::text, p_more jsonb DEFAULT NULL::jsonb)

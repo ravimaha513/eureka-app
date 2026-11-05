@@ -1,4 +1,4 @@
--- Security gate (wave 3): eureka.audit_prune_exported (0488) treated every audit row of an exported
+-- Security gate (wave 3): eureka.audit_prune_exported (0518) treated every audit row of an exported
 -- UTC day whose seq lies in the file's [first_seq, last_seq] as exported. A transaction that began on
 -- that day (so its row's `at` is that day) and committed after the export ran can hold a seq inside
 -- that range without being in the file, and would be deleted unexported.
@@ -41,7 +41,7 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION eureka.audit_prune_exported(integer) FROM PUBLIC;
 
--- The owner's delete policy (audit_owner_prune, 0488) is unchanged: it still bounds any owner-run
+-- The owner's delete policy (audit_owner_prune, 0518) is unchanged: it still bounds any owner-run
 -- delete to old rows inside an exported day's seq range. It cannot carry the count rule (a policy may
 -- not read its own table: "infinite recursion"), so the late-commit refinement lives in this
 -- function, the only prune path (worker-only EXECUTE).

@@ -1,8 +1,9 @@
 -- authz.role_separation: current definition (repeatable; db/functions/README.md).
--- Admin is only admin (AD-3a; docs/roles-api.md "Admin separation"; migrations 0470, 0480).
+-- since: 0521
+-- Admin is only admin (AD-3a; docs/roles-api.md "Admin separation"; migrations 0500, 0510).
 -- Called by request_role and approve_role_request (single grant, bulk import, approvals) before
 -- they write eureka.user_role. Raises, when granting p_role to p_user:
---   role_violates_admin_separation: p_role itself breaks the role-level rule of 0470
+--   role_violates_admin_separation: p_role itself breaks the role-level rule of 0500
 --     (authz.role_admin_conflicts: admin-only permission without the admin trait, or a business
 --     permission on an admin-trait role). Legacy roles like that stay held but are not granted again;
 --   separation_of_duties: the grant would mix classes (authz.role_classes): an admin role for a

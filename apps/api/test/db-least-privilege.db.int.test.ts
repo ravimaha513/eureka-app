@@ -3,7 +3,7 @@ import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, T, TECH_ID, U, seedFixtures, type FixtureCandidate } from "./fixtures.js";
 
 /**
- * Database least privilege for the API and worker roles (migration 0472, security review G-01, G-02,
+ * Database least privilege for the API and worker roles (migration 0502, security review G-01, G-02,
  * G-03; roadmap R-07). A lint over the grants, plus the behaviour that follows from them.
  */
 let db: TestDb;

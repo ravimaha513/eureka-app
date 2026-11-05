@@ -1,7 +1,7 @@
 # Name search performance: baseline and R-13 result
 
 Measurements for R-13 (findings G-04, A-05, B-06; E-09 and the eureka_app lists: see "R-13b / E-09" at the end). Before = the
-schema at 6db3a53 with no trigram index; after = migration `0479_name_search_trgm.sql` (pg_trgm + GIN
+schema at 6db3a53 with no trigram index; after = migration `0509_name_search_trgm.sql` (pg_trgm + GIN
 trigram indexes `person_name_trgm`, `applicant_name_trgm` on `(first_name || ' ' || last_name)`).
 The SQL text the services send is the same before and after (it is now written by `nameSearch()` in
 `apps/api/src/platform/sql.ts`; the only textual change is an explicit `ESCAPE '\'` on the candidate
@@ -153,7 +153,7 @@ Rows = rows returned after the change (page of 50, or the export's full set); id
    person/applicant while it runs. Sizes: `person_name_trgm` 1.4 MB (heap 4.5 MB),
    `applicant_name_trgm` 1.4 MB (heap 6.2 MB). GIN `fastupdate` is on (the default), so each name
    write adds one pending-list entry. Applying the migration as a non-superuser database owner was
-   checked: a fresh `CREATEROLE CREATEDB` role owning the database applied 0479 through
+   checked: a fresh `CREATEROLE CREATEDB` role owning the database applied 0509 through
    `src/db/migrate.ts`, and the extension landed in `public`, owned by that role. The schema is pinned
    because earlier migrations leave the migrator session's `search_path` on `eureka`: an unpinned
    `CREATE EXTENSION` put pg_trgm in `eureka`.
@@ -3457,7 +3457,7 @@ Measured by W3-H on 2026-11-05. Before = `pipeline-report.service.ts` at 6cc3ad5
 whole `baseSql` CTE for the summary). After = one statement: `rows AS MATERIALIZED` feeds a `summary` CTE and a
 `page` CTE (keyset on `(lower(name) NULLS LAST, id)`, the deprecated `OFFSET` still applied), joined
 `summary LEFT JOIN page`, with the lookup joins (technology, team, recruiter, location) done after the
-`LIMIT`. No index was added (migration 0489 not used): the sort key is computed after the aggregation, so no
+`LIMIT`. No index was added (migration 0519 not used): the sort key is computed after the aggregation, so no
 index can serve it; the cost is the aggregation itself.
 
 ## Environment and method
@@ -3713,7 +3713,7 @@ With the name sets the lists touch only matching persons, and both equivalent In
 measured above are slower for the common case, so the policy is unchanged. The remaining list where it
 shows is `employees` without a search (104.7 ms after, 141.4 ms before: the plan joins all 10,000
 employees before the top-N sort); that is the employee list's ordering, not the policy, and is left for
-a separate change. Migrations 0481–0482 were therefore not needed.
+a separate change. Migrations 0511–0512 were therefore not needed.
 
 ### Security notes
 

@@ -3,7 +3,7 @@ import type { JobContext, JobDefinition } from "../runner.js";
 import { dueMaintenanceKeys, utcDateKey, type DailySchedule } from "../schedule.js";
 
 /**
- * Retention jobs (migration 0488; docs/notifications.md "Retention"). Each one
+ * Retention jobs (migration 0518; docs/notifications.md "Retention"). Each one
  * calls narrow SECURITY DEFINER functions executable by eureka_worker only (the
  * worker has no grants on the identity tables); the database enforces the
  * minimum retention and deletes a bounded batch per call, so the jobs loop.
@@ -22,7 +22,7 @@ import { dueMaintenanceKeys, utcDateKey, type DailySchedule } from "../schedule.
  *   day has an audit_export ledger row covering their seq (the S3 export
  *   succeeded). The database refuses anything else, whoever calls.
  * - rate-limit-purge (hourly): calls authz.rate_purge() when that function
- *   exists (shared rate limiter, migrations 0486/0487); until then it records
+ *   exists (shared rate limiter, migrations 0516/0517); until then it records
  *   `available: false` and does nothing.
  */
 export const SESSION_RETENTION_JOB = "session-retention";
@@ -85,7 +85,7 @@ export function auditRetentionJob(days: number, schedule: DailySchedule = AUDIT_
   };
 }
 
-/** True once the shared limiter's purge function is installed (migrations 0486/0487, another branch). */
+/** True once the shared limiter's purge function is installed (migrations 0516/0517, another branch). */
 export async function ratePurgeAvailable(pool: pg.Pool): Promise<boolean> {
   const r = await pool.query<{ ok: boolean }>("SELECT to_regprocedure('authz.rate_purge()') IS NOT NULL AS ok");
   return r.rows[0]!.ok;

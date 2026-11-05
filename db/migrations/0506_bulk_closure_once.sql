@@ -40,7 +40,7 @@ RESET ROLE;
 
 SET ROLE eureka_owner;
 
--- The rebuild itself (body of the statement trigger up to 0476): whole-org cycle
+-- The rebuild itself (body of the statement trigger up to 0506): whole-org cycle
 -- check, closure, access_version once per transaction. Clears the pending marker.
 CREATE FUNCTION eureka.reporting_closure_rebuild() RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$

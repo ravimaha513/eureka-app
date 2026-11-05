@@ -40,7 +40,7 @@ describe("SQL agrees with the shared catalog", () => {
     expect(allowed.sort()).toEqual([...statuses].sort());
   });
 
-  // Admin is only admin (0480): SQL and the catalog classify the built-in roles alike, and none is
+  // Admin is only admin (0510): SQL and the catalog classify the built-in roles alike, and none is
   // admin_compatible_only (the role_permission holder guard leaves system roles to the catalog).
   it("authz.role_classes agrees with roleClassification for every built-in role", async () => {
     const { rows } = await db.admin.query<{ role_key: string; classification: string }>(

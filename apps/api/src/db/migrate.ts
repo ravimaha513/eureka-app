@@ -224,7 +224,7 @@ export async function seedCatalog(client: pg.Client | pg.PoolClient, opts: { pro
   await client.query("BEGIN");
   try {
     // Permissions first: role_permission references them (0311). Flags drive role.is_restricted
-    // and the admin/data separation checks (0470).
+    // and the admin/data separation checks (0500).
     for (const key of PERMISSIONS) {
       await client.query(
         `INSERT INTO eureka.permission (key, is_restricted, is_org_sensitive, is_admin_only, is_admin_compatible) VALUES ($1,$2,$3,$4,$5)

@@ -517,7 +517,7 @@ const deadAt = async (id: string) =>
 const jobStatus = async (key: string) => (await db.admin.query<{ status: string; attempts: number; detail: Record<string, unknown> }>(
   "SELECT status, attempts, detail FROM eureka.job_run WHERE job_name = 'outbox-delivery' AND run_key = $1", [key])).rows[0];
 
-describe("outbox dead letter (migration 0488)", () => {
+describe("outbox dead letter (migration 0518)", () => {
   it("a poison event is dead-lettered after N attempts, kept for inspection, never retried, and does not block others", async () => {
     const poison = await poisonEvent();
     const { eventId: healthy } = await newPlacement();

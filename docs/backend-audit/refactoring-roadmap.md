@@ -281,7 +281,7 @@ Please confirm before any code changes:
 * **R-01:** single admin stays and no second approver is required; existing violating custom roles are *reported*, not failed.
 * **R-10:** If-Match stays **optional**. No mandatory-header (428) rollout without a separate approval.
 
-Built on branch `ccr-6973b23a-g6dxmm` by parallel worktrees, with migrations 0470–0479. An independent security gate (eureka-security-gate) returned **ship**, and its 3 actionable minors are fixed.
+Built on branch `ccr-6973b23a-g6dxmm` by parallel worktrees, with migrations 0500–0509. An independent security gate (eureka-security-gate) returned **ship**, and its 3 actionable minors are fixed.
 
 | Item | Status | What shipped | Notes / left |
 |---|---|---|---|
@@ -291,7 +291,7 @@ Built on branch `ccr-6973b23a-g6dxmm` by parallel worktrees, with migrations 047
 | R-04 | Done | CSV export masks applicant email exactly as JSON does | — |
 | R-05 | Done | Verified applicants are exempt from the global link cap; `portal_cap_reached` warn log; identical responses | — |
 | R-06 | Done (option B) | Per-user cap of 200 restricted opens per 24 h (`policy_setting restricted_opens_per_day`), 429 above it; 60 s restricted links; high-water and cap logs; docs corrected | Confirm 200/day with HR |
-| R-07 | Done | Worker EXECUTE on `transition_candidate` revoked; column-level grants on person, candidate and job; DB lint test | Candidate allow-list still includes columns some tests write directly (tracked in the 0472 comments) |
+| R-07 | Done | Worker EXECUTE on `transition_candidate` revoked; column-level grants on person, candidate and job; DB lint test | Candidate allow-list still includes columns some tests write directly (tracked in the 0502 comments) |
 | R-08 | Done | Payments summary computed in one numeric aggregate; correct `outstanding`; `receivedWithoutAmount` | Finance totals change for invoices without an amount (intended) |
 | R-09 | Done | Fail-closed guard with a `@SelfService()` marker; route inventory test with reviewed SelfService and Public lists | — |
 | R-10 | Done (optional) | `optionalIfMatch()` on candidates, submissions, interviews, roles, employment and planned end date, and bill void; malformed tag → 412 | The web client does not send If-Match yet |
@@ -308,7 +308,7 @@ Owner decisions:
 * **Admin is only admin:** a user holding an admin-trait role holds no data roles, and the reverse. Roles that break the admin/data split cannot be assigned. Existing violators are reported (`GET /admin/roles/violations`, `GET /admin/users/violations`), not stripped.
 * **Restricted-document cap:** stays at 200 per user per day (`policy_setting restricted_opens_per_day`).
 
-Migrations 0480 and 0484–0491 (0481–0483 unused). Independent security gate on the wave-3 diff: **ship**. Its 2 minors are fixed (a concurrent grant race, `e563506`; audit prune skipping late commits, `f3790d0`).
+Migrations 0510 and 0514–0521 (0511–0513 unused). Independent security gate on the wave-3 diff: **ship**. Its 2 minors are fixed (a concurrent grant race, `e563506`; audit prune skipping late commits, `f3790d0`).
 
 | Item | Status | What shipped | Notes / left |
 |---|---|---|---|
@@ -317,12 +317,12 @@ Migrations 0480 and 0484–0491 (0481–0483 unused). Independent security gate 
 | R-16 | Done | Jobs and batches in `state-machines.ts`; `job_guard` transition list; D-07 (Sales leads may set batch status, per TR-1); paperwork locked set; TS↔SQL parity test | Job lifecycle kept permissive (no rules defined in docs) |
 | R-17 | Done | `AdminService` → 8 services; `CandidatesService` → 5 services plus `candidate-common`; team-scope check deduplicated | `scopePredicate` / cursor helpers could move to `platform/` (D-14) |
 | R-19 | Done | `docs/openapi.json` (OpenAPI 3.1) generated from zod; `openapi:check` in CI; `@ApiBody` / `@ApiQuery` on all modules | Response bodies not yet described |
-| R-20, R-26, R-28, R-30 | Done | `migrate.ts`: fresh run = incremental run (`-- since:` markers, session reset, lock-wait timeout, checksum verify); 0484 CHECKs validated; catalog-wide DB lint; SCRAM role passwords; 0485 location function owner | Check the deploy log for `0484:` WARNINGs |
+| R-20, R-26, R-28, R-30 | Done | `migrate.ts`: fresh run = incremental run (`-- since:` markers, session reset, lock-wait timeout, checksum verify); 0514 CHECKs validated; catalog-wide DB lint; SCRAM role passwords; 0515 location function owner | Check the deploy log for `0514:` WARNINGs |
 | R-21, R-27 | Done | Separate outbox lane; dead-letter queue; session / step-up / applicant-session retention; `audit_event` kept forever unless `AUDIT_RETENTION_DAYS ≥ 365`, pruning only exported days | Set the production worker count ≥ 1 before go-live |
 | R-23 | Done | `truncated` / cursor on capped lists; pipeline report single-pass with keyset paging (org-scope 1.2–2.8 s → ~0.55 s) | `offset` deprecated where cursors were added |
 | R-24, R-25 | Done | Postgres-backed shared limiter for security limits; one statement per request for auth (no cache) | — |
 | Web | Done | `?error=` messages; 503 / Retry-After retry; 429 and 412 messages; If-Match on edits; separation reports | e2e not run here (no Docker) |
-| D-06 | Done | `set_batch_status` returns the previous status; the audit `from` is correct (0490) | — |
+| D-06 | Done | `set_batch_status` returns the previous status; the audit `from` is correct (0520) | — |
 
 **Still open:** D-14 (move shared SQL helpers to `platform/`); response schemas in OpenAPI; an e2e journey for the new flows; removing the legacy `eureka_sid` fallback next release; mandatory If-Match (needs approval).
 

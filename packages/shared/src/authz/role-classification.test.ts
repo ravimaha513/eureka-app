@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GRANTS, ROLES, ROLE_TRAITS, roleClassification } from "./catalog.js";
 
-/** Admin is only admin, per user (docs/roles-api.md "Admin separation"; migration 0480). */
+/** Admin is only admin, per user (docs/roles-api.md "Admin separation"; migration 0510). */
 describe("role classification", () => {
   it("built-in roles: org_admin is the only admin role, every other one is a data role", () => {
     expect(ROLES.filter((r) => roleClassification(ROLE_TRAITS[r], GRANTS[r]) === "admin")).toEqual(["org_admin"]);

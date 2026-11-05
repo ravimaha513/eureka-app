@@ -87,7 +87,7 @@ export class UserImportService {
           if (roles.includes(null)) { fail("unknown_role"); continue; }
           const wanted = roles as RoleRow[];
           if (new Set(wanted.map((x) => x.key)).size !== wanted.length) { fail("duplicate_role"); continue; }
-          // Admin is only admin (0480): admin and data roles never together; admin_compatible_only goes with either.
+          // Admin is only admin (0510): admin and data roles never together; admin_compatible_only goes with either.
           if (wanted.some((x) => x.classification === "admin") && wanted.some((x) => x.classification === "data")) {
             fail("separation_of_duties"); continue;
           }
@@ -144,7 +144,7 @@ export class UserImportService {
         // Second pass: reporting lines, then teams. New users have no reports yet, so a loop can only run
         // through rows of this file: it is found here and reported per row. The other lines go to
         // authz.admin_bulk_set_managers in one call. The closure rebuild is deferred over the whole pass
-        // (team adds move reporting lines too, 0370) and done once, before commit (0476).
+        // (team adds move reporting lines too, 0370) and done once, before commit (0506).
         if (links.length > 0) await c.query(`SELECT authz.reporting_closure_defer()`);
         const fail = (res: Row, code: string) => { res.status = "error"; res.error = code; delete res.id; res.roles = []; };
         const fileManager = new Map(links.filter((l) => l.managerEmail && fileEmails.has(l.managerEmail))

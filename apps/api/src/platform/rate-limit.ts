@@ -51,7 +51,7 @@ export interface RateSystemDb {
 /**
  * Fixed-window limiter shared by every API task and kept across deploys
  * (audit R-24, F-06/B-09): the count lives in Postgres (authz.rate_take,
- * migration 0486; one UPSERT per call, windows aligned to the epoch). For the
+ * migration 0516; one UPSERT per call, windows aligned to the epoch). For the
  * security-relevant limits only: password sign-in and reset, portal sign-up,
  * link and verify, public feedback, document and Data Hub downloads/uploads,
  * exports. Cheap read throttles stay on RateLimiter.

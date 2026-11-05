@@ -7,7 +7,7 @@ import { CLIENT_ID, LOC, T, U, seedFixtures } from "./fixtures.js";
 import { newCandidate } from "./placement-seed.js";
 
 // docs/submissions-api.md "Concurrency and retries": optional If-Match on the two PATCH routes
-// (row_version, migration 0477) and optional Idempotency-Key + serialised duplicate check on POST.
+// (row_version, migration 0507) and optional Idempotency-Key + serialised duplicate check on POST.
 let db: TestDb;
 let app: NestFastifyApplication;
 const SECRET = "test-secret-test-secret-test-secret-123";
@@ -60,7 +60,7 @@ const version = async (id: string) =>
 const audits = async (action: string, id: string) =>
   (await db.admin.query(`SELECT 1 FROM eureka.audit_event WHERE action = $1 AND entity_id = $2`, [action, id])).rowCount;
 
-describe("row_version (0477)", () => {
+describe("row_version (0507)", () => {
   it("starts at 1, is returned as rowVersion and bumps on every write", async () => {
     const id = await submission();
     expect((await call("r1a", "GET", `/api/v1/submissions/${id}`)).json().rowVersion).toBe(1);

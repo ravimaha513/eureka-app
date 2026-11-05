@@ -950,7 +950,7 @@ export function adminSeparationViolations(traits: Pick<RoleTraits, "admin">, gra
 }
 
 /**
- * Admin separation class of a role (docs/roles-api.md "Admin separation"; migration 0480,
+ * Admin separation class of a role (docs/roles-api.md "Admin separation"; migration 0510,
  * authz.role_classes): "admin" for the admin trait; "admin_compatible_only" when, without it, every
  * grant is in ADMIN_COMPATIBLE_PERMISSIONS (or there is none); "data" otherwise. A user holds admin
  * roles or data roles, never both; admin_compatible_only roles go with either.

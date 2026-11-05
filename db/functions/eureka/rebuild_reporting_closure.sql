@@ -1,9 +1,10 @@
 -- eureka.rebuild_reporting_closure: current definition (repeatable; db/functions/README.md).
+-- since: 0521
 -- Earlier body: migration 0002. Change this file, not a new migration.
 -- Statement trigger on reporting_line: closure rebuild with cycle check, serialized by
 -- advisory lock (B2.1, N10). The rebuild itself is eureka.reporting_closure_rebuild
--- (0476); the access_version bump is once per transaction, as in eureka.bump_access_version.
--- While a bulk flow defers the rebuild (authz.reporting_closure_defer, 0476) the trigger
+-- (0506); the access_version bump is once per transaction, as in eureka.bump_access_version.
+-- While a bulk flow defers the rebuild (authz.reporting_closure_defer, 0506) the trigger
 -- only takes the lock and marks the closure pending: authz.reporting_closure_flush, or
 -- the deferred constraint trigger reporting_closure_at_commit, rebuilds once.
 

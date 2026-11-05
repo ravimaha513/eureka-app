@@ -110,7 +110,7 @@ describe("database: assignment_employment and the 0150 functions", () => {
        WHERE n.nspname = 'authz' AND p.proname IN ('payroll_companies','set_assignment_employment','assignment_pay_rates',
          'employment_movements','assign_employee_team','notification_recipients') ORDER BY 1`)).rows;
     expect(fns.map((f) => f.proname)).toEqual(["assign_employee_team", "assignment_pay_rates", "employment_movements",
-      "notification_recipients", "payroll_companies", "set_assignment_employment", "set_assignment_employment"]); // + the 0478 If-Match overload
+      "notification_recipients", "payroll_companies", "set_assignment_employment", "set_assignment_employment"]); // + the 0508 If-Match overload
     for (const f of fns) {
       expect(f.secdef, f.proname).toBe(true);
       expect(f.cfg, f.proname).toContain("search_path=pg_catalog, pg_temp");

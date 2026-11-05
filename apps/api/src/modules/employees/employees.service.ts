@@ -114,7 +114,7 @@ const anyAssignment = (cond: string) => `EXISTS (
 
 const ref = (id: string | null, name: string | null) => (id ? { id, name } : null);
 
-/** The optional-version employment functions (0478) raise `stale`: 412, as on the other If-Match routes. */
+/** The optional-version employment functions (0508) raise `stale`: 412, as on the other If-Match routes. */
 function staleToPrecondition(err: unknown): void {
   const e = err as { message?: string; code?: string };
   if (e.message === "stale" && e.code !== undefined) throw new HttpException("stale", HttpStatus.PRECONDITION_FAILED);

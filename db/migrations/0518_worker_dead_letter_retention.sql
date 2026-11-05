@@ -84,7 +84,7 @@ BEGIN
       NEW.published_at := pg_catalog.now();
       RETURN NEW;
     END IF;
-    -- Dead letter (0488): dead_at NULL -> now(), once, on an unpublished event.
+    -- Dead letter (0518): dead_at NULL -> now(), once, on an unpublished event.
     IF OLD.published_at IS NULL AND OLD.dead_at IS NULL
        AND NEW.dead_at IS NOT NULL AND NEW.published_at IS NULL
        AND (to_jsonb(NEW) - 'dead_at') IS NOT DISTINCT FROM (to_jsonb(OLD) - 'dead_at') THEN

@@ -4,7 +4,7 @@ import { SharedRateLimiter, type RateSystemDb } from "../src/platform/rate-limit
 import { createTestDb, type TestDb } from "./db-harness.js";
 
 /**
- * Shared-store rate limiter (migration 0486, R-24; audit F-06, B-09): the count
+ * Shared-store rate limiter (migration 0516, R-24; audit F-06, B-09): the count
  * lives in Postgres, so it holds across API tasks and deploys.
  */
 let db: TestDb;

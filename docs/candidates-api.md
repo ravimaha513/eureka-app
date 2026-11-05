@@ -131,7 +131,7 @@ with the `rowVersion` of `GET /candidates/:id`:
 
 Every one of these responses now carries the new `rowVersion` (additive). Direct updates check with
 `AND row_version = $n`; the definer paths (compliance, visibility, transition) lock the row first with
-`authz.candidate_version_lock` (0475). The Hot List bulk actions and other internal callers send no version.
+`authz.candidate_version_lock` (0505). The Hot List bulk actions and other internal callers send no version.
 A required header (428) is a later, breaking step.
 
 ## Company links and documents status (CA-4)
@@ -264,7 +264,7 @@ upload is also on the batch's Students tab while the batch is open.
 - `POST /api/v1/batches/:id/candidates/bulk` (`candidate:create`) `{ dryRun, teamId?, rows: [{ firstName, lastName, phone, email }] }`
   (1-500 rows; `teamId: null` = "No team yet", assigned later as for `POST /candidates`) → 200 `{ dryRun, committed, created, failed, rows: [{ row, firstName, lastName, phone, email, status, error? }] }`.
 - All or nothing: one transaction, rolled back when any row fails or on `dryRun`, so the preview is what a real run does.
-  Rows are validated in memory, their contacts checked in one call (`authz.candidate_contacts_taken`, 0475, which takes
+  Rows are validated in memory, their contacts checked in one call (`authz.candidate_contacts_taken`, 0505, which takes
   the contact lock until the transaction ends) and the rest inserted set-based; `authz.candidate_contact_unique` stays
   the backstop. A taken email is reported before a taken phone, as the trigger does.
 - Row errors: `invalid_first_name`, `invalid_last_name`, `missing_country_code`, `trunk_zero`, `invalid` (phone),
@@ -275,7 +275,7 @@ upload is also on the batch's Students tab while the batch is open.
 - **Daily row budget** (audit A-01): the file answers "is this contact taken?" for every row, so rows checked against
   existing contacts (the ones that pass the in-memory checks) are charged to the caller, previews included, before the
   check runs: `BULK_CANDIDATE_ROWS_PER_DAY` = **2,000 rows per user per UTC day** (`candidate-batches.service.ts`; change the
-  constant to resize it). Stored in `eureka.bulk_candidate_budget` (0475, written only by
+  constant to resize it). Stored in `eureka.bulk_candidate_budget` (0505, written only by
   `authz.bulk_candidate_budget_take`), so it holds across API tasks. A file that would pass it gets
   **429 `bulk_budget_exceeded`** and is not charged; 404 / 403 / 422 come first and cost nothing.
 - Audit (counts and ids only): `candidate.created` per row with `{ batchId, bulk: true }`, `batch.candidates_added`
@@ -290,7 +290,7 @@ upload is also on the batch's Students tab while the batch is open.
   no cursor).
 - `PUT /api/v1/batches/:id/status` (`candidate:create`; batch planning rights at the location) `{ to }` → `{ id, status }`;
   404 not visible, 403 not allowed, 422 `invalid_transition`. `authz.set_batch_status` returns the status it changed
-  from (0490), and that is what the `batch.status` audit row records as `from`, also when another change landed
+  from (0520), and that is what the `batch.status` audit row records as `from`, also when another change landed
   between the API's read and the function's row lock (D-06). `PUT /api/v1/training/batches/:id/status` audits the same way.
 
 ## Code layout

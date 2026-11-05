@@ -1,5 +1,5 @@
 -- "Admin is only admin" per user (owner decision 2026-11-05; docs/roles-api.md "Admin separation",
--- docs/admin-api.md AD-3a; follows 0470). Role classes:
+-- docs/admin-api.md AD-3a; follows 0500). Role classes:
 --   * admin: the role has the admin trait (eureka.role.is_admin), whatever it holds;
 --   * admin_compatible_only: no admin trait, and every permission it holds is admin-compatible
 --     (catalog ADMIN_COMPATIBLE_PERMISSIONS: staff directory, reference data, chat), or none;
@@ -8,7 +8,7 @@
 -- A user holds admin roles or data roles, never both; admin_compatible_only roles go with either.
 -- authz.role_separation (db/functions), called by request_role and approve_role_request (single
 -- grant, bulk import, approvals), refuses a grant that would mix them (separation_of_duties) and a
--- role that itself breaks the role-level rule of 0470 (role_violates_admin_separation).
+-- role that itself breaks the role-level rule of 0500 (role_violates_admin_separation).
 -- The trigger below stops the other way in: adding a business permission to a custom
 -- admin_compatible_only role that an admin holds (role_held_by_admin).
 -- Users who already mix are NOT changed: one WARNING per user (ids only), and

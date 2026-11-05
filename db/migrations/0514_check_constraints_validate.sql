@@ -69,7 +69,7 @@ BEGIN
     BEGIN
       EXECUTE pg_catalog.format('ALTER TABLE %s VALIDATE CONSTRAINT %I', c.tbl, c.conname);
     EXCEPTION WHEN check_violation THEN
-      RAISE WARNING '0484: % on % stays NOT VALID: existing rows violate %', c.conname, c.tbl, pg_catalog.pg_get_constraintdef(c.oid)
+      RAISE WARNING '0514: % on % stays NOT VALID: existing rows violate %', c.conname, c.tbl, pg_catalog.pg_get_constraintdef(c.oid)
         USING HINT = 'Fix the rows, then ALTER TABLE ... VALIDATE CONSTRAINT in a new migration (G-09/G-10).';
     END;
   END LOOP;

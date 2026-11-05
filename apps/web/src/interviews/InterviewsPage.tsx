@@ -38,7 +38,7 @@ export interface Interview {
   /** Outcome of the round (migration 0360); `cleared` is the location's pre-call readiness. */
   result?: InterviewResult; resultAt?: string | null;
   submissionStatus?: string | null; placement?: { id: string; status: string } | null;
-  /** The optional If-Match for PATCH and clear-and-select (IS-12, migration 0478); absent on older servers. */
+  /** The optional If-Match for PATCH and clear-and-select (IS-12, migration 0508); absent on older servers. */
   rowVersion?: number;
 }
 

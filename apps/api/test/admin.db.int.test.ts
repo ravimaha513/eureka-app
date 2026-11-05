@@ -379,7 +379,7 @@ describe("security review follow-ups (migration 0018)", () => {
   });
 });
 
-describe("admin separation and role versions (migrations 0470, 0471)", () => {
+describe("admin separation and role versions (migrations 0500, 0501)", () => {
   /** Runs fn as eureka_app for actor after setup as the owner, all rolled back. */
   async function withSetup<T>(setup: string[], actor: string, fn: (c: import("pg").PoolClient) => Promise<T>): Promise<T> {
     const c = await db.admin.connect();
@@ -464,7 +464,7 @@ describe("admin separation and role versions (migrations 0470, 0471)", () => {
   });
 });
 
-describe("admin is only admin, per user (migration 0480)", () => {
+describe("admin is only admin, per user (migration 0510)", () => {
   const Z = "00000000-0000-0000-0000-00000000a480";
   type C = import("pg").PoolClient;
   /** Runs fn as eureka_app after setup as the owner, all rolled back; `as` switches the acting user. */

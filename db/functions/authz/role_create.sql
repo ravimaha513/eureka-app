@@ -1,9 +1,10 @@
 -- authz.role_create: current definition (repeatable; db/functions/README.md).
+-- since: 0521
 -- An admin creates a custom role by cloning another role's grants and traits
 -- (docs/roles-api.md). Returns the new key (c_<slug of the label>). Raises
 -- not_permitted, unknown_role, role_archived (source), invalid_label, role_exists,
 -- unknown_department. The API writes the audit row in the same transaction.
--- Admin separation (0470, security review C-01): cloning a role that breaks it (an
+-- Admin separation (0500, security review C-01): cloning a role that breaks it (an
 -- older custom role, GET /admin/roles/violations) would add a violation, so it raises
 -- business_permission_on_admin_role or admin_permission_needs_admin_role.
 

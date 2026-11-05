@@ -50,7 +50,7 @@ import { DELIVERED_TYPES, EMAIL_TYPES, INBOX_TYPES, inboxBodyWith, renderEmail, 
  * alert log). Everything before the `sending` mark is retried (at least once
  * up to that point). Inbox rows are written exactly once per recipient.
  *
- * Dead letter (migration 0488): a key that fails `deadLetterAfter` times in a
+ * Dead letter (migration 0518): a key that fails `deadLetterAfter` times in a
  * row (backoff between attempts) is given up: the event gets `dead_at` (it is
  * never delivered, published or pruned; kept for inspection) and its job_run
  * row the terminal status `dead`, with an alert and a `job_dead_lettered`
@@ -363,7 +363,7 @@ export async function skipBacklog(pool: pg.Pool, since: Date, log: Logger): Prom
 }
 
 /**
- * Dead-letters one event (migration 0488): sets dead_at once, only while it is
+ * Dead-letters one event (migration 0518): sets dead_at once, only while it is
  * unpublished. The database guard allows nothing else. True when it was marked now.
  */
 export async function deadLetterEvent(pool: pg.Pool, id: string): Promise<boolean> {

@@ -1,4 +1,5 @@
 -- authz.transition_candidate: current definition (repeatable; db/functions/README.md).
+-- since: 0521
 -- Earlier bodies: migrations 0006, 0015, 0022. Change this file, not a new migration.
 
 SET ROLE authz_definer;

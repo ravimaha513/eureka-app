@@ -5,7 +5,7 @@ import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { U, seedFixtures } from "./fixtures.js";
 
 /**
- * R-13 (migration 0479): a GIN trigram index on the exact full-name expression the searches use.
+ * R-13 (migration 0509): a GIN trigram index on the exact full-name expression the searches use.
  * Plans are EXPLAINed without ANALYZE and with enable_seqscan off, so the assertions do not depend on
  * the fixture's (small) table sizes; docs/backend-audit/perf-baseline.md has the measured plans on
  * 50k candidates, including why the eureka_app (RLS) list paths cannot use the index.
@@ -48,7 +48,7 @@ const CANDIDATE_SEARCH = `SELECT c.id FROM eureka.candidate c JOIN eureka.person
   WHERE ${nameSearch("p", "$1")} ORDER BY c.id`;
 const DEFINER = { role: "authz_definer", user: U.ceo };
 
-describe("name search index (R-13, migration 0479)", () => {
+describe("name search index (R-13, migration 0509)", () => {
   it("the trigram indexes are built on exactly the expression the queries use", async () => {
     const { rows } = await db.admin.query<{ indexrelid: string; def: string }>(
       `SELECT indexrelid::regclass::text AS indexrelid, pg_get_indexdef(indexrelid) AS def FROM pg_index

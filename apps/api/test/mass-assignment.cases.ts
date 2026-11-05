@@ -2292,7 +2292,7 @@ const IGNORED: IgnoreCase[] = [
       });
       expect(r.statusCode, r.body).toBe(422);
       await ok("admin", "PATCH", `/api/v1/admin/roles/${key}`, { label: "MA Role Patched", traits: { recruiter: true } }, 204);
-      // row_version is the server's (0471): one accepted edit bumps it from 1 to 2, whatever rowVersion the body named.
+      // row_version is the server's (0501): one accepted edit bumps it from 1 to 2, whatever rowVersion the body named.
       expect(await rows(`SELECT key, label, is_system, is_recruiter, archived_at, row_version FROM eureka.role WHERE key = $1`, [key]))
         .toEqual([{ key, label: "MA Role Patched", is_system: false, is_recruiter: true, archived_at: null, row_version: 2 }]);
       expect(await rows(`SELECT 1 FROM eureka.role_permission WHERE role_key = $1 AND permission = 'rate:read'`, [key])).toEqual([]);

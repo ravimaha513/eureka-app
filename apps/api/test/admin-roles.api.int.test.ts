@@ -336,7 +336,7 @@ describe("admin separation (security review C-01)", () => {
       expect(await roleOf("c_sneaky")).toBeUndefined();
     });
 
-    it("is not granted again (0480): 422 role_violates_admin_separation", async () => {
+    it("is not granted again (0510): 422 role_violates_admin_separation", async () => {
       const r = await call("admin", "POST", "/api/v1/admin/role-requests", { userId: U.r1a, role: "c_legacy_mixed" });
       expect(r.statusCode).toBe(422);
       expect(detail(r)).toBe("role_violates_admin_separation");
@@ -364,7 +364,7 @@ describe("admin separation (security review C-01)", () => {
   });
 });
 
-describe("admin is only admin, per user (migration 0480)", () => {
+describe("admin is only admin, per user (migration 0510)", () => {
   it("GET /admin/roles classifies every role", async () => {
     const items = (await call("admin", "GET", "/api/v1/admin/roles?includeArchived=true")).json().items as
       (RoleItem & { classification: string })[];

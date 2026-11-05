@@ -1,4 +1,5 @@
 -- authz.role_update: current definition (repeatable; db/functions/README.md).
+-- since: 0521
 -- An admin edits a custom role (docs/roles-api.md). p_patch is a JSON object whose
 -- present keys change: label, description, track, level, departmentId, traits
 -- {sales, locationBound, admin, recruiter, coach}. Returns the changed field names.
@@ -7,7 +8,7 @@
 -- (location ids, separation of duties, coach assignments) depend on them.
 -- Raises not_permitted, unknown_role, system_role, role_archived, invalid_label,
 -- role_exists, invalid_track, invalid_level, unknown_department, role_in_use.
--- Admin separation (0470, security review C-01): turning the admin trait on while the
+-- Admin separation (0500, security review C-01): turning the admin trait on while the
 -- role holds a business permission raises business_permission_on_admin_role; turning it
 -- off while the role holds an admin-only permission raises admin_permission_needs_admin_role.
 -- p_expected_version (optional If-Match, C-02): stale when it is not the role's row_version.

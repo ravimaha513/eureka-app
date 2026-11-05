@@ -1,4 +1,5 @@
 -- eureka.job_guard: current definition (repeatable; db/functions/README.md).
+-- since: 0521
 -- Earlier body: migration 0060. Change this file, not a new migration.
 -- BEFORE INSERT/UPDATE/DELETE on eureka.job: server-managed columns (rule 4), value checks the
 -- CHECKs cannot express, and the job status lifecycle (docs/jobs-portal-api.md JP-3a), mirrored by

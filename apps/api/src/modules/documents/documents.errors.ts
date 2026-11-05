@@ -3,7 +3,7 @@ import { HttpException, HttpStatus, Logger } from "@nestjs/common";
 /**
  * Restricted files (candidate documents and restricted DataHub folders) open without step-up (owner decision on
  * security review B-01). Compensating controls: the per-user cap on restricted opens in any 24 hours, enforced in
- * authz.document_download / authz.datahub_download (migration 0474, policy_setting restricted_opens_per_day), the
+ * authz.document_download / authz.datahub_download (migration 0504, policy_setting restricted_opens_per_day), the
  * 60-second presigned link, and the warnings below (ids and counts only) for alerting.
  */
 export const RESTRICTED_OPENS_HIGH_WATER = 0.8;

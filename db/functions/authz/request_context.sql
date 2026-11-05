@@ -1,5 +1,6 @@
 -- authz.request_context: current definition (repeatable; db/functions/README.md).
--- Created for migration 0487 (R-25; docs/backend-audit F-03). Change this file, not a new migration.
+-- since: 0521
+-- Created for migration 0517 (R-25; docs/backend-audit F-03). Change this file, not a new migration.
 --
 -- Per-request staff authentication in ONE statement on ONE connection
 -- (platform/auth.guard.ts). Replaces the session lookup CTE (SessionService.resolve),

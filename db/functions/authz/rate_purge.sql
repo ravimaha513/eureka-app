@@ -1,5 +1,6 @@
 -- authz.rate_purge: current definition (repeatable; db/functions/README.md).
--- Created for migration 0486 (R-24). Change this file, not a new migration.
+-- since: 0521
+-- Created for migration 0516 (R-24). Change this file, not a new migration.
 --
 -- Deletes expired authz.rate_window rows (windows that ended before now) and
 -- returns how many. For the worker's periodic purge (eureka_worker); a window

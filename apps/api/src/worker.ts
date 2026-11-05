@@ -93,9 +93,9 @@ const jobs = [
   performanceBelowTargetJob(),
   // pipeline-vendors: "candidate not responding" flags still open after NONRESPONSE_HOLD_DAYS (migration 0171).
   candidateNonresponseJob(config.NONRESPONSE_HOLD_DAYS),
-  // Retention (G-08, migration 0488): ended staff/applicant sessions and expired step-up rows.
+  // Retention (G-08, migration 0518): ended staff/applicant sessions and expired step-up rows.
   sessionRetentionJob({ sessionDays: config.SESSION_RETENTION_DAYS, stepUpDays: config.STEP_UP_RETENTION_DAYS }),
-  // Shared rate-limit windows: a no-op until authz.rate_purge() exists (migrations 0486/0487).
+  // Shared rate-limit windows: a no-op until authz.rate_purge() exists (migrations 0516/0517).
   rateLimitPurgeJob(),
 ];
 // audit_event is kept for ever unless AUDIT_RETENTION_DAYS is set; then only exported days are pruned.

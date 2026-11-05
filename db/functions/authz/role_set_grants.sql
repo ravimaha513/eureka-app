@@ -1,4 +1,5 @@
 -- authz.role_set_grants: current definition (repeatable; db/functions/README.md).
+-- since: 0521
 -- An admin replaces a custom role's grants (docs/roles-api.md): p_grants is a JSON
 -- object permission -> scope (null removes). Returns {added, removed, changed}
 -- permission keys for the audit row. Raises not_permitted, unknown_role,
@@ -6,7 +7,7 @@
 -- location_scope_needs_location, and role_in_use when the change would add a
 -- restricted permission (or an org-sensitive one at org scope) while the role has
 -- holders: a new role and a fresh grant go through the second approver (AD-3).
--- Admin separation (0470, security review C-01): admin_permission_needs_admin_role when
+-- Admin separation (0500, security review C-01): admin_permission_needs_admin_role when
 -- it would add an admin-only permission to a role without the admin trait,
 -- business_permission_on_admin_role when it would add any other permission (beyond the
 -- admin-compatible ones) to an admin-trait role. Only additions are refused, so a role

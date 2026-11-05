@@ -9,7 +9,7 @@ import { T, U, seedFixtures, toUserAccess, type FixtureCandidate } from "./fixtu
 /**
  * R-12 (A-03, C-03): bulk endpoints keep their per-record results while batching the work.
  * Org-chart apply, bulk user import and team members bulk rebuild the reporting closure once
- * (migration 0476); Hot List bulk actions read once and write in one transaction with a
+ * (migration 0506); Hot List bulk actions read once and write in one transaction with a
  * savepoint per record (no audit row for a record that was rolled back).
  */
 let db: TestDb;

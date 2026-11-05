@@ -8,7 +8,7 @@ import { LOC, T, U, seedFixtures } from "./fixtures.js";
 import { newCandidate } from "./placement-seed.js";
 
 /**
- * authz.request_context (migration 0487, audit F-03): the AuthGuard's one-statement
+ * authz.request_context (migration 0517, audit F-03): the AuthGuard's one-statement
  * session check + access load + temporary-password flag. The access facts must be
  * exactly what the reference loader (AccessService.load, the old per-request path)
  * returns, for every seeded user; the session rules must be the old CTE's.

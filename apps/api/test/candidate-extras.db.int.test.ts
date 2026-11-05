@@ -390,7 +390,7 @@ describe("review follow-ups (0032)", () => {
     const setStatus = (actor: string, id: string, to: string | null) =>
       asUser(db.app, actor, async (c) => (await c.query(`SELECT authz.set_batch_status($1, $2) AS s`, [id, to])).rows[0].s, true);
 
-    // set_batch_status returns the status it changed from (0490), which the API audits.
+    // set_batch_status returns the status it changed from (0520), which the API audits.
     it("moves planned -> in_training -> completed; nothing after completion", async () => {
       expect(await setStatus(U.l3, houston, "in_training")).toBe("planned");
       await expect(setStatus(U.l3, houston, "planned")).rejects.toThrow(/invalid_transition/);

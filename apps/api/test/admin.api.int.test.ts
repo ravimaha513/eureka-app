@@ -96,9 +96,9 @@ const ADMIN_ENDPOINTS: { method: Method; url: string; body?: unknown; adminStatu
   { method: "DELETE", url: `/api/v1/admin/teams/${NIL}/members/${U.r1a}`, adminStatus: 404 },
   { method: "GET", url: `/api/v1/admin/teams/${NIL}/delete-impact`, adminStatus: 404 },
   { method: "DELETE", url: `/api/v1/admin/teams/${NIL}`, adminStatus: 404 },
-  // admin separation report (migration 0470, docs/roles-api.md).
+  // admin separation report (migration 0500, docs/roles-api.md).
   { method: "GET", url: "/api/v1/admin/roles/violations", adminStatus: 200 },
-  // users holding admin and data roles at once (migration 0480).
+  // users holding admin and data roles at once (migration 0510).
   { method: "GET", url: "/api/v1/admin/users/violations", adminStatus: 200 },
 ];
 const MOVE = { method: "POST" as const, url: `/api/v1/teams/${T.t1}/move-member`, body: {} };

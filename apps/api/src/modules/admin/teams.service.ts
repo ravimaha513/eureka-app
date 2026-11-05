@@ -147,7 +147,7 @@ export class TeamsService {
    * under a savepoint of one transaction), so one person already in a team does not block
    * the rest; failures come back per user with the contract error code. 404 if the team
    * does not exist. The reporting closure (0370: members report to the lead) is rebuilt
-   * once at the end (0476), not per person.
+   * once at the end (0506), not per person.
    */
   async addMembers(user: AuthedUser, teamId: string, userIds: string[]) {
     return this.tx.run(user, async (c) => {

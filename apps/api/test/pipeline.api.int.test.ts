@@ -291,7 +291,7 @@ describe("submission state machine", () => {
     for (const [i, to] of ["under_review", "interview_requested", "interview_scheduled", "interview_completed", "selected"].entries()) {
       const r = await move(id, to);
       expect(r.statusCode, r.body).toBe(200);
-      // Every transition bumps the row version (0477).
+      // Every transition bumps the row version (0507).
       expect(r.json()).toEqual({ id, status: to, rejectionReason: null, rowVersion: i + 2 });
     }
     for (const to of ["rejected", "withdrawn", "submitted"]) {
