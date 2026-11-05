@@ -9,6 +9,8 @@ import {
   checklistItemActions,
   checklistItemTransitionAllowed,
   checklistTemplateAccess,
+  OPEN_PLACEMENT_STATUSES,
+  PAPERWORK_LOCKED_PLACEMENT_STATUSES,
   resolveScope,
   type ActivityRef,
   type CandidateRef,
@@ -153,6 +155,10 @@ const activityRef = (r: HeaderRow): ActivityRef => ({
   candidate: candidateRef(r) ?? { recruiterId: null, teamId: null, locationId: null, visibility: "team", marketingStatus: "" },
 });
 
+/** Paperwork writes on a locked placement go on to the definer, which answers placement_closed (PW rules). */
+const paperworkLocked = (placementStatus: string | null) => PAPERWORK_LOCKED_PLACEMENT_STATUSES.has(placementStatus ?? "");
+/** OPEN_PLACEMENT_STATUSES as a SQL list (constants only, never request input). */
+const OPEN_PLACEMENT_SQL = [...OPEN_PLACEMENT_STATUSES].map((s) => `'${s}'`).join(", ");
 const ref = (id: string | null, name: string | null) => (id ? { id, name } : null);
 
 /** One employment or address row of a check (migration 0460). Personal data: never audited by value. */
@@ -206,7 +212,7 @@ export class PaperworkService {
     if (q.ownerRole || q.mine) where.push("coalesce(a.total, 0) > 0");
     if (q.view === "outstanding") {
       where.push(`(coalesce(a.open, 0) > 0 OR (coalesce(b.status, 'not_started') IN ('not_started', 'initiated', 'in_progress')
-                   AND coalesce(pl.status IN ('confirmed', 'paperwork', 'bgc', 'ready'), b.status IS NOT NULL)))`);
+                   AND coalesce(pl.status IN (${OPEN_PLACEMENT_SQL}), b.status IS NOT NULL)))`);
     } else if (q.view === "overdue") {
       where.push("coalesce(a.overdue, 0) > 0");
     }
@@ -354,7 +360,7 @@ export class PaperworkService {
       const needsNotes = changes.notes !== undefined || changes.documentId !== undefined;
       const statusAllowed = changes.status === undefined || acts.transition.includes(changes.status)
         || !checklistItemTransitionAllowed(item.status, changes.status); // invalid edges are reported as 422 below
-      if (h.placement_status !== "backout" && ((needsVerify && !acts.assign) || (needsNotes && !acts.editNotes) || !statusAllowed)) {
+      if (!paperworkLocked(h.placement_status) && ((needsVerify && !acts.assign) || (needsNotes && !acts.editNotes) || !statusAllowed)) {
         throw new ForbiddenException("Not permitted");
       }
       if (changes.status !== undefined) {
@@ -408,7 +414,7 @@ export class PaperworkService {
       // Without bgc:update, a holder of placement.bgc_status:update may only mark the check initiated (bgcActions offers just that).
       const initiateOnly = changes.status === "initiated" && acts.transition.includes("initiated")
         && Object.keys(changes).every((k) => k === "status" || k === "reason");
-      if (h.placement_status !== "backout" && !acts.update && !initiateOnly) throw new ForbiddenException("Not permitted");
+      if (!paperworkLocked(h.placement_status) && !acts.update && !initiateOnly) throw new ForbiddenException("Not permitted");
       if (changes.status !== undefined) {
         if (!bgcTransitionAllowed(status, changes.status)) throw new UnprocessableEntityException("invalid_transition");
         if (bgcReasonRequired(status, changes.status) && !changes.reason) throw new UnprocessableEntityException("reason_required");
@@ -455,8 +461,8 @@ export class PaperworkService {
       const h = await this.header(c, user, placementId);
       const current = (await c.query<{ status: string }>(`SELECT status FROM eureka.bgc WHERE placement_id = $1`, [placementId])).rows[0];
       const acts = bgcActions(user.access, paperworkRef(h), current?.status ?? "not_started", h.placement_status);
-      // A backed-out placement goes on to the function, which answers placement_closed.
-      if (h.placement_status !== "backout" && !acts.update) throw new ForbiddenException("Not permitted");
+      // A locked placement (backout) goes on to the function, which answers placement_closed.
+      if (!paperworkLocked(h.placement_status) && !acts.update) throw new ForbiddenException("Not permitted");
       let audit: { action: string; changes: Record<string, unknown> };
       try {
         audit = await write(c);

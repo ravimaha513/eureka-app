@@ -1,10 +1,12 @@
-import { ApiError } from "../api";
+import { ApiError, commonProblem } from "../api";
 
 export type SalesErrorContext = "profile" | "submission" | "create" | "transition" | "delete" | "generic";
 
 /** Plain-language text for a failed candidate or submission call (RFC 9457 problem). */
 export function salesError(e: unknown, ctx: SalesErrorContext = "generic"): string {
   if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";
+  const common = commonProblem(e);
+  if (common) return common;
   switch (e.status) {
     case 401: return "Your session ended. Sign in again.";
     case 403: return ctx === "create"
@@ -24,7 +26,7 @@ export function salesError(e: unknown, ctx: SalesErrorContext = "generic"): stri
       if (e.detail === "team_required") return "Assign a team before adding this candidate to the Hot List.";
       if (ctx === "transition") return "That status change isn't allowed from the candidate's current status.";
       return "The server rejected this change. Check the values and try again.";
-    case 429: return e.detail ?? "Too many requests. Try again in a minute.";
+    case 429: return e.message;
     default: return e.detail ?? e.title ?? e.message ?? "Something went wrong.";
   }
 }

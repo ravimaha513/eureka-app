@@ -37,11 +37,20 @@ Client-requirement pay is a rate: shown to managers of the job and `rate:read` h
 | `GET /options` | `job:manage`: creatable kinds, clients, staff for the hiring-manager picker |
 | `GET /company-options` | JP-31: `job:manage` and the caller may create internal openings (HR; 403 otherwise): `{ companies: [{ id, name }] }`, active companies, all locations |
 | `GET /:id` | RLS: 404 when not readable (also for the hiring manager and reviewers) |
-| `POST /` | JP-2: `job:manage` and the kind must be creatable by the caller (403 otherwise); optional `Idempotency-Key`; strict body |
-| `PATCH /:id` | JP-3: read-before-write (404/403); `If-Match` rowVersion (428 without, 412 stale); `kind`, owner, team never change |
+| `POST /` | JP-2: `job:manage` and the kind must be creatable by the caller (403 otherwise); optional `Idempotency-Key` (`platform/idempotency.ts`: same body → first response, other body 409 `idempotency_key_reused`, malformed 400 `invalid_idempotency_key`); strict body |
+| `PATCH /:id` | JP-3: read-before-write (404/403); `If-Match` rowVersion (428 without, 412 stale); `kind`, owner, team never change; `status` follows JP-3a (422 `invalid_transition`) |
 
 Server-managed (trigger): `owner_id`, `team_id` (the creator's team, client requirements only), `row_version`, timestamps, `posted_at`
 (first time open). Jobs are never deleted (close them). Audit rows carry ids and codes only (no title, pay, text).
+
+**JP-3a, status lifecycle.** `draft`, `open`, `on_hold`, `closed`. No product rule restricts the order, so every change
+between two statuses is allowed (a closed job can be reopened or put back to draft); saving the unchanged status is not a
+transition. The table lives in `packages/shared` state-machines.ts (`jobTransitionAllowed`, `jobTransitionTargets`), the API
+pre-checks it and the `eureka.job_guard` trigger (`db/functions/eureka/job_guard.sql`) re-checks it (422
+`invalid_transition`); `test/state-machine-parity.db.int.test.ts` keeps the two equal, so a future rule is one edit in each.
+`posted_at` stays the first time the job was open. Closing a job leaves its applications and submissions as they are; only
+new applications (`job_not_open`) and new submissions naming it are refused. Job cards carry `actions.statusTargets`
+(the statuses a PATCH may set; empty without `actions.edit`).
 
 ### Rich text (JP-4)
 
@@ -99,10 +108,13 @@ run afterwards (so latency cannot tell known from unknown addresses). The mail c
 typed name) because it goes to an unverified address. An existing applicant row is never overwritten by a sign-up: what a sign-up submitted travels on the
 link it issued and is applied, to an *unverified* row only, when that link is redeemed (the mailbox owner confirms it).
 
-Limits (JP-13b): per client address in memory per task (20 sign-up/link requests, 30 verifications per 15 minutes; IPv6 keyed by its /64; the map is hard-capped
-with oldest-first eviction); everything per email or global is **database-backed and shared by all tasks, counted only for links actually issued**, so asking
-for somebody else's link cannot lock them out: one link per 60 s and 10 per hour per applicant, and database-wide hourly caps of 600 links and 200 new
-accounts (`eureka.portal_throttle`, definer-only). Infra: the existing WAF rule `login-rate-limit` (100 requests / 5 minutes per IP) now also covers `/api/portal/auth/`, so the web ACL stays at the 5 rules of the CloudFront flat-rate Free plan. Worker job `portal-prune-unverified` (daily 04:45 New York)
+Limits (JP-13b): per client address, shared by all API tasks and kept across deploys (20 sign-up/link requests, 30 verifications per 15 minutes; IPv6 keyed by its /64;
+counted in `authz.rate_take`, migration 0516, which stores the key only as a digest, behind a hard-capped per-task in-memory first gate); everything per email or global is **database-backed and shared by all tasks, counted only for links actually issued**, so asking
+for somebody else's link cannot lock them out: one link per 60 s and 10 per hour per applicant, and database-wide hourly caps of 600 links **to
+unverified addresses** and 200 new accounts (`eureka.portal_throttle`, definer-only). Links to **verified** applicants are exempt from the global link
+cap (migration 0503, security review E-01): only the per-applicant limits apply to them, so a burst of sign-ups for made-up addresses cannot stop
+existing applicants from signing in. When a global cap refuses a request the reply is unchanged (same 202 body, the work runs after the reply) and the
+API logs the warning `portal_cap_reached {"kind":"signup"|"link"}` (the kind only: no address, no id); alert on it. Infra: the existing WAF rule `login-rate-limit` (100 requests / 5 minutes per IP) now also covers `/api/portal/auth/`, so the web ACL stays at the 5 rules of the CloudFront flat-rate Free plan. Worker job `portal-prune-unverified` (daily 04:45 New York)
 deletes applicants who never confirmed their mailbox after 30 days (no application, no open link); only counts are logged. CAPTCHA/proof-of-work on sign-up is an
 open question (not built).
 
@@ -142,7 +154,7 @@ scheduled interviews.
 | Route | Rule |
 |---|---|
 | `GET /api/v1/applications` | JP-17: filters `status`, `jobId`, `search`; RLS: HR all, hiring manager their jobs', interviewer those they interview for |
-| `POST /applications/export` | JP-19: `application:read`; CSV (formula-neutralised, no phone), capped at 5,000 rows, audited, 10 exports per 10 minutes |
+| `POST /applications/export` | JP-19: `application:read`; CSV (formula-neutralised, no phone), capped at 5,000 rows, audited, 10 exports per 10 minutes per user (shared by all API tasks, 0516); the Email column follows the JSON rule: filled only with `applicant:read` at org scope, empty otherwise (header unchanged) |
 | `GET /applications/:id` | JP-18: application + job + applicant + interviews with scorecards + history (internal comments visible to staff only) |
 | `POST /applications/:id/status` | JP-20: `{ to, comment? }`, `If-Match` rowVersion; emails the applicant ("status is now …"), **never the comment** |
 | `POST /applications/:id/interviews` | JP-27: type phone/video/in_person, round, lead user, panel (≤10), slot, duration, meeting link **https only**; moves applied/shortlisted to interview_scheduled; emails the applicant |

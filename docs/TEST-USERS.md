@@ -60,7 +60,7 @@ No shared passwords exist. To create a test user:
   (`authz.password_login`); the API never sees a hash and `authz.user_credential` is readable only by `authz_definer`.
 - 5 wrong passwords lock the account for 15 minutes; every success and failure is audited without the password.
 - Admin-set passwords are temporary (forced change). A new password signs the user out everywhere.
-- Restricted documents and reveals ask for the password again (step-up, 10 minutes).
+- Work-authorization reveals ask for the password again (step-up, 10 minutes). Restricted documents do not; they are capped per user per day.
 - Three independent switches must all say "staging or local": `PASSWORD_LOGIN` (API refuses to start otherwise),
   `password_login` in Terraform (precondition fails in production), and the database policy `password_login`
   (written by `migrate` only when `EUREKA_ENVIRONMENT` is staging or local; deleted everywhere else).

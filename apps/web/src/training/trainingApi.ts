@@ -185,6 +185,7 @@ export function trainingError(e: unknown): string {
     case 403: return "You don't have permission to do this.";
     case 404: return "This record doesn't exist or isn't visible to you.";
     case 412: return "Someone else changed this meanwhile. Close and open it again to see the latest version.";
+    case 429: case 503: return e.message;
     case 422: return e.errors?.length ? "Some fields need attention. Check the highlighted fields." : "The server rejected this change.";
     default: return e.detail ?? e.title ?? e.message ?? "Something went wrong.";
   }

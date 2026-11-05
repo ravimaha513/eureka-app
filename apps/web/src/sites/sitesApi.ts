@@ -188,7 +188,9 @@ export const sitesApi = {
   // Bills.
   bills: (kind: SiteKind, id: string, f: { q?: string; from?: string; to?: string; limit?: number; cursor?: string } = {}) => api<{ items: Bill[]; nextCursor?: string | null }>(`${one(kind, id)}/bills${qs(f)}`),
   createBill: (kind: SiteKind, id: string, body: BillInput) => api<Bill>(`${one(kind, id)}/bills`, { method: "POST", ...json(body) }),
-  voidBill: (id: string, reason: string) => api<unknown>(`/api/v1/bills/${enc(id)}/void`, { method: "POST", ...json({ reason }) }),
+  /** The optional If-Match (D-13): a stale rowVersion is 412 and the bill stays. */
+  voidBill: (id: string, reason: string, rowVersion?: number) =>
+    api<unknown>(`/api/v1/bills/${enc(id)}/void`, { method: "POST", ...json({ reason }), headers: rowVersion === undefined ? {} : ifMatch(rowVersion) }),
   /** Starts an invoice upload: a presigned POST, as for paperwork documents. */
   startInvoice: (id: string, file: { fileName: string; contentType: string; size: number }) =>
     api<{ documentId?: string; upload: UploadTicket }>(`/api/v1/bills/${enc(id)}/invoice`, { method: "POST", ...json(file) }),
@@ -275,7 +277,7 @@ export function sitesError(e: unknown, what = "record"): string {
     case 409: return e.detail ? `This conflicts with the current state (${e.detail}). Refresh and try again.` : "A conflicting change was made. Refresh and try again.";
     case 412: return ERRORS.stale!;
     case 422: return e.errors?.[0]?.message ?? (e.detail ? `Check the form: ${e.detail}.` : "Check the form.");
-    case 429: return e.detail ?? "Too many requests. Try again in a minute.";
+    case 429: return e.message;
     default: return e.detail ?? "Something went wrong.";
   }
 }

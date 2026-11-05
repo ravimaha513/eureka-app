@@ -581,4 +581,58 @@ describe("authz.document_download: restricted access matrix, access log and audi
     await expect(db.admin.query(`DELETE FROM eureka.document_access`)).rejects.toThrow(/append-only/);
     await expect(db.admin.query(`UPDATE eureka.document_access SET user_id = $1`, [U.hr])).rejects.toThrow(/definer functions|append-only/);
   });
+
+  describe("per-user cap on restricted opens (B-01: no step-up; compensating control, migration 0504)", () => {
+    const setCap = (n: number | string) => db.admin.query(`UPDATE authz.policy_setting SET value = $1 WHERE key = 'restricted_opens_per_day'`, [String(n)]);
+    const used = async (user: string) => Number((await db.admin.query(`SELECT
+        (SELECT count(*) FROM eureka.document_access WHERE user_id = $1 AND classification = 'restricted' AND at > now() - interval '24 hours')
+      + (SELECT count(*) FROM eureka.datahub_access WHERE user_id = $1 AND level = 'restricted' AND at > now() - interval '24 hours') AS n`,
+      [user])).rows[0].n);
+    const audits = async (user: string) => (await db.admin.query(`SELECT count(*)::int n FROM eureka.audit_event WHERE actor_id = $1`, [user])).rows[0].n as number;
+    afterAll(async () => { await setCap(200); });
+
+    it("is seeded at 200 and only takes a positive whole number", async () => {
+      expect((await db.admin.query(`SELECT value FROM authz.policy_setting WHERE key = 'restricted_opens_per_day'`)).rows).toEqual([{ value: "200" }]);
+      for (const bad of ["0", "-1", "ten", "1.5", "100000", ""]) await expect(setCap(bad), bad).rejects.toThrow(/policy_setting_restricted_opens/);
+    });
+
+    it("refuses the open past the cap (too_many_restricted_opens, nothing logged); internal, not-clean and other users are unaffected", async () => {
+      const n0 = await used(U.hr);
+      await setCap(n0 + 2);
+      const s = await session(U.hr);
+      expect(await download(U.hr, restricted, s)).toMatchObject({ outcome: "ok", restricted_opens: n0 + 1, restricted_cap: n0 + 2 });
+      expect(await download(U.hr, internal, s)).toMatchObject({ outcome: "ok", restricted_opens: null, restricted_cap: null });
+      expect(await download(U.hr, restricted, null)).toMatchObject({ outcome: "ok", restricted_opens: n0 + 2, restricted_cap: n0 + 2 });
+      // A step-up grant does not lift the cap either.
+      await devGrant(U.hr, s);
+      const a0 = await audits(U.hr);
+      await expect(download(U.hr, restricted, s)).rejects.toMatchObject({ message: "too_many_restricted_opens", code: "23514" });
+      expect(await used(U.hr)).toBe(n0 + 2);
+      expect(await audits(U.hr)).toBe(a0); // no view row
+      expect((await download(U.hr, internal, null)).outcome).toBe("ok");
+      expect((await download(U.hr, pending, null)).outcome).toBe("not_available"); // checked before the cap, not counted
+      const other = await used(U.imm);
+      await setCap(Math.max(n0 + 2, other + 1));
+      expect((await download(U.imm, restricted, null)).outcome).toBe("ok");
+      // Raising the setting lets the user continue.
+      await setCap(n0 + 3);
+      expect(await download(U.hr, restricted, null)).toMatchObject({ outcome: "ok", restricted_opens: n0 + 3 });
+    });
+
+    it("without the setting row the default cap (200) applies", async () => {
+      await db.admin.query(`DELETE FROM authz.policy_setting WHERE key = 'restricted_opens_per_day'`);
+      try {
+        expect(await download(U.acct, restricted, null)).toMatchObject({ outcome: "ok", restricted_cap: 200 });
+      } finally {
+        await db.admin.query(`INSERT INTO authz.policy_setting (key, value) VALUES ('restricted_opens_per_day', '200')`);
+      }
+    });
+
+    it("the cap helper is internal: neither the app nor the worker can call it or change the setting", async () => {
+      await expect(asUser(db.app, U.hr, (c) => c.query(`SELECT * FROM authz.restricted_open_take()`))).rejects.toMatchObject({ code: "42501" });
+      await expect(db.worker.query(`SELECT * FROM authz.restricted_open_take()`)).rejects.toMatchObject({ code: "42501" });
+      await expect(asUser(db.app, U.admin, (c) => c.query(`UPDATE authz.policy_setting SET value = '99999' WHERE key = 'restricted_opens_per_day'`)))
+        .rejects.toMatchObject({ code: "42501" });
+    });
+  });
 });

@@ -67,7 +67,7 @@ describe("interview clear-and-select", () => {
     const { submissionId, interviewId } = await round("submitted");
     const res = await clear("r1a", interviewId);
     expect(res.statusCode, res.body).toBe(201);
-    expect(res.json()).toEqual({ interviewId, result: "cleared", submissionId, submissionStatus: "selected" });
+    expect(res.json()).toEqual({ interviewId, result: "cleared", submissionId, submissionStatus: "selected", rowVersion: 2 });
 
     const iv = (await call("r1a", "GET", `/api/v1/interviews/${interviewId}`)).json();
     expect(iv).toMatchObject({ result: "cleared", callStatus: "completed", submissionStatus: "selected" });

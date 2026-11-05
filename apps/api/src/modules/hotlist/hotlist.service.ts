@@ -8,16 +8,20 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { DOCUMENTS_STATUSES, VISA_CATEGORIES, resolveScope, type CandidateVisibility } from "@eureka/shared";
+import {
+  DOCUMENTS_STATUSES, VISA_CATEGORIES, candidateTransitionAllowed, ownsCandidate, resolveScope,
+  type CandidateRef, type CandidateVisibility, type Permission,
+} from "@eureka/shared";
+import type pg from "pg";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { toProblem } from "../../platform/errors.js";
-import { RateLimiter } from "../../platform/rate-limit.js";
-import { CandidatesService } from "../candidates/candidates.service.js";
+import { RateLimiter, SharedRateLimiter } from "../../platform/rate-limit.js";
+import { ReportExecutor } from "../../platform/report-executor.js";
+import { auditSafeProfile, scopePredicate } from "../candidates/candidates.service.js";
 import { filterSummary, hotlistMore } from "../candidates/list-filters.js";
 import { toCsv } from "./csv.js";
-import type pg from "pg";
 import { CandidateViewFilters } from "../candidates/candidates.schemas.js";
 import { HotlistFilters, type BulkPriority, type BulkStatus, type BulkVisibility, type CreateView, type UpdateView } from "./hotlist.schemas.js";
 import { likeContains } from "../../platform/sql.js";
@@ -65,6 +69,29 @@ interface ExportRow {
 export type BulkError = "not_found" | "forbidden" | "invalid_transition" | "placement_open" | "invalid_teams" | "failed";
 export interface BulkResult { id: string; ok: boolean; error?: BulkError }
 
+/** What the batched read of a bulk request needs per candidate: the engine's CandidateRef and the status. */
+interface BulkRow {
+  id: string; recruiter_id: string | null; team_id: string | null; location_id: string | null;
+  visibility: CandidateVisibility; marketing_status: string;
+}
+const refOf = (r: BulkRow): CandidateRef => ({
+  id: r.id, recruiterId: r.recruiter_id, teamId: r.team_id, locationId: r.location_id, visibility: r.visibility, marketingStatus: r.marketing_status,
+});
+
+/*
+ * Coded database errors of each bulk write, mapped as the single-record endpoint maps them
+ * (CandidatesService.setVisibility / transition / updateProfile) and then reported per record.
+ */
+/** "Selected teams" (0240): the picks left nothing besides the candidate's own team, or name a team that is gone. */
+const VISIBILITY_ERRORS: Record<string, BulkError> = { teams_required: "invalid_teams", invalid_team: "invalid_teams", too_many_teams: "invalid_teams" };
+/** The placement drives the candidate until it joins or backs out (0022); team_required is a 422 (0410). */
+const STATUS_ERRORS: Record<string, BulkError> = { placement_open: "placement_open", team_required: "invalid_transition" };
+/** The profile's batch codes (0026), by their HTTP status: 422 / 409 / 403 / 404. */
+const PRIORITY_ERRORS: Record<string, BulkError> = {
+  invalid_batch: "invalid_transition", batch_exists: "failed", batch_not_allowed: "invalid_transition",
+  location_not_in_scope: "forbidden", batch_not_found: "not_found", invalid_transition: "invalid_transition",
+};
+
 const label = (s: string) => { const t = s.replace(/_/g, " "); return t.charAt(0).toUpperCase() + t.slice(1); };
 
 /**
@@ -84,13 +111,14 @@ const presentView = (list: ViewList) => (r: ViewRow) => {
 @Injectable()
 export class HotlistService {
   private readonly log = new Logger(HotlistService.name);
-  private readonly exportLimiter = new RateLimiter(EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
+  // Per user, shared by all tasks and kept across deploys (R-24, F-06).
+  private readonly exportLimiter = new SharedRateLimiter("hotlist.export", EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
   private readonly bulkLimiter = new RateLimiter(BULK_REQUESTS_PER_MINUTE, 60_000);
 
   constructor(
     private readonly db: DbService,
     private readonly audit: AuditService,
-    private readonly candidates: CandidatesService,
+    private readonly reports: ReportExecutor,
   ) {}
 
   // ---- saved views: RLS lets the owner change a view and teammates read a shared one (0025, 0470) ----
@@ -148,18 +176,36 @@ export class HotlistService {
     }
   }
 
-  // ---- bulk actions: the single-record operation, once per record ----
+  // ---- bulk actions: the single-record rules, one batched read, one transaction ----
 
   bulkVisibility(user: AuthedUser, body: BulkVisibility) {
-    return this.bulk(user, "visibility", body.visibility, body.ids, (id) => this.candidates.setVisibility(user, id, body.visibility, body.teamIds));
+    const teamIds = body.visibility === "selected_teams" ? body.teamIds ?? [] : [];
+    return this.bulk(user, "visibility", body.visibility, body.ids, "candidate.visibility:update", VISIBILITY_ERRORS, null, async (c, row) => {
+      // authz.set_candidate_visibility (0240) re-checks and replaces the "Selected teams" picks.
+      await c.query(`SELECT authz.set_candidate_visibility($1, $2, $3::uuid[])`, [row.id, body.visibility, teamIds]);
+      // Ids only (rule 5).
+      await this.audit.record(c, { actorId: user.id, action: "candidate.visibility", entityType: "candidate", entityId: row.id,
+        changes: body.visibility === "selected_teams" ? { visibility: body.visibility, teamIds } : { visibility: body.visibility } });
+    });
   }
 
   bulkStatus(user: AuthedUser, body: BulkStatus) {
-    return this.bulk(user, "status", body.to, body.ids, (id) => this.candidates.transition(user, id, body.to));
+    return this.bulk(user, "status", body.to, body.ids, "candidate:update", STATUS_ERRORS,
+      (row) => (candidateTransitionAllowed(row.marketing_status, body.to) ? null : "invalid_transition"),
+      async (c, row) => {
+        await c.query(`SELECT authz.transition_candidate($1, $2)`, [row.id, body.to]);
+        await this.audit.record(c, { actorId: user.id, action: "candidate.transition", entityType: "candidate", entityId: row.id,
+          changes: { from: row.marketing_status, to: body.to } });
+      });
   }
 
   bulkPriority(user: AuthedUser, body: BulkPriority) {
-    return this.bulk(user, "priority", body.priority, body.ids, (id) => this.candidates.updateProfile(user, id, { priority: body.priority }));
+    return this.bulk(user, "priority", body.priority, body.ids, "candidate:update", PRIORITY_ERRORS, null, async (c, row) => {
+      // The candidate guard trigger re-checks the column per row, as on PATCH /candidates/:id.
+      await c.query(`UPDATE eureka.candidate SET priority = $2 WHERE id = $1`, [row.id, body.priority]);
+      await this.audit.record(c, { actorId: user.id, action: "candidate.updated", entityType: "candidate", entityId: row.id,
+        changes: auditSafeProfile({ priority: body.priority }) });
+    });
   }
 
   /**
@@ -183,32 +229,64 @@ export class HotlistService {
   }
 
   /**
-   * Each record goes through the same path as its single-record endpoint, in its
-   * own transaction: read-before-write (404 / 403), the engine's scope check and
-   * the database's own guard or definer function. One failure never stops or
-   * undoes the others; every record reports its own outcome.
+   * Each record follows the rules of its single-record endpoint (docs/candidates-api.md, Hot List
+   * bulk): one read of all ids under the caller's candidate:read scope sorts them into not_found
+   * (not visible), forbidden (visible, not owned under `perm`) and, for status, invalid_transition;
+   * then one transaction writes the rest, each under its own savepoint, through the same definer
+   * function or guarded UPDATE and with the same audit row. A record whose write fails is rolled
+   * back to its savepoint (its audit row with it) and reported; one failure never stops or undoes
+   * the others. One summary audit row closes the request.
    */
-  private async bulk(user: AuthedUser, action: "visibility" | "status" | "priority", value: string, ids: string[],
-    one: (id: string) => Promise<unknown>) {
+  private async bulk(user: AuthedUser, action: "visibility" | "status" | "priority", value: string, ids: string[], perm: Permission,
+    coded: Record<string, BulkError>, check: ((row: BulkRow) => BulkError | null) | null, write: (c: pg.PoolClient, row: BulkRow) => Promise<void>) {
     if (!this.bulkLimiter.take(user.id)) {
       throw new HttpException("Too many bulk requests; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
     }
-    const results: BulkResult[] = [];
-    for (const id of ids) {
-      try {
-        await one(id);
-        results.push({ id, ok: true });
-      } catch (err) {
-        const error = bulkError(err);
-        if (error === "failed") this.log.error(err);
-        results.push({ id, ok: false, error });
+    const readScope = resolveScope(user.access, "candidate:read");
+    const scope = resolveScope(user.access, perm);
+    const outcome = new Map<string, BulkError | null>();
+    await this.db.withUser(user.id, async (c) => {
+      const rows = new Map<string, BulkRow>();
+      if (readScope) {
+        const params: unknown[] = [ids];
+        // The same joins as the single-record read (CandidatesService.loadForWrite): a row hidden there is hidden here.
+        for (const r of (await c.query<BulkRow>(
+          `SELECT c.id, c.recruiter_id, c.team_id, c.location_id, c.visibility, c.marketing_status
+             FROM eureka.candidate c
+             JOIN eureka.person p ON p.id = c.person_id
+             JOIN eureka.technology t ON t.id = c.technology_id
+             JOIN eureka.location l ON l.id = c.location_id
+            WHERE c.id = ANY ($1::uuid[]) AND ${scopePredicate(readScope, params)}`, params)).rows) rows.set(r.id, r);
       }
-    }
+      for (const id of ids) {
+        const row = rows.get(id);
+        if (!row) { outcome.set(id, "not_found"); continue; }
+        if (!scope || !ownsCandidate(scope, refOf(row))) { outcome.set(id, "forbidden"); continue; }
+        const refused = check?.(row) ?? null;
+        if (refused) { outcome.set(id, refused); continue; }
+        await c.query("SAVEPOINT bulk_record");
+        try {
+          await write(c, row);
+          await c.query("RELEASE SAVEPOINT bulk_record");
+          outcome.set(id, null);
+        } catch (err) {
+          await c.query("ROLLBACK TO SAVEPOINT bulk_record");
+          const error = bulkError(err, coded);
+          if (error === "failed") this.log.error(err);
+          outcome.set(id, error);
+        }
+      }
+      const succeeded = ids.filter((id) => outcome.get(id) === null).length;
+      await this.audit.record(c, {
+        actorId: user.id, action: "hotlist.bulk", entityType: "candidate",
+        changes: { action, value, requested: ids.length, succeeded, failed: ids.length - succeeded },
+      });
+    });
+    const results: BulkResult[] = ids.map((id) => {
+      const error = outcome.get(id) ?? null;
+      return error === null ? { id, ok: true } : { id, ok: false, error };
+    });
     const succeeded = results.filter((r) => r.ok).length;
-    await this.db.withUser(user.id, (c) => this.audit.record(c, {
-      actorId: user.id, action: "hotlist.bulk", entityType: "candidate",
-      changes: { action, value, requested: ids.length, succeeded, failed: ids.length - succeeded },
-    }));
     return { succeeded, failed: ids.length - succeeded, results };
   }
 
@@ -221,11 +299,11 @@ export class HotlistService {
    */
   async exportCsv(user: AuthedUser, f: HotlistFilters): Promise<{ csv: string; rows: number; truncated: boolean }> {
     if (!resolveScope(user.access, "report:export")) throw new ForbiddenException();
-    if (!this.exportLimiter.take(user.id)) {
+    if (!(await this.exportLimiter.take(user.id, this.db))) {
       throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
     }
-    const rows = await this.db.withUser(user.id, async (c) => {
-      await c.query(`SET LOCAL statement_timeout = '60s'`); // design N9: separate export timeout
+    // design N9: separate export timeout (report executor: at most 25 s, limited concurrency, 503 + Retry-After).
+    const rows = await this.reports.run(user.id, {}, async (c) => {
       const r = (await c.query<ExportRow>(
         `SELECT * FROM authz.hotlist_export(NULL, NULL, NULL, $1, $2, NULL, NULL, NULL, $3, $4, $5)`,
         [f.search ? likeContains(f.search) : null, EXPORT_ROW_CAP + 1, f.resume === undefined ? null : f.resume === "yes", f.stay ?? null,
@@ -259,14 +337,15 @@ export class HotlistService {
   }
 }
 
-function bulkError(err: unknown): BulkError {
-  if (err instanceof HttpException) {
-    const detail = (err.getResponse() as { message?: string }).message;
-    if (detail === "invalid_transition" || detail === "placement_open") return detail;
-    // Selected teams (0240): the picks left nothing besides the candidate's own team, or name a team that is gone.
-    if (detail === "teams_required" || detail === "invalid_team" || detail === "too_many_teams") return "invalid_teams";
-  }
-  const status = err instanceof HttpException ? err.getStatus() : toProblem(err).status;
+/**
+ * Per-record error of a bulk write, as the single-record endpoint answers it: its coded
+ * messages first (set_candidate_visibility, transition_candidate, the profile's batch codes),
+ * then the HTTP status the error maps to.
+ */
+function bulkError(err: unknown, coded: Record<string, BulkError>): BulkError {
+  const e = err as { message?: string; code?: string };
+  if (e.code !== undefined && e.message !== undefined && Object.hasOwn(coded, e.message)) return coded[e.message]!;
+  const status = toProblem(err).status;
   if (status === 404) return "not_found";
   if (status === 403) return "forbidden";
   if (status === 422) return "invalid_transition";

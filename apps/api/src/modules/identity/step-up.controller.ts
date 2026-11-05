@@ -4,11 +4,13 @@ import {
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { CurrentUser, type AuthedUser } from "../../platform/auth.guard.js";
+import { CurrentUser, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { OidcService } from "../../platform/oidc.service.js";
 import { openCookie, sealCookie } from "../../platform/sealed-cookie.js";
+import { stepUpStatus } from "../../platform/step-up.js";
+import { ApiBody } from "../../platform/http/api-doc.js";
 
 const STEP_UP_COOKIE = "eureka_stepup";
 const COOKIE_PATH = "/api/auth/step-up";
@@ -47,6 +49,7 @@ const boundTo = (session: Buffer) => `step-up|${session.toString("hex")}`;
 /** Google returned to the callback without a code (the user cancelled or Google refused). */
 class StepUpCancelled extends Error {}
 
+@SelfService()
 @Controller("api/auth/step-up")
 export class StepUpController {
   private readonly log = new Logger("StepUp");
@@ -65,10 +68,8 @@ export class StepUpController {
   /** Whether this session holds a live step-up grant, and which modes the server offers. */
   @Get()
   async status(@CurrentUser() user: AuthedUser) {
-    const g = await this.db.withUser(user.id, async (c) => (await c.query<{ method: string; expires_at: Date }>(
-      `SELECT method, expires_at FROM authz.step_up_current($1)`, [user.sessionHash])).rows[0]);
-    const hasPassword = this.config.PASSWORD_LOGIN === "on" && await this.db.withUser(user.id, async (c) =>
-      (await c.query<{ h: boolean }>(`SELECT authz.password_has_credential() AS h`)).rows[0]!.h);
+    // One transaction, one round trip (R-25).
+    const { grant: g, hasPassword } = await this.db.withUser(user.id, (c) => stepUpStatus(c, user, this.config.PASSWORD_LOGIN === "on"));
     return {
       active: Boolean(g),
       expiresAt: g?.expires_at.toISOString() ?? null,
@@ -78,6 +79,7 @@ export class StepUpController {
     };
   }
 
+  @ApiBody(StartStepUp)
   @Post("start")
   @HttpCode(200)
   async start(@CurrentUser() user: AuthedUser, @Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
@@ -150,6 +152,7 @@ export class StepUpController {
   }
 
   /** Step-up by re-entering the password (staging/local, migration 0083); the database verifies it. */
+  @ApiBody(StepUpPassword)
   @Post("password")
   @HttpCode(200)
   async password(@CurrentUser() user: AuthedUser, @Body() body: unknown) {

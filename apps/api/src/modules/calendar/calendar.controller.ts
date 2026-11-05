@@ -1,11 +1,12 @@
 import { Controller, ForbiddenException, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req, Res } from "@nestjs/common";
 import { can } from "@eureka/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
+import { CurrentUser, RequirePermission, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { CALENDAR_PROVIDER, DevCalendarProvider, type CalendarProvider } from "./calendar.provider.js";
 import { BusyQuery, CallbackQuery, ConnectQuery } from "./calendar.schemas.js";
 import { CALENDAR_STATE_COOKIE, CalendarService } from "./calendar.service.js";
+import { ApiQuery } from "../../platform/http/api-doc.js";
 
 /**
  * The support calendar connection (docs/alerts-calendar-birthdays.md CA-1..CA-3):
@@ -24,6 +25,7 @@ export class CalendarController {
   }
 
   /** Starts the authorisation: a signed state cookie, then the provider's consent page. */
+  @ApiQuery(ConnectQuery)
   @Get("connect")
   @RequirePermission("calendar:block")
   connect(@CurrentUser() user: AuthedUser, @Query() query: unknown, @Res() reply: FastifyReply): void {
@@ -37,6 +39,7 @@ export class CalendarController {
       .redirect(this.svc.authUrl(state), 302);
   }
 
+  @ApiQuery(CallbackQuery)
   @Get("callback")
   @RequirePermission("calendar:block")
   async callback(@CurrentUser() user: AuthedUser, @Query() query: unknown, @Req() req: FastifyRequest, @Res() reply: FastifyReply): Promise<void> {
@@ -61,6 +64,9 @@ export class CalendarController {
    * a save). Intervals only; nothing cached, nothing audited. The permission is
    * checked here because RequirePermission takes one permission.
    */
+  /** Two alternative permissions (calendar:block or interview:create) are checked in the handler. */
+  @ApiQuery(BusyQuery)
+  @SelfService()
   @Get("busy")
   busy(@CurrentUser() user: AuthedUser, @Query() query: unknown) {
     if (!can(user.access, "calendar:block") && !can(user.access, "interview:create")) throw new ForbiddenException("Not permitted");

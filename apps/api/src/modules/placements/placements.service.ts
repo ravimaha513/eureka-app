@@ -1,7 +1,4 @@
-import { createHash } from "node:crypto";
 import {
-  BadRequestException,
-  ConflictException,
   ForbiddenException,
   HttpException,
   HttpStatus,
@@ -23,9 +20,9 @@ import {
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
-import { canonical, IdempotencyKey } from "../../platform/idempotency.js";
+import { idempotent } from "../../platform/idempotency.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
-import { likeContains } from "../../platform/sql.js";
+import { likeContains, scopedNameSearch } from "../../platform/sql.js";
 import { toCsv } from "../hotlist/csv.js";
 import { EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS } from "../hotlist/hotlist.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
@@ -155,7 +152,7 @@ export class PlacementsService {
     const where = [activityPredicate(scope, params, "pl", "c")];
     if (q.status) where.push(`pl.status = ${p(q.status)}`);
     if (q.candidateId) where.push(`pl.candidate_id = ${p(q.candidateId)}`);
-    if (q.candidate) where.push(`(p.first_name || ' ' || p.last_name) ILIKE ${p(likeContains(q.candidate))} ESCAPE '\\'`);
+    if (q.candidate) where.push(scopedNameSearch("p", p(likeContains(q.candidate)), q.candidate));
     if (q.batchId) where.push(`c.batch_id = ${p(q.batchId)}::uuid`);
     if (q.recruiterId) where.push(`pl.recruiter_id = ${p(q.recruiterId)}`);
     if (q.teamId) where.push(`pl.team_id = ${p(q.teamId)}::uuid`);
@@ -335,22 +332,7 @@ export class PlacementsService {
    * visible, 403 when visible but not placeable by the caller.
    */
   async create(user: AuthedUser, body: CreatePlacement, idempotencyKey: string | undefined) {
-    const key = IdempotencyKey.safeParse(idempotencyKey);
-    if (!key.success) throw new BadRequestException("idempotency_key_required");
-    const hash = createHash("sha256").update(canonical(body)).digest("hex");
-
-    return this.db.withUser(user.id, async (c) => {
-      const claimed = await c.query(
-        `INSERT INTO eureka.idempotency_key (key, user_id, endpoint, request_hash) VALUES ($1,$2,$3,$4)
-         ON CONFLICT DO NOTHING RETURNING key`, [key.data, user.id, PLACEMENTS_ENDPOINT, hash]);
-      if (claimed.rowCount === 0) {
-        const prior = (await c.query<{ request_hash: string; response: unknown }>(
-          `SELECT request_hash, response FROM eureka.idempotency_key WHERE user_id = $1 AND endpoint = $2 AND key = $3`,
-          [user.id, PLACEMENTS_ENDPOINT, key.data])).rows[0];
-        if (!prior || prior.request_hash !== hash || prior.response === null) throw new ConflictException("idempotency_key_reused");
-        return prior.response as { id: string; isFirstPlacement: boolean };
-      }
-
+    return this.db.withUser(user.id, (c) => idempotent(c, user, PLACEMENTS_ENDPOINT, idempotencyKey, body, { required: true }, async () => {
       const readScope = resolveScope(user.access, "submission:read");
       if (!readScope) throw new NotFoundException();
       const params: unknown[] = [body.submissionId];
@@ -379,8 +361,6 @@ export class PlacementsService {
       } catch (err) {
         mapPlacementError(err);
       }
-      await c.query(`UPDATE eureka.idempotency_key SET response = $4 WHERE user_id = $1 AND endpoint = $2 AND key = $3`,
-        [user.id, PLACEMENTS_ENDPOINT, key.data, result]);
       // PL-6/PL-9: no rate and no contact details in the audit log.
       await this.audit.record(c, {
         actorId: user.id, action: "placement.created", entityType: "placement", entityId: result.id,
@@ -392,7 +372,7 @@ export class PlacementsService {
       });
       await this.auditCandidate(c, user, sub.candidate_id, candidateChange);
       return result;
-    });
+    }));
   }
 
   /** PL-5 side effect on the candidate, audited like a manual candidate transition. */

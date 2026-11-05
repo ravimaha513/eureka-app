@@ -1,4 +1,5 @@
 -- authz.role_update: current definition (repeatable; db/functions/README.md).
+-- since: 0521
 -- An admin edits a custom role (docs/roles-api.md). p_patch is a JSON object whose
 -- present keys change: label, description, track, level, departmentId, traits
 -- {sales, locationBound, admin, recruiter, coach}. Returns the changed field names.
@@ -7,15 +8,20 @@
 -- (location ids, separation of duties, coach assignments) depend on them.
 -- Raises not_permitted, unknown_role, system_role, role_archived, invalid_label,
 -- role_exists, invalid_track, invalid_level, unknown_department, role_in_use.
+-- Admin separation (0500, security review C-01): turning the admin trait on while the
+-- role holds a business permission raises business_permission_on_admin_role; turning it
+-- off while the role holds an admin-only permission raises admin_permission_needs_admin_role.
+-- p_expected_version (optional If-Match, C-02): stale when it is not the role's row_version.
+-- A change bumps role.row_version.
 
 SET ROLE authz_definer;
-CREATE OR REPLACE FUNCTION authz.role_update(p_key text, p_patch jsonb)
+CREATE OR REPLACE FUNCTION authz.role_update(p_key text, p_patch jsonb, p_expected_version integer DEFAULT NULL)
  RETURNS text[]
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'pg_catalog', 'pg_temp'
 AS $function$
-DECLARE r record; changed text[] := '{}'; lbl text; tr jsonb; dep uuid; held boolean;
+DECLARE r record; changed text[] := '{}'; lbl text; tr jsonb; dep uuid; held boolean; to_admin boolean;
 BEGIN
   PERFORM authz.admin_guard(NULL);
   SELECT ro.* INTO r FROM eureka.role ro WHERE ro.key = p_key FOR UPDATE;
@@ -27,6 +33,9 @@ BEGIN
   END IF;
   IF r.archived_at IS NOT NULL THEN
     RAISE EXCEPTION 'role_archived' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_expected_version IS NOT NULL AND r.row_version IS DISTINCT FROM p_expected_version THEN
+    RAISE EXCEPTION 'stale' USING ERRCODE = 'serialization_failure';
   END IF;
   held := EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.role_key = p_key AND ur.valid @> pg_catalog.now());
 
@@ -95,6 +104,20 @@ BEGIN
          AND EXISTS (SELECT 1 FROM eureka.role_permission rp WHERE rp.role_key = p_key AND rp.scope = 'location') THEN
         RAISE EXCEPTION 'location_scope_needs_location' USING ERRCODE = 'check_violation';
       END IF;
+      -- Admin separation: the trait flip must not leave grants on the wrong side of it.
+      to_admin := coalesce((tr ->> 'admin')::boolean, r.is_admin);
+      IF to_admin IS DISTINCT FROM r.is_admin THEN
+        IF coalesce(to_admin, false) AND EXISTS (
+             SELECT 1 FROM eureka.role_permission rp JOIN eureka.permission p ON p.key = rp.permission
+             WHERE rp.role_key = p_key AND NOT (p.is_admin_only OR p.is_admin_compatible)) THEN
+          RAISE EXCEPTION 'business_permission_on_admin_role' USING ERRCODE = 'check_violation';
+        END IF;
+        IF NOT coalesce(to_admin, false) AND EXISTS (
+             SELECT 1 FROM eureka.role_permission rp JOIN eureka.permission p ON p.key = rp.permission
+             WHERE rp.role_key = p_key AND p.is_admin_only) THEN
+          RAISE EXCEPTION 'admin_permission_needs_admin_role' USING ERRCODE = 'check_violation';
+        END IF;
+      END IF;
       UPDATE eureka.role SET
         is_sales = coalesce((tr ->> 'sales')::boolean, is_sales),
         is_location_bound = coalesce((tr ->> 'locationBound')::boolean, is_location_bound),
@@ -105,9 +128,12 @@ BEGIN
       changed := changed || 'traits'::text;
     END IF;
   END IF;
+  IF pg_catalog.cardinality(changed) > 0 THEN
+    UPDATE eureka.role ro SET row_version = ro.row_version + 1 WHERE ro.key = p_key;
+  END IF;
   RETURN changed;
 END $function$;
 
-REVOKE ALL ON FUNCTION authz.role_update(text, jsonb) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION authz.role_update(text, jsonb) TO eureka_app;
+REVOKE ALL ON FUNCTION authz.role_update(text, jsonb, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION authz.role_update(text, jsonb, integer) TO eureka_app;
 RESET ROLE;

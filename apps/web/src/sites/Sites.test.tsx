@@ -442,7 +442,7 @@ describe("Bills", () => {
     fireEvent.change(within(dialog).getByLabelText("Reason"), { target: { value: "Entered twice" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Void bill" }));
     expect(await within(drawer).findByText(/was voided\./)).toBeInTheDocument();
-    expect(api.writes()[0]).toMatchObject({ path: `/api/v1/bills/${B1}/void`, body: { reason: "Entered twice" } });
+    expect(api.writes()[0]).toMatchObject({ path: `/api/v1/bills/${B1}/void`, body: { reason: "Entered twice" }, headers: { "if-match": "\"1\"" } });
     expect(await within(panel).findByText("No bills yet.")).toBeInTheDocument();
   });
 

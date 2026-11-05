@@ -23,6 +23,8 @@ FR-PLC-06, implementation plan Phase 3 "Paperwork and onboarding checklists per 
 | PW-11 | Audit (rule 5): field names, statuses, role keys, ids and dates only; never notes, reasons, the BGC company or education text. |
 | PW-12 | Employment and address history are rows (`eureka.bgc_entry`, migration 0460): one per employer or address, with whole months (`YYYY-MM`, no end = still there), `verification` (`pending`/`verified`/`unverified`) and optional notes. Read under the check's `document:read` scope; written with `bgc:update` through `authz.save_bgc_entry` / `authz.delete_bgc_entry`; up to 50 rows per kind; nothing changes on a backed-out placement. Personal data: the audit (`bgc.entry.create`/`.update`/`.delete`) and `bgc_event` (`employment_history`/`address_history`) carry the row id, kind and changed field names only. |
 
+Concurrency vocabulary (audit B-03, migration 0508 review): paperwork items, the BGC, BGC history rows (PATCH and `DELETE ?expectedVersion=`) and document metadata edits take the version **in the body** (`expectedVersion`), and every definer function enforces it when sent (`IF p_expected_version IS NOT NULL AND p_expected_version IS DISTINCT FROM <row>.version` after `FOR UPDATE`; covered by API tests). A mismatch stays **409 `version_mismatch`** here. Newer routes (jobs, facilities, interviews, employment) use the `If-Match: "<rowVersion>"` header with **412 `stale`** (428 where required). The difference is deliberate for now: changing these status codes would break existing clients. Omitting the version keeps last-write-wins on both styles.
+
 ## Endpoints
 
 - `GET /api/v1/paperwork?view=outstanding|overdue|all&ownerRole=&mine=true&bgcStatus=&placementStatus=&placementType=&cursor=&limit=` (`document:read`)
@@ -55,7 +57,7 @@ FR-PLC-06, implementation plan Phase 3 "Paperwork and onboarding checklists per 
 ## Error codes
 
 `invalid_transition`, `reason_required`, `invalid_change`, `invalid_assignee`, `invalid_owner_role`, `invalid_due_date`,
-`invalid_helper`, `invalid_document`, `placement_closed` (backed-out placement), `invalid_checklist_template`, `too_many_entries` (422); `version_mismatch` (409);
+`invalid_helper`, `invalid_document`, `placement_closed` (backed-out placement: `PAPERWORK_LOCKED_PLACEMENT_STATUSES` in `packages/shared` state-machines.ts, mirrored by the definers' `pl.status = 'backout'`; parity in `test/state-machine-parity.db.int.test.ts`), `invalid_checklist_template`, `too_many_entries` (422); `version_mismatch` (409);
 `not_permitted` (403); not found (404, also `entry_not_found`). With `failPlacement`, the placement codes of `authz.transition_placement` apply too.
 
 ## Dev seed

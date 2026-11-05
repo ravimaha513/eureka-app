@@ -221,6 +221,7 @@ describe("contracts (CT-1..CT-6)", () => {
     const hr = await call("hr", "GET", `/api/v1/placements/${placementId}/contracts`);
     expect(hr.statusCode).toBe(200);
     expect(hr.json().items.map((c: { kind: string }) => c.kind)).toEqual(["msa", "po"]);
+    expect(hr.json().truncated).toBe(false);
     expect(hr.json().canAdd).toBe(false);
     expect((await call("acct", "GET", `/api/v1/placements/${placementId}/contracts`)).json().canAdd).toBe(true);
     expect((await call("l1", "GET", `/api/v1/placements/${placementId}/contracts`)).json().canAdd).toBe(true);
@@ -293,6 +294,21 @@ describe("staff birthdays and the CEO digest (BD-1..BD-5)", () => {
     const items = list.json().items as { id: string; name: string; roles: string[]; birthday: { month: number; day: number } | null }[];
     expect(items.find((i) => i.id === U.ceo)).toMatchObject({ name: "ceo", roles: ["CEO"], birthday: bd });
     expect(items.find((i) => i.id === U.r1a)!.birthday).toEqual({ month: 3, day: 14 });
+    // R-23 (C-09): the whole directory by default (truncated=false); ?limit pages by (name, id) keyset.
+    expect(list.json()).toMatchObject({ truncated: false, nextCursor: null });
+    const paged: string[] = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < 100; i++) {
+      const page = await call("hr", "GET", `/api/v1/staff/birthdays?limit=7${cursor ? `&cursor=${cursor}` : ""}`);
+      expect(page.statusCode, page.body).toBe(200);
+      paged.push(...(page.json().items as { id: string }[]).map((x) => x.id));
+      expect(page.json().truncated).toBe(page.json().nextCursor !== null);
+      cursor = page.json().nextCursor;
+      if (!cursor) break;
+    }
+    expect(paged).toEqual(items.map((i) => i.id));
+    expect((await call("hr", "GET", "/api/v1/staff/birthdays?cursor=nope")).statusCode).toBe(422);
+    expect((await call("hr", "GET", `/api/v1/staff/birthdays?cursor=${Buffer.from(JSON.stringify(["a", "b"])).toString("base64url")}`)).statusCode).toBe(422);
     expect((await call("r1a", "GET", "/api/v1/staff/birthdays")).statusCode).toBe(403);
     expect((await audits("staff_birthday.updated")).map((a) => a.changes)).toEqual([{ birthdaySet: true }, { birthdaySet: true }, { birthdaySet: true }]);
     // HR writes only through the definer function; an admin cannot touch another profile row directly.
@@ -397,9 +413,77 @@ describe("support calendar (CA-1..CA-6, dev provider)", () => {
     expect((await audits("calendar.released"))[0]!.changes).toEqual({ reachable: true });
   });
 
+  /** A fresh r1a interview to block. */
+  const fresh = async () => {
+    const res = await call("r1a", "POST", "/api/v1/interviews", { submissionId: r1aInterview().submissionId, round: "Block me", startsAt: slot(), durationMin: 60 });
+    expect(res.statusCode, res.body).toBe(201);
+    return res.json().id as string;
+  };
+  const activeBlocks = async (id: string) =>
+    Number((await db.admin.query("SELECT count(*)::int AS n FROM eureka.calendar_block WHERE interview_id = $1 AND status = 'active'", [id])).rows[0].n);
+
+  it("E-05: a change committed while the provider is called is re-checked; the new event is taken back", async () => {
+    const id = await fresh();
+    const before = provider().events.size;
+    // The interview is cancelled between the checks and the insert: 422, no block, no orphan event.
+    provider().duringCreate = async () => {
+      await db.admin.query("ALTER TABLE eureka.interview DISABLE TRIGGER USER");
+      try {
+        await db.admin.query("UPDATE eureka.interview SET call_status = 'cancelled' WHERE id = $1", [id]);
+      } finally {
+        await db.admin.query("ALTER TABLE eureka.interview ENABLE TRIGGER USER");
+      }
+    };
+    const res = await call("l1", "POST", `/api/v1/interviews/${id}/calendar-block`);
+    expect(res.statusCode).toBe(422);
+    expect(res.json().detail).toBe("interview_not_scheduled");
+    expect(provider().events.size).toBe(before);
+    expect(await activeBlocks(id)).toBe(0);
+
+    // Two leads block at once: one block, one event; the other gets 409 and its event is removed.
+    const other = await fresh();
+    provider().duringCreate = async () => {
+      expect((await call("m1", "POST", `/api/v1/interviews/${other}/calendar-block`)).statusCode).toBe(201);
+    };
+    const second = await call("l1", "POST", `/api/v1/interviews/${other}/calendar-block`);
+    expect(second.statusCode).toBe(409);
+    expect(second.json().detail).toBe("already_blocked");
+    expect(provider().events.size).toBe(before + 1);
+    expect(await activeBlocks(other)).toBe(1);
+    expect((await call("m1", "POST", `/api/v1/interviews/${other}/calendar-block/release`)).statusCode).toBe(200);
+    expect(provider().events.size).toBe(before);
+  });
+
+  it("E-05: provider failures are 503 (retryable) or 502, never 500; a failed release keeps the block for a retry", async () => {
+    const id = await fresh();
+    provider().failNext = new Error("calendar token request failed (401)");
+    const refused = await call("l1", "POST", `/api/v1/interviews/${id}/calendar-block`);
+    expect([refused.statusCode, refused.json().detail]).toEqual([502, "calendar_unavailable"]);
+    expect(refused.body).not.toContain("401");
+    const timeout = new Error("The operation was aborted due to timeout");
+    timeout.name = "TimeoutError";
+    provider().failNext = timeout;
+    const slow = await call("l1", "POST", `/api/v1/interviews/${id}/calendar-block`);
+    expect([slow.statusCode, slow.json().detail, slow.headers["retry-after"]]).toEqual([503, "calendar_unavailable", "30"]);
+    expect(await activeBlocks(id)).toBe(0);
+
+    expect((await call("l1", "POST", `/api/v1/interviews/${id}/calendar-block`)).statusCode).toBe(201);
+    const events = provider().events.size;
+    provider().failNextDelete = new Error("calendar event removal failed (500)");
+    const failed = await call("l1", "POST", `/api/v1/interviews/${id}/calendar-block/release`);
+    expect(failed.statusCode).toBe(503);
+    expect(await activeBlocks(id)).toBe(1);
+    expect(provider().events.size).toBe(events);
+    expect((await call("l1", "POST", `/api/v1/interviews/${id}/calendar-block/release`)).statusCode).toBe(200);
+    expect(await activeBlocks(id)).toBe(0);
+    expect(provider().events.size).toBe(events - 1);
+  });
+
   it("a provider failure leaves no block; disconnecting stops blocking", async () => {
     provider().failNext = new Error("calendar event creation failed (503)");
-    expect((await call("l1", "POST", `/api/v1/interviews/${interviewId}/calendar-block`)).statusCode).toBe(500);
+    const failed = await call("l1", "POST", `/api/v1/interviews/${interviewId}/calendar-block`);
+    expect(failed.statusCode).toBe(503);
+    expect(failed.headers["retry-after"]).toBe("30");
     expect((await call("l1", "GET", `/api/v1/interviews/${interviewId}/calendar-block`)).json().block).toBeNull();
     expect((await call("l1", "POST", "/api/v1/calendar/support/disconnect")).json()).toMatchObject({ connected: false });
     expect((await call("l1", "POST", `/api/v1/interviews/${interviewId}/calendar-block`)).statusCode).toBe(422);

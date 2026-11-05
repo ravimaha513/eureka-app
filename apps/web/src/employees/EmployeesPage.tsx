@@ -360,7 +360,8 @@ function EmployeeDrawer({ id, initial, onClose, onNotice }: {
       </Drawer>
 
       {e && a && action === "end" && <EndDialog name={nameOf(e)} assignmentId={a.id} onClose={() => setAction(null)} onDone={() => done("Assignment ended. The employee is on the bench.")} />}
-      {e && a && action === "planned" && <PlannedEndDialog name={nameOf(e)} assignmentId={a.id} current={a.plannedEndDate} onClose={() => setAction(null)} onDone={(d) => done(`Planned end date set to ${fmtDate(d)}.`)} />}
+      {e && a && action === "planned" && <PlannedEndDialog name={nameOf(e)} assignmentId={a.id} current={a.plannedEndDate}
+        version={(full ? e.assignments?.find((x) => x.id === a.id) : undefined)?.plannedEndDateVersion ?? a.plannedEndDateVersion} onClose={() => setAction(null)} onDone={(d) => done(`Planned end date set to ${fmtDate(d)}.`)} />}
       {e && action === "exit" && <ExitDialog name={nameOf(e)} personId={e.id} onClose={() => setAction(null)} onDone={() => done("Exit recorded.")} />}
       {e && action === "team" && <TeamDialog name={nameOf(e)} personId={e.id} current={e.team?.id ?? null} onClose={() => setAction(null)}
         onDone={(t) => done(`Assigned to ${t ?? "the team"}. The team's lead and manager are notified; the lead assigns a recruiter.`)} />}
@@ -416,11 +417,13 @@ function EndDialog({ name, assignmentId, onClose, onDone }: { name: string; assi
   );
 }
 
-function PlannedEndDialog({ name, assignmentId, current, onClose, onDone }: {
-  name: string; assignmentId: string; current: string | null; onClose: () => void; onDone: (d: string) => void;
+function PlannedEndDialog({ name, assignmentId, current, version: openedVersion, onClose, onDone }: {
+  name: string; assignmentId: string; current: string | null; version?: number; onClose: () => void; onDone: (d: string) => void;
 }) {
   const today = localToday();
   const [date, setDate] = useState(current ?? "");
+  // The version the dialog was opened on: a save after someone else's is 412 `stale`, even once the detail refetches.
+  const [version] = useState(openedVersion);
   const [err, setErr] = useState("");
   const form = useRef<HTMLFormElement>(null);
   const failed = useFocusAfterFailure(form);
@@ -433,7 +436,7 @@ function PlannedEndDialog({ name, assignmentId, current, onClose, onDone }: {
         if (date < today) { setErr("The planned end date must be today or later."); failed(); return; }
         if (date === current) { setErr("That is already the planned end date."); failed(); return; }
         setErr("");
-        void submit.run(async () => { await employeesApi.setPlannedEnd(assignmentId, date); onDone(date); }).then(() => failed());
+        void submit.run(async () => { await employeesApi.setPlannedEnd(assignmentId, date, version); onDone(date); }).then(() => failed());
       }}>
         <p className="dialogbody">{current ? `Currently ${fmtDate(current)}. ` : ""}HR and Accounts get an "ending soon" notice before this date.</p>
         <DateAndReason dateLabel="Planned end date" date={date} setDate={setDate} dateError={err} min={today} />
@@ -527,6 +530,7 @@ function EmploymentDialog({ name, assignment, onClose, onDone }: {
     rate: typeof assignment.payRate === "number" ? String(assignment.payRate) : "",
   };
   const [company, setCompany] = useState(initial.company);
+  const [version] = useState(assignment.employmentVersion);
   const [everify, setEverify] = useState(initial.everify);
   const [onboarded, setOnboarded] = useState(initial.onboarded);
   const [rate, setRate] = useState(initial.rate);
@@ -555,7 +559,7 @@ function EmploymentDialog({ name, assignment, onClose, onDone }: {
         setRateErr("");
         if (Object.keys(changes).length === 0) { setFormErr("Nothing changed."); failed(); return; }
         setFormErr("");
-        void submit.run(async () => { await employeesApi.setEmployment(assignment.id, changes); onDone(); }).then(() => failed());
+        void submit.run(async () => { await employeesApi.setEmployment(assignment.id, changes, version); onDone(); }).then(() => failed());
       }}>
         <p className="dialogbody">{assignment.client.name} · started {fmtDate(assignment.startDate)}{assignment.endDate ? `, ended ${fmtDate(assignment.endDate)}` : ""}.</p>
         <label className="field">Payroll company

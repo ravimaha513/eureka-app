@@ -125,11 +125,11 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
     !!c.teamAssignedAt && c.team.id !== null && { label: "Added to team", value: fmtDate(c.teamAssignedAt) },
     { label: "Recruiter", value: canAssign
       ? <RecruiterPicker candidateId={c.id} current={c.recruiter} busy={busy === "recruiter"}
-          onSave={(id, name) => act("recruiter", () => salesApi.setRecruiter(c.id, id), id ? `${name} is now the recruiter.` : "Recruiter removed.")} />
+          onSave={(id, name) => act("recruiter", () => salesApi.setRecruiter(c.id, id, c.rowVersion), id ? `${name} is now the recruiter.` : "Recruiter removed.")} />
       : c.recruiter?.name ?? "Unassigned" },
     { label: "Location", value: c.location.name },
     { label: "Phone", value: <Phone c={c} /> },
-    !!c.dobMasked && { label: "Date of birth", value: c.dobMasked, className: "masked" },
+    { label: "Date of birth", value: c.dobMasked ?? "—", className: c.dobMasked ? "masked" : undefined },
     c.stay !== undefined && { label: "Stay", value: stayLabel(c) },
     c.marketingLocations !== undefined && { label: "Marketing locations", value: c.marketingLocations.length ? c.marketingLocations.join("; ") : "Not recorded" },
     c.visaCategory !== undefined && { label: "Visa (marketed)", value: visaLabel(c.visaCategory) },
@@ -141,7 +141,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
       label: "Batch",
       value: canUpdate
         ? <BatchPicker candidate={c} canOpen={caps.has("training:read")} busy={busy === "batch"}
-            onSave={(batchId, label) => act("batch", () => salesApi.update(c.id, { batchId }), batchId ? `Batch set to ${label}.` : "Removed from batch.")} />
+            onSave={(batchId, label) => act("batch", () => salesApi.update(c.id, { batchId }, c.rowVersion), batchId ? `Batch set to ${label}.` : "Removed from batch.")} />
         : batchValue(c.batch, caps.has("training:read")),
     },
     { label: "Marketing since", value: fmtDate(c.marketingStartDate) },
@@ -195,7 +195,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
           {canSubmit && <button type="button" className="btn primary" onClick={openSubmit}>Log submission</button>}
           {canAddToHotList && (
             <button type="button" className="btn" disabled={busy !== null} aria-busy={busy === "to:active" || undefined}
-              onClick={() => void act("to:active", () => salesApi.transition(c.id, "active"), "Added to the Hot List (status Active).", "transition")}>
+              onClick={() => void act("to:active", () => salesApi.transition(c.id, "active", c.rowVersion), "Added to the Hot List (status Active).", "transition")}>
               Add to Hot List
             </button>
           )}
@@ -203,7 +203,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
           {showStatus && (
             <StatusMenu from={c.status} next={next} busy={busy}
               onPick={(to) => to === "terminated" ? setModal({ kind: "terminate" })
-                : void act(`to:${to}`, () => salesApi.transition(c.id, to), `Status changed to ${statusLabel(to)}.`, "transition")} />
+                : void act(`to:${to}`, () => salesApi.transition(c.id, to, c.rowVersion), `Status changed to ${statusLabel(to)}.`, "transition")} />
           )}
           {canUpdate && <button type="button" className="btn" onClick={() => setModal({ kind: "edit" })}>Edit profile</button>}
           <Menu text="More" className="cp-more" label={`More actions for ${c.name}`}
@@ -237,17 +237,17 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
                     <h2 id="manage-h">Sharing and rating</h2>
                     {canVisibility && (
                       <VisibilitySwitch value={c.visibility} busy={busy === "vis"}
-                        onChange={(to) => void act("vis", () => salesApi.setVisibility(c.id, to),
+                        onChange={(to) => void act("vis", () => salesApi.setVisibility(c.id, to, undefined, c.rowVersion),
                           to === "all_teams" ? `${c.name} is now open to all teams.` : `${c.name} is now visible to your team only.`)} />
                     )}
                     {canVisibility && c.visibility !== "all_teams" && (
                       <TeamSharePicker ownTeamId={c.team.id} shared={c.sharedTeams ?? []} busy={busy === "share"}
-                        onSave={(ids) => void act("share", () => salesApi.setVisibility(c.id, ids.length ? "selected_teams" : "team", ids.length ? ids : undefined),
+                        onSave={(ids) => void act("share", () => salesApi.setVisibility(c.id, ids.length ? "selected_teams" : "team", ids.length ? ids : undefined, c.rowVersion),
                           ids.length ? `${c.name} is now shared with ${ids.length === 1 ? "1 team" : `${ids.length} teams`}.` : `${c.name} is now visible to your team only.`)} />
                     )}
                     {canRate && (
                       <RatingForm current={c.technicalRating} busy={busy === "rating"}
-                        onSave={(r) => void act("rating", () => salesApi.setRating(c.id, r), `Technical rating set to ${r} of 5.`)} />
+                        onSave={(r) => void act("rating", () => salesApi.setRating(c.id, r, c.rowVersion), `Technical rating set to ${r} of 5.`)} />
                     )}
                   </section>
                 )}
@@ -310,7 +310,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
       )}
       {modal?.kind === "terminate" && (
         <ConfirmDialog title={`Terminate ${c.name}?`} confirmLabel="Terminate" danger formatError={(e) => salesError(e, "transition")}
-          action={() => salesApi.transition(c.id, "terminated")} onClose={() => setModal(null)}
+          action={() => salesApi.transition(c.id, "terminated", c.rowVersion)} onClose={() => setModal(null)}
           onDone={() => { setModal(null); announce("Status changed to Terminated."); refresh(); }}>
           <p>The candidate leaves the Hot List. This can't be undone from this screen.</p>
         </ConfirmDialog>

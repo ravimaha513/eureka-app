@@ -634,7 +634,7 @@ resource "aws_ecs_task_definition" "api" {
     ] : [])
     healthCheck = {
       # The runtime image has no curl/wget; use Node's fetch.
-      command  = ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      command  = ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/live').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
       interval = 15
       retries  = 3
       timeout  = 5

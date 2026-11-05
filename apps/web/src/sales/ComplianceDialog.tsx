@@ -31,6 +31,8 @@ export function ComplianceDialog({ candidate, onClose, onSaved }: {
     documentsStatus: candidate.documentsStatus ?? "",
   };
   const [v, setV] = useState(current);
+  // The version the form was opened on: a save after someone else's is 412 `stale`, even once the profile refetches.
+  const [version] = useState(candidate.rowVersion);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -43,7 +45,7 @@ export function ComplianceDialog({ candidate, onClose, onSaved }: {
     if (Object.keys(body).length === 0) { setFormError("Nothing changed."); return; }
     setBusy(true); setErrors({}); setFormError("");
     try {
-      await salesApi.setCompliance(candidate.id, body);
+      await salesApi.setCompliance(candidate.id, body, version);
       onSaved();
     } catch (err) {
       if (err instanceof ApiError && err.status === 422 && err.detail === "invalid_company") {

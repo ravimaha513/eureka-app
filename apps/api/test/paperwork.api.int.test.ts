@@ -254,6 +254,29 @@ describe("item updates", () => {
 });
 
 describe("BGC", () => {
+  it("B-03: a supplied expectedVersion is enforced (409 version_mismatch, nothing changes); omitted it is last-write-wins", async () => {
+    const m = await placed();
+    const url = `/api/v1/paperwork/placements/${m.id}/bgc`;
+    let res = await call("hr", "PATCH", url, { status: "initiated" });
+    expect(res.statusCode, res.body).toBe(200);
+    const v = res.json().version as number;
+    expect((await call("hr", "PATCH", url, { notes: "Fictional first note", expectedVersion: v })).json().version).toBe(v + 1);
+    res = await call("hr", "PATCH", url, { notes: "Fictional stale note", expectedVersion: v });
+    expect([res.statusCode, res.json().detail]).toEqual([409, "version_mismatch"]);
+    expect((await call("hr", "GET", `/api/v1/paperwork/placements/${m.id}`)).json().bgc).toMatchObject({ notes: "Fictional first note", version: v + 1 });
+    expect((await call("hr", "PATCH", url, { notes: "Fictional last write" })).json().version).toBe(v + 2);
+
+    // History rows: a stale delete keeps the row.
+    const base = `${url}/entries`;
+    res = await call("hr", "POST", base, { kind: "address", city: "Fictional City", region: "TX", country: "US", startMonth: "2021-01" });
+    expect(res.statusCode, res.body).toBe(201);
+    const entry = res.json().addresses[0] as { id: string; version: number };
+    expect((await call("hr", "PATCH", `${base}/${entry.id}`, { verification: "verified", expectedVersion: entry.version })).statusCode).toBe(200);
+    res = await call("hr", "DELETE", `${base}/${entry.id}?expectedVersion=${entry.version}`);
+    expect([res.statusCode, res.json().detail]).toEqual([409, "version_mismatch"]);
+    expect((await call("hr", "GET", `/api/v1/paperwork/placements/${m.id}`)).json().bgc.addresses).toHaveLength(1);
+  });
+
   it("a cleared check is re-initiated with a reason; the drawer offers it", async () => {
     const m = await placed();
     const url = `/api/v1/paperwork/placements/${m.id}/bgc`;

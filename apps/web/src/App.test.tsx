@@ -2,8 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { capabilities, ROLES, type Role } from "@eureka/shared";
-import App, { HotList, Shell } from "./App";
-import type { Me } from "./api";
+import App, { HotList, SIGN_IN_ERRORS, Shell } from "./App";
+import { BUSY_EVENT, type Me } from "./api";
 import { landingScreen, visibleNav } from "./nav";
 
 const meFor = (role: Role): Me => ({
@@ -163,6 +163,59 @@ describe("theme and account menu", () => {
     fireEvent.click(account);
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
     expect(onSignOut).toHaveBeenCalled();
+  });
+});
+
+describe("sign-in errors (/login?error=)", () => {
+  const signedOut = () => vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+    String(input) === "/api/v1/me" ? new Response(JSON.stringify({ status: 401 }), { status: 401 })
+      : new Response(JSON.stringify({ google: true, password: false }), { status: 200 }));
+  afterEach(() => window.history.replaceState(null, "", "/"));
+
+  it.each(Object.entries(SIGN_IN_ERRORS))("?error=%s shows its message once, then drops it from the address", async (code, text) => {
+    signedOut();
+    window.history.replaceState(null, "", `/login?error=${code}&keep=1`);
+    wrap(<App />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(text);
+    expect(screen.getByRole("heading", { name: "Sign in to Eureka" })).toBeInTheDocument();
+    await waitFor(() => expect(window.location.search).toBe("?keep=1"));
+    expect(window.location.pathname).toBe("/login");
+  });
+
+  it("an unknown code reads as a failed sign-in; no code shows nothing", async () => {
+    signedOut();
+    window.history.replaceState(null, "", "/login?error=<script>");
+    const { unmount } = wrap(<App />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(SIGN_IN_ERRORS.signin_failed!);
+    unmount();
+    window.history.replaceState(null, "", "/login");
+    wrap(<App />);
+    await screen.findByRole("heading", { name: "Sign in to Eureka" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("a signed-in user at /login lands on their default screen", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/v1/me") return new Response(JSON.stringify(meFor("recruiter")), { status: 200 });
+      if (url.startsWith("/api/v1/notifications/unread-count")) return new Response(JSON.stringify({ unread: 0, capped: false }), { status: 200 });
+      return new Response(JSON.stringify({ items: [] }), { status: 200 });
+    });
+    window.history.replaceState(null, "", "/login");
+    wrap(<App />);
+    await waitFor(() => expect(window.location.pathname).toBe("/hotlist"));
+  });
+});
+
+describe("busy banner", () => {
+  it("says the server is busy while a read waits out a 503, then clears", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    wrap(<Shell me={meFor("recruiter")} onSignOut={() => undefined} />);
+    await screen.findByRole("complementary", { name: "Main navigation" });
+    act(() => { window.dispatchEvent(new CustomEvent(BUSY_EVENT, { detail: 1 })); });
+    expect(screen.getByText("The server is busy. Retrying in a moment…")).toBeInTheDocument();
+    act(() => { window.dispatchEvent(new CustomEvent(BUSY_EVENT, { detail: -1 })); });
+    expect(screen.queryByText("The server is busy. Retrying in a moment…")).not.toBeInTheDocument();
   });
 });
 

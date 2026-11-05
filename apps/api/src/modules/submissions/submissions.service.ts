@@ -1,4 +1,6 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
+import {
+  ConflictException, ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException, UnprocessableEntityException,
+} from "@nestjs/common";
 import type pg from "pg";
 import { z } from "zod";
 import {
@@ -15,7 +17,8 @@ import {
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
-import { likeContains } from "../../platform/sql.js";
+import { idempotent, parseIdempotencyKey } from "../../platform/idempotency.js";
+import { likeContains, scopedNameSearch } from "../../platform/sql.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import {
   Cursor,
@@ -30,6 +33,16 @@ import {
 } from "./pipeline.js";
 
 const uuid = z.string().uuid();
+
+/** Idempotency-Key scope for POST /submissions (platform/idempotency.ts). */
+const CREATE_ENDPOINT = "POST /api/v1/submissions";
+
+/**
+ * Optional If-Match (R-10 phase 1): `undefined` = no header (no check, as before);
+ * a number = the rowVersion the client saw; `null` = a header that is not a version (always stale).
+ */
+export type ExpectedVersion = number | null | undefined;
+const stale = () => new HttpException("stale", HttpStatus.PRECONDITION_FAILED);
 
 export const CreateSubmission = z
   .object({
@@ -139,6 +152,7 @@ interface SubmissionRow {
   status_changed_at: Date | null;
   details_edited_at: Date | null;
   details_edited_by_name: string | null;
+  row_version: number;
   k: string;
   c_recruiter: string | null;
   c_team: string | null;
@@ -154,7 +168,7 @@ interface SubmissionRow {
 const SELECT = `
   SELECT s.id, s.candidate_id, s.recruiter_id, s.team_id, s.location_id, s.job_title, s.client_id, s.vendor_id,
          s.rate, s.status, s.rejection_reason, s.job_id, s.submitted_at, s.status_changed_at, ${toMicros("s.submitted_at")} AS k,
-         s.details_edited_at, eu.display_name AS details_edited_by_name,
+         s.details_edited_at, eu.display_name AS details_edited_by_name, s.row_version,
          cl.name AS client, ru.display_name AS recruiter_name,
          CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name END AS candidate_name,
          c.recruiter_id AS c_recruiter, c.team_id AS c_team, c.location_id AS c_location,
@@ -259,15 +273,24 @@ export class SubmissionsService {
       interviews: r.trail ?? [],
       /** Status of the latest placement made from this submission, or null. */
       placementStatus: r.placement_status,
+      /** Optimistic concurrency: send it back as If-Match on PATCH (optional; 412 when stale). */
+      rowVersion: r.row_version,
       /** Hints for the UI (docs/placements-api.md); every write is checked again. */
       actions: submissionActions(access, activityRef(r), r.status, visibleCandidate(r)),
     };
   }
 
-  async create(user: AuthedUser, body: CreateSubmission) {
+  /**
+   * Optional Idempotency-Key (R-14): a retry with the same body returns the first answer,
+   * another body 409. The duplicate check runs under a transaction lock on the
+   * (candidate, client) pair, so concurrent submissions of the same pair are serialised:
+   * the later one sees the earlier and gets duplicateWarning: true.
+   */
+  async create(user: AuthedUser, body: CreateSubmission, idempotencyKey?: string) {
+    parseIdempotencyKey(idempotencyKey, { required: false });
     const scope = resolveScope(user.access, "submission:create");
     return this.db.withUser(user.id, async (c) => {
-      // Read-before-write: the candidate must be visible for submission:create.
+      // Read-before-write: the candidate must be visible for submission:create (a replay too).
       const { rows } = await c.query(
         `SELECT recruiter_id, team_id, location_id, visibility, marketing_status FROM eureka.candidate WHERE id = $1`,
         [body.candidateId]);
@@ -277,19 +300,25 @@ export class SubmissionsService {
         visibility: r.visibility, marketingStatus: r.marketing_status,
       })) throw new NotFoundException();
 
-      const dup = await c.query<{ d: boolean }>(`SELECT authz.recent_submission_exists($1,$2) AS d`, [body.candidateId, body.clientId]);
-      const ins = await c.query<{ id: string }>(
-        `INSERT INTO eureka.submission (candidate_id, job_title, client_id, vendor_id, rate, job_id)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-        [body.candidateId, body.jobTitle, body.clientId, body.vendorId ?? null, body.rate ?? null, body.jobId ?? null])
-        .catch(mapSubmissionJobError);
-      await this.audit.record(c, {
-        actorId: user.id, action: "submission.created", entityType: "submission", entityId: ins.rows[0]!.id,
-        // Design B3: duplicate checks are audited (yes/no only, like the answer itself).
-        changes: { candidateId: body.candidateId, clientId: body.clientId, duplicateWarning: dup.rows[0]!.d,
-          ...(body.jobId ? { jobId: body.jobId } : {}) },
+      return idempotent(c, user, CREATE_ENDPOINT, idempotencyKey, body, { required: false }, async () => {
+        // The duplicate rule is per candidate and client (authz.recent_submission_exists), so that is the lock;
+        // it covers every job of the client. Held until commit, so the next check sees this row.
+        await c.query(`SELECT pg_advisory_xact_lock(hashtextextended('submission:' || $1::text || ':' || $2::text, 0))`,
+          [body.candidateId, body.clientId]);
+        const dup = await c.query<{ d: boolean }>(`SELECT authz.recent_submission_exists($1,$2) AS d`, [body.candidateId, body.clientId]);
+        const ins = await c.query<{ id: string }>(
+          `INSERT INTO eureka.submission (candidate_id, job_title, client_id, vendor_id, rate, job_id)
+           VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+          [body.candidateId, body.jobTitle, body.clientId, body.vendorId ?? null, body.rate ?? null, body.jobId ?? null])
+          .catch(mapSubmissionJobError);
+        await this.audit.record(c, {
+          actorId: user.id, action: "submission.created", entityType: "submission", entityId: ins.rows[0]!.id,
+          // Design B3: duplicate checks are audited (yes/no only, like the answer itself).
+          changes: { candidateId: body.candidateId, clientId: body.clientId, duplicateWarning: dup.rows[0]!.d,
+            ...(body.jobId ? { jobId: body.jobId } : {}) },
+        });
+        return { id: ins.rows[0]!.id, duplicateWarning: dup.rows[0]!.d, rowVersion: 1 };
       });
-      return { id: ins.rows[0]!.id, duplicateWarning: dup.rows[0]!.d };
     });
   }
 
@@ -302,7 +331,7 @@ export class SubmissionsService {
     const where = [activityPredicate(scope, params)];
     if (q.status) where.push(`s.status = ${p(q.status)}`);
     if (q.candidateId) where.push(`s.candidate_id = ${p(q.candidateId)}`);
-    if (q.candidate) where.push(`(p.first_name || ' ' || p.last_name) ILIKE ${p(likeContains(q.candidate))} ESCAPE '\\'`);
+    if (q.candidate) where.push(scopedNameSearch("p", p(likeContains(q.candidate)), q.candidate));
     if (q.batchId) where.push(`c.batch_id = ${p(q.batchId)}::uuid`);
     if (q.recruiterId) where.push(`s.recruiter_id = ${p(q.recruiterId)}`);
     if (q.from) where.push(`s.submitted_at >= ${p(q.from)}::timestamptz`);
@@ -382,18 +411,42 @@ export class SubmissionsService {
     return rows[0];
   }
 
+  /**
+   * With If-Match, API writes to one submission queue on a transaction lock before reading it,
+   * so a request that lost the race reads the winner's version and gets 412 up front (instead of,
+   * say, a 422 from re-validating against the winner's state). Other writers are caught by versionAfter.
+   */
+  private async serialiseVersioned(c: pg.PoolClient, id: string, expected: ExpectedVersion) {
+    if (expected === undefined) return;
+    await c.query(`SELECT pg_advisory_xact_lock(hashtextextended('submission-write:' || $1::text, 0))`, [id]);
+  }
+
+  /**
+   * The row_version after a definer write, read under the row lock that write took. With If-Match,
+   * anything but expected + bumps means a concurrent write committed between our read and the lock: 412
+   * (the transaction rolls back).
+   */
+  private async versionAfter(c: pg.PoolClient, id: string, expected: ExpectedVersion, bumps: number): Promise<number> {
+    const v = (await c.query<{ v: number }>(`SELECT row_version AS v FROM eureka.submission WHERE id = $1`, [id])).rows[0]?.v;
+    if (v === undefined) throw new NotFoundException();
+    if (expected !== undefined && v !== (expected ?? 0) + bumps) throw stale();
+    return v;
+  }
+
   async get(user: AuthedUser, id: string) {
     const row = await this.db.withUser(user.id, (c) => this.load(c, user, id));
     return this.present(user.access, row);
   }
 
   /** Read-before-write (design B3): 404 when not visible, 403 when visible but not updatable. */
-  async changeStatus(user: AuthedUser, id: string, body: StatusChange) {
+  async changeStatus(user: AuthedUser, id: string, body: StatusChange, expected?: ExpectedVersion) {
     return this.db.withUser(user.id, async (c) => {
+      await this.serialiseVersioned(c, id, expected);
       const row = await this.load(c, user, id);
       if (!ownsActivity(resolveScope(user.access, "submission:update"), activityRef(row))) {
         throw new ForbiddenException("Not permitted");
       }
+      if (expected !== undefined && expected !== row.row_version) throw stale();
       if (!submissionTransitionAllowed(row.status, body.to)) throw new UnprocessableEntityException("invalid_transition");
       let status: string;
       try {
@@ -403,11 +456,13 @@ export class SubmissionsService {
       } catch (err) {
         mapPipelineError(err);
       }
+      // The transition is one UPDATE (+1). Anything else means another write got in between our read and its row lock.
+      const rowVersion = await this.versionAfter(c, id, expected, 1);
       await this.audit.record(c, {
         actorId: user.id, action: "submission.status", entityType: "submission", entityId: id,
         changes: { from: row.status, to: status, ...(body.rejectionReason ? { rejectionReasonGiven: true } : {}) },
       });
-      return { id, status, rejectionReason: body.rejectionReason ?? null };
+      return { id, status, rejectionReason: body.rejectionReason ?? null, rowVersion };
     });
   }
 
@@ -416,18 +471,22 @@ export class SubmissionsService {
    * visible, 403 without submission.details:update (or rate:read for the rate);
    * authz.edit_submission checks everything again. The audit keeps field names only (rule 5).
    */
-  async edit(user: AuthedUser, id: string, body: EditSubmission) {
+  async edit(user: AuthedUser, id: string, body: EditSubmission, expected?: ExpectedVersion) {
     return this.db.withUser(user.id, async (c) => {
+      await this.serialiseVersioned(c, id, expected);
       const row = await this.load(c, user, id);
       if (!ownsActivity(resolveScope(user.access, "submission.details:update"), activityRef(row))) {
         throw new ForbiddenException("Not permitted");
       }
+      if (expected !== undefined && expected !== row.row_version) throw stale();
       if (body.rate !== undefined && !ownsActivity(resolveScope(user.access, "rate:read"), activityRef(row))) {
         throw new ForbiddenException("field_not_permitted");
       }
       const r = await c.query<{ ch: string[] }>(`SELECT authz.edit_submission($1, $2::jsonb) AS ch`, [id, JSON.stringify(body)])
         .catch(mapEditError);
       const changed = r.rows[0]!.ch;
+      // authz.edit_submission locks the row and updates it once when something changed (+1), else not at all.
+      await this.versionAfter(c, id, expected, changed.length > 0 ? 1 : 0);
       if (changed.length > 0) {
         await this.audit.record(c, {
           actorId: user.id, action: "submission.edited", entityType: "submission", entityId: id,

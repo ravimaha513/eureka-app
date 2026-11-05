@@ -1,5 +1,5 @@
 import {
-  ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException, ServiceUnavailableException, UnprocessableEntityException,
+  ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException, UnprocessableEntityException,
 } from "@nestjs/common";
 import type pg from "pg";
 import { z } from "zod";
@@ -8,8 +8,10 @@ import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
+import { ReportExecutor } from "../../platform/report-executor.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
+import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import type { ActiveCandidatesQuery, ActivityKind, ActivityQuery, PeriodQuery, SetTarget, TargetListQuery } from "./performance.schemas.js";
 
 const DAY_MS = 86_400_000;
@@ -127,7 +129,7 @@ function lastDay(end: string): string {
 export class PerformanceService {
   private readonly limiter = new RateLimiter(PERFORMANCE_REQUESTS_PER_MINUTE, 60_000);
 
-  constructor(private readonly db: DbService, private readonly audit: AuditService) {}
+  constructor(private readonly db: DbService, private readonly audit: AuditService, private readonly reports: ReportExecutor) {}
 
   private scopes(access: UserAccess): Scopes {
     const perf = resolveScope(access, "performance:read");
@@ -146,19 +148,12 @@ export class PerformanceService {
     }
   }
 
-  /** Runs a report as the user; a statement timeout becomes 503 (as the dashboard). */
+  /**
+   * Runs a report as the user (report executor): org-wide callers get the raised timeout and a report slot;
+   * a statement timeout becomes 503 + Retry-After (as the dashboard).
+   */
   private async report<T>(user: AuthedUser, all: boolean, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
-    try {
-      return await this.db.withUser(user.id, async (c) => {
-        if (all) await c.query("SET LOCAL statement_timeout = '60s'");
-        return fn(c);
-      });
-    } catch (err) {
-      if ((err as { code?: string }).code === "57014") {
-        throw new ServiceUnavailableException("The report took too long; narrow the period and try again");
-      }
-      throw err;
-    }
+    return this.reports.run(user.id, { heavy: all, timeoutDetail: "The report took too long; narrow the period and try again" }, fn);
   }
 
   /** People (active Sales users) the caller's performance:read grant covers. */
@@ -251,7 +246,7 @@ export class PerformanceService {
     return this.report(user, s.perf.all, async (c) => {
       const params: Params = [];
       const where = activityWhere(s, READ_PERM[q.kind], params, k.alias);
-      if (!where) return { kind: q.kind, period: { from: from.toISOString(), to: to.toISOString() }, total: 0, items: [] };
+      if (!where) return { kind: q.kind, period: { from: from.toISOString(), to: to.toISOString() }, total: q.cursor ? null : 0, truncated: false, nextCursor: null, items: [] };
       const p = bind(params);
       const conds = [where, k.extra, `${k.ts} >= ${p(from.toISOString())}::timestamptz`, `${k.ts} < ${p(to.toISOString())}::timestamptz`];
       if (q.userId) conds.push(`${k.alias}.recruiter_id = ${p(q.userId)}::uuid`);
@@ -262,10 +257,19 @@ export class PerformanceService {
           ? `i.call_status AS status, i.round AS d1, CASE WHEN i.cleared THEN 'yes' ELSE 'no' END AS d2, NULL::text AS d3`
           : `pl.status AS status, v.name AS d1, pl.tentative_start::text AS d2, pl.placement_type AS d3`;
       const joins = q.kind === "placements" || q.kind === "joined" ? `LEFT JOIN eureka.vendor v ON v.id = pl.vendor_id` : "";
-      const sql = `SELECT ${a}.id, ${k.ts} AS at, ${a}.candidate_id,
+      const countParams = params.slice();
+      // Keyset (D-10): after the cursor in (time DESC, id) order; no window total on later pages.
+      const keyset: string[] = [];
+      if (q.cursor) {
+        const [micros, cid] = splitCursor(q.cursor);
+        const $t = fromMicros(p(micros));
+        const $id = p(cid);
+        keyset.push(`(${k.ts} < ${$t} OR (${k.ts} = ${$t} AND ${a}.id > ${$id}::uuid))`);
+      }
+      const sql = `SELECT ${a}.id, ${k.ts} AS at, ${toMicros(k.ts)} AS k, ${a}.candidate_id,
           CASE WHEN pp.id IS NOT NULL THEN pp.first_name || ' ' || pp.last_name END AS candidate_name,
           ${a}.recruiter_id, ru.display_name AS recruiter_name, tm.name AS team_name, cl.name AS client, ${detail},
-          count(*) OVER ()::int AS total
+          ${q.cursor ? "NULL::int" : "count(*) OVER ()::int"} AS total
         FROM ${k.table} ${a}
         LEFT JOIN eureka.candidate c ON c.id = ${a}.candidate_id
         LEFT JOIN eureka.person pp ON pp.id = c.person_id
@@ -273,22 +277,28 @@ export class PerformanceService {
         LEFT JOIN eureka.team tm ON tm.id = ${a}.team_id
         LEFT JOIN eureka.client cl ON cl.id = ${a}.client_id
         ${joins}
-        WHERE ${conds.join(" AND ")}
+        WHERE ${[...conds, ...keyset].join(" AND ")}
         ORDER BY ${k.ts} DESC, ${a}.id
-        LIMIT ${p(q.limit)} OFFSET ${p(q.offset)}`;
+        LIMIT ${p(q.limit + 1)} OFFSET ${p(q.offset)}`;
       type Row = {
-        id: string; at: Date; candidate_id: string; candidate_name: string | null; recruiter_id: string; recruiter_name: string | null;
-        team_name: string | null; client: string | null; status: string; d1: string | null; d2: string | null; d3: string | null; total: number;
+        id: string; at: Date; k: string; candidate_id: string; candidate_name: string | null; recruiter_id: string; recruiter_name: string | null;
+        team_name: string | null; client: string | null; status: string; d1: string | null; d2: string | null; d3: string | null; total: number | null;
       };
-      const { rows } = await c.query<Row>(sql, params);
-      const total = rows[0]?.total ?? (q.offset > 0
+      const { rows: fetched } = await c.query<Row>(sql, params);
+      const truncated = fetched.length > q.limit;
+      const rows = fetched.slice(0, q.limit);
+      const last = rows[rows.length - 1];
+      const total = q.cursor ? null : rows[0]?.total ?? (q.offset > 0
         ? (await c.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${k.table} ${a} LEFT JOIN eureka.candidate c ON c.id = ${a}.candidate_id
-             WHERE ${conds.join(" AND ")}`, params.slice(0, params.length - 2))).rows[0]!.n
+             WHERE ${conds.join(" AND ")}`, countParams)).rows[0]!.n
         : 0);
       return {
         kind: q.kind,
         period: { from: from.toISOString(), to: to.toISOString() },
+        /** Exact on the first page (no cursor); null on cursor pages. */
         total,
+        truncated,
+        nextCursor: truncated && last ? `${last.k}.${last.id}` : null,
         items: rows.map((r) => ({
           id: r.id,
           at: r.at.toISOString(),

@@ -6,6 +6,18 @@ Paperwork and compliance documents on a candidate or one of the candidate's plac
 `restricted/documents/` (restricted, own KMS key). Restricted types (I-9, driving license, work authorization) are
 listed and opened only under `document.restricted:read`; every opening is in the access log.
 
+**Restricted opens need no step-up** (since migration 0350; owner decision on security review B-01: Google gives unverified
+apps no `auth_time`, so Google users could never step up). A live step-up grant of the session is only recorded on the
+access-log row. Compensating controls instead:
+- **Per-user cap**: at most `restricted_opens_per_day` restricted opens per user in any 24 hours (default **200**), counted
+  across candidate documents and restricted DataHub folders and enforced in SQL by `authz.document_download` /
+  `authz.datahub_download` (migration 0504). Over it: 429 `too_many_restricted_opens`, nothing logged as opened. The value
+  is `authz.policy_setting` key `restricted_opens_per_day` (1-99999; not writable by the app: change it as the migration
+  owner, e.g. `UPDATE authz.policy_setting SET value = '300' WHERE key = 'restricted_opens_per_day'`).
+- **60-second links**: the presigned GET of a restricted file lives 60 s, as an internal one (was 5 minutes).
+- **Warnings for alerting** (API log, ids and counts only): `restricted_open_high_water {"userId","opens","cap"}` once, when a
+  user's open reaches 80 % of the cap; `restricted_open_cap_reached {"userId"}` on every refused open.
+
 This file starts with migration 0461 (editing); the upload, download and access-log endpoints below are as built in 0043.
 
 ## Rules
@@ -22,14 +34,21 @@ This file starts with migration 0461 (editing); the upload, download and access-
 ## Endpoints
 
 - `GET /api/v1/candidates/:id/documents`, `GET /api/v1/placements/:id/documents` (`document:read`) return
-  `{ items: [Document], canUpload, canUploadRestricted, canViewRestricted }`, newest first.
+  `{ items: [Document], canUpload, canUploadRestricted, canViewRestricted, truncated, nextCursor }`, newest first.
+  With no query: the newest 200, as before. `truncated` (R-23): more documents exist; `?limit=1..200&cursor=<nextCursor>`
+  pages on (`created_at`, `id`), exact to the microsecond (`"<epoch µs>.<id>"`); `nextCursor` is null on the last page.
+  Unknown query keys are ignored (the route took no query before); a bad `cursor`/`limit` is 422.
 - `POST /api/v1/candidates/:id/documents`, `POST /api/v1/placements/:id/documents` (`document:upload`) with
   `{ docType, contentType, size }` return 201 `{ id, fileId, classification, status: "pending", upload: { url, fields, expiresAt } }`.
 - `PATCH /api/v1/documents/:documentId` (`document:upload`) with any of `{ title|null, docType, expectedVersion }` returns `Document` (DOC-4).
 - `POST /api/v1/documents/:documentId/replace` (`document:upload`) with `{ contentType, size, expectedVersion? }` returns 201
   `{ id, fileId, classification, status: "pending", upload }` (DOC-5); post the file to `upload` as for a new document.
-- `POST /api/v1/documents/:documentId/download` (`document:read`) returns `{ url, expiresAt }` for the current clean file.
-- `GET /api/v1/document-access?documentId=&before=&limit=` returns the access log (`audit:read`: all; restricted readers: one document).
+- `POST /api/v1/documents/:documentId/download` (`document:read`) returns `{ url, expiresAt }` (60 s) for the current clean
+  file; restricted opens count toward the per-user cap above (429 `too_many_restricted_opens`).
+- `GET /api/v1/document-access?documentId=&cursor=&limit=` returns the access log (`audit:read`: all; restricted readers: one document)
+  as `{ items, truncated, nextCursor }`, newest first. Page with `cursor=<nextCursor>` (keyset on `at`, `id`: rows sharing a
+  timestamp across a page boundary are neither skipped nor repeated; B-07). `before=<instant>` (rows strictly older) still
+  works but is **deprecated**: it drops rows that share the boundary time. `cursor` and `before` together: 422.
 
 `Document` = `{ id, candidateId, placementId, docType, docTypeLabel, classification, status, reason, contentType, sizeBytes, sha256,
 uploadedBy: {id,name}, createdAt, scannedAt, title, version, replacement: { status, reason, contentType, sizeBytes, createdAt } | null }`
@@ -37,7 +56,8 @@ uploadedBy: {id,name}, createdAt, scannedAt, title, version, replacement: { stat
 ## Error codes
 
 `invalid_upload`, `invalid_change`, `classification_change` (422); `too_many_pending`, `version_mismatch`, `not_available` (409);
-`step_up_required`, not permitted (403); not found (404); too many uploads or downloads (429).
+not permitted (403); not found (404); too many uploads or downloads (per user per minute, counted across all API tasks since migration 0516), `too_many_restricted_opens` (429). No document route
+answers `step_up_required`: restricted documents need no step-up (see above).
 
 ## Web
 

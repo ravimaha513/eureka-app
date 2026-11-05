@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query } from "@nestjs/common";
-import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
+import { CurrentUser, RequirePermission, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { parseIfMatch } from "../../platform/http/if-match.js";
 import { CreateJob, JobListQuery, UpdateJob } from "./jobs.schemas.js";
 import { JobsService } from "./jobs.service.js";
@@ -33,6 +33,7 @@ export class JobsController {
 
   /** Readable with job:read in scope, or by the job's hiring manager (no permission needed; RLS decides). */
   @Get(":id")
+  @SelfService()
   get(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.svc.get(user, id);
   }

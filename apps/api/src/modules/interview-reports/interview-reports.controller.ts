@@ -3,6 +3,7 @@ import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { DailyInterviewsQuery, InterviewReportQuery } from "./interview-reports.schemas.js";
 import { InterviewReportsService } from "./interview-reports.service.js";
+import { ApiBody, ApiQuery } from "../../platform/http/api-doc.js";
 
 export { InterviewReportsService };
 
@@ -13,6 +14,7 @@ const day = (iso: string) => iso.slice(0, 10);
 export class InterviewReportsController {
   constructor(private readonly svc: InterviewReportsService) {}
 
+  @ApiQuery(InterviewReportQuery)
   @Get()
   @RequirePermission("report:read")
   report(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
@@ -20,6 +22,7 @@ export class InterviewReportsController {
   }
 
   /** POST, not GET: audited and CSRF-protected, like the Hot List export. */
+  @ApiBody(InterviewReportQuery)
   @Post("export")
   @HttpCode(200)
   @RequirePermission("report:export")
@@ -34,12 +37,14 @@ export class InterviewReportsController {
     return out.csv;
   }
 
+  @ApiQuery(DailyInterviewsQuery)
   @Get("daily")
   @RequirePermission("report:read")
   daily(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.daily(user, DailyInterviewsQuery.parse(q));
   }
 
+  @ApiBody(DailyInterviewsQuery)
   @Post("daily/export")
   @HttpCode(200)
   @RequirePermission("report:export")

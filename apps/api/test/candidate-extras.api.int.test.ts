@@ -236,6 +236,29 @@ describe("review follow-ups (0032)", () => {
     expect(audit.rows).toEqual([{ changes: { from: "planned", to: "in_training" } }]);
   });
 
+  it("batch status audits the status it changed from when another change lands first (D-06)", async () => {
+    const id = (await call("l1", "POST", "/api/v1/batches", { name: "Race batch", locationId: LOC.austin, technologyId: TECH_ID, startMonth: "2028-04" })).json().id;
+    let pending: ReturnType<typeof call> | undefined;
+    let waited = false;
+    // Another writer moves the batch to in_training and holds the row lock while the API request
+    // reads "planned", then waits on the lock inside authz.set_batch_status.
+    await asUser(db.app, U.l1, async (c) => {
+      await c.query(`SELECT authz.set_batch_status($1, 'in_training')`, [id]);
+      pending = call("l1", "PUT", `/api/v1/batches/${id}/status`, { to: "cancelled" });
+      for (let i = 0; i < 100; i++) {
+        const waiting = (await db.admin.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`)).rows[0]!.n;
+        if (waiting > 0) { waited = true; break; }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    }, true);
+    const res = await pending!;
+    expect(waited).toBe(true); // the request really read "planned" and then queued on the lock
+    expect(res.json()).toEqual({ id, status: "cancelled" });
+    const audit = await db.admin.query(`SELECT changes FROM eureka.audit_event WHERE action = 'batch.status' AND entity_id = $1`, [id]);
+    expect(audit.rows).toEqual([{ changes: { from: "in_training", to: "cancelled" } }]);
+  });
+
   it("creating a batch outside the caller's locations is 403", async () => {
     const houston = "00000000-0000-0000-0000-00000000b002";
     await db.admin.query(`INSERT INTO eureka.location (id, name, kind) VALUES ($1, 'Houston', 'training')`, [houston]);
@@ -270,6 +293,26 @@ describe("review follow-ups (0032)", () => {
     const r = await call("l1", "POST", "/api/v1/candidates", { firstName: "T", lastName: "Z", email: "t.z@example.com", technologyId: TECH_ID, locationId: LOC.dallas, phone: "+91 098765 43210" });
     expect(r.statusCode).toBe(422);
     expect(r.json().errors[0]).toEqual({ path: "phone", message: expect.stringContaining("Leave out the national 0") });
+  });
+
+  // Last in this block: the 201 far-future batches push every other batch off the first page.
+  it("GET /batches says when the 200-row cap cut the list (A-12)", async () => {
+    const before = (await call("l1", "GET", "/api/v1/batches")).json();
+    expect(before.truncated).toBe(false);
+    expect(before.items.length).toBeLessThan(200);
+    await asUser(db.app, U.l1, (c) => c.query(
+      `SELECT authz.create_batch($1, $2, d::date, NULL)
+         FROM pg_catalog.generate_series(date '2080-01-01', date '2080-01-01' + interval '200 months', interval '1 month') AS d`,
+      [LOC.dallas, TECH_ID]), true);
+    const all = (await call("l1", "GET", "/api/v1/batches")).json();
+    expect(all.truncated).toBe(true);
+    expect(all.items).toHaveLength(200);
+    // Newest first: the cut drops the oldest months.
+    expect(all.items[0].startMonth).toBe("2096-09");
+    // A filter that matches fewer rows is complete again.
+    const other = (await call("l1", "GET", `/api/v1/batches?locationId=${LOC.austin}`)).json();
+    expect(other.truncated).toBe(false);
+    expect(other.items.every((b: { location: { id: string } }) => b.location.id === LOC.austin)).toBe(true);
   });
 });
 

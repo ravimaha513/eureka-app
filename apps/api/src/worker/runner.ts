@@ -8,6 +8,16 @@ export interface JobDefinition {
   dueKeys(now: Date, ctx: DueContext): string[] | Promise<string[]>;
   /** Does the work for one run key. Must be idempotent. Returns detail for job_run. */
   run(runKey: string, ctx: JobContext): Promise<Record<string, unknown>>;
+  /**
+   * Dead-letter policy (migration 0518): from this many failed attempts on, the
+   * key is not retried. `mark` runs first (e.g. the outbox flags its event);
+   * then job_run records the terminal status `dead`, kept for inspection and
+   * never claimed again. Without it a key is retried with backoff for ever.
+   */
+  deadLetter?: {
+    afterAttempts: number;
+    mark?(runKey: string, ctx: DueContext & { attempt: number }): Promise<void>;
+  };
 }
 
 export interface DueContext {
@@ -29,9 +39,11 @@ export interface JobContext extends DueContext {
  * ran: this runner did the work; done-before: already succeeded; leased: another
  * runner holds a live lease; backoff: a failed run waits for next_attempt_at;
  * failed: the work failed (retried after backoff); lease-lost: the work finished
- * but another runner had taken over the key, so the outcome was not recorded.
+ * but another runner had taken over the key, so the outcome was not recorded;
+ * dead: the key exhausted its job's dead-letter attempts (now, or earlier) and
+ * is never run again.
  */
-export type RunOutcome = "ran" | "done-before" | "leased" | "backoff" | "failed" | "lease-lost";
+export type RunOutcome = "ran" | "done-before" | "leased" | "backoff" | "failed" | "lease-lost" | "dead";
 
 export interface RunnerOptions {
   /** How long a claim is valid without renewal. */
@@ -98,7 +110,7 @@ export class JobRunner {
           SET status = 'running', attempts = attempts + 1, detail = NULL, next_attempt_at = NULL,
               lease_until = now() + $3 * interval '1 millisecond'
         WHERE job_name = $1 AND run_key = $2
-          AND status <> 'succeeded'
+          AND status NOT IN ('succeeded', 'dead')
           AND (status <> 'running' OR lease_until < now())
           AND (next_attempt_at IS NULL OR next_attempt_at <= now())
         RETURNING attempts`, [job, runKey, lease]);
@@ -115,6 +127,7 @@ export class JobRunner {
       "SELECT status FROM eureka.job_run WHERE job_name = $1 AND run_key = $2", [job, runKey]);
     const status = cur.rows[0]?.status;
     if (status === "succeeded") return "done-before";
+    if (status === "dead") return "dead";
     if (status === "running") return "leased";
     return "backoff";
   }
@@ -131,7 +144,7 @@ export class JobRunner {
 
   /** Records the outcome if this runner still holds the lease; false otherwise. */
   private async finish(
-    job: string, runKey: string, attempt: number, status: "succeeded" | "failed",
+    job: string, runKey: string, attempt: number, status: "succeeded" | "failed" | "dead",
     detail: Record<string, unknown>, retryInMs: number | null,
   ): Promise<boolean> {
     const r = await this.pool.query(
@@ -190,8 +203,14 @@ export class JobRunner {
           return "lease-lost";
         }
         // A shutdown abort is not the job's fault: the next worker may retry at once.
-        const retryInMs = this.abort.signal.aborted ? 0 : backoffMs(attempt, this.opts);
+        const shutdown = this.abort.signal.aborted;
+        const retryInMs = shutdown ? 0 : backoffMs(attempt, this.opts);
         const message = err instanceof Error ? err.message : String(err);
+        const dl = job.deadLetter;
+        if (!shutdown && dl && attempt >= dl.afterAttempts) {
+          const dead = await this.deadLetter(job, runKey, attempt, message, Date.now() - started, err);
+          if (dead !== null) return dead;
+        }
         const recorded = await this.finish(job.name, runKey, attempt, "failed",
           { error: message.slice(0, 1000) }, retryInMs);
         const exhausted = attempt >= this.opts.maxAttempts;
@@ -212,6 +231,31 @@ export class JobRunner {
       settled = true;
       clearInterval(renewTimer);
     }
+  }
+
+  /**
+   * Terminal failure: the job's mark() first, then job_run `dead` (fenced on the
+   * attempt). Returns null when mark() failed (the caller records an ordinary
+   * failure with backoff, so the key is dead-lettered on a later attempt).
+   */
+  private async deadLetter(
+    job: JobDefinition, runKey: string, attempt: number, message: string, ms: number, err: unknown,
+  ): Promise<RunOutcome | null> {
+    try {
+      await job.deadLetter!.mark?.(runKey, { pool: this.pool, log: this.log, attempt });
+    } catch (markErr) {
+      this.log.error("job dead-letter mark failed; retried with backoff", {
+        job: job.name, runKey, attempt, ...errorFields(markErr) });
+      return null;
+    }
+    const recorded = await this.finish(job.name, runKey, attempt, "dead",
+      { error: message.slice(0, 1000), deadLettered: true }, null);
+    // One structured line per dead-lettered key: the metric (count by job) and the alert.
+    this.log.error("job dead-lettered after repeated failures; not retried", {
+      job: job.name, runKey, attempt, ms, recorded, alert: true, metric: "job_dead_lettered",
+      afterAttempts: job.deadLetter!.afterAttempts, ...errorFields(err),
+    });
+    return recorded ? "dead" : "lease-lost";
   }
 
   /** One scheduler pass: every due run key of every job, one at a time. */
@@ -269,4 +313,14 @@ export class JobRunner {
     if (!finished) this.abort.abort();
     return finished;
   }
+}
+
+/**
+ * Stops several runners (the worker's lanes) at once, each with the same grace
+ * period, so a long job in one lane does not eat the other lane's grace.
+ * True when every lane drained.
+ */
+export async function stopRunners(runners: JobRunner[], graceMs: number): Promise<boolean> {
+  const clean = await Promise.all(runners.map((r) => r.stop(graceMs)));
+  return clean.every(Boolean);
 }

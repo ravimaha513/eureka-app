@@ -137,7 +137,7 @@ describe("Employees 0150", () => {
 
   it("edits employment details; sends only changes; the pay rate only when the server offers it", async () => {
     const a = { ...E1.assignment!, client: E1.assignment!.client!, isFirstPlacement: true, vendor: { id: "v1", name: "Prime Vendor Co" },
-      payrollCompany: null, everifyDate: null, onboardedDate: "2026-06-02", payRate: 41.5 };
+      payrollCompany: null, everifyDate: null, onboardedDate: "2026-06-02", payRate: 41.5, employmentVersion: 0 };
     const e1 = { ...E1, actions: { ...E1.actions, editEmployment: true } };
     api.routes["GET /api/v1/employees/e1"] = () => ({ body: { ...detail(e1), assignments: [a] } });
     api.routes["PATCH /api/v1/assignments/a-e1/employment"] = () => ({ body: { id: "a-e1", changed: ["payrollCompanyId"] } });
@@ -161,6 +161,7 @@ describe("Employees 0150", () => {
     fireEvent.change(within(dlg).getByLabelText(/Pay rate/), { target: { value: "41.5" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Save details" }));
     await waitFor(() => expect(api.writes().map((w) => w.body)).toEqual([{ payrollCompanyId: "co1", everifyDate: "2026-06-03" }]));
+    expect(api.writes()[0]!.headers["if-match"]).toBe("\"0\""); // 0 = nothing stored yet, still a version
   });
 
   it("hides the pay rate field when the server omits payRate", async () => {
@@ -227,6 +228,7 @@ describe("Employee drawer", () => {
 
   it("extends the planned end date", async () => {
     api.routes["PUT /api/v1/assignments/a-e1/planned-end-date"] = () => ({ body: { id: "a-e1", plannedEndDate: "2027-01-31" } });
+    api.routes["GET /api/v1/employees/e1"] = () => ({ body: { ...detail(E1), assignments: [{ ...E1.assignment!, client: E1.assignment!.client!, plannedEndDateVersion: 4 }] } });
     wrap(<EmployeesPage me={meFor("accounts")} />);
     const d = await openDrawer("Asha Iyer");
     fireEvent.click(within(d).getByRole("button", { name: /Extend or change end date/ }));
@@ -234,6 +236,7 @@ describe("Employee drawer", () => {
     fireEvent.change(within(dlg).getByLabelText("Planned end date"), { target: { value: "2027-01-31" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Save end date" }));
     await waitFor(() => expect(api.writes()[0]?.body).toEqual({ plannedEndDate: "2027-01-31" }));
+    expect(api.writes()[0]!.headers["if-match"]).toBe("\"4\"");
   });
 
   it("records an exit and returns a benched employee to marketing", async () => {

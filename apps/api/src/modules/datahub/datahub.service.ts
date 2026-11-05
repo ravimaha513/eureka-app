@@ -1,6 +1,4 @@
-import { createHash } from "node:crypto";
 import {
-  BadRequestException,
   ConflictException,
   ForbiddenException,
   HttpException,
@@ -19,20 +17,21 @@ import {
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { inPickerScope, pickerScopePerm } from "../../platform/people-scope.js";
-import { RateLimiter } from "../../platform/rate-limit.js";
+import { SharedRateLimiter } from "../../platform/rate-limit.js";
 import { documentQuarantineKey, documentStoredKey } from "../../platform/storage/content.js";
 import { DOCUMENT_STORAGE, type DocumentStorage } from "../../platform/storage/document-storage.js";
+import { noteRestrictedOpen, restrictedOpenError } from "../documents/documents.errors.js";
 import {
   decodeCursor, encodeCursor, likeEscape,
   type FolderCreate, type FolderUpdate, type UploadRequest,
 } from "./datahub.schemas.js";
-import { IdempotencyKey } from "../../platform/idempotency.js";
+import { idempotent } from "../../platform/idempotency.js";
 import { dbErrorMapper } from "../../platform/errors.js";
 
 /** Presigned POST lifetime (as documents; the database upload window is 5 minutes). */
 export const DATAHUB_UPLOAD_TTL_SECONDS = 120;
-/** Presigned GET lifetime: 60 s, restricted 5 minutes (as documents, design A6.3). */
-export const DATAHUB_DOWNLOAD_TTL_SECONDS = { internal: 60, restricted: 300 } as const;
+/** Presigned GET lifetime: 60 s for every file, restricted included (as documents; B-01, no step-up). */
+export const DATAHUB_DOWNLOAD_TTL_SECONDS = { internal: 60, restricted: 60 } as const;
 export const DATAHUB_UPLOADS_PER_MINUTE = 20;
 export const DATAHUB_DOWNLOADS_PER_MINUTE = 30;
 const CREATE_FOLDER_ENDPOINT = "POST /api/v1/datahub/folders";
@@ -148,8 +147,9 @@ const LogCursor = z.object({ at: z.string().datetime({ offset: true }), id: z.st
  */
 @Injectable()
 export class DatahubService {
-  private readonly uploadLimiter = new RateLimiter(DATAHUB_UPLOADS_PER_MINUTE, 60_000);
-  private readonly downloadLimiter = new RateLimiter(DATAHUB_DOWNLOADS_PER_MINUTE, 60_000);
+  // Per user, shared by all tasks and kept across deploys (R-24, B-09); taken in the request transaction.
+  private readonly uploadLimiter = new SharedRateLimiter("datahub.upload", DATAHUB_UPLOADS_PER_MINUTE, 60_000);
+  private readonly downloadLimiter = new SharedRateLimiter("datahub.download", DATAHUB_DOWNLOADS_PER_MINUTE, 60_000);
 
   constructor(
     private readonly db: DbService,
@@ -188,33 +188,13 @@ export class DatahubService {
   async createFolder(user: AuthedUser, parse: () => FolderCreate, idempotencyKey: string | undefined) {
     if (!this.canCreate(user)) throw new ForbiddenException("Not permitted");
     const body = parse();
-    const key = idempotencyKey === undefined ? null : IdempotencyKey.safeParse(idempotencyKey);
-    if (key && !key.success) throw new BadRequestException("invalid_idempotency_key");
-    const hash = createHash("sha256").update(JSON.stringify(body)).digest("hex");
-    return this.db.withUser(user.id, async (c) => {
-      if (key?.success) {
-        const claimed = await c.query(
-          `INSERT INTO eureka.idempotency_key (key, user_id, endpoint, request_hash) VALUES ($1,$2,$3,$4)
-           ON CONFLICT DO NOTHING RETURNING key`, [key.data, user.id, CREATE_FOLDER_ENDPOINT, hash]);
-        if (claimed.rowCount === 0) {
-          const prior = (await c.query<{ request_hash: string; response: unknown }>(
-            `SELECT request_hash, response FROM eureka.idempotency_key WHERE user_id = $1 AND endpoint = $2 AND key = $3`,
-            [user.id, CREATE_FOLDER_ENDPOINT, key.data])).rows[0];
-          if (!prior || prior.request_hash !== hash || prior.response === null) throw new ConflictException("idempotency_key_reused");
-          return prior.response as { id: string; rowVersion: number };
-        }
-      }
+    return this.db.withUser(user.id, (c) => idempotent(c, user, CREATE_FOLDER_ENDPOINT, idempotencyKey, body, { required: false }, async () => {
       const id = (await c.query<{ id: string }>(
         `SELECT authz.datahub_create_folder($1, $2, $3, $4, $5, $6, $7, $8) AS id`,
         [body.parentId ?? null, body.name, body.description ?? null, body.level, body.roleKeys ?? [], body.memberIds ?? [],
           body.membersCanUpload ?? false, body.locationId ?? null]).catch(mapDbError)).rows[0]!.id;
-      const result = { id, rowVersion: 1 };
-      if (key?.success) {
-        await c.query(`UPDATE eureka.idempotency_key SET response = $4 WHERE user_id = $1 AND endpoint = $2 AND key = $3`,
-          [user.id, CREATE_FOLDER_ENDPOINT, key.data, result]);
-      }
-      return result;
-    });
+      return { id, rowVersion: 1 };
+    }));
   }
 
   /** DH-4: managers only; If-Match carries the rowVersion (428 without it, 412 when stale). */
@@ -352,7 +332,7 @@ export class DatahubService {
       if (!folder.readable) throw new ForbiddenException("not_member");
       if (!folder.managed && !folder.members_can_upload) throw new ForbiddenException("Not permitted");
       const body = parse();
-      if (!this.uploadLimiter.take(user.id)) {
+      if (!(await this.uploadLimiter.take(user.id, c))) {
         throw new HttpException("Too many uploads; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
       }
       const row = (await c.query<{ file_id: string; version_id: string; version: number; file_object_id: string; classification: DocumentClassification }>(
@@ -379,22 +359,28 @@ export class DatahubService {
   }
 
   /**
-   * DH-7: a short-lived download link for one clean version. Restricted
-   * folders need a live step-up of this session: 403 `step_up_required`
-   * (the refusal is audited, so it is raised after the transaction commits).
+   * DH-7: a short-lived (60 s) download link for one clean version. Restricted
+   * folders need no step-up (owner decision on security review B-01); each
+   * restricted open counts toward the caller's cap of restricted opens in any
+   * 24 hours, shared with candidate documents and enforced in
+   * authz.datahub_download (429 `too_many_restricted_opens`, logged; a warning
+   * at 80 % of it).
    */
   async download(user: AuthedUser, versionId: string) {
     const out = await this.db.withUser(user.id, async (c) => {
       const v = (await c.query<{ name: string; content_type: DocumentContentType }>(
         `SELECT f.name, o.content_type FROM ${VERSION_FROM} JOIN eureka.datahub_file f ON f.id = v.file_id WHERE v.id = $1`, [versionId])).rows[0];
       if (!v) throw new NotFoundException();
-      if (!this.downloadLimiter.take(user.id)) {
+      if (!(await this.downloadLimiter.take(user.id, c))) {
         throw new HttpException("Too many downloads; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
       }
-      const r = (await c.query<{ outcome: string; file_object_id: string | null; classification: DocumentClassification; version: number }>(
-        `SELECT outcome, file_object_id, classification, version FROM authz.datahub_download($1, $2)`, [versionId, user.sessionHash])
-        .catch(mapDbError)).rows[0]!;
+      const r = (await c.query<{ outcome: string; file_object_id: string | null; classification: DocumentClassification; version: number;
+        restricted_opens: number | null; restricted_cap: number | null }>(
+        `SELECT outcome, file_object_id, classification, version, restricted_opens, restricted_cap FROM authz.datahub_download($1, $2)`,
+        [versionId, user.sessionHash])
+        .catch(restrictedOpenError(user.id)).catch(mapDbError)).rows[0]!;
       if (r.outcome !== "ok" || !r.file_object_id) return { outcome: r.outcome } as const;
+      noteRestrictedOpen(user.id, r.restricted_opens, r.restricted_cap);
       const ttl = r.outcome === "ok" && r.classification === "restricted" ? DATAHUB_DOWNLOAD_TTL_SECONDS.restricted : DATAHUB_DOWNLOAD_TTL_SECONDS.internal;
       const url = await this.storage.presignDownload({
         key: documentStoredKey(r.file_object_id, r.classification), contentType: v.content_type,
@@ -402,7 +388,6 @@ export class DatahubService {
       });
       return { outcome: "ok", url, expiresAt: new Date(Date.now() + ttl * 1000).toISOString() } as const;
     });
-    if (out.outcome === "step_up_required") throw new ForbiddenException("step_up_required");
     if (out.outcome !== "ok") throw new ConflictException("not_available");
     return { url: out.url, expiresAt: out.expiresAt };
   }

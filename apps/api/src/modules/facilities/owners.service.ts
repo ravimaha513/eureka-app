@@ -45,6 +45,9 @@ interface OwnerRow {
   end_date?: string | null;
 }
 
+/** People offered by the in-charge picker per search. */
+const PICKER_LIMIT = 50;
+
 const EXTRA: Record<OwnerKind, string> = {
   company: `(SELECT count(*)::int FROM eureka.company_employee e WHERE e.company_id = o.id AND e.end_date IS NULL) AS employee_count`,
   facility: `o.owner_name, o.owner_email, o.owner_phone, o.rent::text AS rent, o.fee_frequency, o.capacity, o.beds,
@@ -306,8 +309,9 @@ export class OwnersService {
             AND EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.user_id = u.id AND ur.location_id = $1 AND ur.valid @> now())
             AND NOT EXISTS (SELECT 1 FROM ${k.incharges} i WHERE i.${k.fk} = $2 AND i.user_id = u.id)
             AND ($3 = '' OR strpos(lower(u.display_name), $3) > 0)
-          ORDER BY u.display_name, u.id LIMIT 50`, [o.location_id, id, needle(q)]);
-      return { items: rows };
+          ORDER BY u.display_name, u.id LIMIT ${PICKER_LIMIT + 1}`, [o.location_id, id, needle(q)]);
+      // `truncated`: more people match than the picker shows (narrow the search).
+      return { items: rows.slice(0, PICKER_LIMIT), truncated: rows.length > PICKER_LIMIT };
     });
   }
 

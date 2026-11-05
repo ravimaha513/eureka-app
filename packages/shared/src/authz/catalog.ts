@@ -928,3 +928,35 @@ export function isRestrictedRole(role: Role): boolean {
     ORG_SENSITIVE_PERMISSIONS.some((p) => GRANTS[role][p] === "org")
   );
 }
+
+/**
+ * Admin/data separation (docs/roles-api.md "Admin separation"; security review C-01): the
+ * Users & Access administration permissions go only to roles with the admin trait, and a role
+ * with the admin trait holds nothing but these and ADMIN_COMPATIBLE_PERMISSIONS (no business
+ * data, AD-1). The migration runner copies both lists into eureka.permission (is_admin_only,
+ * is_admin_compatible); authz.role_create, role_update and role_set_grants refuse changes that
+ * would add a violation.
+ */
+export const ADMIN_PERMISSIONS: readonly Permission[] = ["access:manage", "audit:read"];
+
+/** Non-business permissions an admin-trait role may hold besides ADMIN_PERMISSIONS (any role may hold them). */
+export const ADMIN_COMPATIBLE_PERMISSIONS: readonly Permission[] = ["staff.contact:read", "technology:create", "chat:use"];
+
+/** The grants that break admin/data separation for a role with these traits; empty when it complies. */
+export function adminSeparationViolations(traits: Pick<RoleTraits, "admin">, grants: Grants): Permission[] {
+  return (Object.keys(grants) as Permission[]).filter((p) => traits.admin
+    ? !ADMIN_PERMISSIONS.includes(p) && !ADMIN_COMPATIBLE_PERMISSIONS.includes(p)
+    : ADMIN_PERMISSIONS.includes(p));
+}
+
+/**
+ * Admin separation class of a role (docs/roles-api.md "Admin separation"; migration 0510,
+ * authz.role_classes): "admin" for the admin trait; "admin_compatible_only" when, without it, every
+ * grant is in ADMIN_COMPATIBLE_PERMISSIONS (or there is none); "data" otherwise. A user holds admin
+ * roles or data roles, never both; admin_compatible_only roles go with either.
+ */
+export type RoleClassification = "admin" | "data" | "admin_compatible_only";
+export function roleClassification(traits: Pick<RoleTraits, "admin">, grants: Grants): RoleClassification {
+  if (traits.admin) return "admin";
+  return (Object.keys(grants) as Permission[]).every((p) => ADMIN_COMPATIBLE_PERMISSIONS.includes(p)) ? "admin_compatible_only" : "data";
+}

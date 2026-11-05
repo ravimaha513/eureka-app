@@ -15,19 +15,26 @@ import {
 } from "@eureka/shared";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
-import { RateLimiter } from "../../platform/rate-limit.js";
+import { SharedRateLimiter } from "../../platform/rate-limit.js";
 import { documentDownloadName, documentQuarantineKey, documentStoredKey } from "../../platform/storage/content.js";
 import { DOCUMENT_STORAGE, type DocumentStorage } from "../../platform/storage/document-storage.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
-import type { AccessLogQuery, DocumentUpload, ReplaceDocumentFile, UpdateDocument } from "./documents.schemas.js";
+import {
+  DOCUMENT_LIST_CAP, type AccessLogQuery, type DocumentListQuery, type DocumentUpload, type ReplaceDocumentFile, type UpdateDocument,
+} from "./documents.schemas.js";
+import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import { AuditService } from "../../platform/audit.service.js";
 import type { z } from "zod";
 import { dbErrorMapper } from "../../platform/errors.js";
+import { noteRestrictedOpen, restrictedOpenError } from "./documents.errors.js";
 
 /** Presigned POST lifetime (as resumes; the database upload window is 5 minutes). */
 export const DOCUMENT_UPLOAD_TTL_SECONDS = 120;
-/** Presigned GET lifetime: 60 s for internal files, 5 minutes for restricted ones (design A6.3). */
-export const DOCUMENT_DOWNLOAD_TTL_SECONDS = { internal: 60, restricted: 300 } as const;
+/**
+ * Presigned GET lifetime: 60 s for every file. Restricted files open without step-up (B-01 owner decision), so
+ * their link is no longer-lived than an internal one (was 5 minutes).
+ */
+export const DOCUMENT_DOWNLOAD_TTL_SECONDS = { internal: 60, restricted: 60 } as const;
 export const DOCUMENT_UPLOADS_PER_MINUTE = 10;
 export const DOCUMENT_DOWNLOADS_PER_MINUTE = 30;
 
@@ -114,12 +121,14 @@ type Owner = { kind: "candidate"; id: string } | { kind: "placement"; id: string
  * document:read / document:upload (and document.restricted:read for
  * restricted types) does not cover the candidate. RLS (document_read) and the
  * definer functions of migration 0043 apply the same rules in the database;
- * authz.document_download also enforces step-up and writes the access log.
+ * authz.document_download writes the access log and enforces the per-user cap
+ * on restricted opens (no step-up: B-01 owner decision; migration 0504).
  */
 @Injectable()
 export class DocumentsService {
-  private readonly uploadLimiter = new RateLimiter(DOCUMENT_UPLOADS_PER_MINUTE, 60_000);
-  private readonly downloadLimiter = new RateLimiter(DOCUMENT_DOWNLOADS_PER_MINUTE, 60_000);
+  // Per user, shared by all tasks and kept across deploys (R-24, B-09); taken in the request transaction.
+  private readonly uploadLimiter = new SharedRateLimiter("documents.upload", DOCUMENT_UPLOADS_PER_MINUTE, 60_000);
+  private readonly downloadLimiter = new SharedRateLimiter("documents.download", DOCUMENT_DOWNLOADS_PER_MINUTE, 60_000);
 
   constructor(
     private readonly db: DbService,
@@ -147,16 +156,33 @@ export class DocumentsService {
     return p.candidate_id;
   }
 
-  async list(user: AuthedUser, owner: Owner) {
+  /**
+   * Newest first. Without a query: the newest DOCUMENT_LIST_CAP, as always; `truncated` and
+   * `nextCursor` (keyset on created_at, id, exact to the microsecond) reach the rest.
+   */
+  async list(user: AuthedUser, owner: Owner, q: DocumentListQuery = { limit: DOCUMENT_LIST_CAP }) {
     return this.db.withUser(user.id, async (c) => {
       const candidateId = await this.candidateOf(c, owner);
       const access = documentAccess(user.access, await this.candidate(c, user, candidateId));
       if (!access.read) throw new ForbiddenException("Not permitted");
-      const where = owner.kind === "candidate" ? `d.candidate_id = $1` : `d.placement_id = $1`;
-      const { rows } = await c.query<DocumentRow>(
-        `SELECT ${DOCUMENT_COLUMNS} FROM ${DOCUMENT_FROM} WHERE ${where} ORDER BY d.created_at DESC, d.id DESC LIMIT 200`, [owner.id]);
+      const params: unknown[] = [owner.id];
+      const where = [owner.kind === "candidate" ? `d.candidate_id = $1` : `d.placement_id = $1`];
+      if (q.cursor) {
+        const [micros, id] = splitCursor(q.cursor);
+        params.push(micros, id);
+        where.push(`(d.created_at, d.id) < (${fromMicros("$2")}, $3::uuid)`);
+      }
+      params.push(q.limit + 1);
+      const { rows } = await c.query<DocumentRow & { k: string }>(
+        `SELECT ${DOCUMENT_COLUMNS}, ${toMicros("d.created_at")} AS k FROM ${DOCUMENT_FROM} WHERE ${where.join(" AND ")}
+          ORDER BY d.created_at DESC, d.id DESC LIMIT $${params.length}`, params);
+      const page = rows.slice(0, q.limit);
+      const last = page[page.length - 1];
+      const truncated = rows.length > q.limit;
       return {
-        items: rows.map(present),
+        items: page.map(present),
+        truncated,
+        nextCursor: truncated && last ? `${last.k}.${last.id}` : null,
         canUpload: access.upload,
         canUploadRestricted: access.uploadRestricted,
         canViewRestricted: access.readRestricted,
@@ -174,7 +200,7 @@ export class DocumentsService {
       if (DOCUMENT_TYPES[body.docType].classification === "restricted" && !access.uploadRestricted) {
         throw new ForbiddenException("Not permitted");
       }
-      if (!this.uploadLimiter.take(user.id)) {
+      if (!(await this.uploadLimiter.take(user.id, c))) {
         throw new HttpException("Too many uploads; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
       }
       // The definer re-checks scope, writes the rows and audits document.upload_requested (ids, type, size).
@@ -225,7 +251,7 @@ export class DocumentsService {
     return this.db.withUser(user.id, async (c) => {
       const d = await this.editable(c, user, documentId);
       const body = parse();
-      if (!this.uploadLimiter.take(user.id)) {
+      if (!(await this.uploadLimiter.take(user.id, c))) {
         throw new HttpException("Too many uploads; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
       }
       const r = (await c.query<{ file_id: string; classification: DocumentClassification }>(
@@ -243,9 +269,11 @@ export class DocumentsService {
   }
 
   /**
-   * A short-lived download link. Restricted documents need a live step-up of
-   * this session: 403 `step_up_required` otherwise (the refusal is audited, so
-   * it is raised after the transaction commits). Each link issued is one
+   * A short-lived (60 s) download link. Restricted documents need no step-up
+   * (owner decision on security review B-01); instead each restricted open
+   * counts toward the caller's cap of restricted opens in any 24 hours, enforced
+   * in authz.document_download (429 `too_many_restricted_opens` over it, logged;
+   * a warning when the caller reaches 80 % of it). Each link issued is one
    * access-log row and one audit row (document.viewed / document.downloaded).
    */
   async download(user: AuthedUser, documentId: string) {
@@ -254,12 +282,15 @@ export class DocumentsService {
       if (!d) throw new NotFoundException();
       const access = documentAccess(user.access, await this.candidate(c, user, d.candidate_id));
       if (!access.read || (d.classification === "restricted" && !access.readRestricted)) throw new NotFoundException();
-      if (!this.downloadLimiter.take(user.id)) {
+      if (!(await this.downloadLimiter.take(user.id, c))) {
         throw new HttpException("Too many downloads; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
       }
-      const r = (await c.query<{ outcome: string; file_id: string | null; classification: DocumentClassification }>(
-        `SELECT outcome, file_id, classification FROM authz.document_download($1, $2)`, [documentId, user.sessionHash]).catch(mapDbError)).rows[0]!;
+      const r = (await c.query<{ outcome: string; file_id: string | null; classification: DocumentClassification;
+        restricted_opens: number | null; restricted_cap: number | null }>(
+        `SELECT outcome, file_id, classification, restricted_opens, restricted_cap FROM authz.document_download($1, $2)`, [documentId, user.sessionHash])
+        .catch(restrictedOpenError(user.id)).catch(mapDbError)).rows[0]!;
       if (r.outcome !== "ok" || !r.file_id) return { outcome: r.outcome } as const;
+      noteRestrictedOpen(user.id, r.restricted_opens, r.restricted_cap);
       const ttl = DOCUMENT_DOWNLOAD_TTL_SECONDS[r.classification];
       const url = await this.storage.presignDownload({
         key: documentStoredKey(r.file_id, r.classification), contentType: d.content_type,
@@ -267,7 +298,6 @@ export class DocumentsService {
       });
       return { outcome: "ok", url, expiresAt: new Date(Date.now() + ttl * 1000).toISOString() } as const;
     });
-    if (out.outcome === "step_up_required") throw new ForbiddenException("step_up_required");
     if (out.outcome !== "ok") throw new ConflictException("not_available");
     return { url: out.url, expiresAt: out.expiresAt };
   }
@@ -293,14 +323,26 @@ export class DocumentsService {
       const where: string[] = [];
       if (q.documentId) { params.push(q.documentId); where.push(`a.document_id = $${params.length}`); }
       if (q.before) { params.push(q.before); where.push(`a.at < $${params.length}`); }
-      params.push(q.limit);
-      const { rows } = await c.query<{ id: string; document_id: string; doc_type: string; classification: string; user_id: string;
-        user_name: string | null; action: string; step_up_grant_id: string | null; at: Date }>(
-        `SELECT a.id, a.document_id, a.doc_type, a.classification, a.user_id, u.display_name AS user_name, a.action, a.step_up_grant_id, a.at
+      if (q.cursor) {
+        // Keyset on (at, id): rows sharing a timestamp across a page boundary are neither skipped nor repeated.
+        const [micros, id] = splitCursor(q.cursor);
+        params.push(micros, id);
+        where.push(`(a.at, a.id) < (${fromMicros(`$${params.length - 1}`)}, $${params.length}::uuid)`);
+      }
+      params.push(q.limit + 1);
+      const { rows: all } = await c.query<{ id: string; document_id: string; doc_type: string; classification: string; user_id: string;
+        user_name: string | null; action: string; step_up_grant_id: string | null; at: Date; k: string }>(
+        `SELECT a.id, a.document_id, a.doc_type, a.classification, a.user_id, u.display_name AS user_name, a.action, a.step_up_grant_id, a.at,
+                ${toMicros("a.at")} AS k
          FROM eureka.document_access a LEFT JOIN eureka.app_user u ON u.id = a.user_id
          ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
          ORDER BY a.at DESC, a.id DESC LIMIT $${params.length}`, params);
+      const rows = all.slice(0, q.limit);
+      const last = rows[rows.length - 1];
+      const truncated = all.length > q.limit;
       return {
+        truncated,
+        nextCursor: truncated && last ? `${last.k}.${last.id}` : null,
         items: rows.map((r) => ({
           id: r.id, documentId: r.document_id, docType: r.doc_type, classification: r.classification,
           user: { id: r.user_id, name: r.user_name }, action: r.action, steppedUp: r.step_up_grant_id !== null, at: r.at.toISOString(),

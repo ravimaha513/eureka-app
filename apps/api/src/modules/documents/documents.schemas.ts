@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Cursor } from "../submissions/pipeline.js";
 import {
   DOCUMENT_CONTENT_TYPE_LIST, DOCUMENT_MAX_BYTES, DOCUMENT_TYPE_LIST, type DocumentContentType, type DocumentType,
 } from "@eureka/shared";
@@ -22,10 +23,25 @@ export type DocumentUpload = z.infer<typeof DocumentUpload>;
 export const AccessLogQuery = z
   .object({
     documentId: z.string().uuid().optional(),
+    /** Deprecated: rows strictly older than this instant (drops rows that share the boundary time). Use `cursor`. */
     before: z.string().datetime({ offset: true }).optional(),
+    /** Keyset cursor: the previous page's `nextCursor` ("<epoch microseconds>.<id>"). */
+    cursor: Cursor.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })
-  .strict();
+  .strict()
+  .refine((q) => q.cursor === undefined || q.before === undefined, { message: "give cursor or before, not both", path: ["before"] });
+
+/** GET .../documents: optional keyset paging (no query: the newest DOCUMENT_LIST_CAP, as before). */
+export const DOCUMENT_LIST_CAP = 200;
+export const DocumentListQuery = z
+  .object({
+    cursor: Cursor.optional(),
+    limit: z.coerce.number().int().min(1).max(DOCUMENT_LIST_CAP).default(DOCUMENT_LIST_CAP),
+  })
+  // Not strict: this route took no query before, so unknown keys stay ignored (no breaking change).
+  .strip();
+export type DocumentListQuery = z.infer<typeof DocumentListQuery>;
 
 const noControl = /^[^\p{Cc}]+$/u;
 

@@ -3,7 +3,7 @@
  * (create only) and placements (docs/placements-api.md).
  */
 import type { InterviewStage } from "@eureka/shared";
-import { api } from "../api";
+import { api, ifMatch } from "../api";
 import type { Interview } from "../interviews/InterviewsPage";
 import { fetchCsv } from "../lib/download";
 import { formatUsd } from "../lib/format";
@@ -65,6 +65,8 @@ export interface Submission {
   /** Status of the latest placement made from this submission. */
   placementStatus?: string | null;
   actions?: SubmissionActions;
+  /** The optional If-Match for PATCH and status (docs/submissions-api.md); absent on older servers. */
+  rowVersion?: number;
 }
 
 export interface SubmissionFilters {
@@ -212,22 +214,24 @@ export const pipelineApi = {
   submissionSummary: (f: Omit<SubmissionFilters, "status" | "interviewed" | "stage" | "cursor" | "limit">) =>
     api<SubmissionSummary>(`/api/v1/submissions/summary?${qs(f)}`),
   submission: (id: string) => api<Submission>(`/api/v1/submissions/${enc(id)}`),
-  changeSubmissionStatus: (id: string, to: string, rejectionReason?: string) =>
-    api<{ id: string; status: string }>(`/api/v1/submissions/${enc(id)}/status`, {
-      method: "PATCH", body: JSON.stringify({ to, ...(rejectionReason ? { rejectionReason } : {}) }),
+  // `version` (rowVersion) on the edits below goes out as the optional If-Match: 412 `stale` when someone saved first.
+  changeSubmissionStatus: (id: string, to: string, rejectionReason?: string, version?: number) =>
+    api<{ id: string; status: string; rowVersion?: number }>(`/api/v1/submissions/${enc(id)}/status`, {
+      method: "PATCH", body: JSON.stringify({ to, ...(rejectionReason ? { rejectionReason } : {}) }), headers: ifMatch(version),
     }),
-  editSubmission: (id: string, b: EditSubmission) =>
-    api<{ changed: string[]; submission: Submission }>(`/api/v1/submissions/${enc(id)}`, { method: "PATCH", body: JSON.stringify(b) }),
+  editSubmission: (id: string, b: EditSubmission, version?: number) =>
+    api<{ changed: string[]; submission: Submission }>(`/api/v1/submissions/${enc(id)}`,
+      { method: "PATCH", body: JSON.stringify(b), headers: ifMatch(version) }),
   createInterview: (b: CreateInterview) => api<{ id: string }>("/api/v1/interviews", { method: "POST", body: JSON.stringify(b) }),
   /** Every round of one submission the caller can see, in time order (drawer timeline). */
   submissionInterviews: (submissionId: string) =>
     api<Page<Interview>>(`/api/v1/interviews?${qs({ submissionId, sort: "asc", limit: 200 })}`),
-  setInterviewResult: (id: string, result: "pending" | "cleared" | "rejected") =>
-    api<Interview>(`/api/v1/interviews/${enc(id)}`, { method: "PATCH", body: JSON.stringify({ result }) }),
+  setInterviewResult: (id: string, result: "pending" | "cleared" | "rejected", version?: number) =>
+    api<Interview>(`/api/v1/interviews/${enc(id)}`, { method: "PATCH", body: JSON.stringify({ result }), headers: ifMatch(version) }),
   /** IS-11: mark the round cleared and move its submission to Selected in one step. */
-  clearAndSelect: (id: string) =>
-    api<{ interviewId: string; result: string; submissionId: string; submissionStatus: string }>(
-      `/api/v1/interviews/${enc(id)}/clear-and-select`, { method: "POST" }),
+  clearAndSelect: (id: string, version?: number) =>
+    api<{ interviewId: string; result: string; submissionId: string; submissionStatus: string; rowVersion?: number }>(
+      `/api/v1/interviews/${enc(id)}/clear-and-select`, { method: "POST", headers: ifMatch(version) }),
   placements: (f: PlacementFilters) => api<Page<Placement>>(`/api/v1/placements?${qs({ limit: 50, ...f })}`),
   placement: (id: string) => api<Placement>(`/api/v1/placements/${enc(id)}`),
   /** Teams for the Placements Team filter (placements and cleared interviews in the caller's scope). */

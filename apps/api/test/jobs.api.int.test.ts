@@ -1,6 +1,6 @@
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { can, jobAllowed, type UserAccess } from "@eureka/shared";
+import { JOB_STATUSES, can, jobAllowed, jobTransitionTargets, type UserAccess } from "@eureka/shared";
 import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
@@ -146,6 +146,11 @@ describe("validation", () => {
     expect(a.statusCode).toBe(201);
     expect(b.json().id).toBe(a.json().id);
     expect((await call("l1", "POST", "/api/v1/jobs", clientReq({ title: "Other" }), h)).statusCode).toBe(409);
+    // platform/idempotency.ts vocabulary: the key is optional here, a malformed one is invalid (400).
+    const bad = await call("l1", "POST", "/api/v1/jobs", clientReq({ title: "Bad key" }), { "idempotency-key": "has spaces" });
+    expect([bad.statusCode, bad.json().detail]).toEqual([400, "invalid_idempotency_key"]);
+    const stored = await db.admin.query(`SELECT response FROM eureka.idempotency_key WHERE key = $1`, [h["idempotency-key"]]);
+    expect(stored.rows[0].response).toEqual({ status: 201, body: a.json() });
   });
 });
 
@@ -166,6 +171,24 @@ describe("update (JP-3)", () => {
     expect((await call("r1a", "PATCH", `/api/v1/jobs/${id}`, { title: "x" }, { "if-match": '"2"' })).statusCode).toBe(403);
     expect((await call("l3", "PATCH", `/api/v1/jobs/${id}`, { title: "x" }, { "if-match": '"2"' })).statusCode).toBe(404);
     expect((await call("m1", "PATCH", `/api/v1/jobs/${id}`, { kind: "internal_opening" }, { "if-match": '"2"' })).statusCode).toBe(422);
+  });
+
+  it("status lifecycle (JP-3a): every change between statuses is allowed and hinted; posted time stays", async () => {
+    const card = async (k: Key) => (await call(k, "GET", `/api/v1/jobs/${id}`)).json();
+    let cur = await card("l1");
+    expect(cur.actions).toEqual({ edit: true, statusTargets: jobTransitionTargets(cur.status) });
+    expect((await card("r1a")).actions).toEqual({ edit: false, statusTargets: [] });
+    const postedAt = cur.postedAt;
+    for (const to of ["closed", "draft", "on_hold", "open", "open"] as const) {
+      const r = await call("l1", "PATCH", `/api/v1/jobs/${id}`, { status: to }, { "if-match": `"${cur.rowVersion}"` });
+      expect(r.statusCode, `${cur.status} -> ${to}: ${r.body}`).toBe(200);
+      cur = r.json();
+      expect([cur.status, cur.postedAt, cur.actions.statusTargets]).toEqual([to, postedAt, JOB_STATUSES.filter((s) => s !== to)]);
+    }
+    const audited = (await db.admin.query<{ c: { status?: unknown } }>(
+      `SELECT changes AS c FROM eureka.audit_event WHERE entity_id = $1 AND action = 'job.updated' ORDER BY seq`, [id])).rows;
+    // Saving the unchanged status is no transition and is not audited as one.
+    expect(audited.map((r) => r.c.status ?? null).slice(-2)).toEqual([{ from: "on_hold", to: "open" }, null]);
   });
 });
 

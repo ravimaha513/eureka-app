@@ -2,13 +2,14 @@ import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCod
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { AllowPasswordChange, CurrentUser, Public, type AuthedUser } from "../../platform/auth.guard.js";
+import { AllowPasswordChange, CurrentUser, Public, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { clientInfo } from "../../platform/client-info.js";
 import { clientIp, ipKey } from "../../platform/client-ip.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
-import { RateLimiter } from "../../platform/rate-limit.js";
-import { SESSION_COOKIE, SessionService } from "../../platform/session.service.js";
+import { SharedRateLimiter } from "../../platform/rate-limit.js";
+import { SessionService } from "../../platform/session.service.js";
+import { ApiBody } from "../../platform/http/api-doc.js";
 
 const PasswordLogin = z.object({ email: z.string().trim().email().max(254), password: z.string().min(1).max(200) }).strict();
 const SetupPassword = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/), newPassword: z.string().min(1).max(200) }).strict();
@@ -24,7 +25,8 @@ const ChangePassword = z.object({ currentPassword: z.string().min(1).max(200), n
  */
 @Controller("api/auth")
 export class PasswordController {
-  private readonly perIp = new RateLimiter(30, 10 * 60_000);
+  // Shared across tasks and deploys (R-24): sign-in and set-password together, per IP.
+  private readonly perIp = new SharedRateLimiter("auth.password.ip", 30, 10 * 60_000);
 
   constructor(
     @Inject(CONFIG) private readonly config: AppConfig,
@@ -47,23 +49,20 @@ export class PasswordController {
     };
   }
 
+  @ApiBody(PasswordLogin)
   @Public()
   @Post("password-login")
   @HttpCode(200)
   async login(@Body() body: unknown, @Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply) {
     this.enabled();
-    if (!this.perIp.take(ipKey(clientIp(req, this.config)))) throw new HttpException("too_many_attempts", HttpStatus.TOO_MANY_REQUESTS);
+    if (!(await this.perIp.take(ipKey(clientIp(req, this.config)), this.db))) throw new HttpException("too_many_attempts", HttpStatus.TOO_MANY_REQUESTS);
     const { email, password } = PasswordLogin.parse(body);
     const r = await this.db.system(async (c) => (await c.query<{ user_id: string | null; outcome: string; must_change: boolean }>(
       `SELECT user_id, outcome, must_change FROM authz.password_login($1, $2, $3, $4)`,
       [email, password, this.config.PASSWORD_MAX_FAILURES, this.config.PASSWORD_LOCK_MINUTES])).rows[0]!);
     if (r.outcome === "locked") throw new HttpException("account_locked", HttpStatus.TOO_MANY_REQUESTS);
     if (r.outcome !== "ok" || !r.user_id) throw new UnauthorizedException("Invalid email or password");
-    const sid = await this.sessions.create(r.user_id, new Date(), clientInfo(req, this.config));
-    void reply.setCookie(SESSION_COOKIE, sid, {
-      httpOnly: true, secure: this.config.NODE_ENV === "production", sameSite: "lax", path: "/",
-      maxAge: this.config.SESSION_ABSOLUTE_HOURS * 3600,
-    });
+    this.sessions.setSessionCookie(reply, await this.sessions.create(r.user_id, new Date(), clientInfo(req, this.config)));
     return { mustChangePassword: r.must_change };
   }
 
@@ -73,12 +72,13 @@ export class PasswordController {
    * or no longer usable (one message for all of them); 422 password_weak keeps
    * the link open.
    */
+  @ApiBody(SetupPassword)
   @Public()
   @Post("password/setup")
   @HttpCode(200)
   async setup(@Body() body: unknown, @Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply) {
     this.enabled();
-    if (!this.perIp.take(ipKey(clientIp(req, this.config)))) throw new HttpException("too_many_attempts", HttpStatus.TOO_MANY_REQUESTS);
+    if (!(await this.perIp.take(ipKey(clientIp(req, this.config)), this.db))) throw new HttpException("too_many_attempts", HttpStatus.TOO_MANY_REQUESTS);
     const parsed = SetupPassword.safeParse(body);
     if (!parsed.success) throw new BadRequestException("invalid_link");
     const { token, newPassword } = parsed.data;
@@ -87,18 +87,16 @@ export class PasswordController {
       [createHash("sha256").update(token).digest(), newPassword])).rows[0]!);
     if (r.outcome === "weak") throw new HttpException("password_weak", HttpStatus.UNPROCESSABLE_ENTITY);
     if (r.outcome !== "ok" || !r.user_id) throw new BadRequestException("invalid_link");
-    const sid = await this.sessions.create(r.user_id, new Date(), clientInfo(req, this.config));
-    void reply.setCookie(SESSION_COOKIE, sid, {
-      httpOnly: true, secure: this.config.NODE_ENV === "production", sameSite: "lax", path: "/",
-      maxAge: this.config.SESSION_ABSOLUTE_HOURS * 3600,
-    });
+    this.sessions.setSessionCookie(reply, await this.sessions.create(r.user_id, new Date(), clientInfo(req, this.config)));
     return { mustChangePassword: false };
   }
 
   /** The signed-in user changes their own password (also the way out of a temporary one). */
+  @ApiBody(ChangePassword)
   @Post("password/change")
   @AllowPasswordChange()
   @HttpCode(204)
+  @SelfService()
   async change(@CurrentUser() user: AuthedUser, @Body() body: unknown): Promise<void> {
     this.enabled();
     const { currentPassword, newPassword } = ChangePassword.parse(body);

@@ -904,7 +904,7 @@ const CASES: RejectCase[] = [
     }),
     forbidden: {
       recruiterId: U.r1b, teamId: T.t2, locationId: LOC.austin, status: "selected", submittedAt: PAST,
-      statusChangedAt: PAST, statusChangedBy: U.l1, rejectionReason: "x",
+      statusChangedAt: PAST, statusChangedBy: U.l1, rejectionReason: "x", row_version: 99, duplicateWarning: false,
     },
   },
   {
@@ -916,7 +916,7 @@ const CASES: RejectCase[] = [
         state: () => rows(`SELECT * FROM eureka.submission WHERE id = $1`, [submissionId]),
       };
     },
-    forbidden: { status: "selected", recruiterId: U.r1b, teamId: T.t2, candidateId: FOREIGN_ID, statusChangedAt: PAST, statusChangedBy: U.l1, from: "selected" },
+    forbidden: { status: "selected", recruiterId: U.r1b, teamId: T.t2, candidateId: FOREIGN_ID, statusChangedAt: PAST, statusChangedBy: U.l1, from: "selected", row_version: 99 },
   },
   {
     // Detail corrections (lead and above, migration 0440): snapshots, status and the edit stamps stay server-managed.
@@ -930,7 +930,7 @@ const CASES: RejectCase[] = [
     },
     forbidden: {
       status: "selected", recruiterId: U.r1b, teamId: T.t2, locationId: LOC.austin, candidateId: FOREIGN_ID,
-      rejectionReason: "x", statusChangedAt: PAST, detailsEditedAt: PAST, detailsEditedBy: U.l1,
+      rejectionReason: "x", statusChangedAt: PAST, detailsEditedAt: PAST, detailsEditedBy: U.l1, row_version: 99,
     },
   },
   // candidate feedback (public, token-authenticated)
@@ -979,6 +979,7 @@ const CASES: RejectCase[] = [
       teamId: T.t2, recruiterId: U.r2a, visibility: "all_teams", technicalRating: 5, status: "stopped", marketingStatus: "stopped",
       locationId: LOC.austin, personId: FOREIGN_ID, firstName: "X", phone: "+14695559999", benchSince: "2020-01-01",
       teamAssignedAt: PAST, everifyCompanyId: FOREIGN_ID, documentsStatus: "complete", ghLocationId: LOC.austin, ghRemote: true,
+      row_version: 99, ifMatch: "1",
     },
   },
   {
@@ -989,7 +990,7 @@ const CASES: RejectCase[] = [
     }),
     forbidden: {
       teamId: T.t2, recruiterId: U.r2a, priority: "P1", linkedinUrl: "https://linkedin.com/in/x", visaCategory: "h1b",
-      teamAssignedAt: PAST, rowVersion: 99, candidateId: FOREIGN_ID,
+      teamAssignedAt: PAST, rowVersion: 99, candidateId: FOREIGN_ID, row_version: 99, ifMatch: "1",
     },
   },
   {
@@ -998,7 +999,7 @@ const CASES: RejectCase[] = [
       url: `/api/v1/candidates/${own().id}/visibility`, body: { visibility: "all_teams" },
       state: () => rows(`SELECT * FROM eureka.candidate WHERE id = $1`, [own().id]),
     }),
-    forbidden: { teamId: T.t2, recruiterId: U.r2a, candidateId: FOREIGN_ID, status: "stopped" },
+    forbidden: { teamId: T.t2, recruiterId: U.r2a, candidateId: FOREIGN_ID, status: "stopped", row_version: 99, ifMatch: "1" },
   },
   {
     route: "PUT /api/v1/candidates/:id/technical-rating", actor: "locD",
@@ -1006,7 +1007,7 @@ const CASES: RejectCase[] = [
       url: `/api/v1/candidates/${own().id}/technical-rating`, body: { rating: 4 },
       state: () => rows(`SELECT * FROM eureka.candidate WHERE id = $1`, [own().id]),
     }),
-    forbidden: { candidateId: FOREIGN_ID, ratedBy: U.coach, locationId: LOC.austin, priority: "P1" },
+    forbidden: { candidateId: FOREIGN_ID, ratedBy: U.coach, locationId: LOC.austin, priority: "P1", row_version: 99, ifMatch: "1" },
   },
   {
     route: "POST /api/v1/candidates/:id/transition", actor: "r1a",
@@ -1014,7 +1015,7 @@ const CASES: RejectCase[] = [
       url: `/api/v1/candidates/${own().id}/transition`, body: { to: "on_hold" },
       state: () => rows(`SELECT * FROM eureka.candidate WHERE id = $1`, [own().id]),
     }),
-    forbidden: { from: "terminated", force: true, status: "terminated", teamId: T.t2, benchSince: "2020-01-01" },
+    forbidden: { from: "terminated", force: true, status: "terminated", teamId: T.t2, benchSince: "2020-01-01", row_version: 99, ifMatch: "1" },
   },
   {
     route: "POST /api/v1/batches", actor: "l1",
@@ -1182,7 +1183,8 @@ const CASES: RejectCase[] = [
         state: () => employmentState(j.personId),
       };
     },
-    forbidden: { endingNoticeFor: "2099-01-01", endDate: "2099-01-01", startDate: "2020-01-01", assignmentId: FOREIGN_ID, previousPlannedEndDate: "2020-01-01" },
+    forbidden: { endingNoticeFor: "2099-01-01", endDate: "2099-01-01", startDate: "2020-01-01", assignmentId: FOREIGN_ID, previousPlannedEndDate: "2020-01-01",
+      row_version: 9, plannedEndDateVersion: 9 },
   },
   {
     route: "POST /api/v1/employees/:id/exit", actor: "hr",
@@ -1212,7 +1214,7 @@ const CASES: RejectCase[] = [
       };
     },
     forbidden: { updatedBy: U.r2a, updatedAt: "2020-01-01T00:00:00Z", assignmentId: FOREIGN_ID, payroll_company_id: FOREIGN_ID,
-      endDate: "2026-01-01", personId: FOREIGN_ID },
+      endDate: "2026-01-01", personId: FOREIGN_ID, row_version: 9, employmentVersion: 9 },
   },
   {
     route: "POST /api/v1/employees/:id/assign-team", actor: "hr",
@@ -1272,7 +1274,7 @@ const CASES: RejectCase[] = [
     },
     forbidden: {
       submissionId: FOREIGN_ID, candidateId: FOREIGN_ID, recruiterId: U.r1b, teamId: T.t2, locationId: LOC.austin, clientId: FOREIGN_ID,
-      clearedBy: U.locD, clearedAt: PAST, feedbackEmailSentAt: PAST,
+      clearedBy: U.locD, clearedAt: PAST, feedbackEmailSentAt: PAST, row_version: 9,
     },
     // Location fields: a recruiter's grant covers only the sales fields (design B4.7).
     notPermitted: { fields: { cleared: true, consentCaptured: true, systemName: "Zoom" }, detail: /^field_not_permitted: / },
@@ -1438,7 +1440,7 @@ const CASES: RejectCase[] = [
         state: () => rows(`SELECT * FROM eureka.utility_bill WHERE id = $1`, [b]),
       };
     },
-    forbidden: { voidedAt: PAST, voidedBy: U.hr, status: "paid", billId: FOREIGN_ID },
+    forbidden: { voidedAt: PAST, voidedBy: U.hr, status: "paid", billId: FOREIGN_ID, row_version: 9 },
   },
   {
     route: "POST /api/v1/bills/:id/invoice", actor: "locD",
@@ -1571,7 +1573,8 @@ const CASES: RejectCase[] = [
         body: { dryRun: true, rows: [{ firstName: "Mass", lastName: "Assign", phone: "+14695550177", email: "mass.assign@example.com" }] },
         state: () => rows(`SELECT count(*)::int AS n FROM eureka.candidate`) };
     },
-    forbidden: { recruiterId: U.r2a, locationId: LOC.austin, technologyId: FOREIGN_ID, status: "active", batchId: FOREIGN_ID },
+    forbidden: { recruiterId: U.r2a, locationId: LOC.austin, technologyId: FOREIGN_ID, status: "active", batchId: FOREIGN_ID,
+      budget: 100000, rowsChecked: 0, checked: 0, taken: 0 },
   },
   {
     route: "PUT /api/v1/candidates/:id/recruiter", actor: "l1",
@@ -1579,7 +1582,7 @@ const CASES: RejectCase[] = [
       url: `/api/v1/candidates/${own().id}/recruiter`, body: { recruiterId: U.r1a },
       state: () => rows(`SELECT * FROM eureka.candidate WHERE id = $1`, [own().id]),
     }),
-    forbidden: { teamId: T.t2, candidateId: FOREIGN_ID, status: "stopped", locationId: LOC.austin },
+    forbidden: { teamId: T.t2, candidateId: FOREIGN_ID, status: "stopped", locationId: LOC.austin, row_version: 99, ifMatch: "1" },
   },
   {
     route: "PUT /api/v1/candidates/:id/team", actor: "l1",
@@ -2308,8 +2311,9 @@ const IGNORED: IgnoreCase[] = [
       });
       expect(r.statusCode, r.body).toBe(422);
       await ok("admin", "PATCH", `/api/v1/admin/roles/${key}`, { label: "MA Role Patched", traits: { recruiter: true } }, 204);
-      expect(await rows(`SELECT key, label, is_system, is_recruiter, archived_at FROM eureka.role WHERE key = $1`, [key]))
-        .toEqual([{ key, label: "MA Role Patched", is_system: false, is_recruiter: true, archived_at: null }]);
+      // row_version is the server's (0501): one accepted edit bumps it from 1 to 2, whatever rowVersion the body named.
+      expect(await rows(`SELECT key, label, is_system, is_recruiter, archived_at, row_version FROM eureka.role WHERE key = $1`, [key]))
+        .toEqual([{ key, label: "MA Role Patched", is_system: false, is_recruiter: true, archived_at: null, row_version: 2 }]);
       expect(await rows(`SELECT 1 FROM eureka.role_permission WHERE role_key = $1 AND permission = 'rate:read'`, [key])).toEqual([]);
     },
   },
@@ -2323,7 +2327,8 @@ const IGNORED: IgnoreCase[] = [
       expect(r.statusCode, r.body).toBe(422);
       await ok("admin", "PUT", `/api/v1/admin/roles/${key}/grants`, { grants: { "candidate:read": "team" } }, 204);
       expect(await rows(`SELECT permission, scope FROM eureka.role_permission WHERE role_key = $1`, [key])).toEqual([{ permission: "candidate:read", scope: "team" }]);
-      expect(await rows(`SELECT label, is_admin FROM eureka.role WHERE key = $1`, [key])).toEqual([{ label: "MA Role Grants", is_admin: false }]);
+      expect(await rows(`SELECT label, is_admin, row_version FROM eureka.role WHERE key = $1`, [key]))
+        .toEqual([{ label: "MA Role Grants", is_admin: false, row_version: 2 }]);
     },
   },
   {

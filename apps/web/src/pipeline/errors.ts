@@ -1,4 +1,4 @@
-import { ApiError } from "../api";
+import { ApiError, commonProblem } from "../api";
 
 /** Friendly text for the RFC 9457 `detail` codes of the pipeline API (submissions, interviews, placements). */
 export const PIPELINE_ERRORS: Record<string, string> = {
@@ -37,6 +37,8 @@ export type PipelineContext = "submission" | "placement" | "interview" | "create
 
 export function pipelineError(e: unknown, ctx: PipelineContext = "generic"): string {
   if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";
+  const common = commonProblem(e);
+  if (common) return common;
   if (e.detail && PIPELINE_ERRORS[e.detail]) return PIPELINE_ERRORS[e.detail]!;
   switch (e.status) {
     case 401: return "Your session ended. Sign in again.";
@@ -50,7 +52,7 @@ export function pipelineError(e: unknown, ctx: PipelineContext = "generic"): str
     case 422:
       if (e.errors?.length) return "Some fields need attention. Check the highlighted fields.";
       return "The server rejected this change. Check the values and try again.";
-    case 429: return e.detail ?? "Too many requests. Try again in a minute.";
+    case 429: return e.message;
     default: return e.detail ?? e.title ?? e.message ?? "Something went wrong.";
   }
 }

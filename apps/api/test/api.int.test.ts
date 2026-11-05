@@ -3,7 +3,7 @@ import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { can, candidateVisible, resolveScope, type Permission } from "@eureka/shared";
 import { createApp } from "../src/app.module.js";
-import { loadConfig } from "../src/platform/config.js";
+import { CONFIG, loadConfig, type AppConfig } from "../src/platform/config.js";
 import { OidcService } from "../src/platform/oidc.service.js";
 import { AuthController } from "../src/modules/identity/auth.controller.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
@@ -239,7 +239,7 @@ describe("candidate endpoints", () => {
 
   it("status transitions follow the state machine", async () => {
     const r = await call("r1a", "POST", `/api/v1/candidates/${own().id}/transition`, { to: "on_hold" });
-    expect(r.json()).toEqual({ id: own().id, status: "on_hold" });
+    expect(r.json()).toEqual({ id: own().id, status: "on_hold", rowVersion: expect.any(Number) });
     expect((await call("r1a", "POST", `/api/v1/candidates/${own().id}/transition`, { to: "confirmation" })).statusCode).toBe(422);
     await call("r1a", "POST", `/api/v1/candidates/${own().id}/transition`, { to: "active" });
   });
@@ -367,6 +367,27 @@ describe("Google OIDC validation", () => {
     // A different Google account claiming the same email cannot take over the user.
     await expect(ctrl.linkUser("attacker-sub", "l1@eureka.example")).rejects.toThrow(/No active Eureka account/);
     await expect(ctrl.linkUser("x", "stranger@eureka.example")).rejects.toThrow(/No active Eureka account/);
+    // With a hosted domain configured, an email outside it is never looked up (defence in depth).
+    const cfg = app.get<AppConfig>(CONFIG);
+    const prev = cfg.GOOGLE_HOSTED_DOMAIN;
+    cfg.GOOGLE_HOSTED_DOMAIN = "eureka.example";
+    try {
+      await expect(ctrl.linkUser("y", "someone@gmail.example")).rejects.toThrow(/No active Eureka account/);
+    } finally {
+      cfg.GOOGLE_HOSTED_DOMAIN = prev;
+    }
+  });
+
+  it("auth.linked / auth.denied audit rows carry a reason code, never the email (rule 5)", async () => {
+    const { rows } = await db.admin.query<{ action: string; entity_id: string | null; changes: Record<string, unknown> }>(
+      `SELECT action, entity_id, changes FROM eureka.audit_event WHERE action IN ('auth.linked', 'auth.denied') ORDER BY seq`);
+    expect(rows).toEqual([
+      { action: "auth.linked", entity_id: U.l1, changes: { linkedBy: "email" } },
+      { action: "auth.denied", entity_id: null, changes: { reason: "no_matching_account", domainMatch: true } },
+      { action: "auth.denied", entity_id: null, changes: { reason: "no_matching_account", domainMatch: true } },
+      { action: "auth.denied", entity_id: null, changes: { reason: "outside_hosted_domain", domainMatch: false } },
+    ]);
+    expect(JSON.stringify(rows)).not.toContain("@");
   });
 });
 

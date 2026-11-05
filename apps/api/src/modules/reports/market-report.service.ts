@@ -1,4 +1,4 @@
-import { ForbiddenException, HttpException, HttpStatus, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { ForbiddenException, HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import type pg from "pg";
 import {
   IN_MARKET_STATUSES, MARKET_REPORT_STATUSES, MARKET_REPORT_TIME_ZONE, PLACED_STATUSES, resolveScope,
@@ -6,8 +6,8 @@ import {
 } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
-import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
+import { ReportExecutor } from "../../platform/report-executor.js";
 import { toCsv } from "../hotlist/csv.js";
 import { EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS } from "../hotlist/hotlist.service.js";
 import type { MarketReportQuery } from "./market-report.schemas.js";
@@ -68,23 +68,18 @@ export class MarketReportService {
   private readonly viewLimiter = new RateLimiter(MARKET_REPORT_VIEWS_PER_MINUTE, 60_000);
   private readonly exportLimiter = new RateLimiter(EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
 
-  constructor(private readonly db: DbService, private readonly audit: AuditService) {}
+  constructor(private readonly audit: AuditService, private readonly reports: ReportExecutor) {}
 
   private async rows(user: AuthedUser, q: MarketReportQuery, forExport: boolean,
     after?: (c: pg.PoolClient, rows: Row[]) => Promise<void>): Promise<Row[]> {
-    try {
-      return await this.db.withUser(user.id, async (c) => {
-        await c.query(`SET LOCAL statement_timeout = '60s'`); // design N9: org-wide reports
-        const rows = (await c.query<Row>(
-          `SELECT group_id, group_name, marketing_status, candidates, placed_in_period FROM authz.market_report($1, $2, $3, $4)`,
-          [q.groupBy, q.placedFrom ?? null, q.placedTo ?? null, forExport])).rows;
-        if (after) await after(c, rows);
-        return rows;
-      });
-    } catch (err) {
-      if ((err as { code?: string }).code === "57014") throw new ServiceUnavailableException("The report took too long. Try again later.");
-      throw err;
-    }
+    // design N9: org-wide reports (report executor: raised timeout, report slot, 503 + Retry-After on timeout).
+    return this.reports.run(user.id, { timeoutDetail: "The report took too long. Try again later." }, async (c) => {
+      const rows = (await c.query<Row>(
+        `SELECT group_id, group_name, marketing_status, candidates, placed_in_period FROM authz.market_report($1, $2, $3, $4)`,
+        [q.groupBy, q.placedFrom ?? null, q.placedTo ?? null, forExport])).rows;
+      if (after) await after(c, rows);
+      return rows;
+    });
   }
 
   private build(q: MarketReportQuery, rows: Row[]) {
@@ -108,9 +103,13 @@ export class MarketReportService {
     if (!this.viewLimiter.take(user.id)) {
       throw new HttpException("Too many report requests; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
     }
-    const { withPeriod, totals, groups } = this.build(q, await this.rows(user, q, false));
+    // Point-in-time counts: a short per-user cache (keyed by the query and the caller's report scopes) absorbs refreshes.
+    const key = { q, market: resolveScope(user.access, "report.market:read"), report: resolveScope(user.access, "report:read") };
+    const { asOf, rows } = await this.reports.cached("market-report", user.id, key,
+      async () => ({ asOf: new Date().toISOString(), rows: await this.rows(user, q, false) }));
+    const { withPeriod, totals, groups } = this.build(q, rows);
     return {
-      asOf: new Date().toISOString(),
+      asOf,
       groupBy: q.groupBy,
       placedBetween: withPeriod ? { from: q.placedFrom ?? null, to: q.placedTo ?? null, timeZone: MARKET_REPORT_TIME_ZONE } : null,
       inMarketStatuses: [...IN_MARKET_STATUSES],

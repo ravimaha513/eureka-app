@@ -11,7 +11,7 @@ import { documentScanJob } from "../src/worker/jobs/document-scan.js";
 import { DEFAULT_SCAN_OPTIONS } from "../src/worker/jobs/scan-pipeline.js";
 import { silentLogger } from "../src/worker/log.js";
 import { JobRunner } from "../src/worker/runner.js";
-import { createTestDb, type TestDb } from "./db-harness.js";
+import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { EICAR_TEST_STRING } from "../src/platform/storage/local-files.js";
 import { LOC, U, seedFixtures, toUserAccess } from "./fixtures.js";
 import { joinedEmployee } from "./employee-seed.js";
@@ -238,7 +238,9 @@ describe("companies and facilities: create, edit, validation", () => {
 describe("incharges and employees", () => {
   it("incharges: active users with a role at the location; duplicate 409; outsider 422; remove 204 then 404", async () => {
     const c = await company("locD", LOC.dallas);
-    const opts = (await ok<{ items: { id: string }[] }>("locD", "GET", `/api/v1/companies/${c.id}/incharge-options`)).items.map((x) => x.id);
+    const picker = await ok<{ items: { id: string }[]; truncated: boolean }>("locD", "GET", `/api/v1/companies/${c.id}/incharge-options`);
+    expect(picker.truncated).toBe(false); // R-23: true only when more than 50 people match
+    const opts = picker.items.map((x) => x.id);
     expect(opts).toContain(U.locD);
     expect(opts).not.toContain(U.r1a);
     expect(opts).not.toContain(opsA);
@@ -425,6 +427,23 @@ describe("bills", () => {
     }
     expect((await call("opsA", "PATCH", `/api/v1/bills/${b2.id}`, { amount: "1" }, ifMatch(3))).statusCode).toBe(404);
     expect((await call("opsA", "POST", `/api/v1/bills/${b2.id}/void`, { reason: "x" })).statusCode).toBe(404);
+  });
+
+  it("void takes an optional If-Match (D-13): stale is 412 and the bill stays; a match voids it", async () => {
+    const { c, water } = await setup();
+    const b = await bill(c.id, water.id, "75.00", "2025-04");
+    expect((await ok<{ rowVersion: number }>("locD", "PATCH", `/api/v1/bills/${b.id}`, { amount: "76.00" }, 200, ifMatch(1))).rowVersion).toBe(2);
+    const stale = await call("locD", "POST", `/api/v1/bills/${b.id}/void`, { reason: "Entered twice" }, ifMatch(1));
+    expect([stale.statusCode, stale.json().detail]).toEqual([412, "stale"]);
+    expect((await db.admin.query("SELECT voided_at FROM eureka.utility_bill WHERE id = $1", [b.id])).rows[0].voided_at).toBeNull();
+    // The stale check also holds in the database (a version that moved after the API's read).
+    const sql = asUser(db.app, U.locD, (cl) => cl.query("SELECT authz.bill_void($1, 'x', 1)", [b.id]));
+    await expect(sql).rejects.toThrow(/stale/);
+    expect((await call("opsA", "POST", `/api/v1/bills/${b.id}/void`, { reason: "x" }, ifMatch(1))).statusCode).toBe(404);
+    const done = await call("locD", "POST", `/api/v1/bills/${b.id}/void`, { reason: "Entered twice" }, ifMatch(2));
+    expect(done.statusCode, done.body).toBe(200);
+    expect(done.json()).toEqual({ id: b.id, voided: true, rowVersion: 3 });
+    expect((await call("locD", "POST", `/api/v1/bills/${b.id}/void`, { reason: "again" }, ifMatch(3))).json().detail).toBe("bill_voided");
   });
 
   it("summaries: totals, months zero-filled, by type and by owner, voided excluded; facilities separate", async () => {

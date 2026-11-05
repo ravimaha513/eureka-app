@@ -63,3 +63,24 @@ Returns `{ changed: string[], submission }` (`changed` empty when every value ma
 
 UI: the submission drawer's **Details** section has its own **Edit details** button
 (separate from **Next steps**, which moves the status) opening the Edit submission details dialog.
+
+## Concurrency and retries (migration 0507; audit R-10 / R-14)
+
+- **`rowVersion`**: every submission item (list, detail, `PATCH` responses) carries it.
+  `eureka.submission.row_version` is server-managed: 1 on insert (the insert guard refuses
+  anything else), +1 on every update (status transition, detail edit, any other path).
+- **Optional `If-Match: "<rowVersion>"`** on `PATCH /:id` and `PATCH /:id/status`. No header:
+  as before (last write wins). Header present and not the current version (or not a version
+  at all): **412 `stale`**, nothing changes. Checked after 404/403 and before the 422s; a
+  write that lands between the check and the definer's row lock is also 412.
+  `PATCH /:id/status` returns `{ id, status, rejectionReason, rowVersion }`; `PATCH /:id`
+  returns the new version in `submission.rowVersion` (unchanged when `changed` is empty).
+- **`POST /api/v1/submissions`** returns `{ id, duplicateWarning, rowVersion: 1 }` and takes an
+  optional **`Idempotency-Key`** (`platform/idempotency.ts`; printable ASCII, 1-200): a retry
+  with the same body returns the first response without creating anything; the same key with
+  another body is 409 `idempotency_key_reused`; a malformed key is 400 `invalid_idempotency_key`.
+  Keys are per user and kept 24 h. The candidate visibility check (404) runs before the key.
+- **Duplicate warning under concurrency**: the 90-day check (`authz.recent_submission_exists`,
+  per candidate and client) runs under a transaction advisory lock on that pair, so parallel
+  submissions of the same candidate to the same client (any of its jobs) are serialised: the
+  first gets `duplicateWarning: false`, every later one `true`.

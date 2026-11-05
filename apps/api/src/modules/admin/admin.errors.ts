@@ -1,7 +1,8 @@
 import {
   ConflictException,
   ForbiddenException,
-  type HttpException,
+  HttpException,
+  HttpStatus,
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
@@ -50,6 +51,15 @@ const CODES: Record<string, (code: string) => HttpException> = {
   location_scope_needs_location: (c) => new UnprocessableEntityException(c),
   unknown_department: (c) => new UnprocessableEntityException(c),
   role_department_mismatch: (c) => new UnprocessableEntityException(c),
+  // Admin/data separation (0500; docs/roles-api.md "Admin separation").
+  admin_permission_needs_admin_role: (c) => new UnprocessableEntityException(c),
+  business_permission_on_admin_role: (c) => new UnprocessableEntityException(c),
+  // Admin is only admin per user (0510): a legacy role that breaks the rule is not granted again,
+  // and a custom role an admin holds takes no business permission.
+  role_violates_admin_separation: (c) => new UnprocessableEntityException(c),
+  role_held_by_admin: (c) => new UnprocessableEntityException(c),
+  // Optional If-Match on role edits (0501): the role changed since the client read it.
+  stale: (c) => new HttpException(c, HttpStatus.PRECONDITION_FAILED),
   duplicate_user: (c) => new UnprocessableEntityException(c),
   invalid_manager: (c) => new UnprocessableEntityException(c),
   invalid_lead: (c) => new UnprocessableEntityException(c),

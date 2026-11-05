@@ -3,7 +3,7 @@ import { resolveScope } from "@eureka/shared";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
-import { scopePredicate } from "./candidates.service.js";
+import { scopePredicate } from "./candidate-common.js";
 
 interface SubmissionCounts {
   total: number;

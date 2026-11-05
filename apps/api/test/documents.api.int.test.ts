@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair } from "jose";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Logger } from "@nestjs/common";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { can, candidateVisible, documentAccess, resolveScope } from "@eureka/shared";
 import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
@@ -346,8 +347,9 @@ describe("restricted access matrix (every fixture user; with, without and expire
     if (a.read && readable && a.readRestricted) {
       expect(after.statusCode, after.body).toBe(200);
       const { url, expiresAt } = after.json() as { url: string; expiresAt: string };
-      expect(Date.parse(expiresAt) - Date.now()).toBeLessThanOrEqual(300_000);
-      expect(Date.parse(expiresAt) - Date.now()).toBeGreaterThan(240_000);
+      // Restricted links live 60 s, as internal ones (B-01: no step-up, so no longer-lived link).
+      expect(Date.parse(expiresAt) - Date.now()).toBeLessThanOrEqual(60_000);
+      expect(Date.parse(expiresAt) - Date.now()).toBeGreaterThan(30_000);
       const got = await app.inject({ method: "GET", url });
       expect(got.statusCode).toBe(200);
       expect(got.rawPayload.equals(body)).toBe(true);
@@ -388,6 +390,37 @@ describe("restricted access matrix (every fixture user; with, without and expire
     const r = await call(s, "POST", `/api/v1/documents/${restricted.id}/download`);
     expect(r.statusCode).toBe(200);
     expect(await grants()).toBeNull();
+  });
+
+  it("restricted opens are capped per user per 24 hours: 429 too_many_restricted_opens; warnings at 80 % and at the cap carry ids only", async () => {
+    const used = async () => Number((await db.admin.query(`SELECT
+        (SELECT count(*) FROM eureka.document_access WHERE user_id = $1 AND classification = 'restricted' AND at > now() - interval '24 hours')
+      + (SELECT count(*) FROM eureka.datahub_access WHERE user_id = $1 AND level = 'restricted' AND at > now() - interval '24 hours') AS n`,
+      [U.imm])).rows[0].n);
+    const n0 = await used();
+    // Cap n0 + 5: the high-water mark (80 %) is open number ceil(0.8 * cap).
+    const cap = n0 + 5;
+    const mark = Math.ceil(cap * 0.8);
+    await db.admin.query(`UPDATE authz.policy_setting SET value = $1 WHERE key = 'restricted_opens_per_day'`, [String(cap)]);
+    const warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+    try {
+      const s = await login(emailOf("imm"), true);
+      const codes: number[] = [];
+      for (let i = n0; i < cap; i++) codes.push((await call(s, "POST", `/api/v1/documents/${restricted.id}/download`)).statusCode);
+      expect(codes.every((c) => c === 200)).toBe(true);
+      const refused = await call(s, "POST", `/api/v1/documents/${restricted.id}/download`);
+      expect([refused.statusCode, refused.json().detail]).toEqual([429, "too_many_restricted_opens"]);
+      expect(await used()).toBe(cap);
+      // Internal documents are not capped.
+      expect((await call(s, "POST", `/api/v1/documents/${internal.id}/download`)).statusCode).toBe(200);
+      const lines = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith("restricted_open_"));
+      const expected = [`restricted_open_cap_reached ${JSON.stringify({ userId: U.imm })}`];
+      if (mark > n0) expected.unshift(`restricted_open_high_water ${JSON.stringify({ userId: U.imm, opens: mark, cap })}`);
+      expect(lines).toEqual(expected);
+    } finally {
+      warn.mockRestore();
+      await db.admin.query(`UPDATE authz.policy_setting SET value = '200' WHERE key = 'restricted_opens_per_day'`);
+    }
   });
 
   it("logging out ends the step-up with the session", async () => {
@@ -438,6 +471,39 @@ describe("access log, audit rows and the audit export (ids only)", () => {
       expect((await call(key, "GET", `/api/v1/document-access?documentId=${restricted.id}`)).statusCode).toBe(403);
     }
     expect((await call("acct", "GET", `/api/v1/document-access?documentId=${restricted.id}&extra=1`)).statusCode).toBe(422);
+  });
+
+  it("pages the log by (at, id) keyset: rows sharing a timestamp across a page boundary are neither lost nor repeated (B-07)", async () => {
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL session_replication_role = replica");
+      await c.query(`INSERT INTO eureka.document_access (document_id, user_id, action, doc_type, classification, at)
+        SELECT $1, $2, 'download', 'i9', 'restricted', '2031-01-01T00:00:00.123456Z' FROM generate_series(1, 3)`, [restricted.id, U.hr]);
+      await c.query("COMMIT");
+    } finally { c.release(); }
+    const url = `/api/v1/document-access?documentId=${restricted.id}`;
+    const everything = (await call("acct", "GET", url)).json();
+    expect(everything).toMatchObject({ truncated: false, nextCursor: null });
+    expect(everything.items).toHaveLength(4);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < 6; i++) {
+      const r = await call("acct", "GET", `${url}&limit=2${cursor ? `&cursor=${cursor}` : ""}`);
+      expect(r.statusCode, r.body).toBe(200);
+      seen.push(...(r.json().items as { id: string }[]).map((x) => x.id));
+      expect(r.json().truncated).toBe(r.json().nextCursor !== null);
+      cursor = r.json().nextCursor;
+      if (!cursor) break;
+    }
+    expect(seen).toEqual((everything.items as { id: string }[]).map((x) => x.id));
+    // Page 1 ends inside the tie: the deprecated `before` drops the third tied row, the cursor keeps it.
+    const first = (await call("acct", "GET", `${url}&limit=2`)).json();
+    const before = (await call("acct", "GET", `${url}&before=${encodeURIComponent(first.items[1].at)}`)).json().items as unknown[];
+    expect(before.length).toBeLessThan(2);
+    for (const q of [`&cursor=nope`, `&cursor=${first.nextCursor}&before=2031-01-01T00:00:00Z`]) {
+      expect((await call("acct", "GET", url + q)).statusCode, q).toBe(422);
+    }
   });
 
   it("each view is in the audit export as document.viewed with ids and codes only", async () => {
@@ -618,5 +684,39 @@ describe("configuration", () => {
     expect(loadConfig(dev).STEP_UP_TTL_MINUTES).toBe(10);
     expect(() => loadConfig({ ...dev, STEP_UP_TTL_MINUTES: "16" })).toThrow();
     expect(() => loadConfig({ ...dev, STEP_UP_MAX_AGE_SECONDS: "3600" })).toThrow();
+  });
+});
+
+describe("document list paging (R-23, B-07)", () => {
+  it("no query: everything up to the cap as before, with truncated=false; ?limit pages by (created_at, id) keyset", async () => {
+    const cand = await newCandidate(db, { teamId: own().teamId, recruiterId: U.r1a, locationId: own().locationId });
+    const path = `/api/v1/candidates/${cand.id}/documents`;
+    // Three documents sharing one creation time (the id breaks the tie), written directly: earlier tests
+    // used up the per-minute upload budget.
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL session_replication_role = replica");
+      await c.query(`WITH f AS (
+          INSERT INTO eureka.file_object (classification, content_type, size_bytes, uploaded_by, upload_expires_at)
+          SELECT 'internal', 'application/pdf', 10, $2, now() + interval '1 hour' FROM generate_series(1, 3) RETURNING id)
+        INSERT INTO eureka.document (candidate_id, doc_type, classification, file_id, created_by, created_at)
+        SELECT $1, 'offer_letter', 'internal', f.id, $2, '2030-05-05T05:05:05.555555Z' FROM f`, [cand.id, U.r1a]);
+      await c.query("COMMIT");
+    } finally { c.release(); }
+    const all = (await call("r1a", "GET", path)).json();
+    expect(all).toMatchObject({ truncated: false, nextCursor: null, canUpload: true });
+    expect(all.items).toHaveLength(3);
+    const p1 = (await call("r1a", "GET", `${path}?limit=2`)).json();
+    expect(p1.truncated).toBe(true);
+    expect(p1.items).toHaveLength(2);
+    const p2 = (await call("r1a", "GET", `${path}?limit=2&cursor=${p1.nextCursor}`)).json();
+    expect(p2).toMatchObject({ truncated: false, nextCursor: null });
+    expect([...p1.items, ...p2.items].map((d: { id: string }) => d.id)).toEqual(all.items.map((d: { id: string }) => d.id));
+    // Unknown keys stay ignored (the route took no query before); a malformed cursor or limit is 422.
+    expect((await call("r1a", "GET", `${path}?foo=1`)).statusCode).toBe(200);
+    for (const q of ["cursor=nope", "limit=0", "limit=201"]) expect((await call("r1a", "GET", `${path}?${q}`)).statusCode, q).toBe(422);
+    // Scope still applies to outsiders.
+    expect([403, 404]).toContain((await call("r2a", "GET", `${path}?limit=2`)).statusCode);
   });
 });

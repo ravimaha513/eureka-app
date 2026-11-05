@@ -1,9 +1,10 @@
 import { Body, Controller, Delete, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from "@nestjs/common";
-import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
+import { CurrentUser, RequirePermission, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { parseIfMatch } from "../../platform/http/if-match.js";
 import {
   CreatePreferredVendor, PreferredVendorQuery, PreferredVendorsService, UpdatePreferredVendor,
 } from "./preferred-vendors.service.js";
+import { ApiBody, ApiQuery } from "../../platform/http/api-doc.js";
 
 export { PreferredVendorsService };
 
@@ -16,16 +17,20 @@ export { PreferredVendorsService };
 export class PreferredVendorsController {
   constructor(private readonly svc: PreferredVendorsService) {}
 
+  @ApiQuery(PreferredVendorQuery)
   @Get()
+  @SelfService()
   list(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.list(user, PreferredVendorQuery.parse(q));
   }
 
   @Get(":id")
+  @SelfService()
   get(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.svc.get(user, id);
   }
 
+  @ApiBody(CreatePreferredVendor)
   @Post()
   @RequirePermission("vendor.preferred:create")
   create(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
@@ -33,6 +38,7 @@ export class PreferredVendorsController {
   }
 
   /** `If-Match` carries the rowVersion the client saw (428 without it, 412 when stale). */
+  @ApiBody(UpdatePreferredVendor)
   @Patch(":id")
   @RequirePermission("vendor.preferred:create")
   update(

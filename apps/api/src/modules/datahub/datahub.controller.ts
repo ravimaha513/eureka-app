@@ -5,6 +5,7 @@ import {
   AccessLogQuery, FileListQuery, FolderCreate, FolderUpdate, PeopleQuery, SearchQuery, UploadRequest,
 } from "./datahub.schemas.js";
 import { DatahubService } from "./datahub.service.js";
+import { ApiBody, ApiQuery } from "../../platform/http/api-doc.js";
 
 /**
  * DataHub (docs/datahub-api.md): organisation folders with security levels
@@ -24,6 +25,7 @@ export class DatahubController {
   }
 
   /** Optional Idempotency-Key: a retried create returns the first answer. */
+  @ApiBody(FolderCreate)
   @Post("folders")
   @RequirePermission("datahub:read")
   createFolder(@CurrentUser() user: AuthedUser, @Body() body: unknown, @Headers("idempotency-key") key: string | undefined) {
@@ -37,6 +39,7 @@ export class DatahubController {
   }
 
   /** Optimistic concurrency: `If-Match` carries the rowVersion the client saw (428 without it, 412 when stale). */
+  @ApiBody(FolderUpdate)
   @Patch("folders/:id")
   @RequirePermission("datahub:read")
   updateFolder(
@@ -73,12 +76,14 @@ export class DatahubController {
     await this.svc.setMember(user, id, userId, false);
   }
 
+  @ApiQuery(AccessLogQuery)
   @Get("folders/:id/access-log")
   @RequirePermission("datahub:read")
   accessLog(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Query() query: unknown) {
     return this.svc.accessLog(user, id, AccessLogQuery.parse(query));
   }
 
+  @ApiQuery(FileListQuery)
   @Get("folders/:id/files")
   @RequirePermission("datahub:read")
   files(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Query() query: unknown) {
@@ -86,6 +91,7 @@ export class DatahubController {
   }
 
   /** Returns a presigned POST into quarantine/ (2 minutes); the version opens after a clean scan. */
+  @ApiBody(UploadRequest)
   @Post("folders/:id/files")
   @RequirePermission("datahub:read")
   upload(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
@@ -105,7 +111,7 @@ export class DatahubController {
     await this.svc.deleteFile(user, id);
   }
 
-  /** Presigned GET (attachment; 60 s, restricted 5 min) for a clean version; logged. POST so it carries the CSRF token. */
+  /** Presigned GET (attachment; 60 s) for a clean version; logged; restricted opens are capped per user per 24 h (429). POST so it carries the CSRF token. */
   @Post("versions/:id/download")
   @HttpCode(200)
   @RequirePermission("datahub:read")
@@ -113,6 +119,7 @@ export class DatahubController {
     return this.svc.download(user, id);
   }
 
+  @ApiQuery(SearchQuery)
   @Get("search")
   @RequirePermission("datahub:read")
   search(@CurrentUser() user: AuthedUser, @Query() query: unknown) {
@@ -120,6 +127,7 @@ export class DatahubController {
   }
 
   /** People picker for restricted folders (datahub:manage or datahub:create, checked in the service). */
+  @ApiQuery(PeopleQuery)
   @Get("people")
   @RequirePermission("datahub:read")
   people(@CurrentUser() user: AuthedUser, @Query() query: unknown) {

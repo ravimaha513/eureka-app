@@ -39,7 +39,7 @@ async function login(key: Key) {
   sessions.set(key, s);
   return s;
 }
-async function call(key: Key, method: "GET" | "POST" | "PUT", url: string, payload?: unknown, headers: Record<string, string> = {}) {
+async function call(key: Key, method: "GET" | "POST" | "PUT" | "DELETE", url: string, payload?: unknown, headers: Record<string, string> = {}) {
   const s = await login(key);
   return app.inject({ method, url, payload: payload as never,
     headers: { cookie: s.cookie, ...(method !== "GET" ? { "x-csrf-token": s.csrf } : {}), ...headers } });
@@ -142,6 +142,39 @@ describe("staff: reading applications (JP-17..JP-19)", () => {
     expect(ex.body).toContain("Sales Development Representative,Asha Iyer,applicant-a@example.com");
     expect((await call("l2", "POST", "/api/v1/applications/export", {})).statusCode).toBe(403);
     expect((await call("hr", "POST", "/api/v1/applicants/export", {})).body).toContain("Asha Iyer");
+  });
+
+  it("the CSV follows the JSON email rule: application:read without applicant:read gets empty Email cells (A-04)", async () => {
+    // A custom role with application:read only, held by the job's hiring manager (a lead: no applicant:read,
+    // but RLS shows them the applicant through their job, so the email would reach the CSV).
+    const role = await call("admin", "POST", "/api/v1/admin/roles", { label: "Hiring coordinator", cloneFrom: "hr" });
+    expect(role.statusCode, role.body).toBe(201);
+    const key = role.json().key as string;
+    expect((await call("admin", "PUT", `/api/v1/admin/roles/${key}/grants`, { grants: { "application:read": "org" } })).statusCode).toBe(204);
+    const req = await call("admin", "POST", "/api/v1/admin/role-requests", { userId: U.l2, role: key });
+    expect(req.json().status, req.body).toBe("applied");
+
+    const header = "Job title,Applicant,Email,Company,Applied,Overall rating,Status";
+    const masked = await call("l2", "POST", "/api/v1/applications/export", {});
+    expect(masked.statusCode, masked.body).toBe(200);
+    const lines = masked.body.trim().split(/\r?\n/);
+    expect(lines[0]).toBe(header);
+    expect(lines.some((l) => l.startsWith("Sales Development Representative,Asha Iyer,,"))).toBe(true);
+    expect(masked.body).not.toContain("@example.com");
+    // The JSON list masks the same caller's emails.
+    const json = (await call("l2", "GET", "/api/v1/applications")).json().items as { applicant: { email: string } }[];
+    expect(json.length).toBeGreaterThan(0);
+    for (const a of json) expect(a.applicant.email).toMatch(/•••/);
+
+    const full = await call("hr", "POST", "/api/v1/applications/export", {});
+    expect(full.body.trim().split(/\r?\n/)[0]).toBe(header);
+    expect(full.body).toContain("Sales Development Representative,Asha Iyer,applicant-a@example.com");
+    // Audit row unchanged: counts and filters only.
+    const { rows } = await db.admin.query(`SELECT changes FROM eureka.audit_event WHERE action = 'application.export' AND actor_id = $1`, [U.l2]);
+    expect(rows).toEqual([{ changes: { rows: expect.any(Number), truncated: false, cap: expect.any(Number), status: null, jobId: null, search: false } }]);
+    // Back to a plain lead for the tests below.
+    expect((await call("admin", "DELETE", `/api/v1/admin/users/${U.l2}/roles/${key}`)).statusCode).toBe(204);
+    expect((await call("l2", "POST", "/api/v1/applications/export", {})).statusCode).toBe(403);
   });
 });
 

@@ -2,8 +2,8 @@ import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
-import { BULK_CANDIDATE_CALLS_PER_MINUTE } from "../src/modules/candidates/candidates.service.js";
-import { createTestDb, type TestDb } from "./db-harness.js";
+import { BULK_CANDIDATE_CALLS_PER_MINUTE, BULK_CANDIDATE_ROWS_PER_DAY } from "../src/modules/candidates/candidates.service.js";
+import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, T, TECH_ID, U, seedFixtures } from "./fixtures.js";
 
 /** New candidates for a batch from the Excel template (docs/candidates-api.md). */
@@ -132,5 +132,80 @@ describe("bulk add", () => {
     let last = 0;
     for (let i = 0; i <= BULK_CANDIDATE_CALLS_PER_MINUTE; i++) last = (await bulk("l3", { dryRun: true, rows: [row(40)] })).statusCode;
     expect(last).toBe(429);
+  });
+});
+
+/** Daily row budget (A-01) and the set-based contact check (A-07), migration 0505. */
+describe("bulk add: daily row budget and set-based check", () => {
+  const used = async (id: string) => (await db.admin.query(
+    `SELECT rows_checked FROM eureka.bulk_candidate_budget WHERE user_id = $1 AND day = (now() AT TIME ZONE 'UTC')::date`, [id])).rows[0]?.rows_checked as number | undefined;
+  const lastAudit = async (actor: string, action: string) => (await db.admin.query(
+    `SELECT changes FROM eureka.audit_event WHERE actor_id = $1 AND action = $2 ORDER BY seq DESC LIMIT 1`, [actor, action])).rows[0]?.changes;
+
+  it("charges previews and real runs, only rows checked against existing contacts, and records the counts", async () => {
+    const before = (await used(U.l1)) ?? 0;
+    // Row 2 is refused in memory (not charged); row 3 has a contact an earlier test created (charged, taken).
+    const res = await bulk("l1", { dryRun: true, rows: [row(60), row(61, { email: "nope" }), row(62, { email: "bulk1@example.com" })] });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().rows.map((r: { error?: string }) => r.error)).toEqual([undefined, "invalid_email", "duplicate_email"]);
+    expect(await used(U.l1)).toBe(before + 2);
+    expect(await lastAudit(U.l1, "batch.candidates_checked")).toEqual({ rows: 3, failed: 2, checked: 2, taken: 1 });
+    const done = await bulk("l1", { dryRun: false, rows: [row(63)] });
+    expect(done.json()).toMatchObject({ committed: true, created: 1 });
+    expect(await used(U.l1)).toBe(before + 3);
+    expect(await lastAudit(U.l1, "batch.candidates_added")).toEqual({ teamId: T.t1, created: 1, checked: 1, taken: 0 });
+  });
+
+  it("answers 429 bulk_budget_exceeded past the budget, preview or not, and charges nothing then", async () => {
+    await db.admin.query(`INSERT INTO eureka.bulk_candidate_budget (user_id, day, rows_checked) VALUES ($1, (now() AT TIME ZONE 'UTC')::date, $2)`,
+      [U.m2, BULK_CANDIDATE_ROWS_PER_DAY - 1]);
+    const over = await bulk("m2", { dryRun: true, teamId: T.t3, rows: [row(70), row(71)] });
+    expect(over.statusCode).toBe(429);
+    expect(over.json().detail).toBe("bulk_budget_exceeded");
+    expect(await used(U.m2)).toBe(BULK_CANDIDATE_ROWS_PER_DAY - 1);
+    expect((await bulk("m2", { dryRun: true, teamId: T.t3, rows: [row(70)] })).statusCode).toBe(200);
+    expect(await used(U.m2)).toBe(BULK_CANDIDATE_ROWS_PER_DAY);
+    expect((await bulk("m2", { dryRun: false, teamId: T.t3, rows: [row(72)] })).statusCode).toBe(429);
+    expect(await count("bulk72@example.com")).toBe(0);
+    // Rows refused in memory cost nothing, so a file of only bad rows is still answered.
+    expect((await bulk("m2", { dryRun: true, teamId: T.t3, rows: [row(73, { email: "nope" })] })).statusCode).toBe(200);
+    // 404 / 403 / 422 come before the budget.
+    expect((await bulk("m2", { dryRun: true, rows: [row(74)] }, "00000000-0000-4000-8000-000000000000")).statusCode).toBe(404);
+  });
+
+  it("previews a full 500-row file in one pass and commits it all or nothing", async () => {
+    const rows = Array.from({ length: 500 }, (_, i) => ({
+      firstName: `Big${i}`, lastName: "File", phone: `+1 972 555 ${String(1000 + i)}`, email: `big${i}@example.com` }));
+    const t0 = Date.now();
+    const preview = await bulk("ceo", { dryRun: true, teamId: T.t1, rows });
+    expect(preview.statusCode).toBe(200);
+    expect(Date.now() - t0).toBeLessThan(15_000); // smoke check, not a benchmark
+    expect(preview.json()).toMatchObject({ dryRun: true, committed: false, created: 0, failed: 0 });
+    expect(await count("big0@example.com")).toBe(0);
+    const done = await bulk("ceo", { dryRun: false, teamId: T.t1, rows });
+    expect(done.json()).toMatchObject({ committed: true, created: 500, failed: 0 });
+    const { rows: audits } = await db.admin.query(
+      `SELECT count(*)::int AS n FROM eureka.audit_event WHERE actor_id = $1 AND action = 'candidate.created' AND changes ->> 'bulk' = 'true'`, [U.ceo]);
+    expect(audits[0].n).toBe(500);
+    // A second run of the same file: every row taken, nothing created, per-row codes.
+    const again = await bulk("ceo", { dryRun: false, teamId: T.t1, rows: rows.slice(0, 3) });
+    expect(again.json()).toMatchObject({ committed: false, created: 0, failed: 3 });
+    expect(again.json().rows.map((r: { error?: string }) => r.error)).toEqual(["duplicate_email", "duplicate_email", "duplicate_email"]);
+  });
+
+  it("reports a taken phone when only the phone matches (email checked first, as the trigger does)", async () => {
+    const res = await bulk("l1", { dryRun: true, rows: [row(80, { phone: "+1 972 555 1000" }), row(81, { email: "big1@example.com", phone: "+1 972 555 1002" })] });
+    expect(res.json().rows.map((r: { error?: string }) => r.error)).toEqual(["duplicate_phone", "duplicate_email"]);
+  });
+
+  it("keeps the budget table and the contact check to the definer functions", async () => {
+    await expect(asUser(db.app, U.l1, (c) => c.query(`SELECT * FROM eureka.bulk_candidate_budget`))).rejects.toThrow(/permission denied/);
+    await expect(asUser(db.app, U.r1a, (c) => c.query(`SELECT * FROM authz.candidate_contacts_taken(ARRAY['big1@example.com'], NULL)`)))
+      .rejects.toThrow(/not_permitted/);
+    await expect(asUser(db.app, U.r1a, (c) => c.query(`SELECT authz.bulk_candidate_budget_take(1, 2000)`))).rejects.toThrow(/not_permitted/);
+    const found = await asUser(db.app, U.l1, (c) => c.query(
+      `SELECT kind, value FROM authz.candidate_contacts_taken(ARRAY['BIG1@example.com', 'none@example.com'], ARRAY['+19725551003']) ORDER BY 1`));
+    expect(found.rows).toEqual([{ kind: "email", value: "big1@example.com" }, { kind: "phone", value: "+19725551003" }]);
+    await expect(asUser(db.app, U.l1, (c) => c.query(`SELECT authz.bulk_candidate_budget_take(-1, 2000)`))).rejects.toThrow(/invalid_budget/);
   });
 });

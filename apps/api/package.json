@@ -8,6 +8,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "../../scripts/test-api-gate.sh",
     "db:migrate": "tsx src/db/migrate.ts",
+    "openapi": "node --import @swc-node/register/esm-register scripts/openapi.ts",
+    "openapi:check": "node --import @swc-node/register/esm-register scripts/openapi.ts --check",
     "db:seed": "tsx src/db/seed-dev.ts",
     "db:seed-load": "tsx src/db/seed-load.ts",
     "dev": "node --watch --import @swc-node/register/esm-register src/main.ts",
@@ -34,6 +36,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@asteasolutions/zod-to-openapi": "7.3.4",
     "@swc-node/register": "^1.12.1",
     "@swc/cli": "^0.8.1",
     "@swc/core": "^1.16.2",

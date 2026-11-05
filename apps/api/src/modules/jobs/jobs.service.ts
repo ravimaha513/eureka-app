@@ -1,16 +1,15 @@
-import { createHash } from "node:crypto";
 import {
-  BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException,
+  ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
 import type pg from "pg";
 import {
-  can, creatableJobKinds, jobAllowed, resolveScope, type JobKind, type JobRef, type RichDoc, type UserAccess,
+  can, creatableJobKinds, jobAllowed, jobTransitionAllowed, jobTransitionTargets, resolveScope, type JobKind, type JobRef, type RichDoc, type UserAccess,
 } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
-import { canonical, IdempotencyKey } from "../../platform/idempotency.js";
+import { idempotent } from "../../platform/idempotency.js";
 import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import { PARTY_PERMISSIONS } from "../lookups/lookups.controller.js";
 import type { CreateJob, JobListQuery, UpdateJob } from "./jobs.schemas.js";
@@ -121,6 +120,7 @@ const CODES: Record<string, () => HttpException> = {
   invalid_hiring_manager: () => new UnprocessableEntityException("invalid_hiring_manager"),
   client_locked: () => new UnprocessableEntityException("client_locked"),
   server_managed_field: () => new UnprocessableEntityException("server_managed_field"),
+  invalid_transition: () => new UnprocessableEntityException("invalid_transition"),
 };
 
 /** Maps the job guard's coded errors and constraint violations (migration 0060) to problem details. */
@@ -143,6 +143,7 @@ export class JobsService {
   present(access: UserAccess, r: JobRow, companies?: ReadonlyMap<string, string>) {
     const pay = r.pay_amount !== null && payVisible(access, r)
       ? { amount: Number(r.pay_amount), frequency: r.pay_frequency, currency: r.pay_currency } : null;
+    const edit = jobAllowed(access, "job:manage", jobRef(r));
     return {
       id: r.id,
       kind: r.kind,
@@ -171,7 +172,8 @@ export class JobsService {
       updatedAt: r.updated_at,
       postedAt: r.posted_at,
       rowVersion: r.row_version,
-      actions: { edit: jobAllowed(access, "job:manage", jobRef(r)) },
+      /** JP-3a: `statusTargets` lists the statuses a PATCH may move the job to (state-machines.ts). */
+      actions: { edit, statusTargets: edit ? jobTransitionTargets(r.status) : [] },
     };
   }
 
@@ -261,32 +263,9 @@ export class JobsService {
   async create(user: AuthedUser, body: CreateJob, idempotencyKey: string | undefined) {
     this.checkKind(user, body.kind);
     this.checkClientVisible(user, body.clientId);
-    let key: string | null = null;
-    if (idempotencyKey !== undefined) {
-      const k = IdempotencyKey.safeParse(idempotencyKey);
-      if (!k.success) throw new BadRequestException("invalid_idempotency_key");
-      key = k.data;
-    }
-    const hash = createHash("sha256").update(canonical(body)).digest("hex");
-    return this.db.withUser(user.id, async (c) => {
-      if (key !== null) {
-        const claimed = await c.query(
-          `INSERT INTO eureka.idempotency_key (key, user_id, endpoint, request_hash) VALUES ($1,$2,$3,$4)
-           ON CONFLICT DO NOTHING RETURNING key`, [key, user.id, ENDPOINT, hash]);
-        if (claimed.rowCount === 0) {
-          const prior = (await c.query<{ request_hash: string; response: unknown }>(
-            `SELECT request_hash, response FROM eureka.idempotency_key WHERE user_id = $1 AND endpoint = $2 AND key = $3`,
-            [user.id, ENDPOINT, key])).rows[0];
-          if (!prior || prior.request_hash !== hash || prior.response === null) throw new ConflictException("idempotency_key_reused");
-          return prior.response as { id: string; rowVersion: number };
-        }
-      }
+    return this.db.withUser(user.id, (c) => idempotent(c, user, ENDPOINT, idempotencyKey, body, { required: false }, async () => {
       const id = await this.insert(c, body);
       const result = { id, rowVersion: 1 };
-      if (key !== null) {
-        await c.query(`UPDATE eureka.idempotency_key SET response = $4 WHERE user_id = $1 AND endpoint = $2 AND key = $3`,
-          [user.id, ENDPOINT, key, result]);
-      }
       // Ids and codes only (rule 5): no titles, pay or free text.
       await this.audit.record(c, {
         actorId: user.id, action: "job.created", entityType: "job", entityId: id,
@@ -294,7 +273,7 @@ export class JobsService {
           hiringManagerId: body.hiringManagerId ?? null, publishedToPortal: body.publishedToPortal },
       });
       return result;
-    });
+    }));
   }
 
   private async insert(c: pg.PoolClient, b: CreateJob): Promise<string> {
@@ -329,6 +308,10 @@ export class JobsService {
       if (kind === "client_requirement" && (b.companyId != null || b.clientId === null)) throw new UnprocessableEntityException("invalid_job_reference");
       if (kind === "internal_opening" && b.clientId != null) throw new UnprocessableEntityException("client_not_allowed");
       if (kind === "client_requirement" && b.publishedToPortal === true) throw new UnprocessableEntityException("portal_internal_only");
+      // JP-3a: the job lifecycle (state-machines.ts); eureka.job_guard re-checks it. An unchanged status is no transition.
+      if (b.status !== undefined && b.status !== cur.status && !jobTransitionAllowed(cur.status, b.status)) {
+        throw new UnprocessableEntityException("invalid_transition");
+      }
       const sets: string[] = [];
       const params: unknown[] = [];
       const p = (v: unknown) => { params.push(v); return `$${params.length}`; };

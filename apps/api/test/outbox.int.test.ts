@@ -3,8 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadWorkerConfig } from "../src/worker/config.js";
 import { MailRejected, type Mail, type MailTransport } from "../src/worker/feedback-mail.js";
 import {
-  cleanupIdempotencyKeys, deliverEvent, dueOutboxEvents, idempotencyCleanupJob, outboxDeliveryJob, outboxPruneJob, pruneOutbox,
-  pruneOutboxJobRuns,
+  cleanupIdempotencyKeys, deadLetterEvent, deliverEvent, dueOutboxEvents, idempotencyCleanupJob, outboxBacklog, outboxDeliveryJob,
+  outboxPruneJob, pruneOutbox, pruneOutboxJobRuns, skipBacklog,
 } from "../src/worker/jobs/outbox.js";
 import { createLogger, silentLogger } from "../src/worker/log.js";
 import { JobRunner } from "../src/worker/runner.js";
@@ -502,6 +502,114 @@ describe("outbox hardening (migration 0029)", () => {
     expect(mail.sent).toHaveLength(0);
     expect(lines.some((l) => l.includes("OUTBOX_DELIVER_SINCE") && l.includes('"skipped":1'))).toBe(true);
     expect(() => loadWorkerConfig({ DATABASE_URL: "postgres://w@h/d", EXPORT_DIR: "/tmp/x", OUTBOX_DELIVER_SINCE: "yesterday" })).toThrow();
+  });
+});
+
+/** An unpublished placement.created event the registry cannot render (a poison message). */
+async function poisonEvent(): Promise<string> {
+  const id = (await db.admin.query<{ id: string }>("SELECT gen_random_uuid() AS id")).rows[0]!.id;
+  await force(`INSERT INTO eureka.outbox_event (id, type, aggregate_type, aggregate_id, payload)
+    VALUES ($1, 'placement.created', 'placement', gen_random_uuid(), '{"status":"bogus"}')`, [id]);
+  return id;
+}
+const deadAt = async (id: string) =>
+  (await db.admin.query("SELECT dead_at FROM eureka.outbox_event WHERE id = $1", [id])).rows[0]?.dead_at ?? null;
+const jobStatus = async (key: string) => (await db.admin.query<{ status: string; attempts: number; detail: Record<string, unknown> }>(
+  "SELECT status, attempts, detail FROM eureka.job_run WHERE job_name = 'outbox-delivery' AND run_key = $1", [key])).rows[0];
+
+describe("outbox dead letter (migration 0518)", () => {
+  it("a poison event is dead-lettered after N attempts, kept for inspection, never retried, and does not block others", async () => {
+    const poison = await poisonEvent();
+    const { eventId: healthy } = await newPlacement();
+    const lines: string[] = [];
+    const log = createLogger({}, (l) => lines.push(l));
+    const mail = new FakeMail();
+    const job = outboxDeliveryJob(mail, ORIGIN, { batchSize: 500, deadLetterAfter: 3 });
+    // Backoff of 1 ms so the test can retry at once (the backoff itself is covered above).
+    const runner = new JobRunner(db.worker, [job], log, () => undefined, { backoffBaseMs: 1, backoffMaxMs: 1 });
+
+    const due = await job.dueKeys(new Date(), { pool: db.worker, log });
+    expect(due.indexOf(poison)).toBeLessThan(due.indexOf(healthy)); // older first
+    const pause = () => new Promise((r) => setTimeout(r, 5));
+    expect(await runner.runOnce(job, poison)).toBe("failed");
+    await pause();
+    expect(await runner.runOnce(job, poison)).toBe("failed");
+    expect(await deadAt(poison)).toBeNull();
+    await pause();
+    expect(await runner.runOnce(job, poison)).toBe("dead");
+
+    expect(await deadAt(poison)).not.toBeNull();
+    expect(await publishedAt(poison)).toBeNull();
+    expect(await jobStatus(poison)).toMatchObject({ status: "dead", attempts: 3, detail: { deadLettered: true } });
+    expect(lines.some((l) => l.includes('"metric":"outbox_dead_lettered"') && l.includes(poison) && l.includes('"alert":true'))).toBe(true);
+    expect(lines.some((l) => l.includes('"metric":"job_dead_lettered"') && l.includes('"job":"outbox-delivery"'))).toBe(true);
+
+    // Excluded from delivery: not due, not claimable, never published or pruned.
+    expect(await dueOutboxEvents(db.worker, 500)).not.toContain(poison);
+    expect(await runner.runOnce(job, poison)).toBe("dead");
+    await pruneOutbox(db.worker, 7, ctx());
+    expect(await deadAt(poison)).not.toBeNull();
+    // The healthy event behind it is delivered.
+    expect(await dueOutboxEvents(db.worker, 500)).toContain(healthy);
+    expect(await runner.runOnce(job, healthy)).toBe("ran");
+    expect(mail.to()).toEqual(EXPECTED);
+
+    // Backlog metric line: dead-lettered events counted apart from pending ones.
+    const b = await outboxBacklog(db.worker);
+    expect(b.deadLettered).toBeGreaterThanOrEqual(1);
+    lines.length = 0;
+    await outboxDeliveryJob(mail, ORIGIN, { batchSize: 1 }).dueKeys(new Date(), { pool: db.worker, log });
+    const metric = lines.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.metric === "outbox_backlog");
+    expect(metric).toMatchObject({ deadLettered: b.deadLettered, pending: b.pending });
+    expect(typeof metric!.oldestPendingSeconds).toBe("number");
+  });
+
+  it("the job's threshold decides; below it a failure keeps its backoff", async () => {
+    const runner = new JobRunner(db.worker, [], silentLogger);
+    const strict = outboxDeliveryJob(new FakeMail(), ORIGIN, { batchSize: 500, deadLetterAfter: 1 });
+    const lenient = outboxDeliveryJob(new FakeMail(), ORIGIN, { batchSize: 500, deadLetterAfter: 5 });
+    const a = await poisonEvent();
+    expect(await runner.runOnce(strict, a)).toBe("dead"); // the attempt that fails counts
+    const b = await poisonEvent();
+    expect(await runner.runOnce(lenient, b)).toBe("failed");
+    expect(await deadAt(b)).toBeNull();
+    expect((await jobStatus(b))!.status).toBe("failed");
+    expect(() => outboxDeliveryJob(null, null, { batchSize: 1, deadLetterAfter: 0 })).toThrow(/dead-letter/);
+    expect(() => loadWorkerConfig({ DATABASE_URL: "postgres://w@h/d", EXPORT_DIR: "/tmp/x", OUTBOX_DEAD_LETTER_ATTEMPTS: "2" })).toThrow();
+    expect(loadWorkerConfig({ DATABASE_URL: "postgres://w@h/d", EXPORT_DIR: "/tmp/x" })).toMatchObject({
+      OUTBOX_DEAD_LETTER_ATTEMPTS: 12, OUTBOX_TICK_SECONDS: 10 });
+  });
+
+  it("the worker may dead-letter an unpublished event once and change nothing else; nobody else may", async () => {
+    const { eventId } = await newPlacement();
+    expect(await denied(db.worker, "UPDATE eureka.outbox_event SET dead_at = now(), payload = '{}' WHERE id = $1", [eventId]))
+      .toMatch(/permission denied/);
+    expect(await denied(db.admin, "UPDATE eureka.outbox_event SET dead_at = now() WHERE id = $1", [eventId]))
+      .toMatch(/only through placement functions/);
+    expect(await denied(db.worker, "UPDATE eureka.outbox_event SET dead_at = now(), published_at = now() WHERE id = $1", [eventId]))
+      .toMatch(/row-level security|marked published/);
+    // Server-stamped time, once.
+    await db.worker.query("UPDATE eureka.outbox_event SET dead_at = '2000-01-01' WHERE id = $1", [eventId]);
+    const r = await db.admin.query("SELECT dead_at > now() - interval '1 minute' AS now FROM eureka.outbox_event WHERE id = $1", [eventId]);
+    expect(r.rows[0].now).toBe(true);
+    expect(await deadLetterEvent(db.worker, eventId)).toBe(false);
+    // A dead event cannot be published, and the backlog cut-off skips it instead of failing.
+    expect(await denied(db.worker, "UPDATE eureka.outbox_event SET published_at = now() WHERE id = $1", [eventId]))
+      .toMatch(/marked published/);
+    await force("UPDATE eureka.outbox_event SET created_at = now() - interval '3 days' WHERE id = $1", [eventId]);
+    await skipBacklog(db.worker, new Date(), silentLogger);
+    expect(await publishedAt(eventId)).toBeNull();
+    // A published event cannot be dead-lettered.
+    const published = await deliveredEvent();
+    expect(await deadLetterEvent(db.worker, published)).toBe(false);
+    // The worker cannot revive a dead job_run row or insert one.
+    const poison = await poisonEvent();
+    expect(await new JobRunner(db.worker, [], silentLogger)
+      .runOnce(outboxDeliveryJob(new FakeMail(), ORIGIN, { batchSize: 1, deadLetterAfter: 1 }), poison)).toBe("dead");
+    expect((await db.worker.query(`UPDATE eureka.job_run SET status = 'running', attempts = attempts + 1,
+      lease_until = now() + interval '1 minute' WHERE job_name = 'outbox-delivery' AND run_key = $1`, [poison])).rowCount).toBe(0);
+    expect(await denied(db.worker, `INSERT INTO eureka.job_run (job_name, run_key, status, lease_until)
+      VALUES ('x-dead', 'k', 'dead', NULL)`)).toMatch(/row-level security/);
   });
 });
 

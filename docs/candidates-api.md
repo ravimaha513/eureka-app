@@ -60,7 +60,7 @@ branch's base: that role does not exist here (interview prep is the interview co
 | `sort` | `default`, `priority`, `days`, `name` | order: id; P1 first; longest in market first (no start date last); name |
 
 Paging stays keyset: with a sort the cursor is still the last row's id, and the next page starts
-after that row's (sort key, id). Both list paths (scoped SQL in `candidates.service.ts`, open
+after that row's (sort key, id). Both list paths (scoped SQL in `candidate-list.service.ts`, open
 `authz.hotlist_page`) order the same way.
 
 Saved views (`POST/PATCH /hotlist/views`, `/candidates/views`) and `POST /hotlist/export` accept the same keys (the export
@@ -111,7 +111,18 @@ for anyone else). A view grants nothing: the list still applies the reader's own
 `GET /api/v1/hotlist/filter-options` (`hotlist:read`): `{ teams: [{ id, name, lead }], recruiters:
 [{ id, name }], guestHouses: [{ id, name }] }` for the filter selects (current recruiter-role
 holders; locations of kind `gh`). `POST /api/v1/hotlist/bulk/priority` (`candidate:update`)
-`{ ids, priority }` runs `PATCH /candidates/:id { priority }` per record, like the other bulk actions.
+`{ ids, priority }` applies the rules of `PATCH /candidates/:id { priority }` per record, like the other bulk actions.
+
+Hot List bulk actions (`/hotlist/bulk/{visibility,status,priority}`, up to 100 ids, R-12): one read of
+all ids under the caller's `candidate:read` scope sorts them in memory into `not_found` (not visible),
+`forbidden` (visible, not owned under the action's permission) and, for status, `invalid_transition`;
+the rest are written in one transaction, each under its own savepoint, through the same definer
+function or guarded UPDATE as the single-record endpoint, with the same per-record audit row
+(`candidate.visibility`, `candidate.transition`, `candidate.updated`). A record whose write fails is
+rolled back to its savepoint, audit row included, and reported with the single endpoint's code
+(`invalid_teams`, `placement_open`, `invalid_transition`, `forbidden`, `not_found`, else `failed`);
+the others still commit. Response `{ succeeded, failed, results: [{ id, ok, error? }] }` in request
+order, plus one `hotlist.bulk` summary audit row (`action, value, requested, succeeded, failed`).
 
 ## Profile fields (CA-3)
 
@@ -135,12 +146,30 @@ team), `confirmations` (times the candidate reached confirmation, from `candidat
 `canEditCompliance`; and, for owners of the candidate only (not through Open to all teams),
 `linkedinUrl`, `resumeUrl` and `companies`.
 
+`dobMasked` (`•• / •• / <year>`) follows the DOB rule (audit A-10): only callers holding the restricted
+`candidate.dob:read` over the candidate (HR, Immigration) get it; everyone else, owners included, gets `null`.
+
 `team_assigned_at` is server-managed: set on insert and whenever `team_id` changes, refused from any
 client (`candidate_profile_guard`), backfilled from the last assignment events.
 
 **Marketing status values** ("Active/Remote", "Active/All Teams", "N/A") are a derived label
 (`marketingStatusLabel`), not new statuses: "All Teams" mirrors `visibility`, "Remote" mirrors the stay,
 "N/A" is a candidate still in training. The status machine and every access rule are unchanged.
+
+## Optimistic concurrency (If-Match)
+
+`PATCH /candidates/:id`, `PUT /candidates/:id/compliance`, `/recruiter`, `/technical-rating`, `/visibility` and
+`POST /candidates/:id/transition` accept an **optional** `If-Match: "<rowVersion>"` (`W/"3"` and a bare `3` work too)
+with the `rowVersion` of `GET /candidates/:id`:
+
+- no header (or `*`): the write runs as before, unchecked;
+- a version the candidate no longer has: **412 `stale`**, nothing written (an unparsable header can never match: 412);
+- 404 / 403 still come first.
+
+Every one of these responses now carries the new `rowVersion` (additive). Direct updates check with
+`AND row_version = $n`; the definer paths (compliance, visibility, transition) lock the row first with
+`authz.candidate_version_lock` (0505). The Hot List bulk actions and other internal callers send no version.
+A required header (428) is a later, breaking step.
 
 ## Company links and documents status (CA-4)
 
@@ -272,13 +301,42 @@ upload is also on the batch's Students tab while the batch is open.
 - `POST /api/v1/batches/:id/candidates/bulk` (`candidate:create`) `{ dryRun, teamId?, rows: [{ firstName, lastName, phone, email }] }`
   (1-500 rows; `teamId: null` = "No team yet", assigned later as for `POST /candidates`) → 200 `{ dryRun, committed, created, failed, rows: [{ row, firstName, lastName, phone, email, status, error? }] }`.
 - All or nothing: one transaction, rolled back when any row fails or on `dryRun`, so the preview is what a real run does.
+  Rows are validated in memory, their contacts checked in one call (`authz.candidate_contacts_taken`, 0505, which takes
+  the contact lock until the transaction ends) and the rest inserted set-based; `authz.candidate_contact_unique` stays
+  the backstop. A taken email is reported before a taken phone, as the trigger does.
 - Row errors: `invalid_first_name`, `invalid_last_name`, `missing_country_code`, `trunk_zero`, `invalid` (phone),
   `invalid_email`, `duplicate_in_file`, `duplicate_email`, `duplicate_phone`. Rows name only the value that is taken, not
   whose it is.
 - 404 batch not visible; 403 team outside `candidate:create` (same rule as `POST /candidates`); 422 `batch_not_allowed`
   when the batch is completed or cancelled; 429 after 10 calls a minute per user.
-- Audit (counts and ids only): `candidate.created` per row with `{ batchId, bulk: true }`, `batch.candidates_added`,
-  and `batch.candidates_checked` for a preview or a refused file.
+- **Daily row budget** (audit A-01): the file answers "is this contact taken?" for every row, so rows checked against
+  existing contacts (the ones that pass the in-memory checks) are charged to the caller, previews included, before the
+  check runs: `BULK_CANDIDATE_ROWS_PER_DAY` = **2,000 rows per user per UTC day** (`candidate-batches.service.ts`; change the
+  constant to resize it). Stored in `eureka.bulk_candidate_budget` (0505, written only by
+  `authz.bulk_candidate_budget_take`), so it holds across API tasks. A file that would pass it gets
+  **429 `bulk_budget_exceeded`** and is not charged; 404 / 403 / 422 come first and cost nothing.
+- Audit (counts and ids only): `candidate.created` per row with `{ batchId, bulk: true }`, `batch.candidates_added`
+  `{ teamId, created, checked, taken }`, and `batch.candidates_checked` `{ rows, failed, checked, taken }` for a preview
+  or a refused file (`checked`: rows charged to the budget; `taken`: rows reported `duplicate_email` / `duplicate_phone`).
+
+## Batches list and status (FR-CAN-02)
+
+- `GET /api/v1/batches?locationId=&technologyId=&status=` (`candidate:read`) → `{ items: [{ id, label, customName,
+  location, technology, startMonth, sizePlanned, status, candidatesInScope }], truncated, canCreate }`, newest start
+  month first, at most **200** items. `truncated: true` means more batches match: narrow the filter (A-12; additive,
+  no cursor).
+- `PUT /api/v1/batches/:id/status` (`candidate:create`; batch planning rights at the location) `{ to }` → `{ id, status }`;
+  404 not visible, 403 not allowed, 422 `invalid_transition`. `authz.set_batch_status` returns the status it changed
+  from (0520), and that is what the `batch.status` audit row records as `from`, also when another change landed
+  between the API's read and the function's row lock (D-06). `PUT /api/v1/training/batches/:id/status` audits the same way.
+
+## Code layout
+
+`candidates.service.ts` is the module's entry point: it re-exports the helpers other modules use (`scopePredicate`,
+`auditSafeProfile`, `moreFilters`, …) and keeps `CandidatesService.create` for applications. The work lives in
+`candidate-common.ts` (rows, scope predicate, presentation, read-before-write), `candidate-list.service.ts`
+(Candidates list, Hot List), `candidate-profile.service.ts` (one candidate's reads and edits), `candidate-create.service.ts`
+(create, duplicate check), `candidate-batches.service.ts` (batches, bulk add) and `candidate-timeline.service.ts`.
 
 ## Deleting a candidate (CA-7)
 

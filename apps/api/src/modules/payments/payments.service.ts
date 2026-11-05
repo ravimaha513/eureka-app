@@ -1,7 +1,4 @@
-import { createHash } from "node:crypto";
 import {
-  BadRequestException,
-  ConflictException,
   ForbiddenException,
   HttpException,
   HttpStatus,
@@ -15,13 +12,13 @@ import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
-import { canonical, IdempotencyKey } from "../../platform/idempotency.js";
+import { idempotent, parseIdempotencyKey } from "../../platform/idempotency.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import { mapPaymentError } from "./payments.errors.js";
 import type {
   BillablePlacementQuery, CreateInvoice, InvoiceListQuery, InvoiceSummaryQuery, RecordPayment, UpdateInvoice,
 } from "./payments.schemas.js";
-import { likeContains } from "../../platform/sql.js";
+import { likeContains, nameSearch } from "../../platform/sql.js";
 
 /**
  * Payments / incentive dashboard (gap L1, migration 0100, docs/payments-api.md).
@@ -219,7 +216,7 @@ export class PaymentsService {
     if (q.from) where.push(`iv.invoice_date >= ${p(q.from)}::date`);
     if (q.to) where.push(`iv.invoice_date <= ${p(q.to)}::date`);
     if (q.search) {
-      where.push(`(p.first_name || ' ' || p.last_name) ILIKE ${p(likeContains(q.search))} ESCAPE '\\'`);
+      where.push(nameSearch("p", p(likeContains(q.search))));
     }
     return where;
   }
@@ -248,6 +245,10 @@ export class PaymentsService {
    * Dashboard tiles: live invoices per status (counts, the longest current
    * delay) and, where the caller may see money, totals over the invoices whose
    * amounts they can see (`amountsHidden` counts the others).
+   * One aggregate over numeric (R-08): money is summed and subtracted in SQL and only
+   * converted to a JSON number at the end. `outstanding` is what is still owed on
+   * invoices that state an amount; payments on invoices without an amount are not
+   * netted against it (they are `receivedWithoutAmount`, also part of `received`).
    */
   async summary(user: AuthedUser, q: InvoiceSummaryQuery) {
     const scope = this.readScope(user.access);
@@ -256,29 +257,34 @@ export class PaymentsService {
     const where = this.where(scope, params, q);
     const money = rateScope ? scopePredicate({ ...rateScope, allTeams: false, hotlistOpen: false }, params, "pl") : "false";
     const sql = `
-      SELECT iv.status, count(*)::int AS n,
+      SELECT count(*) FILTER (WHERE iv.status = 'pending')::int AS pending,
+             count(*) FILTER (WHERE iv.status = 'delayed')::int AS delayed,
+             count(*) FILTER (WHERE iv.status = 'received')::int AS received,
+             coalesce(max(iv.delay_days) FILTER (WHERE iv.status = 'delayed'), 0)::int AS max_delay,
              count(*) FILTER (WHERE NOT (${money}))::int AS hidden,
              coalesce(sum(iv.amount) FILTER (WHERE ${money}), 0)::text AS invoiced,
              coalesce(sum(iv.paid_amount) FILTER (WHERE ${money}), 0)::text AS paid,
-             max(iv.delay_days)::int AS max_delay
+             coalesce(sum(iv.amount - iv.paid_amount) FILTER (WHERE ${money} AND iv.amount IS NOT NULL), 0)::text AS outstanding,
+             coalesce(sum(iv.paid_amount) FILTER (WHERE ${money} AND iv.amount IS NULL), 0)::text AS paid_without_amount
       FROM eureka.invoice_status iv
       JOIN eureka.placement pl ON pl.id = iv.placement_id
       LEFT JOIN eureka.candidate c ON c.id = pl.candidate_id
       LEFT JOIN eureka.person p ON p.id = c.person_id
-      WHERE ${where.join(" AND ")} AND iv.status <> 'void'
-      GROUP BY iv.status`;
-    const rows = await this.db.withUser(user.id, async (c) => (await c.query<{
-      status: string; n: number; hidden: number; invoiced: string; paid: string; max_delay: number | null;
-    }>(sql, params)).rows);
-    const by = (s: string) => rows.find((r) => r.status === s);
-    const counts = { pending: by("pending")?.n ?? 0, delayed: by("delayed")?.n ?? 0, received: by("received")?.n ?? 0 };
-    const out: Record<string, unknown> = { counts, maxDelayDays: by("delayed")?.max_delay ?? 0 };
+      WHERE ${where.join(" AND ")} AND iv.status <> 'void'`;
+    const r = await this.db.withUser(user.id, async (c) => (await c.query<{
+      pending: number; delayed: number; received: number; max_delay: number; hidden: number;
+      invoiced: string; paid: string; outstanding: string; paid_without_amount: string;
+    }>(sql, params)).rows[0]!);
+    const out: Record<string, unknown> = {
+      counts: { pending: r.pending, delayed: r.delayed, received: r.received }, maxDelayDays: r.max_delay,
+    };
     if (rateScope) {
-      const invoiced = rows.reduce((s, r) => s + Number(r.invoiced), 0);
-      const paid = rows.reduce((s, r) => s + Number(r.paid), 0);
-      const round = (v: number) => Math.round(v * 100) / 100;
-      out.totals = { invoiced: round(invoiced), received: round(paid), outstanding: round(Math.max(invoiced - paid, 0)) };
-      out.amountsHidden = rows.reduce((s, r) => s + r.hidden, 0);
+      // numeric(12,2) sums as decimal text -> the nearest JSON number; no float arithmetic, no rounding.
+      out.totals = {
+        invoiced: Number(r.invoiced), received: Number(r.paid), outstanding: Number(r.outstanding),
+        receivedWithoutAmount: Number(r.paid_without_amount),
+      };
+      out.amountsHidden = r.hidden;
     }
     return out;
   }
@@ -290,7 +296,7 @@ export class PaymentsService {
     const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
     const where = [activityPredicate(scope, params, "pl", "c"), "pl.joined_at IS NOT NULL"];
     if (q.search) {
-      where.push(`(p.first_name || ' ' || p.last_name) ILIKE ${p(likeContains(q.search))} ESCAPE '\\'`);
+      where.push(nameSearch("p", p(likeContains(q.search))));
     }
     if (q.uninvoiced) where.push(`NOT EXISTS (SELECT 1 FROM eureka.invoice i WHERE i.placement_id = pl.id AND i.voided_at IS NULL)`);
     const sql = `
@@ -300,11 +306,15 @@ export class PaymentsService {
       FROM eureka.placement pl
       ${PLACEMENT_JOINS}
       WHERE ${where.join(" AND ")}
-      ORDER BY pl.joined_at DESC, pl.id DESC LIMIT ${p(q.limit)}`;
-    const rows = await this.db.withUser(user.id, async (c) => (await c.query<InvoiceRow & {
+      ORDER BY pl.joined_at DESC, pl.id DESC LIMIT ${p(q.limit + 1)}`;
+    const fetched = await this.db.withUser(user.id, async (c) => (await c.query<InvoiceRow & {
       id: string; invoice_count: number; last_invoice_date: string | null;
     }>(sql, params)).rows);
+    // One extra row tells the client the list was cut at `limit` (R-23; additive).
+    const truncated = fetched.length > q.limit;
+    const rows = fetched.slice(0, q.limit);
     return {
+      truncated,
       items: rows.map((r) => ({
         id: r.id,
         status: r.placement_status,
@@ -359,34 +369,10 @@ export class PaymentsService {
     });
   }
 
-  /** Idempotency-Key (design B3): a repeat with the same body returns the first response; a failed request does not consume the key. */
-  private async claim(c: pg.PoolClient, user: AuthedUser, endpoint: string, rawKey: string | undefined, body: unknown) {
-    const key = IdempotencyKey.safeParse(rawKey);
-    if (!key.success) throw new BadRequestException("idempotency_key_required");
-    const hash = createHash("sha256").update(canonical(body)).digest("hex");
-    const claimed = await c.query(
-      `INSERT INTO eureka.idempotency_key (key, user_id, endpoint, request_hash) VALUES ($1,$2,$3,$4)
-       ON CONFLICT DO NOTHING RETURNING key`, [key.data, user.id, endpoint, hash]);
-    if (claimed.rowCount === 0) {
-      const prior = (await c.query<{ request_hash: string; response: unknown }>(
-        `SELECT request_hash, response FROM eureka.idempotency_key WHERE user_id = $1 AND endpoint = $2 AND key = $3`,
-        [user.id, endpoint, key.data])).rows[0];
-      if (!prior || prior.request_hash !== hash || prior.response === null) throw new ConflictException("idempotency_key_reused");
-      return { replay: prior.response, store: async () => undefined };
-    }
-    return {
-      replay: undefined,
-      store: async (response: unknown) => {
-        await c.query(`UPDATE eureka.idempotency_key SET response = $4 WHERE user_id = $1 AND endpoint = $2 AND key = $3`,
-          [user.id, endpoint, key.data, response]);
-      },
-    };
-  }
-
   /** FR-PAY-01..03: Accounts raises an invoice on a joined placement it can read. */
   async create(user: AuthedUser, body: CreateInvoice, idempotencyKey: string | undefined) {
     // Malformed or missing keys are refused before anything else (400).
-    if (!IdempotencyKey.safeParse(idempotencyKey).success) throw new BadRequestException("idempotency_key_required");
+    parseIdempotencyKey(idempotencyKey, { required: true });
     return this.db.withUser(user.id, async (c) => {
       // Visibility and permission first: a replay is only returned to a caller who still may create this invoice.
       const scope = resolveScope(user.access, "invoice:read");
@@ -398,26 +384,26 @@ export class PaymentsService {
          WHERE pl.id = $1 AND ${activityPredicate(scope, params, "pl", "c")}`, params)).rows[0];
       if (!pl) throw new NotFoundException();
       if (!this.canUpdate(user.access, pl)) throw new ForbiddenException("Not permitted");
-      const k = await this.claim(c, user, INVOICES_ENDPOINT, idempotencyKey, body);
-      if (k.replay !== undefined) return k.replay as { id: string };
-      if (pl.joined_at === null) throw new UnprocessableEntityException("placement_not_joined");
-      let id: string;
-      try {
-        id = (await c.query<{ id: string }>(
-          `SELECT authz.invoice_create($1, $2, $3::date, $4, $5::date, $6::date, $7::date, $8, $9, $10) AS id`,
-          [body.placementId, body.invoiceNo ?? null, body.invoiceDate, body.termsDays, body.timesheetSubmittedOn ?? null,
-            body.periodStart ?? null, body.periodEnd ?? null, body.hours ?? null, body.amount ?? null, body.incentiveAmount ?? null],
-        )).rows[0]!.id;
-      } catch (err) {
-        mapPaymentError(err);
-      }
-      const result = { id, rowVersion: 1 };
-      await k.store(result);
-      await this.audit.record(c, {
-        actorId: user.id, action: "invoice.created", entityType: "invoice", entityId: id,
-        changes: { placementId: body.placementId, termsDays: body.termsDays, fields: fieldsOf(body) },
+      // Idempotency-Key (design B3): a repeat with the same body returns the first response; a failed request does not consume the key.
+      return idempotent(c, user, INVOICES_ENDPOINT, idempotencyKey, body, { required: true }, async () => {
+        if (pl.joined_at === null) throw new UnprocessableEntityException("placement_not_joined");
+        let id: string;
+        try {
+          id = (await c.query<{ id: string }>(
+            `SELECT authz.invoice_create($1, $2, $3::date, $4, $5::date, $6::date, $7::date, $8, $9, $10) AS id`,
+            [body.placementId, body.invoiceNo ?? null, body.invoiceDate, body.termsDays, body.timesheetSubmittedOn ?? null,
+              body.periodStart ?? null, body.periodEnd ?? null, body.hours ?? null, body.amount ?? null, body.incentiveAmount ?? null],
+          )).rows[0]!.id;
+        } catch (err) {
+          mapPaymentError(err);
+        }
+        const result = { id, rowVersion: 1 };
+        await this.audit.record(c, {
+          actorId: user.id, action: "invoice.created", entityType: "invoice", entityId: id,
+          changes: { placementId: body.placementId, termsDays: body.termsDays, fields: fieldsOf(body) },
+        });
+        return result;
       });
-      return result;
     });
   }
 
@@ -467,26 +453,25 @@ export class PaymentsService {
 
   /** FR-PAY-04/05: a payment received; the first one for the placement notifies recruiter, lead and manager. */
   async recordPayment(user: AuthedUser, invoiceId: string, body: RecordPayment, idempotencyKey: string | undefined) {
-    if (!IdempotencyKey.safeParse(idempotencyKey).success) throw new BadRequestException("idempotency_key_required");
+    parseIdempotencyKey(idempotencyKey, { required: true });
     return this.db.withUser(user.id, async (c) => {
       // Read-before-write first (404/403/422 void): a replay is only returned to a caller who still may record payments.
       const row = await this.loadForWrite(c, user, invoiceId);
-      const k = await this.claim(c, user, PAYMENTS_ENDPOINT, idempotencyKey, { invoiceId, ...body });
-      if (k.replay !== undefined) return k.replay as { id: string; invoiceId: string; firstPayment: boolean };
-      if (row.status === "received") throw new UnprocessableEntityException("invoice_received");
-      let r: { payment_id: string; first_payment: boolean };
-      try {
-        r = (await c.query<typeof r>(`SELECT * FROM authz.payment_record($1, $2::date, $3)`, [invoiceId, body.receivedOn, body.amount])).rows[0]!;
-      } catch (err) {
-        mapPaymentError(err);
-      }
-      const result = { id: r.payment_id, invoiceId, firstPayment: r.first_payment };
-      await k.store(result);
-      await this.audit.record(c, {
-        actorId: user.id, action: "payment.recorded", entityType: "invoice", entityId: invoiceId,
-        changes: { paymentId: r.payment_id, placementId: row.placement_id, receivedOn: body.receivedOn, firstPayment: r.first_payment },
+      return idempotent(c, user, PAYMENTS_ENDPOINT, idempotencyKey, { invoiceId, ...body }, { required: true }, async () => {
+        if (row.status === "received") throw new UnprocessableEntityException("invoice_received");
+        let r: { payment_id: string; first_payment: boolean };
+        try {
+          r = (await c.query<typeof r>(`SELECT * FROM authz.payment_record($1, $2::date, $3)`, [invoiceId, body.receivedOn, body.amount])).rows[0]!;
+        } catch (err) {
+          mapPaymentError(err);
+        }
+        const result = { id: r.payment_id, invoiceId, firstPayment: r.first_payment };
+        await this.audit.record(c, {
+          actorId: user.id, action: "payment.recorded", entityType: "invoice", entityId: invoiceId,
+          changes: { paymentId: r.payment_id, placementId: row.placement_id, receivedOn: body.receivedOn, firstPayment: r.first_payment },
+        });
+        return result;
       });
-      return result;
     });
   }
 

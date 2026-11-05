@@ -1,5 +1,5 @@
 /** Typed client for employees, the assignment lifecycle and the joinings/exits report (docs/employees-api.md). */
-import { ApiError, api } from "../api";
+import { ApiError, api, commonProblem, ifMatch } from "../api";
 import { fetchCsv, type ExportResult } from "../lib/download";
 
 export interface Named { id: string; name: string | null }
@@ -32,6 +32,12 @@ export interface EmployeeAssignment {
   onboardedDate?: string | null;
   /** Present (number or null) only when the caller may see and set it (rate:read over the placement). */
   payRate?: number | null;
+  /**
+   * Detail `assignments[]` only (migration 0508): the optional If-Match values of the planned end date and the
+   * employment facts. 0 = nothing stored yet (still sent: it is a real version).
+   */
+  plannedEndDateVersion?: number;
+  employmentVersion?: number;
 }
 
 export interface Employee {
@@ -163,8 +169,10 @@ export const employeesApi = {
   get: (id: string) => api<EmployeeDetail>(`/api/v1/employees/${enc(id)}`),
   endAssignment: (id: string, endDate: string, reason: string) =>
     api<{ id: string; employeeStatus: string }>(`/api/v1/assignments/${enc(id)}/end`, { method: "POST", ...json({ endDate, reason }) }),
-  setPlannedEnd: (id: string, plannedEndDate: string) =>
-    api<{ id: string; plannedEndDate: string }>(`/api/v1/assignments/${enc(id)}/planned-end-date`, { method: "PUT", ...json({ plannedEndDate }) }),
+  /** `version`: plannedEndDateVersion, sent as the optional If-Match (412 `stale` when someone saved first). */
+  setPlannedEnd: (id: string, plannedEndDate: string, version?: number) =>
+    api<{ id: string; plannedEndDate: string }>(`/api/v1/assignments/${enc(id)}/planned-end-date`,
+      { method: "PUT", ...json({ plannedEndDate }), headers: ifMatch(version) }),
   exit: (id: string, exitDate: string, reason: string) =>
     api<{ id: string; status: string }>(`/api/v1/employees/${enc(id)}/exit`, { method: "POST", ...json({ exitDate, reason }) }),
   returnToMarket: (id: string) =>
@@ -175,8 +183,10 @@ export const employeesApi = {
   },
   payrollCompanies: () => api<{ items: PayrollCompany[] }>("/api/v1/employees/payroll-companies"),
   teams: () => api<{ items: AssignableTeam[] }>("/api/v1/employees/teams"),
-  setEmployment: (assignmentId: string, changes: EmploymentChanges) =>
-    api<{ id: string; changed: string[] }>(`/api/v1/assignments/${enc(assignmentId)}/employment`, { method: "PATCH", ...json(changes) }),
+  /** `version`: employmentVersion, sent as the optional If-Match. */
+  setEmployment: (assignmentId: string, changes: EmploymentChanges, version?: number) =>
+    api<{ id: string; changed: string[] }>(`/api/v1/assignments/${enc(assignmentId)}/employment`,
+      { method: "PATCH", ...json(changes), headers: ifMatch(version) }),
   assignTeam: (id: string, teamId: string) =>
     api<{ id: string; team: Named }>(`/api/v1/employees/${enc(id)}/assign-team`, { method: "POST", ...json({ teamId }) }),
   activeEmployees: (month: string, clientId?: string) =>
@@ -214,14 +224,16 @@ const ERRORS: Record<string, string> = {
 
 export function employmentError(e: unknown): string {
   if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "Something went wrong.";
+  const common = commonProblem(e);
+  if (common) return common;
   if (e.detail && ERRORS[e.detail]) return ERRORS[e.detail]!;
   switch (e.status) {
     case 401: return "Your session ended. Sign in again.";
     case 403: return "You don't have permission to do that.";
     case 404: return "This record doesn't exist or is outside your scope.";
     case 422: return e.errors?.length ? "Some fields need attention." : "The server rejected this change. Check the values and try again.";
-    case 429: return e.detail ?? "Too many requests. Try again in a few minutes.";
-    case 503: return e.detail ?? "The report took too long. Choose a shorter period.";
+    case 429: return e.message;
+    case 503: return e.message;
     default: return e.detail ?? e.title ?? e.message ?? "Something went wrong.";
   }
 }

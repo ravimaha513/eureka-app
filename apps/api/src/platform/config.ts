@@ -17,6 +17,9 @@ const ConfigSchema = z
     // and a rolling deploy can briefly run twice the API tasks plus the worker,
     // so keep this small in AWS (the task definitions set 5).
     DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(10),
+    // Longest a request waits for a pooled connection (a free slot or a new
+    // connection) before it fails with a retryable 503 instead of hanging.
+    DB_CONNECT_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(3000),
     // Seconds to keep serving after SIGTERM before closing, so API Gateway and
     // Cloud Map stop routing to this task before its connections go away.
     DRAIN_SECONDS: z.coerce.number().int().min(0).max(25).default(15), // ECS stopTimeout is 30 s
@@ -71,6 +74,10 @@ const ConfigSchema = z
     // Applicant sessions (separate from staff sessions).
     PORTAL_SESSION_IDLE_MINUTES: z.coerce.number().int().min(5).max(240).default(60),
     PORTAL_SESSION_HOURS: z.coerce.number().int().min(1).max(24).default(12),
+    // Heavy report queries (org-wide reports, exports) running at once per API
+    // task; one more gets 503 + Retry-After (platform/report-executor.ts). Keep
+    // well below DB_POOL_MAX so sign-in and health always find a connection.
+    REPORT_MAX_CONCURRENT: z.coerce.number().int().min(1).max(20).default(2),
   })
   .superRefine((c, ctx) => {
     checkFieldCrypto(c, ctx, { bidx: true });

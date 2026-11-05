@@ -1,4 +1,4 @@
-import { ApiError } from "../api";
+import { ApiError, commonProblem } from "../api";
 import { CONNECTION_MESSAGE, GENERIC_ERROR_MESSAGE } from "../lib/errorText";
 
 /** Friendly text for the RFC 9457 `detail` codes in docs/admin-api.md. */
@@ -15,7 +15,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   lead_of_team: "This person leads a team. Give the team a new lead first, then deactivate them.",
   last_admin: "At least one active admin must remain.",
   has_reports: "This person still manages people. Move their direct reports to another manager first.",
-  separation_of_duties: "Admins can't hold business roles, and people with business roles can't be admins. Use a separate account.",
+  separation_of_duties: "Admin roles can't be combined with data roles: an administrator can't hold business roles, and someone with business roles can't be an administrator. Use a separate account.",
   requester_not_admin: "The person who asked for this role is no longer an admin, so it can't be approved. Ask for it again.",
   email_exists: "A user with this email already exists.",
   location_exists: "A location with this name already exists.",
@@ -52,6 +52,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
   duplicate_user: "Each person can appear once per batch. Undo one of their changes.",
   not_a_recruiter: "Only people with a recruiter role can be team members.",
   role_department_mismatch: "This role is limited to one department; the person isn't in it. Set their department first.",
+  // Admin/data separation (R-01, docs/roles-api.md): admin is only admin.
+  admin_permission_needs_admin_role: "Users & Access permissions can only go on a role with the Administrator trait. Turn the trait on, or leave these permissions off.",
+  business_permission_on_admin_role: "An Administrator role can hold only Users & Access permissions. Remove the business permissions, or use a separate role.",
+  role_violates_admin_separation: "This role mixes administrator and business permissions, so it can't be granted. Fix the role first (Roles tab).",
+  role_held_by_admin: "An administrator holds this role, so it can't get business permissions. Move the administrator to another role first, or use a separate role.",
+  invalid_grants: "The permission list was not valid. Refresh and try again.",
+  stale: "Another admin changed this meanwhile. The latest version is loading — check it and save again.",
 };
 
 /** Short reason a person was skipped by a bulk team add (AddMembersResult.failed). */
@@ -77,6 +84,8 @@ export function friendlyError(e: unknown, ctx: ErrorContext = "generic"): string
   if (ctx === "addMember" && e.status === 409) return ERROR_MESSAGES.already_member!;
   if (e.status === 403) return "You don't have permission to do that.";
   if (e.status === 404) return "That record no longer exists. Refresh and try again.";
+  const common = commonProblem(e);
+  if (common) return common;
   // An unknown code is not shown to the user; it goes to the console for support.
   console.debug("Unhandled API error", e.status, e.detail ?? e.title ?? e.message);
   return GENERIC_ERROR_MESSAGE;

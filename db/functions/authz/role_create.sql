@@ -1,8 +1,12 @@
 -- authz.role_create: current definition (repeatable; db/functions/README.md).
+-- since: 0521
 -- An admin creates a custom role by cloning another role's grants and traits
 -- (docs/roles-api.md). Returns the new key (c_<slug of the label>). Raises
 -- not_permitted, unknown_role, role_archived (source), invalid_label, role_exists,
 -- unknown_department. The API writes the audit row in the same transaction.
+-- Admin separation (0500, security review C-01): cloning a role that breaks it (an
+-- older custom role, GET /admin/roles/violations) would add a violation, so it raises
+-- business_permission_on_admin_role or admin_permission_needs_admin_role.
 
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.role_create(p_label text, p_clone_from text, p_description text, p_department uuid, p_track text, p_level integer)
@@ -24,6 +28,16 @@ BEGIN
   END IF;
   IF src.archived_at IS NOT NULL THEN
     RAISE EXCEPTION 'role_archived' USING ERRCODE = 'check_violation';
+  END IF;
+  IF coalesce(src.is_admin, false) AND EXISTS (
+       SELECT 1 FROM eureka.role_permission rp JOIN eureka.permission p ON p.key = rp.permission
+       WHERE rp.role_key = src.key AND NOT (p.is_admin_only OR p.is_admin_compatible)) THEN
+    RAISE EXCEPTION 'business_permission_on_admin_role' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NOT coalesce(src.is_admin, false) AND EXISTS (
+       SELECT 1 FROM eureka.role_permission rp JOIN eureka.permission p ON p.key = rp.permission
+       WHERE rp.role_key = src.key AND p.is_admin_only) THEN
+    RAISE EXCEPTION 'admin_permission_needs_admin_role' USING ERRCODE = 'check_violation';
   END IF;
   IF p_department IS NOT NULL AND NOT EXISTS (SELECT 1 FROM eureka.department d WHERE d.id = p_department) THEN
     RAISE EXCEPTION 'unknown_department' USING ERRCODE = 'check_violation';

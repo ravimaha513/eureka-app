@@ -5,7 +5,7 @@ import {
   INTERVIEW_TYPE_LABELS, SCORECARD_CRITERIA, SCORECARD_KINDS, SCORECARD_LABELS, INTERVIEW_RESULTS, isSafeHttpsUrl,
   type InterviewResult, type InterviewType, type Scorecard,
 } from "@eureka/shared";
-import { api, can, type Me } from "../api";
+import { api, can, ifMatch, type Me } from "../api";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { FilterBar, type FilterChip } from "../ui/FilterBar";
 import { Menu } from "../ui/Menu";
@@ -44,6 +44,8 @@ export interface Interview {
   /** Outcome of the round (migration 0360); `cleared` is the location's pre-call readiness. */
   result?: InterviewResult; resultAt?: string | null;
   submissionStatus?: string | null; placement?: { id: string; status: string } | null;
+  /** The optional If-Match for PATCH and clear-and-select (IS-12, migration 0508); absent on older servers. */
+  rowVersion?: number;
 }
 
 /** Board cell: the candidate's own feedback (rating and a short excerpt; the full text is in the Feedback dialog). */
@@ -164,7 +166,10 @@ function Edit({ item, zone, onClose, onDone }: { item: Interview; zone: string; 
     if (useDuration && body.startsAt !== undefined && body.durationMin === undefined) body.durationMin = values.durationMin;
     if (body.meetingUrl && !/^https:\/\/\S+$/.test(String(body.meetingUrl))) throw new Error("The meeting link must start with https:// and contain no spaces.");
     if (panel !== null || lead !== null) { body.panelIds = curPanel; body.leadId = curLead || null; }
-    if (Object.keys(body).length) await api(`/api/v1/interviews/${item.id}`, { method: "PATCH", body: JSON.stringify(body) }); onDone();
+    if (Object.keys(body).length) {
+      await api(`/api/v1/interviews/${item.id}`, { method: "PATCH", body: JSON.stringify(body), headers: ifMatch(item.rowVersion) });
+    }
+    onDone();
   }); }}>
     <p className="hint iv-editfor">{[item.candidate.name, item.position, item.client?.name].filter(Boolean).join(" · ")}</p>
     {(can("startsAt") || can("endsAt")) && <p className="hint">Times in {zone} ({zoneAbbr(zone, item.startsAt)}). Change the zone on the board.</p>}
@@ -559,7 +564,7 @@ export function InterviewsPage({ me, initialOpenId = null, onOpenChange, onOpenS
     {feedback && <Feedback item={feedback} onClose={() => setFeedback(null)} />}
     {placing && <CreatePlacementDialog
       submission={{ id: placing.submissionId, candidateName: placing.candidate.name, jobTitle: placing.position || "The position", client: placing.client?.name ?? "the client" }}
-      clearRound={{ id: placing.id, round: placing.round, pending: placing.result !== "cleared" }}
+      clearRound={{ id: placing.id, round: placing.round, pending: placing.result !== "cleared", rowVersion: placing.rowVersion }}
       onClose={() => setPlacing(null)}
       onSelectedOnly={() => { setPlacing(null); setNotice(`${placing.round} cleared and the submission moved to Selected.`); void qc.invalidateQueries({ queryKey: ["interviews"] }); void qc.invalidateQueries({ queryKey: ["submissions"] }); }}
       onCreated={() => { setPlacing(null); setNotice(`Placement created for ${placing.candidate.name ?? "the candidate"} from ${placing.round}.`); void qc.invalidateQueries({ queryKey: ["interviews"] }); void qc.invalidateQueries({ queryKey: ["submissions"] }); void qc.invalidateQueries({ queryKey: ["placements"] }); }} />}

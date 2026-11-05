@@ -96,6 +96,10 @@ const ADMIN_ENDPOINTS: { method: Method; url: string; body?: unknown; adminStatu
   { method: "DELETE", url: `/api/v1/admin/teams/${NIL}/members/${U.r1a}`, adminStatus: 404 },
   { method: "GET", url: `/api/v1/admin/teams/${NIL}/delete-impact`, adminStatus: 404 },
   { method: "DELETE", url: `/api/v1/admin/teams/${NIL}`, adminStatus: 404 },
+  // admin separation report (migration 0500, docs/roles-api.md).
+  { method: "GET", url: "/api/v1/admin/roles/violations", adminStatus: 200 },
+  // users holding admin and data roles at once (migration 0510).
+  { method: "GET", url: "/api/v1/admin/users/violations", adminStatus: 200 },
 ];
 const MOVE = { method: "POST" as const, url: `/api/v1/teams/${T.t1}/move-member`, body: {} };
 
@@ -221,7 +225,10 @@ describe("locations", () => {
     const { id } = r.json();
     const row = (await db.admin.query(`SELECT name, kind, state, timezone FROM eureka.location WHERE id = $1`, [id])).rows[0];
     expect(row).toEqual({ name: "Houston", kind: "office", state: "TX", timezone: "America/Chicago" });
-    expect((await audits("admin.location.created")).at(-1)).toMatchObject({ actor_id: U.admin, entity_id: id });
+    // Name and state are free text: not in the audit row (rule 5, security review C-05).
+    expect((await audits("admin.location.created")).at(-1)).toEqual({
+      actor_id: U.admin, entity_id: id, changes: { kind: "office", fields: ["name", "kind", "state", "timezone"] },
+    });
 
     expect((await call("admin", "POST", "/api/v1/admin/locations", { name: "Houston", kind: "office" })).statusCode).toBe(409);
     expect((await call("admin", "POST", "/api/v1/admin/locations", { name: "Nowhere", kind: "warehouse" })).statusCode).toBe(422);
@@ -306,7 +313,11 @@ describe("users", () => {
     expect(list.items).toEqual([expect.objectContaining({
       id, designation: "Recruiter", primaryLocation: { id: LOC.dallas, name: "Dallas" }, roles: [], teams: [], manager: null,
     })]);
-    expect((await audits("admin.user.created")).at(-1)).toMatchObject({ actor_id: U.admin, entity_id: id });
+    // No display name, designation or email in the audit row (rule 5, security review C-05).
+    expect((await audits("admin.user.created")).at(-1)).toEqual({
+      actor_id: U.admin, entity_id: id,
+      changes: { fields: ["email", "displayName", "designation", "primaryLocationId"], primaryLocationId: LOC.dallas },
+    });
   });
 
   describe("bulk create", () => {
@@ -334,7 +345,13 @@ describe("users", () => {
       expect(r.json()).toMatchObject({ committed: true, created: 2, failed: 0 });
       const list = (await call("admin", "GET", "/api/v1/admin/users?search=bulk.ok1")).json();
       expect(list.items[0]).toMatchObject({ designation: "Recruiter", primaryLocation: { id: LOC.dallas } });
-      expect((await audits("admin.user.created")).length).toBe(before + 2);
+      const created = await audits("admin.user.created");
+      expect(created.length).toBe(before + 2);
+      // Rule 5: no email or free-text names in the audit rows.
+      for (const row of created.slice(-2)) {
+        expect(JSON.stringify(row)).not.toMatch(/bulk\.ok[12]@|Ok One|Ok Two|Recruiter/);
+        expect(row.changes).toMatchObject({ bulk: true });
+      }
       expect((await audits("admin.user.bulk_created")).at(-1)).toMatchObject({ actor_id: U.admin });
     });
 
@@ -611,7 +628,9 @@ describe("role requests (AD-3, AD-4, AD-6, AD-7)", () => {
     expect(ok.statusCode).toBe(200);
     expect(ok.json()).toEqual({ status: "approved" });
     expect((await call("r2a", "GET", "/api/v1/me")).json().capabilities).toContain("candidate.dob:read");
-    const approved = (await call("admin", "GET", "/api/v1/admin/role-requests?status=approved")).json().items;
+    const approvedList = (await call("admin", "GET", "/api/v1/admin/role-requests?status=approved")).json();
+    expect([approvedList.truncated, approvedList.nextCursor]).toEqual([false, null]);
+    const approved = approvedList.items;
     expect(approved[0]).toMatchObject({ id, status: "approved", decidedBy: { id: U.admin2, displayName: "admin2" } });
     expect((await audits("admin.role_request.approved")).at(-1)).toMatchObject({ actor_id: U.admin2, entity_id: id });
     expect((await call("admin2", "POST", `/api/v1/admin/role-requests/${id}/approve`)).statusCode).toBe(409);
@@ -667,6 +686,7 @@ describe("teams", () => {
     const r = await call("admin", "POST", "/api/v1/admin/teams", { name: "Team New", leadId: U.l3, locationId: LOC.dallas });
     expect(r.statusCode).toBe(201);
     const id = r.json().id as string;
+    expect((await audits("admin.team.created")).at(-1)).toEqual({ actor_id: U.admin, entity_id: id, changes: { leadId: U.l3, locationId: LOC.dallas } });
     expect((await call("admin", "PUT", `/api/v1/admin/teams/${id}/lead`, { leadId: U.m2 })).statusCode).toBe(204);
     expect((await call("admin", "POST", `/api/v1/admin/teams/${id}/members`, { userId: U.hr })).statusCode).toBe(204);
     const dup = await call("admin", "POST", `/api/v1/admin/teams/${T.t1}/members`, { userId: U.hr });
@@ -804,6 +824,7 @@ describe("lead adds members to their own team (AD-10)", () => {
     const inTeams = (await db.admin.query(`SELECT user_id FROM eureka.team_member WHERE valid @> now()`)).rows.map((r) => r.user_id);
     expect(addable.filter((id: string) => inTeams.includes(id))).toEqual([]);
     expect(body.addable[0]).toEqual({ id: expect.any(String), displayName: expect.any(String), email: expect.stringContaining("@") });
+    expect(body.addableTruncated).toBe(false);
   });
 
   it("adds an unassigned recruiter, audited, and they leave the addable list", async () => {
@@ -946,5 +967,43 @@ describe("coach assignments (AD-11)", () => {
     expect(await drop("admin", `/api/v1/admin/teams/${T.t3}/coaches/${U.il}`)).toEqual([204, null]);
     expect((await audits("admin.team.coach_unassigned")).at(-1)).toMatchObject({ actor_id: U.admin, entity_id: T.t3, changes: { coachId: U.il } });
     expect(await open(U.il)).toEqual([T.t1]);
+  });
+});
+
+describe("role request history paging (audit C-09)", () => {
+  it("pages past 500 with truncated / nextCursor, newest first, each request once; a bad cursor is 422", async () => {
+    // 520 old rejected requests, ten per timestamp so the id tie-break is exercised too.
+    await db.admin.query(
+      `INSERT INTO eureka.role_request (user_id, role_key, requested_by, requested_at, status, decided_by, decided_at)
+       SELECT $1, 'hr', $2, timestamptz '2001-01-01' + (g / 10) * interval '1 minute', 'rejected', $3, now()
+       FROM generate_series(1, 520) g`, [U.r3a, U.admin, U.admin2]);
+    const total = (await db.admin.query<{ n: number }>(`SELECT count(*)::int AS n FROM eureka.role_request WHERE status = 'rejected'`)).rows[0]!.n;
+    const seen: string[] = [];
+    const at: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const res = await call("admin", "GET", `/api/v1/admin/role-requests?status=rejected${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { items: { id: string; requestedAt: string }[]; truncated: boolean; nextCursor: string | null };
+      expect(body.items.length).toBeLessThanOrEqual(500);
+      expect(body.truncated).toBe(body.nextCursor !== null);
+      if (pages === 0) expect([body.items.length, body.truncated]).toEqual([500, true]);
+      seen.push(...body.items.map((i) => i.id));
+      at.push(...body.items.map((i) => i.requestedAt));
+      cursor = body.nextCursor;
+      pages++;
+    } while (cursor && pages < 5);
+    expect(pages).toBe(2);
+    expect(seen.length).toBe(total);
+    expect(new Set(seen).size).toBe(total);
+    expect([...at].sort().reverse()).toEqual(at);
+
+    const unfiltered = (await call("admin", "GET", "/api/v1/admin/role-requests")).json();
+    expect([unfiltered.items.length, unfiltered.truncated]).toEqual([500, true]);
+    for (const bad of ["nope", Buffer.from(JSON.stringify(["x", "y"])).toString("base64url")]) {
+      const r = await call("admin", "GET", `/api/v1/admin/role-requests?cursor=${bad}`);
+      expect([r.statusCode, r.json().detail]).toEqual([422, "invalid_cursor"]);
+    }
   });
 });

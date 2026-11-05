@@ -12,7 +12,7 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { MAIL_PORT, type MailPort } from "../../platform/mail.js";
-import { RateLimiter } from "../../platform/rate-limit.js";
+import { SharedRateLimiter } from "../../platform/rate-limit.js";
 import { CandidatesService } from "../candidates/candidates.service.js";
 import { toCsv } from "../hotlist/csv.js";
 import { JobsService, JOB_SELECT, companyNames, type JobRow } from "../jobs/jobs.service.js";
@@ -20,7 +20,7 @@ import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import type {
   ApplicantListQuery, ApplicationExport, ApplicationListQuery, CreateCandidateFromApplication, ScheduleInterview, Scorecard, SetPeople, StatusChange,
 } from "./applications.schemas.js";
-import { likeContains } from "../../platform/sql.js";
+import { likeContains, nameSearch } from "../../platform/sql.js";
 import { dbErrorMapper } from "../../platform/errors.js";
 
 /**
@@ -79,7 +79,8 @@ const fullName = (r: { first_name: string | null; last_name: string | null }) =>
 @Injectable()
 export class ApplicationsService {
   private readonly log = new Logger("Applications");
-  private readonly exportLimiter = new RateLimiter(10, 10 * 60_000);
+  // Per user, shared by all tasks and kept across deploys (R-24, F-06).
+  private readonly exportLimiter = new SharedRateLimiter("applications.export", 10, 10 * 60_000);
 
   constructor(
     private readonly db: DbService,
@@ -94,9 +95,14 @@ export class ApplicationsService {
     return resolveScope(access, "application:manage")?.all === true || (r.hiring_manager_id !== null && r.hiring_manager_id === access.userId);
   }
 
+  /** Applicant emails in full only with applicant:read at org scope (JSON masks them, the CSV leaves them empty). */
+  private emailVisible(access: UserAccess) {
+    return resolveScope(access, "applicant:read")?.all === true;
+  }
+
   /** Applicant contact details follow applicant:read / applicant.phone:read, not the job or interview that revealed the application. */
   private email(access: UserAccess, v: string | null) {
-    if (v === null || resolveScope(access, "applicant:read")?.all === true) return v;
+    if (v === null || this.emailVisible(access)) return v;
     const at = v.indexOf("@");
     return at < 1 ? "•••" : `${v[0]}•••${v.slice(at)}`;
   }
@@ -149,7 +155,7 @@ export class ApplicationsService {
     const where = ["true"];
     if (q.status) where.push(`a.status = ${p(q.status)}`);
     if (q.jobId) where.push(`a.job_id = ${p(q.jobId)}::uuid`);
-    if (q.search) where.push(`(ap.first_name || ' ' || ap.last_name) ILIKE ${p(likeContains(q.search))} ESCAPE '\\'`);
+    if (q.search) where.push(nameSearch("ap", p(likeContains(q.search))));
     if (cursor) {
       const [t, id] = splitCursor(cursor);
       where.push(`(a.applied_at, a.id) < (${fromMicros(p(t))}, ${p(id)}::uuid)`);
@@ -161,7 +167,9 @@ export class ApplicationsService {
 
   async exportCsv(user: AuthedUser, q: ApplicationExport) {
     if (!can(user.access, "application:read")) throw new ForbiddenException();
-    if (!this.exportLimiter.take(user.id)) throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
+    if (!(await this.exportLimiter.take(user.id, this.db))) throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
+    // Same field rule as JSON (A-04): without applicant:read at org scope the Email cells stay empty; the header does not change.
+    const emails = this.emailVisible(user.access);
     return this.db.withUser(user.id, async (c) => {
       const rows = await this.rows(user, q, EXPORT_ROW_CAP + 1, undefined, c);
       const page = rows.slice(0, EXPORT_ROW_CAP);
@@ -169,7 +177,7 @@ export class ApplicationsService {
       await this.audit.record(c, { actorId: user.id, action: "application.export", entityType: "job_application",
         changes: { rows: page.length, truncated: rows.length > EXPORT_ROW_CAP, cap: EXPORT_ROW_CAP, status: q.status ?? null, jobId: q.jobId ?? null, search: q.search !== undefined } });
       const csv = toCsv(["Job title", "Applicant", "Email", "Company", "Applied", "Overall rating", "Status"],
-        page.map((r) => [r.job_title ?? "", fullName(r) ?? "", r.email ?? "", names.get(r.job_id) ?? "", r.applied_at.toISOString().slice(0, 10),
+        page.map((r) => [r.job_title ?? "", fullName(r) ?? "", emails ? r.email ?? "" : "", names.get(r.job_id) ?? "", r.applied_at.toISOString().slice(0, 10),
           r.rating ?? "", APPLICATION_STATUS_LABELS[r.status]]));
       return { csv, rows: page.length, truncated: rows.length > EXPORT_ROW_CAP };
     });
@@ -374,7 +382,7 @@ export class ApplicationsService {
     const where = ["true"];
     if (q.search) {
       const s = p(likeContains(q.search));
-      where.push(`((ap.first_name || ' ' || ap.last_name) ILIKE ${s} ESCAPE '\\' OR ap.email ILIKE ${s} ESCAPE '\\')`);
+      where.push(`(${nameSearch("ap", s)} OR ap.email ILIKE ${s} ESCAPE '\\')`);
     }
     if (q.cursor) {
       const [t, id] = splitCursor(q.cursor);
@@ -399,7 +407,7 @@ export class ApplicationsService {
   }
 
   async exportApplicants(user: AuthedUser, q: { search?: string }) {
-    if (!this.exportLimiter.take(user.id)) throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
+    if (!(await this.exportLimiter.take(user.id, this.db))) throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
     return this.db.withUser(user.id, async (c) => {
       const rows = await this.applicants(user, { ...q, limit: EXPORT_ROW_CAP }, EXPORT_ROW_CAP + 1, c);
       const page = rows.slice(0, EXPORT_ROW_CAP);

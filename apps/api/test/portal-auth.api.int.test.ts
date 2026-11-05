@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Logger } from "@nestjs/common";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
 import { portalCookieName } from "../src/platform/portal-session.service.js";
-import { GENERIC_SENT, PortalAuthService } from "../src/modules/portal/portal-auth.service.js";
+import { GENERIC_SENT, GLOBAL_LINKS_PER_HOUR, GLOBAL_SIGNUPS_PER_HOUR, PortalAuthService } from "../src/modules/portal/portal-auth.service.js";
 import { portalPruneJob } from "../src/worker/jobs/portal-prune.js";
 import { silentLogger } from "../src/worker/log.js";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
@@ -44,6 +45,22 @@ const signUp = async (email: string, first = "Asha", last = "Iyer", phone = "+91
 };
 const applicant = async (email: string) =>
   (await db.admin.query(`SELECT first_name, last_name, phone_e164, email_verified_at FROM eureka.applicant WHERE email = lower($1)`, [email])).rows[0];
+
+/** The current hour's global counter of a kind, and test-only writes to it as the definer (the guard refuses anyone else). */
+const bucket = async (kind: string) => (await db.admin.query(
+  `SELECT coalesce(sum(n),0)::int AS n FROM eureka.portal_throttle WHERE kind = $1 AND bucket = date_trunc('hour', now())`, [kind])).rows[0].n as number;
+const asDefiner = async (sql: string, params: unknown[] = []) => {
+  const c = await db.admin.connect();
+  try {
+    await c.query("BEGIN");
+    await c.query("SET LOCAL ROLE authz_definer");
+    await c.query(sql, params);
+    await c.query("COMMIT");
+  } catch (e) { await c.query("ROLLBACK").catch(() => undefined); throw e; } finally { c.release(); }
+};
+const fillBucket = (kind: string, n: number) => asDefiner(`INSERT INTO eureka.portal_throttle (kind, bucket, n) VALUES ($1, date_trunc('hour', now()), $2)
+  ON CONFLICT (kind, bucket) DO UPDATE SET n = excluded.n`, [kind, n]);
+const clearBuckets = () => asDefiner(`DELETE FROM eureka.portal_throttle`);
 
 describe("sign-up and sign-in", () => {
   it("answers the same for new, existing and unknown emails; mails only real accounts, with a fixed greeting", async () => {
@@ -189,13 +206,72 @@ describe("limits", () => {
     const cap = t0 + 2;
     expect((await su("cap-1@example.com", cap)).length).toBe(1);
     expect((await su("cap-2@example.com", cap)).length).toBe(1);
-    expect((await su("cap-3@example.com", cap)).length).toBe(0); // nothing created, nothing to tell
+    // Nothing created; the row only says which cap refused it (for the API's warning log).
+    expect(await su("cap-3@example.com", cap)).toEqual([{ applicant_id: null, existing: null, issued: false, cap_reached: "signup" }]);
     expect(await n()).toBe(2);
     // An existing address is unaffected by the new-account cap but still bound by the link cap.
     const l0 = (await db.admin.query(`SELECT coalesce(sum(n),0)::int AS n FROM eureka.portal_throttle WHERE kind = 'link' AND bucket = date_trunc('hour', now())`)).rows[0].n as number;
     await ageLinks(db, "cap-1@example.com");
-    expect((await su("cap-1@example.com", cap, l0)).map((r) => r.issued)).toEqual([false]);
-    expect((await su("cap-1@example.com", cap, l0 + 5)).map((r) => r.issued)).toEqual([true]);
+    expect((await su("cap-1@example.com", cap, l0)).map((r) => [r.issued, r.cap_reached])).toEqual([[false, "link"]]);
+    expect((await su("cap-1@example.com", cap, l0 + 5)).map((r) => [r.issued, r.cap_reached])).toEqual([[true, null]]);
+    // Per-applicant limits are not a cap: cooldown refusals say nothing.
+    expect((await su("cap-1@example.com", cap, l0 + 5)).map((r) => [r.issued, r.cap_reached])).toEqual([[false, null]]);
+  });
+
+  it("verified applicants are exempt from the global link cap; unverified links still share it (E-01)", async () => {
+    const run = async (sql: string, params: unknown[]) => (await asUser(db.app, U.hr, (c) => c.query(sql, params), true)).rows;
+    const issue = (email: string, globalLinks: number) => run(
+      `SELECT issued, cap_reached FROM authz.portal_issue_link($1, gen_random_uuid(), sha256(convert_to($1::text, 'UTF8')), 15, 10, 60, $2)`, [email, globalLinks]);
+    await portalSignIn(app, "verified-cap@example.com");
+    await signUp("unverified-cap@example.com", "Un", "Verified", "+1 469 555 0107");
+    await ageLinks(db, "verified-cap@example.com");
+    await ageLinks(db, "unverified-cap@example.com");
+    await fillBucket("link", 5);
+    try {
+      // A full bucket refuses the unverified address...
+      expect(await issue("unverified-cap@example.com", 5)).toEqual([{ issued: false, cap_reached: "link" }]);
+      // ...but the verified applicant still gets a link, and it is not counted in the bucket.
+      expect(await issue("verified-cap@example.com", 5)).toEqual([{ issued: true, cap_reached: null }]);
+      expect(await bucket("link")).toBe(5);
+      // The per-applicant limits still hold for verified applicants (cooldown here).
+      expect(await issue("verified-cap@example.com", 5)).toEqual([{ issued: false, cap_reached: null }]);
+      // Below the cap the unverified address gets its link and is counted.
+      expect(await issue("unverified-cap@example.com", 6)).toEqual([{ issued: true, cap_reached: null }]);
+      expect(await bucket("link")).toBe(6);
+    } finally {
+      await clearBuckets();
+    }
+  });
+
+  it("API: with both global caps exhausted, verified applicants still sign in; answers are identical; a warning names the kind only", async () => {
+    await portalSignIn(app, "verified-api@example.com");
+    await signUp("unverified-api@example.com", "Un", "Verified", "+1 469 555 0108");
+    await ageLinks(db, "verified-api@example.com");
+    await ageLinks(db, "unverified-api@example.com");
+    const before = { v: (await mailboxOf(app, "verified-api@example.com")).length, u: (await mailboxOf(app, "unverified-api@example.com")).length };
+    const warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+    await fillBucket("link", GLOBAL_LINKS_PER_HOUR);
+    await fillBucket("signup", GLOBAL_SIGNUPS_PER_HOUR);
+    try {
+      const answers = [
+        await post("/api/portal/auth/request-link", { email: "verified-api@example.com" }),
+        await post("/api/portal/auth/request-link", { email: "unverified-api@example.com" }),
+        await post("/api/portal/auth/request-link", { email: "nobody-api@example.com" }),
+        await post("/api/portal/auth/sign-up", { firstName: "New", lastName: "Person", email: "new-api@example.com", phone: "+1 469 555 0109" }),
+      ];
+      await drainPortal(app);
+      for (const r of answers) expect([r.statusCode, r.json()]).toEqual([202, { message: GENERIC_SENT }]);
+      expect((await mailboxOf(app, "verified-api@example.com")).length).toBe(before.v + 1);
+      expect((await mailboxOf(app, "unverified-api@example.com")).length).toBe(before.u);
+      expect(await mailboxOf(app, "new-api@example.com")).toEqual([]);
+      expect(await applicant("new-api@example.com")).toBeUndefined();
+      const lines = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith("portal_cap_reached"));
+      expect(lines.sort()).toEqual(['portal_cap_reached {"kind":"link"}', 'portal_cap_reached {"kind":"signup"}']);
+      expect(warn.mock.calls.flat().join(" ")).not.toMatch(/@/);
+    } finally {
+      warn.mockRestore();
+      await clearBuckets();
+    }
   });
 
   it("per client address: 429 after 20 requests in 15 minutes; IPv6 is keyed by /64", async () => {

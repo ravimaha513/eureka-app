@@ -390,11 +390,12 @@ describe("review follow-ups (0032)", () => {
     const setStatus = (actor: string, id: string, to: string | null) =>
       asUser(db.app, actor, async (c) => (await c.query(`SELECT authz.set_batch_status($1, $2) AS s`, [id, to])).rows[0].s, true);
 
+    // set_batch_status returns the status it changed from (0520), which the API audits.
     it("moves planned -> in_training -> completed; nothing after completion", async () => {
-      expect(await setStatus(U.l3, houston, "in_training")).toBe("in_training");
+      expect(await setStatus(U.l3, houston, "in_training")).toBe("planned");
       await expect(setStatus(U.l3, houston, "planned")).rejects.toThrow(/invalid_transition/);
       await expect(setStatus(U.l3, houston, null)).rejects.toThrow(/invalid_transition/);
-      expect(await setStatus(U.l3, houston, "completed")).toBe("completed");
+      expect(await setStatus(U.l3, houston, "completed")).toBe("in_training");
       await expect(setStatus(U.l3, houston, "cancelled")).rejects.toThrow(/invalid_transition/);
       expect((await db.admin.query(`SELECT status FROM eureka.batch WHERE id = $1`, [houston])).rows[0].status).toBe("completed");
     });
@@ -405,7 +406,7 @@ describe("review follow-ups (0032)", () => {
       await expect(setStatus(U.r3a, b, "cancelled")).rejects.toThrow(/not_permitted/);
       await expect(setStatus(U.admin, b, "cancelled")).rejects.toThrow(/batch_not_found/);
       await expect(setStatus(U.l3, "00000000-0000-0000-0000-00000000dead", "cancelled")).rejects.toThrow(/batch_not_found/);
-      expect(await setStatus(U.l3, b, "cancelled")).toBe("cancelled");
+      expect(await setStatus(U.l3, b, "cancelled")).toBe("planned");
     });
   });
 

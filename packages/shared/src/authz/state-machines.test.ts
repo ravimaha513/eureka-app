@@ -2,12 +2,22 @@ import { describe, expect, it } from "vitest";
 import { candidateActions, placementTransitions, submissionActions } from "./actions.js";
 import type { CandidateRef, UserAccess } from "./engine.js";
 import {
+  BATCH_OPEN_STATUSES,
+  BATCH_STATUSES,
+  CLOSED_BEFORE_JOIN_STATUSES,
+  OPEN_PLACEMENT_STATUSES,
+  PAPERWORK_LOCKED_PLACEMENT_STATUSES,
   PLACEMENT_STATUSES,
+  batchTransitionAllowed,
+  batchTransitionTargets,
   candidateTransitionTargets,
   placementTransitionAllowed,
+  jobTransitionAllowed,
+  jobTransitionTargets,
   placementTransitionTargets,
   submissionTransitionTargets,
 } from "./state-machines.js";
+import { JOB_STATUSES } from "../jobs.js";
 
 const base = (over: Partial<UserAccess> & Pick<UserAccess, "userId" | "roles">): UserAccess => ({
   teamIds: [], subordinateUserIds: [], subtreeTeamIds: [], coachedTeamIds: [], subtreeCoachedTeamIds: [], ...over,
@@ -43,6 +53,44 @@ describe("other state machines", () => {
   it("submission targets", () => {
     expect(submissionTransitionTargets("submitted")).toEqual(["under_review", "rejected", "withdrawn"]);
     expect(submissionTransitionTargets("selected")).toEqual([]);
+  });
+});
+
+describe("job lifecycle (JP-3a: permissive as built)", () => {
+  it("any status may change to any other; the unchanged status is not a transition", () => {
+    for (const from of JOB_STATUSES) {
+      expect(jobTransitionTargets(from)).toEqual(JOB_STATUSES.filter((s) => s !== from));
+      expect(jobTransitionAllowed(from, from)).toBe(false);
+    }
+    expect(jobTransitionAllowed("closed", "draft")).toBe(true);
+    expect(jobTransitionAllowed("open", "archived")).toBe(false);
+    expect(jobTransitionAllowed("archived", "open")).toBe(false);
+    expect(jobTransitionTargets("archived")).toEqual([]);
+  });
+});
+
+describe("training batch lifecycle (TR-6)", () => {
+  it("planned -> in_training -> completed; cancelled from either open state; completed and cancelled are final", () => {
+    expect(batchTransitionTargets("planned")).toEqual(["in_training", "cancelled"]);
+    expect(batchTransitionTargets("in_training")).toEqual(["completed", "cancelled"]);
+    expect(batchTransitionTargets("completed")).toEqual([]);
+    expect(batchTransitionTargets("cancelled")).toEqual([]);
+    expect(batchTransitionAllowed("planned", "completed")).toBe(false);
+    expect(batchTransitionAllowed("in_training", "planned")).toBe(false);
+    for (const s of BATCH_STATUSES) expect(batchTransitionAllowed(s, s)).toBe(false);
+  });
+  it("open batches are exactly those with an outgoing transition", () => {
+    expect(BATCH_STATUSES.filter((s) => BATCH_OPEN_STATUSES.has(s))).toEqual(BATCH_STATUSES.filter((s) => batchTransitionTargets(s).length > 0));
+  });
+});
+
+describe("placement status sets", () => {
+  it("paperwork locks only on a backout, which is a closed-before-join status and never open", () => {
+    expect([...PAPERWORK_LOCKED_PLACEMENT_STATUSES]).toEqual(["backout"]);
+    for (const s of PAPERWORK_LOCKED_PLACEMENT_STATUSES) {
+      expect(CLOSED_BEFORE_JOIN_STATUSES.has(s)).toBe(true);
+      expect(OPEN_PLACEMENT_STATUSES.has(s)).toBe(false);
+    }
   });
 });
 

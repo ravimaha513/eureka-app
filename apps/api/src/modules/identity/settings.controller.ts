@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Post, Put } from "@nestjs/common";
-import { CurrentUser, type AuthedUser } from "../../platform/auth.guard.js";
+import { CurrentUser, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { PreferenceType, PreferenceUpdate, ProfileUpdate, parseVersion } from "./settings.schemas.js";
 import { SettingsService } from "./settings.service.js";
+import { ApiBody } from "../../platform/http/api-doc.js";
 
 /**
  * Settings & Preferences of the signed-in user (docs/interviews-settings-api.md
@@ -9,6 +10,7 @@ import { SettingsService } from "./settings.service.js";
  * the CSRF token like every other write. Nothing here reads or changes
  * another user's data.
  */
+@SelfService()
 @Controller("api/v1/settings")
 export class SettingsController {
   constructor(private readonly svc: SettingsService) {}
@@ -18,6 +20,7 @@ export class SettingsController {
     return this.svc.profile(user);
   }
 
+  @ApiBody(ProfileUpdate)
   @Put("profile")
   updateProfile(@CurrentUser() user: AuthedUser, @Headers("if-match") ifMatch: string | undefined, @Body() body: unknown) {
     return this.svc.updateProfile(user, parseVersion(ifMatch), ProfileUpdate.parse(body));
@@ -28,6 +31,7 @@ export class SettingsController {
     return this.svc.preferences(user);
   }
 
+  @ApiBody(PreferenceUpdate)
   @Put("notifications/:type")
   setPreference(@CurrentUser() user: AuthedUser, @Param("type") type: string, @Body() body: unknown) {
     return this.svc.setPreference(user, PreferenceType.parse(type), PreferenceUpdate.parse(body).inApp);

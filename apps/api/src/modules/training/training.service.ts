@@ -9,7 +9,10 @@ import {
 } from "@nestjs/common";
 import type pg from "pg";
 import {
+  BATCH_OPEN_STATUSES,
   batchDisplayName,
+  batchTransitionAllowed,
+  batchTransitionTargets,
   canManageTraining,
   canPlanBatch,
   resolveScope,
@@ -34,7 +37,7 @@ import type {
   UpdateModule,
   UpdateTrainingBatch,
 } from "./training.schemas.js";
-import { likeContains } from "../../platform/sql.js";
+import { likeContains, nameSearch } from "../../platform/sql.js";
 
 interface BatchRow {
   id: string;
@@ -122,9 +125,13 @@ export class TrainingService {
         manage,
         /** Training managers and Sales leadership (Lead and above) at their batch locations; the database refuses a batch with students. */
         delete: b.deletable && b.students === 0,
-        updateProgress: trainingBatchCovered(access, "training.progress:update", ref) && ["planned", "in_training"].includes(b.status),
-        addStudents: b.staffable && ["planned", "in_training"].includes(b.status),
+        updateProgress: trainingBatchCovered(access, "training.progress:update", ref) && BATCH_OPEN_STATUSES.has(b.status),
+        addStudents: b.staffable && BATCH_OPEN_STATUSES.has(b.status),
         removeStudents: b.staffable,
+        /** TR-1: batch planning rights at the location (authz.batch_manage_location_ids(), as set_batch_status checks). */
+        changeStatus: b.deletable,
+        /** Statuses PUT /status accepts now (state-machines.ts batchTransitionTargets). */
+        statusTargets: b.deletable ? batchTransitionTargets(b.status) : [],
       },
     };
   }
@@ -234,11 +241,18 @@ export class TrainingService {
     });
   }
 
+  /**
+   * TR-1 (finding D-07): whoever plans batches at the location (training managers and Sales
+   * leadership, `deletable` = authz.batch_manage_location_ids()), the rule set_batch_status applies.
+   */
   async setStatus(user: AuthedUser, id: string, to: string) {
     return this.db.withUser(user.id, async (c) => {
       const b = await this.loadBatch(c, id);
-      await c.query(`SELECT authz.set_batch_status($1, $2)`, [id, to]).catch(mapTrainingError);
-      await this.audit.record(c, { actorId: user.id, action: "batch.status", entityType: "batch", entityId: id, changes: { from: b.status, to } });
+      if (!b.deletable) throw new ForbiddenException("Not permitted");
+      if (!batchTransitionAllowed(b.status, to)) throw new UnprocessableEntityException("invalid_transition");
+      // The function returns the status it locked and changed (0520), the true `from` under concurrent changes.
+      const from = (await c.query<{ s: string }>(`SELECT authz.set_batch_status($1, $2) AS s`, [id, to]).catch(mapTrainingError)).rows[0]!.s;
+      await this.audit.record(c, { actorId: user.id, action: "batch.status", entityType: "batch", entityId: id, changes: { from, to } });
       return { id, status: to };
     });
   }
@@ -306,7 +320,7 @@ export class TrainingService {
       await this.loadBatch(c, id);
       const students = (await c.query<{ candidate_id: string; first_name: string; last_name: string; technology: string; marketing_status: string }>(
         `SELECT * FROM authz.training_batch_students($1) s
-         WHERE ($2::text IS NULL OR (s.first_name || ' ' || s.last_name) ILIKE $2)
+         WHERE ($2::text IS NULL OR ${nameSearch("s", "$2")})
          ORDER BY s.first_name, s.last_name, s.candidate_id`, [id, search ? likeContains(search) : null])).rows;
       const courses = await this.batchCourses(c, id);
       const modules = courses.flatMap((co) => co.modules.map((m) => ({ courseId: co.id, moduleId: m.id, durationMinutes: m.durationMinutes })));
@@ -359,7 +373,7 @@ export class TrainingService {
          LEFT JOIN eureka.batch ob ON ob.id = c.batch_id
          LEFT JOIN eureka.technology obt ON obt.id = ob.technology_id
          WHERE c.location_id = $1 AND c.batch_id IS DISTINCT FROM $2
-           AND ($3::text IS NULL OR (p.first_name || ' ' || p.last_name) ILIKE $3 OR t.name ILIKE $3)
+           AND ($3::text IS NULL OR ${nameSearch("p", "$3")} OR t.name ILIKE $3)
            AND ${scopePredicate({ ...scope, allTeams: false, hotlistOpen: false }, params)}
          ORDER BY c.batch_id IS NOT NULL, p.first_name, p.last_name, c.id LIMIT 200`, params);
       return {
@@ -390,21 +404,13 @@ export class TrainingService {
     return this.db.withUser(user.id, async (c) => {
       const b = await this.loadBatch(c, id);
       if (!b.staffable) throw new ForbiddenException("Not permitted");
-      if (!["planned", "in_training"].includes(b.status)) throw new UnprocessableEntityException("batch_closed");
-      const added: string[] = [];
-      const skipped: string[] = [];
-      for (const candidateId of new Set(candidateIds)) {
-        await c.query("SAVEPOINT add_student");
-        try {
-          await c.query(`SELECT authz.set_batch_student($1, $2, true)`, [id, candidateId]);
-          added.push(candidateId);
-        } catch (err) {
-          if ((err as { message?: string }).message !== "candidate_not_eligible") return mapTrainingError(err);
-          await c.query("ROLLBACK TO SAVEPOINT add_student");
-          skipped.push(candidateId);
-        }
-        await c.query("RELEASE SAVEPOINT add_student");
-      }
+      if (!BATCH_OPEN_STATUSES.has(b.status)) throw new UnprocessableEntityException("batch_closed");
+      // One call (0506): the rules of authz.set_batch_student per candidate, scope sets computed once,
+      // candidates locked in id order; one row per distinct candidate, in request order.
+      const outcomes = (await c.query<{ candidate_id: string; outcome: "added" | "skipped" }>(
+        `SELECT candidate_id, outcome FROM authz.set_batch_students($1, $2::uuid[])`, [id, candidateIds]).catch(mapTrainingError)).rows;
+      const added = outcomes.filter((o) => o.outcome === "added").map((o) => o.candidate_id);
+      const skipped = outcomes.filter((o) => o.outcome === "skipped").map((o) => o.candidate_id);
       await this.audit.record(c, {
         actorId: user.id, action: "training.students_added", entityType: "batch", entityId: id,
         changes: { candidateIds: added, skipped: skipped.length },

@@ -8,6 +8,7 @@ import { seedPipeline, type PipelineSeed } from "./pipeline-seed.js";
 import { feedbackEmailJob, feedbackNotificationJob } from "../src/worker/jobs/feedback-email.js";
 import { JobRunner } from "../src/worker/runner.js";
 import type { Mail } from "../src/worker/feedback-mail.js";
+import { FeedbackController } from "../src/modules/feedback/feedback.controller.js";
 
 let db: TestDb; let app: NestFastifyApplication; let seed: PipelineSeed;
 const sent: Mail[] = [];
@@ -89,6 +90,20 @@ describe("candidate feedback",()=>{
  it("limits invalid token guessing",async()=>{
   const replies=[];for(let n=0;n<35;n++)replies.push(await app.inject({method:"GET",url:"/api/public/feedback/invalid",remoteAddress:"198.51.100.4"}));
   expect(replies.at(-1)!.statusCode).toBe(429);
+ });
+ it("keys the per-address limit by IPv6 /64, and a refused address adds no token keys (D-01)",async()=>{
+  const get=(remoteAddress:string,token="x".repeat(43))=>app.inject({method:"GET",url:`/api/public/feedback/${token}`,remoteAddress});
+  const codes:number[]=[];
+  // Rotating addresses inside one /64 share one window of 30 a minute.
+  for(let n=0;n<31;n++)codes.push((await get(`2001:db8:feed:1::${(n+1).toString(16)}`,`${String(n).padStart(2,"0")}${"a".repeat(41)}`)).statusCode);
+  expect(codes.slice(0,30).every((c)=>c===404)).toBe(true);
+  expect(codes[30]).toBe(429);
+  expect((await get("2001:db8:feed:1:ffff::1")).statusCode).toBe(429);
+  expect((await get("2001:db8:feed:2::1")).statusCode).toBe(404); // the next /64 is someone else
+  const limiters=app.get(FeedbackController) as unknown as {ipLimiter:{size:number};tokenLimiter:{size:number}};
+  const tokens=limiters.tokenLimiter.size;
+  for(let n=0;n<50;n++)expect((await get("2001:db8:feed:1::abcd",`${String(n).padStart(3,"0")}${"b".repeat(40)}`)).statusCode).toBe(429);
+  expect(limiters.tokenLimiter.size).toBe(tokens);
  });
 });
 

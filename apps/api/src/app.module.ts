@@ -10,8 +10,12 @@ import { AuditService } from "./platform/audit.service.js";
 import { AuthGuard, Public } from "./platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "./platform/config.js";
 import { DbService } from "./platform/db.service.js";
-import { ProblemFilter } from "./platform/errors.js";
+import { ProblemFilter, RetryableUnavailable } from "./platform/errors.js";
+import { JsonLoggerService, setLogWriter } from "./platform/logger.js";
+import { registerMetrics } from "./platform/metrics.js";
+import { genReqId, registerRequestId } from "./platform/request-context.js";
 import { OidcService } from "./platform/oidc.service.js";
+import { ReportExecutor } from "./platform/report-executor.js";
 import { originGuard } from "./platform/origin-guard.js";
 import { SessionService } from "./platform/session.service.js";
 import { AuthController } from "./modules/identity/auth.controller.js";
@@ -22,12 +26,17 @@ import { SettingsService } from "./modules/identity/settings.service.js";
 import { CandidatesController } from "./modules/candidates/candidates.controller.js";
 import { CandidatesService } from "./modules/candidates/candidates.service.js";
 import { CandidateMetricsService } from "./modules/candidates/candidate-metrics.service.js";
+import { CandidateBatchesService } from "./modules/candidates/candidate-batches.service.js";
+import { CandidateCreateService } from "./modules/candidates/candidate-create.service.js";
+import { CandidateListService } from "./modules/candidates/candidate-list.service.js";
+import { CandidateProfileService } from "./modules/candidates/candidate-profile.service.js";
+import { CandidateTimelineService } from "./modules/candidates/candidate-timeline.service.js";
 import { SubmissionsController, SubmissionsService } from "./modules/submissions/submissions.controller.js";
 import { InterviewsController } from "./modules/interviews/interviews.controller.js";
 import { InterviewsService } from "./modules/interviews/interviews.service.js";
 import { AdminController, CoachAssignmentsController, TeamsController, UserDesignationController } from "./modules/admin/admin.controller.js";
 import { PerformanceController, PerformanceService } from "./modules/performance/performance.controller.js";
-import { AdminService } from "./modules/admin/admin.service.js";
+import { ADMIN_PROVIDERS } from "./modules/admin/admin.providers.js";
 import { PlacementsController } from "./modules/placements/placements.controller.js";
 import { PlacementsService } from "./modules/placements/placements.service.js";
 import { LookupsController, LookupsService } from "./modules/lookups/lookups.controller.js";
@@ -80,15 +89,44 @@ import { InterviewReportsController, InterviewReportsService } from "./modules/i
 import { AssessmentsController, NonResponseController, PipelineReportController, PipelineReportService } from "./modules/pipeline-report/pipeline-report.controller.js";
 import { PreferredVendorsController, PreferredVendorsService } from "./modules/preferred-vendors/preferred-vendors.controller.js";
 
+/** Readiness: the database ping must answer within this many ms (a starved pool must not hang the probe). */
+const READY_TIMEOUT_MS = 1000;
+
 @Controller("api")
 class HealthController {
   constructor(private readonly db: DbService) {}
 
+  /** Liveness (the ECS container health check): the process serves HTTP; no database, so a busy pool never gets the task replaced. */
+  @Public()
+  @Get("health/live")
+  live() {
+    return { status: "ok" };
+  }
+
+  /** Readiness: a database ping with a 1 s bound; 503 + Retry-After when the pool or database does not answer in time. */
+  @Public()
+  @Get("health/ready")
+  async ready() {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new RetryableUnavailable("database_unavailable", 5)), READY_TIMEOUT_MS);
+    });
+    try {
+      await Promise.race([this.db.system((c) => c.query("SELECT 1")), timeout]);
+    } catch (err) {
+      if (err instanceof RetryableUnavailable) throw err;
+      throw new RetryableUnavailable("database_unavailable", 5);
+    } finally {
+      clearTimeout(timer);
+    }
+    return { status: "ok" };
+  }
+
+  /** Backward-compatible alias of readiness (deploy smoke tests, local-dev script). */
   @Public()
   @Get("health")
-  async health() {
-    await this.db.system((c) => c.query("SELECT 1"));
-    return { status: "ok" };
+  health() {
+    return this.ready();
   }
 }
 
@@ -128,10 +166,11 @@ export class AppModule {
       ],
       providers: [
         { provide: CONFIG, useValue: config },
-        DbService, SessionService, AccessService, AuditService, OidcService, SettingsService,
-        CandidatesService, CandidateMetricsService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
+        DbService, SessionService, AccessService, AuditService, OidcService, SettingsService, ReportExecutor,
+        CandidatesService, CandidateMetricsService, SubmissionsService, InterviewsService, ...ADMIN_PROVIDERS, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
         PaperworkService,
         ResumesService, NotificationsService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
+        CandidateListService, CandidateProfileService, CandidateCreateService, CandidateBatchesService, CandidateTimelineService,
         WorkAuthorizationService, OwnersService, UtilitiesService, BillsService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
         DatahubService,
         // training
@@ -169,11 +208,17 @@ export async function createApp(config: AppConfig): Promise<NestFastifyApplicati
     // API Gateway append to it) and nothing reads req.ip yet. When a client IP is
     // needed, derive it from CloudFront's CloudFront-Viewer-Address header on
     // requests that passed the origin guard.
-    new FastifyAdapter({ trustProxy: false, bodyLimit: 1_048_576 }),
-    { logger: config.NODE_ENV === "test" ? false : ["error", "warn", "log"] },
+    // Request ids (audit R-11): genReqId from x-amzn-trace-id, else a UUID; a
+    // client `request-id` header is not trusted (requestIdHeader: false).
+    new FastifyAdapter({ trustProxy: false, bodyLimit: 1_048_576, requestIdHeader: false, genReqId }),
+    // Structured JSON logs (platform/logger.ts); tests stay quiet.
+    { logger: config.NODE_ENV === "test" ? false : new JsonLoggerService() },
   );
+  if (config.NODE_ENV === "test") setLogWriter("silent");
   await app.register(cookie as never);
   const fastify = app.getHttpAdapter().getInstance();
+  registerRequestId(fastify);
+  registerMetrics(fastify, app.get(DbService).pool);
   if (config.ORIGIN_VERIFY_SECRET) fastify.addHook("onRequest", originGuard(config.ORIGIN_VERIFY_SECRET));
   // Local document driver (development, tests): the API stands in for the bucket.
   if (storage instanceof LocalDocumentStorage) await registerLocalStorageRoutes(fastify, storage);

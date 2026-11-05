@@ -249,7 +249,8 @@ describe("EXECUTE grants (rule 2)", () => {
               p.prosecdef AS definer
          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'authz' AND p.proname = ANY ($1)`, [[...appFns, ...internal]])).rows;
-    expect(rows.map((r) => r.name).sort()).toEqual([...appFns, ...internal].sort());
+    // bill_void twice: (uuid, text) and the 0508 overload with an optional row version (D-13).
+    expect(rows.map((r) => r.name).sort()).toEqual([...appFns, "bill_void", ...internal].sort());
     for (const r of rows) {
       expect(r.pub, r.name).toBe(false);
       expect(r.cfg, r.name).toEqual(["search_path=pg_catalog, pg_temp"]);

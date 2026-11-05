@@ -170,7 +170,7 @@ describe("Submissions list: create placement from the row", () => {
 describe("Submission detail", () => {
   it("offers exactly the transitions in actions and moves the submission forward", async () => {
     let status = "submitted";
-    api.routes["GET /api/v1/submissions/s1"] = () => ({ body: { ...S1, status } });
+    api.routes["GET /api/v1/submissions/s1"] = () => ({ body: { ...S1, status, rowVersion: 4 } });
     api.routes["PATCH /api/v1/submissions/s1/status"] = (_u, b) => { status = (b as { to: string }).to; return { body: { id: "s1", status } }; };
     wrap(<SubmissionsPage me={RECRUITER} />);
     const drawer = await openDrawer("Asha Iyer");
@@ -183,6 +183,7 @@ describe("Submission detail", () => {
     await waitFor(() => expect(within(drawer).getByRole("status")).toHaveTextContent("Status changed to Under review."));
     expect(api.writes()[0]).toMatchObject({ method: "PATCH", path: "/api/v1/submissions/s1/status", body: { to: "under_review" } });
     expect(api.writes()[0]!.headers["x-csrf-token"]).toBe("tok");
+    expect(api.writes()[0]!.headers["if-match"]).toBe("\"4\"");
     await waitFor(() => expect(within(drawer).getAllByText("Under review").length).toBeGreaterThan(0));
   });
 
@@ -488,7 +489,7 @@ describe("Edit submission details (lead and above)", () => {
   });
 
   it("sends only the changed fields, hides the rate without editRate and shows who edited", async () => {
-    let current = editable();
+    let current = { ...editable(), rowVersion: 2 };
     api.routes["GET /api/v1/submissions"] = () => ({ body: { items: [current], nextCursor: null } });
     api.routes["GET /api/v1/submissions/s1"] = () => ({ body: current });
     api.routes["PATCH /api/v1/submissions/s1"] = (_u, b) => {
@@ -512,6 +513,7 @@ describe("Edit submission details (lead and above)", () => {
     fireEvent.click(within(dlg).getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit submission details" })).not.toBeInTheDocument());
     expect(api.writes()[0]!.body).toEqual({ jobTitle: "Staff Java Developer", vendorId: VENDOR });
+    expect(api.writes()[0]!.headers["if-match"]).toBe("\"2\"");
     expect(await within(drawer).findByText(/Details edited .* by Lead One\./)).toBeInTheDocument();
   });
 

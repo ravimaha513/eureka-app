@@ -32,7 +32,7 @@ function documentError(e: unknown, action: "upload" | "download" | "load" | "edi
       ? "Five uploads are already being scanned for this candidate. Wait for them to finish."
       : "This document isn't available (it is still being scanned or did not pass).";
     case 422: return "The server refused this file. Choose a PDF, Word (.docx), PNG or JPEG file up to 15 MB.";
-    case 429: return e.detail ?? "Too many requests. Try again in a minute.";
+    case 429: return e.message;
     default: return e.detail ?? "Something went wrong.";
   }
 }

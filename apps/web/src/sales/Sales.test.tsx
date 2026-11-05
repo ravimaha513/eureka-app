@@ -8,6 +8,8 @@ import { CandidateProfile } from "./CandidateProfile";
 import { CandidatesPage } from "./CandidatesPage";
 import { HotListPage } from "./HotListPage";
 import { DUPLICATE_WARNING } from "./LogSubmissionDialog";
+import { STALE_MESSAGE } from "../lib/errorText";
+import { refetchOnStale } from "../lib/queryClient";
 import { negate, openMoreFilters, pickOption } from "../ui/testHelpers";
 
 // ---- fixtures (shapes from apps/api/src/modules/candidates/candidates.service.ts) ---------------
@@ -182,7 +184,7 @@ describe("Hot List", () => {
   it("shows the rate-limit message from the server", async () => {
     routes["GET /api/v1/hotlist"] = () => problem(429, { title: "Too Many Requests", detail: "Too many Hot List requests; try again in a minute" });
     wrap(<HotListPage me={RECRUITER} />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Too many Hot List requests; try again in a minute");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Too many Hot List requests. Try again in a minute.");
   });
 });
 
@@ -441,6 +443,28 @@ describe("Candidate profile", () => {
     expect(within(card).getAllByRole("listitem").map((li) => li.textContent).slice(-2)).toEqual(["L1 3", "L2 2"]);
   });
 
+  it("shows — for the date of birth when the server withholds it (dobMasked null)", async () => {
+    routes[`GET /api/v1/candidates/${CID}`] = () => ({ body: { ...PROFILE, dobMasked: null } });
+    renderProfile(RECRUITER);
+    const label = await screen.findByText("Date of birth");
+    expect(label.nextElementSibling).toHaveTextContent(/^—$/);
+  });
+
+  it("a stale edit says the record changed and refetches the profile", async () => {
+    routes[`PUT /api/v1/candidates/${CID}/technical-rating`] = () => problem(412, { title: "Precondition Failed", detail: "stale" });
+    const qc = client();
+    const stop = refetchOnStale(qc);
+    render(<QueryClientProvider client={qc}><CandidateProfile id={CID} me={LOC_ADMIN} onBack={() => undefined} /></QueryClientProvider>);
+    fireEvent.change(await screen.findByLabelText("Rating (1 to 5)"), { target: { value: "4" } });
+    const gets = () => calls.filter((c) => c.method === "GET" && c.path === `/api/v1/candidates/${CID}`).length;
+    const before = gets();
+    fireEvent.click(screen.getByRole("button", { name: "Save rating" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(STALE_MESSAGE);
+    expect(writes()[0]!.headers).toMatchObject({ "if-match": "\"3\"" });
+    await waitFor(() => expect(gets()).toBeGreaterThan(before));
+    stop();
+  });
+
   it("shows the profile with actions for a recruiter only", async () => {
     renderProfile(RECRUITER);
     const h1 = await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
@@ -462,7 +486,7 @@ describe("Candidate profile", () => {
     expect(screen.queryByRole("button", { name: "Log submission" })).toBeInTheDocument(); // leads can submit (sales line)
     fireEvent.click(sw);
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Asha Iyer is now open to all teams."));
-    expect(writes()[0]).toMatchObject({ method: "PUT", body: { visibility: "all_teams" } });
+    expect(writes()[0]).toMatchObject({ method: "PUT", body: { visibility: "all_teams" }, headers: { "if-match": "\"3\"" } });
   });
 
   it("lets a lead share with picked teams, never listing the candidate's own team", async () => {
@@ -482,7 +506,7 @@ describe("Candidate profile", () => {
     expect(anjali).not.toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Save sharing" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Asha Iyer is now shared with 1 team."));
-    expect(writes()[0]).toMatchObject({ method: "PUT", body: { visibility: "selected_teams", teamIds: ["t3"] } });
+    expect(writes()[0]).toMatchObject({ method: "PUT", body: { visibility: "selected_teams", teamIds: ["t3"] }, headers: { "if-match": "\"3\"" } });
   });
 
   it("lets a location admin set the technical rating and nothing else", async () => {
@@ -496,6 +520,7 @@ describe("Candidate profile", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save rating" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Technical rating set to 4 of 5."));
     expect(writes()[0]!.body).toEqual({ rating: 4 });
+    expect(writes()[0]!.headers).toMatchObject({ "if-match": "\"3\"" });
   });
 
   it("explains a 404 (another team's profile) and focuses the heading", async () => {
@@ -517,6 +542,7 @@ describe("Candidate profile", () => {
     fireEvent.click(screen.getByRole("button", { name: "Move to On hold" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Status changed to On hold."));
     expect(writes()[0]!.body).toEqual({ to: "on_hold" });
+    expect(writes()[0]!.headers).toMatchObject({ "if-match": "\"3\"" });
     await openStatusMenu();
     fireEvent.click(screen.getByRole("button", { name: "Move to Stopped" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("That status change isn't allowed");
@@ -572,6 +598,7 @@ describe("Candidate profile", () => {
     await waitFor(() => expect(email).toHaveAttribute("aria-invalid", "true"));
     expect(email).toHaveAccessibleDescription(expect.stringContaining("Invalid email"));
     expect(writes()[0]!.body).toEqual({ priority: "P1", marketingEmail: "asha@mkt.example", inPersonOk: false });
+    expect(writes()[0]!.headers).toMatchObject({ "if-match": "\"3\"" });
 
     fireEvent.click(within(dlg).getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());

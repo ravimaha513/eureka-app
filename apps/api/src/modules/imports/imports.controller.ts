@@ -8,6 +8,7 @@ import { z } from "zod";
 import { AuditService } from "../../platform/audit.service.js";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
+import { ApiBody } from "../../platform/http/api-doc.js";
 
 /**
  * Sheet import sign-off (docs/import.md). Everything that records a person's
@@ -146,6 +147,7 @@ export class ImportsController {
     return this.svc.review(user, id);
   }
 
+  @ApiBody(Decision)
   @Post(":id/decisions")
   @HttpCode(200)
   decide(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
@@ -157,6 +159,7 @@ export class ImportsController {
     return this.svc.preview(user, id);
   }
 
+  @ApiBody(Approve)
   @Post(":id/approve")
   @HttpCode(200)
   approve(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {

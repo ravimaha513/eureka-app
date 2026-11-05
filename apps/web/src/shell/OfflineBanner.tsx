@@ -1,5 +1,24 @@
-import { useSyncExternalStore } from "react";
-import { WifiOff } from "lucide-react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { Hourglass, WifiOff } from "lucide-react";
+import { BUSY_EVENT } from "../api";
+
+/**
+ * "Busy, retrying" while any read waits out a 503's Retry-After before its one retry (api.ts).
+ * It clears by itself; if the retry fails too, the screen shows its own error.
+ */
+export function BusyBanner() {
+  const [waiting, setWaiting] = useState(0);
+  useEffect(() => {
+    const on = (e: Event) => setWaiting((n) => Math.max(0, n + Number((e as CustomEvent<number>).detail)));
+    window.addEventListener(BUSY_EVENT, on);
+    return () => window.removeEventListener(BUSY_EVENT, on);
+  }, []);
+  return (
+    <div role="status" aria-live="polite" className={waiting ? "offline-banner" : "sr-only"}>
+      {waiting > 0 && <><Hourglass size={16} aria-hidden="true" />The server is busy. Retrying in a moment…</>}
+    </div>
+  );
+}
 
 const subscribe = (onChange: () => void) => {
   window.addEventListener("online", onChange);
