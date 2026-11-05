@@ -26,6 +26,11 @@ import { SettingsService } from "./modules/identity/settings.service.js";
 import { CandidatesController } from "./modules/candidates/candidates.controller.js";
 import { CandidatesService } from "./modules/candidates/candidates.service.js";
 import { CandidateMetricsService } from "./modules/candidates/candidate-metrics.service.js";
+import { CandidateBatchesService } from "./modules/candidates/candidate-batches.service.js";
+import { CandidateCreateService } from "./modules/candidates/candidate-create.service.js";
+import { CandidateListService } from "./modules/candidates/candidate-list.service.js";
+import { CandidateProfileService } from "./modules/candidates/candidate-profile.service.js";
+import { CandidateTimelineService } from "./modules/candidates/candidate-timeline.service.js";
 import { SubmissionsController, SubmissionsService } from "./modules/submissions/submissions.controller.js";
 import { InterviewsController } from "./modules/interviews/interviews.controller.js";
 import { InterviewsService } from "./modules/interviews/interviews.service.js";
@@ -165,6 +170,7 @@ export class AppModule {
         CandidatesService, CandidateMetricsService, SubmissionsService, InterviewsService, ...ADMIN_PROVIDERS, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
         PaperworkService,
         ResumesService, NotificationsService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },
+        CandidateListService, CandidateProfileService, CandidateCreateService, CandidateBatchesService, CandidateTimelineService,
         WorkAuthorizationService, OwnersService, UtilitiesService, BillsService, { provide: FIELD_CRYPTO, useFactory: () => createFieldCrypto(config) },
         DatahubService,
         // training

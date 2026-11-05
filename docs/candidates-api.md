@@ -60,7 +60,7 @@ branch's base: that role does not exist here (interview prep is the interview co
 | `sort` | `default`, `priority`, `days`, `name` | order: id; P1 first; longest in market first (no start date last); name |
 
 Paging stays keyset: with a sort the cursor is still the last row's id, and the next page starts
-after that row's (sort key, id). Both list paths (scoped SQL in `candidates.service.ts`, open
+after that row's (sort key, id). Both list paths (scoped SQL in `candidate-list.service.ts`, open
 `authz.hotlist_page`) order the same way.
 
 Saved views (`POST/PATCH /hotlist/views`) and `POST /hotlist/export` accept the same keys (the export
@@ -274,13 +274,32 @@ upload is also on the batch's Students tab while the batch is open.
   when the batch is completed or cancelled; 429 after 10 calls a minute per user.
 - **Daily row budget** (audit A-01): the file answers "is this contact taken?" for every row, so rows checked against
   existing contacts (the ones that pass the in-memory checks) are charged to the caller, previews included, before the
-  check runs: `BULK_CANDIDATE_ROWS_PER_DAY` = **2,000 rows per user per UTC day** (`candidates.service.ts`; change the
+  check runs: `BULK_CANDIDATE_ROWS_PER_DAY` = **2,000 rows per user per UTC day** (`candidate-batches.service.ts`; change the
   constant to resize it). Stored in `eureka.bulk_candidate_budget` (0475, written only by
   `authz.bulk_candidate_budget_take`), so it holds across API tasks. A file that would pass it gets
   **429 `bulk_budget_exceeded`** and is not charged; 404 / 403 / 422 come first and cost nothing.
 - Audit (counts and ids only): `candidate.created` per row with `{ batchId, bulk: true }`, `batch.candidates_added`
   `{ teamId, created, checked, taken }`, and `batch.candidates_checked` `{ rows, failed, checked, taken }` for a preview
   or a refused file (`checked`: rows charged to the budget; `taken`: rows reported `duplicate_email` / `duplicate_phone`).
+
+## Batches list and status (FR-CAN-02)
+
+- `GET /api/v1/batches?locationId=&technologyId=&status=` (`candidate:read`) → `{ items: [{ id, label, customName,
+  location, technology, startMonth, sizePlanned, status, candidatesInScope }], truncated, canCreate }`, newest start
+  month first, at most **200** items. `truncated: true` means more batches match: narrow the filter (A-12; additive,
+  no cursor).
+- `PUT /api/v1/batches/:id/status` (`candidate:create`; batch planning rights at the location) `{ to }` → `{ id, status }`;
+  404 not visible, 403 not allowed, 422 `invalid_transition`. `authz.set_batch_status` returns the status it changed
+  from (0490), and that is what the `batch.status` audit row records as `from`, also when another change landed
+  between the API's read and the function's row lock (D-06). `PUT /api/v1/training/batches/:id/status` audits the same way.
+
+## Code layout
+
+`candidates.service.ts` is the module's entry point: it re-exports the helpers other modules use (`scopePredicate`,
+`auditSafeProfile`, `moreFilters`, …) and keeps `CandidatesService.create` for applications. The work lives in
+`candidate-common.ts` (rows, scope predicate, presentation, read-before-write), `candidate-list.service.ts`
+(Candidates list, Hot List), `candidate-profile.service.ts` (one candidate's reads and edits), `candidate-create.service.ts`
+(create, duplicate check), `candidate-batches.service.ts` (batches, bulk add) and `candidate-timeline.service.ts`.
 
 ## Deleting a candidate (CA-7)
 

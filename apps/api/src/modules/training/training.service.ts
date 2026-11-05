@@ -250,8 +250,9 @@ export class TrainingService {
       const b = await this.loadBatch(c, id);
       if (!b.deletable) throw new ForbiddenException("Not permitted");
       if (!batchTransitionAllowed(b.status, to)) throw new UnprocessableEntityException("invalid_transition");
-      await c.query(`SELECT authz.set_batch_status($1, $2)`, [id, to]).catch(mapTrainingError);
-      await this.audit.record(c, { actorId: user.id, action: "batch.status", entityType: "batch", entityId: id, changes: { from: b.status, to } });
+      // The function returns the status it locked and changed (0490), the true `from` under concurrent changes.
+      const from = (await c.query<{ s: string }>(`SELECT authz.set_batch_status($1, $2) AS s`, [id, to]).catch(mapTrainingError)).rows[0]!.s;
+      await this.audit.record(c, { actorId: user.id, action: "batch.status", entityType: "batch", entityId: id, changes: { from, to } });
       return { id, status: to };
     });
   }
