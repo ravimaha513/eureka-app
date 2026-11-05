@@ -6,7 +6,8 @@ const digest = (v: string) => createHash("sha256").update(v).digest();
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
-const isHealthPath = (url: string) => url === "/api/health" || url.startsWith("/api/health?");
+/** /api/health, /api/health/live, /api/health/ready (optionally with a query string); nothing else. */
+const isHealthPath = (url: string) => /^\/api\/health(\/live|\/ready)?(\?|$)/.test(url);
 
 /**
  * Rejects requests that did not come through CloudFront (and therefore skipped
@@ -17,7 +18,7 @@ const isHealthPath = (url: string) => url === "/api/health" || url.startsWith("/
  * compared with every entry via constant-time SHA-256 digest comparison,
  * without exiting early on a match.
  *
- * The only exemption is /api/health from loopback: the ECS container health
+ * The only exemption is /api/health (and /live, /ready) from loopback: the ECS container health
  * check runs inside the task and calls 127.0.0.1. Health requests arriving
  * through the VPC link come from another address and need the secret too.
  */

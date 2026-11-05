@@ -64,6 +64,9 @@ describe("origin guard", () => {
     app.addHook("onRequest", originGuard(`${S1}, ${S2}`));
     app.get("/api/health", async () => ({ status: "ok" }));
     app.get("/api/healthz", async () => ({ status: "other" }));
+    app.get("/api/health/live", async () => ({ status: "ok" }));
+    app.get("/api/health/ready", async () => ({ status: "ok" }));
+    app.get("/api/health/other", async () => ({ status: "other" }));
     app.get("/api/v1/me", async () => ({ ok: true }));
     await app.ready();
   });
@@ -77,6 +80,8 @@ describe("origin guard", () => {
   it.each(["127.0.0.1", "::1", "::ffff:127.0.0.1"])("lets the container health check through from %s", async (ip) => {
     expect((await get("/api/health", ip)).statusCode).toBe(200);
     expect((await get("/api/health?deep=1", ip)).statusCode).toBe(200);
+    expect((await get("/api/health/live", ip)).statusCode).toBe(200);
+    expect((await get("/api/health/ready", ip)).statusCode).toBe(200);
   });
 
   it("requires the secret for health from anywhere else (VPC link)", async () => {
@@ -88,6 +93,8 @@ describe("origin guard", () => {
 
   it("only exempts the exact health path", async () => {
     expect((await get("/api/healthz", "127.0.0.1")).statusCode).toBe(403);
+    expect((await get("/api/health/other", "127.0.0.1")).statusCode).toBe(403);
+    expect((await get("/api/health/livez", "127.0.0.1")).statusCode).toBe(403);
     expect((await get("/api/health/../v1/me", "127.0.0.1")).statusCode).toBe(403);
     expect((await get("/api/v1/me", "127.0.0.1")).statusCode).toBe(403);
   });
