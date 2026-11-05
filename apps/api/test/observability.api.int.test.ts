@@ -252,6 +252,9 @@ describe("Google sign-in callback failures redirect to the login page (F-05)", (
     const before = (await db.admin.query(`SELECT count(*)::int AS n FROM eureka.audit_event WHERE action = 'auth.denied'`)).rows[0].n;
     expectLoginError(await callback(s.cookie, `code=c&state=${s.state}`), "not_provisioned");
     expect((await db.admin.query(`SELECT count(*)::int AS n FROM eureka.audit_event WHERE action = 'auth.denied'`)).rows[0].n).toBe(before + 1);
+    // Rule 5: a reason code and the hosted-domain match, never the email.
+    const last = (await db.admin.query(`SELECT changes FROM eureka.audit_event WHERE action = 'auth.denied' ORDER BY seq DESC LIMIT 1`)).rows[0];
+    expect(last.changes).toEqual({ reason: "no_matching_account", domainMatch: true });
   });
 
   it("success sets the __Host- session cookie (Secure, HttpOnly, Lax, Path=/) and redirects home", async () => {
