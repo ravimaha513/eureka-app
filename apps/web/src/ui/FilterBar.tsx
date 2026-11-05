@@ -19,14 +19,14 @@ export interface FilterChip {
  * While `selecting`, `selection` (a `.bulkbar`) takes the summary row's place.
  *
  * Phones (≤768px): only `search` and a "Filters · n" button show; the button opens every filter
- * (primary + more) as a bottom sheet with a Done button. Escape or Done closes it and returns
+ * (primary + more) as a bottom sheet with Done, and a footer with Reset and "Show n results" (`showLabel`). Escape or Done closes it and returns
  * focus to the button; opening moves focus to the first field in the sheet.
  *
  * Fields are passed in as ready-made `.field.inline` blocks, e.g.
  *   <div className="field inline fb-search"><label htmlFor={id}>Search name</label><input id={id} type="search" … /></div>
  * State stays with the caller (keep it in the URL with useSearchParams).
  */
-export function FilterBar({ label, search, primary, more, moreCount, activeCount, chips = [], hasFilters, onClear, summaryEnd, selection, selecting = false }: {
+export function FilterBar({ label, search, primary, more, moreCount, activeCount, chips = [], hasFilters, onClear, summaryEnd, selection, selecting = false, showLabel }: {
   /** Accessible name of the search form, e.g. "Hot List filters". */
   label: string;
   /** The search field: the only control left inline on phones. */
@@ -49,6 +49,8 @@ export function FilterBar({ label, search, primary, more, moreCount, activeCount
   /** The bulk-selection bar; replaces the summary row while `selecting`. */
   selection?: ReactNode;
   selecting?: boolean;
+  /** Phone sheet footer button text, e.g. "Show 38 candidates"; default "Show results". */
+  showLabel?: string;
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -90,6 +92,10 @@ export function FilterBar({ label, search, primary, more, moreCount, activeCount
               <div className="fb-more" id={`${id}-more`} hidden={!open} role="group" aria-label="More filters">{more}</div>
             </>
           )}
+          <div className="fb-sheetfoot">
+            <button type="button" className="btn" disabled={!hasFilters} onClick={onClear}>Reset</button>
+            <button type="button" className="btn primary" onClick={close}>{showLabel ?? "Show results"}</button>
+          </div>
         </div>
       </form>
       {selection}

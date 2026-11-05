@@ -114,11 +114,13 @@ export function ListFilters({ s, label, statuses, batches, options, actions, sel
     <Segmented label={LABELS[k]} value={s.single[k]} options={opts} onChange={(v) => s.setSingle(k, v)} />
   );
   const fetching = s.q.isFetching && s.q.isPlaceholderData;
+  const total = s.facets.data?.total;
   return (
     <FilterBar label={`${label} filters`} selection={selection} selecting={selecting}
       moreCount={moreCount} activeCount={active.length + (s.applied.search ? 1 : 0)}
       chips={active.map((f) => ({ key: f.key, name: f.label, not: f.not, label: `${f.label}${f.not ? " is not" : ":"} ${f.value}`, onRemove: f.clear }))}
       hasFilters={s.hasFilters} onClear={s.clear}
+      showLabel={total !== undefined ? `Show ${total} ${total === 1 ? "candidate" : "candidates"}` : undefined}
       search={
         <div className="field inline fb-search">
           <label htmlFor={`${id}-search`}>Search name</label>
