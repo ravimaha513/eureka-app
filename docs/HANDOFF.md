@@ -298,6 +298,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Hot List open-to-all emphasis: solid violet "Open to all teams" chip (`--violet-solid`), violet row tint + left bar (`tr.opentoall`); "Selected teams" stays tinted (`.badge.shared_teams`)
 - Sales can edit interview system name (Edit interview form; API allowlist + guard, migration 0530, IS-14). Create still refuses it; `cleared` / `consent_captured` stay location-only.
 - Interview details drawer: Edit, Feedback and Place dialogs stack above it, so it no longer has to be closed first.
+- Coach calendar (migration 0540, `docs/coach-calendar-api.md`): day and week grids of every coach's interviews; only the `ceo` role decides who else sees them, by role or user.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

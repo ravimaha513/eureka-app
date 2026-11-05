@@ -53,6 +53,7 @@ const CODES: Record<string, (code: string) => HttpException> = {
   role_department_mismatch: (c) => new UnprocessableEntityException(c),
   // Admin/data separation (0500; docs/roles-api.md "Admin separation").
   admin_permission_needs_admin_role: (c) => new UnprocessableEntityException(c),
+  ceo_only_permission: (c) => new UnprocessableEntityException(c),
   business_permission_on_admin_role: (c) => new UnprocessableEntityException(c),
   // Admin is only admin per user (0510): a legacy role that breaks the rule is not granted again,
   // and a custom role an admin holds takes no business permission.

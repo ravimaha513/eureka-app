@@ -8744,6 +8744,197 @@
         }
       }
     },
+    "/api/v1/coach-calendar": {
+      "get": {
+        "operationId": "CoachCalendarController_calendar",
+        "tags": [
+          "calendar"
+        ],
+        "description": "Any signed-in staff user; data scope from RLS or a check in the service.",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "self-service",
+        "parameters": [
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              ]
+            },
+            "required": true,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              ]
+            },
+            "required": true,
+            "name": "to",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/coach-calendar/grants": {
+      "get": {
+        "operationId": "CoachCalendarController_grants",
+        "tags": [
+          "calendar"
+        ],
+        "description": "Staff session; the guard requires the permission in x-eureka-permission (data scope from RLS).",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "permission",
+        "x-eureka-permission": "coach_calendar:manage",
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "CoachCalendarController_setGrant",
+        "tags": [
+          "calendar"
+        ],
+        "description": "Staff session; the guard requires the permission in x-eureka-permission (data scope from RLS).",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "permission",
+        "x-eureka-permission": "coach_calendar:manage",
+        "responses": {
+          "201": {
+            "description": "Success"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/coach-calendar/grants/{id}": {
+      "delete": {
+        "operationId": "CoachCalendarController_removeGrant",
+        "tags": [
+          "calendar"
+        ],
+        "description": "Staff session; the guard requires the permission in x-eureka-permission (data scope from RLS).",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "permission",
+        "x-eureka-permission": "coach_calendar:manage",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/coach-calendar/people": {
+      "get": {
+        "operationId": "CoachCalendarController_people",
+        "tags": [
+          "calendar"
+        ],
+        "description": "Staff session; the guard requires the permission in x-eureka-permission (data scope from RLS).",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "permission",
+        "x-eureka-permission": "coach_calendar:manage",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "required": true,
+            "name": "q",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
     "/api/v1/companies": {
       "get": {
         "operationId": "CompaniesController_list",

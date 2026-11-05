@@ -53,6 +53,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   not_a_recruiter: "Only people with a recruiter role can be team members.",
   role_department_mismatch: "This role is limited to one department; the person isn't in it. Set their department first.",
   // Admin/data separation (R-01, docs/roles-api.md): admin is only admin.
+  ceo_only_permission: "Coach calendar access is decided by the CEO, on the Coach calendar screen. It can't go on a role.",
   admin_permission_needs_admin_role: "Users & Access permissions can only go on a role with the Administrator trait. Turn the trait on, or leave these permissions off.",
   business_permission_on_admin_role: "An Administrator role can hold only Users & Access permissions. Remove the business permissions, or use a separate role.",
   role_violates_admin_separation: "This role mixes administrator and business permissions, so it can't be granted. Fix the role first (Roles tab).",

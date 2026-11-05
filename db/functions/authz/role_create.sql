@@ -60,7 +60,8 @@ BEGIN
           src.is_admin, src.is_recruiter, src.is_coach,
           coalesce(p_track, src.track), coalesce(p_level, src.level), p_department, src.key, actor);
   INSERT INTO eureka.role_permission (role_key, permission, scope)
-  SELECT k, rp.permission, rp.scope FROM eureka.role_permission rp WHERE rp.role_key = src.key;
+  SELECT k, rp.permission, rp.scope FROM eureka.role_permission rp
+   WHERE rp.role_key = src.key AND rp.permission NOT LIKE 'coach\_calendar:%'; -- CEO and coach only (0540)
   RETURN k;
 END $function$;
 
