@@ -1,7 +1,7 @@
 import { Controller, ForbiddenException, Get, HttpCode, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req, Res } from "@nestjs/common";
 import { can } from "@eureka/shared";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
+import { CurrentUser, RequirePermission, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { CALENDAR_PROVIDER, DevCalendarProvider, type CalendarProvider } from "./calendar.provider.js";
 import { BusyQuery, CallbackQuery, ConnectQuery } from "./calendar.schemas.js";
@@ -61,6 +61,8 @@ export class CalendarController {
    * a save). Intervals only; nothing cached, nothing audited. The permission is
    * checked here because RequirePermission takes one permission.
    */
+  /** Two alternative permissions (calendar:block or interview:create) are checked in the handler. */
+  @SelfService()
   @Get("busy")
   busy(@CurrentUser() user: AuthedUser, @Query() query: unknown) {
     if (!can(user.access, "calendar:block") && !can(user.access, "interview:create")) throw new ForbiddenException("Not permitted");

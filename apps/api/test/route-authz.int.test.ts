@@ -28,6 +28,8 @@ import { U, toUserAccess } from "./fixtures.js";
 
 /** Reviewed: any signed-in staff user may call these; scope comes from RLS or a check in the service. */
 const SELF_SERVICE: readonly string[] = [
+  // calendar: calendar:block or interview:create, checked in the handler (RequirePermission takes one)
+  "GET /api/v1/calendar/support/busy",
   // identity: own session, profile, preferences and step-up state
   "POST /api/auth/logout",
   "POST /api/auth/password/change",
@@ -89,10 +91,7 @@ const PUBLIC: readonly string[] = [
  * posture named here; until then it is accepted as either undecorated or that posture (and the
  * guard refuses it while undecorated). Remove an entry once the decorator lands.
  */
-const PENDING: Readonly<Record<string, "self-service">> = {
-  // service: calendar:block or interview:create (two permissions; RequirePermission takes one)
-  "GET /api/v1/calendar/support/busy": "self-service",
-};
+const PENDING: Readonly<Record<string, "self-service">> = {};
 
 type Posture = "permission" | "public" | "portal" | "self-service";
 const KEYS: Record<Posture, string> = {
