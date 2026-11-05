@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Me } from "../api";
 import { RoleName, RoleOptions } from "../lookups";
@@ -8,6 +8,9 @@ import { PLACEMENT_TYPE_LABELS, fmtDateTime, type PlacementType } from "../pipel
 import { PipelineStatus } from "../pipeline/ui";
 import { docTypeLabel } from "../lib/format";
 import { useSearchParam } from "../lib/router";
+import { Tabs } from "../ui/Tabs";
+import { DueDate } from "../payments/cells";
+import "./paperwork.css";
 import { DocumentsSection } from "../documents/DocumentsSection";
 import { documentKeys, documentsApi } from "../documents/documentsApi";
 import { Loading } from "../ui/Loading";
@@ -38,8 +41,7 @@ export function PaperworkWorkspace({ placementId, me, onBack }: {
 }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: paperworkKeys.detail(placementId), queryFn: () => paperworkApi.detail(placementId) });
-  const [tabParam, setTabParam] = useSearchParam("tab");
-  const tab: Tab = TABS.some((t) => t.key === tabParam) ? (tabParam as Tab) : "documents";
+  const [, setTabParam] = useSearchParam("tab");
   const [message, setMessage] = useState("");
   const hid = useId();
   const done = (m: string) => {
@@ -54,15 +56,17 @@ export function PaperworkWorkspace({ placementId, me, onBack }: {
   const d = q.data;
   const name = d.candidate.name ?? "Candidate";
   const attention = needsAttention(d);
-
-  const onTabKey = (e: KeyboardEvent) => {
-    const i = TABS.findIndex((t) => t.key === tab);
-    const next = e.key === "ArrowRight" ? (i + 1) % TABS.length : e.key === "ArrowLeft" ? (i + TABS.length - 1) % TABS.length : -1;
-    if (next < 0) return;
-    e.preventDefault();
-    setTabParam(TABS[next]!.key);
-    document.getElementById(`${hid}-t-${TABS[next]!.key}`)?.focus();
-  };
+  // Open on the work: the first tab with something to do, else the checklist; documents only without a checklist.
+  const defaultTab: Tab = attention[0]?.tab ?? (d.items.length > 0 ? "checklist" : "documents");
+  const tabs = TABS.map((t) => ({
+    key: t.key,
+    label: t.key === "checklist" && d.checklist.total > 0
+      ? <>{t.label}<span className="tabcount" aria-hidden="true" title={`${d.checklist.open} open`}>{d.checklist.open}</span></>
+      : t.key === "bgc" && attention.some((a) => a.tab === "bgc")
+        ? <>{t.label}<span className="tabdot" aria-hidden="true" title="Needs attention" /></>
+        : t.label,
+  }));
+  const doneCount = d.checklist.total - d.checklist.open;
 
   return (
     <>
@@ -80,49 +84,57 @@ export function PaperworkWorkspace({ placementId, me, onBack }: {
             {d.recruiter.name && <span>· Recruiter {d.recruiter.name}</span>}
           </p>
         </div>
-        <dl className="pwstats" aria-label="Summary">
-          <div><dt>Checklist</dt><dd>{d.checklist.total === 0 ? <span className="muted">No checklist</span>
-            : `${d.checklist.total - d.checklist.open} of ${d.checklist.total} done`}</dd></div>
-          <div><dt>Background check</dt><dd><BgcBadge status={d.bgc.status} /></dd></div>
-        </dl>
+      </div>
+
+      {/* Action strip: where this placement stands and what needs doing, before any facts. */}
+      <div className="actionstrip pw-strip" role="region" aria-label="Summary">
+        <div className="as-status">
+          <span className="pw-stripstat">Checklist {d.checklist.total === 0 ? <span className="muted">none</span> : `${doneCount} of ${d.checklist.total} done`}</span>
+          {d.checklist.overdue > 0 && <span className="badge overdue">{d.checklist.overdue} overdue</span>}
+          {d.checklist.requiredOpen > 0 && <span className="badge on_hold">{d.checklist.requiredOpen} required open</span>}
+          <span className="pw-stripsep" aria-hidden="true" />
+          <span className="pw-stripstat">Background check</span> <BgcBadge status={d.bgc.status} />
+        </div>
+        {attention.length > 0 && (
+          <div className="as-actions" role="group" aria-label="Needs attention">
+            {attention.map((a, k) => (
+              <button key={k} type="button" className={`btn sm${k === 0 ? " primary" : ""}`} onClick={() => setTabParam(a.tab === defaultTab ? "" : a.tab)}>{a.text}</button>
+            ))}
+          </div>
+        )}
       </div>
       <p role="status" aria-live="polite" className="livemsg">{message}</p>
 
-      <div className="tabs pwtabs" role="tablist" aria-label="Paperwork sections" onKeyDown={onTabKey}>
-        {TABS.map((t) => (
-          <button key={t.key} type="button" className="tab" role="tab" id={`${hid}-t-${t.key}`} aria-controls={`${hid}-p-${t.key}`}
-            aria-selected={tab === t.key} tabIndex={tab === t.key ? 0 : -1} onClick={() => setTabParam(t.key)}>
-            {t.label}
-            {t.key === "checklist" && d.checklist.total > 0 && <span className="tabcount" aria-hidden="true" title={`${d.checklist.open} open`}>{d.checklist.open}</span>}
-            {t.key === "bgc" && attention.some((a) => a.tab === "bgc") && <span className="tabdot" aria-hidden="true" title="Needs attention" />}
-          </button>
-        ))}
-      </div>
-
       <div className="pwlayout">
-        <div role="tabpanel" id={`${hid}-p-${tab}`} aria-labelledby={`${hid}-t-${tab}`} className="pwmain">
-          {tab === "documents" && (
-            // Upload and open documents here (0043); a placement the caller cannot read files them on the candidate.
-            <DocumentsSection owner={d.placement ? { kind: "placement", id: placementId } : { kind: "candidate", id: d.candidate.id }}
-              title={d.placement ? "Placement documents" : "Candidate documents"} />
-          )}
-          {tab === "checklist" && <ChecklistPanel d={d} me={me} placementId={placementId} onDone={done} />}
-          {tab === "bgc" && (
-            <>
-              <BgcStatusCard placementId={placementId} bgc={d.bgc} actualStart={d.placement?.actualStart ?? null} onDone={done} />
-              <BgcDetailsCard key={`d${d.bgc.version ?? 0}`} placementId={placementId} bgc={d.bgc} actualStart={d.placement?.actualStart ?? null} onDone={done} />
-              <EntriesCard kind="employment" placementId={placementId} bgc={d.bgc} onDone={done} />
-              <EntriesCard kind="address" placementId={placementId} bgc={d.bgc} onDone={done} />
-              <BgcNotes key={`n${d.bgc.version ?? 0}`} placementId={placementId} bgc={d.bgc} onDone={done} />
-            </>
-          )}
-          {tab === "activity" && (
-            <section className="card pad" aria-labelledby={`${hid}-act`}>
-              <h2 id={`${hid}-act`}>Background check activity</h2>
-              <p className="hint">Who changed what. Values of personal fields are not shown. Checklist history is on each checklist item.</p>
-              <HistoryList entries={d.bgc.history} label="Background check history" />
-            </section>
-          )}
+        <div className="pwmain">
+          <Tabs label="Paperwork sections" urlKey="tab" tabs={tabs} defaultValue={defaultTab} className="pw-tabs" panelClassName="pwpanel">
+            {(tab) => (
+              <>
+                {tab === "documents" && (
+                  // Upload and open documents here (0043); a placement the caller cannot read files them on the candidate.
+                  <DocumentsSection owner={d.placement ? { kind: "placement", id: placementId } : { kind: "candidate", id: d.candidate.id }}
+                    title={d.placement ? "Placement documents" : "Candidate documents"} />
+                )}
+                {tab === "checklist" && <ChecklistPanel d={d} me={me} placementId={placementId} onDone={done} />}
+                {tab === "bgc" && (
+                  <>
+                    <BgcStatusCard placementId={placementId} bgc={d.bgc} actualStart={d.placement?.actualStart ?? null} onDone={done} />
+                    <BgcDetailsCard key={`d${d.bgc.version ?? 0}`} placementId={placementId} bgc={d.bgc} actualStart={d.placement?.actualStart ?? null} onDone={done} />
+                    <EntriesCard kind="employment" placementId={placementId} bgc={d.bgc} onDone={done} />
+                    <EntriesCard kind="address" placementId={placementId} bgc={d.bgc} onDone={done} />
+                    <BgcNotes key={`n${d.bgc.version ?? 0}`} placementId={placementId} bgc={d.bgc} onDone={done} />
+                  </>
+                )}
+                {tab === "activity" && (
+                  <section className="card pad" aria-labelledby={`${hid}-act`}>
+                    <h2 id={`${hid}-act`}>Background check activity</h2>
+                    <p className="hint">Who changed what. Values of personal fields are not shown. Checklist history is on each checklist item.</p>
+                    <HistoryList entries={d.bgc.history} label="Background check history" />
+                  </section>
+                )}
+              </>
+            )}
+          </Tabs>
         </div>
 
         <aside className="pwrail" aria-label="Placement summary">
@@ -140,12 +152,12 @@ export function PaperworkWorkspace({ placementId, me, onBack }: {
               </>}
             </dl>
           </section>
-          <section className="card pad">
+          <section className="card pad pw-attn">
             <h2>Needs attention</h2>
             {attention.length === 0 ? <p className="muted">Nothing needs attention.</p> : (
               <ul className="pwattn">
                 {attention.map((a, k) => (
-                  <li key={k}><button type="button" className="linkbtn" onClick={() => setTabParam(a.tab)}>{a.text}</button></li>
+                  <li key={k}><button type="button" className="linkbtn" onClick={() => setTabParam(a.tab === defaultTab ? "" : a.tab)}>{a.text}</button></li>
                 ))}
               </ul>
             )}
@@ -207,6 +219,18 @@ function ChecklistPanel({ d, me, placementId, onDone }: { d: PaperworkDetail; me
   const hid = useId();
   const [editItem, setEditItem] = useState<PaperworkItem | null>(null);
   const [historyOf, setHistoryOf] = useState<string | null>(null);
+  const [quick, setQuick] = useState<{ id: string; error?: string } | null>(null);
+  /** One-click "Mark received": the most common change, sent with the version the row was read at. */
+  const markReceived = async (i: PaperworkItem) => {
+    setQuick({ id: i.id });
+    try {
+      await paperworkApi.updateItem(i.id, { expectedVersion: i.version, status: "received" });
+      setQuick(null);
+      onDone(`${docTypeLabel(i.docType)} marked Received.`);
+    } catch (e) {
+      setQuick({ id: i.id, error: paperworkError(e) });
+    }
+  };
   return (
     <section className="card pad" aria-labelledby={`${hid}-k`}>
       <h2 id={`${hid}-k`}>Paperwork checklist</h2>
@@ -214,30 +238,44 @@ function ChecklistPanel({ d, me, placementId, onDone }: { d: PaperworkDetail; me
         <>
           <p className="muted">{d.checklist.total - d.checklist.open} of {d.checklist.total} done
             {d.checklist.overdue > 0 && `, ${d.checklist.overdue} overdue`}.</p>
-          <div className="tablewrap"><table className="mini" aria-labelledby={`${hid}-k`}>
-            <thead><tr><th>Document</th><th>Owner</th><th>Status</th><th>Due</th><th><span className="sr-only">Actions</span></th></tr></thead>
+          {quick?.error && <p className="error" role="alert">{quick.error}</p>}
+          <div className="tablewrap"><table className="mini dtable pw-checklist" aria-labelledby={`${hid}-k`}>
+            <thead><tr><th>Document</th><th>Status</th><th>Due</th><th>Owner</th><th className="c-act"><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
-              {d.items.map((i) => (
-                <tr key={i.id}>
-                  <td>{docTypeLabel(i.docType)}<span className="block">{i.required ? "Required" : "Optional"}
-                    {i.assignee && ` · ${i.assignee.name ?? "assigned"}`}{i.documentId && " · document linked"}</span>
-                    {i.notes && <span className="block note">{i.notes}</span>}</td>
-                  <td><RoleName k={i.ownerRole} /></td>
-                  <td><span className={`badge cl-${i.status}`}>{paperworkLabel(i.status)}</span>
-                    {i.statusReason && <span className="block muted">{i.statusReason}</span>}</td>
-                  <td>{i.dueOn ? fmtDate(i.dueOn) : <span className="muted">—</span>}{i.overdue && <> <span className="badge overdue">Overdue</span></>}</td>
-                  <td className="rowactions">
-                    {(i.actions.transition.length > 0 || i.actions.editNotes || i.actions.assign) && (
-                      <button type="button" className="btn sm" onClick={() => setEditItem(i)} aria-label={`Update ${docTypeLabel(i.docType)}`}>Update</button>
+              {d.items.map((i) => {
+                const label = docTypeLabel(i.docType);
+                const canEdit = i.actions.transition.length > 0 || i.actions.editNotes || i.actions.assign;
+                return (
+                  <Fragment key={i.id}>
+                    <tr>
+                      <td className="c-primary"><b>{label}</b><span className="block">{i.required ? "Required" : "Optional"}
+                        {i.assignee && ` · ${i.assignee.name ?? "assigned"}`}{i.documentId && " · document linked"}</span>
+                        {i.notes && <span className="block note">{i.notes}</span>}</td>
+                      <td className="c-badge" data-label="Status"><span className={`badge cl-${i.status}`}>{paperworkLabel(i.status)}</span>
+                        {i.statusReason && <span className="block muted">{i.statusReason}</span>}</td>
+                      <td data-label="Due"><DueDate on={i.dueOn} done={!i.overdue} />
+                        {i.overdue && <> <span className="badge overdue">{i.status === "received" ? "Verification overdue" : "Overdue"}</span></>}</td>
+                      <td data-label="Owner"><RoleName k={i.ownerRole} /></td>
+                      <td className="c-act">
+                        {i.status === "pending" && i.actions.transition.includes("received") && (
+                          <button type="button" className="btn sm primary" disabled={quick?.id === i.id && !quick.error} onClick={() => void markReceived(i)}
+                            aria-label={`Mark ${label} received`}>Mark received</button>
+                        )}
+                        {canEdit && (
+                          <button type="button" className="btn sm" onClick={() => setEditItem(i)} aria-label={`Update ${label}`}>Update</button>
+                        )}
+                        <button type="button" className="btn sm" aria-expanded={historyOf === i.id}
+                          onClick={() => setHistoryOf(historyOf === i.id ? null : i.id)} aria-label={`History of ${label}`}>History</button>
+                      </td>
+                    </tr>
+                    {historyOf === i.id && (
+                      <tr className="pw-histrow"><td colSpan={5}><ItemHistory itemId={i.id} label={label} /></td></tr>
                     )}
-                    <button type="button" className="btn sm" aria-expanded={historyOf === i.id}
-                      onClick={() => setHistoryOf(historyOf === i.id ? null : i.id)} aria-label={`History of ${docTypeLabel(i.docType)}`}>History</button>
-                  </td>
-                </tr>
-              ))}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table></div>
-          {historyOf && <ItemHistory itemId={historyOf} label={docTypeLabel(d.items.find((i) => i.id === historyOf)?.docType ?? "")} />}
         </>
       )}
       {editItem && (
@@ -385,6 +423,10 @@ function BgcStatusCard({ placementId, bgc, actualStart: currentStart, onDone }: 
   const [actualStart, setActualStart] = useState(currentStart ?? "");
   const [failPlacement, setFailPlacement] = useState(false);
   const [err, setErr] = useState<{ status?: string; reason?: string; actualStart?: string }>({});
+  // A cleared check rarely moves again (re-initiate): its move form waits behind "Change status".
+  const [changing, setChanging] = useState(bgc.status !== "cleared");
+  // Failing is final: the change waits here until the user confirms it in a dialog.
+  const [confirming, setConfirming] = useState<BgcChange | null>(null);
   // Clearing the check records the placement's actual start date (PW-7); required.
   const clearing = status === "cleared";
   const submit = useSubmit(paperworkError);
@@ -392,12 +434,21 @@ function BgcStatusCard({ placementId, bgc, actualStart: currentStart, onDone }: 
   const needsReason = status !== "" && bgcReasonRequired(bgc.status, status);
   const willFail = status === "failed";
   const at = bgc.status === "cleared" || bgc.status === "failed" ? 3 : STEPS.indexOf(bgc.status as (typeof STEPS)[number]);
+  const reset = (b: BgcChange) => {
+    setStatus(""); setReason(""); setFailPlacement(false); setActualStart(b.status === "cleared" ? actualStart : currentStart ?? "");
+    if (bgc.status === "cleared") setChanging(false);
+  };
+  const message = (b: BgcChange, r: Bgc) =>
+    b.failPlacement ? "Background check failed; placement marked BGC failed." : `Background check marked ${paperworkLabel(r.status)}.`;
 
   return (
     <section className="card pad" aria-labelledby={`${hid}-s`}>
       <div className="pwcardhead">
         <h2 id={`${hid}-s`}>Status</h2>
         <BgcBadge status={bgc.status} />
+        {transitions.length > 0 && !changing && (
+          <button type="button" className="btn sm pushright" onClick={() => setChanging(true)}>Change status</button>
+        )}
       </div>
       {bgc.statusChangedAt && <p className="hint">Last changed {fmtDateTime(bgc.statusChangedAt)}{bgc.statusReason && <> · Reason: {bgc.statusReason}</>}</p>}
       <ol className="stepper" aria-label="Background check progress">
@@ -410,8 +461,8 @@ function BgcStatusCard({ placementId, bgc, actualStart: currentStart, onDone }: 
       </ol>
       {transitions.length === 0 ? (
         <p className="muted">{bgc.status === "failed" ? "A failed check is final." : "You can't change this check's status."}</p>
-      ) : (
-        <form noValidate onSubmit={(e) => {
+      ) : !changing ? null : (
+        <form noValidate className="pw-statusform" onSubmit={(e) => {
           e.preventDefault();
           if (!status) { setErr({ status: "Pick a status." }); e.currentTarget.querySelector<HTMLElement>("select")?.focus(); return; }
           if (needsReason && !reason.trim()) { setErr({ reason: "Give a reason." }); e.currentTarget.querySelector<HTMLElement>("textarea")?.focus(); return; }
@@ -420,10 +471,11 @@ function BgcStatusCard({ placementId, bgc, actualStart: currentStart, onDone }: 
           const b: BgcChange = { status, ...(reason.trim() ? { reason: reason.trim() } : {}), ...(bgc.version === null ? {} : { expectedVersion: bgc.version }) };
           if (clearing && actualStart !== (currentStart ?? "")) b.actualStart = actualStart;
           if (failPlacement && willFail && bgc.actions.failPlacement) b.failPlacement = true;
+          if (willFail) { setConfirming(b); return; }
           void submit.run(async () => {
             const r = await paperworkApi.updateBgc(placementId, b);
-            setStatus(""); setReason(""); setFailPlacement(false); setActualStart(clearing ? actualStart : currentStart ?? "");
-            onDone(b.failPlacement ? "Background check failed; placement marked BGC failed." : `Background check marked ${paperworkLabel(r.status)}.`);
+            reset(b);
+            onDone(message(b, r));
           });
         }}>
           <div className="pwgrid">
@@ -452,8 +504,30 @@ function BgcStatusCard({ placementId, bgc, actualStart: currentStart, onDone }: 
               {" "}Also mark the placement BGC failed (same rules as on Placements)</label>
           )}
           {submit.error && <p className="error" role="alert">{submit.error}</p>}
-          <div className="pwactions"><button type="submit" className="btn primary" disabled={submit.busy}>Update status</button></div>
+          <div className="pwactions">
+            {bgc.status === "cleared" && <button type="button" className="btn" onClick={() => { setChanging(false); setStatus(""); setErr({}); }}>Cancel</button>}
+            <button type="submit" className={`btn ${willFail ? "danger" : "primary"}`} disabled={submit.busy}>Update status</button>
+          </div>
         </form>
+      )}
+      {confirming && (
+        <ConfirmDialog title="Fail this background check?" confirmLabel="Fail check" danger formatError={paperworkError}
+          onClose={() => setConfirming(null)}
+          action={async () => {
+            const r = await paperworkApi.updateBgc(placementId, confirming);
+            reset(confirming);
+            return r;
+          }}
+          onDone={() => {
+            const b = confirming;
+            setConfirming(null);
+            onDone(message(b, { ...bgc, status: "failed" }));
+          }}>
+          <p>A failed check is final: it can't be moved again.</p>
+          <p>{confirming.failPlacement
+            ? "The placement is also marked BGC failed."
+            : bgc.actions.failPlacement ? "The placement keeps its status (you didn't choose to mark it BGC failed)." : "The placement's status doesn't change here."}</p>
+        </ConfirmDialog>
       )}
     </section>
   );

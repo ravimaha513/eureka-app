@@ -1,0 +1,33 @@
+/* Back-office shared cells (payments/cells.tsx): due dates, tabular values, record facts. Tokens only. */
+.duedate { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.duedate.late .dueflag { color: var(--bad-fg); font-weight: 600; }
+.duedate.soon .dueflag { color: var(--warn-fg); font-weight: 600; }
+.dtable td.num, .dtable th.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dtable td small.block, .dtable td span.block { display: block; font-size: 12px; line-height: 1.3; margin-top: 1px; color: var(--muted); }
+.dtable tr.rowopen { cursor: pointer; }
+.dtable tr.rowopen:hover .recordlink b { text-decoration: underline; text-underline-offset: 2px; }
+.dtable td.c-act { white-space: nowrap; }
+.dtable td.c-act > * + * { margin-left: 4px; }
+
+/* Filter toggles (aria-pressed, segmented): labelled like a field so they line up in the filter row. */
+.bo-toggles .bo-toggleslabel { font-size: 13px; font-weight: 600; color: var(--text2); }
+.bo-toggles .tabs.seg { height: var(--h-control, 36px); align-items: stretch; flex-wrap: nowrap; }
+.bo-toggles .tabs.seg .tab { height: auto; min-height: 0; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--text2); }
+.bo-toggles .tabs.seg .tab[aria-pressed="true"] { color: var(--on-pri); }
+.bo-togglecount { font-variant-numeric: tabular-nums; font-weight: 500; opacity: .85; }
+
+/* Record facts in a drawer: grouped, two-up, values in ink. */
+.bo-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr)); gap: 12px 20px; margin: 0; }
+.bo-facts > div { min-width: 0; }
+.bo-facts dt { font-size: 12.5px; color: var(--muted); margin-bottom: 2px; }
+.bo-facts dd { margin: 0; color: var(--text); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.bo-group { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line2); }
+.bo-group > h3 { font-size: 13px; font-weight: 650; color: var(--text2); margin: 0; }
+.bo-banner { padding: 8px 12px; border-radius: var(--r-md); border: 1px solid var(--info-line); background: var(--info-bg); color: var(--info-fg); font-weight: 600; font-size: 13.5px; }
+.bo-banner:empty { display: none; }
+
+@media (max-width: 768px) {
+  .dtable td.num { text-align: left; }
+  .dtable td.c-act > * + * { margin-left: 0; }
+  .bo-facts { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 14px; }
+}
