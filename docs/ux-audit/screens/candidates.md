@@ -1,5 +1,5 @@
 # Candidates — `/candidates`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Approved · Implemented (rebrand pass 1, shares the Hot List filter bar and URL state) · Validation in review
 Who / permission: `candidate:read` (nav.ts:16). "New candidate" needs `candidate:create` (not r1a); "New batch" when the batch list returns `canCreate`.
 Source: `apps/web/src/sales/CandidatesPage.tsx`, `ListControls.tsx`, `useCandidateList.ts`, `CreateCandidateDialog.tsx`, `BulkCandidatesForm.tsx`, `HotListPage.tsx:25-41` (CandidateName)
 Evidence: `candidates-desktop.png`, `candidates-desktop-full.png`, `candidates-mobile.png`, `candidates-mobile-full.png`, new: `candidates-recruiter-desktop.png`, `candidates-create-dialog-desktop.png`

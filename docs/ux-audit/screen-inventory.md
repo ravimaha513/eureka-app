@@ -87,21 +87,21 @@ The cross-cutting design-system inventory is in [screens/_system.md](screens/_sy
 - **Success:** `.livemsg` is always styled as green success, including for errors and for "Uploading…".
 
 ## Audit status checklist
-Legend: ☐ not done · ☑ done. **No screen is approved or implemented yet. Approval comes from you, per screen.**
+Legend: ☐ not done · ☑ done · ◐ partial. The rebrand identity (tokens, type, mark, buttons, fields, tables, chips, tabs) applies to every screen as of 2026-11-05. Layout redesigns are approved per screen.
 
 | Screen | Not audited | Audited | Redesign proposed | Approved | Implemented | Validated |
 |---|---|---|---|---|---|---|
-| Hot List | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Candidates | | ☑ | ☑ | ☐ | ☐ | ☐ |
+| Hot List | | ☑ | ☑ | ☑ | ☑ | ◐ in review |
+| Candidates | | ☑ | ☑ | ☑ | ☑ | ◐ in review |
 | Candidate profile | | ☑ | ☑ | ☐ | ☐ | ☐ |
 | Submissions | | ☑ | ☑ | ☐ | ☐ | ☐ |
 | Interviews | | ☑ | ☑ | ☐ | ☐ | ☐ |
 | Placements | | ☑ | ☑ | ☐ | ☐ | ☐ |
 | Placement detail | | ☑ | ☑ | ☐ | ☐ | ☐ |
 | Dashboard | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| App shell | | ☑ | ☑ | ☐ | ☐ | ☐ |
+| App shell | | ☑ | ☑ | ☑ | ◐ identity only (nav regroup and phone drawer pending) | ☐ |
 | Notifications | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Login | | ☑ | ☑ | ☐ | ☐ | ☐ |
+| Login | | ☑ | ☑ | ☑ | ☑ (brand panel, theme label, error placement) | ◐ in review |
 | Jobs | | ☑ | ☑ | ☐ | ☐ | ☐ |
 | Applications | | ☑ | ☑ | ☐ | ☐ | ☐ |
 | Application detail | | ☑ | ☑ | ☐ | ☐ | ☐ |

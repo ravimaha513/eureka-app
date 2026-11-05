@@ -3,29 +3,30 @@
 Status: **proposal, not approved.** Phase 3 preview. Nothing here is implemented.
 Evidence: [screens/_system.md](screens/_system.md) (counts, contrast, targets) and the screen reports.
 
-## 1. Direction: refine the incumbent, don't rebrand
+## 1. Direction (decided 2026-11-05): rebrand
 
-**What the product is.** Eureka is an Operate-mode tool: recruiters and back-office staff spend all day in it, mostly in tables. The audit's problems are structural (filters, tables, links, action placement), not stylistic. A new visual world would cost re-learning without fixing those problems.
+The user chose a **rebrand**, not the "refine" option this document first proposed. The pinned direction combines the category-standard structure with the Air Waybill identity:
+- deep carbon sidebar
+- restrained signal-red brand accents
+- strong typography
+- clean, data-dense layouts
+- conventional status chips
+- no metaphors and no decoration
 
-**Proposal: "quiet ledger".** Keep the identity: indigo accent, light and dark themes, current layout shell. Make it calmer and denser:
-- **Hairlines, not shadows.**
-- **Tighter radii.** Cards 8px, controls 6px, instead of 14 and 10.
-- **One neutral surface layer** for the sidebar and toolbars.
-- **Colour reserved for meaning.** Accent for primary action, selection and focus; tones for status. No decorative gradients.
-- **Tabular numerals** in every count, money and date column.
-- **Status shown by a word plus a tone,** never by colour alone.
+The direction contract is in `apps/web/.impeccable/surfaces/src-sales-hotlistpage-tsx.md`. The decision sketches are in `apps/web/.impeccable/mocks/decision/`. Once the finish review passes, `apps/web/DESIGN.md` records the built system and supersedes the token proposals below.
 
-**Remove:**
-- the gradient logo glow,
-- the login hero's grid background and fake KPI/funnel art,
-- the 128px placeholder covers on Training/Courses cards,
-- `--shadow-sm` on resting cards.
+**Implemented in pass 1:**
+- Tokens: `--side-*`, `--brand`, `--sel`, `--info-*`, `--field-line`, `--on-pri`, `--r-sm/md/lg`, `--h-control/compact`, `--font`.
+- Archivo, self-hosted through `@fontsource-variable/archivo`.
+- The BrandMark.
+- Carbon primary buttons.
+- Underline tabs, distinct from filter toggles.
+- Global `:focus-visible`.
+- Radii normalised to 4/6/8.
+- No resting shadows.
+- The list-screen kit: filter bar, selection bar, card table.
 
-**Keep:** light/dark parity, the tokenised status triplets (`--ok/warn/bad-*`), `Dialog` behaviour, reduced-motion handling.
-
-**Trade-off.** Refining is less visually striking than a rebrand, but it ships screen by screen without a "two apps" period, which a full visual replacement would create mid-migration.
-
-### Typography decision (needs your call)
+### Typography decision (resolved: Archivo, self-hosted)
 `font-family: Inter, …` is declared but Inter is **never loaded** (`styles.css:18`), so users already see Segoe UI, SF or Roboto depending on OS. Two options:
 
 | Option | What it means | Trade-off |

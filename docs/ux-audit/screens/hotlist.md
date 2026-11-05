@@ -1,5 +1,5 @@
 # Hot List — `/hotlist`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Approved · Implemented (rebrand pass 1) · Validation in review
 Who / permission: `hotlist:read` (nav.ts:15). Default landing screen for every role that has it (App.tsx:286): recruiters, leads, managers, CEO, interview coaches/leads. Bulk bar needs `candidate:update` or `candidate.visibility:update`; Export needs `report:export`.
 Source: `apps/web/src/sales/HotListPage.tsx`, `HotListExtras.tsx` (SavedViews, ExportButton, BulkBar), `ListControls.tsx` (ListFilters, ListFooter), `useCandidateList.ts`, `sales/ui.tsx`, `salesApi.ts`, `App.tsx:284-320,457-468`
 Evidence: `hotlist-desktop.png`, `hotlist-desktop-full.png` (ceo), `hotlist-recruiter-desktop.png`, `hotlist-recruiter-mobile.png`, `hotlist-mobile-full.png`, new: `hotlist-bulk-selected-desktop.png`, `hotlist-table-scrolled-desktop.png`, `hotlist-quickview-desktop.png`, `hotlist-quickview-mobile.png`
@@ -80,4 +80,16 @@ Files: HotListPage.tsx, HotListExtras.tsx, ListControls.tsx, useCandidateList.ts
 | Design consistency | 5 | Header not `.pagehead` (vs CandidatesPage.tsx:32); same colour for two visibility states; Apply-button pattern differs from profile's menu pattern |
 
 ## Validation
-Visual inspection: desktop 1440 and mobile 390 as ceo and r1a (existing + new screenshots), measured table scroll widths, first-row offsets, Tab count, touch targets, overflow (none at 390), filter persistence across profile open/close and reload. Redesign validation: pending (not implemented).
+Visual inspection: desktop 1440 and mobile 390 as ceo and r1a (existing + new screenshots), measured table scroll widths, first-row offsets, Tab count, touch targets, overflow (none at 390), filter persistence across profile open/close and reload. Redesign validation: see below.
+
+### Implemented (pass 1, 2026-11-05)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Critical: row action off-screen at 1440 | Columns prioritised (Stay and In person shown at ≥1600px, Location and Visa at ≥1280px), Lead folded under Team, names and status chips wrap, row action column pinned right, whole row opens the profile | Table width 1150/1150 at 1440 (was 1540/1110); at 1280 it is 1005/990 and at 1024 it is 882/734, with the action column sticky. `screenshots/after/hotlist-desktop-full.png` |
+| #2 High: filters lost on reload | Filters live in the URL through `useSearchParams` (`lib/router.ts`). Reload and Back from a profile keep them | e2e `hotlist-extras.spec.ts` asserts that a reload keeps Status |
+| #3 High: 15 always-open filters | Search, Technology, Status, Priority, Team and Recruiter are inline. The other 8 sit behind "More filters · n", with removable chips and a result count. Sort is on the summary row | First row at about y=260 at 1440 (was 702) |
+| #9 Mobile | Phones get a search box plus a Filters sheet (focus moves in, Escape closes it) and cards instead of a sideways-scrolling table. The bulk bar docks to the bottom | Page width 390/390 (no overflow). `after/hotlist-mobile.png`, `hotlist-filters-sheet-mobile.png`, `hotlist-bulk-mobile.png` |
+| Bulk bar always visible and disabled | Appears only with a selection, keeps its outcome after the change (with Dismiss), and the selection survives paging | Unit tests in `HotListExtras.test.tsx` |
+| "Active Active/All Teams" duplication | The status sub-label is hidden when it only repeats visibility; one "Open to all teams" chip remains | — |
+
+Tests: web unit 126/126 in the affected files. e2e `hotlist-extras.spec.ts` 3/3. In `sales.spec.ts` and `candidate-extras.spec.ts`, 3 failures also fail on the original code in this local setup (two "Sign in" buttons with password login on; batch profile data), so they were not caused by this change.
