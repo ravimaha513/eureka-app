@@ -228,12 +228,17 @@ export class BillsService {
     });
   }
 
-  /** "Delete" in the UI. The reason is stored on the bill, never in the audit log (rule 5). */
-  async void(user: AuthedUser, id: string, parse: () => { reason: string }) {
+  /**
+   * "Delete" in the UI. The reason is stored on the bill, never in the audit log (rule 5).
+   * `expectedVersion`: the optional If-Match (D-13); stale -> 412, re-checked by bill_void under the row lock.
+   */
+  async void(user: AuthedUser, id: string, parse: () => { reason: string }, expectedVersion: number | null = null) {
     return this.db.withUser(user.id, async (c) => {
-      await this.loadManaged(c, user, id);
+      const cur = await this.loadManaged(c, user, id);
       const { reason } = parse();
-      const version = (await c.query<{ v: number }>(`SELECT authz.bill_void($1, $2) AS v`, [id, reason]).catch(mapDbError)).rows[0]!.v;
+      if (expectedVersion !== null && expectedVersion !== cur.row_version) throw new HttpException("stale", HttpStatus.PRECONDITION_FAILED);
+      const version = (await c.query<{ v: number }>(`SELECT authz.bill_void($1, $2, $3::int) AS v`, [id, reason, expectedVersion])
+        .catch(mapDbError)).rows[0]!.v;
       await this.audit.record(c, { actorId: user.id, action: "bill.voided", entityType: "utility_bill", entityId: id, changes: { reasonGiven: true, rowVersion: version } });
       return { id, voided: true, rowVersion: version };
     });

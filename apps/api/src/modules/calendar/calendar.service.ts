@@ -6,11 +6,27 @@ import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
+import { RetryableUnavailable } from "../../platform/errors.js";
 import { decryptToken, encryptToken } from "../../worker/feedback-mail.js";
 import { CALENDAR_PROVIDER, type BusyInterval, type CalendarProvider } from "./calendar.provider.js";
 
 export const CALENDAR_STATE_COOKIE = "eureka_calendar";
 const KEY = "support";
+
+/**
+ * E-05 / R-18: a failed block/release call to the provider as a problem, never a
+ * 500, and never with the provider's message (it can name the calendar).
+ * Timeouts, network failures, 429 and 5xx answers are worth retrying: 503 with
+ * Retry-After. Anything else (a refused token, a calendar gone): 502.
+ */
+export function providerError(err: unknown): never {
+  const e = (err ?? {}) as { name?: string; message?: string };
+  const status = Number(/\((\d{3})\)/.exec(String(e.message ?? ""))?.[1] ?? Number.NaN);
+  if (e.name === "TimeoutError" || e.name === "AbortError" || err instanceof TypeError || status === 429 || status >= 500) {
+    throw new RetryableUnavailable("calendar_unavailable", 30);
+  }
+  throw new BadGatewayException("calendar_unavailable");
+}
 
 interface ConnectionRow { provider: string; calendar_id: string; account_email: string; token_enc: string; scopes: string; connected_at: Date; connected_by: string; connected_by_name: string | null }
 /** The definer function's row for the free/busy read (migration 0090): no account, no who-connected. */
@@ -190,48 +206,95 @@ export class CalendarService {
     });
   }
 
-  async block(user: AuthedUser, interviewId: string) {
-    return this.db.withUser(user.id, async (c) => {
-      const i = await this.interview(c, user, interviewId);
-      if (i.call_status !== "scheduled") throw new UnprocessableEntityException("interview_not_scheduled");
-      if (await this.activeBlock(c, interviewId)) throw new ConflictException("already_blocked");
-      const k = await this.connection(c);
-      if (!k) throw new UnprocessableEntityException("calendar_not_connected");
-      const token = decryptToken(k.token_enc, this.tokenKey);
-      const type = i.interview_type ? INTERVIEW_TYPE_LABELS[i.interview_type as keyof typeof INTERVIEW_TYPE_LABELS] ?? i.interview_type : null;
-      const description = [
-        `Candidate: ${i.candidate_name ?? "—"}`, `Client: ${i.client_name ?? "—"}`, `Position: ${i.job_title ?? "—"}`,
-        `Round: ${i.round}`, `Type: ${type ?? "—"}`, `Meeting link: ${i.meeting_url ?? "—"}`, `Recruiter: ${i.recruiter_name ?? "—"}`,
-        `Blocked from Eureka by ${user.id}`,
-      ].join("\n");
-      const externalId = await this.provider.createEvent(token, k.calendar_id, {
-        summary: `Interview: ${i.round} – ${i.candidate_name ?? "candidate"}`, description, startsAt: i.starts_at, endsAt: i.ends_at,
-      });
-      try {
-        await c.query(
-          `INSERT INTO eureka.calendar_block (interview_id, calendar_id, external_id, starts_at, ends_at) VALUES ($1, $2, $3, $4, $5)`,
-          [interviewId, k.calendar_id, externalId, i.starts_at, i.ends_at]);
-      } catch (err) {
-        // The row did not land (concurrent block, policy): take the event back so the calendar matches the database.
-        await this.provider.deleteEvent(token, k.calendar_id, externalId).catch(() => undefined);
-        if ((err as { code?: string }).code === "23505") throw new ConflictException("already_blocked");
-        throw err;
-      }
-      await this.audit.record(c, { actorId: user.id, action: "calendar.blocked", entityType: "interview", entityId: interviewId, changes: { provider: k.provider } });
-      return { block: this.presentBlock(await this.activeBlock(c, interviewId)), canBlock: true, connected: true };
-    });
+  /** Checks before a block: the interview (404/403), still scheduled, not blocked, a connection (E-05: no provider call here). */
+  private async blockable(c: pg.PoolClient, user: AuthedUser, interviewId: string): Promise<{ i: InterviewRow; k: ConnectionRow }> {
+    const i = await this.interview(c, user, interviewId);
+    if (i.call_status !== "scheduled") throw new UnprocessableEntityException("interview_not_scheduled");
+    if (await this.activeBlock(c, interviewId)) throw new ConflictException("already_blocked");
+    const k = await this.connection(c);
+    if (!k) throw new UnprocessableEntityException("calendar_not_connected");
+    return { i, k };
   }
 
+  /**
+   * E-05 / R-18: the provider is called outside any database transaction. 1) read
+   * and authorise (transaction 1, committed); 2) create the event; 3) re-check and
+   * insert the block plus its audit row (transaction 2). If transaction 2 fails for
+   * any reason (a concurrent block, the interview moved, the audit insert, the
+   * COMMIT), the event is removed again so the calendar matches the database.
+   * Provider failures are 502/503 calendar_unavailable, never 500.
+   */
+  async block(user: AuthedUser, interviewId: string) {
+    const { i, k } = await this.db.withUser(user.id, (c) => this.blockable(c, user, interviewId));
+    const token = decryptToken(k.token_enc, this.tokenKey);
+    const type = i.interview_type ? INTERVIEW_TYPE_LABELS[i.interview_type as keyof typeof INTERVIEW_TYPE_LABELS] ?? i.interview_type : null;
+    const description = [
+      `Candidate: ${i.candidate_name ?? "—"}`, `Client: ${i.client_name ?? "—"}`, `Position: ${i.job_title ?? "—"}`,
+      `Round: ${i.round}`, `Type: ${type ?? "—"}`, `Meeting link: ${i.meeting_url ?? "—"}`, `Recruiter: ${i.recruiter_name ?? "—"}`,
+      `Blocked from Eureka by ${user.id}`,
+    ].join("\n");
+    let externalId: string;
+    try {
+      externalId = await this.provider.createEvent(token, k.calendar_id, {
+        summary: `Interview: ${i.round} – ${i.candidate_name ?? "candidate"}`, description, startsAt: i.starts_at, endsAt: i.ends_at,
+      });
+    } catch (err) {
+      providerError(err);
+    }
+    try {
+      return await this.db.withUser(user.id, async (c) => {
+        // The slot, connection and block state may have changed while the provider was called.
+        const now = await this.blockable(c, user, interviewId);
+        if (now.k.calendar_id !== k.calendar_id || +now.i.starts_at !== +i.starts_at || +now.i.ends_at !== +i.ends_at) {
+          throw new ConflictException("interview_changed");
+        }
+        try {
+          await c.query(
+            `INSERT INTO eureka.calendar_block (interview_id, calendar_id, external_id, starts_at, ends_at) VALUES ($1, $2, $3, $4, $5)`,
+            [interviewId, k.calendar_id, externalId, i.starts_at, i.ends_at]);
+        } catch (err) {
+          if ((err as { code?: string }).code === "23505") throw new ConflictException("already_blocked");
+          throw err;
+        }
+        await this.audit.record(c, { actorId: user.id, action: "calendar.blocked", entityType: "interview", entityId: interviewId, changes: { provider: k.provider } });
+        return { block: this.presentBlock(await this.activeBlock(c, interviewId)), canBlock: true, connected: true };
+      });
+    } catch (err) {
+      // The row did not land (or did not commit): take the event back.
+      await this.provider.deleteEvent(token, k.calendar_id, externalId).catch(() => undefined);
+      throw err;
+    }
+  }
+
+  /**
+   * E-05 / R-18: read and authorise (transaction 1), remove the event outside any
+   * transaction, then mark the block released with its audit row (transaction 2).
+   * Removal is idempotent (an event already gone counts as removed), so a failure
+   * at any step leaves a block that a retry releases cleanly; marking it released
+   * first could instead strand an event Eureka no longer points at. A provider
+   * failure is 502/503 calendar_unavailable and leaves the block active.
+   */
   async release(user: AuthedUser, interviewId: string) {
-    return this.db.withUser(user.id, async (c) => {
+    const { b, k } = await this.db.withUser(user.id, async (c) => {
       await this.interview(c, user, interviewId);
       const b = await this.activeBlock(c, interviewId);
       if (!b) throw new NotFoundException("no_active_block");
-      const k = await this.connection(c);
-      // A connection replaced or removed since the block: the event cannot be reached; the record is still released.
-      if (k && k.calendar_id === b.calendar_id) await this.provider.deleteEvent(decryptToken(k.token_enc, this.tokenKey), k.calendar_id, b.external_id);
-      await c.query(`UPDATE eureka.calendar_block SET status = 'released' WHERE id = $1 AND status = 'active'`, [b.id]);
-      await this.audit.record(c, { actorId: user.id, action: "calendar.released", entityType: "interview", entityId: interviewId, changes: { reachable: k !== null && k.calendar_id === b.calendar_id } });
+      return { b, k: await this.connection(c) };
+    });
+    // A connection replaced or removed since the block: the event cannot be reached; the record is still released.
+    const reachable = k !== null && k.calendar_id === b.calendar_id;
+    if (reachable) {
+      try {
+        await this.provider.deleteEvent(decryptToken(k.token_enc, this.tokenKey), k.calendar_id, b.external_id);
+      } catch (err) {
+        providerError(err);
+      }
+    }
+    return this.db.withUser(user.id, async (c) => {
+      await this.interview(c, user, interviewId);
+      const n = (await c.query(`UPDATE eureka.calendar_block SET status = 'released' WHERE id = $1 AND status = 'active'`, [b.id])).rowCount ?? 0;
+      // Released concurrently by someone else: the same outcome, audited once (by them).
+      if (n) await this.audit.record(c, { actorId: user.id, action: "calendar.released", entityType: "interview", entityId: interviewId, changes: { reachable } });
       return { block: null, canBlock: true, connected: k !== null };
     });
   }

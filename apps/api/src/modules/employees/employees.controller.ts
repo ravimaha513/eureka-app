@@ -1,6 +1,7 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
+import { parseIfMatch } from "../../platform/http/if-match.js";
 import {
   ActiveEmployeesQuery, AssignTeam, AssignmentEmployment, EmployeeExportQuery, EmployeeListQuery, EndAssignment, ExitEmployee,
   PlannedEndDate, ReportPeriod, ReturnToMarket,
@@ -93,17 +94,20 @@ export class AssignmentsController {
     return this.svc.endAssignment(user, id, EndAssignment.parse(body));
   }
 
+  /** Optional If-Match: the assignment's plannedEndDateVersion (412 when stale). */
   @Put(":id/planned-end-date")
   @RequirePermission("assignment:update")
-  plannedEnd(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.svc.setPlannedEndDate(user, id, PlannedEndDate.parse(body));
+  plannedEnd(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
+    @Headers("if-match") ifMatch: string | undefined) {
+    return this.svc.setPlannedEndDate(user, id, PlannedEndDate.parse(body), parseIfMatch(ifMatch));
   }
 
-  /** 0150: payroll company, E-Verify date, onboarded date, pay rate (rate:read as well). */
+  /** 0150: payroll company, E-Verify date, onboarded date, pay rate (rate:read as well). Optional If-Match: employmentVersion (412 when stale). */
   @Patch(":id/employment")
   @RequirePermission("assignment:update")
-  employment(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.svc.setEmployment(user, id, AssignmentEmployment.parse(body));
+  employment(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
+    @Headers("if-match") ifMatch: string | undefined) {
+    return this.svc.setEmployment(user, id, AssignmentEmployment.parse(body), parseIfMatch(ifMatch));
   }
 }
 

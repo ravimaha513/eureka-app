@@ -1163,7 +1163,8 @@ const CASES: RejectCase[] = [
         state: () => employmentState(j.personId),
       };
     },
-    forbidden: { endingNoticeFor: "2099-01-01", endDate: "2099-01-01", startDate: "2020-01-01", assignmentId: FOREIGN_ID, previousPlannedEndDate: "2020-01-01" },
+    forbidden: { endingNoticeFor: "2099-01-01", endDate: "2099-01-01", startDate: "2020-01-01", assignmentId: FOREIGN_ID, previousPlannedEndDate: "2020-01-01",
+      row_version: 9, plannedEndDateVersion: 9 },
   },
   {
     route: "POST /api/v1/employees/:id/exit", actor: "hr",
@@ -1193,7 +1194,7 @@ const CASES: RejectCase[] = [
       };
     },
     forbidden: { updatedBy: U.r2a, updatedAt: "2020-01-01T00:00:00Z", assignmentId: FOREIGN_ID, payroll_company_id: FOREIGN_ID,
-      endDate: "2026-01-01", personId: FOREIGN_ID },
+      endDate: "2026-01-01", personId: FOREIGN_ID, row_version: 9, employmentVersion: 9 },
   },
   {
     route: "POST /api/v1/employees/:id/assign-team", actor: "hr",
@@ -1253,7 +1254,7 @@ const CASES: RejectCase[] = [
     },
     forbidden: {
       submissionId: FOREIGN_ID, candidateId: FOREIGN_ID, recruiterId: U.r1b, teamId: T.t2, locationId: LOC.austin, clientId: FOREIGN_ID,
-      clearedBy: U.locD, clearedAt: PAST, feedbackEmailSentAt: PAST,
+      clearedBy: U.locD, clearedAt: PAST, feedbackEmailSentAt: PAST, row_version: 9,
     },
     // Location fields: a recruiter's grant covers only the sales fields (design B4.7).
     notPermitted: { fields: { cleared: true, consentCaptured: true, systemName: "Zoom" }, detail: /^field_not_permitted: / },
@@ -1419,7 +1420,7 @@ const CASES: RejectCase[] = [
         state: () => rows(`SELECT * FROM eureka.utility_bill WHERE id = $1`, [b]),
       };
     },
-    forbidden: { voidedAt: PAST, voidedBy: U.hr, status: "paid", billId: FOREIGN_ID },
+    forbidden: { voidedAt: PAST, voidedBy: U.hr, status: "paid", billId: FOREIGN_ID, row_version: 9 },
   },
   {
     route: "POST /api/v1/bills/:id/invoice", actor: "locD",
