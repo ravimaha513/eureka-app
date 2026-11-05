@@ -818,6 +818,15 @@ const CASES: RejectCase[] = [
     }),
     forbidden: { teamId: T.t1, coachId: U.il, valid: false, coach_id: U.il },
   },
+  // coach calendar (migration 0540)
+  {
+    route: "POST /api/v1/coach-calendar/grants", actor: "ceo",
+    prepare: async () => ({
+      url: "/api/v1/coach-calendar/grants", body: { granteeRole: "hr", allCoaches: true, detail: "busy" },
+      state: () => rows(`SELECT id, grantee_role, all_coaches, detail, created_by, updated_at FROM eureka.coach_calendar_grant ORDER BY id`),
+    }),
+    forbidden: { granteeType: "role", grantee_role: "ceo", all: true, created_by: U.m1 },
+  },
   {
     route: "POST /api/v1/teams/:id/coaches", actor: "il",
     prepare: async () => ({

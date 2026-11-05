@@ -8,8 +8,7 @@ import {
   ORG_SENSITIVE_PERMISSIONS,
   RESTRICTED_PERMISSIONS,
   SCOPES,
-  permissionArea,
-} from "@eureka/shared";
+  permissionArea, FIXED_ROLE_PERMISSIONS } from "@eureka/shared";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { roleRow, roleRows, type RoleRow } from "./admin-queries.js";
 import { AdminTx } from "./admin-tx.js";
@@ -44,7 +43,7 @@ export class RolesService {
   listPermissions() {
     return {
       scopes: [...SCOPES],
-      items: PERMISSIONS.map((key) => ({
+      items: PERMISSIONS.filter((key) => !FIXED_ROLE_PERMISSIONS.includes(key)).map((key) => ({
         key, area: permissionArea(key), description: PERMISSION_DESCRIPTIONS[key],
         restricted: RESTRICTED_PERMISSIONS.includes(key), orgSensitive: ORG_SENSITIVE_PERMISSIONS.includes(key),
         adminOnly: ADMIN_PERMISSIONS.includes(key), adminCompatible: ADMIN_COMPATIBLE_PERMISSIONS.includes(key),

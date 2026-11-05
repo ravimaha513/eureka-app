@@ -28,6 +28,8 @@ import { U, toUserAccess } from "./fixtures.js";
 const SELF_SERVICE: readonly string[] = [
   // calendar: calendar:block or interview:create, checked in the handler (RequirePermission takes one)
   "GET /api/v1/calendar/support/busy",
+  // Coach calendar: a CEO grant is data, so the service checks authz.coach_calendar_can_view().
+  "GET /api/v1/coach-calendar",
   // identity: own session, profile, preferences and step-up state
   "POST /api/auth/logout",
   "POST /api/auth/password/change",

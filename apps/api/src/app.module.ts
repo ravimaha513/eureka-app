@@ -81,6 +81,8 @@ import { ContractsController } from "./modules/contracts/contracts.controller.js
 import { ContractsService } from "./modules/contracts/contracts.service.js";
 import { CalendarController, InterviewCalendarController } from "./modules/calendar/calendar.controller.js";
 import { CalendarService } from "./modules/calendar/calendar.service.js";
+import { CoachCalendarController } from "./modules/calendar/coach-calendar.controller.js";
+import { CoachCalendarService } from "./modules/calendar/coach-calendar.service.js";
 import { CALENDAR_PROVIDER, DevCalendarProvider, GoogleCalendarProvider } from "./modules/calendar/calendar.provider.js";
 import { StaffBirthdaysController, StaffBirthdaysService } from "./modules/staff/birthdays.controller.js";
 import { PaymentsController, PaymentsService } from "./modules/payments/payments.controller.js";
@@ -152,7 +154,7 @@ export class AppModule {
         JobsController, PortalAuthController, PortalMeController, PortalDevMailboxController,
         ApplicationsController, ApplicationInterviewsController, ApplicantsController, PortalJobsController,
         // interview-alerts
-        ContractsController, CalendarController, InterviewCalendarController, StaffBirthdaysController,
+        ContractsController, CalendarController, InterviewCalendarController, CoachCalendarController, StaffBirthdaysController,
         // payments
         PaymentsController,
         // performance
@@ -180,7 +182,7 @@ export class AppModule {
         JobsService, PortalSessionService, PortalAuthService, { provide: MAIL_PORT, useFactory: () => createMailPort(config) },
         ApplicationsService, PortalJobsService,
         // interview-alerts
-        ContractsService, CalendarService, StaffBirthdaysService,
+        ContractsService, CalendarService, CoachCalendarService, StaffBirthdaysService,
         // performance
         PerformanceService,
         { provide: CALENDAR_PROVIDER, useFactory: () => config.CALENDAR_MODE === "google"

@@ -173,6 +173,10 @@ export const PERMISSIONS = [
   "interview.feedback:create",
   /** Block the support team's shared Google Calendar for an interview (interview-alerts package). */
   "calendar:block",
+  /** See the coach calendar grid; beyond this catalog grant, the CEO's grants (docs/coach-calendar-api.md). */
+  "coach_calendar:read",
+  /** See every coach's calendar and decide who else may. The CEO alone. */
+  "coach_calendar:manage",
   // placements and compliance
   "placement:read",
   "placement:create",
@@ -275,6 +279,7 @@ export const PERMISSION_AREAS: Record<string, string> = {
   submission: "Marketing",
   interview: "Interviews",
   calendar: "Interviews",
+  coach_calendar: "Interviews",
   placement: "Placements",
   rate: "Placements",
   document: "Documents",
@@ -332,6 +337,8 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   "interview:update": "Edit interviews and outcomes",
   "interview.feedback:create": "Record interview feedback",
   "calendar:block": "Block the support team's calendar",
+  "coach_calendar:read": "See the coach calendar",
+  "coach_calendar:manage": "Decide who sees the coach calendar",
   "placement:read": "See placements",
   "placement:create": "Create placements",
   "placement:update": "Edit placements",
@@ -580,6 +587,9 @@ export const GRANTS: Record<Role, Grants> = {
     "invoice:read": "hierarchy",
   },
   ceo: {
+    // coach calendar: sees every coach and alone decides who else may
+    "coach_calendar:read": "org",
+    "coach_calendar:manage": "org",
     // reference data: add technologies (docs/lookups-api.md)
     "technology:create": "org",
     "candidate:read": "org",
@@ -787,6 +797,8 @@ export const GRANTS: Record<Role, Grants> = {
     "chat:use": "own",
   },
   interview_coach: {
+    // coach calendar: their own column; anyone else's needs a CEO grant
+    "coach_calendar:read": "own",
     "candidate:read": "coached",
     "hotlist:read": "coached",
     "interview:read": "coached",
@@ -937,6 +949,8 @@ export function isRestrictedRole(role: Role): boolean {
  * is_admin_compatible); authz.role_create, role_update and role_set_grants refuse changes that
  * would add a violation.
  */
+/** Fixed on the ceo and interview_coach roles: never offered for, or allowed on, a custom role (migration 0540). */
+export const FIXED_ROLE_PERMISSIONS: readonly Permission[] = ["coach_calendar:read", "coach_calendar:manage"];
 export const ADMIN_PERMISSIONS: readonly Permission[] = ["access:manage", "audit:read"];
 
 /** Non-business permissions an admin-trait role may hold besides ADMIN_PERMISSIONS (any role may hold them). */

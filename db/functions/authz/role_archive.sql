@@ -1,4 +1,5 @@
 -- authz.role_archive: current definition (repeatable; db/functions/README.md).
+-- since: 0540
 -- An admin retires a custom role nobody holds (docs/roles-api.md): it leaves the
 -- pickers, its rows stay for the audit trail. Pending requests for it are rejected.
 -- Raises not_permitted, unknown_role, system_role, role_in_use.
@@ -29,6 +30,8 @@ BEGIN
   UPDATE eureka.role SET archived_at = pg_catalog.now() WHERE key = p_key;
   UPDATE eureka.role_request SET status = 'rejected', decided_by = actor, decided_at = pg_catalog.now()
    WHERE role_key = p_key AND status = 'pending';
+  -- Restoring the role must not bring coach calendar access back without the CEO deciding again.
+  DELETE FROM eureka.coach_calendar_grant g WHERE g.grantee_role = p_key;
 END $function$;
 
 REVOKE ALL ON FUNCTION authz.role_archive(text) FROM PUBLIC;

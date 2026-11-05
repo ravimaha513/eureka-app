@@ -26,6 +26,7 @@ const DashboardPage = lazyNamed(() => import("./dashboard/DashboardPage"), "Dash
 const CandidateProfile = lazyNamed(() => import("./sales/CandidateProfile"), "CandidateProfile");
 const CandidatesPage = lazyNamed(() => import("./sales/CandidatesPage"), "CandidatesPage");
 const InterviewsPage = lazyNamed(() => import("./interviews/InterviewsPage"), "InterviewsPage");
+const CoachCalendarPage = lazyNamed(() => import("./calendar/CoachCalendarPage"), "CoachCalendarPage");
 const PlacementsPage = lazyNamed(() => import("./pipeline/PlacementsPage"), "PlacementsPage");
 const SubmissionsPage = lazyNamed(() => import("./pipeline/SubmissionsPage"), "SubmissionsPage");
 const PaperworkPage = lazyNamed(() => import("./paperwork/PaperworkPage"), "PaperworkPage");
@@ -569,6 +570,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
               : current.key === "submissions" ? <SubmissionsPage me={me} onOpenPlacement={has("placements") ? (id) => go("placements", id) : undefined} initialOpenId={recordId} onOpenChange={(id) => go("submissions", id)} />
               : current.key === "placements" ? <PlacementsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("placements", id)} onOpenSubmission={has("submissions") ? (id) => go("submissions", id) : undefined} />
               : current.key === "interviews" ? <InterviewsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("interviews", id)} onOpenSubmission={has("submissions") ? (id) => go("submissions", id) : undefined} />
+              : current.key === "coach-calendar" ? <CoachCalendarPage me={me} onOpenInterview={has("interviews") ? (id) => go("interviews", id) : undefined} />
               : current.key === "paperwork" ? <PaperworkPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("paperwork", id)} />
               : current.key === "access" ? <AccessPage me={me} />
               : current.key === "birthdays" ? <BirthdaysPage />

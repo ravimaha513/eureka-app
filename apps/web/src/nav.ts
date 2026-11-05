@@ -20,6 +20,8 @@ export const NAV: NavItem[] = [
   { key: "candidates", label: "Candidates", section: "Work", anyOf: ["candidate:read"] },
   { key: "submissions", label: "Submissions", section: "Work", anyOf: ["submission:read"] },
   { key: "interviews", label: "Interviews", section: "Work", anyOf: ["interview:read"] },
+  // A CEO grant adds coach_calendar:read to the capabilities /me returns.
+  { key: "coach-calendar", label: "Coach calendar", section: "Work", anyOf: ["coach_calendar:read"] },
   { key: "placements", label: "Placements", section: "Work", anyOf: ["placement:read"] },
   // chat
   { key: "chat", label: "Chat", section: "Work", anyOf: ["chat:use"] },

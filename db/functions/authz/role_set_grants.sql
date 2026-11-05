@@ -47,6 +47,10 @@ BEGIN
              AND NOT EXISTS (SELECT 1 FROM eureka.permission p WHERE p.key = w.key)) THEN
     RAISE EXCEPTION 'unknown_permission' USING ERRCODE = 'check_violation';
   END IF;
+  -- The coach calendar belongs to the CEO and the coaches, never to a custom role (0540).
+  IF EXISTS (SELECT 1 FROM pg_catalog.jsonb_each_text(p_grants) w WHERE w.value IS NOT NULL AND w.key LIKE 'coach\_calendar:%') THEN
+    RAISE EXCEPTION 'ceo_only_permission' USING ERRCODE = 'check_violation';
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_catalog.jsonb_each_text(p_grants) w WHERE w.value IS NOT NULL
              AND w.value NOT IN ('own','team','coached','coached_hierarchy','hierarchy','location','org')) THEN
     RAISE EXCEPTION 'invalid_scope' USING ERRCODE = 'check_violation';
