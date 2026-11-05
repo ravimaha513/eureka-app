@@ -1,6 +1,6 @@
 /* Theme tokens. Identity: carbon sidebar, carbon ink, one restrained signal red (brand mark, current-nav and
-   active-tab rules, sort indicator), neutral ground, hairlines, small radii. Light by default; dark under
-   [data-theme="dark"] (set by useTheme). See docs/ux-audit/design-system.md. */
+   active-tab rules, errors), neutral ground, hairlines, small radii. Light by default; dark under
+   [data-theme="dark"] (set by useTheme). See apps/web/DESIGN.md. */
 :root {
   --bg: #f4f5f7; --surface: #fff; --surface2: #f8f9fb; --hover: #f0f1f5;
   --line: #e3e5eb; --line2: #eceef2; --line-strong: #d3d6df; --field-line: #868e9e;
@@ -139,7 +139,7 @@ tbody tr[aria-selected="true"] td, tbody tr.selected td { background: var(--sel)
 .badge.full_of_interviews { background: var(--info-bg); color: var(--info-fg); } .badge.all_teams { background: var(--violet-bg); color: var(--violet-fg); }
 .prio { font-weight: 700; font-size: 11.5px; padding: 1px 6px; border-radius: var(--r-sm); background: var(--neutral-bg); color: var(--neutral-fg); font-variant-numeric: tabular-nums; }
 .prio.P1 { background: var(--pri-btn); color: var(--on-pri); } .prio.P2 { background: var(--warn-bg); color: var(--warn-fg); }
-.masked { color: var(--faint); }
+.masked { color: var(--muted); }
 .tabs { display: flex; gap: 8px; }
 .tab { border: 1px solid var(--line-strong); background: var(--surface); height: 30px; padding: 0 12px; border-radius: var(--r-md); font-weight: 600; font-size: 13px; color: var(--text2); display: inline-flex; align-items: center; }
 .tab:hover { color: var(--text); }
@@ -1012,7 +1012,7 @@ form.stack { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 @media (max-width: 768px) { .offline-banner { margin: 10px 14px 0; } }
 
 /* Skip link: first Tab stop, visible only when focused */
-.skiplink { position: absolute; left: 12px; top: -60px; z-index: 100; padding: 10px 14px; border-radius: var(--r-md); background: var(--pri-btn); color: #fff; font-weight: 600; text-decoration: none; }
+.skiplink { position: absolute; left: 12px; top: -60px; z-index: 100; padding: 10px 14px; border-radius: var(--r-md); background: var(--pri-btn); color: var(--on-pri); font-weight: 600; text-decoration: none; }
 .skiplink:focus { top: 12px; outline: 2px solid var(--pri); outline-offset: 2px; }
 .content:focus { outline: none; }
 
