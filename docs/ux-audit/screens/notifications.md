@@ -1,5 +1,5 @@
 # Notifications (bell + inbox panel) — top bar, every route
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: every signed-in user (no capability gate; Shell renders `NotificationBell` unconditionally, App.tsx:448). Which entries open a record depends on the screens the user has (`canOpenEntity`, App.tsx:314-316). Per-type in-app on/off lives in Settings → Notifications.
 Source: `apps/web/src/notifications/Inbox.tsx` (160 lines), `App.tsx:312-327,448`, `styles.css:532-546`, `.chipx` `styles.css:223-224`
 Evidence: existing `dashboard-desktop.png` (bell with count); new `notifications-panel-desktop.png`, `notifications-panel-mobile.png`, `shell-overlap-inbox-usermenu-desktop.png`
@@ -65,3 +65,20 @@ Inbox.tsx + styles.css:532-546 (+ new Popover if done with the shell work, M). N
 
 ## Validation
 Visual inspection: panel open at 1440 and 390 (ceo, 1 entry), overlapping user menu, outside-click behaviour measured with Playwright. Empty / error / multi-page states reviewed from code only (seed data has one notification). Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Close target 18px (High) | Close is an `.iconbtn` with a lucide X: 32px on desktop, 44px on phones. | `after/notifications-desktop.png`, `after/notifications-mobile.png` |
+| #4 Count bubble in error red, 2.69:1 in dark (High) | The bubble uses `--pri-btn` / `--on-pri` with a surface ring: carbon on light, near-white with navy text on dark. It now means the same as the chat count. | `notifications/notifications.css`; `after/notifications-dark-desktop.png` |
+| #2 No outside-click close; Escape only inside (Medium) | A mousedown outside the bell and panel closes it without moving focus. Escape anywhere closes it and returns focus to the bell, except while a modal dialog is open. | `Inbox.test.tsx` "closes on a click outside" and the existing Escape test |
+| #3 Entries ~140px (Medium) | Rows are compact: a 16px type icon (placement, candidate, chat, application, interview, digest, target), the title, the body clamped to 2 lines, and a short time on the right ("2:35 AM", "Yesterday", "Nov 5"; the full time is the title). Mark read/unread is a 28px icon button (40px on phones) with the same accessible names. | `after/notifications-desktop.png` |
+| #5 Plain Loading / error without Retry (Medium) | Uses `Loading` and `QueryError`; Retry refetches. | `Inbox.test.tsx` "offers Retry" |
+| #6 Unread looks like an error card (Low) | No tinted card. Unread shows a bold title and a small carbon dot on the type icon. Titles that open a record keep a quiet underline. | `after/notifications-dark-desktop.png` |
+| Phone sheet | The panel head is sticky, so Mark all read stays in reach. The panel's maximum height is `100dvh - 76px`. | `after/notifications-mobile.png` |
+
+Not done:
+- #8: no day separators, and the panel does not close when focus leaves it.
+- #7: no live message for Mark all read.
+
+Validation (wave 2): ceo with one entry, at 1440 and 390, light and dark. Page width was 390 at phone width. The 8 inbox unit tests pass, including the outside-click and Retry tests.

@@ -1,5 +1,5 @@
 # App shell (sidebar, top bar, drawer, quick jump) — every signed-in route
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: every signed-in user. Nav items filtered by `anyOf`/`allOf` (nav.ts:13-51, `visibleNav` nav.ts:59-62). Measured item counts: ceo 19, l1 19, m1 19, r1a 18, locD 16, hr 14, acct 11, imm 9, coach 7, admin 2. Settings is not in the sidebar; it is reached from the avatar menu and Quick jump (nav.ts:53-57, App.tsx:387).
 Source: `apps/web/src/App.tsx:281-508` (Shell), `nav.ts`, `shell/ui.tsx` (NAV_ICONS, Avatar, ThemeSwitch, UserMenu), `shell/QuickJump.tsx`, `shell/OfflineBanner.tsx`, `shell/theme.ts`, `chat/ChatNavBadge.tsx`, `styles.css:41-101` (shell), `:634-691` (phone), `:976-993` (quick jump, offline, skip link)
 Evidence: existing `dashboard-desktop.png`, `dashboard-mobile.png`, `candidates-desktop.png`; new `shell-sidebar-ceo-desktop.png`, `shell-sidebar-recruiter-desktop.png`, `shell-collapsed-desktop.png`, `shell-drawer-mobile.png`, `shell-quickjump-desktop.png`, `shell-quickjump-filter-desktop.png`, `shell-quickjump-mobile.png`, `shell-usermenu-desktop.png`, `shell-usermenu-mobile.png`, `shell-focus-skiplink-desktop.png`, `shell-focus-collapse-desktop.png`, `shell-offline-desktop.png`, `shell-overlap-inbox-usermenu-desktop.png`
@@ -73,3 +73,26 @@ M overall. nav.ts section regroup + explicit section order (S, hot file); styles
 
 ## Validation
 Visual inspection: desktop 1440×900 (ceo, r1a sidebars captured at full height), collapsed rail, Quick jump empty + filtered, user menu, offline banner, overlapping popovers; mobile 390×844 drawer, user menu, Quick jump. Keyboard: Tab order from page load (skip link → collapse → nav), drawer focus and Tab escape measured with Playwright. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Phone drawer not a modal (High) | While open, the aside becomes `role="dialog"` with `aria-modal`. Focus moves to the current (or first) screen, Tab and Shift+Tab wrap inside, and `<main>` is `inert`. A 44px "Close menu" button sits in the brand row. Escape and the close button return focus to the menu button. The drawer no longer delays `visibility` when it opens, so focus lands at once. It also closes if the window widens to desktop. | `App.tsx` Shell drawer effect; `App.test.tsx` "is a modal while open"; Playwright: focus after open = "Hot List", 30×Tab stays inside, `main[inert]` = true; `after/shell-mobile.png`, `after/shell-dark-mobile.png` |
+| #2 Nav too long, ordered by code, Chat in "Other" (High) | `nav.ts` is regrouped by task, with an explicit `NAV_SECTIONS` order: Work (Hot List, Candidates, Submissions, Interviews, Placements, Chat) · Hiring · Operations · Training · Insights (Dashboard first) · Team & admin. "Other" is gone and `anyOf`/`allOf` are unchanged. Landing is explicit (`landingScreen`: Hot List, then Dashboard, then the first screen that is not Chat), so no role's landing screen changes. Items are 32px and section labels 10/3px, so all 19 CEO items and the theme switch fit 900px (sidebar overflow 0). | `nav.ts`; `App.test.tsx` "sidebar grouping" and a landing test over every role; `after/shell-desktop.png`, `after/shell-recruiter-desktop.png` |
+| #3 Magnifier is the screen switcher, not search (Medium) | The desktop top bar shows a field-shaped "Go to screen… Ctrl K" button on the left (⌘K on Mac); its name stays "Go to screen". Phones keep a 44px square icon button. | `after/shell-desktop.png`, `after/shell-quickjump-mobile.png` |
+| #4 Quick jump input unstyled (Medium) | The input is a 40px field (44px with 16px text on phones) with the field stroke and a focus border and halo. The highlighted option has an ink-wash border. | `shell/shell.css`; `after/shell-quickjump-desktop.png` |
+| #6 Collapsed rail relies on `title` (Medium) | A positioned label (`.navtip`) shows the screen name on hover and on keyboard focus. It is fixed-position, so the scrolling rail does not clip it. `title` is removed. | `after/shell-collapsed-desktop.png` (Submissions focused by keyboard) |
+| #7 Overlays don't coordinate (Medium) | The inbox closes on an outside click, so opening the account menu closes it, and the reverse. | `Inbox.test.tsx` "closes on a click outside" |
+| #8 Focus rings inconsistent (Low) | Added `:focus-visible` rules for the collapse button, theme switch, user chip and account-menu items. Nav items get a white inset ring, because the carbon ring was invisible on the carbon sidebar. | `shell/shell.css` |
+| #11 Phone top bar 40px (Low) | The menu, Quick jump and bell buttons are 44×44 on phones. | `after/shell-mobile.png` |
+| #12 Offline banner scrolls away (Low) | The banner is sticky under the top bar. | `shell/shell.css` |
+| #13 Account-menu hover turns every item red (Low) | Hover now uses the wash with ink text. | `shell/shell.css` |
+| chat.css loaded with the shell | `ChatNavBadge` no longer imports `chat.css`. The sidebar count (`.navbadge`) is styled in `shell/shell.css` as an off-white count on the carbon sidebar; the old carbon-on-carbon count was nearly invisible. | `chat/ChatNavBadge.tsx` |
+
+Not done:
+- #5: no context title in the top bar; the h1 stays the single title.
+- #9: no change; wave 1 already removed the active dot.
+- #10: the theme switch stays in the sidebar foot, where it still fits.
+- No shared Popover primitive; the inbox reuses the account menu's outside-click pattern.
+
+Validation (wave 2): Playwright at 1440×900 and 390×844, light and dark, as ceo and r1a. Page width was 1440 or 390 on every capture. Sidebar overflow was 0 at 1440×900, expanded and collapsed. Hot List row actions were visible at 1440. Drawer focus, Tab trap and inert were measured as above. `pnpm --filter @eureka/web typecheck` is clean and the web unit suite passes 555/555.

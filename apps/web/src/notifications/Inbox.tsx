@@ -1,8 +1,13 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Bell } from "lucide-react";
+import {
+  BadgeCheck, Bell, CalendarClock, Check, CircleDot, FolderOpen, MessageCircle, Newspaper, TrendingUp, UserRound, X, type LucideIcon,
+} from "lucide-react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { fmtDateTime } from "../lib/format";
+import { Loading } from "../ui/Loading";
+import { QueryError } from "../ui/QueryError";
+import "./notifications.css";
 
 /** One inbox entry (GET /api/v1/notifications; migration 0046). */
 export interface InboxItem {
@@ -22,6 +27,22 @@ export const inboxKeys = { all: ["notifications"] as const, unread: ["notificati
 export const UNREAD_POLL_MS = 60_000;
 
 const countLabel = (n: number, capped: boolean) => (capped || n > 99 ? "99+" : String(n));
+
+/** What an entry is about, at a glance (decorative; the title says it in words). */
+const ENTITY_ICONS: Partial<Record<InboxItem["entity"]["type"], LucideIcon>> = {
+  placement: BadgeCheck, candidate: UserRound, conversation: MessageCircle, application: FolderOpen,
+  interview: CalendarClock, digest: Newspaper, performance_target: TrendingUp,
+};
+
+/** Today: the time; yesterday: "Yesterday"; this year: "Nov 5"; older: "Nov 5, 2025". The full stamp is the title. */
+export function shortTime(iso: string, now = new Date()): string {
+  const d = new Date(iso);
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(now) - day(d)) / 86_400_000);
+  if (diff === 0) return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (diff === 1) return "Yesterday";
+  return d.toLocaleDateString(undefined, d.getFullYear() === now.getFullYear() ? { month: "short", day: "numeric" } : { dateStyle: "medium" });
+}
 
 /**
  * The bell in the top bar and its inbox panel. The unread count is polled
@@ -66,10 +87,24 @@ export function NotificationBell({ onOpen, canOpen, pollMs = UNREAD_POLL_MS }: {
     if (focusBell) bell.current?.focus();
   };
   useEffect(() => { if (open) heading.current?.focus(); }, [open]);
+  // A popover: a click outside it (the account menu, the page) or Escape anywhere closes it.
+  const wrap = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (!wrap.current?.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      setOpen(false);
+      bell.current?.focus();
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [open]);
 
   const label = n === 0 ? "Notifications, none unread" : `Notifications, ${countLabel(n, capped)} unread`;
   return (
-    <div className="inbox-wrap">
+    <div className="inbox-wrap" ref={wrap}>
       <button ref={bell} type="button" className="bell" aria-label={label} aria-expanded={open} aria-controls={panelId}
         onClick={() => { if (open) close(); else { setOpen(true); void qc.invalidateQueries({ queryKey: inboxKeys.all }); } }}>
         <Bell size={18} strokeWidth={1.8} aria-hidden="true" />
@@ -116,43 +151,50 @@ function InboxPanel({ id, headingRef, unread, onClose, onOpen, canOpen }: {
   }));
 
   return (
-    <section id={id} className="inbox" aria-labelledby={`${id}-h`}
-      onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } }}>
+    <section id={id} className="inbox" aria-labelledby={`${id}-h`}>
       <div className="inbox-head">
         <h2 id={`${id}-h`} ref={headingRef} tabIndex={-1}>Notifications</h2>
         <button type="button" className="btn sm" disabled={busy || unread === 0} onClick={() => void markAll()}>Mark all read</button>
-        <button type="button" className="chipx" aria-label="Close notifications" onClick={onClose}>×</button>
+        <button type="button" className="iconbtn inbox-close" aria-label="Close notifications" onClick={onClose}><X size={18} aria-hidden="true" /></button>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
-      {q.isLoading ? <p className="muted">Loading…</p>
-        : q.error ? <p className="error" role="alert">Could not load notifications.</p>
-        : items.length === 0 ? <p className="muted">No notifications yet.</p>
+      {q.isLoading ? <Loading label="Loading notifications…" />
+        : q.error ? <QueryError query={q} message="Could not load notifications." />
+        : items.length === 0 ? <p className="muted inbox-empty">No notifications yet.</p>
         : (
           <ul className="inbox-list" aria-label="Notifications, newest first">
-            {items.map((item) => (
-              <li key={item.id} className={item.readAt ? "read" : "unread"}>
-                <div className="inbox-title">
-                  {!item.readAt && <span className="sr-only">Unread: </span>}
-                  {canOpen(item.entity) ? (
-                    <button type="button" className="linkish" onClick={() => {
-                      if (!item.readAt) void mark(item, true);
-                      onOpen(item.entity);
-                    }}>{item.title}</button>
-                  ) : <strong>{item.title}</strong>}
-                </div>
-                <p>{item.body}</p>
-                <small className="muted"><time dateTime={item.createdAt}>{fmtDateTime(item.createdAt)}</time></small>
-                <button type="button" className="btn sm" disabled={busy}
-                  aria-label={`${item.readAt ? "Mark unread" : "Mark read"}: ${item.title}`}
-                  onClick={() => void mark(item, !item.readAt)}>
-                  {item.readAt ? "Mark unread" : "Mark read"}
-                </button>
-              </li>
-            ))}
+            {items.map((item) => {
+              const Icon = ENTITY_ICONS[item.entity.type] ?? Bell;
+              const label = item.readAt ? "Mark unread" : "Mark read";
+              return (
+                <li key={item.id} className={item.readAt ? "read" : "unread"}>
+                  <span className="inbox-icon" aria-hidden="true"><Icon size={16} strokeWidth={1.8} /></span>
+                  <div className="inbox-main">
+                    <div className="inbox-title">
+                      {!item.readAt && <span className="sr-only">Unread: </span>}
+                      {canOpen(item.entity) ? (
+                        <button type="button" className="inbox-open" onClick={() => {
+                          if (!item.readAt) void mark(item, true);
+                          onOpen(item.entity);
+                        }}>{item.title}</button>
+                      ) : <strong>{item.title}</strong>}
+                    </div>
+                    <p className="inbox-body">{item.body}</p>
+                  </div>
+                  <div className="inbox-side">
+                    <time dateTime={item.createdAt} title={fmtDateTime(item.createdAt)}>{shortTime(item.createdAt)}</time>
+                    <button type="button" className="iconbtn sm inbox-mark" disabled={busy} title={label}
+                      aria-label={`${label}: ${item.title}`} onClick={() => void mark(item, !item.readAt)}>
+                      {item.readAt ? <CircleDot size={15} aria-hidden="true" /> : <Check size={15} aria-hidden="true" />}
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       {q.hasNextPage && (
-        <button type="button" className="btn sm" disabled={q.isFetchingNextPage} aria-busy={q.isFetchingNextPage || undefined}
+        <button type="button" className="btn sm inbox-more" disabled={q.isFetchingNextPage} aria-busy={q.isFetchingNextPage || undefined}
           onClick={() => void q.fetchNextPage()}>Show older notifications</button>
       )}
     </section>

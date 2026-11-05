@@ -1,5 +1,5 @@
 # Chat — `/chat`, `/chat/<conversationId>`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `chat:use` (nav.ts:50) — every role measured (ceo, r1a, l1, m1, locD, hr, acct, imm, coach, admin). Group rename/members/delete need `canManage` on the conversation.
 Source: `apps/web/src/chat/ChatPage.tsx` (775 lines: ChatPage, ConversationRow, ConversationView, ConversationMenu, MessageItem, AttachmentChip, Composer, PeoplePicker, CreateGroupPanel, MembersPanel), `chatApi.ts`, `ChatNavBadge.tsx`, `linkify.tsx`, `chat/chat.css` (107 lines), `Drawer` from `sales/ui.tsx`
 Evidence: existing `chat-desktop.png`, `chat-mobile.png` (empty state); new `chat-conversation-desktop.png`, `chat-conversation-mobile.png`, `chat-list-mobile.png`, `chat-menu-desktop.png`, `chat-hover-actions-desktop.png`, `chat-create-group-desktop.png`. Test conversation ceo ↔ r1a (3 messages, one with a link) created in the local dev DB for the capture.
@@ -71,3 +71,22 @@ ChatPage.tsx (header, picker rows, states, copy), chat.css (layout, rename `.dot
 
 ## Validation
 Visual inspection: desktop 1440 (list, open conversation, ⋮ menu, hover actions, create-group drawer), mobile 390 (list, conversation); target sizes and overflow measured with Playwright. Members panel, attachments and edit mode reviewed from code. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #10 chat.css global leaks (Medium) | `.dot` is renamed `.chat-dot` and the `.iconbtn.sm` override is scoped to `.chat-msg-actions`. `.navbadge` moved to the shell. `ChatNavBadge` no longer imports chat.css, so chat.css loads only with the chat chunk and no longer restyles the dashboard legend dots or the kit icon buttons. | `chat/chat.css`, `chat/ChatNavBadge.tsx`, `shell/shell.css` |
+| #1 Picker rows ~20px (High) | Each picker row is a whole-row label, 40px tall (44px on phones), with an 18px checkbox and a highlighter fill when picked. Chip and attachment remove buttons are 28px (36px on phones). | `after/chat-dark-desktop.png` |
+| #2 Placeholder says "Search users…" (Medium) | The placeholder is "Search chats and people", the same as the label. | `after/chat-desktop.png` |
+| #3 Phone header eats 170px (Medium) | On phones the page description and your own status are hidden. With a conversation open the page head is hidden too, so the conversation header sits under the top bar and the pane fills `100dvh - 96px`. The composer pads for the safe area. | `after/chat-mobile.png`, `after/chat-list-mobile.png` |
+| #8 Plain Loading / error text (Medium) | The conversation list uses `Loading` and `QueryError` with Retry. | `ChatPage.tsx` |
+| #12 Desktop dead band under the card (Low) | The pane height is `100dvh - 186px`. | `after/chat-desktop.png` |
+| Small Corners | The day separator and file chips are no longer pill-shaped. | `chat/chat.css` |
+
+Not done:
+- Kept because `e2e/chat.spec.ts` checks them and that file is outside this wave's files:
+  - #6: Title Case in the create-group drawer.
+  - #4: the fixed "Online" status; it still shows on desktop and is hidden on phones.
+- Unchanged: the filter pills (#5), the actions on your own messages (#7) and the ⋮ menu (#9).
+
+Validation (wave 2): ceo with one direct conversation, at 1440 and 390, light and dark, plus the create-group drawer in dark. Page width was 390 at phone width. The chat unit tests pass.

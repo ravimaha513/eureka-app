@@ -1,5 +1,5 @@
 # Sign in, Set password, Change password — `/` (signed out), `/set-password`, forced change
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Regression-checked (rebrand wave 2; no changes needed)
 Who / permission: signed-out visitors; `/set-password#token=…` for invited users; `ChangePassword` replaces the app while `me.mustChangePassword` (App.tsx:545). Methods come from `/api/auth/methods` (password, Google) plus dev sign-in in `import.meta.env.DEV`.
 Source: `apps/web/src/App.tsx:52-262` (DEV_USERS, PasswordForm, ChangePassword, SetPassword, Login), `App.tsx:526-536` (boot/error), `shell/useAuthMethods.ts`, `styles.css:145-180` (login), `:204-214` (fields/buttons)
 Evidence: existing `login-desktop.png`, `login-mobile.png`; new `login-error-desktop.png`, `login-error-mobile.png`, `login-1024.png`, `login-dark-desktop.png`, `login-focus-desktop.png`, `login-setpassword-invalid-desktop.png`
@@ -68,3 +68,6 @@ App.tsx:58-262 + styles.css:145-180 only. No API changes.
 
 ## Validation
 Visual inspection: desktop 1440 (light, dark, focus state, rate-limited error), 1024, mobile 390 (default + error), invalid set-password link. Note: the error capture shows the 429 lockout message because the shared dev API was rate-limited during the audit; placement is identical for 401. ChangePassword not rendered (needs an admin-set password user) — reviewed from code. Redesign validation: pending (not implemented).
+
+### Wave 2 regression check
+Login was rebuilt in an earlier wave; the shell wave changed only signed-in code (App.tsx `Shell`, `shell/shell.css`). Re-captured at 1440 light and 390 dark: layout, theme toggle and both sign-in forms unchanged; page width 390 at phone width. Evidence: `after/login-desktop.png`, `after/login-mobile.png`. No changes made.

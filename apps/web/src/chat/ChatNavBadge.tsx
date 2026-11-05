@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CHAT_POLL } from "@eureka/shared";
 import { chatApi, chatKeys, errorStatus, pollDelay } from "./chatApi";
-import "./chat.css";
 
 // Kept apart from ChatPage so the sidebar badge does not pull the chat screen into the main bundle.
+// Its style (.navbadge) lives with the shell (shell/shell.css); chat.css loads only with the chat screen.
 
 /** True while the tab is hidden (polling backs off; design A7). */
 export function useHidden(): boolean {

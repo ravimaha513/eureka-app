@@ -1,0 +1,74 @@
+/*
+ * Shell wave 2 (docs/ux-audit/screens/shell.md): task-grouped sidebar that fits a 900px laptop,
+ * a visible Quick jump field in the top bar, the phone drawer as a modal, collapsed-rail labels,
+ * consistent focus rings. Loaded with App, after styles.css. DESIGN.md tokens only.
+ */
+
+/* Sidebar density: 19 items in six groups fit 900px with the theme switch (32px items, 10/3 labels). */
+.brandrow { height: 56px; }
+.navsec { padding: 10px 10px 3px; }
+.nav { height: 32px; }
+.nav[aria-current="page"]::before { top: 6px; bottom: 6px; }
+.themeswitch { margin-top: auto; flex: none; }
+.side .navlist { padding-bottom: 12px; }
+
+/* Chat unread count beside "Chat" (was in chat.css, which now loads only with the chat screen). */
+.navbadge { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--side-text); color: var(--side-bg); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* Focus rings: shell controls that fell back to the browser outline. */
+.collapsebtn:focus-visible, .themeswitch button:focus-visible, .navclose:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* Nav items: the shared carbon focus ring is invisible on the carbon sidebar; use white, inset. */
+.side .nav:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+.userchip:focus-visible, .userpanel-item:focus-visible, .qjfield:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; }
+/* The account menu: hover is a wash, not error red (Sign out is not destructive). */
+.userpanel-item:hover { color: var(--text); }
+
+/* Collapsed rail: the screen name beside the icon on hover and keyboard focus (App.tsx navtip). */
+.navtip { position: fixed; left: 70px; z-index: 70; transform: translateY(-50%); pointer-events: none; padding: 5px 9px; border-radius: var(--r-md); background: var(--side-current); color: #fff; font-size: 13px; font-weight: 600; white-space: nowrap; box-shadow: var(--shadow-lg); }
+
+/* Quick jump trigger: a field-shaped button on desktop, so "go to a screen" is visible with its shortcut. */
+.qjfield { display: inline-flex; align-items: center; gap: 8px; width: 260px; height: 34px; padding: 0 6px 0 10px; border: 1px solid var(--field-line); border-radius: var(--r-md); background: var(--surface); color: var(--muted); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.qjfield:hover { border-color: var(--pri); color: var(--text2); }
+.qjfield-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qjfield-kbd { flex: none; font: inherit; font-size: 11.5px; font-weight: 600; color: var(--muted); border: 1px solid var(--line-strong); border-radius: var(--r-sm); padding: 1px 6px; background: var(--surface2); font-variant-numeric: tabular-nums; }
+
+/* Quick jump dialog: the input is a real field (was an unstyled native input). */
+.quickjump input[role="combobox"] { height: 40px; border: 1px solid var(--field-line); border-radius: var(--r-md); padding: 0 12px; background: var(--surface); color: var(--text); font: inherit; font-size: 15px; }
+.quickjump input[role="combobox"]::placeholder { color: var(--muted); }
+.quickjump input[role="combobox"]:focus { border-color: var(--pri); box-shadow: 0 0 0 3px var(--pri-100); outline: none; }
+.quickjump input[role="combobox"]:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; }
+.qjlist li { min-height: 36px; padding: 0 10px; }
+.qjlist li[aria-selected="true"] { background: var(--pri-50); color: var(--text); box-shadow: inset 0 0 0 1px var(--pri-200); }
+
+/* Offline warning stays in view while the page scrolls (under the sticky top bar). */
+.offline-banner { position: sticky; top: 64px; z-index: 15; }
+
+/* The drawer's close button exists only while the phone drawer is open. */
+.navclose { display: none; }
+
+@media (min-width: 769px) {
+  .collapsed .brandrow { padding: 12px 0 4px; }
+  .collapsed .navsec { padding: 6px 0; margin-top: 6px; }
+  .collapsed .navbadge { position: absolute; top: 2px; right: 4px; min-width: 16px; height: 16px; line-height: 16px; font-size: 10px; padding: 0 4px; }
+}
+
+@media (max-width: 768px) {
+  /* The drawer is visible as soon as it starts sliding in, so focus can move into it at once. */
+  .side.open { transition: transform .2s ease; }
+  .side .nav { height: 40px; }
+  .brandrow { height: 60px; }
+  .navclose { display: grid; place-items: center; width: 44px; height: 44px; margin-right: -6px; flex: none; border: 0; border-radius: var(--r-md); background: none; color: var(--side-text); }
+  .navclose:hover { background: var(--side-hover); color: #fff; }
+  .themeswitch button { height: 40px; }
+  /* Top bar: 44px targets; Quick jump collapses to an icon button beside the bell. */
+  .menubtn { width: 44px; height: 44px; }
+  .bell { width: 44px; height: 44px; }
+  .qjfield { width: 44px; height: 44px; padding: 0; justify-content: center; margin-left: auto; border-color: var(--line); border-radius: var(--r-md); color: var(--text2); }
+  .qjfield-text, .qjfield-kbd { display: none; }
+  .topright { margin-left: 0; gap: 8px; }
+  .top { gap: 8px; }
+  .offline-banner { top: 68px; }
+  .dialog.quickjump { margin-top: 12px; }
+  .quickjump input[role="combobox"] { height: 44px; font-size: 16px; }
+  .qjlist li { min-height: 44px; }
+}
