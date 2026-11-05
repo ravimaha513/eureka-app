@@ -6,8 +6,10 @@ import { DocumentsService } from "./documents.service.js";
 /**
  * FR-PPR-01 to 03: paperwork and compliance documents on a candidate or one of
  * the candidate's placements; restricted documents (I-9, driving license,
- * work authorization) open only for HR, Accounts and Immigration after
- * step-up (api/auth/step-up), and every opening is in the access log.
+ * work authorization) open only for HR, Accounts and Immigration. No step-up
+ * is required (owner decision on security review B-01); compensating controls:
+ * a per-user cap on restricted opens per 24 hours (429), 60 s links, warning
+ * logs, and every opening is in the access log.
  */
 @Controller("api/v1")
 export class DocumentsController {
@@ -45,7 +47,7 @@ export class DocumentsController {
     return this.svc.requestUpload(user, { kind: "placement", id }, () => DocumentUpload.parse(body));
   }
 
-  /** Presigned GET (attachment; 60 s, restricted 5 min) for a clean file; logged. POST so it carries the CSRF token. */
+  /** Presigned GET (attachment; 60 s) for a clean file; logged; restricted opens are capped per user per 24 h (429). POST so it carries the CSRF token. */
   @Post("documents/:documentId/download")
   @HttpCode(200)
   @RequirePermission("document:read")

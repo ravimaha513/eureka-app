@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair } from "jose";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Logger } from "@nestjs/common";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { can, candidateVisible, documentAccess, resolveScope } from "@eureka/shared";
 import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
@@ -346,8 +347,9 @@ describe("restricted access matrix (every fixture user; with, without and expire
     if (a.read && readable && a.readRestricted) {
       expect(after.statusCode, after.body).toBe(200);
       const { url, expiresAt } = after.json() as { url: string; expiresAt: string };
-      expect(Date.parse(expiresAt) - Date.now()).toBeLessThanOrEqual(300_000);
-      expect(Date.parse(expiresAt) - Date.now()).toBeGreaterThan(240_000);
+      // Restricted links live 60 s, as internal ones (B-01: no step-up, so no longer-lived link).
+      expect(Date.parse(expiresAt) - Date.now()).toBeLessThanOrEqual(60_000);
+      expect(Date.parse(expiresAt) - Date.now()).toBeGreaterThan(30_000);
       const got = await app.inject({ method: "GET", url });
       expect(got.statusCode).toBe(200);
       expect(got.rawPayload.equals(body)).toBe(true);
@@ -388,6 +390,37 @@ describe("restricted access matrix (every fixture user; with, without and expire
     const r = await call(s, "POST", `/api/v1/documents/${restricted.id}/download`);
     expect(r.statusCode).toBe(200);
     expect(await grants()).toBeNull();
+  });
+
+  it("restricted opens are capped per user per 24 hours: 429 too_many_restricted_opens; warnings at 80 % and at the cap carry ids only", async () => {
+    const used = async () => Number((await db.admin.query(`SELECT
+        (SELECT count(*) FROM eureka.document_access WHERE user_id = $1 AND classification = 'restricted' AND at > now() - interval '24 hours')
+      + (SELECT count(*) FROM eureka.datahub_access WHERE user_id = $1 AND level = 'restricted' AND at > now() - interval '24 hours') AS n`,
+      [U.imm])).rows[0].n);
+    const n0 = await used();
+    // Cap n0 + 5: the high-water mark (80 %) is open number ceil(0.8 * cap).
+    const cap = n0 + 5;
+    const mark = Math.ceil(cap * 0.8);
+    await db.admin.query(`UPDATE authz.policy_setting SET value = $1 WHERE key = 'restricted_opens_per_day'`, [String(cap)]);
+    const warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+    try {
+      const s = await login(emailOf("imm"), true);
+      const codes: number[] = [];
+      for (let i = n0; i < cap; i++) codes.push((await call(s, "POST", `/api/v1/documents/${restricted.id}/download`)).statusCode);
+      expect(codes.every((c) => c === 200)).toBe(true);
+      const refused = await call(s, "POST", `/api/v1/documents/${restricted.id}/download`);
+      expect([refused.statusCode, refused.json().detail]).toEqual([429, "too_many_restricted_opens"]);
+      expect(await used()).toBe(cap);
+      // Internal documents are not capped.
+      expect((await call(s, "POST", `/api/v1/documents/${internal.id}/download`)).statusCode).toBe(200);
+      const lines = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith("restricted_open_"));
+      const expected = [`restricted_open_cap_reached ${JSON.stringify({ userId: U.imm })}`];
+      if (mark > n0) expected.unshift(`restricted_open_high_water ${JSON.stringify({ userId: U.imm, opens: mark, cap })}`);
+      expect(lines).toEqual(expected);
+    } finally {
+      warn.mockRestore();
+      await db.admin.query(`UPDATE authz.policy_setting SET value = '200' WHERE key = 'restricted_opens_per_day'`);
+    }
   });
 
   it("logging out ends the step-up with the session", async () => {

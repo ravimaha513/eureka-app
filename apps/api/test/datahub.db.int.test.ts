@@ -306,6 +306,32 @@ describe("files, versions, scan, download, access log", () => {
     expect((await q(U.admin, `SELECT id FROM eureka.datahub_access`)).length).toBeGreaterThanOrEqual(2); // audit:read
   });
 
+  it("restricted opens count toward the per-user daily cap (B-01 compensating control); internal ones do not", async () => {
+    const pay = await upload(U.acct, F["Payroll exports"]!, "Cap.pdf");
+    const pol = await upload(U.hr, F["Company policies"]!, "Cap.pdf");
+    await finish(pay.file_object_id, "clean", "NO_THREATS_FOUND", SHA, 1000);
+    await finish(pol.file_object_id, "clean", "NO_THREATS_FOUND", SHA, 1000);
+    const used = async (user: string) => (await db.admin.query(`SELECT
+        (SELECT count(*) FROM eureka.datahub_access WHERE user_id = $1 AND level = 'restricted' AND at > now() - interval '24 hours')
+      + (SELECT count(*) FROM eureka.document_access WHERE user_id = $1 AND classification = 'restricted' AND at > now() - interval '24 hours') AS n`,
+      [user])).rows[0].n as string;
+    const n0 = Number(await used(U.r1a));
+    await db.admin.query(`UPDATE authz.policy_setting SET value = $1 WHERE key = 'restricted_opens_per_day'`, [String(n0 + 1)]);
+    try {
+      const s = await session(U.r1a);
+      expect(await download(U.r1a, pay.version_id, s)).toMatchObject({ outcome: "ok", restricted_opens: n0 + 1, restricted_cap: n0 + 1 });
+      expect(await download(U.r1a, pol.version_id, s)).toMatchObject({ outcome: "ok", restricted_opens: null, restricted_cap: null });
+      const logged = Number(await used(U.r1a));
+      expect(await err(download(U.r1a, pay.version_id, s))).toEqual({ message: "too_many_restricted_opens", code: "23514" });
+      expect(Number(await used(U.r1a))).toBe(logged); // refused: nothing logged
+      expect((await download(U.r1a, pol.version_id, s)).outcome).toBe("ok"); // internal files stay open
+      // Another member is not affected by r1a's count.
+      expect((await download(U.acct, pay.version_id, await session(U.acct))).outcome).toBe("ok");
+    } finally {
+      await db.admin.query(`UPDATE authz.policy_setting SET value = '200' WHERE key = 'restricted_opens_per_day'`);
+    }
+  });
+
   it("a subfolder of a restricted folder is readable only by the parent's members", async () => {
     const f = await upload(U.acct, F["Payroll 2026"]!, "Q1.pdf");
     expect((await q(U.r1a, `SELECT id FROM eureka.datahub_file WHERE id = $1`, [f.file_id])).length).toBe(1);
