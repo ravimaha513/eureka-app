@@ -4,7 +4,7 @@ import type { Permission } from "@eureka/shared";
 import type { Candidate, Me } from "../api";
 import { salesError } from "./errors";
 import { BulkBar, ExportButton, SavedViews } from "./HotListExtras";
-import { ListFilters, ListFooter } from "./ListControls";
+import { ListFilters, ListFooter, resultCount } from "./ListControls";
 import { useQuery } from "@tanstack/react-query";
 import { HOTLIST_STATUS_OPTIONS, hotlistApi, salesKeys } from "./salesApi";
 import { Drawer, OpenToAllBadge, SharedBadge, Phone, Priority, StatusBadge, fmtDate } from "./ui";
@@ -72,14 +72,14 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  const cols = canBulk ? 13 : 12;
+  const cols = canBulk ? 14 : 13;
   const yesNo = (v: boolean | null | undefined) => (v === true ? "Yes" : v === false ? "No" : "—");
 
   return (
     <>
       <div className="pagehead">
         <div>
-          <h1 tabIndex={-1}>Hot List</h1>
+          <h1 tabIndex={-1}>Hot List{resultCount(s) && <span className="h1count" aria-label={`, ${resultCount(s)} candidates`}>{resultCount(s)}</span>}</h1>
           <p className="sub">Your team's candidates and every candidate open to all teams. Phones show only for candidates in your scope.</p>
         </div>
         <div className="pageactions">
@@ -87,11 +87,11 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
           {canExport && <ExportButton s={s} />}
         </div>
       </div>
-      <ListFilters s={s} label="Hot List" statuses={HOTLIST_STATUS_OPTIONS} options={options.data} />
-      {canBulk && (
-        <BulkBar selected={selected} items={items} canStatus={canStatus} canVisibility={canVisibility}
-          onDone={() => setSelected(new Set())} />
-      )}
+      <ListFilters s={s} label="Hot List" statuses={HOTLIST_STATUS_OPTIONS} options={options.data} selecting={canBulk && selected.size > 0}
+        selection={canBulk && (
+          <BulkBar selected={selected} items={items} canStatus={canStatus} canVisibility={canVisibility}
+            onDone={() => setSelected(new Set())} />
+        )} />
       <div className="card tablewrap listcard">
         {s.q.isLoading ? <Loading /> : s.q.error ? <QueryError query={s.q} message={salesError(s.q.error)} /> : (
           <table className="cardtable hotlist" aria-label="Hot List" aria-busy={s.q.isFetching || undefined}>
@@ -107,7 +107,7 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
                     })} />
                 </th>
               )}
-              <th>Candidate</th><th>Technology</th><th>Status</th><th>Pri</th><th>Team</th><th>Recruiter</th>
+              <th>Candidate</th><th>Technology</th><th>Status</th><th>Pri</th><th>Team</th><th className="p3">Lead</th><th>Recruiter</th>
               <th className="p2">Location</th><th className="p2">Visa</th><th className="p3">Stay</th><th className="p3">In person</th>
               <th>Phone</th><th className="num">Days</th><th className="c-act"><span className="sr-only">Actions</span></th>
             </tr></thead>
@@ -133,14 +133,15 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
                     {c.statusLabel && c.statusLabel.includes("/") && !/\/all teams$/i.test(c.statusLabel) && <small className="block">{c.statusLabel}</small>}
                   </td>
                   <td className="c-pri"><Priority p={c.priority} /></td>
-                  <td className="c-team">{c.team.name}{c.team.lead && <small className="block">Lead <span>{c.team.lead}</span></small>}</td>
+                  <td className="c-team">{c.team.name}</td>
+                  <td className="p3">{c.team.lead ?? "—"}</td>
                   <td className="c-rec">{c.recruiter?.name ?? <span className="muted">Unassigned</span>}</td>
                   <td className="p2">{c.location.name}</td>
                   <td className="p2">{c.visaCategory ? visaLabel(c.visaCategory) : "—"}</td>
                   <td className="p3">{c.stay ? stayLabel(c) : "—"}</td>
                   <td className="p3">{yesNo(c.inPersonOk)}</td>
                   <td className={`c-phone${c.phoneMasked ? " masked" : ""}`}><Phone c={c} /></td>
-                  <td className="c-days num">{c.daysInMarket ?? "—"}<span className="cardonly"> days</span></td>
+                  <td className="c-days num">{c.daysInMarket != null ? <>{c.daysInMarket}<span className="cardonly"> days</span></> : "—"}</td>
                   <td className="c-act">
                     <button type="button" className="btn sm" aria-label={`Quick view of ${c.name}`} onClick={() => setPreview(c)}>View</button>
                   </td>

@@ -1,7 +1,7 @@
 /** Hot List saved views, bulk actions and export (apps/api/src/modules/hotlist). The server checks every action. */
 import { useId, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download } from "lucide-react";
+import { BookmarkPlus, Download } from "lucide-react";
 import { ApiError, type Candidate } from "../api";
 import { saveBlob } from "../lib/download";
 import { TeamChecklist } from "./TeamChecklist";
@@ -83,7 +83,7 @@ export function SavedViews({ s }: { s: ListState }) {
             {items.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
           </select>
         </div>
-        <button type="button" className="btn" onClick={() => open("save")}>Save current filters…</button>
+        <button type="button" className="btn" onClick={() => open("save")}><BookmarkPlus size={16} aria-hidden="true" /><span className="btnlabel">Save current filters…</span></button>
         {current && (
           <>
             <button type="button" className="btn" onClick={() => open("rename")}>Rename</button>
@@ -129,7 +129,7 @@ export function ExportButton({ s }: { s: ListState }) {
     <div className="export">
       <button type="button" className="btn" disabled={run.isPending} onClick={() => run.mutate()} aria-describedby="hotlist-export-hint"
         title={`Exports this view for candidates in your scope, up to ${EXPORT_ROW_CAP.toLocaleString("en-US")} rows. Phones are masked.`}>
-        <Download size={15} aria-hidden="true" />{run.isPending ? "Exporting…" : "Export CSV"}
+        <Download size={16} aria-hidden="true" /><span className="btnlabel">{run.isPending ? "Exporting…" : "Export CSV"}</span>
       </button>
       <small id="hotlist-export-hint" className="sr-only">Exports this view for candidates in your scope, up to {EXPORT_ROW_CAP.toLocaleString("en-US")} rows. Phones are masked.</small>
       {run.isError ? (

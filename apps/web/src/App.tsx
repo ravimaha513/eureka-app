@@ -206,7 +206,7 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
               {theme === "dark" ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}{theme === "dark" ? "Light theme" : "Dark theme"}
             </button>
           </div>
-          <h1>Hi, welcome back!</h1>
+          <h1>Sign in to Eureka</h1>
           {passwordLogin && <PasswordForm onSignedIn={onSignedIn} onError={setErr} />}
           {passwordLogin && err && <p className="error" role="alert">{err}</p>}
           {devMode ? (

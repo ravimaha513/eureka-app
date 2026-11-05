@@ -16,10 +16,13 @@ type SecondaryKey = "visibility" | "locationId" | "visa" | "documents" | "resume
  * box and a Filters button that opens every filter as a sheet. Sort and the result count sit
  * under the bar. Every value lives in the URL (useCandidateList).
  */
-export function ListFilters({ s, label, statuses, batches, options, actions }: {
+export function ListFilters({ s, label, statuses, batches, options, actions, selection, selecting = false }: {
   s: ListState; label: string; statuses: readonly string[]; batches?: { id: string; label: string }[]; options?: FilterOptions;
   /** Extra controls on the right of the summary row (saved views, export). */
   actions?: ReactNode;
+  /** The bulk-selection bar: while `selecting`, it takes the summary row's place. */
+  selection?: ReactNode;
+  selecting?: boolean;
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -54,8 +57,6 @@ export function ListFilters({ s, label, statuses, batches, options, actions }: {
   if (s.extra.inPerson) chips.push(["inPerson", s.extra.inPerson === "yes" ? "In person" : "Not in person", () => s.setExtra("inPerson", "")]);
   if (s.extra.ghLocationId) chips.push(["ghLocationId", `Guest house: ${optLabel(ghOpts, s.extra.ghLocationId)}`, () => s.setExtra("ghLocationId", "")]);
   const primarySet = [s.searchInput, s.technologyInput, s.status, s.batchId, ...(options ? [s.extra.priority, s.extra.teamId, s.extra.recruiterId] : [])].filter(Boolean).length;
-  const n = s.q.data?.items.length;
-  const more = s.q.data?.nextCursor;
 
   return (
     <div className={`filterbar${open ? " open" : ""}`}
@@ -128,7 +129,8 @@ export function ListFilters({ s, label, statuses, batches, options, actions }: {
           </div>
         </div>
       </form>
-      <div className="fb-summary">
+      {selection}
+      {!selecting && <div className="fb-summary">
         {chips.length > 0 && (
           <ul className="chips" aria-label="Active filters">
             {chips.map(([k, text, clear]) => (
@@ -139,7 +141,7 @@ export function ListFilters({ s, label, statuses, batches, options, actions }: {
           </ul>
         )}
         {s.hasFilters && <button type="button" className="linkbtn" onClick={s.clear}>Clear filters</button>}
-        <span className="fb-count muted">{n === undefined ? "" : `${n}${more ? "+" : ""} ${n === 1 && !more ? "candidate" : "candidates"}`}</span>
+        <span className="fb-spacer" />
         {options && (
           <div className="field inline fb-sort">
             <label htmlFor={`${id}-sort`}>Sort by</label>
@@ -150,9 +152,16 @@ export function ListFilters({ s, label, statuses, batches, options, actions }: {
           </div>
         )}
         {actions}
-      </div>
+      </div>}
     </div>
   );
+}
+
+/** "38" or "50+" (more on the next page) for a heading; empty while loading. */
+export function resultCount(s: ListState): string {
+  const n = s.q.data?.items.length;
+  if (n === undefined || s.q.error) return "";
+  return `${n}${s.q.data?.nextCursor ? "+" : ""}`;
 }
 
 /** Result count (announced politely) and Previous / Next page controls. */

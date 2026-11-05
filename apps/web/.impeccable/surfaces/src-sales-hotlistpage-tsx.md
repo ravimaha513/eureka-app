@@ -18,3 +18,11 @@ STORY: A recruiter lands on the Hot List, sees their filters as chips and the fi
 FIRST VIEWPORT: Carbon sidebar 224px left; top bar with Quick jump, bell, user. h1 "Hot List" + count; one filter row (Search, Technology, Status, Priority, Team, Recruiter, More filters·n, Saved view); active chips + result count; table at y≈260 with condensed caps headers, 34px rows, row action pinned right; selection bar replaces chip row while rows are selected. Phone: h1, search + Filters(n) button opening a sheet, candidate cards.
 FORM: Category-standard enterprise list, assigned world Air Waybill (form 6 of 7) fused per user pin; seed:9eba1a3993cefad8
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+
+## Cited deviations (after finish review 1, 2026-11-05)
+- Primary action is carbon ink (`--pri-btn`), not red: the user pinned "restrained red brand accents", and red primaries read as destructive next to errors. Red is kept for the mark, the current-nav rule, the active-tab underline and errors.
+- The red top rule on the sidebar and login panel was removed (decoration). P1 is a carbon chip, not red.
+- Sort stays a select on the summary row, not sortable column headers: the server's sort keys (LIST_SORTS) do not map one-to-one to columns. Header sorting needs an API change, so it is deferred.
+- Quick jump stays an icon button in the top bar (Ctrl/Cmd+K). A visible field is deferred to the shell wave (nav regroup and phone drawer).
+- Saved views and Export sit in the page head (icon buttons on phones), not in the filter row.
+- The count sits beside the h1 as a small boxed figure ("38", or "50+" when more pages exist).

@@ -139,7 +139,7 @@ describe("sign out", () => {
     wrap(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Account: Test User" }));
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
-    expect(await screen.findByRole("heading", { name: "Hi, welcome back!" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Sign in to Eureka" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", expect.objectContaining({ method: "POST" }));
   });
 });

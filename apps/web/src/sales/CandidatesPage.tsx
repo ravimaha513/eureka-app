@@ -5,7 +5,7 @@ import { navigate } from "../lib/router";
 import { screenPath } from "../nav";
 import { CreateCandidateDialog } from "./CreateCandidateDialog";
 import { CandidateName, profileOpenable, type ListPageProps } from "./HotListPage";
-import { ListFilters, ListFooter } from "./ListControls";
+import { ListFilters, ListFooter, resultCount } from "./ListControls";
 import { STATUSES, salesApi, salesKeys } from "./salesApi";
 import { OpenToAllBadge, SharedBadge, Phone, Priority, StatusBadge } from "./ui";
 import { useCandidateList } from "./useCandidateList";
@@ -30,7 +30,7 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
   return (
     <>
       <div className="pagehead">
-        <div><h1 tabIndex={-1}>Candidates</h1><p className="sub">Candidates in your scope: your own, your team's, and those you manage.</p></div>
+        <div><h1 tabIndex={-1}>Candidates{resultCount(s) && <span className="h1count" aria-label={`, ${resultCount(s)} candidates`}>{resultCount(s)}</span>}</h1><p className="sub">Candidates in your scope: your own, your team's, and those you manage.</p></div>
         <div className="rowactions push">
           {batches.data?.canCreate && (
             <button type="button" className="btn" onClick={() => setCreating("batch")}>New batch</button>
@@ -63,7 +63,7 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
                   <td className="c-rec">{c.recruiter?.name ?? <span className="muted">Unassigned</span>}</td>
                   <td className="p2">{c.location.name}</td>
                   <td className={`c-phone${c.phoneMasked ? " masked" : ""}`}><Phone c={c} /></td>
-                  <td className="c-days num">{c.technicalRating ? `${c.technicalRating}/5` : "—"}<span className="cardonly"> rating</span></td>
+                  <td className="c-days num">{c.technicalRating ? <>{c.technicalRating}/5<span className="cardonly"> rating</span></> : "—"}</td>
                 </tr>
                 );
               })}
