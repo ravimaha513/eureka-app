@@ -45,6 +45,22 @@ on `eureka.role`, and code branches on them instead of on the key:
   `authz.admin_guard`, which gates every admin, import and approval function, requires the
   `admin` trait as well as `access:manage` at org scope, so a holder of such a role is refused
   (403 `Not permitted`) even though the API's permission check lets the request through.
+- **Admin is only admin, per user** (0480, owner decision 2026-11-05). Every role has a class
+  (`authz.role_classes`, catalog `roleClassification`): `admin` when it has the `admin` trait;
+  `admin_compatible_only` when it has no `admin` trait and every grant is admin-compatible (or it
+  has none); `data` for every other role, i.e. any grant outside `ADMIN_COMPATIBLE_PERMISSIONS`
+  (business data, or an admin-only permission on a role without the trait). Admin-compatible
+  permissions never make a role a data role. A user holds admin roles or data roles, never both;
+  `admin_compatible_only` roles go with either. `authz.role_separation`, called by
+  `request_role` and `approve_role_request` (single grant, bulk import, approvals), refuses:
+  422 `separation_of_duties` for an admin role to a user holding a data role or a data role to a
+  user holding an admin role (single-admin mode included), and 422
+  `role_violates_admin_separation` for a role that itself breaks the rule above (a legacy role:
+  its holders keep it, nobody gets it again). It serialises per user (advisory lock) and against
+  grant edits (share lock on the role). A trigger on `role_permission` refuses giving a custom
+  `admin_compatible_only` role its first business permission while an admin holds it (422
+  `role_held_by_admin`; revoke it from the admins first). Users who already mixed before 0480
+  are reported (migration `WARNING` per user id, `GET /admin/users/violations`), never stripped.
 - **Business units** are departments (`eureka.department`, AD-12). A role with
   `department_id` can only be granted to users in that department or its
   sub-departments (`role_department_mismatch`); `null` = whole organisation. Scope is
@@ -92,13 +108,17 @@ to seed and by tests (`assignmentFor(role)` builds an assignment from the catalo
 
 - `GET /api/v1/admin/roles?includeArchived=` returns `{ items: [{ key, label, description, isSystem,
   restricted, traits: { sales, locationBound, admin, recruiter, coach }, track, level,
-  department: {id,name}|null, clonedFrom, holders, archivedAt, rowVersion, grants: { "<permission>": "<scope>" } }] }`
+  department: {id,name}|null, clonedFrom, holders, archivedAt, rowVersion, classification, grants: { "<permission>": "<scope>" } }] }`
   ordered by track, level, label. `rowVersion` is the If-Match value for the two edits below.
+  `classification` is `admin` | `data` | `admin_compatible_only` (admin separation class, 0480).
 - `GET /api/v1/admin/permissions` returns `{ scopes: [...], items: [{ key, area, description,
   restricted, orgSensitive, adminOnly, adminCompatible }] }` from the catalog.
 - `GET /api/v1/admin/roles/violations` returns `{ items: [{ key, label, isSystem, admin, archived,
   holders, permissions }] }`: the roles that break admin separation and the permissions that do
   (read-only, `authz.role_admin_violations`; empty once they are cleaned up).
+- `GET /api/v1/admin/users/violations` returns `{ items: [{ id, displayName, status, adminRoles,
+  dataRoles }] }`: users who hold admin and data roles at once, with the role keys of each class
+  (read-only, `authz.user_admin_violations`, 0480; empty once their roles are revoked).
 - `POST /api/v1/admin/roles` with `{ label, cloneFrom, description?, departmentId?, track?, level? }`
   returns 201 `{ key }`. Copies grants and traits from `cloneFrom` (404 unknown, 422
   `role_archived`). Label 1–80 characters, unique ignoring case among non-archived roles (409
@@ -124,8 +144,9 @@ to seed and by tests (`assignmentFor(role)` builds an assignment from the catalo
   (permission keys only). Audit rows of roles carry the key in `changes` (`entity_id` is a uuid).
   Adding an admin-only permission to a role without the `admin` trait is 422
   `admin_permission_needs_admin_role`; adding any other (non admin-compatible) permission to an
-  `admin`-trait role is 422 `business_permission_on_admin_role`. A null or non-object `grants` is
-  422 `invalid_grants`.
+  `admin`-trait role is 422 `business_permission_on_admin_role`. Giving a custom role its first
+  business permission while an admin holds it is 422 `role_held_by_admin`. A null or non-object
+  `grants` is 422 `invalid_grants`.
 - **Concurrency** (0471, review C-02): `PATCH /admin/roles/:key` and `PUT /admin/roles/:key/grants`
   take an optional `If-Match: "<rowVersion>"`. A stale one is 412 `stale` and changes nothing; the
   check runs in the definer function under the role's row lock. Without the header they behave as

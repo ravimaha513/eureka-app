@@ -336,6 +336,17 @@ describe("admin separation (security review C-01)", () => {
       expect(await roleOf("c_sneaky")).toBeUndefined();
     });
 
+    it("is not granted again (0480): 422 role_violates_admin_separation", async () => {
+      const r = await call("admin", "POST", "/api/v1/admin/role-requests", { userId: U.r1a, role: "c_legacy_mixed" });
+      expect(r.statusCode).toBe(422);
+      expect(detail(r)).toBe("role_violates_admin_separation");
+      const bulk = await call("admin", "POST", "/api/v1/admin/users/bulk", {
+        dryRun: true, rows: [{ email: "legacy.bulk@eureka.example", displayName: "Legacy Bulk", roles: ["c_legacy_mixed"] }],
+      });
+      expect(bulk.statusCode, bulk.body).toBe(200);
+      expect(bulk.json().rows[0]).toMatchObject({ status: "error", error: "role_violates_admin_separation" });
+    });
+
     it("can still be edited without adding a violation, not cloned, and cleaned up", async () => {
       // Label and a business grant change: no new violation.
       expect((await call("admin", "PATCH", "/api/v1/admin/roles/c_legacy_mixed", { label: "Legacy Mixed II" })).statusCode).toBe(204);
@@ -350,6 +361,60 @@ describe("admin separation (security review C-01)", () => {
       expect((await call("admin", "PUT", "/api/v1/admin/roles/c_legacy_mixed/grants", { grants: { "candidate:read": "org" } })).statusCode).toBe(204);
       expect((await call("admin", "GET", "/api/v1/admin/roles/violations")).json().items).toEqual([]);
     });
+  });
+});
+
+describe("admin is only admin, per user (migration 0480)", () => {
+  it("GET /admin/roles classifies every role", async () => {
+    const items = (await call("admin", "GET", "/api/v1/admin/roles?includeArchived=true")).json().items as
+      (RoleItem & { classification: string })[];
+    const cls = Object.fromEntries(items.map((r) => [r.key, r.classification]));
+    expect(cls).toMatchObject({ org_admin: "admin", recruiter: "data", hr: "data", ceo: "data" });
+    for (const r of items) expect(["admin", "data", "admin_compatible_only"], r.key).toContain(r.classification);
+  });
+
+  it("an admin-compatible role goes with an admin role; it then takes no business permission", async () => {
+    expect((await call("admin", "POST", "/api/v1/admin/roles", { label: "Chat Only", cloneFrom: "recruiter" })).statusCode).toBe(201);
+    expect((await call("admin", "PUT", "/api/v1/admin/roles/c_chat_only/grants", { grants: { "chat:use": "own" } })).statusCode).toBe(204);
+    expect((await roleOf("c_chat_only")) as unknown).toMatchObject({ classification: "admin_compatible_only" });
+    // Bulk import: Org Admin with the compatible role is fine, with a data role it is not (dry runs).
+    const bulk = await call("admin", "POST", "/api/v1/admin/users/bulk", {
+      dryRun: true, rows: [
+        { email: "sep.ok@eureka.example", displayName: "Sep Ok", roles: ["Org Admin", "Chat Only"] },
+        { email: "sep.bad@eureka.example", displayName: "Sep Bad", roles: ["Org Admin", "Recruiter"] },
+      ],
+    });
+    expect(bulk.statusCode, bulk.body).toBe(200);
+    expect(bulk.json().rows.map((r: { status: string; error?: string }) => r.error ?? r.status)).toEqual(["ok", "separation_of_duties"]);
+
+    const req = await call("admin", "POST", "/api/v1/admin/role-requests", { userId: U.admin2, role: "c_chat_only" });
+    expect(req.json(), req.body).toMatchObject({ status: "applied" });
+    const r = await call("admin", "PUT", "/api/v1/admin/roles/c_chat_only/grants", { grants: { "chat:use": "own", "candidate:read": "own" } });
+    expect(r.statusCode).toBe(422);
+    expect(detail(r)).toBe("role_held_by_admin");
+    expect((await roleOf("c_chat_only"))!.grants).toEqual({ "chat:use": "own" });
+    // A data user may hold it too; an admin still may not get a data role.
+    expect((await call("admin", "POST", "/api/v1/admin/role-requests", { userId: U.r1b, role: "c_chat_only" })).json()).toMatchObject({ status: "applied" });
+    expect(detail(await call("admin", "POST", "/api/v1/admin/role-requests", { userId: U.admin2, role: "lead" }))).toBe("separation_of_duties");
+    expect((await call("admin", "DELETE", `/api/v1/admin/users/${U.admin2}/roles/c_chat_only`)).statusCode).toBe(204);
+    expect((await call("admin", "DELETE", `/api/v1/admin/users/${U.r1b}/roles/c_chat_only`)).statusCode).toBe(204);
+  });
+
+  it("GET /admin/users/violations lists users who already mix, for admins only; nothing is stripped", async () => {
+    expect((await call("admin", "GET", "/api/v1/admin/users/violations")).json()).toEqual({ items: [] });
+    await db.admin.query(`INSERT INTO eureka.user_role (user_id, role_key) VALUES ($1, 'immigration')`, [U.admin2]);
+    try {
+      const r = await call("admin", "GET", "/api/v1/admin/users/violations");
+      expect(r.statusCode).toBe(200);
+      expect(r.json().items).toEqual([
+        { id: U.admin2, displayName: "admin2", status: "active", adminRoles: ["org_admin"], dataRoles: ["immigration"] },
+      ]);
+      expect((await call("r1a", "GET", "/api/v1/admin/users/violations")).statusCode).toBe(403);
+      expect((await call("hr", "GET", "/api/v1/admin/users/violations")).statusCode).toBe(403);
+    } finally {
+      await db.admin.query(`DELETE FROM eureka.user_role WHERE user_id = $1 AND role_key = 'immigration'`, [U.admin2]);
+    }
+    expect((await call("admin", "GET", "/api/v1/admin/users/violations")).json()).toEqual({ items: [] });
   });
 });
 

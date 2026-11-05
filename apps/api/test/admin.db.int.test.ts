@@ -463,3 +463,155 @@ describe("admin separation and role versions (migrations 0470, 0471)", () => {
     await expect(asUser(db.app, U.admin, (c) => c.query(`UPDATE eureka.role SET row_version = 9 WHERE key = 'lead'`))).rejects.toThrow(/permission denied/);
   });
 });
+
+describe("admin is only admin, per user (migration 0480)", () => {
+  const Z = "00000000-0000-0000-0000-00000000a480";
+  type C = import("pg").PoolClient;
+  /** Runs fn as eureka_app after setup as the owner, all rolled back; `as` switches the acting user. */
+  async function inTx<R>(setup: string[], fn: (c: C, as: (u: string) => Promise<unknown>) => Promise<R>): Promise<R> {
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query(`INSERT INTO eureka.app_user (id, email, display_name) VALUES ('${Z}', 'z480@eureka.example', 'Zed')`);
+      for (const sql of setup) await c.query(sql);
+      await c.query("SET LOCAL ROLE eureka_app");
+      const as = (u: string) => c.query("SELECT set_config('eureka.user_id', $1, true)", [u]);
+      await as(U.admin);
+      return await fn(c, as);
+    } finally {
+      await c.query("ROLLBACK");
+      c.release();
+    }
+  }
+  /** One statement under a savepoint: the first row, or a rejection (rolled back to the savepoint). */
+  async function attempt(c: C, sql: string, params: unknown[] = []) {
+    await c.query("SAVEPOINT a");
+    try {
+      const r = (await c.query(sql, params)).rows[0];
+      await c.query("RELEASE SAVEPOINT a");
+      return r;
+    } catch (err) {
+      await c.query("ROLLBACK TO SAVEPOINT a");
+      throw err;
+    }
+  }
+  const grant = (c: C, user: string, role: string) => attempt(c, `SELECT * FROM authz.request_role($1, $2, NULL)`, [user, role]);
+  const chatOnly = [
+    `INSERT INTO eureka.role (key, label) VALUES ('c_db_chat', 'DB Chat')`,
+    `INSERT INTO eureka.role_permission (role_key, permission, scope) VALUES ('c_db_chat', 'chat:use', 'own')`,
+    `INSERT INTO eureka.role (key, label) VALUES ('c_db_empty', 'DB Empty')`,
+  ];
+
+  it("classifies roles: admin trait, data, admin-compatible only", async () => {
+    await inTx([...chatOnly,
+      `INSERT INTO eureka.role (key, label) VALUES ('c_db_mixed', 'DB Mixed')`,
+      `INSERT INTO eureka.role_permission (role_key, permission, scope) VALUES ('c_db_mixed', 'access:manage', 'org')`,
+    ], async (c) => {
+      const cls = Object.fromEntries((await c.query<{ role_key: string; classification: string }>(
+        `SELECT role_key, classification FROM authz.role_classes()`)).rows.map((r) => [r.role_key, r.classification]));
+      expect(cls).toMatchObject({
+        org_admin: "admin", recruiter: "data", hr: "data",
+        c_db_chat: "admin_compatible_only", c_db_empty: "admin_compatible_only",
+        // An admin-only permission without the admin trait is not admin-compatible: a data role.
+        c_db_mixed: "data",
+      });
+    });
+  });
+
+  it("refuses mixing in both directions; admin-compatible roles go with either", async () => {
+    await inTx(chatOnly, async (c) => {
+      await expect(grant(c, U.admin2, "recruiter")).rejects.toThrow(/separation_of_duties/);
+      await expect(grant(c, U.l1, "org_admin")).rejects.toThrow(/separation_of_duties/);
+      expect(await grant(c, U.admin2, "c_db_chat")).toMatchObject({ request_status: "applied" });
+      expect(await grant(c, U.admin2, "c_db_empty")).toMatchObject({ request_status: "applied" });
+      expect(await grant(c, U.r1a, "c_db_chat")).toMatchObject({ request_status: "applied" });
+      // A compatible role does not open the door: the data role still blocks admin.
+      await expect(grant(c, U.r1a, "org_admin")).rejects.toThrow(/separation_of_duties/);
+      // A user holding only compatible roles may become an admin (restricted: pending here).
+      expect(await grant(c, Z, "c_db_chat")).toMatchObject({ request_status: "applied" });
+      expect(await grant(c, Z, "org_admin")).toMatchObject({ request_status: "pending_approval" });
+      expect((await c.query(`SELECT * FROM authz.user_admin_violations()`)).rows).toEqual([]);
+    });
+  });
+
+  it("refuses granting a role that itself breaks admin/data separation", async () => {
+    await inTx([
+      `INSERT INTO eureka.role (key, label) VALUES ('c_db_mixed', 'DB Mixed')`,
+      `INSERT INTO eureka.role_permission (role_key, permission, scope) VALUES ('c_db_mixed', 'access:manage', 'org'), ('c_db_mixed', 'candidate:read', 'team')`,
+      `INSERT INTO eureka.role (key, label, is_admin) VALUES ('c_db_busy_admin', 'DB Busy Admin', true)`,
+      `INSERT INTO eureka.role_permission (role_key, permission, scope) VALUES ('c_db_busy_admin', 'access:manage', 'org'), ('c_db_busy_admin', 'candidate:read', 'org')`,
+    ], async (c) => {
+      await expect(grant(c, Z, "c_db_mixed")).rejects.toThrow(/role_violates_admin_separation/);
+      await expect(grant(c, U.r1a, "c_db_mixed")).rejects.toThrow(/role_violates_admin_separation/);
+      await expect(grant(c, U.admin2, "c_db_busy_admin")).rejects.toThrow(/role_violates_admin_separation/);
+      await expect(grant(c, Z, "c_db_busy_admin")).rejects.toThrow(/role_violates_admin_separation/);
+    });
+  });
+
+  it("approval re-checks: a pending restricted role is refused once the user mixes", async () => {
+    await inTx([], async (c, as) => {
+      const ceo = await grant(c, Z, "ceo");
+      const adm = await grant(c, Z, "org_admin");
+      expect([ceo.request_status, adm.request_status]).toEqual(["pending_approval", "pending_approval"]);
+      await as(U.admin2);
+      expect(await attempt(c, `SELECT authz.approve_role_request($1) AS s`, [adm.request_id])).toEqual({ s: "approved" });
+      await expect(attempt(c, `SELECT authz.approve_role_request($1) AS s`, [ceo.request_id])).rejects.toThrow(/separation_of_duties/);
+    });
+  });
+
+  it("approval refuses a role that came to break the rule after the request", async () => {
+    await inTx([
+      `INSERT INTO eureka.role (key, label) VALUES ('c_db_later', 'DB Later')`,
+      // candidate:delete at org is org-wide sensitive: the role is restricted, so the grant waits.
+      `INSERT INTO eureka.role_permission (role_key, permission, scope) VALUES ('c_db_later', 'candidate:delete', 'org')`,
+    ], async (c, as) => {
+      const q = await grant(c, Z, "c_db_later");
+      expect(q.request_status).toBe("pending_approval");
+      await c.query("RESET ROLE");
+      await c.query(`INSERT INTO eureka.role_permission (role_key, permission, scope) VALUES ('c_db_later', 'audit:read', 'org')`);
+      await c.query("SET LOCAL ROLE eureka_app");
+      await as(U.admin2);
+      await expect(attempt(c, `SELECT authz.approve_role_request($1) AS s`, [q.request_id])).rejects.toThrow(/role_violates_admin_separation/);
+    });
+  });
+
+  it("a custom role an admin holds takes no business permission", async () => {
+    await inTx(chatOnly, async (c) => {
+      await grant(c, U.admin2, "c_db_chat");
+      const set = (key: string, grants: unknown) =>
+        attempt(c, `SELECT authz.role_set_grants($1, $2::jsonb, NULL) AS d`, [key, JSON.stringify(grants)]);
+      await expect(set("c_db_chat", { "chat:use": "own", "candidate:read": "own" })).rejects.toThrow(/role_held_by_admin/);
+      await expect(set("c_db_chat", { "candidate:read": "own" })).rejects.toThrow(/role_held_by_admin/);
+      // Admin-compatible additions are fine.
+      expect(await set("c_db_chat", { "chat:use": "own", "staff.contact:read": "org" })).toMatchObject({ d: { added: ["staff.contact:read"] } });
+      // A role held only by non-admins may become a data role.
+      await grant(c, U.r1a, "c_db_empty");
+      expect(await set("c_db_empty", { "candidate:read": "own" })).toMatchObject({ d: { added: ["candidate:read"] } });
+    });
+  });
+
+  it("existing mixed users are reported (not stripped) to admins only; the helper is internal", async () => {
+    await inTx([`INSERT INTO eureka.user_role (user_id, role_key) VALUES ('${U.admin2}', 'recruiter')`], async (c, as) => {
+      expect((await c.query(`SELECT * FROM authz.user_admin_violations()`)).rows).toEqual([
+        { user_id: U.admin2, display_name: "admin2", status: "active", admin_roles: ["org_admin"], data_roles: ["recruiter"] },
+      ]);
+      for (const actor of [U.r1a, U.ceo, U.hr, NIL]) {
+        await as(actor);
+        await expect(attempt(c, `SELECT * FROM authz.user_admin_violations()`), actor).rejects.toThrow(/not_permitted/);
+      }
+      await as(U.admin);
+      await expect(attempt(c, `SELECT * FROM authz.user_admin_conflicts()`)).rejects.toThrow(/permission denied/);
+    });
+    // Built-in fixture users comply.
+    expect((await asUser(db.app, U.admin, (c) => c.query(`SELECT * FROM authz.user_admin_violations()`))).rows).toEqual([]);
+  });
+
+  it("single-admin mode still applies an admin role to a clean user, and still separates", async () => {
+    await inTx([`INSERT INTO authz.policy_setting (key, value) VALUES ('single_admin_mode', 'on')
+                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`], async (c) => {
+      expect(await grant(c, Z, "org_admin")).toMatchObject({ request_status: "applied" });
+      await expect(grant(c, Z, "recruiter")).rejects.toThrow(/separation_of_duties/);
+      await expect(grant(c, U.r1a, "org_admin")).rejects.toThrow(/separation_of_duties/);
+    });
+  });
+});
