@@ -19,8 +19,8 @@ export class MeController {
     const profile = await this.db.withUser(user.id, async (c) =>
       (await c.query<{ email: string; display_name: string }>(
         `SELECT email, display_name FROM eureka.app_user WHERE id = $1`, [user.id])).rows[0]);
-    const mustChangePassword = this.config.PASSWORD_LOGIN === "on"
-      && await this.db.withUser(user.id, async (c) => (await c.query<{ m: boolean }>(`SELECT authz.password_must_change() AS m`)).rows[0]!.m);
+    // Read with the session by the AuthGuard (authz.request_context, audit F-03); no second transaction.
+    const mustChangePassword = this.config.PASSWORD_LOGIN === "on" && user.mustChangePassword === true;
     return {
       id: user.id,
       email: profile?.email,
