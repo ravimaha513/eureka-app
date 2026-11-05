@@ -75,7 +75,7 @@ const REQUESTS = [
 
 // ---- fetch router ------------------------------------------------------------------------------
 
-type Reply = { status?: number; body?: unknown };
+type Reply = { status?: number; body?: unknown; headers?: Record<string, string> };
 type Handler = (url: URL, init: RequestInit) => Reply;
 interface Call { method: string; path: string; url: URL; body: unknown; headers: Record<string, string> }
 
@@ -94,7 +94,7 @@ function mockFetch() {
     if (!h) return new Response(JSON.stringify({ detail: `unmocked ${key}` }), { status: 599 });
     const r = h(url, init);
     const status = r.status ?? 200;
-    return new Response(status === 204 ? null : JSON.stringify(r.body ?? {}), { status, headers: { "content-type": "application/problem+json" } });
+    return new Response(status === 204 ? null : JSON.stringify(r.body ?? {}), { status, headers: { "content-type": "application/problem+json", ...r.headers } });
   });
 }
 const writes = () => calls.filter((c) => c.method !== "GET");
@@ -892,7 +892,7 @@ const ROLE_DEFS = [
     grants: { "candidate:read": "team", "candidate:create": "team", "hotlist:read": "team" } },
   { key: "c_senior_lead", label: "Senior Lead", description: "Leads with rates", isSystem: false, restricted: true, holders: 0, archivedAt: null, clonedFrom: "lead",
     traits: { sales: true, locationBound: false, admin: false, recruiter: false, coach: false }, track: "sales", level: 3, department: { id: "d1", name: "Healthcare" },
-    grants: { "candidate:read": "team", "rate:read": "org" } },
+    grants: { "candidate:read": "team", "rate:read": "org" }, rowVersion: 5 },
   { key: "hr", label: "HR", description: null, isSystem: true, restricted: true, holders: 2, archivedAt: null, clonedFrom: null,
     traits: { sales: false, locationBound: false, admin: false, recruiter: false, coach: false }, track: "hr", level: 2, department: null,
     grants: { "document:read": "org" } },
@@ -914,6 +914,8 @@ describe("Roles tab", () => {
     routes["GET /api/v1/admin/roles"] = () => ({ body: { items: ROLE_DEFS } });
     routes["GET /api/v1/admin/permissions"] = () => ({ body: PERMISSIONS });
     routes["GET /api/v1/admin/departments"] = () => ({ body: { items: [{ id: "d1", name: "Healthcare", parentId: null, userCount: 4 }] } });
+    routes["GET /api/v1/admin/roles/violations"] = () => ({ body: { items: [] } });
+    routes["GET /api/v1/admin/users/violations"] = () => ({ body: { items: [] } });
   });
 
   it("lists roles per track in ladder order with built-in, restricted and holder marks", async () => {
@@ -994,6 +996,84 @@ describe("Roles tab", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Create role" }));
     await waitFor(() => expect(lastWrite().body).toEqual({ label: "Team Lead", cloneFrom: "lead", departmentId: "d1" }));
     await waitFor(() => expect(status()).toHaveTextContent("Created Team Lead from Lead (Sales)."));
+  });
+
+  const openSeniorLead = async () => {
+    renderPage("roles");
+    const sales = await screen.findByRole("table", { name: "Sales roles" });
+    fireEvent.click(within(within(sales).getAllByRole("row")[3]!).getByRole("button", { name: "Open" }));
+    return screen.findByRole("dialog", { name: "Senior Lead" });
+  };
+
+  it("sends the role's rowVersion as If-Match and moves on to the ETag after its own save", async () => {
+    routes["PUT /api/v1/admin/roles/c_senior_lead/grants"] = () => ({ status: 204, headers: { etag: "\"6\"" } });
+    routes["PATCH /api/v1/admin/roles/c_senior_lead"] = () => ({ status: 204, headers: { etag: "\"7\"" } });
+    const drawer = await openSeniorLead();
+    fireEvent.change(within(drawer).getByRole("combobox", { name: "Add candidates" }), { target: { value: "team" } });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save permissions" }));
+    await waitFor(() => expect(lastWrite().method).toBe("PUT"));
+    expect(lastWrite().headers["if-match"]).toBe("\"5\"");
+    await waitFor(() => expect(status()).toHaveTextContent("Saved the permissions of Senior Lead."));
+    // The list refetch still says 5 (mocked); our own save moved the version on, so details are not stale against it.
+    fireEvent.change(within(drawer).getByLabelText("Level"), { target: { value: "4" } });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save details" }));
+    await waitFor(() => expect(lastWrite().method).toBe("PATCH"));
+    expect(lastWrite().headers["if-match"]).toBe("\"6\"");
+  });
+
+  it("explains a stale role and the admin-separation refusals", async () => {
+    let reply: Reply = problem(412, "stale");
+    routes["PUT /api/v1/admin/roles/c_senior_lead/grants"] = () => reply;
+    const drawer = await openSeniorLead();
+    fireEvent.change(within(drawer).getByRole("combobox", { name: "Add candidates" }), { target: { value: "team" } });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save permissions" }));
+    expect(await within(drawer).findByText(ERROR_MESSAGES.stale!)).toBeInTheDocument();
+    reply = problem(422, "admin_permission_needs_admin_role");
+    fireEvent.change(within(drawer).getByRole("combobox", { name: "Add candidates" }), { target: { value: "org" } });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save permissions" }));
+    expect(await within(drawer).findByText(ERROR_MESSAGES.admin_permission_needs_admin_role!)).toBeInTheDocument();
+    for (const code of ["business_permission_on_admin_role", "role_violates_admin_separation", "role_held_by_admin", "separation_of_duties"]) {
+      expect(friendlyError(new ApiError(422, code, code))).toBe(ERROR_MESSAGES[code]);
+    }
+  });
+
+  it("reports roles that break admin separation and opens one", async () => {
+    routes["GET /api/v1/admin/roles/violations"] = () => ({ body: { items: [
+      { key: "c_senior_lead", label: "Senior Lead", isSystem: false, admin: false, archived: false, holders: 2, permissions: ["access:manage", "audit:read"] },
+      { key: "c_old_admin", label: "Old Admin", isSystem: false, admin: true, archived: true, holders: 0, permissions: ["candidate:read"] },
+    ] } });
+    renderPage("roles");
+    const report = await screen.findByRole("table", { name: "Roles that break admin separation" });
+    expect(screen.getByRole("heading", { name: "2 roles break admin separation" })).toBeInTheDocument();
+    const [, senior, old] = within(report).getAllByRole("row");
+    expect(senior).toHaveTextContent("Business role with administrator permissions");
+    expect(senior).toHaveTextContent("access:manage, audit:read");
+    expect(old).toHaveTextContent("Administrator role with business permissions");
+    // Archived roles are hidden from the list unless "Show archived" is on, so there is nothing to open.
+    expect(within(old!).queryByRole("button", { name: "Open Old Admin" })).not.toBeInTheDocument();
+    fireEvent.click(within(senior!).getByRole("button", { name: "Open Senior Lead" }));
+    expect(await screen.findByRole("dialog", { name: "Senior Lead" })).toBeInTheDocument();
+  });
+
+  it("shows no report when every role keeps admin separation", async () => {
+    renderPage("roles");
+    await screen.findByRole("table", { name: "Sales roles" });
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/admin/roles/violations")).toBe(true));
+    expect(screen.queryByRole("table", { name: "Roles that break admin separation" })).not.toBeInTheDocument();
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/admin/users/violations")).toBe(true));
+    expect(screen.queryByRole("table", { name: "People holding admin and data roles" })).not.toBeInTheDocument();
+  });
+
+  it("reports people who hold admin and data roles together, and marks admin-compatible roles", async () => {
+    routes["GET /api/v1/admin/roles"] = () => ({ body: { items: ROLE_DEFS.map((r) => (r.key === "hr" ? { ...r, classification: "admin_compatible_only" } : r)) } });
+    routes["GET /api/v1/admin/users/violations"] = () => ({ body: { items: [
+      { id: "u-mix", displayName: "Max Mixed", status: "active", adminRoles: ["Org Admin"], dataRoles: ["Recruiter", "Lead (Sales)"] },
+    ] } });
+    renderPage("roles");
+    const report = await screen.findByRole("table", { name: "People holding admin and data roles" });
+    expect(screen.getByRole("heading", { name: "1 person holds admin and data roles together" })).toBeInTheDocument();
+    expect(within(report).getAllByRole("row")[1]).toHaveTextContent("Max MixedOrg AdminRecruiter, Lead (Sales)");
+    expect(within(screen.getByRole("table", { name: "Hr roles" })).getByText("Admin-compatible")).toBeInTheDocument();
   });
 });
 

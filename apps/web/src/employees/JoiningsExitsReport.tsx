@@ -98,7 +98,7 @@ function JoiningsExitsPanel({ canExport }: { canExport: boolean }) {
         {invalid && <p id={`${id}-range`} className="error" role="alert">Choose a start date on or before the end date.</p>}
         {run.isError ? (
           <p className="error" role="alert">
-            {run.error instanceof ApiError && run.error.status === 429 ? (run.error.detail ?? "Too many exports. Try again later.") : employmentError(run.error)}
+            {run.error instanceof ApiError && run.error.status === 429 ? run.error.message : employmentError(run.error)}
           </p>
         ) : run.data ? (
           <p className="muted" role="status">

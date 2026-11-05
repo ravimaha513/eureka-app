@@ -42,7 +42,7 @@ const hours = (min: number) => (min >= 60 ? `${Math.floor(min / 60)} h ${min % 6
 const errorText = (e: unknown) => e instanceof ApiError ? (e.detail ?? e.message) : "Something went wrong. Please try again.";
 
 function ExportStatus({ run }: { run: { isError: boolean; error: unknown; data?: ExportResult } }) {
-  if (run.isError) return <p className="error" role="alert">{run.error instanceof ApiError && run.error.status === 429 ? (run.error.detail ?? "Too many exports. Try again later.") : errorText(run.error)}</p>;
+  if (run.isError) return <p className="error" role="alert">{run.error instanceof ApiError && run.error.status === 429 ? run.error.message : errorText(run.error)}</p>;
   if (!run.data) return null;
   return <p className="muted" role="status">{run.data.truncated ? `Exported the first ${run.data.rows.toLocaleString("en-US")} rows (the export limit). Choose a shorter period for the rest.`
     : `Exported ${run.data.rows.toLocaleString("en-US")} ${run.data.rows === 1 ? "row" : "rows"}.`}</p>;

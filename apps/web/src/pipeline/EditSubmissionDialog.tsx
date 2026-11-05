@@ -37,6 +37,8 @@ export function EditSubmissionDialog({ submission: s, canEditRate, onClose, onSa
     submittedAt: toLocalInput(s.submittedAt),
   };
   const [v, setV] = useState(initial);
+  // The version the form was opened on: a save after someone else's is 412 `stale`, even once the list refetches.
+  const [version] = useState(s.rowVersion);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -112,7 +114,7 @@ export function EditSubmissionDialog({ submission: s, canEditRate, onClose, onSa
     if (Object.keys(body).length === 0) { setFormError("Nothing has changed yet. Edit a field, or cancel."); failed(); return; }
     setBusy(true);
     try {
-      const r = await pipelineApi.editSubmission(s.id, body);
+      const r = await pipelineApi.editSubmission(s.id, body, version);
       onSaved(r.changed);
     } catch (err) {
       const { _form, ...perField } = fieldErrors(err, FIELDS);

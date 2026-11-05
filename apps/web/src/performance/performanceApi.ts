@@ -135,8 +135,8 @@ export function performanceError(e: unknown): string {
     case 403: return "You don't have permission to do that.";
     case 404: return "That record no longer exists or is outside your scope. Refresh and try again.";
     case 422: return e.errors?.length ? e.errors.map((x) => x.message).join(" ") : "Check the values and try again.";
-    case 429: return e.detail ?? "Too many requests. Try again in a minute.";
-    case 503: return e.detail ?? "The report took too long. Choose a shorter period.";
+    case 429: return e.message;
+    case 503: return e.message;
     default: return e.detail ?? e.title ?? e.message ?? "Something went wrong.";
   }
 }

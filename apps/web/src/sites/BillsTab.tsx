@@ -279,7 +279,7 @@ function VoidDialog({ bill, onClose, onDone }: { bill: Bill; onClose: () => void
     if (!r || r.length > 500) { setFieldError(r ? "Use at most 500 characters." : "Give a reason for voiding this bill."); failed(); return; }
     setFieldError("");
     void run(async () => {
-      try { await sitesApi.voidBill(bill.id, r); onDone(`The ${billName(bill)} was voided.`); }
+      try { await sitesApi.voidBill(bill.id, r, bill.rowVersion); onDone(`The ${billName(bill)} was voided.`); }
       catch (err) { failed(); throw err; }
     });
   };

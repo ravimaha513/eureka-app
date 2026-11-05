@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   adminApi, SCOPE_LABELS, TRAIT_LABELS, trackLabel,
-  type PermissionCatalog, type PermissionDef, type RoleDef, type RoleTraits,
+  type PermissionCatalog, type PermissionDef, type RoleDef, type RoleTraits, type RoleViolation,
 } from "./adminApi";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { Drawer } from "../sales/ui";
@@ -46,6 +46,8 @@ export function RolesTab() {
         <p className="hint">Built-in roles are templates: clone one, then edit the copy's permissions, traits and ladder position. Nobody's access changes until a role is granted.</p>
         <label className="check push"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Show archived</label>
       </div>
+      <RoleViolations canOpen={(r) => !r.archived || showArchived} onOpen={setSelected} />
+      <UserViolations />
       {roles.isLoading || permissions.isLoading ? <Loading />
         : roles.error ? <QueryError query={roles} message={friendlyError(roles.error)} />
         : permissions.error ? <QueryError query={permissions} message={friendlyError(permissions.error)} />
@@ -64,6 +66,7 @@ export function RolesTab() {
                         {r.isSystem && <span className="tag" title="Built-in template; cannot be edited">Built-in</span>}
                         {r.restricted && <span className="tag" title="Granting it needs a second admin">Restricted</span>}
                         {r.archivedAt && <span className="tag">Archived</span>}
+                        {r.classification === "admin_compatible_only" && <span className="tag" title="Can be held together with an admin role">Admin-compatible</span>}
                         {r.department && <span className="muted"> · {r.department.name}</span>}
                       </td>
                       <td>{TRAIT_KEYS.filter((t) => r.traits[t]).map((t) => TRAIT_LABELS[t].label).join(", ") || <span className="muted">—</span>}</td>
@@ -90,6 +93,86 @@ export function RolesTab() {
           onDone={(key, msg) => { setCloneFrom(null); setSelected(key); refresh(msg); }} />
       )}
     </>
+  );
+}
+
+/**
+ * Roles that break admin/data separation (GET /admin/roles/violations, R-01): legacy roles are reported,
+ * never stripped. Nothing renders while there are none.
+ */
+export function RoleViolations({ canOpen, onOpen }: { canOpen: (r: RoleViolation) => boolean; onOpen: (key: string) => void }) {
+  const q = useQuery({ queryKey: [...keys.roles, "violations"], queryFn: () => adminApi.roleViolations().then((r) => r.items) });
+  if (q.error) return <QueryError query={q} message={`We couldn't check roles for admin separation. ${friendlyError(q.error)}`} />;
+  const items = q.data ?? [];
+  if (items.length === 0) return null;
+  return (
+    <section className="rolewarn" aria-labelledby="role-violations">
+      <h3 id="role-violations" className="sectiontitle">
+        {items.length === 1 ? "1 role breaks" : `${items.length} roles break`} admin separation
+      </h3>
+      <p className="hint">
+        Administrator roles may hold only Users &amp; Access permissions, and business roles may not hold them.
+        These roles were set up before the rule. Their holders keep their access; remove the listed permissions to fix each role.
+      </p>
+      <div className="tablewrap">
+        <table className="mini" aria-label="Roles that break admin separation">
+          <thead><tr><th>Role</th><th>Problem</th><th>Holders</th><th>Permissions to remove</th><th><span className="sr-only">Actions</span></th></tr></thead>
+          <tbody>
+            {items.map((r) => (
+              <tr key={r.key}>
+                <td>
+                  <b>{r.label}</b>
+                  {r.isSystem && <span className="tag">Built-in</span>}
+                  {r.archived && <span className="tag">Archived</span>}
+                </td>
+                <td>{r.admin ? "Administrator role with business permissions" : "Business role with administrator permissions"}</td>
+                <td>{r.holders}</td>
+                <td>{r.permissions.map((p, i) => <span key={p}>{i > 0 && ", "}<code>{p}</code></span>)}</td>
+                <td className="rowactions">
+                  {canOpen(r) && <button type="button" className="btn sm" onClick={() => onOpen(r.key)} aria-label={`Open ${r.label}`}>Open</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * People who hold admin and data roles together (GET /admin/users/violations, R-01): set up before the rule,
+ * reported here, never stripped. Nothing renders while there are none.
+ */
+export function UserViolations() {
+  const q = useQuery({ queryKey: [...keys.users, "violations"], queryFn: () => adminApi.userViolations().then((r) => r.items) });
+  if (q.error) return <QueryError query={q} message={`We couldn't check people for admin separation. ${friendlyError(q.error)}`} />;
+  const items = q.data ?? [];
+  if (items.length === 0) return null;
+  return (
+    <section className="rolewarn" aria-labelledby="user-violations">
+      <h3 id="user-violations" className="sectiontitle">
+        {items.length === 1 ? "1 person holds" : `${items.length} people hold`} admin and data roles together
+      </h3>
+      <p className="hint">
+        Admin roles can't be combined with data roles. These grants were made before the rule and still work;
+        revoke one side in Users, and give the other work to a separate account.
+      </p>
+      <div className="tablewrap">
+        <table className="mini" aria-label="People holding admin and data roles">
+          <thead><tr><th>Person</th><th>Admin roles</th><th>Data roles</th></tr></thead>
+          <tbody>
+            {items.map((u) => (
+              <tr key={u.id}>
+                <td><b>{u.displayName}</b>{u.status !== "active" && <span className="tag">{u.status}</span>}</td>
+                <td>{u.adminRoles.join(", ")}</td>
+                <td>{u.dataRoles.join(", ")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -149,9 +232,11 @@ function RoleDrawer({ role, catalog, suspended, onClose, onClone, onChanged }: {
   const [departmentId, setDepartmentId] = useState(role.department?.id ?? "");
   const [traits, setTraits] = useState<RoleTraits>(role.traits);
   const [grants, setGrants] = useState<Record<string, string>>(role.grants);
+  // The If-Match value: the version shown, moved on by our own saves (ETag) so a second save isn't stale against the first.
+  const [version, setVersion] = useState(role.rowVersion);
   useEffect(() => {
     setLabel(role.label); setDescription(role.description ?? ""); setTrack(role.track); setLevel(String(role.level));
-    setDepartmentId(role.department?.id ?? ""); setTraits(role.traits); setGrants(role.grants);
+    setDepartmentId(role.department?.id ?? ""); setTraits(role.traits); setGrants(role.grants); setVersion(role.rowVersion);
   }, [role]);
 
   const detailsDirty = label.trim() !== role.label || description.trim() !== (role.description ?? "") || track !== role.track
@@ -174,13 +259,15 @@ function RoleDrawer({ role, catalog, suspended, onClose, onClone, onChanged }: {
     if (departmentId !== (role.department?.id ?? "")) body.departmentId = departmentId || null;
     const changedTraits = Object.fromEntries(TRAIT_KEYS.filter((t) => traits[t] !== role.traits[t]).map((t) => [t, traits[t]]));
     if (Object.keys(changedTraits).length) body.traits = changedTraits;
-    await adminApi.updateRole(role.key, body);
+    const next = await adminApi.updateRole(role.key, body, version);
+    if (next !== undefined) setVersion(next);
     onChanged(`Saved ${label.trim()}.`);
   });
 
   const saveGrants = () => void grid.run(async () => {
     const full: Record<string, string | null> = Object.fromEntries(catalog.items.map((p) => [p.key, grants[p.key] ?? null]));
-    await adminApi.setRoleGrants(role.key, full);
+    const next = await adminApi.setRoleGrants(role.key, full, version);
+    if (next !== undefined) setVersion(next);
     onChanged(`Saved the permissions of ${role.label}.`);
   });
 

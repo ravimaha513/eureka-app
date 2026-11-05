@@ -189,7 +189,7 @@ describe("Hot List export", () => {
     wrap(<HotListPage me={meFor("ceo")} />);
     await rowOf("Asha Iyer");
     fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
-    expect(await screen.findByText("Too many exports; try again in a few minutes")).toHaveAttribute("role", "alert");
+    expect(await screen.findByText("Too many exports. Try again in a few minutes.")).toHaveAttribute("role", "alert");
     expect(clicked).toEqual([]);
   });
 });

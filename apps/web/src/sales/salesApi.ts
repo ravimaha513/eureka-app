@@ -1,5 +1,5 @@
 /** Typed client for the candidate, Hot List and submission API (apps/api/src/modules/candidates, submissions). */
-import { api, type Candidate } from "../api";
+import { api, ifMatch, type Candidate } from "../api";
 import { fetchCsv, type ExportResult } from "../lib/download";
 import type { ListSort } from "@eureka/shared";
 
@@ -229,6 +229,7 @@ export const statusLabel = (s: string) => {
 
 const enc = encodeURIComponent;
 const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
+const edit = (method: string, body: unknown, version?: number): RequestInit => ({ method, ...json(body), headers: ifMatch(version) });
 
 function listQuery(f: ListFilters): string {
   const q = new URLSearchParams();
@@ -248,23 +249,25 @@ export const salesApi = {
   candidates: (f: ListFilters) => api<Page<Candidate>>(`/api/v1/candidates?${listQuery(f)}`),
   candidate: (id: string) => api<CandidateProfile>(`/api/v1/candidates/${enc(id)}`),
   create: (b: CreateCandidate) => api<{ id: string }>("/api/v1/candidates", { method: "POST", ...json(b) }),
-  update: (id: string, b: ProfileUpdate) => api<{ id: string }>(`/api/v1/candidates/${enc(id)}`, { method: "PATCH", ...json(b) }),
+  // `version` on the edits below: the profile's rowVersion, sent as the optional If-Match (412 `stale` when someone saved first).
+  update: (id: string, b: ProfileUpdate, version?: number) =>
+    api<{ id: string }>(`/api/v1/candidates/${enc(id)}`, edit("PATCH", b, version)),
   /** `teamIds` with "selected_teams" only (the server rejects it otherwise). */
-  setVisibility: (id: string, visibility: Visibility, teamIds?: string[]) =>
-    api<{ id: string; visibility: Visibility }>(`/api/v1/candidates/${enc(id)}/visibility`, {
-      method: "PUT", ...json(visibility === "selected_teams" ? { visibility, teamIds } : { visibility }) }),
+  setVisibility: (id: string, visibility: Visibility, teamIds?: string[], version?: number) =>
+    api<{ id: string; visibility: Visibility }>(`/api/v1/candidates/${enc(id)}/visibility`,
+      edit("PUT", visibility === "selected_teams" ? { visibility, teamIds } : { visibility }, version)),
   shareTeams: () => api<{ items: ShareTeam[] }>("/api/v1/candidate-share-teams"),
   createTeams: () => api<{ items: ShareTeam[]; defaultTeamId: string | null }>("/api/v1/candidate-create-teams"),
   assignTeam: (id: string, teamId: string) =>
     api<{ id: string; teamId: string }>(`/api/v1/candidates/${enc(id)}/team`, { method: "PUT", ...json({ teamId }) }),
-  setRating: (id: string, rating: number) =>
-    api<{ id: string; technicalRating: number }>(`/api/v1/candidates/${enc(id)}/technical-rating`, { method: "PUT", ...json({ rating }) }),
+  setRating: (id: string, rating: number, version?: number) =>
+    api<{ id: string; technicalRating: number }>(`/api/v1/candidates/${enc(id)}/technical-rating`, edit("PUT", { rating }, version)),
   recruiterOptions: (id: string) => api<{ items: { id: string; name: string }[] }>(`/api/v1/candidates/${enc(id)}/recruiter-options`),
-  setRecruiter: (id: string, recruiterId: string | null) =>
-    api<{ id: string; recruiterId: string | null }>(`/api/v1/candidates/${enc(id)}/recruiter`, { method: "PUT", ...json({ recruiterId }) }),
+  setRecruiter: (id: string, recruiterId: string | null, version?: number) =>
+    api<{ id: string; recruiterId: string | null }>(`/api/v1/candidates/${enc(id)}/recruiter`, edit("PUT", { recruiterId }, version)),
   remove: (id: string) => api<void>(`/api/v1/candidates/${enc(id)}`, { method: "DELETE" }),
-  transition: (id: string, to: string) =>
-    api<{ id: string; status: string }>(`/api/v1/candidates/${enc(id)}/transition`, { method: "POST", ...json({ to }) }),
+  transition: (id: string, to: string, version?: number) =>
+    api<{ id: string; status: string }>(`/api/v1/candidates/${enc(id)}/transition`, edit("POST", { to }, version)),
   submit: (b: CreateSubmission) =>
     api<{ id: string; duplicateWarning: boolean }>("/api/v1/submissions", { method: "POST", ...json(b) }),
   duplicateCheck: (b: Pick<CreateCandidate, "firstName" | "lastName" | "phone" | "email">) =>
@@ -274,8 +277,8 @@ export const salesApi = {
     api<Page<TimelineEvent>>(`/api/v1/candidates/${enc(id)}/timeline?limit=50${cursor ? `&cursor=${enc(cursor)}` : ""}`),
   batches: (locationId?: string) =>
     api<BatchList>(`/api/v1/batches${locationId ? `?locationId=${enc(locationId)}` : ""}`),
-  setCompliance: (id: string, b: ComplianceUpdate) =>
-    api<{ id: string }>(`/api/v1/candidates/${enc(id)}/compliance`, { method: "PUT", ...json(b) }),
+  setCompliance: (id: string, b: ComplianceUpdate, version?: number) =>
+    api<{ id: string }>(`/api/v1/candidates/${enc(id)}/compliance`, edit("PUT", b, version)),
   complianceCompanies: () => api<{ items: { id: string; name: string; location: string }[] }>("/api/v1/candidate-companies"),
 };
 

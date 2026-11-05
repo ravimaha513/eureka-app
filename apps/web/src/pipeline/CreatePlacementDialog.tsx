@@ -34,7 +34,7 @@ export function CreatePlacementDialog({ submission, onClose, onCreated, clearRou
    * to Selected (POST /interviews/:id/clear-and-select, a no-op when already
    * done) before the placement is created, so a failed placement can be retried.
    */
-  clearRound?: { id: string; round: string; pending: boolean };
+  clearRound?: { id: string; round: string; pending: boolean; rowVersion?: number };
   /** With clearRound: clear the round and mark the submission Selected without a placement yet. */
   onSelectedOnly?: () => void;
 }) {
@@ -131,7 +131,7 @@ export function CreatePlacementDialog({ submission, onClose, onCreated, clearRou
     };
     setBusy(true);
     try {
-      if (clearRound) await pipelineApi.clearAndSelect(clearRound.id);
+      if (clearRound) await pipelineApi.clearAndSelect(clearRound.id, clearRound.rowVersion);
       const r = await pipelineApi.createPlacement(body, keyRef.current);
       onCreated(r);
     } catch (err) {
@@ -153,7 +153,7 @@ export function CreatePlacementDialog({ submission, onClose, onCreated, clearRou
   const selectOnly = async () => {
     setBusy(true); setFormError("");
     try {
-      await pipelineApi.clearAndSelect(clearRound!.id);
+      await pipelineApi.clearAndSelect(clearRound!.id, clearRound!.rowVersion);
       onSelectedOnly!();
     } catch (err) { setFormError(pipelineError(err, "submission")); }
     finally { setBusy(false); }

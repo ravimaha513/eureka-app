@@ -60,6 +60,8 @@ export function EditProfileDialog({ candidate, onClose, onSaved }: {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
+  // The version the form was opened on: a save after someone else's is 412 `stale`, even once the profile refetches.
+  const [version] = useState(candidate.rowVersion);
 
   const submit = async (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
@@ -92,7 +94,7 @@ export function EditProfileDialog({ candidate, onClose, onSaved }: {
 
     setBusy(true);
     try {
-      await salesApi.update(candidate.id, body);
+      await salesApi.update(candidate.id, body, version);
       onSaved();
     } catch (err) {
       const { _form, ...perField } = fieldErrors(err, FIELDS);
