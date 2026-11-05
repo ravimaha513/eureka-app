@@ -239,7 +239,7 @@ describe("candidate endpoints", () => {
 
   it("status transitions follow the state machine", async () => {
     const r = await call("r1a", "POST", `/api/v1/candidates/${own().id}/transition`, { to: "on_hold" });
-    expect(r.json()).toEqual({ id: own().id, status: "on_hold" });
+    expect(r.json()).toEqual({ id: own().id, status: "on_hold", rowVersion: expect.any(Number) });
     expect((await call("r1a", "POST", `/api/v1/candidates/${own().id}/transition`, { to: "confirmation" })).statusCode).toBe(422);
     await call("r1a", "POST", `/api/v1/candidates/${own().id}/transition`, { to: "active" });
   });
