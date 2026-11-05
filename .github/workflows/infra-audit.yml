@@ -34,7 +34,7 @@ jobs:
       SINCE: ${{ inputs.since || '2026-10-09T00:00:00Z' }}
       OUT: ${{ github.workspace }}/audit-out
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/eureka-github-deploy-${{ env.ENVIRONMENT }}
