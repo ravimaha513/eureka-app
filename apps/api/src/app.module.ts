@@ -11,6 +11,9 @@ import { AuthGuard, Public } from "./platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "./platform/config.js";
 import { DbService } from "./platform/db.service.js";
 import { ProblemFilter } from "./platform/errors.js";
+import { JsonLoggerService, setLogWriter } from "./platform/logger.js";
+import { registerMetrics } from "./platform/metrics.js";
+import { genReqId, registerRequestId } from "./platform/request-context.js";
 import { OidcService } from "./platform/oidc.service.js";
 import { originGuard } from "./platform/origin-guard.js";
 import { SessionService } from "./platform/session.service.js";
@@ -169,11 +172,17 @@ export async function createApp(config: AppConfig): Promise<NestFastifyApplicati
     // API Gateway append to it) and nothing reads req.ip yet. When a client IP is
     // needed, derive it from CloudFront's CloudFront-Viewer-Address header on
     // requests that passed the origin guard.
-    new FastifyAdapter({ trustProxy: false, bodyLimit: 1_048_576 }),
-    { logger: config.NODE_ENV === "test" ? false : ["error", "warn", "log"] },
+    // Request ids (audit R-11): genReqId from x-amzn-trace-id, else a UUID; a
+    // client `request-id` header is not trusted (requestIdHeader: false).
+    new FastifyAdapter({ trustProxy: false, bodyLimit: 1_048_576, requestIdHeader: false, genReqId }),
+    // Structured JSON logs (platform/logger.ts); tests stay quiet.
+    { logger: config.NODE_ENV === "test" ? false : new JsonLoggerService() },
   );
+  if (config.NODE_ENV === "test") setLogWriter("silent");
   await app.register(cookie as never);
   const fastify = app.getHttpAdapter().getInstance();
+  registerRequestId(fastify);
+  registerMetrics(fastify, app.get(DbService).pool);
   if (config.ORIGIN_VERIFY_SECRET) fastify.addHook("onRequest", originGuard(config.ORIGIN_VERIFY_SECRET));
   // Local document driver (development, tests): the API stands in for the bucket.
   if (storage instanceof LocalDocumentStorage) await registerLocalStorageRoutes(fastify, storage);

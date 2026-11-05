@@ -1,6 +1,11 @@
 import { Inject, Injectable, type OnModuleDestroy } from "@nestjs/common";
 import pg from "pg";
 import { CONFIG, type AppConfig } from "./config.js";
+import { databaseBusy, isConnectTimeout, pgCodeOf } from "./errors.js";
+import { apiLog, errorFields } from "./logger.js";
+
+/** Default statement timeout of every API connection (design N9; reports raise it with SET LOCAL). */
+export const STATEMENT_TIMEOUT_MS = 5000;
 
 /** A failed ROLLBACK leaves the connection in an unknown state: the pool destroys a client released with an error. */
 const toError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
@@ -15,14 +20,38 @@ export class DbService implements OnModuleDestroy {
   readonly pool: pg.Pool;
 
   constructor(@Inject(CONFIG) config: AppConfig) {
-    this.pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: config.DB_POOL_MAX });
-    this.pool.on("connect", (c) => {
-      void c.query("SET statement_timeout = '5s'");
+    this.pool = new pg.Pool({
+      connectionString: config.DATABASE_URL,
+      max: config.DB_POOL_MAX,
+      // Session default sent as a startup parameter (no extra round trip, no
+      // floating promise). Reports raise it per transaction with SET LOCAL.
+      statement_timeout: STATEMENT_TIMEOUT_MS,
+      // Bounded wait for a connection; acquire() turns the timeout into a retryable 503.
+      connectionTimeoutMillis: config.DB_CONNECT_TIMEOUT_MS,
     });
+    // An idle pooled client whose backend dies (failover, pg_terminate_backend,
+    // network reset) emits `error` on the pool. Without a listener that event
+    // would crash the process; the pool already discards the client.
+    this.pool.on("error", (err) => apiLog.error("idle database client error", { pgCode: pgCodeOf(err), ...errorFields(err) }));
+    // A client whose backend dies while checked out (between queries of a
+    // transaction) emits `error` on itself, where pg-pool has no listener while
+    // it is lent out: that would crash the process too. The request's next query
+    // fails with the error (and is logged there); release() then discards the client.
+    this.pool.on("connect", (c) => { c.on("error", () => undefined); });
+  }
+
+  /** A pooled client; no connection within DB_CONNECT_TIMEOUT_MS is a 503 with Retry-After. */
+  private async acquire(): Promise<pg.PoolClient> {
+    try {
+      return await this.pool.connect();
+    } catch (err) {
+      if (isConnectTimeout(err)) throw databaseBusy();
+      throw err;
+    }
   }
 
   async withUser<T>(userId: string, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
-    const c = await this.pool.connect();
+    const c = await this.acquire();
     let broken: Error | undefined;
     try {
       await c.query("BEGIN");
@@ -40,7 +69,7 @@ export class DbService implements OnModuleDestroy {
 
   /** Same-transaction write under system scope (no user id set): the change and its audit row commit or roll back together. */
   async withSystemTx<T>(fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
-    const c = await this.pool.connect();
+    const c = await this.acquire();
     let broken: Error | undefined;
     try {
       await c.query("BEGIN");
@@ -61,7 +90,7 @@ export class DbService implements OnModuleDestroy {
    * and that role's policies limit every row to this applicant.
    */
   async withApplicant<T>(applicantId: string, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
-    const c = await this.pool.connect();
+    const c = await this.acquire();
     let broken: Error | undefined;
     try {
       await c.query("BEGIN");
@@ -80,7 +109,7 @@ export class DbService implements OnModuleDestroy {
 
   /** Queries that must run without a user (session lookup, login). */
   async system<T>(fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
-    const c = await this.pool.connect();
+    const c = await this.acquire();
     try {
       return await fn(c);
     } finally {

@@ -1,10 +1,26 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
+import type { FastifyReply } from "fastify";
 import type { ClientInfo } from "./client-info.js";
 import { CONFIG, type AppConfig } from "./config.js";
 import { DbService } from "./db.service.js";
 
+/**
+ * Staff session cookie names (audit F-14). Over HTTPS the cookie is
+ * `__Host-eureka_sid`: the browser then requires Secure, Path=/ and no Domain,
+ * so a sibling subdomain cannot plant or overwrite it. Plain-HTTP development
+ * and tests keep `eureka_sid` (a `__Host-` cookie cannot be set without Secure).
+ */
 export const SESSION_COOKIE = "eureka_sid";
+export const HOST_SESSION_COOKIE = "__Host-eureka_sid";
+
+export interface SessionCookieOptions {
+  httpOnly: true;
+  secure: boolean;
+  sameSite: "lax";
+  path: "/";
+  maxAge?: number;
+}
 
 export interface SessionInfo {
   userId: string;
@@ -23,6 +39,42 @@ export class SessionService {
     private readonly db: DbService,
     @Inject(CONFIG) private readonly config: AppConfig,
   ) {}
+
+  /** Secure cookies whenever the app is served over HTTPS (or runs in production). */
+  get secureCookies(): boolean {
+    return this.config.NODE_ENV === "production" || new URL(this.config.PUBLIC_BASE_URL).protocol === "https:";
+  }
+
+  /** The cookie name new sessions are issued under. */
+  get cookieName(): string {
+    return this.secureCookies ? HOST_SESSION_COOKIE : SESSION_COOKIE;
+  }
+
+  /** The one definition of the staff session cookie's attributes (auth and password sign-in, logout). */
+  sessionCookieOptions(): SessionCookieOptions {
+    return { httpOnly: true, secure: this.secureCookies, sameSite: "lax", path: "/", maxAge: this.config.SESSION_ABSOLUTE_HOURS * 3600 };
+  }
+
+  /**
+   * The session id from the request cookies. Transition (remove one release
+   * after the `__Host-` rename shipped): over HTTPS the old `eureka_sid` cookie is
+   * still read when the new one is absent, so sessions issued before the deploy
+   * survive; every new sign-in gets the `__Host-` cookie.
+   */
+  readSessionId(cookies: Record<string, string | undefined> | undefined): string | undefined {
+    return cookies?.[this.cookieName] ?? (this.secureCookies ? cookies?.[SESSION_COOKIE] : undefined);
+  }
+
+  setSessionCookie(reply: FastifyReply, sid: string): void {
+    void reply.setCookie(this.cookieName, sid, this.sessionCookieOptions());
+  }
+
+  /** Logout: clear the current cookie and, during the transition, the old name too. */
+  clearSessionCookie(reply: FastifyReply): void {
+    const { maxAge: _, ...attrs } = this.sessionCookieOptions();
+    void reply.clearCookie(this.cookieName, attrs);
+    if (this.cookieName !== SESSION_COOKIE) void reply.clearCookie(SESSION_COOKIE, attrs);
+  }
 
   static hash(sid: string): Buffer {
     return createHash("sha256").update(sid).digest();
