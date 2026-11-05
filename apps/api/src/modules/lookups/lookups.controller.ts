@@ -2,7 +2,7 @@ import { Body, ConflictException, Controller, ForbiddenException, Get, HttpCode,
 import { z } from "zod";
 import { can, type Permission, type UserAccess } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
-import { CurrentUser, type AuthedUser } from "../../platform/auth.guard.js";
+import { CurrentUser, RequirePermission, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { dbErrorMapper } from "../../platform/errors.js";
 
@@ -117,24 +117,28 @@ export class LookupsController {
   constructor(private readonly svc: LookupsService) {}
 
   @Get()
+  @SelfService()
   all(@CurrentUser() user: AuthedUser) {
     return this.svc.all(user);
   }
 
   @Post("technologies")
   @HttpCode(200)
+  @RequirePermission("technology:create")
   createTechnology(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createTechnology(user, CreateTechnology.parse(body).name);
   }
 
   @Post("clients")
   @HttpCode(200)
+  @RequirePermission("client:create")
   createClient(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createParty(user, "client", CreateParty.parse(body).name);
   }
 
   @Post("vendors")
   @HttpCode(200)
+  @RequirePermission("vendor:create")
   createVendor(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createParty(user, "vendor", CreateParty.parse(body).name);
   }
