@@ -26,3 +26,5 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 - Quick jump stays an icon button in the top bar (Ctrl/Cmd+K). A visible field is deferred to the shell wave (nav regroup and phone drawer).
 - Saved views and Export sit in the page head (icon buttons on phones), not in the filter row.
 - The count sits beside the h1 as a small boxed figure ("38", or "50+" when more pages exist).
+- Phone first card at y≈259, not ≤200: the saved-view row stays above search because recruiters use saved views to get back to their list. It is one 40px row, with Save and Export as icon buttons. Sort keeps its own row because it has no other home on phones.
+- Below 1600px the team lead appears as a tooltip on the Team cell, with the same text for screen readers. At 1600px and wider it has its own column.

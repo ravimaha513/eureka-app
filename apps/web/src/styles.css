@@ -1226,6 +1226,9 @@ tr.editing:hover td { background: var(--surface2); }
 .listcard td.c-name .persontext > b, .listcard td.c-name .linkbtn b { display: block; overflow: hidden; text-overflow: ellipsis; }
 .h1count { margin-left: 10px; font-size: 15px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; vertical-align: 3px; padding: 1px 7px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); }
 .fb-spacer { margin-left: auto; }
+/* The lead shows in its own column on wide screens; narrower, it rides with the team (tooltip + screen readers). */
+.leadnote { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 1599px) { .cardtable .c-team { text-decoration: underline dotted var(--faint); text-underline-offset: 3px; } }
 @media (min-width: 769px) { .filterbar > .bulkbar { position: static; } }
 .listcard td, .listcard th { padding-inline: 10px; }
 td.num, th.num { text-align: right; }

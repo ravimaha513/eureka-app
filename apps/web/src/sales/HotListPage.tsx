@@ -133,7 +133,7 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
                     {c.statusLabel && c.statusLabel.includes("/") && !/\/all teams$/i.test(c.statusLabel) && <small className="block">{c.statusLabel}</small>}
                   </td>
                   <td className="c-pri"><Priority p={c.priority} /></td>
-                  <td className="c-team">{c.team.name}</td>
+                  <td className="c-team" title={c.team.lead ? `Lead: ${c.team.lead}` : undefined}>{c.team.name}{c.team.lead && <span className="leadnote">, lead {c.team.lead}</span>}</td>
                   <td className="p3">{c.team.lead ?? "—"}</td>
                   <td className="c-rec">{c.recruiter?.name ?? <span className="muted">Unassigned</span>}</td>
                   <td className="p2">{c.location.name}</td>
