@@ -159,7 +159,7 @@ Target: OWASP ASVS 4.0 Level 2 overall; Level 3 controls around restricted docum
 
 - **Sign-in:** OIDC Authorization Code flow with PKCE between the API (confidential client) and Google. The API validates issuer, audience, nonce, signature, expiry and the `hd` claim (company domain). The user must exist and be active in Eureka.
 - **Account linking:** by Google `sub` only. Email matching is allowed once, for a pre-provisioned user with no `sub` recorded yet, and is audited.
-- **Session:** server-side row (`session`); cookie `eureka_sid` holds a 256-bit random id (stored hashed); httpOnly, Secure, SameSite=Lax, Path=/. Lifetime 12 h absolute, 60 min idle. Tokens never reach the browser.
+- **Session:** server-side row (`session`); cookie `__Host-eureka_sid` (plain `eureka_sid` over local HTTP; the old name is still read for one release) holds a 256-bit random id (stored hashed); httpOnly, Secure, SameSite=Lax, Path=/. Lifetime 12 h absolute, 60 min idle. Tokens never reach the browser.
 - **Step-up:** restricted actions (viewing I-9, DL or work-authorization files; approving role grants) require a fresh authentication within 15 minutes. Google's documented `prompt` values do not include `login`, and `auth_time` is not a documented Google claim, so a Phase 0 spike tests `max_age` and the returned claims. If Google cannot prove a fresh sign-in, step-up is done in the app with WebAuthn (a security key or passkey registered in Eureka by each user in HR, Accounts, Immigration and admin roles), and those roles get a 15-minute idle timeout.
 - **MFA:** enforced by Google Workspace 2-Step Verification (AS-04).
 - **CSRF:** SameSite cookie plus `X-CSRF-Token` header equal to HMAC-SHA256(server secret, session id), required on every state-changing request.
