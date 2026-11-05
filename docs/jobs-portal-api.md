@@ -142,7 +142,7 @@ scheduled interviews.
 | Route | Rule |
 |---|---|
 | `GET /api/v1/applications` | JP-17: filters `status`, `jobId`, `search`; RLS: HR all, hiring manager their jobs', interviewer those they interview for |
-| `POST /applications/export` | JP-19: `application:read`; CSV (formula-neutralised, no phone), capped at 5,000 rows, audited, 10 exports per 10 minutes |
+| `POST /applications/export` | JP-19: `application:read`; CSV (formula-neutralised, no phone), capped at 5,000 rows, audited, 10 exports per 10 minutes; the Email column follows the JSON rule: filled only with `applicant:read` at org scope, empty otherwise (header unchanged) |
 | `GET /applications/:id` | JP-18: application + job + applicant + interviews with scorecards + history (internal comments visible to staff only) |
 | `POST /applications/:id/status` | JP-20: `{ to, comment? }`, `If-Match` rowVersion; emails the applicant ("status is now …"), **never the comment** |
 | `POST /applications/:id/interviews` | JP-27: type phone/video/in_person, round, lead user, panel (≤10), slot, duration, meeting link **https only**; moves applied/shortlisted to interview_scheduled; emails the applicant |
