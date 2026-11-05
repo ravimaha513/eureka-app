@@ -2,10 +2,11 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { can } from "../api";
-import { adminApi, departmentLabel, type MoveResult, type Ref, type Team } from "./adminApi";
+import { adminApi, departmentLabel, type AdminUser, type MoveResult, type Ref, type Team } from "./adminApi";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { friendlyError } from "./errors";
-import { keys, useAccess, useMeta, usePeople } from "./shared";
+import { PersonPicker } from "./PersonPicker";
+import { keys, useAccess, useMeta } from "./shared";
 import { Loading } from "../ui/Loading";
 import { QueryError } from "../ui/QueryError";
 import { Avatar } from "../shell/ui";
@@ -123,27 +124,10 @@ export function TeamsTab({ onShowUnassigned }: { onShowUnassigned?: () => void }
   );
 }
 
-function PersonSelect({ id, label, value, onChange, exclude = [], required }: {
-  id: string; label: string; value: string; onChange: (v: string) => void; exclude?: string[]; required?: boolean;
-}) {
-  const people = usePeople();
-  return (
-    <div className="field"><label htmlFor={id}>{label}</label>
-      <select id={id} required={required} data-autofocus value={value} onChange={(e) => onChange(e.target.value)} disabled={people.isLoading}>
-        <option value="" disabled>{people.isLoading ? "Loading people…" : "Choose a person…"}</option>
-        {(people.data ?? []).filter((p) => !exclude.includes(p.id)).map((p) => (
-          <option key={p.id} value={p.id}>{p.displayName} ({p.email})</option>
-        ))}
-      </select>
-      {people.error && <p className="error" role="alert">{friendlyError(people.error)}</p>}
-    </div>
-  );
-}
-
 function CreateTeamDialog({ onClose, onDone }: { onClose: () => void; onDone: (m: string) => void }) {
   const meta = useMeta();
   const [name, setName] = useState("");
-  const [leadId, setLeadId] = useState("");
+  const [lead, setLead] = useState<AdminUser | null>(null);
   const [locationId, setLocationId] = useState("");
   const { busy, error, run } = useSubmit((e) => friendlyError(e));
   return (
@@ -151,19 +135,19 @@ function CreateTeamDialog({ onClose, onDone }: { onClose: () => void; onDone: (m
       <form onSubmit={(e) => {
         e.preventDefault();
         void run(async () => {
-          await adminApi.createTeam({ name: name.trim(), leadId, ...(locationId ? { locationId } : {}) });
+          await adminApi.createTeam({ name: name.trim(), leadId: lead!.id, ...(locationId ? { locationId } : {}) });
           onDone(`Created ${name.trim()}.`);
         });
       }}>
         <div className="field"><label htmlFor="nt-name">Team name</label>
           <input id="nt-name" required data-autofocus value={name} onChange={(e) => setName(e.target.value)} /></div>
-        <PersonSelect id="nt-lead" label="Lead" value={leadId} onChange={setLeadId} required />
+        <PersonPicker id="nt-lead" label="Lead" value={lead} onChange={setLead} />
         <div className="field"><label htmlFor="nt-loc">Location <span className="muted">(optional)</span></label>
           <select id="nt-loc" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
             <option value="">None</option>
             {meta.data?.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select></div>
-        <DialogActions onCancel={onClose} submitLabel="Create team" busy={busy} error={error} disabled={!name.trim() || !leadId} />
+        <DialogActions onCancel={onClose} submitLabel="Create team" busy={busy} error={error} disabled={!name.trim() || !lead} />
       </form>
     </Dialog>
   );
@@ -191,22 +175,20 @@ function RenameTeamDialog({ team, onClose, onDone }: { team: Team; onClose: () =
 }
 
 function LeadDialog({ team, onClose, onDone }: { team: Team; onClose: () => void; onDone: (m: string) => void }) {
-  const [leadId, setLeadId] = useState("");
+  const [lead, setLead] = useState<AdminUser | null>(null);
   const { busy, error, run } = useSubmit((e) => friendlyError(e));
-  const people = usePeople();
   return (
     <Dialog title={`Change lead of ${team.name}`} onClose={onClose}>
       <form onSubmit={(e) => {
         e.preventDefault();
         void run(async () => {
-          await adminApi.setLead(team.id, leadId);
-          const name = people.data?.find((p) => p.id === leadId)?.displayName ?? "the new lead";
-          onDone(`${name} now leads ${team.name}.`);
+          await adminApi.setLead(team.id, lead!.id);
+          onDone(`${lead!.displayName} now leads ${team.name}.`);
         });
       }}>
         <p className="hint">Current lead: <b>{team.lead.displayName}</b>. Reporting lines are checked for loops when the lead changes.</p>
-        <PersonSelect id="ld-lead" label="New lead" value={leadId} onChange={setLeadId} exclude={[team.lead.id]} required />
-        <DialogActions onCancel={onClose} submitLabel="Change lead" busy={busy} error={error} disabled={!leadId} />
+        <PersonPicker id="ld-lead" label="New lead" value={lead} onChange={setLead} exclude={[team.lead.id]} />
+        <DialogActions onCancel={onClose} submitLabel="Change lead" busy={busy} error={error} disabled={!lead} />
       </form>
     </Dialog>
   );

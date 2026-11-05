@@ -1441,6 +1441,8 @@ tbody tr.opentoall > td:first-child { box-shadow: inset 3px 0 0 var(--violet-sol
 .combo-list li .n { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .combo-list li.zero { color: var(--faint); }
 .combo-foot { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 4px 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.combo-foot.combo-more { padding: 6px 12px; }
+.combo-sub { display: block; margin-top: 1px; color: var(--muted); font-size: 12px; font-weight: 400; overflow-wrap: anywhere; }
 .nomatch .back { color: var(--ok-fg); font-weight: 700; }
 .savedviews .checkline { display: inline-flex; align-items: center; gap: 8px; height: 40px; font-size: 13px; color: var(--text2); }
 

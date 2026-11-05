@@ -292,6 +292,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - **Rebrand + UX redesign (PR #113):** carbon/red identity (Archivo, DESIGN.md), ui/ kit (FilterBar, Tabs, Menu, RecordLink, dtable), every staff screen redesigned for desktop and phone; audit in docs/ux-audit/.
 - Backend audit + remediation (#115): `docs/backend-audit/` (architecture, API, security, performance, roadmap); R-01..R-30 built — fail-closed route authz, admin-only-admin separation, column grants, shared rate limiter, report executor + health live/ready, request ids/JSON logs, idempotency helper, optional If-Match, scoped trigram name search, outbox dead letter + retention, OpenAPI (`docs/openapi.json`, `openapi:check`), Admin/Candidates services split; migrations 0500–0521.
 - Landing page + sign-in redesign (#118): `/` shows an animated isometric landing once per device (Get started → `/login`); sign-in gets brand panel, password reveal, "or continue with" Google; styles in `apps/web/src/login/login.css`
+- Team lead picker: New team and Change lead search people on the server by name or email (`apps/web/src/admin/PersonPicker.tsx`) instead of a dropdown capped at 200.
 - Hot List open-to-all emphasis: solid violet "Open to all teams" chip (`--violet-solid`), violet row tint + left bar (`tr.opentoall`); "Selected teams" stays tinted (`.badge.shared_teams`)
 
 ## Next tasks (Phase 2 to MVP), in suggested order

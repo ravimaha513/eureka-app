@@ -164,7 +164,8 @@ test("org admin: reporting line, teams, members and moving a member", async ({ p
     await page.getByRole("button", { name: "New team" }).click();
     dlg = page.getByRole("dialog", { name: "New team" });
     await dlg.getByLabel("Team name").fill(name);
-    await dlg.getByLabel("Lead").selectOption({ label: `${lead.name} (${lead.email})` });
+    await dlg.getByRole("combobox", { name: "Lead", exact: true }).fill(lead.email);
+    await dlg.getByRole("option", { name: lead.name }).click();
     await dlg.getByRole("button", { name: "Create team" }).click();
     await expect(dlg).toBeHidden();
     await expect(liveStatus(page)).toContainText(`Created ${name}.`);
@@ -214,7 +215,8 @@ test("org admin: reporting line, teams, members and moving a member", async ({ p
   // Change the lead of team two.
   await drawer.getByRole("button", { name: "Change lead" }).click();
   dlg = page.getByRole("dialog", { name: `Change lead of ${team2}` });
-  await dlg.getByLabel("New lead").selectOption({ label: `${lead1.name} (${lead1.email})` });
+  await dlg.getByRole("combobox", { name: "New lead", exact: true }).fill(lead1.email);
+  await dlg.getByRole("option", { name: lead1.name }).click();
   await dlg.getByRole("button", { name: "Change lead" }).click();
   await expect(dlg).toBeHidden();
   await expect(liveStatus(page)).toContainText(`${lead1.name} now leads ${team2}.`);

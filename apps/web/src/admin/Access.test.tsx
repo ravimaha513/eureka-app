@@ -676,19 +676,44 @@ describe("Teams tab", () => {
     fireEvent.click(await screen.findByRole("button", { name: "New team" }));
     let dlg = await screen.findByRole("dialog", { name: "New team" });
     fireEvent.change(within(dlg).getByLabelText("Team name"), { target: { value: "Team Neo" } });
+    const leadBox = within(dlg).getByRole("combobox", { name: "Lead" });
+    // Nothing is listed or fetched until you type.
+    fireEvent.click(leadBox);
+    expect(within(dlg).getByText("Type a name or email")).toBeInTheDocument();
+    expect(within(within(dlg).getByRole("listbox", { name: "Lead" })).queryByRole("option")).toBeNull();
+    fireEvent.change(leadBox, { target: { value: "rohit" } });
     await within(dlg).findByRole("option", { name: /Rohit Lead/ });
-    fireEvent.change(within(dlg).getByLabelText("Lead"), { target: { value: "u-lead" } });
+    expect(calls.some((c) => c.path === "/api/v1/admin/users" && c.url.searchParams.get("search") === "rohit" && c.url.searchParams.get("status") === "active")).toBe(true);
+    fireEvent.keyDown(leadBox, { key: "Enter" });
+    expect(leadBox).toHaveValue(`Rohit Lead (${USERS.find((u) => u.id === "u-lead")!.email})`);
     fireEvent.click(within(dlg).getByRole("button", { name: "Create team" }));
     await waitFor(() => expect(status()).toHaveTextContent("Created Team Neo."));
     expect(lastWrite().body).toEqual({ name: "Team Neo", leadId: "u-lead" });
 
     fireEvent.click(within(await openTeam("Team Anjali")).getByRole("button", { name: "Change lead" }));
     dlg = await screen.findByRole("dialog", { name: "Change lead of Team Anjali" });
-    await within(dlg).findByRole("option", { name: /Priya Rao/ });
-    fireEvent.change(within(dlg).getByLabelText("New lead"), { target: { value: "u-priya" } });
+    const newLead = within(dlg).getByRole("combobox", { name: "New lead" });
+    fireEvent.change(newLead, { target: { value: "priya" } });
+    fireEvent.click(await within(dlg).findByRole("option", { name: /Priya Rao/ }));
     fireEvent.click(within(dlg).getByRole("button", { name: "Change lead" }));
     await waitFor(() => expect(status()).toHaveTextContent("Priya Rao now leads Team Anjali."));
     expect(lastWrite()).toMatchObject({ method: "PUT", path: "/api/v1/admin/teams/t2/lead", body: { leadId: "u-priya" } });
+  });
+
+  it("lead picker: Enter never picks a row left over from the previous search", async () => {
+    renderPage("teams");
+    fireEvent.click(await screen.findByRole("button", { name: "New team" }));
+    const dlg = await screen.findByRole("dialog", { name: "New team" });
+    const box = within(dlg).getByRole("combobox", { name: "Lead" });
+    fireEvent.change(box, { target: { value: "rohit" } });
+    await within(dlg).findByRole("option", { name: /Rohit Lead/ });
+    // Rohit is still on screen while the new search is pending.
+    fireEvent.change(box, { target: { value: "priya" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(box).toHaveValue("priya");
+    await within(dlg).findByRole("option", { name: /Priya Rao/ });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(box).toHaveValue(`Priya Rao (${USERS.find((u) => u.id === "u-priya")!.email})`);
   });
 
   it("deletes a team, moving its people to another team (AD-15)", async () => {

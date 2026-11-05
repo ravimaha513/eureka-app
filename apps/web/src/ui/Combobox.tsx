@@ -128,7 +128,7 @@ export function MultiCombobox({ label, values, options, anyLabel, onChange, coun
   );
 }
 
-function Highlight({ text, q }: { text: string; q: string }) {
+export function Highlight({ text, q }: { text: string; q: string }) {
   const t = q.trim();
   const i = t ? text.toLowerCase().indexOf(t.toLowerCase()) : -1;
   if (i < 0) return <>{text}</>;
