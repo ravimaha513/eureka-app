@@ -5,6 +5,7 @@ import { AuditService } from "../../platform/audit.service.js";
 import { CurrentUser, RequirePermission, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { dbErrorMapper } from "../../platform/errors.js";
+import { ApiBody } from "../../platform/http/api-doc.js";
 
 type Item = { id: string; name: string };
 
@@ -122,6 +123,7 @@ export class LookupsController {
     return this.svc.all(user);
   }
 
+  @ApiBody(CreateTechnology)
   @Post("technologies")
   @HttpCode(200)
   @RequirePermission("technology:create")
@@ -129,6 +131,7 @@ export class LookupsController {
     return this.svc.createTechnology(user, CreateTechnology.parse(body).name);
   }
 
+  @ApiBody(CreateParty)
   @Post("clients")
   @HttpCode(200)
   @RequirePermission("client:create")
@@ -136,6 +139,7 @@ export class LookupsController {
     return this.svc.createParty(user, "client", CreateParty.parse(body).name);
   }
 
+  @ApiBody(CreateParty)
   @Post("vendors")
   @HttpCode(200)
   @RequirePermission("vendor:create")

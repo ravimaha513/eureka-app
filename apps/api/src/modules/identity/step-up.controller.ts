@@ -9,6 +9,7 @@ import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { OidcService } from "../../platform/oidc.service.js";
 import { openCookie, sealCookie } from "../../platform/sealed-cookie.js";
+import { ApiBody } from "../../platform/http/api-doc.js";
 
 const STEP_UP_COOKIE = "eureka_stepup";
 const COOKIE_PATH = "/api/auth/step-up";
@@ -79,6 +80,7 @@ export class StepUpController {
     };
   }
 
+  @ApiBody(StartStepUp)
   @Post("start")
   @HttpCode(200)
   async start(@CurrentUser() user: AuthedUser, @Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
@@ -151,6 +153,7 @@ export class StepUpController {
   }
 
   /** Step-up by re-entering the password (staging/local, migration 0083); the database verifies it. */
+  @ApiBody(StepUpPassword)
   @Post("password")
   @HttpCode(200)
   async password(@CurrentUser() user: AuthedUser, @Body() body: unknown) {

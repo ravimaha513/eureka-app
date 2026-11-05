@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Put, Que
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { ActiveCandidatesQuery, ActivityQuery, PeriodQuery, SetTarget, TargetListQuery } from "./performance.schemas.js";
 import { PerformanceService } from "./performance.service.js";
+import { ApiBody, ApiQuery } from "../../platform/http/api-doc.js";
 
 export { PerformanceService };
 
@@ -10,18 +11,21 @@ export { PerformanceService };
 export class PerformanceController {
   constructor(private readonly svc: PerformanceService) {}
 
+  @ApiQuery(PeriodQuery)
   @Get("summary")
   @RequirePermission("performance:read")
   summary(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.summary(user, PeriodQuery.parse(q));
   }
 
+  @ApiQuery(ActivityQuery)
   @Get("activity")
   @RequirePermission("performance:read")
   activity(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.activity(user, ActivityQuery.parse(q));
   }
 
+  @ApiQuery(ActiveCandidatesQuery)
   @Get("active-candidates")
   @RequirePermission("performance:read")
   activeCandidates(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
@@ -34,12 +38,14 @@ export class PerformanceController {
     return this.svc.peopleList(user);
   }
 
+  @ApiQuery(TargetListQuery)
   @Get("targets")
   @RequirePermission("performance:read")
   targets(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.listTargets(user, TargetListQuery.parse(q));
   }
 
+  @ApiBody(SetTarget)
   @Put("targets")
   @RequirePermission("performance.target:manage")
   setTarget(@CurrentUser() user: AuthedUser, @Body() body: unknown) {

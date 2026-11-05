@@ -3,12 +3,14 @@ import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { CreatePlacement, PlacementExportQuery, PlacementListQuery, PlacementStatusChange } from "./placements.schemas.js";
 import { PlacementsService } from "./placements.service.js";
+import { ApiBody, ApiQuery } from "../../platform/http/api-doc.js";
 
 /** docs/placements-api.md. */
 @Controller("api/v1/placements")
 export class PlacementsController {
   constructor(private readonly svc: PlacementsService) {}
 
+  @ApiQuery(PlacementListQuery)
   @Get()
   @RequirePermission("placement:read")
   list(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
@@ -16,6 +18,7 @@ export class PlacementsController {
   }
 
   /** Placements report CSV (migration 0160). POST, not GET: audited and CSRF-protected, like the Hot List export. */
+  @ApiBody(PlacementExportQuery)
   @Post("export")
   @HttpCode(200)
   @RequirePermission("report:export")
@@ -43,6 +46,7 @@ export class PlacementsController {
   }
 
   /** PL-8: Idempotency-Key is required; a repeat with the same body returns the first response. */
+  @ApiBody(CreatePlacement)
   @Post()
   @RequirePermission("placement:create")
   create(@CurrentUser() user: AuthedUser, @Body() body: unknown, @Headers("idempotency-key") key: string | undefined) {
@@ -50,6 +54,7 @@ export class PlacementsController {
   }
 
   /** PL-4; bgc_failed additionally needs placement.bgc_status:update. */
+  @ApiBody(PlacementStatusChange)
   @Patch(":id/status")
   @RequirePermission("placement:update")
   status(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {

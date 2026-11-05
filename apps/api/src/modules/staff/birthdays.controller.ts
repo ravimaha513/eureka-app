@@ -3,6 +3,7 @@ import { AuditService } from "../../platform/audit.service.js";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { BirthdayUpdate } from "./birthdays.schemas.js";
+import { ApiBody } from "../../platform/http/api-doc.js";
 
 interface StaffRow {
   id: string; display_name: string; email: string; designation: string | null; location: string | null;
@@ -69,6 +70,7 @@ export class StaffBirthdaysController {
     return this.svc.list(user);
   }
 
+  @ApiBody(BirthdayUpdate)
   @Put(":id/birthday")
   @RequirePermission("staff.birthday:manage")
   set(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {

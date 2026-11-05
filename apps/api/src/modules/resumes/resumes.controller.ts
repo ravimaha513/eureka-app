@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from "@ne
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { ResumeUpload } from "./resumes.schemas.js";
 import { ResumesService } from "./resumes.service.js";
+import { ApiBody } from "../../platform/http/api-doc.js";
 
 /** FR-CAN-07: candidate resumes (document:read / document:upload over the candidate). */
 @Controller("api/v1/candidates/:id/resumes")
@@ -15,6 +16,7 @@ export class ResumesController {
   }
 
   /** Returns a presigned POST into quarantine/ (5 minutes); the file becomes available after a clean scan. */
+  @ApiBody(ResumeUpload)
   @Post()
   @RequirePermission("document:upload")
   upload(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {

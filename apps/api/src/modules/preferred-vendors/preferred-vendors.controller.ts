@@ -4,6 +4,7 @@ import { parseIfMatch } from "../../platform/http/if-match.js";
 import {
   CreatePreferredVendor, PreferredVendorQuery, PreferredVendorsService, UpdatePreferredVendor,
 } from "./preferred-vendors.service.js";
+import { ApiBody, ApiQuery } from "../../platform/http/api-doc.js";
 
 export { PreferredVendorsService };
 
@@ -16,6 +17,7 @@ export { PreferredVendorsService };
 export class PreferredVendorsController {
   constructor(private readonly svc: PreferredVendorsService) {}
 
+  @ApiQuery(PreferredVendorQuery)
   @Get()
   @SelfService()
   list(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
@@ -28,6 +30,7 @@ export class PreferredVendorsController {
     return this.svc.get(user, id);
   }
 
+  @ApiBody(CreatePreferredVendor)
   @Post()
   @RequirePermission("vendor.preferred:create")
   create(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
@@ -35,6 +38,7 @@ export class PreferredVendorsController {
   }
 
   /** `If-Match` carries the rowVersion the client saw (428 without it, 412 when stale). */
+  @ApiBody(UpdatePreferredVendor)
   @Patch(":id")
   @RequirePermission("vendor.preferred:create")
   update(

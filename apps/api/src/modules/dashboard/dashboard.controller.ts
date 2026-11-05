@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, Post, Query, Res } from "@nestjs/commo
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { DashboardQuery, DashboardService } from "./dashboard.service.js";
+import { ApiBody, ApiQuery } from "../../platform/http/api-doc.js";
 
 export { DashboardService };
 
@@ -10,6 +11,7 @@ export { DashboardService };
 export class DashboardController {
   constructor(private readonly svc: DashboardService) {}
 
+  @ApiQuery(DashboardQuery)
   @Get()
   @RequirePermission("report:read")
   get(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
@@ -17,6 +19,7 @@ export class DashboardController {
   }
 
   /** Sales report CSV (grouped counts; migration 0160). POST, not GET: audited and CSRF-protected, like the Hot List export. */
+  @ApiBody(DashboardQuery)
   @Post("export")
   @HttpCode(200)
   @RequirePermission("report:export")

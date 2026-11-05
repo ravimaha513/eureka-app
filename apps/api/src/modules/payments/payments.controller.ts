@@ -5,6 +5,7 @@ import {
   BillablePlacementQuery, CreateInvoice, Empty, InvoiceListQuery, InvoiceSummaryQuery, RecordPayment, UpdateInvoice,
 } from "./payments.schemas.js";
 import { PaymentsService } from "./payments.service.js";
+import { ApiBody, ApiQuery } from "../../platform/http/api-doc.js";
 
 export { PaymentsService };
 
@@ -17,12 +18,14 @@ export { PaymentsService };
 export class PaymentsController {
   constructor(private readonly svc: PaymentsService) {}
 
+  @ApiQuery(InvoiceListQuery)
   @Get()
   @RequirePermission("invoice:read")
   list(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.list(user, InvoiceListQuery.parse(q));
   }
 
+  @ApiQuery(InvoiceSummaryQuery)
   @Get("summary")
   @RequirePermission("invoice:read")
   summary(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
@@ -30,6 +33,7 @@ export class PaymentsController {
   }
 
   /** Joined placements that can carry invoices (picker for a new invoice; placements not invoiced yet). */
+  @ApiQuery(BillablePlacementQuery)
   @Get("placements")
   @RequirePermission("invoice:read")
   placements(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
@@ -43,6 +47,7 @@ export class PaymentsController {
   }
 
   /** Idempotency-Key is required; a repeat with the same body returns the first response. */
+  @ApiBody(CreateInvoice)
   @Post()
   @RequirePermission("invoice:update")
   create(@CurrentUser() user: AuthedUser, @Body() body: unknown, @Headers("idempotency-key") key: string | undefined) {
@@ -50,6 +55,7 @@ export class PaymentsController {
   }
 
   /** If-Match carries the rowVersion the client saw (428 without it, 412 when stale). */
+  @ApiBody(UpdateInvoice)
   @Patch(":id")
   @RequirePermission("invoice:update")
   update(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
@@ -57,6 +63,7 @@ export class PaymentsController {
     return this.svc.update(user, id, parseIfMatch(ifMatch), UpdateInvoice.parse(body));
   }
 
+  @ApiBody(Empty)
   @Post(":id/void")
   @HttpCode(200)
   @RequirePermission("invoice:update")
@@ -67,6 +74,7 @@ export class PaymentsController {
   }
 
   /** Idempotency-Key is required (design B3: payment creation). */
+  @ApiBody(RecordPayment)
   @Post(":id/payments")
   @RequirePermission("invoice:update")
   recordPayment(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
@@ -74,6 +82,7 @@ export class PaymentsController {
     return this.svc.recordPayment(user, id, RecordPayment.parse(body), key);
   }
 
+  @ApiBody(Empty)
   @Post(":id/payments/:paymentId/void")
   @HttpCode(200)
   @RequirePermission("invoice:update")

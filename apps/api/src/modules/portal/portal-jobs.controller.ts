@@ -11,6 +11,7 @@ import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import { companyNames } from "../jobs/jobs.service.js";
 import { PortalApplicationsQuery, PortalJobsQuery } from "../applications/applications.schemas.js";
 import { dbErrorMapper } from "../../platform/errors.js";
+import { ApiQuery } from "../../platform/http/api-doc.js";
 
 /**
  * Applicant portal: jobs and own applications (docs/jobs-portal-api.md
@@ -164,6 +165,7 @@ export class PortalJobsService {
 export class PortalJobsController {
   constructor(private readonly svc: PortalJobsService) {}
 
+  @ApiQuery(PortalJobsQuery)
   @PortalRoute()
   @Get("jobs")
   jobs(@CurrentApplicant() a: AuthedApplicant, @Query() q: unknown) {
@@ -183,6 +185,7 @@ export class PortalJobsController {
     return this.svc.apply(a, id);
   }
 
+  @ApiQuery(PortalApplicationsQuery)
   @PortalRoute()
   @Get("applications")
   applications(@CurrentApplicant() a: AuthedApplicant, @Query() q: unknown) {

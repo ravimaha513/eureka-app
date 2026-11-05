@@ -11,6 +11,7 @@ import { OidcFailure, OidcService, type SignInError, type VerifiedIdentity } fro
 import { requestLogFields } from "../../platform/request-context.js";
 import { openCookie, sealCookie } from "../../platform/sealed-cookie.js";
 import { SessionService } from "../../platform/session.service.js";
+import { ApiBody } from "../../platform/http/api-doc.js";
 
 const OIDC_COOKIE = "eureka_oidc";
 const DevLogin = z.object({ email: z.string().email() }).strict();
@@ -120,6 +121,7 @@ export class AuthController {
   }
 
   /** Development identity provider; unreachable unless AUTH_MODE=dev (never in production). */
+  @ApiBody(DevLogin)
   @Public()
   @Post("dev-login")
   @HttpCode(204)
