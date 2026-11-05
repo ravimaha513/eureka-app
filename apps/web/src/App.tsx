@@ -10,6 +10,7 @@ import { ChatNavBadge } from "./chat/ChatNavBadge";
 import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, X } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { BrandMark, NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
+import { HeroScene } from "./shell/HeroScene";
 import { Loading } from "./ui/Loading";
 import { QueryError } from "./ui/QueryError";
 import { useAuthMethods } from "./shell/useAuthMethods";
@@ -190,6 +191,7 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
     <div className="loginpage">
       <section className="loginhero" aria-label="About Eureka">
         <div className="brand"><BrandMark size={30} /><span className="brandtext">Eureka<small>Staffing</small></span></div>
+        <HeroScene />
         <div className="herotext">
           <h2>The bench, the pipeline and the paperwork, in one record.</h2>
           <ul>
