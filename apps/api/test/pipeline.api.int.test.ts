@@ -458,7 +458,7 @@ describe("interviews", () => {
     const off = await call("locD", "PATCH", `/api/v1/interviews/${id}`, { cleared: false });
     expect(off.json().clearedAt).toBeNull();
     const audit = await db.admin.query(`SELECT actor_id, changes FROM eureka.audit_event WHERE action = 'interview.updated' AND entity_id = $1 ORDER BY seq`, [id]);
-    expect(audit.rows.map((a) => a.changes)).toEqual([{ cleared: true, systemName: "PC-4", callStatus: "completed" }, { cleared: false }]);
+    expect(audit.rows.map((a) => a.changes)).toEqual([{ cleared: true, systemName: "set", callStatus: "completed" }, { cleared: false }]);
   });
 
   it("coach reads coached interviews and adds coach feedback; cannot edit", async () => {
