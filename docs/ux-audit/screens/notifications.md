@@ -9,7 +9,7 @@ Notice that something needs me (unread count), scan what happened, jump to the r
 
 ## What's on screen
 - Bell 40×40 round button with red count bubble ("99+" cap), polled every 60s; polite live region announces growth only (Inbox.tsx:21-62).
-- Panel (380px, max 70vh, absolute under the bell; fixed full-width under the top bar on phones, styles.css:537, :672): header h2 "Notifications" + "Mark all read" (btn sm) + "×" (chipx 18×18). List of 20 per page; each entry = title (underlined link button if openable, else bold text) + body paragraph + timestamp + "Mark read/unread" btn sm. "Show older notifications" for the next page. States: "Loading…", "Could not load notifications.", "No notifications yet." as plain `<p>`.
+- Panel (380px, max 70vh, absolute under the bell; fixed full-width under the top bar on phones, styles.css:537, :678): header h2 "Notifications" + "Mark all read" (btn sm) + "×" (chipx 18×18). List of 20 per page; each entry = title (underlined link button if openable, else bold text) + body paragraph + timestamp + "Mark read/unread" btn sm. "Show older notifications" for the next page. States: "Loading…", "Could not load notifications.", "No notifications yet." as plain `<p>`.
 - Measured for ceo: 1 entry ("Project assignment ended"), entry height ~140px incl. button.
 
 ## Problems
