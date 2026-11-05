@@ -22,7 +22,7 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { idempotent } from "../../platform/idempotency.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
-import { likeContains, nameSearch } from "../../platform/sql.js";
+import { likeContains, scopedNameSearch } from "../../platform/sql.js";
 import { toCsv } from "../hotlist/csv.js";
 import { EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS } from "../hotlist/hotlist.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
@@ -152,7 +152,7 @@ export class PlacementsService {
     const where = [activityPredicate(scope, params, "pl", "c")];
     if (q.status) where.push(`pl.status = ${p(q.status)}`);
     if (q.candidateId) where.push(`pl.candidate_id = ${p(q.candidateId)}`);
-    if (q.candidate) where.push(nameSearch("p", p(likeContains(q.candidate))));
+    if (q.candidate) where.push(scopedNameSearch("p", p(likeContains(q.candidate)), q.candidate));
     if (q.batchId) where.push(`c.batch_id = ${p(q.batchId)}::uuid`);
     if (q.recruiterId) where.push(`pl.recruiter_id = ${p(q.recruiterId)}`);
     if (q.teamId) where.push(`pl.team_id = ${p(q.teamId)}::uuid`);
