@@ -73,15 +73,19 @@ const fromJob = (j: Job): FormState => ({
 export function JobDialog({ job, onClose, onSaved }: { job?: Job; onClose: () => void; onSaved: (id: string, created: boolean) => void }) {
   const opts = useQuery({ queryKey: jobKeys.options, queryFn: jobsApi.options, staleTime: 5 * 60_000 });
   const kinds = opts.data?.kinds ?? [];
-  const [v, setV] = useState<FormState>(() => job ? fromJob(job) : {
+  // New jobs start as Draft (the API default too): nothing reaches applicants until someone chooses Open and Publish.
+  const [initial] = useState<FormState>(() => job ? fromJob(job) : {
     kind: "client_requirement", title: "", category: "engineering", experienceLevel: "mid", employmentType: "full_time",
-    workMode: "on_site", status: "open", deadline: "", workHours: "", payAmount: "", payFrequency: "hourly", payCurrency: "USD",
+    workMode: "on_site", status: "draft", deadline: "", workHours: "", payAmount: "", payFrequency: "hourly", payCurrency: "USD",
     clientId: "", companyId: "", location: "", skills: [], requirements: null, description: null, hiringManagerId: "", publishedToPortal: false,
   });
+  const [v, setV] = useState<FormState>(initial);
+  const dirty = JSON.stringify(v) !== JSON.stringify(initial);
   const kind: JobKind = job ? job.kind : (kinds.includes(v.kind) ? v.kind : kinds[0] ?? v.kind);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
+  const uid = useId();
   const formRef = useRef<HTMLFormElement>(null);
   const failed = useFocusAfterFailure(formRef);
   const idemKey = useMemo(() => `job-${crypto.randomUUID()}`, []);
@@ -136,47 +140,40 @@ export function JobDialog({ job, onClose, onSaved }: { job?: Job; onClose: () =>
     enabled: kind === "internal_opening" && kinds.includes("internal_opening") });
   const companies = [...(companyOpts.data?.companies ?? [])];
   if (job?.company && !companies.some((c) => c.id === job.company!.id)) companies.unshift({ id: job.company.id, name: job.company.name ?? "Current company" });
+  const live = kind === "internal_opening" && v.publishedToPortal && v.status === "open";
+  const submitLabel = job ? "Save changes" : live ? "Create and publish" : v.status === "draft" ? "Create draft" : "Create job";
+  const visibility = kind !== "internal_opening" ? "Client requirements are never shown on the careers portal."
+    : !v.publishedToPortal ? "Not published: applicants will not see this job."
+    : v.status === "open" ? "Applicants will see this job on the careers portal and can apply."
+    : `Published, but applicants see it only while the status is Open (now ${jobLabel(v.status)}).`;
   return (
-    <Dialog title={job ? `Edit job · ${job.title}` : "Create job"} onClose={onClose} wide>
+    <Dialog title={job ? `Edit job · ${job.title}` : "Create job"} onClose={onClose} wide className="jobdialog" dirty={dirty}>
       <form ref={formRef} onSubmit={submit} noValidate>
         {!job && kinds.length > 1 && (
           <Radios legend="Job type" name="kind" options={kinds} value={kind} onChange={(k) => set("kind", k as JobKind)} />
         )}
-        {!job && kinds.length === 1 && <p className="muted">Type: {jobLabel(kind)}</p>}
-        {job && <p className="muted">Type: {jobLabel(kind)}</p>}
+        {(job || kinds.length === 1) && <p className="jd-type"><span className="muted">Job type</span> <b>{jobLabel(kind)}</b></p>}
+
+        <section className="jd-visibility" aria-labelledby={`${uid}-vis`}>
+          <h3 id={`${uid}-vis`} className="formsection">Status and visibility</h3>
+          <div className="jd-visrow">
+            <Field label="Status" hint="Draft is visible to staff only. Open accepts submissions and applications.">
+              {(p) => <select {...p} value={v.status} onChange={text("status")}>{JOB_STATUSES.map((c) => <option key={c} value={c}>{jobLabel(c)}</option>)}</select>}
+            </Field>
+            <div className="jd-publish">
+              {kind === "internal_opening" && (
+                <label className="check"><input type="checkbox" checked={v.publishedToPortal} aria-describedby={`${uid}-visnote`}
+                  onChange={(e) => set("publishedToPortal", e.target.checked)} />Publish on the careers portal</label>
+              )}
+              <p id={`${uid}-visnote`} className={`jd-visnote${live ? " live" : ""}`} aria-live="polite">{visibility}</p>
+            </div>
+          </div>
+        </section>
+
+        <h3 className="formsection">Job</h3>
         <div className="grid2">
           <Field label="Job title" error={errors.title}>
             {(p) => <input {...p} value={v.title} onChange={text("title")} maxLength={200} data-autofocus placeholder="Enter job title" />}
-          </Field>
-          <Field label="Job category">
-            {(p) => <select {...p} value={v.category} onChange={text("category")}>{JOB_CATEGORIES.map((c) => <option key={c} value={c}>{jobLabel(c)}</option>)}</select>}
-          </Field>
-          <Field label="Experience">
-            {(p) => <select {...p} value={v.experienceLevel} onChange={text("experienceLevel")}>{EXPERIENCE_LEVELS.map((c) => <option key={c} value={c}>{jobLabel(c)}</option>)}</select>}
-          </Field>
-          <Field label="Status">
-            {(p) => <select {...p} value={v.status} onChange={text("status")}>{JOB_STATUSES.map((c) => <option key={c} value={c}>{jobLabel(c)}</option>)}</select>}
-          </Field>
-        </div>
-        <div className="grid2">
-          <Radios legend="Employment type" name="employmentType" options={EMPLOYMENT_TYPES} value={v.employmentType} onChange={(x) => set("employmentType", x)} />
-          <Radios legend="Work mode" name="workMode" options={WORK_MODES} value={v.workMode} onChange={(x) => set("workMode", x)} />
-        </div>
-        <div className="grid2">
-          <Field label="Job deadline (optional)">
-            {(p) => <input {...p} type="date" value={v.deadline} onChange={text("deadline")} />}
-          </Field>
-          <Field label="Work hours per week (optional)" error={errors.workHours}>
-            {(p) => <input {...p} type="number" min={1} max={80} step={1} value={v.workHours} onChange={text("workHours")} />}
-          </Field>
-          <Field label="Pay (optional)" error={errors.payAmount}>
-            {(p) => <input {...p} type="number" min={0} step="0.01" inputMode="decimal" value={v.payAmount} onChange={text("payAmount")} />}
-          </Field>
-          <Field label="Pay frequency">
-            {(p) => <select {...p} value={v.payFrequency} onChange={text("payFrequency")}>{PAY_FREQUENCIES.map((c) => <option key={c} value={c}>{jobLabel(c)}</option>)}</select>}
-          </Field>
-          <Field label="Pay currency">
-            {(p) => <select {...p} value={v.payCurrency} onChange={text("payCurrency")}>{PAY_CURRENCIES.map((c) => <option key={c} value={c}>{CURRENCY_LABELS[c]}</option>)}</select>}
           </Field>
           {kind === "client_requirement" ? (
             <Field label="Client" error={errors.clientId}>
@@ -197,8 +194,11 @@ export function JobDialog({ job, onClose, onSaved }: { job?: Job; onClose: () =>
               )}
             </Field>
           ) : null}
-          <Field label="Location (optional)" error={errors.location}>
-            {(p) => <input {...p} value={v.location} onChange={text("location")} maxLength={130} placeholder="City, State" />}
+          <Field label="Job category">
+            {(p) => <select {...p} value={v.category} onChange={text("category")}>{JOB_CATEGORIES.map((c) => <option key={c} value={c}>{jobLabel(c)}</option>)}</select>}
+          </Field>
+          <Field label="Experience">
+            {(p) => <select {...p} value={v.experienceLevel} onChange={text("experienceLevel")}>{EXPERIENCE_LEVELS.map((c) => <option key={c} value={c}>{jobLabel(c)}</option>)}</select>}
           </Field>
           <Field label="Hiring manager (optional)">
             {(p) => (
@@ -209,14 +209,43 @@ export function JobDialog({ job, onClose, onSaved }: { job?: Job; onClose: () =>
             )}
           </Field>
         </div>
+
+        <h3 className="formsection">Terms</h3>
+        <div className="grid2">
+          <Radios legend="Employment type" name="employmentType" options={EMPLOYMENT_TYPES} value={v.employmentType} onChange={(x) => set("employmentType", x)} />
+          <Radios legend="Work mode" name="workMode" options={WORK_MODES} value={v.workMode} onChange={(x) => set("workMode", x)} />
+        </div>
+        <div className="jd-grid3">
+          <Field label="Location (optional)" error={errors.location}>
+            {(p) => <input {...p} value={v.location} onChange={text("location")} maxLength={130} placeholder="City, State" />}
+          </Field>
+          <Field label="Job deadline (optional)">
+            {(p) => <input {...p} type="date" value={v.deadline} onChange={text("deadline")} />}
+          </Field>
+          <Field label="Work hours per week (optional)" error={errors.workHours}>
+            {(p) => <input {...p} type="number" min={1} max={80} step={1} value={v.workHours} onChange={text("workHours")} />}
+          </Field>
+        </div>
+        <fieldset className="jd-pay">
+          <legend>Pay (optional)</legend>
+          <div className="jd-grid3">
+            <Field label="Pay amount" error={errors.payAmount}>
+              {(p) => <input {...p} type="number" min={0} step="0.01" inputMode="decimal" value={v.payAmount} onChange={text("payAmount")} />}
+            </Field>
+            <Field label="Pay frequency">
+              {(p) => <select {...p} value={v.payFrequency} onChange={text("payFrequency")}>{PAY_FREQUENCIES.map((c) => <option key={c} value={c}>{jobLabel(c)}</option>)}</select>}
+            </Field>
+            <Field label="Pay currency">
+              {(p) => <select {...p} value={v.payCurrency} onChange={text("payCurrency")}>{PAY_CURRENCIES.map((c) => <option key={c} value={c}>{CURRENCY_LABELS[c]}</option>)}</select>}
+            </Field>
+          </div>
+        </fieldset>
+
+        <h3 className="formsection">Content</h3>
         <SkillsInput value={v.skills} onChange={(s) => set("skills", s)} />
         <RichTextEditor label="Requirements" value={v.requirements} onChange={(d) => set("requirements", d)} error={errors.requirements} placeholder="Enter requirements" />
         <RichTextEditor label="Description" value={v.description} onChange={(d) => set("description", d)} error={errors.description} placeholder="Enter description" />
-        {kind === "internal_opening" && (
-          <label className="check"><input type="checkbox" checked={v.publishedToPortal} onChange={(e) => set("publishedToPortal", e.target.checked)} />
-            {" "}Publish on the careers portal (shown to applicants while the job is open)</label>
-        )}
-        <DialogActions onCancel={onClose} submitLabel={job ? "Save changes" : "Create job"} busy={busy} error={formError}
+        <DialogActions onCancel={onClose} submitLabel={submitLabel} busy={busy} error={formError}
           disabled={!job && kinds.length === 0} />
       </form>
     </Dialog>
