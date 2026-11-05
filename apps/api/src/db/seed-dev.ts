@@ -4,7 +4,7 @@
  *   MIGRATION_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/eureka pnpm db:seed
  */
 import pg from "pg";
-import { migrate } from "./migrate.js";
+import { migrate, setRolePassword } from "./migrate.js";
 import { seedFixtures } from "../../test/fixtures.js";
 import { seedDevPipeline } from "./dev-pipeline.js";
 import { seedDevFacilities } from "./dev-facilities.js";
@@ -96,10 +96,7 @@ if (process.env.EUREKA_ENVIRONMENT === "local") {
 // AUTH_MODE=dev in the API (migration 0043); no migration sets it, so other environments refuse it.
 await admin.query(`INSERT INTO authz.policy_setting (key, value) VALUES ('dev_step_up', 'on')
   ON CONFLICT (key) DO UPDATE SET value = 'on'`);
-if (process.env.APP_DB_PASSWORD) {
-  await admin.query(`ALTER ROLE eureka_app PASSWORD '${process.env.APP_DB_PASSWORD.replace(/'/g, "''")}'`);
-}
-if (process.env.WORKER_DB_PASSWORD) {
-  await admin.query(`ALTER ROLE eureka_worker PASSWORD '${process.env.WORKER_DB_PASSWORD.replace(/'/g, "''")}'`);
-}
+// Client-side SCRAM verifiers, so the passwords never appear in statement text (G-06).
+if (process.env.APP_DB_PASSWORD) await setRolePassword(admin, "eureka_app", process.env.APP_DB_PASSWORD);
+if (process.env.WORKER_DB_PASSWORD) await setRolePassword(admin, "eureka_worker", process.env.WORKER_DB_PASSWORD);
 await admin.end();
