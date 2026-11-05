@@ -13,14 +13,16 @@ export const HotlistFilters = z
 export type HotlistFilters = z.infer<typeof HotlistFilters>;
 
 const ViewName = z.string().trim().min(1).max(80);
+/** A view's filters are checked against its list's schema by the controller (CreateView / UpdateView keep them opaque). */
+const ViewFilters = z.record(z.unknown());
 
-export const CreateView = z.object({ name: ViewName, filters: HotlistFilters }).strict();
+export const CreateView = z.object({ name: ViewName, filters: ViewFilters, shared: z.boolean().optional() }).strict();
 export type CreateView = z.infer<typeof CreateView>;
 
 export const UpdateView = z
-  .object({ name: ViewName.optional(), filters: HotlistFilters.optional() })
+  .object({ name: ViewName.optional(), filters: ViewFilters.optional(), shared: z.boolean().optional() })
   .strict()
-  .refine((b) => b.name !== undefined || b.filters !== undefined, { message: "Nothing to change" });
+  .refine((b) => b.name !== undefined || b.filters !== undefined || b.shared !== undefined, { message: "Nothing to change" });
 export type UpdateView = z.infer<typeof UpdateView>;
 
 /** Most candidates one bulk request may touch; every record is checked on its own. */

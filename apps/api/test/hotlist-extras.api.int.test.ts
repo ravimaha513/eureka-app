@@ -70,6 +70,8 @@ describe("permission matrix (generated from the catalog)", () => {
     { perm: "candidate:update", method: "POST", url: "/api/v1/hotlist/bulk/priority", body: { ids: [NOBODY], priority: "P1" } },
     { perm: "hotlist:read", method: "GET", url: "/api/v1/hotlist/filter-options" },
     { perm: "hotlist:read", method: "GET", url: "/api/v1/hotlist/facets" },
+    { perm: "candidate:read", method: "GET", url: "/api/v1/candidates/views" },
+    { perm: "candidate:read", method: "POST", url: "/api/v1/candidates/views", body: { bogus: 1 } },
     { perm: "candidate:read", method: "GET", url: "/api/v1/candidates/facets" },
     { perm: "report:export", method: "POST", url: "/api/v1/hotlist/export", body: { status: "bench" } },
   ];
@@ -83,6 +85,49 @@ describe("permission matrix (generated from the catalog)", () => {
 });
 
 describe("saved views", () => {
+  it("shares a view with the owner's team: teammates and the lead read it, only the owner changes it", async () => {
+    const created = await call("r1a", "POST", "/api/v1/hotlist/views", { name: "Team bench", filters: { status: ["bench"] }, shared: true });
+    expect(created.statusCode, created.body).toBe(201);
+    const v = created.json();
+    expect(v).toMatchObject({ shared: true, mine: true, owner: null });
+    const seen = async (key: keyof typeof U) =>
+      (await call(key, "GET", "/api/v1/hotlist/views")).json().items.find((x: { id: string }) => x.id === v.id);
+    expect(await seen("r1b")).toMatchObject({ name: "Team bench", mine: false, owner: "r1a", filters: { status: ["bench"] } });
+    expect(await seen("l1")).toMatchObject({ mine: false });
+    expect(await seen("r2a")).toBeUndefined();
+    expect((await call("r1b", "PATCH", `/api/v1/hotlist/views/${v.id}`, { name: "Mine now" })).statusCode).toBe(404);
+    expect((await call("r1b", "DELETE", `/api/v1/hotlist/views/${v.id}`)).statusCode).toBe(404);
+    // Clients never pick the team (rule 4): it is not a writable field.
+    expect((await call("r1a", "PATCH", `/api/v1/hotlist/views/${v.id}`, { sharedTeamId: T.t2 })).statusCode).toBe(422);
+    expect((await call("r1a", "PATCH", `/api/v1/hotlist/views/${v.id}`, { shared: false })).json()).toMatchObject({ shared: false });
+    expect(await seen("r1b")).toBeUndefined();
+    const raw = await db.admin.query(`SELECT shared_team_id FROM eureka.hotlist_view WHERE id = $1`, [v.id]);
+    expect(raw.rows[0].shared_team_id).toBeNull();
+    await call("r1a", "DELETE", `/api/v1/hotlist/views/${v.id}`);
+  });
+
+  it("sharing needs a team", async () => {
+    const r = await call("ceo", "POST", "/api/v1/hotlist/views", { name: "Org wide", filters: {}, shared: true });
+    expect(r.statusCode).toBe(422);
+    expect(r.json().detail).toBe("no_team");
+  });
+
+  it("the Candidates list keeps its own views, checked against its own filters", async () => {
+    const c = await call("r1a", "POST", "/api/v1/candidates/views", { name: "Batch view", filters: { batchId: [NOBODY], status: ["in_training"] } });
+    expect(c.statusCode, c.body).toBe(201);
+    // Same name on the other list is fine; the Hot List has no batch filter.
+    const h = await call("r1a", "POST", "/api/v1/hotlist/views", { name: "Batch view", filters: {} });
+    expect(h.statusCode).toBe(201);
+    expect((await call("r1a", "POST", "/api/v1/hotlist/views", { name: "Bad", filters: { batchId: [NOBODY] } })).statusCode).toBe(422);
+    const lists = async (path: string) => (await call("r1a", "GET", path)).json().items.map((x: { name: string; id: string }) => x.id);
+    expect(await lists("/api/v1/candidates/views")).toEqual([c.json().id]);
+    expect(await lists("/api/v1/hotlist/views")).not.toContain(c.json().id);
+    // A view is changed through its own list only.
+    expect((await call("r1a", "DELETE", `/api/v1/hotlist/views/${c.json().id}`)).statusCode).toBe(404);
+    expect((await call("r1a", "DELETE", `/api/v1/candidates/views/${c.json().id}`)).statusCode).toBe(204);
+    expect((await call("r1a", "DELETE", `/api/v1/hotlist/views/${h.json().id}`)).statusCode).toBe(204);
+  });
+
   it("reads a view saved with single values back as lists", async () => {
     const id = (await call("r2a", "POST", "/api/v1/hotlist/views", { name: "Old view", filters: {} })).json().id as string;
     await db.admin.query(`UPDATE eureka.hotlist_view SET filters = $2 WHERE id = $1`, [id, { status: "bench", teamId: T.t1, resume: "yes" }]);

@@ -32,6 +32,8 @@ export const CandidateListQuery = z
   .strict();
 export type CandidateListQuery = z.infer<typeof CandidateListQuery>;
 export const HotlistQuery = CandidateListQuery.omit({ batchId: true });
+/** A saved Candidates-list view: the list's filters and sort, without paging. */
+export const CandidateViewFilters = CandidateListQuery.omit({ cursor: true, limit: true });
 /** Facet counts take the list's filters without paging. */
 export const CandidateFacetQuery = CandidateListQuery.omit({ cursor: true, limit: true, sort: true });
 export const HotlistFacetQuery = CandidateFacetQuery.omit({ batchId: true });

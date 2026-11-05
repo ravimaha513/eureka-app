@@ -17,6 +17,8 @@ import { RateLimiter } from "../../platform/rate-limit.js";
 import { CandidatesService } from "../candidates/candidates.service.js";
 import { filterSummary, hotlistMore } from "../candidates/list-filters.js";
 import { toCsv } from "./csv.js";
+import type pg from "pg";
+import { CandidateViewFilters } from "../candidates/candidates.schemas.js";
 import { HotlistFilters, type BulkPriority, type BulkStatus, type BulkVisibility, type CreateView, type UpdateView } from "./hotlist.schemas.js";
 import { likeContains } from "../../platform/sql.js";
 
@@ -28,7 +30,15 @@ export const EXPORT_WINDOW_MS = 10 * 60_000;
 /** Bulk requests per user per minute; each request touches at most BULK_MAX records. */
 export const BULK_REQUESTS_PER_MINUTE = 10;
 
-interface ViewRow { id: string; name: string; filters: HotlistFilters; created_at: Date; updated_at: Date }
+interface ViewRow {
+  id: string; name: string; filters: unknown; shared: boolean; mine: boolean; owner_name: string;
+  created_at: Date; updated_at: Date;
+}
+/** Which list a saved view belongs to (0470). */
+export type ViewList = "hotlist" | "candidates";
+const VIEW_FILTERS = { hotlist: HotlistFilters, candidates: CandidateViewFilters } as const;
+const VIEW_COLS = `v.id, v.name, v.filters, v.shared, v.owner_id = authz.current_user_id() AS mine, u.display_name AS owner_name,
+  v.created_at, v.updated_at`;
 
 interface ExportRow {
   id: string;
@@ -57,12 +67,16 @@ export interface BulkResult { id: string; ok: boolean; error?: BulkError }
 
 const label = (s: string) => { const t = s.replace(/_/g, " "); return t.charAt(0).toUpperCase() + t.slice(1); };
 
-/** Views saved before the multi-value filters hold single strings: read back in today's shape (arrays). */
-const presentView = (r: ViewRow) => {
-  const parsed = HotlistFilters.safeParse(r.filters);
+/**
+ * A saved view as the client sees it. Views saved before the multi-value filters hold single
+ * strings: they read back in today's shape (arrays). `mine` = the caller owns it (else a teammate
+ * shared it, `owner` names who).
+ */
+const presentView = (list: ViewList) => (r: ViewRow) => {
+  const parsed = VIEW_FILTERS[list].safeParse(r.filters);
   return {
-    id: r.id, name: r.name, filters: parsed.success ? parsed.data : r.filters,
-    createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
+    id: r.id, name: r.name, filters: parsed.success ? parsed.data : r.filters, shared: r.shared, mine: r.mine,
+    owner: r.mine ? null : r.owner_name, createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
   };
 };
 
@@ -79,33 +93,47 @@ export class HotlistService {
     private readonly candidates: CandidatesService,
   ) {}
 
-  // ---- saved views: RLS keeps every row private to its owner (migration 0025) ----
+  // ---- saved views: RLS lets the owner change a view and teammates read a shared one (0025, 0470) ----
 
-  async listViews(user: AuthedUser) {
+  async listViews(user: AuthedUser, list: ViewList) {
     const rows = await this.db.withUser(user.id, async (c) => (await c.query<ViewRow>(
-      `SELECT id, name, filters, created_at, updated_at FROM eureka.hotlist_view ORDER BY lower(name), id`)).rows);
-    return { items: rows.map(presentView) };
+      `SELECT ${VIEW_COLS} FROM eureka.hotlist_view v JOIN eureka.app_user u ON u.id = v.owner_id
+        WHERE v.list = $1 ORDER BY (v.owner_id = authz.current_user_id()) DESC, lower(v.name), v.id`, [list])).rows);
+    return { items: rows.map(presentView(list)) };
   }
 
-  async createView(user: AuthedUser, body: CreateView) {
-    const row = await this.db.withUser(user.id, async (c) => this.mapViewErrors(async () => (await c.query<ViewRow>(
-      `INSERT INTO eureka.hotlist_view (name, filters) VALUES ($1, $2)
-       RETURNING id, name, filters, created_at, updated_at`, [body.name, body.filters])).rows[0]!));
-    return presentView(row);
+  async createView(user: AuthedUser, list: ViewList, body: CreateView) {
+    const row = await this.db.withUser(user.id, async (c) => this.mapViewErrors(async () => {
+      const id = (await c.query<{ id: string }>(
+        `INSERT INTO eureka.hotlist_view (list, name, filters, shared) VALUES ($1, $2, $3, $4) RETURNING id`,
+        [list, body.name, body.filters, body.shared ?? false])).rows[0]!.id;
+      return this.viewById(c, id);
+    }));
+    return presentView(list)(row!);
   }
 
-  async updateView(user: AuthedUser, id: string, body: UpdateView) {
-    const row = await this.db.withUser(user.id, async (c) => this.mapViewErrors(async () => (await c.query<ViewRow>(
-      `UPDATE eureka.hotlist_view SET name = coalesce($2, name), filters = coalesce($3, filters) WHERE id = $1
-       RETURNING id, name, filters, created_at, updated_at`, [id, body.name ?? null, body.filters ?? null])).rows[0]));
+  async updateView(user: AuthedUser, list: ViewList, id: string, body: UpdateView) {
+    const row = await this.db.withUser(user.id, async (c) => this.mapViewErrors(async () => {
+      // Owner only (RLS): a teammate's shared view is not found here, so 404.
+      const n = (await c.query(
+        `UPDATE eureka.hotlist_view SET name = coalesce($3, name), filters = coalesce($4, filters), shared = coalesce($5, shared)
+          WHERE id = $1 AND list = $2 AND owner_id = authz.current_user_id()`,
+        [id, list, body.name ?? null, body.filters ?? null, body.shared ?? null])).rowCount ?? 0;
+      return n ? this.viewById(c, id) : undefined;
+    }));
     if (!row) throw new NotFoundException();
-    return presentView(row);
+    return presentView(list)(row);
   }
 
-  async deleteView(user: AuthedUser, id: string) {
+  async deleteView(user: AuthedUser, list: ViewList, id: string) {
     const n = await this.db.withUser(user.id, async (c) =>
-      (await c.query(`DELETE FROM eureka.hotlist_view WHERE id = $1`, [id])).rowCount ?? 0);
+      (await c.query(`DELETE FROM eureka.hotlist_view WHERE id = $1 AND list = $2 AND owner_id = authz.current_user_id()`, [id, list])).rowCount ?? 0);
     if (n === 0) throw new NotFoundException();
+  }
+
+  private async viewById(c: pg.PoolClient, id: string) {
+    return (await c.query<ViewRow>(
+      `SELECT ${VIEW_COLS} FROM eureka.hotlist_view v JOIN eureka.app_user u ON u.id = v.owner_id WHERE v.id = $1`, [id])).rows[0];
   }
 
   private async mapViewErrors<T>(fn: () => Promise<T>): Promise<T> {
@@ -115,6 +143,7 @@ export class HotlistService {
       const e = err as { code?: string; constraint?: string; message?: string };
       if (e.code === "23505" && e.constraint === "hotlist_view_owner_name") throw new ConflictException("view_name_taken");
       if (e.code === "23514" && e.message === "too_many_views") throw new UnprocessableEntityException("too_many_views");
+      if (e.code === "23514" && e.message === "no_team") throw new UnprocessableEntityException("no_team");
       throw err;
     }
   }

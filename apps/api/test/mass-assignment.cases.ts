@@ -833,7 +833,7 @@ const CASES: RejectCase[] = [
       url: "/api/v1/hotlist/views", body: { name: "MA view", filters: { status: "active" } },
       state: () => rows(`SELECT count(*)::int AS n FROM eureka.hotlist_view`),
     }),
-    forbidden: { ownerId: U.r1b, userId: U.r1b, owner: U.r1b },
+    forbidden: { ownerId: U.r1b, userId: U.r1b, owner: U.r1b, sharedTeamId: T.t2, list: "candidates" },
   },
   {
     route: "PATCH /api/v1/hotlist/views/:id", actor: "r1a",
@@ -844,7 +844,26 @@ const CASES: RejectCase[] = [
         state: () => rows(`SELECT * FROM eureka.hotlist_view WHERE id = $1`, [v.id]),
       };
     },
-    forbidden: { ownerId: U.r1b, userId: U.r1b },
+    forbidden: { ownerId: U.r1b, userId: U.r1b, sharedTeamId: T.t2, list: "candidates" },
+  },
+  {
+    route: "POST /api/v1/candidates/views", actor: "r1a",
+    prepare: async () => ({
+      url: "/api/v1/candidates/views", body: { name: `MA cview ${++n}`, filters: { status: ["active"] } },
+      state: () => rows(`SELECT count(*)::int AS n FROM eureka.hotlist_view`),
+    }),
+    forbidden: { ownerId: U.r1b, owner: U.r1b, sharedTeamId: T.t2, list: "hotlist" },
+  },
+  {
+    route: "PATCH /api/v1/candidates/views/:id", actor: "r1a",
+    prepare: async () => {
+      const v = await ok("r1a", "POST", "/api/v1/candidates/views", { name: `MA cview ${++n}`, filters: {} });
+      return {
+        url: `/api/v1/candidates/views/${v.id}`, body: { name: `MA crenamed ${n}` },
+        state: () => rows(`SELECT * FROM eureka.hotlist_view WHERE id = $1`, [v.id]),
+      };
+    },
+    forbidden: { ownerId: U.r1b, sharedTeamId: T.t2, list: "hotlist" },
   },
   {
     route: "POST /api/v1/hotlist/bulk/visibility", actor: "l1",
