@@ -4,7 +4,7 @@ import {
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { CurrentUser, type AuthedUser } from "../../platform/auth.guard.js";
+import { CurrentUser, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { OidcService } from "../../platform/oidc.service.js";
@@ -47,6 +47,7 @@ const boundTo = (session: Buffer) => `step-up|${session.toString("hex")}`;
 /** Google returned to the callback without a code (the user cancelled or Google refused). */
 class StepUpCancelled extends Error {}
 
+@SelfService()
 @Controller("api/auth/step-up")
 export class StepUpController {
   private readonly log = new Logger("StepUp");

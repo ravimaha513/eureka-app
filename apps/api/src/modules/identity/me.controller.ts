@@ -1,10 +1,11 @@
 import { Controller, Get, Inject } from "@nestjs/common";
 import { capabilities } from "@eureka/shared";
-import { AllowPasswordChange, CurrentUser, type AuthedUser } from "../../platform/auth.guard.js";
+import { AllowPasswordChange, CurrentUser, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { SessionService } from "../../platform/session.service.js";
 
+@SelfService()
 @Controller("api/v1/me")
 export class MeController {
   constructor(

@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
-import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
+import { CurrentUser, RequirePermission, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { parseIfMatch } from "../../platform/http/if-match.js";
 import {
   ApplicantExport, ApplicantListQuery, ApplicationExport, ApplicationListQuery, CreateCandidateFromApplication, InterviewStatus,
@@ -26,6 +26,7 @@ export class ApplicationsController {
   constructor(private readonly svc: ApplicationsService) {}
 
   @Get()
+  @SelfService()
   list(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.list(user, ApplicationListQuery.parse(q));
   }
@@ -41,6 +42,7 @@ export class ApplicationsController {
   }
 
   @Get(":id")
+  @SelfService()
   get(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.svc.get(user, id);
   }
@@ -48,12 +50,14 @@ export class ApplicationsController {
   /** If-Match: the application's rowVersion (428 without it, 412 when stale). */
   @Post(":id/status")
   @HttpCode(200)
+  @SelfService()
   status(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
     @Headers("if-match") ifMatch: string | undefined) {
     return this.svc.transition(user, id, parseIfMatch(ifMatch), StatusChange.parse(body));
   }
 
   @Post(":id/interviews")
+  @SelfService()
   schedule(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.scheduleInterview(user, id, ScheduleInterview.parse(body));
   }
@@ -66,6 +70,7 @@ export class ApplicationsController {
   }
 }
 
+@SelfService()
 @Controller("api/v1/application-interviews")
 export class ApplicationInterviewsController {
   constructor(private readonly svc: ApplicationsService) {}

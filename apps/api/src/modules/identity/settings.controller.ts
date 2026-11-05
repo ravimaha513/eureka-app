@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Post, Put } from "@nestjs/common";
-import { CurrentUser, type AuthedUser } from "../../platform/auth.guard.js";
+import { CurrentUser, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { PreferenceType, PreferenceUpdate, ProfileUpdate, parseVersion } from "./settings.schemas.js";
 import { SettingsService } from "./settings.service.js";
 
@@ -9,6 +9,7 @@ import { SettingsService } from "./settings.service.js";
  * the CSRF token like every other write. Nothing here reads or changes
  * another user's data.
  */
+@SelfService()
 @Controller("api/v1/settings")
 export class SettingsController {
   constructor(private readonly svc: SettingsService) {}

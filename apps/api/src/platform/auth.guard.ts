@@ -15,7 +15,9 @@ import { AccessService } from "./access.service.js";
 import { CONFIG, type AppConfig } from "./config.js";
 import { DbService } from "./db.service.js";
 import { SessionService } from "./session.service.js";
+import { apiLog } from "./logger.js";
 import { PORTAL_HEADER, PortalSessionService } from "./portal-session.service.js";
+import { routeOf } from "./request-context.js";
 
 export interface AuthedUser {
   id: string;
@@ -63,6 +65,18 @@ export const AllowPasswordChange = () => SetMetadata(ALLOW_PASSWORD_CHANGE, true
 
 /** Coarse RBAC check before the handler; data scope is applied in queries and RLS. */
 export const RequirePermission = (p: Permission) => SetMetadata(REQUIRED_PERMISSION, p);
+
+/**
+ * Any signed-in staff user may call the route, by design: the data it reads or
+ * writes is scoped by RLS or by checks in the service (own profile, own
+ * notifications, rows the caller can see, or a permission check the guard
+ * cannot express, such as "either of two permissions"). Staff routes are
+ * default-deny (audit R-09): a route with none of RequirePermission, Public,
+ * PortalRoute or SelfService is refused with 403. New SelfService routes are
+ * reviewed through the allow-list in test/route-authz.int.test.ts.
+ */
+export const SELF_SERVICE_ROUTE = "eureka:self-service";
+export const SelfService = () => SetMetadata(SELF_SERVICE_ROUTE, true);
 
 export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionContext): AuthedUser => {
   const req = ctx.switchToHttp().getRequest<FastifyRequest>();
@@ -114,8 +128,14 @@ export class AuthGuard implements CanActivate {
     if (mustChange) throw new ForbiddenException("password_change_required");
 
     const needed = this.reflector.getAllAndOverride<Permission | undefined>(REQUIRED_PERMISSION, targets);
-    if (needed && !can(access, needed)) throw new ForbiddenException("Not permitted");
-    return true;
+    if (needed) {
+      if (!can(access, needed)) throw new ForbiddenException("Not permitted");
+      return true;
+    }
+    if (this.reflector.getAllAndOverride<boolean>(SELF_SERVICE_ROUTE, targets)) return true;
+    // Fail closed: a staff route that declares no authorization posture is a bug, not an open door.
+    apiLog.warn("route declares no authorization posture", { context: "AuthGuard", method: req.method, route: routeOf(req) });
+    throw new ForbiddenException("Not permitted");
   }
 
   /** Applicant routes: the portal cookie only (a staff cookie is never read here). */

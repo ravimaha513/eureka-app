@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from "@nestjs/common";
-import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
+import { CurrentUser, RequirePermission, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { AccessLogQuery, DocumentUpload, ReplaceDocumentFile, UpdateDocument } from "./documents.schemas.js";
 import { DocumentsService } from "./documents.service.js";
 
@@ -71,6 +71,7 @@ export class DocumentsController {
 
   /** The access log (audit:read: all; document.restricted:read: one restricted document). Checked in the service. */
   @Get("document-access")
+  @SelfService()
   accessLog(@CurrentUser() user: AuthedUser, @Query() query: unknown) {
     return this.svc.accessLog(user, AccessLogQuery.parse(query));
   }

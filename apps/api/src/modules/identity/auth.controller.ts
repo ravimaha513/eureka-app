@@ -3,7 +3,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AuditService } from "../../platform/audit.service.js";
 import { clientInfo } from "../../platform/client-info.js";
-import { AllowPasswordChange, CurrentUser, Public, type AuthedUser } from "../../platform/auth.guard.js";
+import { AllowPasswordChange, CurrentUser, Public, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { apiLog } from "../../platform/logger.js";
@@ -103,12 +103,15 @@ export class AuthController {
         `UPDATE eureka.app_user SET google_sub = $1
          WHERE email = $2 AND google_sub IS NULL AND status = 'active' RETURNING id`, [sub, email]) : { rows: [] };
       const linked = byEmail.rows[0];
+      // Rule 5: no email in audit_event. A reason code and the hosted-domain match say why.
       await this.audit.record(c, {
         actorId: linked?.id ?? "00000000-0000-0000-0000-000000000000",
         action: linked ? "auth.linked" : "auth.denied",
         entityType: "app_user",
         entityId: linked?.id,
-        changes: { email },
+        changes: linked
+          ? { linkedBy: "email" }
+          : { reason: inDomain ? "no_matching_account" : "outside_hosted_domain", domainMatch: inDomain },
       });
       return linked?.id ?? null;
     });
@@ -132,6 +135,7 @@ export class AuthController {
   @Post("logout")
   @AllowPasswordChange()
   @HttpCode(204)
+  @SelfService()
   async logout(@CurrentUser() user: AuthedUser, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
     await this.sessions.revoke(user.sessionHash);
     this.sessions.clearSessionCookie(reply);

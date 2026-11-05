@@ -2,7 +2,7 @@ import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCod
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { AllowPasswordChange, CurrentUser, Public, type AuthedUser } from "../../platform/auth.guard.js";
+import { AllowPasswordChange, CurrentUser, Public, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { clientInfo } from "../../platform/client-info.js";
 import { clientIp, ipKey } from "../../platform/client-ip.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
@@ -91,6 +91,7 @@ export class PasswordController {
   @Post("password/change")
   @AllowPasswordChange()
   @HttpCode(204)
+  @SelfService()
   async change(@CurrentUser() user: AuthedUser, @Body() body: unknown): Promise<void> {
     this.enabled();
     const { currentPassword, newPassword } = ChangePassword.parse(body);
