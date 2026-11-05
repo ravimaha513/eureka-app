@@ -1,11 +1,15 @@
 import { useState } from "react";
-import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
+import "./team.css";
+import { UserPlus } from "lucide-react";
+import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
+import { Person } from "../shell/ui";
 import { coachApi, coachError, type Coach, type CoachVia, type Ref } from "./coachApi";
 
 /**
  * The interview coaches supporting one sales team (docs/admin-api.md AD-11),
  * with remove buttons and "Add coach". Shared by Users & Access (Teams tab,
  * any coach) and the Interview Lead's Coach assignments page (their coaches).
+ * Removing asks first, like removing a team member (RemoveMemberDialog).
  */
 export function CoachList({ team, coaches, available, via, onChanged }: {
   team: { id: string; name: string };
@@ -16,34 +20,33 @@ export function CoachList({ team, coaches, available, via, onChanged }: {
   onChanged: (msg: string) => void;
 }) {
   const [adding, setAdding] = useState(false);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState<string | null>(null);
-  const remove = async (c: Ref) => {
-    setBusy(c.id); setError("");
-    try {
-      await coachApi.unassign(via, team.id, c.id);
-      onChanged(`${c.displayName} no longer coaches ${team.name}.`);
-    } catch (e) { setError(coachError(e)); } finally { setBusy(null); }
-  };
+  const [removing, setRemoving] = useState<Ref | null>(null);
   const assigned = new Set(coaches.map((c) => c.id));
   return (
-    <div className="coaches">
-      <h3 className="muted">Coaches</h3>
+    <div className="coaches tm-coaches">
+      <h3 className="tm-label">Coaches</h3>
       <ul className="members" aria-label={`Coaches of ${team.name}`}>
         {coaches.map((c) => (
           <li key={c.id}>
-            <span>{c.displayName}</span>
-            <button className="btn sm" disabled={busy === c.id} aria-label={`Remove coach ${c.displayName} from ${team.name}`}
-              onClick={() => void remove(c)}>Remove</button>
+            <Person name={c.displayName}>{c.displayName}</Person>
+            <button className="btn sm" aria-label={`Remove coach ${c.displayName} from ${team.name}`}
+              onClick={() => setRemoving(c)}>Remove</button>
           </li>
         ))}
         {coaches.length === 0 && <li className="muted">No coaches yet.</li>}
       </ul>
-      {error && <p className="error" role="alert">{error}</p>}
-      <button className="btn sm" aria-label={`Add coach to ${team.name}`} onClick={() => setAdding(true)}>Add coach</button>
+      <button className="btn sm tm-add" aria-label={`Add coach to ${team.name}`} onClick={() => setAdding(true)}>
+        <UserPlus size={14} aria-hidden="true" />Add coach</button>
       {adding && (
         <AddCoachDialog team={team} via={via} people={available.filter((p) => !assigned.has(p.id))}
           onClose={() => setAdding(false)} onDone={(msg) => { setAdding(false); onChanged(msg); }} />
+      )}
+      {removing && (
+        <ConfirmDialog title={`Remove ${removing.displayName} from ${team.name}?`} confirmLabel="Remove coach" danger formatError={coachError}
+          action={() => coachApi.unassign(via, team.id, removing.id)} onClose={() => setRemoving(null)}
+          onDone={() => { const c = removing; setRemoving(null); onChanged(`${c.displayName} no longer coaches ${team.name}.`); }}>
+          <p>{removing.displayName} stops seeing this team's candidates, Hot List and interviews. You can add them again later.</p>
+        </ConfirmDialog>
       )}
     </div>
   );

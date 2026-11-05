@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, CalendarDays, Plus, Trash2 } from "lucide-react";
+import { CalendarDays, Plus, Trash2 } from "lucide-react";
 import type { Me } from "../api";
 import { ConfirmDialog } from "../ui/Dialog";
 import { fmtDate } from "../sales/ui";
@@ -8,7 +8,8 @@ import { Avatar } from "../shell/ui";
 import { BatchDetailView } from "./BatchDetail";
 import { NewBatchDialog } from "./NewBatchDialog";
 import { BATCH_STATUSES, BATCH_STATUS_LABELS, trainingApi, trainingError, trainingKeys, type BatchCard } from "./trainingApi";
-import { BatchStatusPill, CoverArt } from "./ui";
+import { BatchStatusPill, CoverArt, schedule } from "./ui";
+import "./training.css";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
 
@@ -42,14 +43,19 @@ function BatchList({ me, onOpen, heading, notice, setNotice }: {
   const [deleting, setDeleting] = useState<BatchCard | null>(null);
   const q = useQuery({ queryKey: trainingKeys.batches(status), queryFn: () => trainingApi.batches(status) });
   const items = q.data?.items ?? [];
+  const [text, setText] = useState("");
+  const needle = text.trim().toLowerCase();
+  const shown = needle ? items.filter((b) => [b.name, b.technology.name, b.location.name, b.trainer?.name ?? ""].some((v) => (v ?? "").toLowerCase().includes(needle))) : items;
   return (
     <>
       <div className="pagehead">
         <div>
-          <h1 ref={heading} tabIndex={-1}>Training Batches</h1>
+          <h1 ref={heading} tabIndex={-1}>Training Batches{q.data && <span className="h1count">{items.length}</span>}</h1>
           <p className="sub">Manage student batches and track their progress.</p>
         </div>
-        <div className="toolbar push">
+        <div className="toolbar push tb-tools">
+          <div className="field inline tb-search"><label htmlFor={`${id}-q`}>Search</label>
+            <input id={`${id}-q`} type="search" placeholder="Batch, technology, location, trainer" value={text} onChange={(e) => setText(e.target.value)} /></div>
           <label className="field inline" htmlFor={`${id}-st`}>Status
             <select id={`${id}-st`} value={status} onChange={(e) => setStatus(e.target.value)}>
               <option value="">All statuses</option>
@@ -67,36 +73,51 @@ function BatchList({ me, onOpen, heading, notice, setNotice }: {
       ) : items.length === 0 ? (
         <div className="card"><p className="empty">{status ? "No batches with this status." : "No training batches to show yet."}</p></div>
       ) : (
-        <ul className="tr-grid" aria-label="Training batches">
-          {items.map((b) => (
-            <li key={b.id} className="card tr-card">
-              <div className="tr-coverwrap">
-                <CoverArt cover={b.cover} caption="Training batch" />
-                {b.actions.delete && (
-                  <button type="button" className="iconbtn tr-del" aria-label={`Delete ${b.name}`} onClick={() => setDeleting(b)}>
-                    <Trash2 size={16} aria-hidden="true" />
-                  </button>
-                )}
-              </div>
-              <h2 className="tr-title">{b.name}</h2>
-              <div><BatchStatusPill status={b.status} /> <span className="muted">{b.technology.name} · {b.location.name}</span></div>
-              <div className="tr-meta">
-                <span className="tr-trainer">
-                  <Avatar name={b.trainer?.name ?? "?"} size="sm" />
-                  <small>{b.trainer ? `by ${b.trainer.name}` : "No trainer yet"}</small>
-                </span>
-                <span><b>{b.students}</b><small>Students</small></span>
-                <span><b>{b.courses}</b><small>Courses</small></span>
-              </div>
-              <div className="tr-foot">
-                <span className="muted"><CalendarDays size={14} aria-hidden="true" /> {fmtDate(b.startDate)}{b.endDate ? ` – ${fmtDate(b.endDate)}` : ""}</span>
-                <button type="button" className="iconbtn" aria-label={`Open ${b.name}`} onClick={() => onOpen(b.id)}>
-                  <ArrowRight size={18} aria-hidden="true" />
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <>
+          <div className="tb-summary">
+            <span className="muted">{shown.length === items.length ? `${items.length} ${items.length === 1 ? "batch" : "batches"}` : `${shown.length} of ${items.length} batches`}</span>
+          </div>
+          {shown.length === 0 ? <div className="card"><p className="empty">No batches match this search. <button type="button" className="linkbtn" onClick={() => setText("")}>Clear search</button></p></div> : (
+            <ul className="tb-grid" aria-label="Training batches">
+              {shown.map((b) => {
+                const sched = schedule(b);
+                return (
+                  <li key={b.id} className="card tb-card">
+                    <div className="tb-top">
+                      <CoverArt cover={b.cover} size="sm" />
+                      <div className="tb-titles">
+                        <h2 className="tb-title">{b.name}</h2>
+                        <p className="tb-sub">{b.technology.name} · {b.location.name}</p>
+                      </div>
+                      <BatchStatusPill status={b.status} />
+                    </div>
+                    {/* The whole card opens the batch: one affordance, stretched over the card. */}
+                    <button type="button" className="cardopen tb-open" aria-label={`Open ${b.name}`} onClick={() => onOpen(b.id)} />
+                    <div className="tb-facts">
+                      <span className="tb-trainer"><Avatar name={b.trainer?.name ?? "?"} size="sm" /><small>{b.trainer ? `by ${b.trainer.name}` : "No trainer yet"}</small></span>
+                      <span className="tb-stat"><b>{b.students}</b><small>Students</small></span>
+                      <span className="tb-stat"><b>{b.courses}</b><small>Courses</small></span>
+                    </div>
+                    <div className="tb-sched">
+                      <span className="tb-dates"><CalendarDays size={14} aria-hidden="true" />{fmtDate(b.startDate)}{b.endDate ? ` – ${fmtDate(b.endDate)}` : ""}</span>
+                      {sched && <span className="tb-schedlabel">{sched.label}</span>}
+                      {sched && sched.pct !== null && (
+                        <span className="tb-bar" role="progressbar" aria-label={`Schedule of ${b.name}: ${sched.label}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={sched.pct}>
+                          <span className={sched.pct >= 100 ? "done" : undefined} style={{ width: `${sched.pct}%` }} />
+                        </span>
+                      )}
+                    </div>
+                    {b.actions.delete && (
+                      <button type="button" className="iconbtn sm tb-del" aria-label={`Delete ${b.name}`} title="Delete batch" onClick={() => setDeleting(b)}>
+                        <Trash2 size={16} aria-hidden="true" />
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
       )}
       {creating && (
         <NewBatchDialog me={me} onClose={() => setCreating(false)} onDone={(bid, _name, added) => {

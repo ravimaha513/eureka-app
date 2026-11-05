@@ -631,6 +631,8 @@ describe("Teams tab", () => {
     drawer = await openTeam("Team Rohit");
     expect(within(within(drawer).getByRole("list", { name: "Coaches of Team Rohit" })).getByText("Cora Coach")).toBeInTheDocument();
     fireEvent.click(within(drawer).getByRole("button", { name: "Remove coach Cora Coach from Team Rohit" }));
+    // Removing a coach asks first, like removing a member.
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Remove Cora Coach from Team Rohit?" })).getByRole("button", { name: "Remove coach" }));
     await waitFor(() => expect(status()).toHaveTextContent("Cora Coach no longer coaches Team Rohit."));
     expect(lastWrite()).toMatchObject({ method: "DELETE", path: "/api/v1/admin/teams/t1/coaches/u-coach" });
   });

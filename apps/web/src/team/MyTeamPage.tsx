@@ -4,6 +4,9 @@ import { UserPlus } from "lucide-react";
 import { Person } from "../shell/ui";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { RemoveMemberDialog } from "./RemoveMemberDialog";
+import { Loading } from "../ui/Loading";
+import { QueryError } from "../ui/QueryError";
+import "./team.css";
 import { teamApi, teamError, teamKeys, type Addable, type MyTeam, type Ref } from "./teamApi";
 
 /**
@@ -26,27 +29,30 @@ export function MyTeamPage() {
     void qc.invalidateQueries({ queryKey: teamKeys.mine });
   };
 
+  const teams = q.data?.items ?? [];
+  const addable = q.data?.addable ?? [];
+  // One team: its Add member is the page's primary action. Several: each card gets a secondary one.
+  const single = teams.length === 1;
+  const noneFree = addable.length === 0;
+
   return (
-    <section className="panel">
+    <section className="panel tm-page">
       <div className="pagehead"><div><h1 tabIndex={-1}>My team</h1>
         <p className="sub">Add recruiters who aren't in a team yet. To take someone from another team, ask your manager to move them.</p></div></div>
       <div className="livemsg" role="status" aria-live="polite">{message}</div>
-      {q.isLoading && <p className="empty">Loading…</p>}
-      {q.error && <p className="empty error" role="alert">{teamError(q.error)}</p>}
+      {q.isLoading && <Loading />}
+      {q.error && <QueryError query={q} message={teamError(q.error)} />}
+      {q.data && noneFree && teams.length > 0 && <p className="hint" id="mt-nonefree">No unassigned recruiters right now, so there is nobody to add.</p>}
       {q.data && (
         <div className="teamgrid">
-          {q.data.items.map((t) => (
-            <section key={t.id} className="card team" aria-labelledby={`myteam-${t.id}`}>
-              <header>
-                <div className="rowactions">
-                  <h2 id={`myteam-${t.id}`}>{t.name}</h2>
-                  <span className="badge">{t.members.length} {t.members.length === 1 ? "member" : "members"}</span>
-                </div>
-                <button className="btn sm primary" aria-label={`Add member to ${t.name}`} onClick={() => setAdding(t)}>
-                  <UserPlus size={14} aria-hidden="true" />Add member
-                </button>
+          {teams.map((t) => (
+            <section key={t.id} className="card team tm-card" aria-labelledby={`myteam-${t.id}`}>
+              <header className="tm-head">
+                <h2 id={`myteam-${t.id}`}>{t.name}</h2>
+                <span className="tm-count">{t.members.length} {t.members.length === 1 ? "member" : "members"} + lead</span>
               </header>
-              <Person name={t.lead.displayName}><b>{t.lead.displayName}</b><span className="block muted">Lead</span></Person>
+              <div className="tm-lead"><Person name={t.lead.displayName}><b>{t.lead.displayName}</b><span className="block muted">Lead</span></Person></div>
+              <h3 className="tm-label">Members</h3>
               <ul className="members" aria-label={`Members of ${t.name}`}>
                 {t.members.map((m) => (
                   <li key={m.id}>
@@ -56,9 +62,13 @@ export function MyTeamPage() {
                 ))}
                 {t.members.length === 0 && <li className="muted">No members yet.</li>}
               </ul>
+              <button className={`btn sm tm-add${single ? " primary" : ""}`} aria-label={`Add member to ${t.name}`} disabled={noneFree}
+                aria-describedby={noneFree ? "mt-nonefree" : undefined} onClick={() => setAdding(t)}>
+                <UserPlus size={14} aria-hidden="true" />Add member
+              </button>
             </section>
           ))}
-          {q.data.items.length === 0 && <p className="empty">No teams to manage yet.</p>}
+          {teams.length === 0 && <p className="empty">No teams to manage yet.</p>}
         </div>
       )}
       {adding && (

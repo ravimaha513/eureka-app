@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isSafeHttpsUrl } from "@eureka/shared";
-import { BookOpen, CalendarDays, ChevronDown, ChevronUp, ExternalLink, GraduationCap, Pencil, Plus, Trash2, Upload, UserMinus, Users } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Circle, ExternalLink, Pencil, Plus, Trash2, Upload, UserMinus } from "lucide-react";
 import { can, type Me } from "../api";
 import { navigate } from "../lib/router";
 import { screenPath } from "../nav";
@@ -13,7 +13,10 @@ import {
   NEXT_STATUS, fmtMinutes, trainingApi, trainingError, trainingKeys,
   type AssignedCourse, type BatchDetail, type Student,
 } from "./trainingApi";
-import { BatchStatusPill, CoverArt, ProgressBar } from "./ui";
+import { BatchStatusPill, CoverArt, ProgressBar, elapsedPercent, schedule } from "./ui";
+import { Menu } from "../ui/Menu";
+import { Tabs } from "../ui/Tabs";
+import "./training.css";
 import { Loading } from "../ui/Loading";
 import { QueryError } from "../ui/QueryError";
 
@@ -45,54 +48,52 @@ export function BatchDetailView({ id, me, onBack, onDeleted }: {
   const b = q.data;
   // Who cannot edit the course list comes here to see or fill the batch.
   const tab = picked ?? (b.actions.manage ? "courses" : "students");
+  const sched = schedule(b);
   return (
     <>
       <nav className="tr-crumbs" aria-label="Breadcrumb">
         <button type="button" className="linkbtn" onClick={onBack}>Training Batches</button>
         <span aria-hidden="true"> › </span><span aria-current="page">{b.name}</span>
       </nav>
-      <section className="card tr-head" aria-labelledby={`${tabsId}-h`}>
-        <CoverArt cover={b.cover} caption="Training batch" />
-        <div className="tr-headmain">
-          <div className="tr-headtop">
-            <h1 id={`${tabsId}-h`} ref={heading} tabIndex={-1}>{b.name}</h1>
-            <BatchStatusPill status={b.status} />
-            {(b.actions.manage || b.actions.delete) && (
-              <div className="rowactions push">
-                {b.actions.manage && (NEXT_STATUS[b.status] ?? []).map((s) => (
-                  <button key={s.to} type="button" className={`btn sm${s.to === "cancelled" ? " danger" : ""}`} onClick={() => setStatusTo(s)}>{s.label}</button>
-                ))}
-                {b.actions.manage && <button type="button" className="btn sm" onClick={() => setEditing(true)}><Pencil size={14} aria-hidden="true" />Edit</button>}
-                {b.actions.delete && <button type="button" className="btn sm danger" onClick={() => setDeleting(true)}><Trash2 size={14} aria-hidden="true" />Delete</button>}
-              </div>
-            )}
+      <section className="card tr-head tb-head" aria-labelledby={`${tabsId}-h`}>
+        <div className="tb-headtop">
+          <CoverArt cover={b.cover} size="sm" />
+          <div className="tb-headtitle">
+            <div className="tr-headtop">
+              <h1 id={`${tabsId}-h`} ref={heading} tabIndex={-1}>{b.name}</h1>
+              <BatchStatusPill status={b.status} />
+            </div>
+            <p className="muted">{b.technology.name} · {b.location.name} · {b.trainer ? `Trainer: ${b.trainer.name}` : "No trainer yet"}</p>
           </div>
-          <p className="muted">{b.technology.name} · {b.location.name} · {b.trainer ? `Trainer: ${b.trainer.name}` : "No trainer yet"}</p>
-          <ul className="tr-stats" aria-label="Batch figures">
-            <li><Users size={18} aria-hidden="true" /><b>{b.students}</b><span>Students</span></li>
-            <li><BookOpen size={18} aria-hidden="true" /><b>{b.courses}</b><span>Courses</span></li>
-            <li><CalendarDays size={18} aria-hidden="true" /><b>{fmtDate(b.startDate)}</b><span>Start date{b.endDate ? ` (ends ${fmtDate(b.endDate)})` : ""}</span></li>
-            <li><GraduationCap size={18} aria-hidden="true" /><b>{b.batchYear}</b><span>Batch year</span></li>
-          </ul>
+          {(b.actions.manage || b.actions.delete) && (
+            <div className="tb-headacts">
+              {b.actions.manage && (NEXT_STATUS[b.status] ?? []).filter((s) => s.to !== "cancelled").map((s) => (
+                <button key={s.to} type="button" className="btn sm primary" onClick={() => setStatusTo(s)}>{s.label}</button>
+              ))}
+              {b.actions.manage && <button type="button" className="btn sm" onClick={() => setEditing(true)}><Pencil size={14} aria-hidden="true" />Edit</button>}
+              <Menu label={`More actions for ${b.name}`} items={[
+                ...(b.actions.manage ? (NEXT_STATUS[b.status] ?? []).filter((s) => s.to === "cancelled").map((s) => ({ label: `${s.label}…`, danger: true, onSelect: () => setStatusTo(s) })) : []),
+                b.actions.delete && { label: "Delete batch…", danger: true, onSelect: () => setDeleting(true) },
+              ]} />
+            </div>
+          )}
         </div>
+        <ul className="tb-stats" aria-label="Batch figures">
+          <li><b>{b.students}</b><span>Students</span></li>
+          <li><b>{b.courses}</b><span>Courses</span></li>
+          <li><b>{fmtDate(b.startDate)}{b.endDate ? ` – ${fmtDate(b.endDate)}` : ""}</b><span>{b.endDate ? "Dates" : "Start date"}</span></li>
+          {sched && <li><b>{sched.label}</b><span>Schedule</span></li>}
+          <li><b>{b.batchYear}</b><span>Batch year</span></li>
+        </ul>
       </section>
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
 
-      <div className="tabs tr-tabs" role="tablist" aria-label="Batch sections">
-        <button type="button" role="tab" id={`${tabsId}-tc`} className="tab" aria-selected={tab === "courses"} aria-controls={`${tabsId}-pc`}
-          onClick={() => setTab("courses")}><BookOpen size={15} aria-hidden="true" />&nbsp;View Courses</button>
-        <button type="button" role="tab" id={`${tabsId}-ts`} className="tab" aria-selected={tab === "students"} aria-controls={`${tabsId}-ps`}
-          onClick={() => setTab("students")}><Users size={15} aria-hidden="true" />&nbsp;View Students</button>
-      </div>
-      {tab === "courses" ? (
-        <div role="tabpanel" id={`${tabsId}-pc`} aria-labelledby={`${tabsId}-tc`}>
-          <CoursesPanel batch={b} onNotice={setNotice} />
-        </div>
-      ) : (
-        <div role="tabpanel" id={`${tabsId}-ps`} aria-labelledby={`${tabsId}-ts`}>
-          <StudentsPanel batch={b} canOpenProfile={can(me, "candidate:read")} canImport={can(me, "candidate:create")} onNotice={setNotice} />
-        </div>
-      )}
+      <Tabs label="Batch sections" className="tr-tabs" value={tab} onChange={setTab} panelClassName="tb-tabpanel"
+        tabs={[{ key: "students", label: "Students", count: b.students }, { key: "courses", label: "Courses", count: b.courses }]}>
+        {(t) => t === "courses"
+          ? <CoursesPanel batch={b} onNotice={setNotice} />
+          : <StudentsPanel batch={b} canOpenProfile={can(me, "candidate:read")} canImport={can(me, "candidate:create")} onNotice={setNotice} />}
+      </Tabs>
 
       {editing && <BatchDialog batch={b} onClose={() => setEditing(false)}
         onSaved={() => { setEditing(false); setNotice("Batch saved."); void refresh(); }} />}
@@ -149,7 +150,7 @@ function CoursesPanel({ batch, onNotice }: { batch: BatchDetail; onNotice: (s: s
                   <button type="button" className="tr-acctoggle" aria-expanded={expanded} aria-controls={panel}
                     onClick={() => setOpen((s) => { const n = new Set(s); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); return n; })}>
                     <CoverArt cover={c.cover} size="sm" />
-                    <span><b>{c.title}</b><small className="block muted">{c.modules.length} {c.modules.length === 1 ? "module" : "modules"} · {fmtMinutes(c.totalMinutes)}</small></span>
+                    <span><b>{c.title}</b>{c.modules.length === 0 && <span className="badge tb-empty">No modules</span>}<small className="block muted">{c.modules.length} {c.modules.length === 1 ? "module" : "modules"} · {fmtMinutes(c.totalMinutes)}</small></span>
                     <ChevronDown size={18} aria-hidden="true" className="tr-caret" />
                   </button>
                   {manage && (
@@ -246,7 +247,13 @@ function StudentsPanel({ batch, canOpenProfile, canImport, onNotice }: { batch: 
   const [removing, setRemoving] = useState<Student | null>(null);
   const [error, setError] = useState("");
   const refresh = () => qc.invalidateQueries({ queryKey: trainingKeys.all });
-  const items = q.data?.items ?? [];
+  const [sort, setSort] = useState<"name" | "low" | "high">("name");
+  const elapsed = batch.status === "in_training" ? elapsedPercent(batch) : null;
+  // Behind: more than 10 points below the share of the batch's calendar that has passed (client-side).
+  const isBehind = (s: Student) => elapsed !== null && s.percent + 10 < elapsed;
+  const raw = q.data?.items ?? [];
+  const items = sort === "name" ? raw : [...raw].sort((a, b) => (sort === "low" ? a.percent - b.percent : b.percent - a.percent) || a.name.localeCompare(b.name));
+  const behind = raw.filter(isBehind).length;
 
   // The box shows the new state at once; it falls back to the server's answer after the refetch (or an error).
   const [pending, setPending] = useState<Record<string, boolean>>({});
@@ -265,13 +272,21 @@ function StudentsPanel({ batch, canOpenProfile, canImport, onNotice }: { batch: 
 
   return (
     <section className="card pad tr-panel" aria-label="Students">
-      <div className="pagehead">
-        <h2>Enrolled Students</h2>
+      <div className="tb-paneltools">
+        <div className="field inline">
+          <label htmlFor={`${id}-q`}>Search students</label>
+          <input id={`${id}-q`} type="search" value={text} maxLength={80} onChange={(e) => setText(e.target.value)} />
+        </div>
+        <div className="field inline">
+          <label htmlFor={`${id}-s`}>Sort</label>
+          <select id={`${id}-s`} value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}>
+            <option value="name">Name</option><option value="low">Progress, lowest first</option><option value="high">Progress, highest first</option>
+          </select>
+        </div>
+        {elapsed !== null && (
+          <p className="tb-behindnote">{elapsed}% of the batch calendar has passed{behind > 0 ? <>; <b>{behind} behind</b></> : "; nobody is behind"}.</p>
+        )}
         <div className="toolbar push">
-          <div className="field inline">
-            <label htmlFor={`${id}-q`}>Search students</label>
-            <input id={`${id}-q`} type="search" value={text} maxLength={80} onChange={(e) => setText(e.target.value)} />
-          </div>
           {canImport && ["planned", "in_training"].includes(batch.status) && (
             <button type="button" className="btn sm" onClick={() => setImporting(true)}><Upload size={14} aria-hidden="true" />Upload new candidates</button>
           )}
@@ -291,7 +306,7 @@ function StudentsPanel({ batch, canOpenProfile, canImport, onNotice }: { batch: 
                   <div className="tr-accrow">
                     <button type="button" className="tr-acctoggle" aria-expanded={expanded} aria-controls={panel}
                       onClick={() => setOpen((o) => { const n = new Set(o); if (n.has(s.candidateId)) n.delete(s.candidateId); else n.add(s.candidateId); return n; })}>
-                      <span className="tr-stname"><b>{s.name}</b><small className="block muted">{s.technology} · {fmtMinutes(s.completedMinutes)} of {fmtMinutes(s.totalMinutes)}</small></span>
+                      <span className="tr-stname"><b>{s.name}</b>{isBehind(s) && <span className="badge tb-behind">Behind</span>}<small className="block muted">{s.technology} · {fmtMinutes(s.completedMinutes)} of {fmtMinutes(s.totalMinutes)}</small></span>
                       <ChevronDown size={18} aria-hidden="true" className="tr-caret" />
                     </button>
                     <ProgressBar percent={s.percent} label={`Overall progress of ${s.name}`} />
@@ -314,19 +329,31 @@ function StudentsPanel({ batch, canOpenProfile, canImport, onNotice }: { batch: 
                           <div key={c.id} className="tr-stcourse">
                             <div className="tr-stcoursehead">
                               <b>{c.title}</b>
-                              <ProgressBar percent={cp?.percent ?? 0} label={`${c.title} progress of ${s.name}`} />
+                              {c.modules.length === 0
+                                ? <span className="badge tb-empty">No modules yet</span>
+                                : <ProgressBar percent={cp?.percent ?? 0} label={`${c.title} progress of ${s.name}`} />}
                             </div>
                             <ul className="tr-checks">
+                              {c.modules.length === 0 && <li className="muted">This course has no modules yet, so nobody can complete it. Add modules in Courses.</li>}
                               {c.modules.map((m) => {
                                 const d = done.get(m.id);
                                 return (
-                                  <li key={m.id}>
-                                    <label className="check">
-                                      <input type="checkbox" checked={pending[`${s.candidateId}:${m.id}`] ?? Boolean(d)} disabled={!batch.actions.updateProgress}
-                                        onChange={(e) => void toggle(s, m.id, m.title, e.target.checked)} />
-                                      {" "}{m.title} <span className="muted">({fmtMinutes(m.durationMinutes)})</span>
-                                    </label>
-                                    {d && <small className="muted"> Completed {fmtDate(d.completedAt)}{d.completedBy.name ? ` by ${d.completedBy.name}` : ""}</small>}
+                                  <li key={m.id} className="tb-modrow">
+                                    {batch.actions.updateProgress ? (
+                                      <label className="check">
+                                        <input type="checkbox" checked={pending[`${s.candidateId}:${m.id}`] ?? Boolean(d)}
+                                          onChange={(e) => void toggle(s, m.id, m.title, e.target.checked)} />
+                                        {" "}{m.title} <span className="muted">({fmtMinutes(m.durationMinutes)})</span>
+                                      </label>
+                                    ) : (
+                                      // Read-only: a done / not-done mark, not a disabled checkbox that reads as "unavailable".
+                                      <span className={`tb-mark${d ? " done" : ""}`}>
+                                        {d ? <Check size={16} aria-hidden="true" /> : <Circle size={14} aria-hidden="true" />}
+                                        <span className="sr-only">{d ? "Done: " : "Not done: "}</span>
+                                        {m.title} <span className="muted">({fmtMinutes(m.durationMinutes)})</span>
+                                      </span>
+                                    )}
+                                    <small className="muted tb-done">{d ? <>Completed {fmtDate(d.completedAt)}{d.completedBy.name ? ` by ${d.completedBy.name}` : ""}</> : ""}</small>
                                   </li>
                                 );
                               })}
