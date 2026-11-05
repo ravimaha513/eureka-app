@@ -1,6 +1,6 @@
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { GRANTS, PERMISSIONS, ROLES } from "@eureka/shared";
+import { GRANTS, PERMISSIONS, ROLES, FIXED_ROLE_PERMISSIONS } from "@eureka/shared";
 import { createApp } from "../src/app.module.js";
 import { loadConfig } from "../src/platform/config.js";
 import { createTestDb, type TestDb } from "./db-harness.js";
@@ -73,7 +73,10 @@ describe("permission catalog", () => {
     const r = await call("admin", "GET", "/api/v1/admin/permissions");
     expect(r.statusCode).toBe(200);
     const items = r.json().items as { key: string; area: string; description: string; restricted: boolean; orgSensitive: boolean }[];
-    expect(items.map((i) => i.key)).toEqual([...PERMISSIONS]);
+    // Permissions fixed to their roles can't be granted, so the role editor never lists them.
+    const fixed = new Set<string>(FIXED_ROLE_PERMISSIONS);
+    expect(fixed.has("coach_calendar:manage")).toBe(true);
+    expect(items.map((i) => i.key)).toEqual(PERMISSIONS.filter((p) => !fixed.has(p)));
     expect(items.find((i) => i.key === "visa:read")).toMatchObject({ area: "Documents", restricted: true, orgSensitive: false });
     expect(items.find((i) => i.key === "rate:read")).toMatchObject({ area: "Placements", restricted: false, orgSensitive: true });
     expect(items.find((i) => i.key === "notify.contract:receive")).toMatchObject({ area: "Notifications" });
