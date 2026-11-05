@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { TRAINING_COVER_COLORS, TRAINING_COVER_ICONS } from "@eureka/shared";
+import { BATCH_STATUSES, TRAINING_COVER_COLORS, TRAINING_COVER_ICONS, type BatchStatus } from "@eureka/shared";
 
 /** Request schemas for docs/training-api.md. Limits match the CHECKs of migration 0065. */
 const uuid = z.string().uuid();
@@ -11,8 +11,8 @@ const text = (max: number) => z.string().trim().max(max).regex(/^[^\x00-\x09\x0b
 const https = z.string().trim().max(2000).url()
   .refine((u) => /^https:\/\/[^\s\p{Cc}@/?#]+([/?#][^\s\p{Cc}]*)?$/u.test(u), "Use an https:// link without spaces or user info");
 
-export const BATCH_STATUSES = ["planned", "in_training", "completed", "cancelled"] as const;
-export type BatchStatus = (typeof BATCH_STATUSES)[number];
+/** The batch lifecycle lives in packages/shared state-machines.ts (re-exported for the candidates module). */
+export { BATCH_STATUSES, type BatchStatus };
 export const coverColor = z.enum(TRAINING_COVER_COLORS);
 export const coverIcon = z.enum(TRAINING_COVER_ICONS);
 
@@ -50,7 +50,9 @@ export const UpdateTrainingBatch = z
   .refine((b) => Object.keys(b).length > 0, "nothing to change");
 export type UpdateTrainingBatch = z.infer<typeof UpdateTrainingBatch>;
 
-export const BatchStatusChange = z.object({ to: z.enum(["in_training", "completed", "cancelled"]) }).strict();
+/** Every status some transition reaches (batchTransitionAllowed); the service checks the edge. */
+const BATCH_TARGETS = ["in_training", "completed", "cancelled"] as const satisfies readonly BatchStatus[];
+export const BatchStatusChange = z.object({ to: z.enum(BATCH_TARGETS) }).strict();
 
 export const AddBatchCourse = z.object({ courseId: uuid }).strict();
 export const ReorderCourses = z.object({ courseIds: z.array(uuid).min(1).max(1000).refine((a) => new Set(a).size === a.length, "ids must be unique") }).strict();

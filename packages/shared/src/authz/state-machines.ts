@@ -1,9 +1,14 @@
 /**
  * State machines (design B2.6). The database enforces each one independently
  * (authz.transition_candidate, authz.transition_submission,
- * authz.transition_placement); these copies drive API pre-checks and the
- * per-record action hints, so they must match the SQL exactly.
+ * authz.transition_placement, authz.set_batch_status, the eureka.job_guard
+ * trigger, the paperwork definers); these copies drive API pre-checks and the
+ * per-record action hints, so they must match the SQL exactly
+ * (apps/api/test/state-machine-parity.db.int.test.ts runs every pair).
  */
+import { JOB_STATUSES } from "../jobs.js";
+
+type JobStatus = (typeof JOB_STATUSES)[number];
 
 // ---------- candidate (manual transitions, migration 0015/0022) ----------
 
@@ -103,6 +108,14 @@ export const CLOSED_BEFORE_JOIN_STATUSES: ReadonlySet<string> = new Set(["backou
 export const BGC_HISTORY_YEARS_MIN = 1;
 export const BGC_HISTORY_YEARS_MAX = 50;
 
+/**
+ * Placement statuses in which paperwork (checklist items, BGC record and its history entries) is
+ * locked: the definers answer `placement_closed` (authz.update_checklist_item, update_bgc,
+ * save_bgc_entry, delete_bgc_entry).
+ * Only a backout; a placement closed by bgc_failed or joining_issue keeps its paperwork editable.
+ */
+export const PAPERWORK_LOCKED_PLACEMENT_STATUSES: ReadonlySet<string> = new Set(["backout"]);
+
 /** Candidate statuses a placement can be made from; confirmation = another placement already in progress (a second one is allowed). */
 export const PLACEABLE_CANDIDATE_STATUSES: ReadonlySet<string> = new Set(["active", "full_of_interviews", "confirmation"]);
 
@@ -162,4 +175,49 @@ export const BGC_REASON_REQUIRED: ReadonlySet<string> = new Set(["failed"]);
 /** Failing and re-initiating a cleared check need a non-blank reason (reason_required). */
 export function bgcReasonRequired(from: string, to: string): boolean {
   return BGC_REASON_REQUIRED.has(to) || (from === "cleared" && to === "initiated");
+}
+
+// ---------- jobs (migration 0060; docs/jobs-portal-api.md JP-3a) ----------
+
+/**
+ * Job status lifecycle. Neither the design nor docs/jobs-portal-api.md defines a
+ * job lifecycle, so this encodes the behaviour as built: any status may change to
+ * any other one (a job can be reopened, put back to draft or closed at any time).
+ * Saving the unchanged status is not a transition and is always accepted.
+ * Tighten here and in eureka.job_guard (db/functions) together.
+ */
+const JOB_EDGES: Record<JobStatus, readonly JobStatus[]> = {
+  draft: ["open", "on_hold", "closed"],
+  open: ["draft", "on_hold", "closed"],
+  on_hold: ["draft", "open", "closed"],
+  closed: ["draft", "open", "on_hold"],
+};
+
+export function jobTransitionAllowed(from: string, to: string): boolean {
+  return JOB_EDGES[from as JobStatus]?.includes(to as JobStatus) ?? false;
+}
+
+export function jobTransitionTargets(from: string): JobStatus[] {
+  return JOB_STATUSES.filter((to) => jobTransitionAllowed(from, to));
+}
+
+// ---------- training batches (authz.set_batch_status, migrations 0032/0065; docs/training-api.md TR-6) ----------
+
+export const BATCH_STATUSES = ["planned", "in_training", "completed", "cancelled"] as const;
+export type BatchStatus = (typeof BATCH_STATUSES)[number];
+
+/** Batches that take students, courses and progress (otherwise 422 `batch_closed`). */
+export const BATCH_OPEN_STATUSES: ReadonlySet<string> = new Set(["planned", "in_training"]);
+
+const BATCH_EDGES: Partial<Record<string, readonly BatchStatus[]>> = {
+  planned: ["in_training", "cancelled"],
+  in_training: ["completed", "cancelled"],
+};
+
+export function batchTransitionAllowed(from: string, to: string): boolean {
+  return BATCH_EDGES[from]?.includes(to as BatchStatus) ?? false;
+}
+
+export function batchTransitionTargets(from: string): BatchStatus[] {
+  return [...(BATCH_EDGES[from] ?? [])];
 }

@@ -59,8 +59,9 @@ export class TrainingController {
     return this.svc.updateBatch(user, id, parseIfMatch(ifMatch), () => UpdateTrainingBatch.parse(body));
   }
 
+  /** TR-1: training managers and Sales leadership at their batch locations; checked in the service and the database. */
   @Put("batches/:id/status")
-  @RequirePermission("training:manage")
+  @RequirePermission("training:read")
   status(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.setStatus(user, id, BatchStatusChange.parse(body).to);
   }

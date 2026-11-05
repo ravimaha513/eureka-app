@@ -9,7 +9,10 @@ import {
 } from "@nestjs/common";
 import type pg from "pg";
 import {
+  BATCH_OPEN_STATUSES,
   batchDisplayName,
+  batchTransitionAllowed,
+  batchTransitionTargets,
   canManageTraining,
   canPlanBatch,
   resolveScope,
@@ -122,9 +125,13 @@ export class TrainingService {
         manage,
         /** Training managers and Sales leadership (Lead and above) at their batch locations; the database refuses a batch with students. */
         delete: b.deletable && b.students === 0,
-        updateProgress: trainingBatchCovered(access, "training.progress:update", ref) && ["planned", "in_training"].includes(b.status),
-        addStudents: b.staffable && ["planned", "in_training"].includes(b.status),
+        updateProgress: trainingBatchCovered(access, "training.progress:update", ref) && BATCH_OPEN_STATUSES.has(b.status),
+        addStudents: b.staffable && BATCH_OPEN_STATUSES.has(b.status),
         removeStudents: b.staffable,
+        /** TR-1: batch planning rights at the location (authz.batch_manage_location_ids(), as set_batch_status checks). */
+        changeStatus: b.deletable,
+        /** Statuses PUT /status accepts now (state-machines.ts batchTransitionTargets). */
+        statusTargets: b.deletable ? batchTransitionTargets(b.status) : [],
       },
     };
   }
@@ -234,9 +241,15 @@ export class TrainingService {
     });
   }
 
+  /**
+   * TR-1 (finding D-07): whoever plans batches at the location (training managers and Sales
+   * leadership, `deletable` = authz.batch_manage_location_ids()), the rule set_batch_status applies.
+   */
   async setStatus(user: AuthedUser, id: string, to: string) {
     return this.db.withUser(user.id, async (c) => {
       const b = await this.loadBatch(c, id);
+      if (!b.deletable) throw new ForbiddenException("Not permitted");
+      if (!batchTransitionAllowed(b.status, to)) throw new UnprocessableEntityException("invalid_transition");
       await c.query(`SELECT authz.set_batch_status($1, $2)`, [id, to]).catch(mapTrainingError);
       await this.audit.record(c, { actorId: user.id, action: "batch.status", entityType: "batch", entityId: id, changes: { from: b.status, to } });
       return { id, status: to };
@@ -390,7 +403,7 @@ export class TrainingService {
     return this.db.withUser(user.id, async (c) => {
       const b = await this.loadBatch(c, id);
       if (!b.staffable) throw new ForbiddenException("Not permitted");
-      if (!["planned", "in_training"].includes(b.status)) throw new UnprocessableEntityException("batch_closed");
+      if (!BATCH_OPEN_STATUSES.has(b.status)) throw new UnprocessableEntityException("batch_closed");
       // One call (0476): the rules of authz.set_batch_student per candidate, scope sets computed once,
       // candidates locked in id order; one row per distinct candidate, in request order.
       const outcomes = (await c.query<{ candidate_id: string; outcome: "added" | "skipped" }>(

@@ -38,10 +38,19 @@ Client-requirement pay is a rate: shown to managers of the job and `rate:read` h
 | `GET /company-options` | JP-31: `job:manage` and the caller may create internal openings (HR; 403 otherwise): `{ companies: [{ id, name }] }`, active companies, all locations |
 | `GET /:id` | RLS: 404 when not readable (also for the hiring manager and reviewers) |
 | `POST /` | JP-2: `job:manage` and the kind must be creatable by the caller (403 otherwise); optional `Idempotency-Key` (`platform/idempotency.ts`: same body → first response, other body 409 `idempotency_key_reused`, malformed 400 `invalid_idempotency_key`); strict body |
-| `PATCH /:id` | JP-3: read-before-write (404/403); `If-Match` rowVersion (428 without, 412 stale); `kind`, owner, team never change |
+| `PATCH /:id` | JP-3: read-before-write (404/403); `If-Match` rowVersion (428 without, 412 stale); `kind`, owner, team never change; `status` follows JP-3a (422 `invalid_transition`) |
 
 Server-managed (trigger): `owner_id`, `team_id` (the creator's team, client requirements only), `row_version`, timestamps, `posted_at`
 (first time open). Jobs are never deleted (close them). Audit rows carry ids and codes only (no title, pay, text).
+
+**JP-3a, status lifecycle.** `draft`, `open`, `on_hold`, `closed`. No product rule restricts the order, so every change
+between two statuses is allowed (a closed job can be reopened or put back to draft); saving the unchanged status is not a
+transition. The table lives in `packages/shared` state-machines.ts (`jobTransitionAllowed`, `jobTransitionTargets`), the API
+pre-checks it and the `eureka.job_guard` trigger (`db/functions/eureka/job_guard.sql`) re-checks it (422
+`invalid_transition`); `test/state-machine-parity.db.int.test.ts` keeps the two equal, so a future rule is one edit in each.
+`posted_at` stays the first time the job was open. Closing a job leaves its applications and submissions as they are; only
+new applications (`job_not_open`) and new submissions naming it are refused. Job cards carry `actions.statusTargets`
+(the statuses a PATCH may set; empty without `actions.edit`).
 
 ### Rich text (JP-4)
 
