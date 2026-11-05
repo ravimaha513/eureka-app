@@ -18,6 +18,12 @@ export const fmtUsd = (v: number | string | null | undefined) => {
   return Number.isFinite(n) ? formatUsd(n) : "—";
 };
 
+/** "+14695550001" → "+1 469 555 0001" (NANP); other numbers as stored. The tel: link keeps the raw value. */
+export const fmtPhone = (raw: string) => {
+  const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(raw.replace(/[\s()-]/g, ""));
+  return m ? `+1 ${m[1]} ${m[2]} ${m[3]}` : raw;
+};
+
 const localToday = () => {
   const d = new Date();
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
