@@ -71,6 +71,10 @@ const ConfigSchema = z
     // Applicant sessions (separate from staff sessions).
     PORTAL_SESSION_IDLE_MINUTES: z.coerce.number().int().min(5).max(240).default(60),
     PORTAL_SESSION_HOURS: z.coerce.number().int().min(1).max(24).default(12),
+    // Heavy report queries (org-wide reports, exports) running at once per API
+    // task; one more gets 503 + Retry-After (platform/report-executor.ts). Keep
+    // well below DB_POOL_MAX so sign-in and health always find a connection.
+    REPORT_MAX_CONCURRENT: z.coerce.number().int().min(1).max(20).default(2),
   })
   .superRefine((c, ctx) => {
     checkFieldCrypto(c, ctx, { bidx: true });

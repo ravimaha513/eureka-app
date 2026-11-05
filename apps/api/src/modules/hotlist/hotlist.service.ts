@@ -14,6 +14,7 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { toProblem } from "../../platform/errors.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
+import { ReportExecutor } from "../../platform/report-executor.js";
 import { CandidatesService, moreFilters } from "../candidates/candidates.service.js";
 import { toCsv } from "./csv.js";
 import type { BulkPriority, BulkStatus, BulkVisibility, CreateView, HotlistFilters, UpdateView } from "./hotlist.schemas.js";
@@ -79,6 +80,7 @@ export class HotlistService {
     private readonly db: DbService,
     private readonly audit: AuditService,
     private readonly candidates: CandidatesService,
+    private readonly reports: ReportExecutor,
   ) {}
 
   // ---- saved views: RLS keeps every row private to its owner (migration 0025) ----
@@ -197,8 +199,8 @@ export class HotlistService {
     if (!this.exportLimiter.take(user.id)) {
       throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
     }
-    const rows = await this.db.withUser(user.id, async (c) => {
-      await c.query(`SET LOCAL statement_timeout = '60s'`); // design N9: separate export timeout
+    // design N9: separate export timeout (report executor: at most 25 s, limited concurrency, 503 + Retry-After).
+    const rows = await this.reports.run(user.id, {}, async (c) => {
       const r = (await c.query<ExportRow>(
         `SELECT * FROM authz.hotlist_export($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [f.status ?? null, f.technology ?? null, f.visibility ?? null, f.search ? likeContains(f.search) : null, EXPORT_ROW_CAP + 1,

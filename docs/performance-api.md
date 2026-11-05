@@ -36,7 +36,8 @@ migrations `0110_performance_targets.sql`, `0111_designation_change.sql`,
 `from`, `to`: ISO instants (or dates), default the last 30 days; `from < to`; at most 366 days
 (422 otherwise). `tz`: IANA zone for calendar dates (active candidates), default
 `America/New_York`. Strict query schemas (unknown keys: 422). 30 report requests per user per
-minute (429); a statement timeout is a 503 asking for a shorter period.
+minute (429); a statement timeout is a 503 asking for a shorter period (`Retry-After: 30`). Org-wide callers get a
+25 s timeout and a report slot (`REPORT_MAX_CONCURRENT` per API task, default 2; all taken: 503 + `Retry-After: 5`).
 
 ## PF-2 counts and drill-down
 

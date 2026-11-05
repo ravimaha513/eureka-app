@@ -1,5 +1,5 @@
 import {
-  ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException, ServiceUnavailableException,
+  ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException,
 } from "@nestjs/common";
 import type pg from "pg";
 import { ownsActivity, ownsCandidate, resolveScope, type EffectiveScope } from "@eureka/shared";
@@ -7,6 +7,7 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { AuditService } from "../../platform/audit.service.js";
 import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
+import { ReportExecutor } from "../../platform/report-executor.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import { mapPvError } from "./pipeline-report.errors.js";
@@ -78,7 +79,7 @@ const presentFlag = (f: FlagRow) => ({
 export class PipelineReportService {
   private readonly limiter = new RateLimiter(PIPELINE_REQUESTS_PER_MINUTE, 60_000);
 
-  constructor(private readonly db: DbService, private readonly audit: AuditService) {}
+  constructor(private readonly db: DbService, private readonly audit: AuditService, private readonly reports: ReportExecutor) {}
 
   // ---------------------------------------------------------------- report (PV-1, PV-2)
 
@@ -89,76 +90,70 @@ export class PipelineReportService {
     if (!this.limiter.take(user.id)) {
       throw new HttpException("Too many pipeline report requests; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
     }
-    try {
-      return await this.db.withUser(user.id, async (c) => {
-        if (report.all) await c.query("SET LOCAL statement_timeout = '60s'");
-        const params: Params = [];
-        const base = this.baseSql(params, report, cand, q);
-        const p = bind(params);
-        const page = await c.query<PipelineRow>(`${base}
-          SELECT r.*, CASE WHEN pe.id IS NOT NULL THEN pe.first_name || ' ' || pe.last_name END AS name,
-                 te.name AS technology, tm.name AS team, ru.display_name AS recruiter, lo.name AS location,
-                 count(*) OVER ()::int AS total
-            FROM rows r
-            LEFT JOIN eureka.person pe ON pe.id = r.person_id
-            LEFT JOIN eureka.technology te ON te.id = r.technology_id
-            LEFT JOIN eureka.team tm ON tm.id = r.team_id
-            LEFT JOIN eureka.app_user ru ON ru.id = r.recruiter_id
-            LEFT JOIN eureka.location lo ON lo.id = r.location_id
-           ORDER BY lower(pe.first_name || ' ' || pe.last_name) NULLS LAST, r.id
-           LIMIT ${p(q.limit)} OFFSET ${p(q.offset)}`, params);
-        const sParams: Params = [];
-        const sBase = this.baseSql(sParams, report, cand, q);
-        const s = (await c.query<SummaryRow>(`${sBase}
-          SELECT count(*)::int AS total,
-                 count(*) FILTER (WHERE stage <> 'not_started')::int AS marketing,
-                 count(*) FILTER (WHERE sub_n > 0)::int AS submitted,
-                 count(*) FILTER (WHERE iv_n > 0)::int AS interviewing,
-                 count(*) FILTER (WHERE asm_n > 0)::int AS assessment,
-                 count(*) FILTER (WHERE pl_id IS NOT NULL)::int AS confirmed,
-                 count(*) FILTER (WHERE pl_status IN ('paperwork', 'bgc', 'ready', 'joined'))::int AS paperwork,
-                 count(*) FILTER (WHERE pl_status = 'joined')::int AS joined,
-                 count(*) FILTER (WHERE not_responding)::int AS not_responding,
-                 (SELECT pg_catalog.jsonb_object_agg(stage, n) FROM (SELECT stage, count(*)::int AS n FROM rows GROUP BY stage) g) AS by_stage
-            FROM rows`, sParams)).rows[0]!;
-        return {
-          period: q.from ? { from: q.from, to: q.to } : null,
-          total: s.total,
-          funnel: {
-            marketing: s.marketing, submitted: s.submitted, interviewing: s.interviewing, assessment: s.assessment,
-            confirmed: s.confirmed, paperwork: s.paperwork, joined: s.joined,
-          },
-          notResponding: s.not_responding,
-          byStage: s.by_stage ?? {},
-          items: page.rows.map((r) => ({
-            candidate: { id: r.id, name: r.name },
-            technology: { id: r.technology_id, name: r.technology },
-            team: { id: r.team_id, name: r.team },
-            recruiter: r.recruiter_id ? { id: r.recruiter_id, name: r.recruiter } : null,
-            location: { id: r.location_id, name: r.location },
-            marketingStatus: r.marketing_status,
-            marketingStartDate: r.marketing_start_date,
-            submissions: { count: r.sub_n, lastAt: r.sub_last?.toISOString() ?? null },
-            interviews: { count: r.iv_n, cleared: r.iv_cleared, lastAt: r.iv_last?.toISOString() ?? null },
-            assessments: { count: r.asm_n, passed: r.asm_passed, lastOn: r.asm_last },
-            placement: r.pl_id ? {
-              id: r.pl_id, status: r.pl_status, confirmedAt: r.pl_created!.toISOString(), tentativeStart: r.pl_start,
-              joinedAt: r.pl_joined?.toISOString() ?? null,
-              paperwork: r.ck_total ? { done: r.ck_done ?? 0, total: r.ck_total } : null,
-            } : null,
-            notResponding: r.not_responding,
-            stage: r.stage,
-          })),
-          limit: q.limit,
-          offset: q.offset,
-        };
-      });
-    } catch (err) {
-      if ((err as { code?: string }).code === "57014") {
-        throw new ServiceUnavailableException("The report took too long; narrow the filters and try again");
-      }
-      throw err;
-    }
+    // Org-wide callers get the raised report timeout and a report slot; a statement timeout is 503 + Retry-After.
+    const run = { heavy: report.all, timeoutDetail: "The report took too long; narrow the filters and try again" };
+    return this.reports.run(user.id, run, async (c) => {
+      const params: Params = [];
+      const base = this.baseSql(params, report, cand, q);
+      const p = bind(params);
+      const page = await c.query<PipelineRow>(`${base}
+        SELECT r.*, CASE WHEN pe.id IS NOT NULL THEN pe.first_name || ' ' || pe.last_name END AS name,
+               te.name AS technology, tm.name AS team, ru.display_name AS recruiter, lo.name AS location,
+               count(*) OVER ()::int AS total
+          FROM rows r
+          LEFT JOIN eureka.person pe ON pe.id = r.person_id
+          LEFT JOIN eureka.technology te ON te.id = r.technology_id
+          LEFT JOIN eureka.team tm ON tm.id = r.team_id
+          LEFT JOIN eureka.app_user ru ON ru.id = r.recruiter_id
+          LEFT JOIN eureka.location lo ON lo.id = r.location_id
+         ORDER BY lower(pe.first_name || ' ' || pe.last_name) NULLS LAST, r.id
+         LIMIT ${p(q.limit)} OFFSET ${p(q.offset)}`, params);
+      const sParams: Params = [];
+      const sBase = this.baseSql(sParams, report, cand, q);
+      const s = (await c.query<SummaryRow>(`${sBase}
+        SELECT count(*)::int AS total,
+               count(*) FILTER (WHERE stage <> 'not_started')::int AS marketing,
+               count(*) FILTER (WHERE sub_n > 0)::int AS submitted,
+               count(*) FILTER (WHERE iv_n > 0)::int AS interviewing,
+               count(*) FILTER (WHERE asm_n > 0)::int AS assessment,
+               count(*) FILTER (WHERE pl_id IS NOT NULL)::int AS confirmed,
+               count(*) FILTER (WHERE pl_status IN ('paperwork', 'bgc', 'ready', 'joined'))::int AS paperwork,
+               count(*) FILTER (WHERE pl_status = 'joined')::int AS joined,
+               count(*) FILTER (WHERE not_responding)::int AS not_responding,
+               (SELECT pg_catalog.jsonb_object_agg(stage, n) FROM (SELECT stage, count(*)::int AS n FROM rows GROUP BY stage) g) AS by_stage
+          FROM rows`, sParams)).rows[0]!;
+      return {
+        period: q.from ? { from: q.from, to: q.to } : null,
+        total: s.total,
+        funnel: {
+          marketing: s.marketing, submitted: s.submitted, interviewing: s.interviewing, assessment: s.assessment,
+          confirmed: s.confirmed, paperwork: s.paperwork, joined: s.joined,
+        },
+        notResponding: s.not_responding,
+        byStage: s.by_stage ?? {},
+        items: page.rows.map((r) => ({
+          candidate: { id: r.id, name: r.name },
+          technology: { id: r.technology_id, name: r.technology },
+          team: { id: r.team_id, name: r.team },
+          recruiter: r.recruiter_id ? { id: r.recruiter_id, name: r.recruiter } : null,
+          location: { id: r.location_id, name: r.location },
+          marketingStatus: r.marketing_status,
+          marketingStartDate: r.marketing_start_date,
+          submissions: { count: r.sub_n, lastAt: r.sub_last?.toISOString() ?? null },
+          interviews: { count: r.iv_n, cleared: r.iv_cleared, lastAt: r.iv_last?.toISOString() ?? null },
+          assessments: { count: r.asm_n, passed: r.asm_passed, lastOn: r.asm_last },
+          placement: r.pl_id ? {
+            id: r.pl_id, status: r.pl_status, confirmedAt: r.pl_created!.toISOString(), tentativeStart: r.pl_start,
+            joinedAt: r.pl_joined?.toISOString() ?? null,
+            paperwork: r.ck_total ? { done: r.ck_done ?? 0, total: r.ck_total } : null,
+          } : null,
+          notResponding: r.not_responding,
+          stage: r.stage,
+        })),
+        limit: q.limit,
+        offset: q.offset,
+      };
+    });
   }
 
   /**

@@ -1,5 +1,5 @@
 import {
-  ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException, ServiceUnavailableException, UnprocessableEntityException,
+  ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException, UnprocessableEntityException,
 } from "@nestjs/common";
 import type pg from "pg";
 import { z } from "zod";
@@ -8,6 +8,7 @@ import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
+import { ReportExecutor } from "../../platform/report-executor.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import type { ActiveCandidatesQuery, ActivityKind, ActivityQuery, PeriodQuery, SetTarget, TargetListQuery } from "./performance.schemas.js";
@@ -127,7 +128,7 @@ function lastDay(end: string): string {
 export class PerformanceService {
   private readonly limiter = new RateLimiter(PERFORMANCE_REQUESTS_PER_MINUTE, 60_000);
 
-  constructor(private readonly db: DbService, private readonly audit: AuditService) {}
+  constructor(private readonly db: DbService, private readonly audit: AuditService, private readonly reports: ReportExecutor) {}
 
   private scopes(access: UserAccess): Scopes {
     const perf = resolveScope(access, "performance:read");
@@ -146,19 +147,12 @@ export class PerformanceService {
     }
   }
 
-  /** Runs a report as the user; a statement timeout becomes 503 (as the dashboard). */
+  /**
+   * Runs a report as the user (report executor): org-wide callers get the raised timeout and a report slot;
+   * a statement timeout becomes 503 + Retry-After (as the dashboard).
+   */
   private async report<T>(user: AuthedUser, all: boolean, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
-    try {
-      return await this.db.withUser(user.id, async (c) => {
-        if (all) await c.query("SET LOCAL statement_timeout = '60s'");
-        return fn(c);
-      });
-    } catch (err) {
-      if ((err as { code?: string }).code === "57014") {
-        throw new ServiceUnavailableException("The report took too long; narrow the period and try again");
-      }
-      throw err;
-    }
+    return this.reports.run(user.id, { heavy: all, timeoutDetail: "The report took too long; narrow the period and try again" }, fn);
   }
 
   /** People (active Sales users) the caller's performance:read grant covers. */

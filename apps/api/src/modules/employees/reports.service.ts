@@ -1,10 +1,11 @@
 import type pg from "pg";
-import { ForbiddenException, HttpException, HttpStatus, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { ForbiddenException, HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import { resolveScope, type EffectiveScope, type UserAccess } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
+import { ReportExecutor } from "../../platform/report-executor.js";
 import { toCsv } from "../hotlist/csv.js";
 import { EXPORTS_PER_WINDOW, EXPORT_ROW_CAP, EXPORT_WINDOW_MS } from "../hotlist/hotlist.service.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
@@ -81,14 +82,8 @@ interface GroupCount {
 type Source = { kind: "rls"; scopes: EffectiveScope[] } | { kind: "employee" } | { kind: "none" };
 type Mode = "movements" | "active";
 
-async function timed<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    if ((err as { code?: string }).code === "57014") throw new ServiceUnavailableException("The report took too long. Choose a shorter period.");
-    throw err;
-  }
-}
+/** Report executor options: the statement timeout (57014) becomes 503 + Retry-After with this hint. */
+const REPORT_RUN = { timeoutDetail: "The report took too long. Choose a shorter period." };
 
 const label = (s: string) => { const t = s.replace(/_/g, " "); return t.charAt(0).toUpperCase() + t.slice(1); };
 const ref = (id: string | null, name: string | null) => (id ? { id, name } : null);
@@ -139,7 +134,7 @@ export class ReportsService {
   private readonly exportLimiter = new RateLimiter(EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
   private readonly viewLimiter = new RateLimiter(REPORT_VIEWS_PER_MINUTE, 60_000);
 
-  constructor(private readonly db: DbService, private readonly audit: AuditService) {}
+  constructor(private readonly db: DbService, private readonly audit: AuditService, private readonly reports: ReportExecutor) {}
 
   /** `after` runs in the same transaction (the export's audit row). */
   private async rows(user: AuthedUser, period: ReportPeriod, src: Exclude<Source, { kind: "none" }>, limit: number,
@@ -163,9 +158,8 @@ export class ReportsService {
       ORDER BY greatest(CASE WHEN b.end_date BETWEEN $1::date AND $2::date THEN b.end_date END,
                         CASE WHEN b.start_date BETWEEN $1::date AND $2::date THEN b.start_date END) DESC, b.id
       LIMIT ${limit}`;
-    return this.db.withUser(user.id, async (c) => {
-      await c.query(`SET LOCAL statement_timeout = '60s'`); // design N9: org-wide reports
-      const rows = await timed(() => c.query<Row>(sql, params)).then((r) => r.rows);
+    return this.reports.run(user.id, REPORT_RUN, async (c) => { // design N9: org-wide reports
+      const rows = (await c.query<Row>(sql, params)).rows;
       if (after) await after(c, rows);
       return rows;
     });
@@ -193,9 +187,8 @@ export class ReportsService {
       LEFT JOIN eureka.team tm ON tm.id = b.team_id
       LEFT JOIN pc ON pc.id = b.payroll_company_id
       GROUP BY b.team_id, tm.name, b.payroll_company_id, pc.name`;
-    return this.db.withUser(user.id, async (c) => {
-      await c.query(`SET LOCAL statement_timeout = '60s'`);
-      return (await timed(() => c.query<GroupCount>(sql, params))).rows;
+    return this.reports.run(user.id, REPORT_RUN, async (c) => {
+      return (await c.query<GroupCount>(sql, params)).rows;
     });
   }
 
@@ -294,8 +287,7 @@ export class ReportsService {
     if (src.kind === "none") return empty;
     const params: unknown[] = [from, to];
     const base = baseSql(src, params, "active", q.clientId);
-    const out = await this.db.withUser(user.id, async (c) => {
-      await c.query(`SET LOCAL statement_timeout = '60s'`);
+    const out = await this.reports.run(user.id, REPORT_RUN, async (c) => {
       const sql = `
         WITH b AS MATERIALIZED (${base}), ${PC}
         SELECT 'total' AS g, NULL::uuid AS id, NULL::text AS name, count(DISTINCT b.person_id)::int AS n FROM b
@@ -304,7 +296,7 @@ export class ReportsService {
         UNION ALL
         SELECT 'company', b.payroll_company_id, pc.name, count(DISTINCT b.person_id)::int
         FROM b LEFT JOIN pc ON pc.id = b.payroll_company_id GROUP BY b.payroll_company_id, pc.name`;
-      return (await timed(() => c.query<{ g: string; id: string | null; name: string | null; n: number }>(sql, params))).rows;
+      return (await c.query<{ g: string; id: string | null; name: string | null; n: number }>(sql, params)).rows;
     });
     const order = (a: { count: number; name: string | null }, b: { count: number; name: string | null }) =>
       b.count - a.count || (a.name ?? "~").localeCompare(b.name ?? "~");

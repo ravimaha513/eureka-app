@@ -10,8 +10,9 @@ import { AuditService } from "./platform/audit.service.js";
 import { AuthGuard, Public } from "./platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "./platform/config.js";
 import { DbService } from "./platform/db.service.js";
-import { ProblemFilter } from "./platform/errors.js";
+import { ProblemFilter, RetryableUnavailable } from "./platform/errors.js";
 import { OidcService } from "./platform/oidc.service.js";
+import { ReportExecutor } from "./platform/report-executor.js";
 import { originGuard } from "./platform/origin-guard.js";
 import { SessionService } from "./platform/session.service.js";
 import { AuthController } from "./modules/identity/auth.controller.js";
@@ -80,15 +81,44 @@ import { InterviewReportsController, InterviewReportsService } from "./modules/i
 import { AssessmentsController, NonResponseController, PipelineReportController, PipelineReportService } from "./modules/pipeline-report/pipeline-report.controller.js";
 import { PreferredVendorsController, PreferredVendorsService } from "./modules/preferred-vendors/preferred-vendors.controller.js";
 
+/** Readiness: the database ping must answer within this many ms (a starved pool must not hang the probe). */
+const READY_TIMEOUT_MS = 1000;
+
 @Controller("api")
 class HealthController {
   constructor(private readonly db: DbService) {}
 
+  /** Liveness (the ECS container health check): the process serves HTTP; no database, so a busy pool never gets the task replaced. */
+  @Public()
+  @Get("health/live")
+  live() {
+    return { status: "ok" };
+  }
+
+  /** Readiness: a database ping with a 1 s bound; 503 + Retry-After when the pool or database does not answer in time. */
+  @Public()
+  @Get("health/ready")
+  async ready() {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new RetryableUnavailable("database_unavailable", 5)), READY_TIMEOUT_MS);
+    });
+    try {
+      await Promise.race([this.db.system((c) => c.query("SELECT 1")), timeout]);
+    } catch (err) {
+      if (err instanceof RetryableUnavailable) throw err;
+      throw new RetryableUnavailable("database_unavailable", 5);
+    } finally {
+      clearTimeout(timer);
+    }
+    return { status: "ok" };
+  }
+
+  /** Backward-compatible alias of readiness (deploy smoke tests, local-dev script). */
   @Public()
   @Get("health")
-  async health() {
-    await this.db.system((c) => c.query("SELECT 1"));
-    return { status: "ok" };
+  health() {
+    return this.ready();
   }
 }
 
@@ -128,7 +158,7 @@ export class AppModule {
       ],
       providers: [
         { provide: CONFIG, useValue: config },
-        DbService, SessionService, AccessService, AuditService, OidcService, SettingsService,
+        DbService, SessionService, AccessService, AuditService, OidcService, SettingsService, ReportExecutor,
         CandidatesService, CandidateMetricsService, SubmissionsService, InterviewsService, AdminService, PlacementsService, LookupsService, DashboardService, HotlistService, ImportsService,
         PaperworkService,
         ResumesService, NotificationsService, DocumentsService, EmployeesService, ReportsService, { provide: DOCUMENT_STORAGE, useValue: storage },

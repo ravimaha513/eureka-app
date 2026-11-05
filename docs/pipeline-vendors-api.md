@@ -18,7 +18,8 @@ All bodies and queries are strict zod schemas (unknown keys: 422). Errors are RF
 ## Candidate pipeline report
 
 **PV-1 `GET /api/v1/reports/pipeline`** (`report:read`; the service also requires `candidate:read`, so BU Head gets
-403). Rate limit 20 requests per user per minute (429); org-wide callers get the 60 s statement timeout (503 when hit).
+403). Rate limit 20 requests per user per minute (429); org-wide callers get the 25 s statement timeout (503 + `Retry-After: 30` when hit) and a report slot (all
+`REPORT_MAX_CONCURRENT` taken: 503 + `Retry-After: 5`).
 
 Rows: one per candidate the caller **owns** under `candidate:read` (never through Open to all teams or the open Hot
 List), narrowed to the caller's `report:read` scope, exactly like the dashboard: recruiter own candidates, lead team,

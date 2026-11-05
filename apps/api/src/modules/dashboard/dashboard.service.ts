@@ -1,11 +1,11 @@
-import { ForbiddenException, HttpException, HttpStatus, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { ForbiddenException, HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import type pg from "pg";
 import { z } from "zod";
 import { grantsOf, resolveScope, type EffectiveScope, type Permission, type UserAccess } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
-import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
+import { ReportExecutor } from "../../platform/report-executor.js";
 import { validTimeZone } from "../../platform/time-zone.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import { toCsv } from "../hotlist/csv.js";
@@ -153,7 +153,7 @@ export class DashboardService {
   private readonly limiter = new RateLimiter(DASHBOARD_REQUESTS_PER_MINUTE, 60_000);
   private readonly exportLimiter = new RateLimiter(EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
 
-  constructor(private readonly db: DbService, private readonly audit: AuditService) {}
+  constructor(private readonly audit: AuditService, private readonly reports: ReportExecutor) {}
 
   async get(user: AuthedUser, q: DashboardQuery) {
     return this.run(user, q, "view");
@@ -196,23 +196,16 @@ export class DashboardService {
     const scopes: Scopes = { report, read };
     const metrics = METRIC_KEYS.filter((m) => read[METRICS[m]]);
 
-    try {
-      return await this.load(user, scopes, metrics, groupBy, from, to, q.tz ?? "UTC", mode);
-    } catch (err) {
-      // query_canceled: the statement timeout fired. Mapped here, not globally, so other endpoints keep their behaviour.
-      if ((err as { code?: string }).code === "57014") {
-        throw new ServiceUnavailableException("The report took too long; narrow the period and try again");
-      }
-      throw err;
-    }
+    return this.load(user, scopes, metrics, groupBy, from, to, q.tz ?? "UTC", mode);
   }
 
   private async load(user: AuthedUser, scopes: Scopes, metrics: Metric[], groupBy: GroupBy, from: Date, to: Date, tz: string,
     mode: "view" | "export") {
     const report = scopes.report;
-    return this.db.withUser(user.id, async (c) => {
-      // Org-wide reports get the longer report timeout (design B4.8 N9).
-      if (report.all) await c.query("SET LOCAL statement_timeout = '60s'");
+    // Org-wide reports get the longer report timeout (design B4.8 N9) and a report slot (report executor);
+    // query_canceled (the statement timeout fired) becomes 503 + Retry-After.
+    const run = { heavy: report.all, timeoutDetail: "The report took too long; narrow the period and try again" };
+    return this.reports.run(user.id, run, async (c) => {
       let counts = metrics.length ? await this.counts(c, scopes, groupBy, from, to, tz) : [];
       if (groupBy === "manager") counts = await this.toManagers(c, counts);
       const names = await this.names(c, groupBy, [...new Set(counts.map((r) => r.k).filter((k): k is string => k !== null))]);
@@ -259,7 +252,8 @@ export class DashboardService {
         series: [...days].map(([date, counts]) => ({ date, counts })),
         needsAttention: {
           thresholds: DASHBOARD_THRESHOLDS,
-          sections: await this.attention(c, scopes),
+          // Independent of the period: a short per-user cache (keyed by the caller's scopes) absorbs period changes and refreshes.
+          sections: await this.reports.cached("dashboard.attention", user.id, scopes, () => this.attention(c, scopes)),
         },
       };
     });
