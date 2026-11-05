@@ -41,7 +41,11 @@ $StagingCluster = "eureka-staging"
 # Runs a native command and stops on a non-zero exit (PowerShell does not do that by itself).
 # Plain functions on purpose: tokens like -json, -t or -auto-approve must reach the native
 # command untouched, and an advanced function would try to bind them as its own parameters.
+# EAP Continue inside: with output redirected (the train's *> log), Windows PowerShell 5.1 turns every
+# native stderr line (terragrunt/docker progress) into a NativeCommandError, and Stop would abort on it.
+# The exit code alone decides failure.
 function Invoke-Native {
+  $ErrorActionPreference = "Continue"
   $exe = $args[0]
   $rest = @(); if ($args.Count -gt 1) { $rest = $args[1..($args.Count - 1)] }
   & $exe @rest
@@ -50,6 +54,7 @@ function Invoke-Native {
 
 # Same, returning trimmed stdout as one string.
 function Get-Native {
+  $ErrorActionPreference = "Continue"
   $exe = $args[0]
   $rest = @(); if ($args.Count -gt 1) { $rest = $args[1..($args.Count - 1)] }
   $out = & $exe @rest
@@ -57,10 +62,21 @@ function Get-Native {
   return (($out | Out-String).Trim())
 }
 
+# Real executables only: the deploy child runs with -NoProfile, so profile aliases/functions are gone there.
+function Assert-Tools {
+  $missing = @("git", "aws", "docker", "terragrunt", "terraform", "pnpm") |
+    Where-Object { -not (Get-Command $_ -CommandType Application -ErrorAction SilentlyContinue) }
+  if ($missing) {
+    throw ("not on PATH as executables: $($missing -join ', '). " +
+      "Install them or add their folder to PATH (a `$PROFILE alias is not enough; the deploy runs with -NoProfile).")
+  }
+}
+
 # ---------------------------------------------------------------- deploy (deploy-local.sh)
 
 function Invoke-Deploy {
   param([string]$Root, [string]$Target, [switch]$NoPrompt)
+  Assert-Tools
   $region = if ($Target -eq "production") { "us-east-1" } else { "us-east-2" }
   $env:AWS_REGION = $region
   $env:AWS_DEFAULT_REGION = $region
@@ -91,7 +107,7 @@ function Invoke-Deploy {
 
     Write-Host ">> 2. Build and push image"
     $pw = Get-Native aws ecr get-login-password
-    $pw | docker login --username AWS --password-stdin $registry
+    & { $ErrorActionPreference = "Continue"; $pw | docker login --username AWS --password-stdin $registry }
     if ($LASTEXITCODE -ne 0) { throw "docker login failed" }
     Invoke-Native docker build --platform linux/arm64 -t $image $Root
     Invoke-Native docker push $image
@@ -242,6 +258,7 @@ if ($n -lt $Min -and -not $Force) {
   Write-Host "only $n/$Min queued; not deploying (commits stay queued; -Force if the user asked for this now)"
   exit 0
 }
+Assert-Tools
 
 try {
   New-Item -ItemType Directory -Path $lock -ErrorAction Stop | Out-Null
@@ -273,9 +290,8 @@ try {
     Write-Host "OK: staging now at $($sha.Substring(0,9))"
     Get-Content $log -Tail 2
   } else {
-    Write-Error "FAILED: see $log" -ErrorAction Continue
-    $errs = Select-String -Path $log -Pattern 'Error|error:|FAIL' | Select-Object -Last 8
-    if ($errs) { $errs | ForEach-Object { Write-Host $_.Line } } else { Get-Content $log -Tail 15 }
+    Write-Host "FAILED: see $log (last 30 lines below)" -ForegroundColor Red
+    Get-Content $log -Tail 30 | ForEach-Object { Write-Host "  $_" }
     exit 1
   }
 } finally {
