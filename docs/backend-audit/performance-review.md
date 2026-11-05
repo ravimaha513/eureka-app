@@ -479,6 +479,13 @@ Authz facts must **not** be cached: revocation must take effect immediately, and
 - Regression risks: GIN maintenance cost on person and candidate writes (low write rate). The trigram index is unused for search terms under 3 characters, which then scan as today.
 - Required tests: Existing search integration tests must pass unchanged. Add an EXPLAIN-based test asserting `Bitmap Index Scan on person_name_trgm` for a 3+ character term.
 - Breaking API change?: no
+- **Measured (R-13, migration 0479; [perf-baseline.md](perf-baseline.md), 50k candidates):** with the
+  index, `authz.hotlist_page` and `hotlist_export` (run as authz_definer) use `person_name_trgm` for
+  terms of 3+ characters: 0.30–0.81× of the time before (for example 21.7 → 8.0 ms). The eureka_app
+  lists (candidates, the default Hot List, submissions, placements, employees, applicants) **cannot**
+  use it, because ILIKE is not leakproof and so cannot run ahead of the RLS security quals. They are
+  unchanged at 40–540 ms, and most of that time is the per-row `person_read` EXISTS. Index-backing
+  them needs a scoped definer search (security review). See the follow-up in perf-baseline.md.
 
 #### G-07 · Every org change rewrites every app_user row to bump access_version, which nothing reads
 

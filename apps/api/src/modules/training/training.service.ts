@@ -34,7 +34,7 @@ import type {
   UpdateModule,
   UpdateTrainingBatch,
 } from "./training.schemas.js";
-import { likeContains } from "../../platform/sql.js";
+import { likeContains, nameSearch } from "../../platform/sql.js";
 
 interface BatchRow {
   id: string;
@@ -306,7 +306,7 @@ export class TrainingService {
       await this.loadBatch(c, id);
       const students = (await c.query<{ candidate_id: string; first_name: string; last_name: string; technology: string; marketing_status: string }>(
         `SELECT * FROM authz.training_batch_students($1) s
-         WHERE ($2::text IS NULL OR (s.first_name || ' ' || s.last_name) ILIKE $2)
+         WHERE ($2::text IS NULL OR ${nameSearch("s", "$2")})
          ORDER BY s.first_name, s.last_name, s.candidate_id`, [id, search ? likeContains(search) : null])).rows;
       const courses = await this.batchCourses(c, id);
       const modules = courses.flatMap((co) => co.modules.map((m) => ({ courseId: co.id, moduleId: m.id, durationMinutes: m.durationMinutes })));
@@ -359,7 +359,7 @@ export class TrainingService {
          LEFT JOIN eureka.batch ob ON ob.id = c.batch_id
          LEFT JOIN eureka.technology obt ON obt.id = ob.technology_id
          WHERE c.location_id = $1 AND c.batch_id IS DISTINCT FROM $2
-           AND ($3::text IS NULL OR (p.first_name || ' ' || p.last_name) ILIKE $3 OR t.name ILIKE $3)
+           AND ($3::text IS NULL OR ${nameSearch("p", "$3")} OR t.name ILIKE $3)
            AND ${scopePredicate({ ...scope, allTeams: false, hotlistOpen: false }, params)}
          ORDER BY c.batch_id IS NOT NULL, p.first_name, p.last_name, c.id LIMIT 200`, params);
       return {

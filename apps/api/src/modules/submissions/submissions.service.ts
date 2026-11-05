@@ -18,7 +18,7 @@ import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { idempotent, parseIdempotencyKey } from "../../platform/idempotency.js";
-import { likeContains } from "../../platform/sql.js";
+import { likeContains, nameSearch } from "../../platform/sql.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
 import {
   Cursor,
@@ -331,7 +331,7 @@ export class SubmissionsService {
     const where = [activityPredicate(scope, params)];
     if (q.status) where.push(`s.status = ${p(q.status)}`);
     if (q.candidateId) where.push(`s.candidate_id = ${p(q.candidateId)}`);
-    if (q.candidate) where.push(`(p.first_name || ' ' || p.last_name) ILIKE ${p(likeContains(q.candidate))} ESCAPE '\\'`);
+    if (q.candidate) where.push(nameSearch("p", p(likeContains(q.candidate))));
     if (q.batchId) where.push(`c.batch_id = ${p(q.batchId)}::uuid`);
     if (q.recruiterId) where.push(`s.recruiter_id = ${p(q.recruiterId)}`);
     if (q.from) where.push(`s.submitted_at >= ${p(q.from)}::timestamptz`);

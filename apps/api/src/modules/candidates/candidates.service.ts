@@ -51,7 +51,7 @@ import type {
 } from "./candidates.schemas.js";
 import { Email } from "./candidates.schemas.js";
 import { buildCandidateImportTemplate } from "./candidate-import-template.js";
-import { likeContains } from "../../platform/sql.js";
+import { likeContains, nameSearch } from "../../platform/sql.js";
 import { dbErrorMapper } from "../../platform/errors.js";
 
 interface CandidateRow {
@@ -453,7 +453,7 @@ export class CandidatesService implements OnModuleInit {
     where.push(...extraFilterPredicates(q, params));
     if (q.search) {
       params.push(likeContains(q.search));
-      where.push(`(p.first_name || ' ' || p.last_name) ILIKE $${params.length}`);
+      where.push(nameSearch("p", `$${params.length}`));
     }
     const key = sortKey(q.sort);
     if (q.cursor) {
