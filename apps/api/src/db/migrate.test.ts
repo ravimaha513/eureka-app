@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { FUNCTIONS_DIR, MIGRATIONS_DIR, sqlFiles } from "./migrate.js";
+import { FUNCTIONS_BASELINE, FUNCTIONS_DIR, MIGRATIONS_DIR, functionSince, planRun, scramSha256Verifier, sqlFiles } from "./migrate.js";
 
 /** Migrations up to this one may still define functions that now live in db/functions. */
 const LAST_COPYING_MIGRATION = "0180";
@@ -55,5 +55,56 @@ describe("function files", () => {
     expect(sql.trimEnd()).toMatch(/RESET ROLE;$/);
     expect(sql).toMatch(/^REVOKE ALL ON FUNCTION .+ FROM PUBLIC;$/m);
     expect(sql).toMatch(/^ SET search_path TO /m);
+  });
+});
+
+describe("run order (G-05)", () => {
+  const fn = (file: string, since = FUNCTIONS_BASELINE) => ({ file, since });
+
+  it("places each function file right after the migration its since names, fresh or incremental", () => {
+    const fns = [fn("authz/b.sql"), fn("authz/a.sql", "0502"), fn("eureka/c.sql", "0400")];
+    const order = (steps: ReturnType<typeof planRun>) => steps.map((s) => s.file);
+    expect(order(planRun(["0398_x.sql", "0400_y.sql", "0499_z.sql", "0500_p.sql", "0502_q.sql", "0503_r.sql"], fns))).toEqual(
+      ["0398_x.sql", "0400_y.sql", "eureka/c.sql", "0499_z.sql", "authz/b.sql", "0500_p.sql", "0502_q.sql", "authz/a.sql", "0503_r.sql"]);
+    // The same database migrated through 0500 earlier: the pending tail sees the same bodies.
+    expect(order(planRun(["0502_q.sql", "0503_r.sql"], fns))).toEqual(
+      ["eureka/c.sql", "authz/b.sql", "0502_q.sql", "authz/a.sql", "0503_r.sql"]);
+    // Nothing pending: files only, in since then name order.
+    expect(order(planRun([], fns))).toEqual(["eureka/c.sql", "authz/b.sql", "authz/a.sql"]);
+  });
+
+  it("keeps every migration up to the baseline ahead of all unmarked function files (0001-0499 unchanged)", () => {
+    const steps = planRun(migrations, functionFiles.map((f) => fn(f, functionSince(read(FUNCTIONS_DIR, f)))));
+    const firstFn = steps.findIndex((s) => s.kind === "function");
+    const lastBaselineMigration = steps.map((s) => s.kind === "migration" && s.file.slice(0, 4) <= FUNCTIONS_BASELINE).lastIndexOf(true);
+    expect(firstFn).toBeGreaterThan(lastBaselineMigration);
+  });
+
+  it.each(functionFiles)("%s: a since marker names an existing migration", (f) => {
+    const sql = read(FUNCTIONS_DIR, f);
+    if (!/^-- since:/m.test(sql)) return;
+    const since = functionSince(sql);
+    expect(migrations.some((m) => m.startsWith(since)), `${f} -- since: ${since}`).toBe(true);
+  });
+});
+
+describe("SCRAM verifier (G-06)", () => {
+  it("has Postgres's rolpassword shape and never contains the password", () => {
+    const v = scramSha256Verifier("s3cret-Pass word!");
+    expect(v).toMatch(/^SCRAM-SHA-256\$4096:[A-Za-z0-9+/]{22}==\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$/);
+    expect(v).not.toContain("s3cret");
+    expect(scramSha256Verifier("s3cret-Pass word!")).not.toBe(v); // random salt
+  });
+
+  it("is deterministic for a given salt and iteration count", () => {
+    const salt = Buffer.from("0123456789abcdef");
+    expect(scramSha256Verifier("pencil", { salt, iterations: 4096 })).toBe(scramSha256Verifier("pencil", { salt, iterations: 4096 }));
+    expect(scramSha256Verifier("pencil", { salt, iterations: 4096 })).not.toBe(scramSha256Verifier("pencil", { salt, iterations: 8192 }));
+  });
+
+  it("refuses passwords Postgres would SASLprep-normalise", () => {
+    expect(() => scramSha256Verifier("pässword")).toThrow(/printable ASCII/);
+    expect(() => scramSha256Verifier("")).toThrow(/printable ASCII/);
+    expect(() => scramSha256Verifier("a\nb")).toThrow(/printable ASCII/);
   });
 });
