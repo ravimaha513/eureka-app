@@ -201,8 +201,24 @@ it is on a flat-rate plan.
 
 ## Deploying
 
-- **Production:** every push to `main` that passes CI runs `.github/workflows/deploy.yml`.
-- **Staging** (only after creating it): Actions → deploy → Run workflow → `staging`.
+`.github/workflows/deploy.yml` runs after CI passes on `main` and deploys to each
+environment switched on by a **repository** variable (Settings → Secrets and
+variables → Actions → Variables):
+
+| Variable | Effect |
+|---|---|
+| `STAGING_AUTO_DEPLOY = true` | every green push to `main` deploys **staging** (us-east-2) |
+| `AWS_ACCOUNT_ID` (repository level) | every green push to `main` deploys **production** (us-east-1) |
+
+- **Staging only on Actions** (production stack not running): set `STAGING_AUTO_DEPLOY = true`
+  as a repository variable and `AWS_ACCOUNT_ID = 637423353261` on the `staging`
+  **environment** only. Production stays off because the repository has no `AWS_ACCOUNT_ID`.
+  The staging stack must already exist and the `eureka-github-deploy-staging` role
+  (infra/bootstrap) must trust `environment:staging`.
+- Pushes that land while a staging deploy runs wait; only the newest one deploys next.
+- **By hand:** Actions → deploy → Run workflow → `staging` or `production`.
+- While `STAGING_AUTO_DEPLOY` is on, do not also run `infra/scripts/deploy-train.sh go`:
+  both would apply the same Terraform state.
 
 The workflow, per environment:
 
