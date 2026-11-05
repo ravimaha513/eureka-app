@@ -26,6 +26,7 @@ import { CandidateCreateService } from "./candidate-create.service.js";
 import { CandidateListService } from "./candidate-list.service.js";
 import { CandidateProfileService } from "./candidate-profile.service.js";
 import { CandidateTimelineService } from "./candidate-timeline.service.js";
+import { ApiBody, ApiQuery } from "../../platform/http/api-doc.js";
 
 /**
  * Optional If-Match on single-candidate writes (docs/candidates-api.md "Optimistic
@@ -45,12 +46,14 @@ export class CandidatesController {
     private readonly metricsSvc: CandidateMetricsService,
   ) {}
 
+  @ApiQuery(HotlistQuery)
   @Get("hotlist")
   @RequirePermission("hotlist:read")
   hotlist(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.lists.list(user, "hotlist:read", HotlistQuery.parse(q));
   }
 
+  @ApiQuery(CandidateListQuery)
   @Get("candidates")
   @RequirePermission("candidate:read")
   list(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
@@ -64,6 +67,7 @@ export class CandidatesController {
   }
 
   /** FR-CAN-10: events readable under candidate:read (activity events also need the activity readable). */
+  @ApiQuery(TimelineQuery)
   @Get("candidates/:id/timeline")
   @RequirePermission("candidate:read")
   timeline(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Query() q: unknown) {
@@ -77,6 +81,7 @@ export class CandidatesController {
     return this.metricsSvc.metrics(user, id);
   }
 
+  @ApiBody(CreateCandidate)
   @Post("candidates")
   @RequirePermission("candidate:create")
   create(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
@@ -84,6 +89,7 @@ export class CandidatesController {
   }
 
   /** FR-CAN-09: minimal answer (team, contact, id only if readable); rate-limited and audited. */
+  @ApiBody(DuplicateCheck)
   @Post("candidates/duplicate-check")
   @HttpCode(200)
   @RequirePermission("candidate:create")
@@ -91,6 +97,7 @@ export class CandidatesController {
     return { duplicates: await this.creator.duplicates(user, DuplicateCheck.parse(body)) };
   }
 
+  @ApiBody(ProfileUpdate)
   @Patch("candidates/:id")
   @RequirePermission("candidate:update")
   update(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
@@ -107,6 +114,7 @@ export class CandidatesController {
   }
 
   /** E-Verify, offer letter and 1099 company links and the documents status (HR, Accounts, Immigration, Documents team). */
+  @ApiBody(ComplianceUpdate)
   @Put("candidates/:id/compliance")
   @RequirePermission("candidate.compliance:update")
   compliance(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
@@ -129,6 +137,7 @@ export class CandidatesController {
   }
 
   /** A candidate created with no team gets one (0410); same right and teams as choosing it at creation. */
+  @ApiBody(AssignCandidateTeam)
   @Put("candidates/:id/team")
   @RequirePermission("candidate:create")
   assignTeam(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
@@ -142,6 +151,7 @@ export class CandidatesController {
     return this.profiles.shareTeams(user);
   }
 
+  @ApiBody(VisibilityUpdate)
   @Put("candidates/:id/visibility")
   @RequirePermission("candidate.visibility:update")
   visibility(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
@@ -158,6 +168,7 @@ export class CandidatesController {
   }
 
   /** A lead or above; 422 invalid_recruiter when the user isn't on the candidate's team. */
+  @ApiBody(RecruiterUpdate)
   @Put("candidates/:id/recruiter")
   @RequirePermission("candidate:assign")
   setRecruiter(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
@@ -165,6 +176,7 @@ export class CandidatesController {
     return this.profiles.setRecruiter(user, id, RecruiterUpdate.parse(body).recruiterId, expectedVersion(ifMatch));
   }
 
+  @ApiBody(RatingUpdate)
   @Put("candidates/:id/technical-rating")
   @RequirePermission("candidate.rating:update")
   rating(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
@@ -172,6 +184,7 @@ export class CandidatesController {
     return this.profiles.setRating(user, id, RatingUpdate.parse(body).rating, expectedVersion(ifMatch));
   }
 
+  @ApiBody(Transition)
   @Post("candidates/:id/transition")
   @RequirePermission("candidate:update")
   transition(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
@@ -180,6 +193,7 @@ export class CandidatesController {
   }
 
   /** FR-CAN-02: batches are listed for every candidate:read holder. */
+  @ApiQuery(BatchListQuery)
   @Get("batches")
   @RequirePermission("candidate:read")
   batches(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
@@ -187,6 +201,7 @@ export class CandidatesController {
   }
 
   /** Sales leadership only (candidate:create at team, hierarchy or org scope; canCreateBatch). */
+  @ApiBody(CreateBatch)
   @Post("batches")
   @RequirePermission("candidate:create")
   createBatch(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
@@ -206,6 +221,7 @@ export class CandidatesController {
   }
 
   /** New candidates for a batch; preview with dryRun, all or nothing otherwise. */
+  @ApiBody(BulkBatchCandidates)
   @Post("batches/:id/candidates/bulk")
   @HttpCode(200)
   @RequirePermission("candidate:create")
@@ -214,6 +230,7 @@ export class CandidatesController {
   }
 
   /** planned -> in_training -> completed, or cancelled before completion; same permission as create. */
+  @ApiBody(BatchStatusChange)
   @Put("batches/:id/status")
   @RequirePermission("candidate:create")
   batchStatus(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
