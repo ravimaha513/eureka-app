@@ -526,6 +526,7 @@ These are the findings whose primary concern is design, correctness or operabili
 - Regression risks: Resetting search_path could break a migration that implicitly relied on a predecessor's SET. That is the latent bug this exposes, and it would surface in CI.
 - Required tests: A migrate.int test that applies migrations 0001..N-1, reconnects, then applies N, and compares `pg_get_functiondef` and the schema with a one-shot run. A test that a second migrator times out instead of hanging.
 - Breaking API change?: no
+- Status (R-20, wave 3): fixed for 1–3. `migrate.ts` resets the session (`RESET ROLE`, `RESET ALL`, `DISCARD TEMP`, lock_timeout again) before each file; one plan (`planRun`) orders migrations and changed function files the same way fresh and incremental: a file applies right after the migration its `-- since: NNNN` line names, default `FUNCTIONS_BASELINE` 0499, so 0001–0499 keep today's order (fresh `pg_dump --schema-only` identical before and after) and from 0500 every migration sees the current bodies on CI and production alike; a run that finds a file's function missing at the end fails. The run lock waits at most `MIGRATION_LOCK_WAIT` (5min) and names the holder's pid. Tests: `migrate.test.ts` (plan), `migrate.int.test.ts` (two deploys = one, lock wait, reset). Not done: 4 (orphaned functions).
 
 #### G-09 · Six NOT VALID CHECK constraints were never validated
 
