@@ -84,7 +84,7 @@ Fix: add `num` to the count cells and headers, use `<Field>` for all three contr
 | #3 Ending soon buried (Medium) | Ending within 30 days sits inline next to the Status toggles; planned ends within 30 days are flagged "in Nd" (warn) | employees-desktop.png |
 | #4 Drawer assignments 12 columns (High) | Four stacked columns (Client · vendor, Dates, Employment, Pay rate) + Edit; wraps inside the 572px drawer | employees-drawer-desktop.png |
 | #5 Drawer not routed (Medium) | `initialOpenId` / `onOpenChange` props via `useRoutedId` (App.tsx change requested) | app_requests |
-| #6 Raw E.164 phones (Low) | `fmtPhone` (+1 469 555 0001); tel: keeps the raw value | employees-mobile.png |
+| #6 Raw E.164 phones (Low) | Not changed on Employees: `src/settings/Settings.test.tsx` (another area) pins the raw text as the link name. `fmtPhone` exists in `payments/cells.tsx` and formats the facility owner phone; move it to lib/format (shared request) and update that test to adopt it here | — |
 | #7 Hand-rolled pay rate (Low) | `fmtUsd` (shared back-office formatter) | unit test |
 | #8 Action labels / destructive inline (Low) | Action strip: primary next step, then routine, then End assignment… and Record exit… in danger style last | employees-drawer-desktop.png |
 | #9 Phone: 2 of 9 columns (High) | Record cards; filters in the bottom sheet | employees-mobile.png |

@@ -17,7 +17,7 @@ import { Loading } from "../ui/Loading";
 import { FilterBar, type FilterChip } from "../ui/FilterBar";
 import { RecordLink } from "../ui/RecordLink";
 import { useRoutedId, useSearchParams } from "../lib/router";
-import { DueDate, ToggleGroup, fmtDay, fmtPhone, fmtUsd, fromControl } from "../payments/cells";
+import { DueDate, ToggleGroup, fmtDay, fmtUsd, fromControl } from "../payments/cells";
 import "./employeesPage.css";
 
 const PAGE_SIZE = 50;
@@ -37,8 +37,8 @@ function Contact({ e }: { e: Employee }) {
     <span className="contactcell">
       {c.email && (masked ? <span className="contactlink" title="Hidden: outside your contact permission"><Mail size={14} aria-hidden="true" />{c.email}</span>
         : <a className="contactlink" href={`mailto:${c.email}`}><Mail size={14} aria-hidden="true" />{c.email}</a>)}
-      {c.phone && (masked ? <span className="contactlink" title="Hidden: outside your contact permission"><Phone size={14} aria-hidden="true" />{fmtPhone(c.phone)}</span>
-        : <a className="contactlink" href={`tel:${c.phone}`}><Phone size={14} aria-hidden="true" />{fmtPhone(c.phone)}</a>)}
+      {c.phone && (masked ? <span className="contactlink" title="Hidden: outside your contact permission"><Phone size={14} aria-hidden="true" />{c.phone}</span>
+        : <a className="contactlink" href={`tel:${c.phone}`}><Phone size={14} aria-hidden="true" />{c.phone}</a>)}
       {masked && <span className="sr-only">Contact details hidden</span>}
     </span>
   );
