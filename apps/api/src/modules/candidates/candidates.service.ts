@@ -50,7 +50,9 @@ import type {
   TimelineQuery,
 } from "./candidates.schemas.js";
 import { Email } from "./candidates.schemas.js";
-import { filterPredicates, filterSummary, hotlistMore } from "./list-filters.js";
+import {
+  FACET_KEYS, facetQuery, filterPredicates, filterSummary, hotlistMore, shapeFacets, type FacetCounts, type ListFilter,
+} from "./list-filters.js";
 import { buildCandidateImportTemplate } from "./candidate-import-template.js";
 import { likeContains } from "../../platform/sql.js";
 import { dbErrorMapper } from "../../platform/errors.js";
@@ -281,6 +283,8 @@ export const HOTLIST_PAGES_PER_MINUTE = 60;
 export class CandidatesService implements OnModuleInit {
   private readonly log = new Logger(CandidatesService.name);
   private readonly hotlistLimiter = new RateLimiter(HOTLIST_PAGES_PER_MINUTE, 60_000);
+  /** Facet counts have their own budget: each filter change asks for a page and its counts. */
+  private readonly facetLimiter = new RateLimiter(HOTLIST_PAGES_PER_MINUTE, 60_000);
   private readonly duplicateLimiter = new RateLimiter(DUPLICATE_CHECKS_PER_MINUTE, 60_000);
   private readonly bulkCandidateLimiter = new RateLimiter(BULK_CANDIDATE_CALLS_PER_MINUTE, 60_000);
   /** The database is the source of truth for the Hot List switch (cached briefly). */
@@ -422,6 +426,39 @@ export class CandidatesService implements OnModuleInit {
       })),
       nextCursor: rows.length > q.limit ? page[page.length - 1]!.id : null,
     };
+  }
+
+  /**
+   * Facet counts for the list filters: per filter, how many candidates in the caller's list carry
+   * each value when every other filter applies. Same scope as `list` (the open Hot List through
+   * authz.hotlist_facets). Aggregates only, so not audited per read; the Hot List's are rate-limited.
+   */
+  async facets(user: AuthedUser, perm: "candidate:read" | "hotlist:read", q: ListFilter): Promise<FacetCounts> {
+    const scope = perm === "hotlist:read"
+      ? resolveScope(user.access, perm, await this.currentHotlistPolicy())
+      : resolveScope(user.access, perm);
+    if (!scope) throw new ForbiddenException();
+    const keys = perm === "hotlist:read" ? FACET_KEYS.filter((k) => k !== "batchId") : FACET_KEYS;
+    const search = q.search ? likeContains(q.search) : null;
+    if (perm === "hotlist:read") {
+      if (!this.facetLimiter.take(user.id)) {
+        throw new HttpException("Too many Hot List requests; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
+      }
+      if (scope.hotlistOpen) {
+        const rows = await this.db.withUser(user.id, async (c) => (await c.query<{ facet: string; value: string | null; n: string }>(
+          `SELECT * FROM authz.hotlist_facets($1, $2, $3, $4)`,
+          [search, q.resume === undefined ? null : q.resume === "yes", q.stay ?? null, hotlistMore(q)])).rows);
+        return shapeFacets(rows, keys);
+      }
+    }
+    const params: unknown[] = [];
+    const where = [scopePredicate(scope, params)];
+    if (perm === "hotlist:read") { params.push([...HOTLIST_STATUSES]); where.push(`c.marketing_status = ANY($${params.length}::text[])`); }
+    if (search) { params.push(search); where.push(`(p.first_name || ' ' || p.last_name) ILIKE $${params.length}`); }
+    const sql = facetQuery(where, filterPredicates(q, params), keys);
+    const rows = await this.db.withUser(user.id, async (c) =>
+      (await c.query<{ facet: string; value: string | null; n: string }>(sql, params)).rows);
+    return shapeFacets(rows, keys);
   }
 
   /** Audit row of one Hot List page: who, filter summary (free text as a flag only, rule 5), row count and id range. */

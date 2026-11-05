@@ -228,6 +228,32 @@ describe("Hot List filters", () => {
       expect(await adIds("not=teamId&priority=P3")).toEqual(ids(remote));
     });
 
+    it("facet counts: each filter's values counted with the other filters applied", async () => {
+      const hot = hotAll();
+      const facets = async (q: string) => {
+        const r = await call("ad", "GET", `/api/v1/hotlist/facets?${q}`);
+        expect(r.statusCode, r.body).toBe(200);
+        return r.json() as { total: number; facets: Record<string, { value: string; count: number }[]> };
+      };
+      const count = (f: Awaited<ReturnType<typeof facets>>, k: string, v: string) => f.facets[k]!.find((x) => x.value === v)?.count ?? 0;
+      const all = await facets("");
+      expect(all.total).toBe(hot.length);
+      expect(count(all, "priority", "P1")).toBe(h1b.length);
+      expect(count(all, "visa", "h1b")).toBe(h1b.length);
+      expect(count(all, "stay", "remote")).toBe(remote.length);
+      expect(count(all, "documents", "none")).toBe(hot.length - complete.length);
+      expect(count(all, "teamId", T.t2)).toBe(hot.filter((c) => c.teamId === T.t2).length);
+      expect(all.facets.batchId).toBeUndefined();
+      // A filter does not narrow its own facet, only the others and the total.
+      const p1 = await facets("priority=P1");
+      expect(p1.total).toBe(h1b.length);
+      expect(count(p1, "priority", "P3")).toBe(remote.length);
+      expect(count(p1, "stay", "remote")).toBe(0);
+      const notP1 = await facets("priority=P1&not=priority");
+      expect(notP1.total).toBe(hot.length - h1b.length);
+      expect(count(notP1, "visa", "h1b")).toBe(0);
+    });
+
     it("rejects unknown not= keys and over-long value lists", async () => {
       expect((await call("ad", "GET", "/api/v1/hotlist?not=search")).statusCode).toBe(422);
       const many = Array.from({ length: 51 }, () => `teamId=${T.t1}`).join("&");
@@ -285,6 +311,11 @@ describe("Hot List filters", () => {
     const notH1b = await hrIds("visa=h1b&not=visa");
     expect(notH1b).toEqual(everyone.filter((id) => !h1b.some((c) => c.id === id)));
     expect(await hrIds("documents=none&not=documents")).toEqual(sorted(complete.map((c) => c.id)));
+    const f = (await call("hr", "GET", "/api/v1/candidates/facets?visa=h1b")).json();
+    expect(f.total).toBe(h1b.length);
+    expect(f.facets.visa.find((x: { value: string }) => x.value === "h1b").count).toBe(h1b.length);
+    expect(f.facets.batchId).toEqual([]);
+    expect((await call("hr", "GET", "/api/v1/candidates/facets?limit=5")).statusCode).toBe(422);
   });
 
   it.each([["visa=xx"], ["documents=done"], ["resume=maybe"], ["stay=hotel"], ["locationId=dallas"]])(

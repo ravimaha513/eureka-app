@@ -69,6 +69,8 @@ describe("permission matrix (generated from the catalog)", () => {
     { perm: "candidate:update", method: "POST", url: "/api/v1/hotlist/bulk/status", body: { ids: [NOBODY], to: "active" } },
     { perm: "candidate:update", method: "POST", url: "/api/v1/hotlist/bulk/priority", body: { ids: [NOBODY], priority: "P1" } },
     { perm: "hotlist:read", method: "GET", url: "/api/v1/hotlist/filter-options" },
+    { perm: "hotlist:read", method: "GET", url: "/api/v1/hotlist/facets" },
+    { perm: "candidate:read", method: "GET", url: "/api/v1/candidates/facets" },
     { perm: "report:export", method: "POST", url: "/api/v1/hotlist/export", body: { status: "bench" } },
   ];
   const cases = users.flatMap((u) => endpoints.map((e) => [u, e.perm, e.url, e] as const));

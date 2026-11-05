@@ -129,3 +129,58 @@ export function filterSummary(f: ListFilter) {
     inPerson: f.inPerson, ghLocationId: f.ghLocationId, not: f.not?.length ? f.not : undefined, sort: f.sort,
   };
 }
+
+/** Value of each facet on a candidate row (NULL = not counted; documents "none" = not recorded). */
+const FACET_VALUE: Record<FacetKey, (c: string, t: string) => string> = {
+  status: (c) => `${c}.marketing_status`,
+  technology: (_c, t) => `${t}.name`,
+  visibility: (c) => `${c}.visibility`,
+  batchId: (c) => `${c}.batch_id::text`,
+  locationId: (c) => `${c}.location_id::text`,
+  visa: (c) => `${c}.visa_category`,
+  documents: (c) => `coalesce(${c}.documents_status, 'none')`,
+  priority: (c) => `${c}.priority`,
+  teamId: (c) => `${c}.team_id::text`,
+  recruiterId: (c) => `${c}.recruiter_id::text`,
+  ghLocationId: (c) => `${c}.gh_location_id::text`,
+  resume: (c) => `CASE WHEN ${c}.resume_url IS NOT NULL
+    OR ${c}.id IN (SELECT pg_catalog.unnest((SELECT authz.resume_candidate_ids()))) THEN 'yes' ELSE 'no' END`,
+  stay: (c) => `CASE WHEN ${c}.gh_remote THEN 'remote' WHEN ${c}.gh_location_id IS NOT NULL THEN 'guest_house' END`,
+  inPerson: (c) => `CASE ${c}.in_person_ok WHEN true THEN 'yes' WHEN false THEN 'no' END`,
+};
+
+/**
+ * Facet counts over the rows `where` selects (scope, list statuses, name search): for each facet,
+ * the count per value with every OTHER filter in `preds` applied, plus `_total` with all of them.
+ * One scan of the candidates (a materialized CTE of values and per-filter matches), then one small
+ * aggregate per facet. authz.hotlist_facets is the same query for the open Hot List.
+ */
+export function facetQuery(where: string[], preds: Partial<Record<FacetKey, string>>, keys: readonly FacetKey[]): string {
+  const sel = keys.flatMap((k) => [`${FACET_VALUE[k]("c", "t")} AS "v_${k}"`, `${preds[k] ?? "true"} AS "m_${k}"`]);
+  const others = (skip?: FacetKey) => keys.filter((k) => k !== skip && preds[k]).map((k) => `m."m_${k}"`).join(" AND ") || "true";
+  const parts = keys.map((k) =>
+    `SELECT '${k}'::text AS facet, m."v_${k}" AS value, count(*) AS n FROM m WHERE ${others(k)} AND m."v_${k}" IS NOT NULL GROUP BY 2`);
+  parts.push(`SELECT '_total'::text, NULL::text, count(*) FROM m WHERE ${others()}`);
+  return `WITH m AS MATERIALIZED (
+    SELECT ${sel.join(",\n           ")}
+    FROM eureka.candidate c
+    JOIN eureka.person p ON p.id = c.person_id
+    JOIN eureka.technology t ON t.id = c.technology_id
+    WHERE ${where.join(" AND ")}
+  )
+  ${parts.join("\n  UNION ALL\n  ")}`;
+}
+
+export interface FacetCounts { total: number; facets: Partial<Record<FacetKey, { value: string; count: number }[]>> }
+
+/** Rows of a facet query → `{ total, facets }`, each facet's values by count (then value). */
+export function shapeFacets(rows: { facet: string; value: string | null; n: string | number }[], keys: readonly FacetKey[]): FacetCounts {
+  const facets: FacetCounts["facets"] = Object.fromEntries(keys.map((k) => [k, []]));
+  let total = 0;
+  for (const r of rows) {
+    if (r.facet === "_total") { total = Number(r.n); continue; }
+    facets[r.facet as FacetKey]?.push({ value: r.value!, count: Number(r.n) });
+  }
+  for (const list of Object.values(facets)) list!.sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+  return { total, facets };
+}
