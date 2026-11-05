@@ -1,6 +1,6 @@
 # Eureka backend — refactoring roadmap
 
-> Output of the 2026-11-05 backend audit. **Status: proposal awaiting approval. No production code has been changed.**
+> Output of the 2026-11-05 backend audit. **Status: top 15 implemented on `ccr-6973b23a-g6dxmm` (see §7 Remediation status).**
 > Evidence for every item is in the linked findings ([architecture](architecture.md) ·
 > [api](api-review.md) · [security](security-review.md) · [performance](performance-review.md)).
 
@@ -273,6 +273,36 @@ Please confirm before any code changes:
 2. **R-10 phase 2:** making `If-Match` mandatory is a breaking API change. Approve per resource, or keep it optional?
 3. **R-01 existing roles:** if live custom roles violate the new admin/data separation, should the migration fail (forcing manual cleanup) or report and continue?
 4. **Wave order:** go with Wave 1 as listed, or reprioritise?
+
+## 7. Remediation status (2026-11-05)
+
+**Owner decisions:**
+* **R-06:** no step-up for restricted documents; compensating controls only.
+* **R-01:** single admin stays and no second approver is required; existing violating custom roles are *reported*, not failed.
+* **R-10:** If-Match stays **optional**. No mandatory-header (428) rollout without a separate approval.
+
+Built on branch `ccr-6973b23a-g6dxmm` by parallel worktrees, with migrations 0470–0479. An independent security gate (eureka-security-gate) returned **ship**, and its 3 actionable minors are fixed.
+
+| Item | Status | What shipped | Notes / left |
+|---|---|---|---|
+| R-01 | Done (adjusted) | `ADMIN_PERMISSIONS` may only sit on admin-trait roles, and admin roles may hold no business permissions (enforced on new changes); `admin_guard` requires the admin trait; `GET /admin/roles/violations` plus a migration WARNING per legacy violator | No second approver, by decision. `request_role` can still grant an already-violating legacy role (follow-up) |
+| R-02 | Done | Pool and client `error` listeners; `statement_timeout` in the pool config; `DB_CONNECT_TIMEOUT_MS` → 503 + Retry-After; 57014/53300/57P01/57P03 → 503; 40001/40P01/55P03 → 409 | — |
+| R-03 | Done | `ReportExecutor`: per-task semaphore (2), 25 s cap, 503 + Retry-After, 60 s cache for the market report and needsAttention; `/api/health/live` and `/ready` (origin guard exempts both on loopback) | Reports that take 25–60 s now fail with 503 and should move to async jobs |
+| R-04 | Done | CSV export masks applicant email exactly as JSON does | — |
+| R-05 | Done | Verified applicants are exempt from the global link cap; `portal_cap_reached` warn log; identical responses | — |
+| R-06 | Done (option B) | Per-user cap of 200 restricted opens per 24 h (`policy_setting restricted_opens_per_day`), 429 above it; 60 s restricted links; high-water and cap logs; docs corrected | Confirm 200/day with HR |
+| R-07 | Done | Worker EXECUTE on `transition_candidate` revoked; column-level grants on person, candidate and job; DB lint test | Candidate allow-list still includes columns some tests write directly (tracked in the 0472 comments) |
+| R-08 | Done | Payments summary computed in one numeric aggregate; correct `outstanding`; `receivedWithoutAmount` | Finance totals change for invoices without an amount (intended) |
+| R-09 | Done | Fail-closed guard with a `@SelfService()` marker; route inventory test with reviewed SelfService and Public lists | — |
+| R-10 | Done (optional) | `optionalIfMatch()` on candidates, submissions, interviews, roles, employment and planned end date, and bill void; malformed tag → 412 | The web client does not send If-Match yet |
+| R-11 | Done | Request id (`x-request-id`, problem `instance`), allow-listed JSON logger, EMF metrics, OIDC timeout and `/login?error=` redirects | The web login page should render `?error=` |
+| R-12 | Done | Hot List bulk: one read, then savepoints; set-based training bulk add; closure rebuilt once per transaction (deferred constraint trigger); set-based candidate bulk import | — |
+| R-13 | **Partial** | `pg_trgm` GIN index on the name expression; shared `nameSearch()`; measured in `perf-baseline.md` | Only the Hot List paths (`authz_definer`) use the index (0.30–0.81× the previous time). RLS lists cannot use it, because ILIKE is not leakproof. The next step is a scoped definer name-match function or the `person_read` EXISTS cost, which needs its own security review |
+| R-14 | Done | Shared `idempotent()` helper (4 sites); optional key on `POST /submissions`; advisory lock on (candidate, client) | Placements still checks the key before visibility (behaviour kept on purpose) |
+| R-15 | Done | Per-user bulk-add budget of 2000 rows per day, stored in the DB; 429; counts in the audit row | — |
+| Also | Done | R-18 (calendar calls Google after commit; provider errors → 503/502), E-10 (coach/panel double-booking → 409), E-04, E-08, C-05, A-10, D-01, F-14 (`__Host-` cookie, legacy name read for one release), B-03, D-13, and the rule-5 fixes in auth and admin bulk audit rows | Remove the legacy cookie fallback next release |
+
+**Still open** from the next tier: R-16 state machines, R-17 god-service split, R-19 OpenAPI, R-20 `migrate.ts`, R-21 retention, R-23 pagination flags, R-24 shared limiter, R-25 single-query auth, R-26 catalog lint (partly covered by the DB least-privilege test), R-27 worker dead-letter, R-28 constraints, E-09 (interview board search). Web follow-ups: If-Match on edits, a message for `?error=`, messages for 429 and 503 + Retry-After, and the role violations report.
 
 ## Appendix A — all findings
 
