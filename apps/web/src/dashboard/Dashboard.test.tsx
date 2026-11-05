@@ -55,7 +55,7 @@ const lastQuery = () => api.gets("/api/v1/dashboard").at(-1)!.url.searchParams;
 describe("Dashboard", () => {
   it("shows totals as tiles and a breakdown by the server's grouping", async () => {
     wrap(<DashboardPage />);
-    const tiles = await screen.findByRole("list");
+    const tiles = await screen.findByRole("list", { name: "Activity totals" });
     const tile = (label: string) => within(tiles).getByText(label, { selector: ".tilelabel" }).closest("li")!;
     expect(within(tile("Submissions")).getByText("4")).toBeInTheDocument();
     expect(within(tile("Joined")).getByText("1")).toBeInTheDocument();
@@ -149,6 +149,39 @@ describe("Dashboard", () => {
     expect(onOpen).toHaveBeenCalledWith("placements", "p1");
     const stale = screen.getByRole("region", { name: /^Stale submissions/ });
     expect(within(stale).queryByRole("button", { name: /^Open/ })).not.toBeInTheDocument();
+  });
+
+  it("ranks the groups for the chosen metric and sums the open needs-attention items", async () => {
+    wrap(<DashboardPage />);
+    const rank = await screen.findByRole("list", { name: "Most active by recruiter" });
+    const rows = within(rank).getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent("Priya Shah");
+    expect(rows[0]).toHaveTextContent("3");
+    expect(rows[1]).toHaveTextContent("Unassigned");
+
+    const summary = screen.getByRole("region", { name: /^Needs attention 4 open$/ });
+    expect(within(summary).getByRole("button", { name: /3 stale submissions/ })).toBeInTheDocument();
+    expect(within(summary).getByRole("button", { name: /0 interviews without feedback/ })).toBeInTheDocument();
+    fireEvent.click(within(summary).getByRole("button", { name: /1 placement awaiting/ }));
+    expect(document.activeElement).toHaveTextContent(/^Placements awaiting the next step/);
+  });
+
+  it("applies the small-screen filter sheet only on Apply", async () => {
+    wrap(<DashboardPage />);
+    await screen.findByRole("table", { name: "Activity by recruiter" });
+    const before = api.gets("/api/v1/dashboard").length;
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    const sheet = screen.getByRole("dialog", { name: "Filters" });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Last 90 days" }));
+    fireEvent.change(within(sheet).getByLabelText("Group by"), { target: { value: "location" } });
+    expect(api.gets("/api/v1/dashboard")).toHaveLength(before);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Apply" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => {
+      const q = lastQuery();
+      expect(q.get("groupBy")).toBe("location");
+      expect(Math.round((Date.parse(q.get("to")!) - Date.parse(q.get("from")!)) / 86_400_000)).toBe(90);
+    });
   });
 
   it("explains a load failure with a retry", async () => {
