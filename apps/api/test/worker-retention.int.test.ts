@@ -209,9 +209,15 @@ describe("audit retention (opt-in archival)", () => {
     const exportedOld = await row("2020-01-10T12:00:00Z");
     const unexportedOld = await row("2020-01-11T12:00:00Z");
     const outOfRange = await row("2020-01-10T13:00:00Z"); // same day, after the export's last_seq
+    // A day whose file holds 1 row, but a second row of that day committed late with a seq in range:
+    // the day is kept whole (neither row is pruned).
+    const lateA = await row("2020-01-12T09:00:00Z");
+    const lateB = await row("2020-01-12T09:30:00Z");
     const recent = await row();
     await db.admin.query(`INSERT INTO eureka.audit_export (export_date, object_key, row_count, first_seq, last_seq, byte_size, sha256_hex)
       VALUES ('2020-01-10', 'audit/2020/01/10/test.jsonl.gz', 1, $1, $1, 20, repeat('a', 64))`, [exportedOld]);
+    await db.admin.query(`INSERT INTO eureka.audit_export (export_date, object_key, row_count, first_seq, last_seq, byte_size, sha256_hex)
+      VALUES ('2020-01-12', 'audit/2020/01/12/test.jsonl.gz', 1, $1, $2, 20, repeat('c', 64))`, [lateA, lateB]);
     // Mark today's recent row as part of an export too: still too young.
     await db.admin.query(`INSERT INTO eureka.audit_export (export_date, object_key, row_count, first_seq, last_seq, byte_size, sha256_hex)
       VALUES ((now() AT TIME ZONE 'UTC')::date - 1, 'audit/recent/test.jsonl.gz', 1, $1, $1, 20, repeat('b', 64))`, [recent]);
@@ -222,14 +228,16 @@ describe("audit retention (opt-in archival)", () => {
     const r = await job.run("2026-01-01", ctx());
     expect(r).toMatchObject({ deleted: 1, days: 365 });
     const left = (await db.admin.query("SELECT seq::text FROM eureka.audit_event WHERE action = 'retention.test'")).rows.map((x) => x.seq);
-    expect(left.sort()).toEqual([unexportedOld, outOfRange, recent].sort());
+    expect(left.sort()).toEqual([unexportedOld, outOfRange, lateA, lateB, recent].sort());
 
-    // The owner's delete policy is the same predicate: nothing else goes, whoever runs it as the owner.
+    // The owner's delete policy (0488) still bounds any owner-run delete: unexported, out-of-range and
+    // young rows never go. (The late-commit count rule lives in the function only; a policy cannot
+    // read its own table.)
     const c = await db.admin.connect();
     try {
       await c.query("BEGIN");
       await c.query("SET LOCAL ROLE eureka_owner");
-      const d = await c.query("DELETE FROM eureka.audit_event WHERE action = 'retention.test'");
+      const d = await c.query("DELETE FROM eureka.audit_event WHERE seq = ANY ($1::bigint[])", [[unexportedOld, outOfRange, recent]]);
       expect(d.rowCount).toBe(0);
     } finally {
       await c.query("ROLLBACK");
