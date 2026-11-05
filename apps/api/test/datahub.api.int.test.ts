@@ -330,6 +330,29 @@ describe("files", () => {
     expect((await call("r1a", "GET", `/api/v1/datahub/folders/${F.restricted}/access-log`)).statusCode).toBe(403);
   });
 
+  it("restricted links live 60 s, and restricted opens are capped per user per 24 hours (429 too_many_restricted_opens)", async () => {
+    // The clean version of the previous test (a new file would show up in the folder's search and lists).
+    const up = { versionId: (await db.admin.query(`SELECT v.id FROM eureka.datahub_file_version v JOIN eureka.datahub_file f ON f.id = v.file_id
+      WHERE f.name = 'June payroll.pdf'`)).rows[0].id as string };
+    const used = async () => Number((await db.admin.query(`SELECT
+        (SELECT count(*) FROM eureka.document_access WHERE user_id = $1 AND classification = 'restricted' AND at > now() - interval '24 hours')
+      + (SELECT count(*) FROM eureka.datahub_access WHERE user_id = $1 AND level = 'restricted' AND at > now() - interval '24 hours') AS n`,
+      [U.r1a])).rows[0].n);
+    await db.admin.query(`UPDATE authz.policy_setting SET value = $1 WHERE key = 'restricted_opens_per_day'`, [String(await used() + 1)]);
+    try {
+      const s = await login("r1a", true);
+      const ok = await call(s, "POST", `/api/v1/datahub/versions/${up.versionId}/download`);
+      expect(ok.statusCode, ok.body).toBe(200);
+      const left = Date.parse(ok.json().expiresAt as string) - Date.now();
+      expect(left).toBeLessThanOrEqual(60_000);
+      expect(left).toBeGreaterThan(30_000);
+      const refused = await call(s, "POST", `/api/v1/datahub/versions/${up.versionId}/download`);
+      expect([refused.statusCode, refused.json().detail]).toEqual([429, "too_many_restricted_opens"]);
+    } finally {
+      await db.admin.query(`UPDATE authz.policy_setting SET value = '200' WHERE key = 'restricted_opens_per_day'`);
+    }
+  });
+
   it("search: file and folder names over readable folders only", async () => {
     const r = await call("r1a", "GET", "/api/v1/datahub/search?q=PAY");
     expect(r.statusCode).toBe(200);

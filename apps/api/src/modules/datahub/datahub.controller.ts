@@ -105,7 +105,7 @@ export class DatahubController {
     await this.svc.deleteFile(user, id);
   }
 
-  /** Presigned GET (attachment; 60 s, restricted 5 min) for a clean version; logged. POST so it carries the CSRF token. */
+  /** Presigned GET (attachment; 60 s) for a clean version; logged; restricted opens are capped per user per 24 h (429). POST so it carries the CSRF token. */
   @Post("versions/:id/download")
   @HttpCode(200)
   @RequirePermission("datahub:read")

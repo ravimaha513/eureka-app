@@ -22,6 +22,7 @@ import { inPickerScope, pickerScopePerm } from "../../platform/people-scope.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
 import { documentQuarantineKey, documentStoredKey } from "../../platform/storage/content.js";
 import { DOCUMENT_STORAGE, type DocumentStorage } from "../../platform/storage/document-storage.js";
+import { noteRestrictedOpen, restrictedOpenError } from "../documents/documents.errors.js";
 import {
   decodeCursor, encodeCursor, likeEscape,
   type FolderCreate, type FolderUpdate, type UploadRequest,
@@ -31,8 +32,8 @@ import { dbErrorMapper } from "../../platform/errors.js";
 
 /** Presigned POST lifetime (as documents; the database upload window is 5 minutes). */
 export const DATAHUB_UPLOAD_TTL_SECONDS = 120;
-/** Presigned GET lifetime: 60 s, restricted 5 minutes (as documents, design A6.3). */
-export const DATAHUB_DOWNLOAD_TTL_SECONDS = { internal: 60, restricted: 300 } as const;
+/** Presigned GET lifetime: 60 s for every file, restricted included (as documents; B-01, no step-up). */
+export const DATAHUB_DOWNLOAD_TTL_SECONDS = { internal: 60, restricted: 60 } as const;
 export const DATAHUB_UPLOADS_PER_MINUTE = 20;
 export const DATAHUB_DOWNLOADS_PER_MINUTE = 30;
 const CREATE_FOLDER_ENDPOINT = "POST /api/v1/datahub/folders";
@@ -379,9 +380,12 @@ export class DatahubService {
   }
 
   /**
-   * DH-7: a short-lived download link for one clean version. Restricted
-   * folders need a live step-up of this session: 403 `step_up_required`
-   * (the refusal is audited, so it is raised after the transaction commits).
+   * DH-7: a short-lived (60 s) download link for one clean version. Restricted
+   * folders need no step-up (owner decision on security review B-01); each
+   * restricted open counts toward the caller's cap of restricted opens in any
+   * 24 hours, shared with candidate documents and enforced in
+   * authz.datahub_download (429 `too_many_restricted_opens`, logged; a warning
+   * at 80 % of it).
    */
   async download(user: AuthedUser, versionId: string) {
     const out = await this.db.withUser(user.id, async (c) => {
@@ -391,10 +395,13 @@ export class DatahubService {
       if (!this.downloadLimiter.take(user.id)) {
         throw new HttpException("Too many downloads; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
       }
-      const r = (await c.query<{ outcome: string; file_object_id: string | null; classification: DocumentClassification; version: number }>(
-        `SELECT outcome, file_object_id, classification, version FROM authz.datahub_download($1, $2)`, [versionId, user.sessionHash])
-        .catch(mapDbError)).rows[0]!;
+      const r = (await c.query<{ outcome: string; file_object_id: string | null; classification: DocumentClassification; version: number;
+        restricted_opens: number | null; restricted_cap: number | null }>(
+        `SELECT outcome, file_object_id, classification, version, restricted_opens, restricted_cap FROM authz.datahub_download($1, $2)`,
+        [versionId, user.sessionHash])
+        .catch(restrictedOpenError(user.id)).catch(mapDbError)).rows[0]!;
       if (r.outcome !== "ok" || !r.file_object_id) return { outcome: r.outcome } as const;
+      noteRestrictedOpen(user.id, r.restricted_opens, r.restricted_cap);
       const ttl = r.outcome === "ok" && r.classification === "restricted" ? DATAHUB_DOWNLOAD_TTL_SECONDS.restricted : DATAHUB_DOWNLOAD_TTL_SECONDS.internal;
       const url = await this.storage.presignDownload({
         key: documentStoredKey(r.file_object_id, r.classification), contentType: v.content_type,
@@ -402,7 +409,6 @@ export class DatahubService {
       });
       return { outcome: "ok", url, expiresAt: new Date(Date.now() + ttl * 1000).toISOString() } as const;
     });
-    if (out.outcome === "step_up_required") throw new ForbiddenException("step_up_required");
     if (out.outcome !== "ok") throw new ConflictException("not_available");
     return { url: out.url, expiresAt: out.expiresAt };
   }

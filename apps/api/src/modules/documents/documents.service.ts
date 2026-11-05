@@ -23,11 +23,15 @@ import type { AccessLogQuery, DocumentUpload, ReplaceDocumentFile, UpdateDocumen
 import { AuditService } from "../../platform/audit.service.js";
 import type { z } from "zod";
 import { dbErrorMapper } from "../../platform/errors.js";
+import { noteRestrictedOpen, restrictedOpenError } from "./documents.errors.js";
 
 /** Presigned POST lifetime (as resumes; the database upload window is 5 minutes). */
 export const DOCUMENT_UPLOAD_TTL_SECONDS = 120;
-/** Presigned GET lifetime: 60 s for internal files, 5 minutes for restricted ones (design A6.3). */
-export const DOCUMENT_DOWNLOAD_TTL_SECONDS = { internal: 60, restricted: 300 } as const;
+/**
+ * Presigned GET lifetime: 60 s for every file. Restricted files open without step-up (B-01 owner decision), so
+ * their link is no longer-lived than an internal one (was 5 minutes).
+ */
+export const DOCUMENT_DOWNLOAD_TTL_SECONDS = { internal: 60, restricted: 60 } as const;
 export const DOCUMENT_UPLOADS_PER_MINUTE = 10;
 export const DOCUMENT_DOWNLOADS_PER_MINUTE = 30;
 
@@ -114,7 +118,8 @@ type Owner = { kind: "candidate"; id: string } | { kind: "placement"; id: string
  * document:read / document:upload (and document.restricted:read for
  * restricted types) does not cover the candidate. RLS (document_read) and the
  * definer functions of migration 0043 apply the same rules in the database;
- * authz.document_download also enforces step-up and writes the access log.
+ * authz.document_download writes the access log and enforces the per-user cap
+ * on restricted opens (no step-up: B-01 owner decision; migration 0474).
  */
 @Injectable()
 export class DocumentsService {
@@ -243,9 +248,11 @@ export class DocumentsService {
   }
 
   /**
-   * A short-lived download link. Restricted documents need a live step-up of
-   * this session: 403 `step_up_required` otherwise (the refusal is audited, so
-   * it is raised after the transaction commits). Each link issued is one
+   * A short-lived (60 s) download link. Restricted documents need no step-up
+   * (owner decision on security review B-01); instead each restricted open
+   * counts toward the caller's cap of restricted opens in any 24 hours, enforced
+   * in authz.document_download (429 `too_many_restricted_opens` over it, logged;
+   * a warning when the caller reaches 80 % of it). Each link issued is one
    * access-log row and one audit row (document.viewed / document.downloaded).
    */
   async download(user: AuthedUser, documentId: string) {
@@ -257,9 +264,12 @@ export class DocumentsService {
       if (!this.downloadLimiter.take(user.id)) {
         throw new HttpException("Too many downloads; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
       }
-      const r = (await c.query<{ outcome: string; file_id: string | null; classification: DocumentClassification }>(
-        `SELECT outcome, file_id, classification FROM authz.document_download($1, $2)`, [documentId, user.sessionHash]).catch(mapDbError)).rows[0]!;
+      const r = (await c.query<{ outcome: string; file_id: string | null; classification: DocumentClassification;
+        restricted_opens: number | null; restricted_cap: number | null }>(
+        `SELECT outcome, file_id, classification, restricted_opens, restricted_cap FROM authz.document_download($1, $2)`, [documentId, user.sessionHash])
+        .catch(restrictedOpenError(user.id)).catch(mapDbError)).rows[0]!;
       if (r.outcome !== "ok" || !r.file_id) return { outcome: r.outcome } as const;
+      noteRestrictedOpen(user.id, r.restricted_opens, r.restricted_cap);
       const ttl = DOCUMENT_DOWNLOAD_TTL_SECONDS[r.classification];
       const url = await this.storage.presignDownload({
         key: documentStoredKey(r.file_id, r.classification), contentType: d.content_type,
@@ -267,7 +277,6 @@ export class DocumentsService {
       });
       return { outcome: "ok", url, expiresAt: new Date(Date.now() + ttl * 1000).toISOString() } as const;
     });
-    if (out.outcome === "step_up_required") throw new ForbiddenException("step_up_required");
     if (out.outcome !== "ok") throw new ConflictException("not_available");
     return { url: out.url, expiresAt: out.expiresAt };
   }
