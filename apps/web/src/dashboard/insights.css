@@ -44,6 +44,8 @@ th.num .ins-sort { flex-direction: row-reverse; }
 th abbr { text-decoration: none; }
 
 @media (max-width: 768px) {
+  /* A secondary line inside a phone-card cell stays in the value column, under the value. */
+  .dtable td[data-label] > .block { grid-column: 2; margin-top: -8px; }
   .ins-tiles { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
   .ins-tiles > li { padding: 10px 10px 10px 12px; gap: 2px; }
   .ins-tiles .tilelabel { font-size: 12px; }

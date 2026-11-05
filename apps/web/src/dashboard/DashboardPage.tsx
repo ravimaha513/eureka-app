@@ -1,7 +1,8 @@
 import { useId, useMemo, useState } from "react";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowDownRight, ArrowRight, ArrowUpRight, CalendarDays, Minus, SlidersHorizontal, X } from "lucide-react";
-import { PALETTE, TrendChart } from "../ui/Charts";
+import { PALETTE } from "../ui/Charts";
+import { DailyTrend } from "./DailyTrend";
 import { pipelineError } from "../pipeline/errors";
 import { saveBlob } from "../lib/download";
 import { pipelineLabel } from "../pipeline/pipelineApi";
@@ -341,12 +342,12 @@ export function DashboardPage({ canOpen = () => false, onOpen, firstName, canExp
                     ))}
                   </div>
                 </div>
-                <TrendChart data={trend} label="Activity per day" height={260}
+                <DailyTrend data={trend} label="Activity per day" height={260}
                   series={plot.map((m) => ({ key: m, label: METRIC_LABELS[m], color: METRIC_COLOR[m] }))} />
               </section>
 
               <div className="dash-side">
-                {shownMetric && (
+                {shownMetric && d.groups.length > 1 && (
                   <section className="card dash-card" aria-labelledby={`${id}-rank`}>
                     <div className="chartheader">
                       <div>
@@ -360,7 +361,7 @@ export function DashboardPage({ canOpen = () => false, onOpen, firstName, canExp
                         </select>
                       </div>
                     </div>
-                    {d.groups.length === 0 ? <p className="muted">No activity in this period.</p> : (() => {
+                    {(() => {
                       const rows = [...d.groups].sort((a, b) => (b.counts[shownMetric] ?? 0) - (a.counts[shownMetric] ?? 0)).slice(0, 5);
                       const max = Math.max(1, ...rows.map((g) => g.counts[shownMetric] ?? 0));
                       return (
@@ -380,11 +381,9 @@ export function DashboardPage({ canOpen = () => false, onOpen, firstName, canExp
                         </ol>
                       );
                     })()}
-                    {d.groups.length > 0 && (
-                      <button type="button" className="linkbtn dash-viewall" onClick={() => jumpTo(`${id}-table`)}>
-                        All {d.groups.length} {d.groups.length === 1 ? "row" : "rows"} in the table <ArrowRight size={14} aria-hidden="true" />
-                      </button>
-                    )}
+                    <button type="button" className="linkbtn dash-viewall" onClick={() => jumpTo(`${id}-table`)}>
+                      All {d.groups.length} rows in the table <ArrowRight size={14} aria-hidden="true" />
+                    </button>
                   </section>
                 )}
 

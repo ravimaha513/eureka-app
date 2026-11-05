@@ -1,5 +1,5 @@
 # Dashboard — `/dashboard`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `report:read` (nav.ts:14) — CEO, managers, leads, recruiters, location ops
 Source: `apps/web/src/dashboard/DashboardPage.tsx`, `apps/web/src/ui/Charts.tsx`, `apps/web/src/styles.css:464-475, 505-512, 1101-1166`
 Evidence: `dashboard-desktop-full.png`, `dashboard-mobile-full.png`, `dashboard-recruiter-desktop.png`, `dashboard-recruiter-mobile.png`, `dashboard-legend-focus-desktop.png` (new), `dashboard-trend-tooltip-desktop.png` (new), `dashboard-filtersheet-mobile.png` (new)
@@ -71,4 +71,23 @@ DashboardPage.tsx reorder/removal, Charts.tsx (`TrendChart` curve prop + dots, r
 | Design consistency | 5 | Tile/series colour mismatch (#8) |
 
 ## Validation
-Visual inspection: CEO and recruiter at 1440 and 390 (existing + new shots), legend keyboard focus, chart tooltip, mobile filter sheet; mobile overflow measured (none at page level; tables scroll internally). Redesign validation: pending (not implemented).
+Visual inspection: CEO and recruiter at 1440 and 390 (existing + new shots), legend keyboard focus, chart tooltip, mobile filter sheet; mobile overflow measured (none at page level; tables scroll internally). Redesign validation: see wave 2 below.
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Work buried (High) | "Needs attention" is now the first block: one card with three lists (oldest first, 5 rows + "Show all N"), and each row has Open | `after/dashboard-desktop.png` (Open buttons at y≈311, x 1319–1394) |
+| #2 Needs attention ×3 | Summary card and donut removed. Each list heading carries its count and the section head carries the total | `after/dashboard-desktop.png` |
+| #3 Funnel not a funnel (High) | Replaced by "Pipeline activity in the period" bars, labelled "events counted in the period, not a cohort". A 0 draws no bar | `after/dashboard-desktop.png`; unit test "no bar for zero" |
+| #4 Activity-mix donut | Removed (mixed units) | — |
+| #5 Smoothed trend | Local `DailyTrend`: straight lines between real days, a dot per day up to 31 points, chart tokens | `after/dashboard-desktop.png` |
+| #6 Legend contrast (High) | Kit legend: an off item is a hollow dot with `--muted` text, readable contrast, `aria-pressed` | `after/dashboard-dark-desktop.png` |
+| #7 Delta honesty | Absolute + percent (`−8 (−38%)`). When the previous period was 0 it shows "New · prev 0" in muted ink. Decreases use neutral ink, never red. One "Change vs previous 7 days" caption | `after/dashboard-desktop.png` |
+| #8 Tile/series colours | One `METRIC_COLOR` map (chart tokens) for tile swatch, legend, line and bar. Tiles are a compact stat strip with no tinted icon tiles | `after/dashboard-desktop.png` |
+| #9 Empty location card | Rank card sizes to its content beside the trend, and is hidden when the scope has one group | `after/dashboard-desktop.png` |
+| #10 Group views repeat | Share donut removed. The group table has a visible "By <group>" heading and count | `after/dashboard-desktop.png` |
+| #11 Open off-screen on phone (High) | Needs-attention rows are phone cards: name + status, details, recruiter, waiting, and a 40px Open button | `after/dashboard-mobile.png` (Open at x 277–363) |
+| #12 Small "View all" | 28px target on desktop, 40px on phones | — |
+| #13 Age bar | Removed. "Waiting" is a right-aligned number | — |
+
+**Validation (wave 2):** typecheck is clean and the `src/dashboard`, `src/performance` and `src/employees` unit tests pass (65). The shared API on :3000 was down during this wave: nothing was listening there or on the database port, and there was no Docker daemon. So the screens were checked in Playwright against this branch's Vite build, with fictional fixtures served by `page.route`. The fixture shapes come from the typed clients and the CEO capabilities from the shared catalog. Viewports were 1440×900 and 390×844, light and dark. Page width at 390 is 390 in every shot, and row actions sit inside the viewport at 1440. Re-check against the seeded API when it is back.

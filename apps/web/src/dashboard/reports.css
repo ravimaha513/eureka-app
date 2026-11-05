@@ -1,0 +1,72 @@
+/* Reports (wave 2): Joinings and exits, Active employees, Market. Tokens only (DESIGN.md).
+   Shared insight classes (ins-*) live in insights.css. */
+.rep { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.rep-panel { min-width: 0; }
+.rep-stack { display: flex; flex-direction: column; gap: 32px; min-width: 0; }
+.rep-block { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.rep-block + .rep-block { border-top: 1px solid var(--line); padding-top: 24px; }
+.rep-intro { margin: 0; }
+.rep-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; margin-top: 8px; }
+.rep-body > .ins-head { margin-bottom: -6px; }
+.rep-range { margin-left: 10px; font-size: 14px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+.rep-active .ins-head { margin-bottom: 0; }
+
+/* Filter row: period/fields on the left, export on the right; messages take their own line. */
+.rep-filters { justify-content: flex-start; }
+.rep-filters .ins-dates { display: flex; align-items: flex-end; gap: 8px 12px; flex-wrap: wrap; }
+.rep-filters .field.inline select, .rep-filters .field.inline input { height: 36px; }
+.rep-export { margin-left: auto; align-self: flex-end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.rep-export .hint { max-width: 300px; text-align: right; }
+.rep-msg { flex-basis: 100%; margin: 0; }
+.rep-cleardates { height: 36px; }
+
+/* Tiles: three to four figures; tiles size to the row, never a lonely wrapped tile. */
+.rep-tiles { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.rep-tiles:has(> li:only-child) { max-width: 360px; }
+.rep-reasons { margin: 2px 0 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 16px; font-size: 12.5px; max-width: 340px; }
+.rep-reasons > div { display: flex; justify-content: space-between; gap: 8px; }
+.rep-reasons dt { color: var(--text2); }
+.rep-reasons dd { margin: 0; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.rep-reasons > div.zero dt, .rep-reasons > div.zero dd { color: var(--muted); font-weight: 400; }
+
+/* Each table has a visible heading; the two small summaries sit side by side. */
+.rep-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px 24px; align-items: start; }
+.rep-table { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rep-table h3 { font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -.01em; display: flex; align-items: baseline; gap: 8px; margin: 0; }
+.rep-table th.num, .rep-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rep-events td.rep-date { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rep-events td.rep-event .badge + .badge { margin-left: 4px; }
+
+/* Market: many status columns. The group column stays put while the counts scroll. */
+.rep-market table { font-variant-numeric: tabular-nums; }
+.rep-market th, .rep-market td { white-space: nowrap; }
+.rep-market tbody th[scope="row"], .rep-market tfoot th[scope="row"], .rep-market thead th:first-child {
+  position: sticky; left: 0; z-index: 1; background: var(--surface); text-align: left; box-shadow: inset -1px 0 0 var(--line2); }
+.rep-market thead th:first-child { background: var(--surface2); z-index: 2; }
+/* Row heads are values (a technology, a team): body type, not condensed caps. */
+.rep-market tbody th[scope="row"], .rep-market tfoot th[scope="row"] { font-family: inherit; font-size: 13.5px; font-stretch: 100%; text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--text); }
+.rep-market tfoot th, .rep-market tfoot td { font-weight: 700; color: var(--text); border-top: 1px solid var(--line-strong); }
+
+@media (max-width: 768px) {
+  .rep-stack { gap: 24px; }
+  .rep-range { display: block; margin: 2px 0 0; font-size: 13px; }
+  .rep-filters .ins-dates { display: grid; grid-template-columns: 1fr 1fr; }
+  .rep-filters .ins-dates .field.inline { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-width: 0; }
+  .rep-filters .ins-dates .field.inline:only-child { grid-column: 1 / -1; }
+  .rep-filters .field.inline select, .rep-filters .field.inline input { height: 44px; font-size: 16px; width: 100%; min-width: 0; }
+  .rep-cleardates { height: 44px; align-self: end; }
+  .rep-export { margin-left: 0; align-items: stretch; width: 100%; }
+  .rep-export .btn { height: 44px; }
+  .rep-export .hint { max-width: none; text-align: left; }
+  .rep-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rep-exits, .rep-tiles > li:only-child, .rep-tiles > li:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .rep-tiles:has(> li:only-child) { max-width: none; }
+  .rep-pair { grid-template-columns: minmax(0, 1fr); }
+  .rep-table .dtable td.num { text-align: left; }
+  .rep-table .listcard:has(> .rep-compact) { border: 1px solid var(--line); background: var(--surface); border-radius: var(--r-lg); overflow: hidden; }
+  .rep-compact td.c-primary { background: none; }
+  .rep-table .tablewrap > table.rep-compact { min-width: 0; width: 100%; }
+  .rep-compact th, .rep-compact td { padding-inline: 10px; }
+  .rep-compact th.num { white-space: normal; }
+  .rep-market { overflow-x: auto; }
+}
