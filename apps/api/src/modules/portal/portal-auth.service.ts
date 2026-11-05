@@ -24,11 +24,18 @@ import type { RequestLink, SignUp } from "./portal.schemas.js";
  * map); everything per email or global is in the database, shared by all
  * tasks and counted only for links actually issued, so asking for a link for
  * somebody else's address cannot lock them out: one link per 60 s and 10 an
- * hour per applicant, and database-wide hourly caps on links and on new accounts.
+ * hour per applicant, and database-wide hourly caps on new accounts and on links
+ * to unverified addresses. Links to verified applicants are exempt from the
+ * global link cap (security review E-01), so a burst of sign-ups for made-up
+ * addresses cannot stop existing applicants from signing in. When a global
+ * cap refuses a request the reply is still the same; the service logs a
+ * warning `portal_cap_reached {"kind":"signup"|"link"}` (no address, no id)
+ * for alerting.
  */
 export const LINK_TTL_MINUTES = 15;
 export const LINKS_PER_HOUR = 10;
 export const LINK_COOLDOWN_SECONDS = 60;
+/** Database-wide hourly cap on links to unverified addresses (verified applicants are exempt). */
 export const GLOBAL_LINKS_PER_HOUR = 600;
 export const GLOBAL_SIGNUPS_PER_HOUR = 200;
 /** Sign-up and link requests per client address (/64 for IPv6) per 15 minutes; link redemptions likewise. */
@@ -70,6 +77,11 @@ export class PortalAuthService {
     this.pending.add(p);
   }
 
+  /** Structured warning for alerting when a database-wide cap refused a request: the kind only, never the address. */
+  private capReached(kind: string | null | undefined) {
+    if (kind === "signup" || kind === "link") this.log.warn(`portal_cap_reached ${JSON.stringify({ kind })}`);
+  }
+
   /** Waits for deferred work (tests, graceful shutdown). */
   async drain(): Promise<void> {
     while (this.pending.size) await Promise.all([...this.pending]);
@@ -101,16 +113,17 @@ export class PortalAuthService {
     this.defer("sign-up", async () => {
       const link = this.newLink();
       const r = await this.db.system(async (c) => {
-        const row = (await c.query<{ applicant_id: string; existing: boolean; issued: boolean }>(
+        const row = (await c.query<{ applicant_id: string | null; existing: boolean | null; issued: boolean; cap_reached: string | null }>(
           `SELECT * FROM authz.portal_sign_up($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
           [body.firstName, body.lastName, body.email, body.phone, link.id, link.hash, LINK_TTL_MINUTES, LINKS_PER_HOUR,
             LINK_COOLDOWN_SECONDS, GLOBAL_LINKS_PER_HOUR, GLOBAL_SIGNUPS_PER_HOUR])).rows[0];
-        if (row) {
+        if (row?.applicant_id) {
           await this.audit.record(c, { actorId: row.applicant_id, action: "applicant.sign_up", entityType: "applicant", entityId: row.applicant_id,
             changes: { existing: row.existing, linkIssued: row.issued } });
         }
         return row;
       });
+      this.capReached(r?.cap_reached);
       if (r?.issued) {
         await this.send(body.email, r.existing ? "Sign in to Eureka Careers" : "Confirm your email for Eureka Careers",
           this.linkText(link.url, r.existing
@@ -125,9 +138,10 @@ export class PortalAuthService {
     this.takeIp(this.ipLimiter, ip);
     this.defer("request-link", async () => {
       const link = this.newLink();
-      const r = await this.db.system(async (c) => (await c.query<{ applicant_id: string; issued: boolean }>(
+      const r = await this.db.system(async (c) => (await c.query<{ applicant_id: string; issued: boolean; cap_reached: string | null }>(
         `SELECT * FROM authz.portal_issue_link($1, $2, $3, $4, $5, $6, $7)`,
         [body.email, link.id, link.hash, LINK_TTL_MINUTES, LINKS_PER_HOUR, LINK_COOLDOWN_SECONDS, GLOBAL_LINKS_PER_HOUR])).rows[0]);
+      this.capReached(r?.cap_reached);
       if (r?.issued) await this.send(body.email, "Sign in to Eureka Careers", this.linkText(link.url, "Use this link to sign in to Eureka Careers:"), "sign-in");
     });
     return { message: GENERIC_SENT };
