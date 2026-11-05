@@ -55,6 +55,10 @@ All under `/api/v1/training` unless noted.
 - `GET /batches/:id/eligible-students?search=` (TR-8) → `{ items: [{ candidateId, name, technology, status, currentBatch }] }`.
 - `POST /batches/:id/students` `{ candidateId }` → 201; `DELETE /batches/:id/students/:candidateId` → 204 (TR-8).
 - `POST /batches/:id/students/bulk` `{ candidateIds }` (1–200) → 201 `{ batchId, added, skipped: [candidateId] }` (TR-8).
+  One call to `authz.set_batch_students` (0476): the `set_batch_student` rules per candidate, scope sets
+  computed once, candidates locked in id order (overlapping bulk adds cannot deadlock). `added` counts the
+  distinct candidates now in the batch (already there counts too); `skipped` lists the not-eligible ones in
+  request order. Audited once as `training.students_added` `{ candidateIds, skipped }`.
 - `PUT /batches/:id/students/:candidateId/modules/:moduleId` (`training.progress:update`) `{ completed: boolean }` → `{ moduleId, completed, completedAt, completedBy }`.
 - `GET /trainers` (`canPlanBatch`) → `{ items: [{ id, name }] }` (active users who may record progress).
 - `GET /courses?includeArchived=true` (`training:read`) → `{ items: [{ id, title, description, cover, archived, location, modules, totalMinutes, batches, rowVersion, canEdit }], nextCursor: null, canCreate }`.

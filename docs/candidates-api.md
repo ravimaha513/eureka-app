@@ -74,7 +74,18 @@ and team Hot List) `teamAssignedAt`.
 `GET /api/v1/hotlist/filter-options` (`hotlist:read`): `{ teams: [{ id, name, lead }], recruiters:
 [{ id, name }], guestHouses: [{ id, name }] }` for the filter selects (current recruiter-role
 holders; locations of kind `gh`). `POST /api/v1/hotlist/bulk/priority` (`candidate:update`)
-`{ ids, priority }` runs `PATCH /candidates/:id { priority }` per record, like the other bulk actions.
+`{ ids, priority }` applies the rules of `PATCH /candidates/:id { priority }` per record, like the other bulk actions.
+
+Hot List bulk actions (`/hotlist/bulk/{visibility,status,priority}`, up to 100 ids, R-12): one read of
+all ids under the caller's `candidate:read` scope sorts them in memory into `not_found` (not visible),
+`forbidden` (visible, not owned under the action's permission) and, for status, `invalid_transition`;
+the rest are written in one transaction, each under its own savepoint, through the same definer
+function or guarded UPDATE as the single-record endpoint, with the same per-record audit row
+(`candidate.visibility`, `candidate.transition`, `candidate.updated`). A record whose write fails is
+rolled back to its savepoint, audit row included, and reported with the single endpoint's code
+(`invalid_teams`, `placement_open`, `invalid_transition`, `forbidden`, `not_found`, else `failed`);
+the others still commit. Response `{ succeeded, failed, results: [{ id, ok, error? }] }` in request
+order, plus one `hotlist.bulk` summary audit row (`action, value, requested, succeeded, failed`).
 
 ## Profile fields (CA-3)
 
