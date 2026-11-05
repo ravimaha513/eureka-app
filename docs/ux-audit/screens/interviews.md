@@ -1,5 +1,5 @@
 # Interviews — `/interviews` (record: `/interviews/<id>`)
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `interview:read` (nav.ts:18): recruiters, leads, managers, CEO, location ops, interview coaches. "Schedule interview" needs `interview:create`. "Clear and place" needs `placement:create`. Per-row editability comes from server `editableFields`.
 Source: `apps/web/src/interviews/InterviewsPage.tsx` (board, `Schedule`, `Edit`, `Feedback`, `InterviewDrawer`), `calendar/SupportCalendar.tsx`, `pipeline/CreatePlacementDialog.tsx`; routing `App.tsx:474`
 Evidence: `interviews-desktop.png`, `interviews-desktop-full.png`, `interviews-mobile.png`, `interviews-mobile-full.png`, new: `interviews-detail-{desktop,mobile}.png`, `interviews-detail-full-{desktop,mobile}.png`, `interviews-detail-url-{desktop,mobile}.png`, `interviews-create-dialog-{desktop,mobile}.png`, `interviews-edit-dialog-{desktop,mobile}.png`
@@ -77,3 +77,22 @@ Web only, no API changes (`submissionId`, `placement.id` and `candidate.id` are 
 
 ## Validation
 Visual inspection: desktop 1440 and mobile 390 board, detail drawer via row button and via direct URL, Create and Edit dialogs; table width and target sizes measured with Playwright. No data mutated. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 clipped actions, 195px rows (High) | Agenda `dtable` grouped by day (sticky day head with count), time as `2:00 – 3:00 PM` with the zone in the column head, one-line readiness; one row action (Clear and place / Create placement when allowed, else Details) + ⋯ menu (Details, Edit interview, Feedback); feedback column `p3` with stars under the result below 1600px | `after/interviews-desktop.png` (rows ~54px, actions 1230-1411) |
+| #2 no cross-links (High) | Candidate name → profile; placement in Result → placement; drawer links candidate, submission (needs `onOpenSubmission`, app_requests) and placement | `interviews-drawer-desktop.png` |
+| #3 read-only drawer (High) | Drawer action strip: call status + result chips + slot, then Clear and place / Edit interview / Feedback; the dialogs open over the drawer (it suspends) | InterviewsPage.test (drawer actions) |
+| #4 time display (Medium) | One format everywhere (`zones.ts`): `Fri, Nov 6, 2026` + `2:00 – 3:00 PM CST`; drawer shows start, end and zone | — |
+| #5 time-zone model (High) | One page-level Time zone select drives display, the date filters and the Create/Edit slot inputs (Edit shows `Times in <zone>` and converts with it); options: your zone, US Eastern/Central/Pacific, India | `interviews-desktop.png` |
+| #6 create form order and echo inputs (Medium) | Shared form: submission first, the chosen submission as text (no read-only echo fields), round, slot, type, link, coach, panel; Reset form kept | `interviews-schedule-dialog-desktop.png` |
+| #7 broken checkbox, focus on read-only (Medium) | Booleans render as `label.check` in one group; autofocus on the first editable field; no read-only inputs | InterviewsPage.test (edit) |
+| #8 raw lowercase statuses (Low) | `callStatusLabel` / `CallStatus` chip with its own quiet tints (`.badge.cs-*`), feedback kinds via labels | — |
+| #9 filters not in URL; Reset clears From (Medium) | All filters + candidate in the URL; `?from=any` for every date; Clear filters returns to today onward | InterviewsPage.test |
+| #10 readiness hard to scan (Medium) | `Ready` chip or `Not cleared`, then ✓/– Invite and Consent with full words for screen readers | — |
+| #11 phone + 17px client link (High) | Rows become cards (time, round, readiness, result, action); client history link 24px (32px on phones); filters in the sheet | `interviews-mobile.png` |
+| #12 feedback errors (Low) | Kept the dialog error (form-level); Close button now a proper footer; unsaved-change guard on Feedback and Edit | — |
+
+**Validation (wave 2):** `pnpm --filter @eureka/web typecheck` clean; `vitest run src/pipeline src/interviews src/pipelinereport` 103/103 (tests updated only where markup intentionally changed: status selects instead of chip groups, row menus, the shared scheduling form, `More filters` disclosure). The shared API on :3000 was down during this wave (no Postgres or Docker in the session), so the after-shots were taken against the branch's Vite build with Playwright route fixtures shaped like the API (fictional data, read-only). Checked at 1440x900 and 390x844 in light and dark: `document.documentElement.scrollWidth` = 390 on phones, row actions inside the viewport at 1440 (`td.c-act` right edge 1411). E2E specs not run (they create records and need the live API).
+After: `../screenshots/after/interviews-{desktop,mobile}.png`, `interviews-drawer-{desktop,mobile}.png`, `interviews-schedule-dialog-{desktop,mobile}.png`, `interviews-dark-{desktop,mobile}.png`

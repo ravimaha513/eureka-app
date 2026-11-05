@@ -1,5 +1,5 @@
 # Placement detail — `/placements/<id>`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `placement:read`. Status buttons come from server `allowedTransitions`. BGC initiate needs `bgc.actions`. Documents need `document:read`.
 Source: `apps/web/src/pipeline/PlacementsPage.tsx:260-484` (`PlacementDrawer`, `ExitDialog`, `ReinitiateBgcDialog`), `pipeline/ContractsSection.tsx`, `documents/DocumentsSection.tsx`, `sales/ui.tsx` (`Drawer`)
 Evidence: `placements-detail-desktop.png`, `placements-detail-desktop-full.png`, `placements-detail-mobile.png`, `placements-detail-mobile-full.png`, new: `placements-detail-bottom-{desktop,mobile}.png`
@@ -61,3 +61,19 @@ Web only for the layout, stepper, copy and links (`PlacementsPage.tsx`, `styles.
 
 ## Validation
 Visual inspection: desktop 1440 and mobile 390 drawer, top and scrolled to bottom (as CEO, who has no transitions on this record). Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 next steps buried; misleading BGC copy for read-only (High) | Action strip at the top: status chip + start/joined note, forward moves (first is primary), BGC initiate/re-initiate, exits as danger buttons (still confirmed). No transitions → `You can view this placement…` and the BGC line no longer says `under Status` | `after/placement-detail-desktop.png`, `placement-detail-readonly-desktop.png` |
+| #2 no stepper (Medium) | Stage stepper Confirmed · Paperwork · BGC · Ready · Joined (`aria-current=step`), exits shown in bad tint | — |
+| #3 no links out (Medium) | Candidate → profile, Submission (when App passes `onOpenSubmission`), checklist → `Open in Paperwork & BGC` (document:read or bgc:update) | — |
+| #4 15 equal facts (Low) | Facts grouped Job / People / Dates in two columns | — |
+| #5 phone tables truncated (Medium) | Contacts and checklist become stacked definition cards; phone is a tap-to-call link | `placement-detail-mobile.png` |
+| #6 truncated document label (Low) | Full-width table in the wide drawer; overdue items first | — |
+| #7 exits next to forward moves (Low) | Exits pushed to the end of the strip in danger style | — |
+
+Not done: status history (no endpoint).
+
+**Validation (wave 2):** `pnpm --filter @eureka/web typecheck` clean; `vitest run src/pipeline src/interviews src/pipelinereport` 103/103 (tests updated only where markup intentionally changed: status selects instead of chip groups, row menus, the shared scheduling form, `More filters` disclosure). The shared API on :3000 was down during this wave (no Postgres or Docker in the session), so the after-shots were taken against the branch's Vite build with Playwright route fixtures shaped like the API (fictional data, read-only). Checked at 1440x900 and 390x844 in light and dark: `document.documentElement.scrollWidth` = 390 on phones, row actions inside the viewport at 1440 (`td.c-act` right edge 1411). E2E specs not run (they create records and need the live API).
+After: `../screenshots/after/placement-detail-{desktop,mobile}.png`, `placement-detail-dark-{desktop,mobile}.png`, `placement-detail-readonly-{desktop,mobile}.png`

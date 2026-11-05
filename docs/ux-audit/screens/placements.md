@@ -1,5 +1,5 @@
 # Placements — `/placements`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `placement:read` (nav.ts:19): recruiters (own), leads, managers, CEO, HR, accounts, immigration. "Cleared interviews" tab needs `interview:read`. Export needs `report:export`.
 Source: `apps/web/src/pipeline/PlacementsPage.tsx` (list, lines 67-258), `pipeline/ClearedInterviews.tsx`, `pipeline/ui.tsx`, `pipelineApi.ts`; routing `App.tsx:473`. Detail drawer: see `placement-detail.md`.
 Evidence: `placements-desktop.png`, `placements-desktop-full.png`, `placements-mobile.png`, `placements-mobile-full.png`
@@ -62,3 +62,17 @@ Ops and HR roles can triage straight from the list instead of opening records on
 
 ## Validation
 Visual inspection: existing desktop and mobile screenshots; table width measured at 390 (990/360) and 1440 (fits). Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 list doesn't show what needs action (High) | Start cell adds `Starts in N days` (warn when ≤7) / `Start date passed`; paperwork progress per row needs the checklist on the list endpoint (API change, deferred); no server sort (deferred) | `after/placements-desktop.png` |
+| #2 created dates, no quick filters (Medium) | Kept Created from/through (the API filters by creation only); quick filters deferred (API) | — |
+| #3 no links (Medium) | Candidate → profile (RecordLink); drawer links candidate, source submission (App prop) and Paperwork & BGC | — |
+| #4 First placement on most rows (Low) | Quiet outlined tag in the row; the violet chip stays in the drawer | Placements.test |
+| #5 phone overflow, 16 controls (High) | `dtable` cards; FilterBar (Candidate, Status, dates inline; Batch, Vendor, End client, Technology, Team, Location under More filters / the phone sheet) | `placements-mobile.png` |
+| #6 chips without counts (Low) | Status is a select (no count endpoint for placements; not invented) | — |
+| #7 tabs without ARIA keyboard (Low) | Kit `Tabs` with `?view=cleared` | Placements.test (cleared tab) |
+
+**Validation (wave 2):** `pnpm --filter @eureka/web typecheck` clean; `vitest run src/pipeline src/interviews src/pipelinereport` 103/103 (tests updated only where markup intentionally changed: status selects instead of chip groups, row menus, the shared scheduling form, `More filters` disclosure). The shared API on :3000 was down during this wave (no Postgres or Docker in the session), so the after-shots were taken against the branch's Vite build with Playwright route fixtures shaped like the API (fictional data, read-only). Checked at 1440x900 and 390x844 in light and dark: `document.documentElement.scrollWidth` = 390 on phones, row actions inside the viewport at 1440 (`td.c-act` right edge 1411). E2E specs not run (they create records and need the live API).
+After: `../screenshots/after/placements-{desktop,mobile}.png`

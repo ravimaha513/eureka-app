@@ -73,7 +73,7 @@
 .scheduleform .slot-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
 .scheduleform .slot-row select { width: 100%; min-width: 0; }
 .scheduleform .slotchip { border-radius: var(--r-md); }
-.scheduleform .schedule-for { margin: -4px 0 4px; color: var(--text2); }
+.scheduleform .schedule-for { margin: 2px 0 10px; color: var(--text2); }
 .scheduleform .schedule-sub { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
 .scheduleform .actions.left { justify-content: flex-start; border: 0; padding: 0; margin: 4px 0 0; position: static; }
 
