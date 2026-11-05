@@ -109,12 +109,30 @@ team), `confirmations` (times the candidate reached confirmation, from `candidat
 `canEditCompliance`; and, for owners of the candidate only (not through Open to all teams),
 `linkedinUrl`, `resumeUrl` and `companies`.
 
+`dobMasked` (`•• / •• / <year>`) follows the DOB rule (audit A-10): only callers holding the restricted
+`candidate.dob:read` over the candidate (HR, Immigration) get it; everyone else, owners included, gets `null`.
+
 `team_assigned_at` is server-managed: set on insert and whenever `team_id` changes, refused from any
 client (`candidate_profile_guard`), backfilled from the last assignment events.
 
 **Marketing status values** ("Active/Remote", "Active/All Teams", "N/A") are a derived label
 (`marketingStatusLabel`), not new statuses: "All Teams" mirrors `visibility`, "Remote" mirrors the stay,
 "N/A" is a candidate still in training. The status machine and every access rule are unchanged.
+
+## Optimistic concurrency (If-Match)
+
+`PATCH /candidates/:id`, `PUT /candidates/:id/compliance`, `/recruiter`, `/technical-rating`, `/visibility` and
+`POST /candidates/:id/transition` accept an **optional** `If-Match: "<rowVersion>"` (`W/"3"` and a bare `3` work too)
+with the `rowVersion` of `GET /candidates/:id`:
+
+- no header (or `*`): the write runs as before, unchecked;
+- a version the candidate no longer has: **412 `stale`**, nothing written (an unparsable header can never match: 412);
+- 404 / 403 still come first.
+
+Every one of these responses now carries the new `rowVersion` (additive). Direct updates check with
+`AND row_version = $n`; the definer paths (compliance, visibility, transition) lock the row first with
+`authz.candidate_version_lock` (0475). The Hot List bulk actions and other internal callers send no version.
+A required header (428) is a later, breaking step.
 
 ## Company links and documents status (CA-4)
 
@@ -246,13 +264,23 @@ upload is also on the batch's Students tab while the batch is open.
 - `POST /api/v1/batches/:id/candidates/bulk` (`candidate:create`) `{ dryRun, teamId?, rows: [{ firstName, lastName, phone, email }] }`
   (1-500 rows; `teamId: null` = "No team yet", assigned later as for `POST /candidates`) → 200 `{ dryRun, committed, created, failed, rows: [{ row, firstName, lastName, phone, email, status, error? }] }`.
 - All or nothing: one transaction, rolled back when any row fails or on `dryRun`, so the preview is what a real run does.
+  Rows are validated in memory, their contacts checked in one call (`authz.candidate_contacts_taken`, 0475, which takes
+  the contact lock until the transaction ends) and the rest inserted set-based; `authz.candidate_contact_unique` stays
+  the backstop. A taken email is reported before a taken phone, as the trigger does.
 - Row errors: `invalid_first_name`, `invalid_last_name`, `missing_country_code`, `trunk_zero`, `invalid` (phone),
   `invalid_email`, `duplicate_in_file`, `duplicate_email`, `duplicate_phone`. Rows name only the value that is taken, not
   whose it is.
 - 404 batch not visible; 403 team outside `candidate:create` (same rule as `POST /candidates`); 422 `batch_not_allowed`
   when the batch is completed or cancelled; 429 after 10 calls a minute per user.
-- Audit (counts and ids only): `candidate.created` per row with `{ batchId, bulk: true }`, `batch.candidates_added`,
-  and `batch.candidates_checked` for a preview or a refused file.
+- **Daily row budget** (audit A-01): the file answers "is this contact taken?" for every row, so rows checked against
+  existing contacts (the ones that pass the in-memory checks) are charged to the caller, previews included, before the
+  check runs: `BULK_CANDIDATE_ROWS_PER_DAY` = **2,000 rows per user per UTC day** (`candidates.service.ts`; change the
+  constant to resize it). Stored in `eureka.bulk_candidate_budget` (0475, written only by
+  `authz.bulk_candidate_budget_take`), so it holds across API tasks. A file that would pass it gets
+  **429 `bulk_budget_exceeded`** and is not charged; 404 / 403 / 422 come first and cost nothing.
+- Audit (counts and ids only): `candidate.created` per row with `{ batchId, bulk: true }`, `batch.candidates_added`
+  `{ teamId, created, checked, taken }`, and `batch.candidates_checked` `{ rows, failed, checked, taken }` for a preview
+  or a refused file (`checked`: rows charged to the budget; `taken`: rows reported `duplicate_email` / `duplicate_phone`).
 
 ## Deleting a candidate (CA-7)
 

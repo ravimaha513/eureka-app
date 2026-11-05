@@ -94,9 +94,14 @@ export class ApplicationsService {
     return resolveScope(access, "application:manage")?.all === true || (r.hiring_manager_id !== null && r.hiring_manager_id === access.userId);
   }
 
+  /** Applicant emails in full only with applicant:read at org scope (JSON masks them, the CSV leaves them empty). */
+  private emailVisible(access: UserAccess) {
+    return resolveScope(access, "applicant:read")?.all === true;
+  }
+
   /** Applicant contact details follow applicant:read / applicant.phone:read, not the job or interview that revealed the application. */
   private email(access: UserAccess, v: string | null) {
-    if (v === null || resolveScope(access, "applicant:read")?.all === true) return v;
+    if (v === null || this.emailVisible(access)) return v;
     const at = v.indexOf("@");
     return at < 1 ? "•••" : `${v[0]}•••${v.slice(at)}`;
   }
@@ -162,6 +167,8 @@ export class ApplicationsService {
   async exportCsv(user: AuthedUser, q: ApplicationExport) {
     if (!can(user.access, "application:read")) throw new ForbiddenException();
     if (!this.exportLimiter.take(user.id)) throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
+    // Same field rule as JSON (A-04): without applicant:read at org scope the Email cells stay empty; the header does not change.
+    const emails = this.emailVisible(user.access);
     return this.db.withUser(user.id, async (c) => {
       const rows = await this.rows(user, q, EXPORT_ROW_CAP + 1, undefined, c);
       const page = rows.slice(0, EXPORT_ROW_CAP);
@@ -169,7 +176,7 @@ export class ApplicationsService {
       await this.audit.record(c, { actorId: user.id, action: "application.export", entityType: "job_application",
         changes: { rows: page.length, truncated: rows.length > EXPORT_ROW_CAP, cap: EXPORT_ROW_CAP, status: q.status ?? null, jobId: q.jobId ?? null, search: q.search !== undefined } });
       const csv = toCsv(["Job title", "Applicant", "Email", "Company", "Applied", "Overall rating", "Status"],
-        page.map((r) => [r.job_title ?? "", fullName(r) ?? "", r.email ?? "", names.get(r.job_id) ?? "", r.applied_at.toISOString().slice(0, 10),
+        page.map((r) => [r.job_title ?? "", fullName(r) ?? "", emails ? r.email ?? "" : "", names.get(r.job_id) ?? "", r.applied_at.toISOString().slice(0, 10),
           r.rating ?? "", APPLICATION_STATUS_LABELS[r.status]]));
       return { csv, rows: page.length, truncated: rows.length > EXPORT_ROW_CAP };
     });

@@ -1,6 +1,7 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Headers, HttpCode, HttpException, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
+import { parseIfMatch } from "../../platform/http/if-match.js";
 import { BatchStatusChange } from "../training/training.schemas.js";
 import {
   BatchListQuery,
@@ -21,6 +22,18 @@ import {
 } from "./candidates.schemas.js";
 import { CandidateMetricsService } from "./candidate-metrics.service.js";
 import { CandidatesService } from "./candidates.service.js";
+
+/**
+ * Optional If-Match on single-candidate writes (docs/candidates-api.md "Optimistic
+ * concurrency"): no header (or `*`) -> null, no check; a version -> 412 when stale;
+ * anything else can never match -> 412.
+ */
+function expectedVersion(header: string | undefined): number | null {
+  if (header === undefined || header.trim() === "" || header.trim() === "*") return null;
+  const v = parseIfMatch(header);
+  if (v === null) throw new HttpException("stale", HttpStatus.PRECONDITION_FAILED);
+  return v;
+}
 
 @Controller("api/v1")
 export class CandidatesController {
@@ -74,8 +87,9 @@ export class CandidatesController {
 
   @Patch("candidates/:id")
   @RequirePermission("candidate:update")
-  update(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.svc.updateProfile(user, id, ProfileUpdate.parse(body));
+  update(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
+    @Headers("if-match") ifMatch: string | undefined) {
+    return this.svc.updateProfile(user, id, ProfileUpdate.parse(body), expectedVersion(ifMatch));
   }
 
   /** Hard delete with everything recorded about the candidate; 409 candidate_placed once placed (docs/candidates-api.md). */
@@ -89,8 +103,9 @@ export class CandidatesController {
   /** E-Verify, offer letter and 1099 company links and the documents status (HR, Accounts, Immigration, Documents team). */
   @Put("candidates/:id/compliance")
   @RequirePermission("candidate.compliance:update")
-  compliance(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.svc.setCompliance(user, id, ComplianceUpdate.parse(body));
+  compliance(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
+    @Headers("if-match") ifMatch: string | undefined) {
+    return this.svc.setCompliance(user, id, ComplianceUpdate.parse(body), expectedVersion(ifMatch));
   }
 
   /** Active companies for the compliance picker. */
@@ -123,9 +138,10 @@ export class CandidatesController {
 
   @Put("candidates/:id/visibility")
   @RequirePermission("candidate.visibility:update")
-  visibility(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+  visibility(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
+    @Headers("if-match") ifMatch: string | undefined) {
     const b = VisibilityUpdate.parse(body);
-    return this.svc.setVisibility(user, id, b.visibility, b.teamIds);
+    return this.svc.setVisibility(user, id, b.visibility, b.teamIds, expectedVersion(ifMatch));
   }
 
   /** Who can be the recruiter: the candidate's team's active members and lead. */
@@ -138,20 +154,23 @@ export class CandidatesController {
   /** A lead or above; 422 invalid_recruiter when the user isn't on the candidate's team. */
   @Put("candidates/:id/recruiter")
   @RequirePermission("candidate:assign")
-  setRecruiter(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.svc.setRecruiter(user, id, RecruiterUpdate.parse(body).recruiterId);
+  setRecruiter(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
+    @Headers("if-match") ifMatch: string | undefined) {
+    return this.svc.setRecruiter(user, id, RecruiterUpdate.parse(body).recruiterId, expectedVersion(ifMatch));
   }
 
   @Put("candidates/:id/technical-rating")
   @RequirePermission("candidate.rating:update")
-  rating(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.svc.setRating(user, id, RatingUpdate.parse(body).rating);
+  rating(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
+    @Headers("if-match") ifMatch: string | undefined) {
+    return this.svc.setRating(user, id, RatingUpdate.parse(body).rating, expectedVersion(ifMatch));
   }
 
   @Post("candidates/:id/transition")
   @RequirePermission("candidate:update")
-  transition(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.svc.transition(user, id, Transition.parse(body).to);
+  transition(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
+    @Headers("if-match") ifMatch: string | undefined) {
+    return this.svc.transition(user, id, Transition.parse(body).to, expectedVersion(ifMatch));
   }
 
   /** FR-CAN-02: batches are listed for every candidate:read holder. */

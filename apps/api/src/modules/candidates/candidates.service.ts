@@ -33,7 +33,7 @@ import {
   type Permission,
   type UserAccess,
 } from "@eureka/shared";
-import { AuditService } from "../../platform/audit.service.js";
+import { AuditService, redactChanges } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
@@ -161,6 +161,14 @@ export const DUPLICATE_CHECKS_PER_MINUTE = 20;
 /** A file answers "is this contact taken?" for up to 500 rows, so previews are limited per user too. */
 export const BULK_CANDIDATE_CALLS_PER_MINUTE = 10;
 
+/**
+ * Rows per user per UTC day that the bulk add may check against existing
+ * candidates' contacts, previews included (A-01). Stored in the database
+ * (eureka.bulk_candidate_budget, 0475), so it holds across API tasks.
+ * docs/candidates-api.md "Bulk add to a batch".
+ */
+export const BULK_CANDIDATE_ROWS_PER_DAY = 2000;
+
 /** Thrown inside the transaction to roll a bulk add back and still answer with its report. */
 class BulkCandidatesRollback extends Error {
   constructor(readonly report: unknown) { super("bulk_rollback"); }
@@ -204,6 +212,14 @@ const mapCreateError: (err: unknown) => never = dbErrorMapper({
   duplicate_phone: () => new ConflictException("duplicate_contact"),
 });
 
+/** The bulk add's daily row budget (0475): 429 once spent. */
+const mapBudgetError: (err: unknown) => never = dbErrorMapper({
+  bulk_budget_exceeded: () => new HttpException("bulk_budget_exceeded", HttpStatus.TOO_MANY_REQUESTS),
+});
+
+/** If-Match named a version the candidate no longer has (docs/candidates-api.md "Optimistic concurrency"). */
+const stale = () => new HttpException("stale", HttpStatus.PRECONDITION_FAILED);
+
 
 /**
  * Application-layer scope predicate (design B4.4). Parameterized; RLS applies
@@ -226,6 +242,12 @@ export function scopePredicate(scope: EffectiveScope, params: unknown[], alias =
     if (scope.sharedCandidateIds.size > 0) parts.push(`${alias}.id = ANY(${p([...scope.sharedCandidateIds])}::uuid[])`);
   }
   return `(${parts.join(" OR ")})`;
+}
+
+/** Part of the DOB (the birth year) is shown only to holders of candidate.dob:read who own the candidate (A-10). */
+export function dobReadable(access: UserAccess, ref: CandidateRef): boolean {
+  const scope = resolveScope(access, "candidate.dob:read");
+  return scope !== null && ownsCandidate(scope, ref);
 }
 
 const toRef = (r: Pick<CandidateRow, "id" | "recruiter_id" | "team_id" | "location_id" | "visibility" | "marketing_status">): CandidateRef => ({
@@ -401,7 +423,8 @@ export class CandidatesService implements OnModuleInit {
       technicalRating: r.technical_rating,
       phone: fields.phone,
       phoneMasked: fields.phoneMasked,
-      dobMasked: r.dob_year ? `•• / •• / ${r.dob_year}` : null,
+      // The birth year follows the DOB policy (candidate.dob:read over the candidate), as the phone follows its own.
+      dobMasked: r.dob_year && dobReadable(access, ref) ? `•• / •• / ${r.dob_year}` : null,
       rowVersion: r.row_version,
       batch: r.batch_id && r.batch_month
         ? { id: r.batch_id, label: batchLabel(r.batch_technology ?? "", r.batch_location ?? "", r.batch_month, r.batch_name) }
@@ -546,6 +569,22 @@ export class CandidatesService implements OnModuleInit {
     return row;
   }
 
+  /**
+   * Optional If-Match for writes through definer functions: locks the candidate
+   * (authz.candidate_version_lock, 0475) and compares its row_version, so no other
+   * write lands between the check and this transaction's own. `null`: no check.
+   */
+  private async checkVersion(c: pg.PoolClient, id: string, expected: number | null) {
+    if (expected === null) return;
+    const { rows } = await c.query<{ v: number }>(`SELECT authz.candidate_version_lock($1) AS v`, [id]);
+    if (rows[0]!.v !== expected) throw stale();
+  }
+
+  /** row_version after a write the caller made (the caller still owns the candidate, so RLS shows it). */
+  private async currentVersion(c: pg.PoolClient, id: string): Promise<number | null> {
+    return (await c.query<{ v: number }>(`SELECT row_version AS v FROM eureka.candidate WHERE id = $1`, [id])).rows[0]?.v ?? null;
+  }
+
   async get(user: AuthedUser, id: string) {
     const scope = resolveScope(user.access, "candidate:read");
     if (!scope) throw new NotFoundException();
@@ -600,9 +639,12 @@ export class CandidatesService implements OnModuleInit {
     };
   }
 
-  async updateProfile(user: AuthedUser, id: string, body: ProfileUpdate) {
+  /** `expected`: the If-Match row version (412 when stale); null keeps the unchecked write (Hot List bulk, older clients). */
+  async updateProfile(user: AuthedUser, id: string, body: ProfileUpdate, expected: number | null = null) {
     return this.db.withUser(user.id, async (c) => {
-      await this.loadForWrite(c, user, id, "candidate:update");
+      const row = await this.loadForWrite(c, user, id, "candidate:update");
+      if (expected !== null && expected !== row.row_version) throw stale();
+      let rowVersion = row.row_version;
       const map: Record<string, string> = {
         priority: "priority", marketingEmail: "marketing_email", vitelNumber: "vitel_number",
         marketingStartDate: "marketing_start_date", inPersonOk: "in_person_ok", technologyId: "technology_id",
@@ -618,12 +660,16 @@ export class CandidatesService implements OnModuleInit {
       if (entries.length) {
         const params: unknown[] = [id];
         const sets = entries.map(([col, v]) => { params.push(v); return `${col} = $${params.length}`; });
-        await c.query(`UPDATE eureka.candidate SET ${sets.join(", ")} WHERE id = $1`, params).catch(mapProfileError);
+        const version = expected === null ? "" : ` AND row_version = $${params.push(expected)}`;
+        const r = await c.query<{ row_version: number }>(
+          `UPDATE eureka.candidate SET ${sets.join(", ")} WHERE id = $1${version} RETURNING row_version`, params).catch(mapProfileError);
+        if (expected !== null && r.rowCount === 0) throw stale();
+        rowVersion = r.rows[0]?.row_version ?? rowVersion;
         await this.audit.record(c, {
           actorId: user.id, action: "candidate.updated", entityType: "candidate", entityId: id, changes: auditSafeProfile(body),
         });
       }
-      return { id };
+      return { id, rowVersion };
     });
   }
 
@@ -633,9 +679,11 @@ export class CandidatesService implements OnModuleInit {
    * link names an active company. Read-before-write: 404 if the candidate is
    * not readable, 403 if readable but not covered.
    */
-  async setCompliance(user: AuthedUser, id: string, body: ComplianceUpdate) {
+  async setCompliance(user: AuthedUser, id: string, body: ComplianceUpdate, expected: number | null = null) {
     return this.db.withUser(user.id, async (c) => {
       await this.loadForWrite(c, user, id, "candidate.compliance:update");
+      // With If-Match the row stays locked from here, so the merge below reads what it overwrites.
+      await this.checkVersion(c, id, expected);
       const cur = (await c.query<{ e: string | null; o: string | null; f: string | null; d: string | null }>(
         `SELECT everify_company_id AS e, offer_letter_company_id AS o, form1099_company_id AS f, documents_status AS d
          FROM eureka.candidate WHERE id = $1`, [id])).rows[0]!;
@@ -712,9 +760,10 @@ export class CandidatesService implements OnModuleInit {
     });
   }
 
-  async setVisibility(user: AuthedUser, id: string, visibility: CandidateVisibility, teamIds: string[] = []) {
+  async setVisibility(user: AuthedUser, id: string, visibility: CandidateVisibility, teamIds: string[] = [], expected: number | null = null) {
     return this.db.withUser(user.id, async (c) => {
       await this.loadForWrite(c, user, id, "candidate.visibility:update");
+      await this.checkVersion(c, id, expected);
       try {
         // authz.set_candidate_visibility (0240) re-checks and replaces the "Selected teams" picks.
         await c.query(`SELECT authz.set_candidate_visibility($1, $2, $3::uuid[])`, [id, visibility, visibility === "selected_teams" ? teamIds : []]);
@@ -726,7 +775,7 @@ export class CandidatesService implements OnModuleInit {
       // Ids only (rule 5).
       await this.audit.record(c, { actorId: user.id, action: "candidate.visibility", entityType: "candidate", entityId: id,
         changes: visibility === "selected_teams" ? { visibility, teamIds } : { visibility } });
-      return { id, visibility, ...(visibility === "selected_teams" ? { teamIds } : {}) };
+      return { id, visibility, ...(visibility === "selected_teams" ? { teamIds } : {}), rowVersion: await this.currentVersion(c, id) };
     });
   }
 
@@ -752,34 +801,43 @@ export class CandidatesService implements OnModuleInit {
     });
   }
 
-  async setRecruiter(user: AuthedUser, id: string, recruiterId: string | null) {
+  async setRecruiter(user: AuthedUser, id: string, recruiterId: string | null, expected: number | null = null) {
     return this.db.withUser(user.id, async (c) => {
       const row = await this.loadForWrite(c, user, id, "candidate:assign");
-      if (recruiterId === row.recruiter_id) return { id, recruiterId };
+      if (expected !== null && expected !== row.row_version) throw stale();
+      if (recruiterId === row.recruiter_id) return { id, recruiterId, rowVersion: row.row_version };
       // With no team the recruiter is what keeps the candidate in scope (0410); assign the team first.
       if (row.team_id === null) throw new UnprocessableEntityException("team_required");
       if (recruiterId && !(await this.teamRecruiters(c, row.team_id)).some((u) => u.id === recruiterId)) {
         throw new UnprocessableEntityException("invalid_recruiter");
       }
-      await c.query(`UPDATE eureka.candidate SET recruiter_id = $2 WHERE id = $1`, [id, recruiterId]);
+      const r = await c.query<{ row_version: number }>(
+        `UPDATE eureka.candidate SET recruiter_id = $2 WHERE id = $1 AND ($3::int IS NULL OR row_version = $3) RETURNING row_version`,
+        [id, recruiterId, expected]);
+      if (expected !== null && r.rowCount === 0) throw stale();
       await this.audit.record(c, { actorId: user.id, action: "candidate.recruiter", entityType: "candidate", entityId: id,
         changes: { fromRecruiterId: row.recruiter_id, toRecruiterId: recruiterId } });
-      return { id, recruiterId };
+      return { id, recruiterId, rowVersion: r.rows[0]?.row_version ?? row.row_version };
     });
   }
 
-  async setRating(user: AuthedUser, id: string, rating: number) {
+  async setRating(user: AuthedUser, id: string, rating: number, expected: number | null = null) {
     return this.db.withUser(user.id, async (c) => {
-      await this.loadForWrite(c, user, id, "candidate.rating:update");
-      await c.query(`UPDATE eureka.candidate SET technical_rating = $2 WHERE id = $1`, [id, rating]);
+      const row = await this.loadForWrite(c, user, id, "candidate.rating:update");
+      if (expected !== null && expected !== row.row_version) throw stale();
+      const r = await c.query<{ row_version: number }>(
+        `UPDATE eureka.candidate SET technical_rating = $2 WHERE id = $1 AND ($3::int IS NULL OR row_version = $3) RETURNING row_version`,
+        [id, rating, expected]);
+      if (expected !== null && r.rowCount === 0) throw stale();
       await this.audit.record(c, { actorId: user.id, action: "candidate.rating", entityType: "candidate", entityId: id, changes: { rating } });
-      return { id, technicalRating: rating };
+      return { id, technicalRating: rating, rowVersion: r.rows[0]?.row_version ?? row.row_version };
     });
   }
 
-  async transition(user: AuthedUser, id: string, to: string) {
+  async transition(user: AuthedUser, id: string, to: string, expected: number | null = null) {
     return this.db.withUser(user.id, async (c) => {
       const row = await this.loadForWrite(c, user, id, "candidate:update");
+      await this.checkVersion(c, id, expected);
       if (!candidateTransitionAllowed(row.marketing_status, to)) throw new UnprocessableEntityException("invalid_transition");
       let rows: { s: string }[];
       try {
@@ -791,7 +849,7 @@ export class CandidatesService implements OnModuleInit {
         throw err;
       }
       await this.audit.record(c, { actorId: user.id, action: "candidate.transition", entityType: "candidate", entityId: id, changes: { from: row.marketing_status, to } });
-      return { id, status: rows[0]!.s };
+      return { id, status: rows[0]!.s, rowVersion: await this.currentVersion(c, id) };
     });
   }
 
@@ -869,12 +927,31 @@ export class CandidatesService implements OnModuleInit {
   }
 
   /**
+   * The batch a bulk add goes to, and the team and recruiter its candidates get:
+   * 404 unknown batch, 403 team outside candidate:create, 422 closed batch.
+   */
+  private async bulkTarget(c: pg.PoolClient, user: AuthedUser, batchId: string, teamId: string | null | undefined) {
+    const batch = (await c.query<{ location_id: string; technology_id: string; status: string }>(
+      `SELECT location_id, technology_id, status FROM eureka.batch WHERE id = $1`, [batchId])).rows[0];
+    if (!batch) throw new NotFoundException();
+    const team = this.creatableTeam(user, teamId);
+    if (batch.status !== "planned" && batch.status !== "in_training") throw new UnprocessableEntityException("batch_not_allowed");
+    // As in create(): with no team, only the recruiter link keeps the candidates in the caller's scope.
+    const recruiter = (team === null && !resolveScope(user.access, "candidate:create")?.all) || hasTrait(user.access, "recruiter") ? user.id : null;
+    return { batch, team, recruiter };
+  }
+
+  /**
    * New candidates for a batch from the Excel template (docs/candidates-api.md). All
    * or nothing: every row is inserted in one transaction, rolled back when any row
    * fails or when `dryRun` is set, so a preview shows exactly what a real run would
    * do. Each row is the single create's insert and audit event; technology and
-   * location come from the batch. authz.candidate_contact_unique (0260) finds taken
-   * contacts; a row reports only which value is taken, not whose it is.
+   * location come from the batch. Rows are validated in memory, then their contacts
+   * are checked in one call (authz.candidate_contacts_taken, 0475, which holds the
+   * contact lock until the transaction ends) and the rest inserted set-based; the
+   * trigger authz.candidate_contact_unique (0260) stays the backstop. A row reports
+   * only which value is taken, not whose it is. Rows checked against existing
+   * contacts are charged to the caller's daily budget first (429 once spent, A-01).
    */
   async bulkAddToBatch(user: AuthedUser, batchId: string, body: BulkBatchCandidates) {
     if (!this.bulkCandidateLimiter.take(user.id)) {
@@ -882,64 +959,91 @@ export class CandidatesService implements OnModuleInit {
       throw new HttpException("Too many imports; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
     }
     type Row = { row: number; firstName: string; lastName: string; phone: string; email: string; status: "ok" | "error"; error?: string };
+    const fail = (res: Row, code: string) => { res.status = "error"; res.error = code; };
+    // In-memory validation, in file order; `check` are the rows whose contacts go to the database.
+    const emails = new Set<string>();
+    const phones = new Set<string>();
+    const rows: Row[] = [];
+    const check: { res: Row; email: string; phone: string }[] = [];
+    for (const [i, r] of body.rows.entries()) {
+      const firstName = r.firstName.trim();
+      const lastName = r.lastName.trim();
+      const email = Email.safeParse(r.email);
+      const phone = normalizePhoneE164(r.phone);
+      const res: Row = { row: i + 1, firstName, lastName, phone: phone ?? r.phone.trim(), email: email.success ? email.data : r.email.trim(), status: "ok" };
+      rows.push(res);
+      if (!firstName || firstName.length > 80) { fail(res, "invalid_first_name"); continue; }
+      if (!lastName || lastName.length > 80) { fail(res, "invalid_last_name"); continue; }
+      if (!phone) { fail(res, phoneProblem(r.phone) ?? "invalid"); continue; }
+      if (!email.success) { fail(res, "invalid_email"); continue; }
+      if (emails.has(email.data) || phones.has(phone)) { fail(res, "duplicate_in_file"); continue; }
+      emails.add(email.data);
+      phones.add(phone);
+      check.push({ res, email: email.data, phone });
+    }
+
+    // The budget is charged in its own transaction, after the batch and team checks,
+    // so a preview (rolled back below) still counts.
+    await this.db.withUser(user.id, async (c) => {
+      await this.bulkTarget(c, user, batchId, body.teamId);
+      if (check.length === 0) return;
+      await c.query(`SELECT authz.bulk_candidate_budget_take($1, $2)`, [check.length, BULK_CANDIDATE_ROWS_PER_DAY]).catch((err: unknown) => {
+        if ((err as { message?: string }).message === "bulk_budget_exceeded") {
+          this.log.warn(`Bulk candidate daily row budget exceeded by user ${user.id}`);
+        }
+        return mapBudgetError(err);
+      });
+    });
+
+    let taken = 0;
     try {
       const report = await this.db.withUser(user.id, async (c) => {
-        const batch = (await c.query<{ location_id: string; technology_id: string; status: string }>(
-          `SELECT location_id, technology_id, status FROM eureka.batch WHERE id = $1`, [batchId])).rows[0];
-        if (!batch) throw new NotFoundException();
-        const team = this.creatableTeam(user, body.teamId);
-        if (batch.status !== "planned" && batch.status !== "in_training") throw new UnprocessableEntityException("batch_not_allowed");
-        // As in create(): with no team, only the recruiter link keeps the candidates in the caller's scope.
-        const recruiter = (team === null && !resolveScope(user.access, "candidate:create")?.all) || hasTrait(user.access, "recruiter") ? user.id : null;
-        const emails = new Set<string>();
-        const phones = new Set<string>();
-        const rows: Row[] = [];
-        for (const [i, r] of body.rows.entries()) {
-          const firstName = r.firstName.trim();
-          const lastName = r.lastName.trim();
-          const email = Email.safeParse(r.email);
-          const phone = normalizePhoneE164(r.phone);
-          const res: Row = { row: i + 1, firstName, lastName, phone: phone ?? r.phone.trim(), email: email.success ? email.data : r.email.trim(), status: "ok" };
-          rows.push(res);
-          const fail = (code: string) => { res.status = "error"; res.error = code; };
-          if (!firstName || firstName.length > 80) { fail("invalid_first_name"); continue; }
-          if (!lastName || lastName.length > 80) { fail("invalid_last_name"); continue; }
-          if (!phone) { fail(phoneProblem(r.phone) ?? "invalid"); continue; }
-          if (!email.success) { fail("invalid_email"); continue; }
-          if (emails.has(email.data) || phones.has(phone)) { fail("duplicate_in_file"); continue; }
-          emails.add(email.data);
-          phones.add(phone);
-          await c.query("SAVEPOINT bulk_candidate");
-          try {
-            const personId = randomUUID();
-            await c.query(`INSERT INTO eureka.person (id, first_name, last_name, phone_e164, personal_email) VALUES ($1,$2,$3,$4,$5)`,
-              [personId, firstName, lastName, phone, email.data]);
-            const cand = await c.query<{ id: string }>(
-              `INSERT INTO eureka.candidate (person_id, technology_id, team_id, recruiter_id, location_id, batch_id)
-               VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-              [personId, batch.technology_id, team, recruiter, batch.location_id, batchId]);
-            await this.audit.record(c, { actorId: user.id, action: "candidate.created", entityType: "candidate", entityId: cand.rows[0]!.id, changes: { batchId, bulk: true } });
-            await c.query("RELEASE SAVEPOINT bulk_candidate");
-          } catch (err) {
-            const m = (err as { message?: string }).message;
-            if (m !== "duplicate_email" && m !== "duplicate_phone") throw err;
-            await c.query("ROLLBACK TO SAVEPOINT bulk_candidate");
-            fail(m);
+        const { batch, team, recruiter } = await this.bulkTarget(c, user, batchId, body.teamId);
+        const insert: { email: string; phone: string; res: Row }[] = [];
+        if (check.length > 0) {
+          const found = (await c.query<{ kind: "email" | "phone"; value: string }>(
+            `SELECT kind, value FROM authz.candidate_contacts_taken($1::text[], $2::text[])`,
+            [check.map((x) => x.email), check.map((x) => x.phone)])).rows;
+          const takenEmails = new Set(found.filter((f) => f.kind === "email").map((f) => f.value));
+          const takenPhones = new Set(found.filter((f) => f.kind === "phone").map((f) => f.value));
+          // Email first, then phone: the trigger's order.
+          for (const x of check) {
+            if (takenEmails.has(x.email)) { fail(x.res, "duplicate_email"); taken++; }
+            else if (takenPhones.has(x.phone)) { fail(x.res, "duplicate_phone"); taken++; }
+            else insert.push(x);
           }
+        }
+        if (insert.length > 0) {
+          const personIds = insert.map(() => randomUUID());
+          await c.query(
+            `INSERT INTO eureka.person (id, first_name, last_name, phone_e164, personal_email)
+             SELECT * FROM unnest($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[])`,
+            [personIds, insert.map((x) => x.res.firstName), insert.map((x) => x.res.lastName), insert.map((x) => x.phone), insert.map((x) => x.email)]);
+          const made = await c.query<{ id: string }>(
+            `INSERT INTO eureka.candidate (person_id, technology_id, team_id, recruiter_id, location_id, batch_id)
+             SELECT p, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid FROM unnest($1::uuid[]) WITH ORDINALITY AS u(p, n) ORDER BY n RETURNING id`,
+            [personIds, batch.technology_id, team, recruiter, batch.location_id, batchId]);
+          // One candidate.created per row, as the single create writes (ids and flags only, rule 5).
+          await c.query(
+            `INSERT INTO eureka.audit_event (actor_id, action, entity_type, entity_id, changes)
+             SELECT $1::uuid, 'candidate.created', 'candidate', id, $3::jsonb FROM unnest($2::uuid[]) AS id`,
+            [user.id, made.rows.map((r) => r.id), JSON.stringify(redactChanges({ batchId, bulk: true }))]);
         }
         const failed = rows.filter((r) => r.status === "error").length;
         const out = { dryRun: body.dryRun, committed: !body.dryRun && failed === 0, created: body.dryRun || failed > 0 ? 0 : rows.length, failed, rows };
         if (!out.committed) throw new BulkCandidatesRollback(out);
-        await this.audit.record(c, { actorId: user.id, action: "batch.candidates_added", entityType: "batch", entityId: batchId, changes: { teamId: team, created: rows.length } });
+        await this.audit.record(c, { actorId: user.id, action: "batch.candidates_added", entityType: "batch", entityId: batchId,
+          changes: { teamId: team, created: rows.length, checked: check.length, taken } });
         return out;
       }).catch(mapCreateError);
       return report;
     } catch (err) {
       if (!(err instanceof BulkCandidatesRollback)) throw err;
       // Audited apart: the check's transaction was rolled back. Counts only (rule 5).
-      const { rows, failed } = err.report as { rows: Row[]; failed: number };
+      const { rows: reported, failed } = err.report as { rows: Row[]; failed: number };
       await this.db.withUser(user.id, (c) => this.audit.record(c, {
-        actorId: user.id, action: "batch.candidates_checked", entityType: "batch", entityId: batchId, changes: { rows: rows.length, failed },
+        actorId: user.id, action: "batch.candidates_checked", entityType: "batch", entityId: batchId,
+        changes: { rows: reported.length, failed, checked: check.length, taken },
       }));
       return err.report;
     }
