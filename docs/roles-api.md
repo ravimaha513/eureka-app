@@ -187,7 +187,7 @@ stays with `POST /teams/:id/move-member` (`team:move_member`, candidates reassig
   (`ladder_level`), returned and audited, never a refusal: the org is the admin's call.
 - `GET /api/v1/admin/org-chart` returns `{ people: [{ id, displayName, designation, managerId,
   roles: [{ key, label, track, level }], team: { id, name, asLead }|null, canMove }],
-  teams: [{ id, name, leadId }] }` for active users (`canMove` is false for the caller: `self_change`).
+  teams: [{ id, name, leadId }], truncated }` for active users (at most 2000 people; `truncated` when cut) (`canMove` is false for the caller: `self_change`).
 - `GET /api/v1/admin/org-chart/preview?userId=&managerId=` returns `{ loses: [{id,displayName}],
   gains: [...], warnings: ["ladder_level"] }`: the managers leaving and joining the person's
   reporting chain (`reporting_closure` ancestors before and after; `managerId` empty = no manager).
