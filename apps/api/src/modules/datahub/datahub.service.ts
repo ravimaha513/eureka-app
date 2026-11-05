@@ -27,7 +27,7 @@ import {
   decodeCursor, encodeCursor, likeEscape,
   type FolderCreate, type FolderUpdate, type UploadRequest,
 } from "./datahub.schemas.js";
-import { IdempotencyKey } from "../../platform/idempotency.js";
+import { idempotent } from "../../platform/idempotency.js";
 import { dbErrorMapper } from "../../platform/errors.js";
 
 /** Presigned POST lifetime (as documents; the database upload window is 5 minutes). */
@@ -189,33 +189,13 @@ export class DatahubService {
   async createFolder(user: AuthedUser, parse: () => FolderCreate, idempotencyKey: string | undefined) {
     if (!this.canCreate(user)) throw new ForbiddenException("Not permitted");
     const body = parse();
-    const key = idempotencyKey === undefined ? null : IdempotencyKey.safeParse(idempotencyKey);
-    if (key && !key.success) throw new BadRequestException("invalid_idempotency_key");
-    const hash = createHash("sha256").update(JSON.stringify(body)).digest("hex");
-    return this.db.withUser(user.id, async (c) => {
-      if (key?.success) {
-        const claimed = await c.query(
-          `INSERT INTO eureka.idempotency_key (key, user_id, endpoint, request_hash) VALUES ($1,$2,$3,$4)
-           ON CONFLICT DO NOTHING RETURNING key`, [key.data, user.id, CREATE_FOLDER_ENDPOINT, hash]);
-        if (claimed.rowCount === 0) {
-          const prior = (await c.query<{ request_hash: string; response: unknown }>(
-            `SELECT request_hash, response FROM eureka.idempotency_key WHERE user_id = $1 AND endpoint = $2 AND key = $3`,
-            [user.id, CREATE_FOLDER_ENDPOINT, key.data])).rows[0];
-          if (!prior || prior.request_hash !== hash || prior.response === null) throw new ConflictException("idempotency_key_reused");
-          return prior.response as { id: string; rowVersion: number };
-        }
-      }
+    return this.db.withUser(user.id, (c) => idempotent(c, user, CREATE_FOLDER_ENDPOINT, idempotencyKey, body, { required: false }, async () => {
       const id = (await c.query<{ id: string }>(
         `SELECT authz.datahub_create_folder($1, $2, $3, $4, $5, $6, $7, $8) AS id`,
         [body.parentId ?? null, body.name, body.description ?? null, body.level, body.roleKeys ?? [], body.memberIds ?? [],
           body.membersCanUpload ?? false, body.locationId ?? null]).catch(mapDbError)).rows[0]!.id;
-      const result = { id, rowVersion: 1 };
-      if (key?.success) {
-        await c.query(`UPDATE eureka.idempotency_key SET response = $4 WHERE user_id = $1 AND endpoint = $2 AND key = $3`,
-          [user.id, CREATE_FOLDER_ENDPOINT, key.data, result]);
-      }
-      return result;
-    });
+      return { id, rowVersion: 1 };
+    }));
   }
 
   /** DH-4: managers only; If-Match carries the rowVersion (428 without it, 412 when stale). */

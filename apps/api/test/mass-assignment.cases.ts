@@ -885,7 +885,7 @@ const CASES: RejectCase[] = [
     }),
     forbidden: {
       recruiterId: U.r1b, teamId: T.t2, locationId: LOC.austin, status: "selected", submittedAt: PAST,
-      statusChangedAt: PAST, statusChangedBy: U.l1, rejectionReason: "x",
+      statusChangedAt: PAST, statusChangedBy: U.l1, rejectionReason: "x", row_version: 99, duplicateWarning: false,
     },
   },
   {
@@ -897,7 +897,7 @@ const CASES: RejectCase[] = [
         state: () => rows(`SELECT * FROM eureka.submission WHERE id = $1`, [submissionId]),
       };
     },
-    forbidden: { status: "selected", recruiterId: U.r1b, teamId: T.t2, candidateId: FOREIGN_ID, statusChangedAt: PAST, statusChangedBy: U.l1, from: "selected" },
+    forbidden: { status: "selected", recruiterId: U.r1b, teamId: T.t2, candidateId: FOREIGN_ID, statusChangedAt: PAST, statusChangedBy: U.l1, from: "selected", row_version: 99 },
   },
   {
     // Detail corrections (lead and above, migration 0440): snapshots, status and the edit stamps stay server-managed.
@@ -911,7 +911,7 @@ const CASES: RejectCase[] = [
     },
     forbidden: {
       status: "selected", recruiterId: U.r1b, teamId: T.t2, locationId: LOC.austin, candidateId: FOREIGN_ID,
-      rejectionReason: "x", statusChangedAt: PAST, detailsEditedAt: PAST, detailsEditedBy: U.l1,
+      rejectionReason: "x", statusChangedAt: PAST, detailsEditedAt: PAST, detailsEditedBy: U.l1, row_version: 99,
     },
   },
   // candidate feedback (public, token-authenticated)

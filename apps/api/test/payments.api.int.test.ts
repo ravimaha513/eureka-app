@@ -111,7 +111,10 @@ describe("Accounts raises an invoice and records payments", () => {
   it("requires an Idempotency-Key, replays a repeat and refuses a reused key with another body", async () => {
     const body = { placementId: j.placementId, invoiceNo: "INV-A-1", invoiceDate: addDays(today, -40), termsDays: 30, hours: 160, amount: 9876.5,
       timesheetSubmittedOn: addDays(today, -42), periodStart: addDays(today, -70), periodEnd: addDays(today, -41), incentiveAmount: 250.75 };
-    expect((await call("acct", "POST", "/api/v1/invoices", body)).statusCode).toBe(400);
+    const missing = await call("acct", "POST", "/api/v1/invoices", body);
+    expect([missing.statusCode, missing.json().detail]).toEqual([400, "idempotency_key_required"]);
+    const bad = await call("acct", "POST", "/api/v1/invoices", body, { "idempotency-key": "has spaces" });
+    expect([bad.statusCode, bad.json().detail]).toEqual([400, "idempotency_key_required"]);
     const key = newKey();
     const first = await call("acct", "POST", "/api/v1/invoices", body, key);
     expect(first.statusCode, first.body).toBe(201);
@@ -277,11 +280,33 @@ describe("dashboard filters, summary and billable placements", () => {
   it("summary: counts by status, the longest delay and totals for viewers of money", async () => {
     const s = (await call("acct", "GET", `/api/v1/invoices/summary?teamId=${T.t2}`)).json();
     expect(s).toEqual({ counts: { pending: 1, delayed: 1, received: 0 }, maxDelayDays: 30,
-      totals: { invoiced: 1500, received: 0, outstanding: 1500 }, amountsHidden: 0 });
+      totals: { invoiced: 1500, received: 0, outstanding: 1500, receivedWithoutAmount: 0 }, amountsHidden: 0 });
     const l2 = (await call("l2", "GET", "/api/v1/invoices/summary")).json();
     expect(l2).toEqual({ counts: { pending: 1, delayed: 1, received: 0 }, maxDelayDays: 30 });
     const m2 = (await call("m2", "GET", "/api/v1/invoices/summary")).json();
     expect(m2).toMatchObject({ counts: { pending: 0, delayed: 0, received: 1 }, totals: { invoiced: 300, received: 300, outstanding: 0 } });
+  });
+
+  it("summary totals are exact numeric sums; payments on amount-less invoices do not reduce outstanding (R-08)", async () => {
+    // A window of invoice dates no other test uses, so the totals are only these invoices.
+    const day = addDays(today, -300);
+    const window = `from=${day}&to=${addDays(day, 3)}`;
+    const j = await joinedEmployee(db, { actor: U.r1a, teamId: T.t1 });
+    const inv = (amount: number | null, d = 0) => createInvoice(j.placementId,
+      { invoiceDate: addDays(day, d), termsDays: 30, invoiceNo: undefined, hours: undefined, amount: amount ?? undefined });
+    const pay = async (id: string, amount: number) => expect((await call("acct", "POST", `/api/v1/invoices/${id}/payments`,
+      { receivedOn: addDays(day, 10), amount }, newKey())).statusCode).toBe(201);
+    await inv(0.1);
+    await inv(0.2, 1);
+    await pay(await inv(100, 2), 40);
+    await pay(await inv(null, 3), 50);
+    const s = (await call("acct", "GET", `/api/v1/invoices/summary?${window}`)).json();
+    // 0.1 + 0.2 + 100 = 100.3 exactly; outstanding 0.1 + 0.2 + 60 (the 50 on the amount-less invoice is not netted).
+    expect(s.totals).toEqual({ invoiced: 100.3, received: 90, outstanding: 60.3, receivedWithoutAmount: 50 });
+    expect(s.counts).toEqual({ pending: 0, delayed: 3, received: 1 });
+    expect(s.amountsHidden).toBe(0);
+    // The same money is hidden from callers without rate:read.
+    expect((await call("l1", "GET", `/api/v1/invoices/summary?${window}`)).json()).not.toHaveProperty("totals");
   });
 
   it("billable placements: joined placements in scope with their invoice counts", async () => {

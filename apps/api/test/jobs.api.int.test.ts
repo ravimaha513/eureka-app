@@ -146,6 +146,11 @@ describe("validation", () => {
     expect(a.statusCode).toBe(201);
     expect(b.json().id).toBe(a.json().id);
     expect((await call("l1", "POST", "/api/v1/jobs", clientReq({ title: "Other" }), h)).statusCode).toBe(409);
+    // platform/idempotency.ts vocabulary: the key is optional here, a malformed one is invalid (400).
+    const bad = await call("l1", "POST", "/api/v1/jobs", clientReq({ title: "Bad key" }), { "idempotency-key": "has spaces" });
+    expect([bad.statusCode, bad.json().detail]).toEqual([400, "invalid_idempotency_key"]);
+    const stored = await db.admin.query(`SELECT response FROM eureka.idempotency_key WHERE key = $1`, [h["idempotency-key"]]);
+    expect(stored.rows[0].response).toEqual({ status: 201, body: a.json() });
   });
 });
 

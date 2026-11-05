@@ -37,7 +37,7 @@ Client-requirement pay is a rate: shown to managers of the job and `rate:read` h
 | `GET /options` | `job:manage`: creatable kinds, clients, staff for the hiring-manager picker |
 | `GET /company-options` | JP-31: `job:manage` and the caller may create internal openings (HR; 403 otherwise): `{ companies: [{ id, name }] }`, active companies, all locations |
 | `GET /:id` | RLS: 404 when not readable (also for the hiring manager and reviewers) |
-| `POST /` | JP-2: `job:manage` and the kind must be creatable by the caller (403 otherwise); optional `Idempotency-Key`; strict body |
+| `POST /` | JP-2: `job:manage` and the kind must be creatable by the caller (403 otherwise); optional `Idempotency-Key` (`platform/idempotency.ts`: same body → first response, other body 409 `idempotency_key_reused`, malformed 400 `invalid_idempotency_key`); strict body |
 | `PATCH /:id` | JP-3: read-before-write (404/403); `If-Match` rowVersion (428 without, 412 stale); `kind`, owner, team never change |
 
 Server-managed (trigger): `owner_id`, `team_id` (the creator's team, client requirements only), `row_version`, timestamps, `posted_at`

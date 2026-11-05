@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
 import {
-  BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException,
+  ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
 import type pg from "pg";
@@ -10,7 +9,7 @@ import {
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
-import { canonical, IdempotencyKey } from "../../platform/idempotency.js";
+import { idempotent } from "../../platform/idempotency.js";
 import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import { PARTY_PERMISSIONS } from "../lookups/lookups.controller.js";
 import type { CreateJob, JobListQuery, UpdateJob } from "./jobs.schemas.js";
@@ -261,32 +260,9 @@ export class JobsService {
   async create(user: AuthedUser, body: CreateJob, idempotencyKey: string | undefined) {
     this.checkKind(user, body.kind);
     this.checkClientVisible(user, body.clientId);
-    let key: string | null = null;
-    if (idempotencyKey !== undefined) {
-      const k = IdempotencyKey.safeParse(idempotencyKey);
-      if (!k.success) throw new BadRequestException("invalid_idempotency_key");
-      key = k.data;
-    }
-    const hash = createHash("sha256").update(canonical(body)).digest("hex");
-    return this.db.withUser(user.id, async (c) => {
-      if (key !== null) {
-        const claimed = await c.query(
-          `INSERT INTO eureka.idempotency_key (key, user_id, endpoint, request_hash) VALUES ($1,$2,$3,$4)
-           ON CONFLICT DO NOTHING RETURNING key`, [key, user.id, ENDPOINT, hash]);
-        if (claimed.rowCount === 0) {
-          const prior = (await c.query<{ request_hash: string; response: unknown }>(
-            `SELECT request_hash, response FROM eureka.idempotency_key WHERE user_id = $1 AND endpoint = $2 AND key = $3`,
-            [user.id, ENDPOINT, key])).rows[0];
-          if (!prior || prior.request_hash !== hash || prior.response === null) throw new ConflictException("idempotency_key_reused");
-          return prior.response as { id: string; rowVersion: number };
-        }
-      }
+    return this.db.withUser(user.id, (c) => idempotent(c, user, ENDPOINT, idempotencyKey, body, { required: false }, async () => {
       const id = await this.insert(c, body);
       const result = { id, rowVersion: 1 };
-      if (key !== null) {
-        await c.query(`UPDATE eureka.idempotency_key SET response = $4 WHERE user_id = $1 AND endpoint = $2 AND key = $3`,
-          [user.id, ENDPOINT, key, result]);
-      }
       // Ids and codes only (rule 5): no titles, pay or free text.
       await this.audit.record(c, {
         actorId: user.id, action: "job.created", entityType: "job", entityId: id,
@@ -294,7 +270,7 @@ export class JobsService {
           hiringManagerId: body.hiringManagerId ?? null, publishedToPortal: body.publishedToPortal },
       });
       return result;
-    });
+    }));
   }
 
   private async insert(c: pg.PoolClient, b: CreateJob): Promise<string> {
