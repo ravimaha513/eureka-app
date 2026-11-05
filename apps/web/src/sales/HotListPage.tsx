@@ -125,7 +125,7 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
                   </td>
                 </tr>
               ))}
-              {items.length === 0 && <tr><td colSpan={cols} className="empty">{s.hasFilters ? <NoMatches s={s} options={options.data} /> : "No candidates on the Hot List."}</td></tr>}
+              {items.length === 0 && <tr><td colSpan={cols} className="empty">{s.hasFilters ? <NoMatches s={s} statuses={HOTLIST_STATUS_OPTIONS} options={options.data} /> : "No candidates on the Hot List."}</td></tr>}
             </tbody>
           </table>
         )}

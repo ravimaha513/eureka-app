@@ -246,7 +246,7 @@ describe('"/" shortcut', () => {
     window.history.replaceState(null, "", "/hotlist");
     wrap(<Shell me={meFor("recruiter")} onSignOut={() => undefined} />);
     const box = await screen.findByPlaceholderText("Candidate name");
-    const tech = screen.getByPlaceholderText("e.g. Java");
+    const tech = screen.getByRole("combobox", { name: "Technology" });
     tech.focus();
     fireEvent.keyDown(tech, { key: "/" });
     expect(tech).toHaveFocus();

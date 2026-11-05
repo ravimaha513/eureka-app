@@ -102,7 +102,7 @@ describe("Candidates list: batches", () => {
     routes["GET /api/v1/candidates"] = () => ({ body: { items: [], nextCursor: null } });
     wrap(<CandidatesPage me={RECRUITER} />);
     await pickOption("Batch", "Java · Dallas · Nov 2026");
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "on_hold" } });
+    await pickOption("Status", "On hold");
     const chips = screen.getByRole("list", { name: "Active filters" });
     expect(within(chips).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["StatusOn hold", "BatchJava · Dallas · Nov 2026"]);
     const relax = await screen.findByRole("list", { name: "Remove one filter" });

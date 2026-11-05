@@ -76,14 +76,14 @@ describe("Hot List filters and columns", () => {
     await screen.findByText("Asha Iyer", { selector: "b" });
     openMoreFilters();
     await pickOption("Location", "Dallas");
-    fireEvent.change(screen.getByLabelText("Visa"), { target: { value: "h1b" } });
-    fireEvent.change(screen.getByLabelText("Documents"), { target: { value: "none" } });
+    await pickOption("Visa", "H-1B");
+    await pickOption("Documents", "Not recorded", "Pending");
     pickSegment("Resume", "On file");
     pickSegment("Stay", "Remote");
     expect(within(screen.getByRole("list", { name: "Active filters" })).getByRole("button", { name: "Remove Location filter" })).toBeInTheDocument();
     await waitFor(() => expect(lastHotlist().get("stay")).toBe("remote"));
     const p = lastHotlist();
-    expect([p.get("locationId"), p.get("visa"), p.get("documents"), p.get("resume")]).toEqual([LOC, "h1b", "none", "yes"]);
+    expect([p.getAll("locationId"), p.getAll("visa"), p.getAll("documents"), p.get("resume")]).toEqual([[LOC], ["h1b"], ["none", "pending"], "yes"]);
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     await waitFor(() => expect(lastHotlist().get("stay")).toBeNull());
   });
