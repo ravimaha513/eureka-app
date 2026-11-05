@@ -12,6 +12,7 @@ test-results
 playwright-report
 .claude/*
 !.claude/settings.json
+!.claude/skills/
 .local
 
 # terraform / terragrunt

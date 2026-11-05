@@ -8,6 +8,7 @@ Internal talent-ops platform. pnpm monorepo, Node 22+, Postgres 16.
 - `apps/web` — React + Vite. `src/<area>/`; `e2e/` = Playwright
 - `db/migrations/00NN_*.sql` — append-only, checksum-pinned. Next number = highest + 1 (`ls db/migrations | tail -1`). Functions with a file in `db/functions/` are edited there, never in a new migration
 - `infra/` — Terraform/Terragrunt (AWS compute currently deleted; ignore unless asked)
+- `.claude/skills/eureka-*` — project skills (migration, definer-fn, rls-policy, sql-review, new-module, authz-grant, outbox-event, handoff, test-run, int-test, shard-split, mass-assignment, e2e, security-gate)
 
 ## Commands
 - `pnpm local` — full stack (Docker PG :55432, API :3000, web :5173)
