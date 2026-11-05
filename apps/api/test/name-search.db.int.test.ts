@@ -39,7 +39,11 @@ async function inContext<T>(as: As, fn: (c: pg.PoolClient) => Promise<T>): Promi
 }
 
 const plan = (sql: string, params: unknown[], as: As) => inContext(as, async (c) => {
+  // Seq and plain index scans off: on fixture-sized tables, once ANALYZE has run, a full person_pkey walk
+  // with a filter can be cheapest; this leaves only an index that matches the condition (or, under RLS,
+  // the seq scan the security barrier forces).
   await c.query("SET LOCAL enable_seqscan = off");
+  await c.query("SET LOCAL enable_indexscan = off");
   return (await c.query<Record<string, string>>(`EXPLAIN ${sql}`, params)).rows.map((r) => r["QUERY PLAN"]).join("\n");
 });
 
