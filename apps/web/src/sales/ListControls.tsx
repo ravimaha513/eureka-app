@@ -125,12 +125,12 @@ export function ListFilters({ s, label, statuses, batches, options }: {
         </button>
       </div>
 
-      <div id={`${id}-panel`} className="filterpanel" hidden={!open}>
-        <div className="sheethead">
+      <div id={`${id}-panel`} className="lf-panel" hidden={!open}>
+        <div className="lf-sheethead">
           <h2 id={`${id}-panel-title`}>Filters</h2>
           <button type="button" className="btn ghost sm" onClick={() => setOpen(false)}>Done</button>
         </div>
-        <div className="filtergrid" role="group" aria-labelledby={`${id}-panel-title`}>
+        <div className="lf-grid" role="group" aria-labelledby={`${id}-panel-title`}>
           {extraCombo("locationId", "Location", locations, "Any location")}
           {extraSel("visa", "Visa", Object.entries(VISA_CATEGORIES), "Any visa")}
           {extraSel("documents", "Documents", DOCUMENTS, "Any documents status")}
@@ -146,12 +146,12 @@ export function ListFilters({ s, label, statuses, batches, options }: {
             </>
           )}
         </div>
-        <div className="sheetfoot">
+        <div className="lf-sheetfoot">
           <button type="button" className="btn" disabled={!s.hasFilters} onClick={s.clear}>Reset</button>
           <button type="button" className="btn primary" onClick={() => setOpen(false)}>Show results</button>
         </div>
       </div>
-      {open && <div className="sheetscrim" aria-hidden="true" onClick={() => setOpen(false)} />}
+      {open && <div className="lf-scrim" aria-hidden="true" onClick={() => setOpen(false)} />}
 
       {(active.length > 0 || s.hasFilters) && (
         <div className="activefilters">
