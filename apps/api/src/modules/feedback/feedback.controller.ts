@@ -3,7 +3,7 @@ import { Body, Controller, Get, Inject, HttpException, NotFoundException, Param,
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { Public } from "../../platform/auth.guard.js";
-import { clientIp } from "../../platform/client-ip.js";
+import { clientIp, ipKey } from "../../platform/client-ip.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
@@ -18,15 +18,18 @@ export const hashToken = (token: string) => createHash("sha256").update(token).d
 export class FeedbackController {
   // Bounded process-local abuse protection. Production edge rate limits supplement
   // this per-instance limit; tokens are hashed before entering the limiter.
-  private readonly limiter = new RateLimiter(30, 60_000);
+  // Client addresses are keyed like the password and portal routes (ipKey: IPv6 by
+  // /64, so rotating inside one allocation earns nothing). Tokens have their own
+  // map, so a flood of distinct tokens can never evict the per-address windows.
+  private readonly ipLimiter = new RateLimiter(30, 60_000);
+  private readonly tokenLimiter = new RateLimiter(30, 60_000);
   constructor(private readonly db: DbService, @Inject(CONFIG) private readonly config: AppConfig) {}
   private check(req: FastifyRequest, token: string) {
     // Limiter runs before the format check so guessing malformed tokens is also throttled.
+    // The address is taken first: a refused client never adds a token key.
+    if (!this.ipLimiter.take(`ip:${ipKey(clientIp(req, this.config))}`)) throw new HttpException("Too many requests", 429);
     const hash = hashToken(token);
-    const ip = clientIp(req, this.config);
-    for (const key of [`ip:${ip}`, `token:${hash}`]) {
-      if (!this.limiter.take(key)) throw new HttpException("Too many requests", 429);
-    }
+    if (!this.tokenLimiter.take(`token:${hash}`)) throw new HttpException("Too many requests", 429);
     if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new NotFoundException("Feedback link unavailable");
     return hash;
   }
