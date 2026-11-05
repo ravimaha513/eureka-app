@@ -119,7 +119,11 @@ describe("authz.person_name_matches = person_read + name ILIKE (differential, R-
     try {
       await c.query("BEGIN");
       await c.query("SET LOCAL ROLE authz_definer");
+      // Plans on a handful of fixture rows follow the table statistics: with only seq scans off, a
+      // planner may walk person_pkey and filter instead (CI did). With plain index scans off too, the
+      // name condition can only be applied through an index that matches it: person_name_trgm.
       await c.query("SET LOCAL enable_seqscan = off");
+      await c.query("SET LOCAL enable_indexscan = off");
       const p = (await c.query<Record<string, string>>(`EXPLAIN SELECT p.id FROM eureka.person p
         WHERE ${nameSearch("p", "$1::text")} AND EXISTS (SELECT 1 FROM eureka.candidate c WHERE c.person_id = p.id)`, [likeContains("cand1")]))
         .rows.map((r) => r["QUERY PLAN"]).join("\n");
