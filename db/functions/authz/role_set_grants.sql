@@ -6,9 +6,16 @@
 -- location_scope_needs_location, and role_in_use when the change would add a
 -- restricted permission (or an org-sensitive one at org scope) while the role has
 -- holders: a new role and a fresh grant go through the second approver (AD-3).
+-- Admin separation (0470, security review C-01): admin_permission_needs_admin_role when
+-- it would add an admin-only permission to a role without the admin trait,
+-- business_permission_on_admin_role when it would add any other permission (beyond the
+-- admin-compatible ones) to an admin-trait role. Only additions are refused, so a role
+-- that already breaks the rule (GET /admin/roles/violations) can still be edited and cleaned up.
+-- p_expected_version (optional If-Match, C-02): stale when it is not the role's row_version.
+-- A change bumps role.row_version.
 
 SET ROLE authz_definer;
-CREATE OR REPLACE FUNCTION authz.role_set_grants(p_key text, p_grants jsonb)
+CREATE OR REPLACE FUNCTION authz.role_set_grants(p_key text, p_grants jsonb, p_expected_version integer DEFAULT NULL)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -27,7 +34,10 @@ BEGIN
   IF r.archived_at IS NOT NULL THEN
     RAISE EXCEPTION 'role_archived' USING ERRCODE = 'check_violation';
   END IF;
-  IF pg_catalog.jsonb_typeof(p_grants) <> 'object' THEN
+  IF p_expected_version IS NOT NULL AND r.row_version IS DISTINCT FROM p_expected_version THEN
+    RAISE EXCEPTION 'stale' USING ERRCODE = 'serialization_failure';
+  END IF;
+  IF pg_catalog.jsonb_typeof(p_grants) IS DISTINCT FROM 'object' THEN
     RAISE EXCEPTION 'invalid_grants' USING ERRCODE = 'check_violation';
   END IF;
 
@@ -42,6 +52,20 @@ BEGIN
   END IF;
   IF NOT r.is_location_bound AND EXISTS (SELECT 1 FROM pg_catalog.jsonb_each_text(p_grants) w WHERE w.value = 'location') THEN
     RAISE EXCEPTION 'location_scope_needs_location' USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- Admin separation: refuse new grants that break it (existing ones stay until removed).
+  IF NOT coalesce(r.is_admin, false) AND EXISTS (
+       SELECT 1 FROM pg_catalog.jsonb_each_text(p_grants) w JOIN eureka.permission p ON p.key = w.key
+       WHERE w.value IS NOT NULL AND p.is_admin_only
+         AND NOT EXISTS (SELECT 1 FROM eureka.role_permission cur WHERE cur.role_key = p_key AND cur.permission = w.key)) THEN
+    RAISE EXCEPTION 'admin_permission_needs_admin_role' USING ERRCODE = 'check_violation';
+  END IF;
+  IF coalesce(r.is_admin, false) AND EXISTS (
+       SELECT 1 FROM pg_catalog.jsonb_each_text(p_grants) w JOIN eureka.permission p ON p.key = w.key
+       WHERE w.value IS NOT NULL AND NOT (p.is_admin_only OR p.is_admin_compatible)
+         AND NOT EXISTS (SELECT 1 FROM eureka.role_permission cur WHERE cur.role_key = p_key AND cur.permission = w.key)) THEN
+    RAISE EXCEPTION 'business_permission_on_admin_role' USING ERRCODE = 'check_violation';
   END IF;
 
   held := EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.role_key = p_key AND ur.valid @> pg_catalog.now());
@@ -67,6 +91,10 @@ BEGIN
   INSERT INTO eureka.role_permission (role_key, permission, scope)
   SELECT p_key, w.key, w.value FROM pg_catalog.jsonb_each_text(p_grants) w WHERE w.key = ANY (added);
 
+  IF pg_catalog.cardinality(added) + pg_catalog.cardinality(removed) + pg_catalog.cardinality(changed) > 0 THEN
+    UPDATE eureka.role ro SET row_version = ro.row_version + 1 WHERE ro.key = p_key;
+  END IF;
+
   -- Holders' sessions pick the new grants up on their next request (access_version).
   UPDATE eureka.app_user u SET access_version = u.access_version + 1
    WHERE EXISTS (SELECT 1 FROM eureka.user_role ur WHERE ur.user_id = u.id AND ur.role_key = p_key AND ur.valid @> pg_catalog.now());
@@ -75,6 +103,6 @@ BEGIN
                                        'changed', pg_catalog.to_jsonb(changed));
 END $function$;
 
-REVOKE ALL ON FUNCTION authz.role_set_grants(text, jsonb) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION authz.role_set_grants(text, jsonb) TO eureka_app;
+REVOKE ALL ON FUNCTION authz.role_set_grants(text, jsonb, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION authz.role_set_grants(text, jsonb, integer) TO eureka_app;
 RESET ROLE;

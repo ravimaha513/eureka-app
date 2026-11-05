@@ -928,3 +928,23 @@ export function isRestrictedRole(role: Role): boolean {
     ORG_SENSITIVE_PERMISSIONS.some((p) => GRANTS[role][p] === "org")
   );
 }
+
+/**
+ * Admin/data separation (docs/roles-api.md "Admin separation"; security review C-01): the
+ * Users & Access administration permissions go only to roles with the admin trait, and a role
+ * with the admin trait holds nothing but these and ADMIN_COMPATIBLE_PERMISSIONS (no business
+ * data, AD-1). The migration runner copies both lists into eureka.permission (is_admin_only,
+ * is_admin_compatible); authz.role_create, role_update and role_set_grants refuse changes that
+ * would add a violation.
+ */
+export const ADMIN_PERMISSIONS: readonly Permission[] = ["access:manage", "audit:read"];
+
+/** Non-business permissions an admin-trait role may hold besides ADMIN_PERMISSIONS (any role may hold them). */
+export const ADMIN_COMPATIBLE_PERMISSIONS: readonly Permission[] = ["staff.contact:read", "technology:create", "chat:use"];
+
+/** The grants that break admin/data separation for a role with these traits; empty when it complies. */
+export function adminSeparationViolations(traits: Pick<RoleTraits, "admin">, grants: Grants): Permission[] {
+  return (Object.keys(grants) as Permission[]).filter((p) => traits.admin
+    ? !ADMIN_PERMISSIONS.includes(p) && !ADMIN_COMPATIBLE_PERMISSIONS.includes(p)
+    : ADMIN_PERMISSIONS.includes(p));
+}

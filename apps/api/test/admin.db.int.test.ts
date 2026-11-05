@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { isRestrictedRole, ROLES } from "@eureka/shared";
+import { ADMIN_COMPATIBLE_PERMISSIONS, ADMIN_PERMISSIONS, isRestrictedRole, ROLES } from "@eureka/shared";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
 import { LOC, T, U, seedFixtures, type FixtureCandidate } from "./fixtures.js";
 
@@ -376,5 +376,90 @@ describe("security review follow-ups (migration 0018)", () => {
   it("a manager with direct reports cannot be deactivated", async () => {
     await expect(asUser(db.app, U.admin, (c) => c.query(`SELECT authz.admin_set_user_status($1, false)`, [U.m1])))
       .rejects.toThrow(/has_reports|lead_of_team/);
+  });
+});
+
+describe("admin separation and role versions (migrations 0470, 0471)", () => {
+  /** Runs fn as eureka_app for actor after setup as the owner, all rolled back. */
+  async function withSetup<T>(setup: string[], actor: string, fn: (c: import("pg").PoolClient) => Promise<T>): Promise<T> {
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      for (const sql of setup) await c.query(sql);
+      await c.query("SELECT set_config('eureka.user_id', $1, true)", [actor]);
+      await c.query("SET LOCAL ROLE eureka_app");
+      return await fn(c);
+    } finally {
+      await c.query("ROLLBACK");
+      c.release();
+    }
+  }
+  const mixedRole = [
+    `INSERT INTO eureka.role (key, label) VALUES ('c_db_mixed', 'DB Mixed')`,
+    `INSERT INTO eureka.role_permission (role_key, permission, scope) VALUES ('c_db_mixed', 'access:manage', 'org'), ('c_db_mixed', 'candidate:read', 'team')`,
+  ];
+
+  it("permission flags are seeded from the catalog; built-in roles report no violation", async () => {
+    const { rows } = await db.admin.query<{ key: string; is_admin_only: boolean; is_admin_compatible: boolean }>(
+      `SELECT key, is_admin_only, is_admin_compatible FROM eureka.permission`);
+    expect(rows.filter((r) => r.is_admin_only).map((r) => r.key).sort()).toEqual([...ADMIN_PERMISSIONS].sort());
+    expect(rows.filter((r) => r.is_admin_compatible).map((r) => r.key).sort()).toEqual([...ADMIN_COMPATIBLE_PERMISSIONS].sort());
+    expect((await asUser(db.app, U.admin, (c) => c.query(`SELECT * FROM authz.role_admin_violations()`))).rows).toEqual([]);
+  });
+
+  it("the violations report needs an admin; its helper is internal", async () => {
+    for (const actor of [U.r1a, U.ceo, U.hr, NIL]) {
+      await expect(asUser(db.app, actor, (c) => c.query(`SELECT * FROM authz.role_admin_violations()`)), actor).rejects.toThrow(/not_permitted/);
+    }
+    await expect(db.app.query(`SELECT * FROM authz.role_admin_violations()`)).rejects.toThrow(/not_permitted/);
+    await expect(asUser(db.app, U.admin, (c) => c.query(`SELECT * FROM authz.role_admin_conflicts()`))).rejects.toThrow(/permission denied/);
+  });
+
+  it("admin_guard needs the admin trait as well as access:manage", async () => {
+    const setup = [...mixedRole, `INSERT INTO eureka.user_role (user_id, role_key) VALUES ('${U.hr}', 'c_db_mixed')`];
+    await withSetup(setup, U.hr, async (c) => {
+      expect((await c.query(`SELECT authz.has_org('access:manage') AS ok`)).rows[0].ok).toBe(true);
+      for (const sql of [
+        `SELECT authz.admin_create_user('mixed@eureka.example', 'Mixed', NULL, NULL)`,
+        `SELECT * FROM authz.role_admin_violations()`,
+        `SELECT authz.role_create('Mixed Copy', 'lead', NULL, NULL, NULL, NULL)`,
+      ]) {
+        await c.query("SAVEPOINT s");
+        await expect(c.query(sql)).rejects.toThrow(/not_permitted/);
+        await c.query("ROLLBACK TO SAVEPOINT s");
+      }
+    });
+  });
+
+  it("an existing violation is reported, its edits still work, new violations are refused", async () => {
+    await withSetup(mixedRole, U.admin, async (c) => {
+      expect((await c.query(`SELECT role_key, permissions FROM authz.role_admin_violations()`)).rows)
+        .toEqual([{ role_key: "c_db_mixed", permissions: ["access:manage"] }]);
+      const set = async (grants: unknown, version: number | null = null) => {
+        await c.query("SAVEPOINT s");
+        try {
+          return (await c.query(`SELECT authz.role_set_grants('c_db_mixed', $1::jsonb, $2) AS d`, [JSON.stringify(grants), version])).rows[0].d;
+        } catch (err) {
+          await c.query("ROLLBACK TO SAVEPOINT s");
+          throw err;
+        }
+      };
+      expect(await set({ "access:manage": "org", "candidate:read": "org" })).toEqual({ added: [], removed: [], changed: ["candidate:read"] });
+      await expect(set({ "access:manage": "org", "candidate:read": "org", "audit:read": "org" })).rejects.toThrow(/admin_permission_needs_admin_role/);
+      // NULL grants are refused, not read as "remove everything" (rule 1).
+      await expect(set(null)).rejects.toThrow(/invalid_grants/);
+      // Version check: 2 after the one change; a stale expected version is refused.
+      await expect(set({ "access:manage": "org" }, 1)).rejects.toThrow(/stale/);
+      expect(await set({ "access:manage": "org" }, 2)).toEqual({ added: [], removed: ["candidate:read"], changed: [] });
+      expect((await c.query(`SELECT row_version FROM eureka.role WHERE key = 'c_db_mixed'`)).rows[0].row_version).toBe(3);
+      await c.query("SAVEPOINT u");
+      await expect(c.query(`SELECT authz.role_update('c_db_mixed', '{"label":"X"}'::jsonb, 2)`)).rejects.toThrow(/stale/);
+      await c.query("ROLLBACK TO SAVEPOINT u");
+      expect((await c.query(`SELECT authz.role_update('c_db_mixed', '{"label":"DB Mixed II"}'::jsonb, 3) AS ch`)).rows[0].ch).toEqual(["label"]);
+    });
+  });
+
+  it("row_version is server-managed: the API role cannot write it", async () => {
+    await expect(asUser(db.app, U.admin, (c) => c.query(`UPDATE eureka.role SET row_version = 9 WHERE key = 'lead'`))).rejects.toThrow(/permission denied/);
   });
 });

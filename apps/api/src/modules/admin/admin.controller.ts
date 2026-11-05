@@ -1,6 +1,7 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
+import { parseIfMatch } from "../../platform/http/if-match.js";
 import {
   AddMember,
   AddMembers,
@@ -153,16 +154,31 @@ export class AdminController {
     return this.svc.createRole(user, CreateRole.parse(body));
   }
 
+  /** Roles that break admin/data separation (read-only report; docs/roles-api.md "Admin separation"). */
+  @Get("roles/violations")
+  listRoleViolations(@CurrentUser() user: AuthedUser) {
+    return this.svc.listRoleViolations(user);
+  }
+
+  /** Optional If-Match: the rowVersion from GET /admin/roles (412 when stale); the new one comes back as ETag. */
   @Patch("roles/:key")
   @HttpCode(204)
-  async updateRole(@CurrentUser() user: AuthedUser, @Param("key") key: string, @Body() body: unknown): Promise<void> {
-    await this.svc.updateRole(user, RoleKey.parse(key), UpdateRole.parse(body));
+  async updateRole(
+    @CurrentUser() user: AuthedUser, @Param("key") key: string, @Body() body: unknown,
+    @Headers("if-match") ifMatch: string | undefined, @Res({ passthrough: true }) res: FastifyReply,
+  ): Promise<void> {
+    const v = await this.svc.updateRole(user, RoleKey.parse(key), UpdateRole.parse(body), parseIfMatch(ifMatch));
+    void res.header("etag", `"${v}"`);
   }
 
   @Put("roles/:key/grants")
   @HttpCode(204)
-  async setRoleGrants(@CurrentUser() user: AuthedUser, @Param("key") key: string, @Body() body: unknown): Promise<void> {
-    await this.svc.setRoleGrants(user, RoleKey.parse(key), SetRoleGrants.parse(body));
+  async setRoleGrants(
+    @CurrentUser() user: AuthedUser, @Param("key") key: string, @Body() body: unknown,
+    @Headers("if-match") ifMatch: string | undefined, @Res({ passthrough: true }) res: FastifyReply,
+  ): Promise<void> {
+    const v = await this.svc.setRoleGrants(user, RoleKey.parse(key), SetRoleGrants.parse(body), parseIfMatch(ifMatch));
+    void res.header("etag", `"${v}"`);
   }
 
   @Post("roles/:key/archive")

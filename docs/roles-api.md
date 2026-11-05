@@ -32,6 +32,19 @@ on `eureka.role`, and code branches on them instead of on the key:
   org-sensitive permission at `org` scope. A trigger on `role_permission` keeps
   `role.is_restricted` current, so a custom role that drifts into sensitive territory is
   approved like a built-in one.
+- **Admin separation** (0470, security review C-01): the Users & Access permissions
+  (`ADMIN_PERMISSIONS`: `access:manage`, `audit:read`; `eureka.permission.is_admin_only`) go only
+  to roles with the `admin` trait, and an `admin`-trait role holds nothing else but the
+  admin-compatible ones (`ADMIN_COMPATIBLE_PERMISSIONS`: `staff.contact:read`,
+  `technology:create`, `chat:use`; `is_admin_compatible`), i.e. no business data (AD-1). One admin
+  may still grant an admin role alone (owner decision; no second approver beyond AD-3).
+  `role_create` / `role_update` / `role_set_grants` refuse a change that would *add* a violation
+  (422 `admin_permission_needs_admin_role`, `business_permission_on_admin_role`); a custom role
+  that already broke the rule before 0470 is reported (migration `WARNING`,
+  `GET /admin/roles/violations`), never stripped, and edits that add no violation still work.
+  `authz.admin_guard`, which gates every admin, import and approval function, requires the
+  `admin` trait as well as `access:manage` at org scope, so a holder of such a role is refused
+  (403 `Not permitted`) even though the API's permission check lets the request through.
 - **Business units** are departments (`eureka.department`, AD-12). A role with
   `department_id` can only be granted to users in that department or its
   sub-departments (`role_department_mismatch`); `null` = whole organisation. Scope is
@@ -79,10 +92,13 @@ to seed and by tests (`assignmentFor(role)` builds an assignment from the catalo
 
 - `GET /api/v1/admin/roles?includeArchived=` returns `{ items: [{ key, label, description, isSystem,
   restricted, traits: { sales, locationBound, admin, recruiter, coach }, track, level,
-  department: {id,name}|null, clonedFrom, holders, archivedAt, grants: { "<permission>": "<scope>" } }] }`
-  ordered by track, level, label.
+  department: {id,name}|null, clonedFrom, holders, archivedAt, rowVersion, grants: { "<permission>": "<scope>" } }] }`
+  ordered by track, level, label. `rowVersion` is the If-Match value for the two edits below.
 - `GET /api/v1/admin/permissions` returns `{ scopes: [...], items: [{ key, area, description,
-  restricted, orgSensitive }] }` from the catalog.
+  restricted, orgSensitive, adminOnly, adminCompatible }] }` from the catalog.
+- `GET /api/v1/admin/roles/violations` returns `{ items: [{ key, label, isSystem, admin, archived,
+  holders, permissions }] }`: the roles that break admin separation and the permissions that do
+  (read-only, `authz.role_admin_violations`; empty once they are cleaned up).
 - `POST /api/v1/admin/roles` with `{ label, cloneFrom, description?, departmentId?, track?, level? }`
   returns 201 `{ key }`. Copies grants and traits from `cloneFrom` (404 unknown, 422
   `role_archived`). Label 1–80 characters, unique ignoring case among non-archived roles (409
@@ -94,7 +110,10 @@ to seed and by tests (`assignmentFor(role)` builds an assignment from the catalo
   `role_in_use`): holders' access facts (location ids, separation of duties, coach assignments)
   depend on them. Turning `locationBound` off while a grant uses the `location` scope is 422
   `location_scope_needs_location`. `authz.role_update`; audited as `admin.role.updated` with the
-  changed field names (and the trait values).
+  changed field names (and the trait values). Turning `admin` on while the role holds a business
+  permission is 422 `business_permission_on_admin_role`; turning it off while it holds an
+  admin-only one is 422 `admin_permission_needs_admin_role`. Cloning a role that breaks admin
+  separation is refused with the same codes.
 - `PUT /api/v1/admin/roles/:key/grants` with `{ grants: { "<permission>": "<scope>" | null } }`
   replaces the whole grant set, returns 204. 422 `unknown_permission`, `invalid_scope`,
   `system_role`, `role_archived`; 422 `role_in_use` when the change would add a restricted
@@ -103,6 +122,15 @@ to seed and by tests (`assignmentFor(role)` builds an assignment from the catalo
   Holders' `access_version` is bumped, so their next request carries the new grants.
   `authz.role_set_grants`; audited as `admin.role.grants_changed` `{ key, added, removed, changed }`
   (permission keys only). Audit rows of roles carry the key in `changes` (`entity_id` is a uuid).
+  Adding an admin-only permission to a role without the `admin` trait is 422
+  `admin_permission_needs_admin_role`; adding any other (non admin-compatible) permission to an
+  `admin`-trait role is 422 `business_permission_on_admin_role`. A null or non-object `grants` is
+  422 `invalid_grants`.
+- **Concurrency** (0471, review C-02): `PATCH /admin/roles/:key` and `PUT /admin/roles/:key/grants`
+  take an optional `If-Match: "<rowVersion>"`. A stale one is 412 `stale` and changes nothing; the
+  check runs in the definer function under the role's row lock. Without the header they behave as
+  before (last write wins). Both return the role's new version as `ETag: "<rowVersion>"`; an edit
+  that changes nothing keeps it. Only these two definer functions bump `role.row_version`.
 - `POST /api/v1/admin/roles/:key/archive` returns 204; 422 `role_in_use` when anyone holds it,
   `system_role`. Archived roles disappear from pickers, keep their rows; their pending requests
   are rejected. `authz.role_archive`; audited as `admin.role.archived`.
