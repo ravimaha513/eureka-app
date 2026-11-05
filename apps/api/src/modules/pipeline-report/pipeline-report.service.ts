@@ -1,5 +1,5 @@
 import {
-  ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException,
+  ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException, UnprocessableEntityException,
 } from "@nestjs/common";
 import type pg from "pg";
 import { ownsActivity, ownsCandidate, resolveScope, type EffectiveScope } from "@eureka/shared";
@@ -38,12 +38,29 @@ interface PipelineRow {
   asm_n: number; asm_passed: number; asm_last: string | null;
   pl_id: string | null; pl_status: string | null; pl_created: Date | null; pl_start: string | null; pl_joined: Date | null;
   ck_total: number | null; ck_done: number | null;
-  not_responding: boolean; stage: PipelineStage; total: number;
+  not_responding: boolean; stage: PipelineStage;
 }
 
-interface SummaryRow {
-  total: number; marketing: number; submitted: number; interviewing: number; assessment: number;
-  confirmed: number; paperwork: number; joined: number; not_responding: number; by_stage: Record<string, number> | null;
+interface SummaryCols {
+  s_total: number; s_marketing: number; s_submitted: number; s_interviewing: number; s_assessment: number;
+  s_confirmed: number; s_paperwork: number; s_joined: number; s_not_responding: number; s_by_stage: Record<string, number> | null;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Keyset cursor of the report (opaque): base64url JSON [sort key | null, candidate id]. */
+function encodePipelineCursor(key: string | null, id: string): string {
+  return Buffer.from(JSON.stringify([key, id]), "utf8").toString("base64url");
+}
+function decodePipelineCursor(cursor: string | undefined): { key: string | null; id: string } | null {
+  if (cursor === undefined) return null;
+  try {
+    const v = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
+    if (Array.isArray(v) && v.length === 2 && (v[0] === null || typeof v[0] === "string") && typeof v[1] === "string" && UUID.test(v[1])) {
+      return { key: v[0] as string | null, id: v[1] };
+    }
+  } catch { /* fall through */ }
+  throw new UnprocessableEntityException("invalid_cursor");
 }
 
 interface AssessmentRow {
@@ -87,51 +104,73 @@ export class PipelineReportService {
     const report = resolveScope(user.access, "report:read");
     const cand = resolveScope(user.access, "candidate:read");
     if (!report || !cand) throw new ForbiddenException("Not permitted");
+    // A malformed cursor is a 422 before it costs a rate-limit token.
+    const after = decodePipelineCursor(q.cursor);
     if (!this.limiter.take(user.id)) {
       throw new HttpException("Too many pipeline report requests; try again in a minute", HttpStatus.TOO_MANY_REQUESTS);
     }
     // Org-wide callers get the raised report timeout and a report slot; a statement timeout is 503 + Retry-After.
     const run = { heavy: report.all, timeoutDetail: "The report took too long; narrow the filters and try again" };
     return this.reports.run(user.id, run, async (c) => {
+      // E-03: one statement, one snapshot. `rows` (the full-history aggregation) is materialized once and
+      // read by both the summary and the page, so totals always agree with the page. Paging is keyset on
+      // (lower(name) NULLS LAST, id); the deprecated `offset` still works (bounded at 10,000).
       const params: Params = [];
       const base = this.baseSql(params, report, cand, q);
       const p = bind(params);
-      const page = await c.query<PipelineRow>(`${base}
-        SELECT r.*, CASE WHEN pe.id IS NOT NULL THEN pe.first_name || ' ' || pe.last_name END AS name,
-               te.name AS technology, tm.name AS team, ru.display_name AS recruiter, lo.name AS location,
-               count(*) OVER ()::int AS total
-          FROM rows r
-          LEFT JOIN eureka.person pe ON pe.id = r.person_id
-          LEFT JOIN eureka.technology te ON te.id = r.technology_id
-          LEFT JOIN eureka.team tm ON tm.id = r.team_id
-          LEFT JOIN eureka.app_user ru ON ru.id = r.recruiter_id
-          LEFT JOIN eureka.location lo ON lo.id = r.location_id
-         ORDER BY lower(pe.first_name || ' ' || pe.last_name) NULLS LAST, r.id
-         LIMIT ${p(q.limit)} OFFSET ${p(q.offset)}`, params);
-      const sParams: Params = [];
-      const sBase = this.baseSql(sParams, report, cand, q);
-      const s = (await c.query<SummaryRow>(`${sBase}
-        SELECT count(*)::int AS total,
-               count(*) FILTER (WHERE stage <> 'not_started')::int AS marketing,
-               count(*) FILTER (WHERE sub_n > 0)::int AS submitted,
-               count(*) FILTER (WHERE iv_n > 0)::int AS interviewing,
-               count(*) FILTER (WHERE asm_n > 0)::int AS assessment,
-               count(*) FILTER (WHERE pl_id IS NOT NULL)::int AS confirmed,
-               count(*) FILTER (WHERE pl_status IN ('paperwork', 'bgc', 'ready', 'joined'))::int AS paperwork,
-               count(*) FILTER (WHERE pl_status = 'joined')::int AS joined,
-               count(*) FILTER (WHERE not_responding)::int AS not_responding,
-               (SELECT pg_catalog.jsonb_object_agg(stage, n) FROM (SELECT stage, count(*)::int AS n FROM rows GROUP BY stage) g) AS by_stage
-          FROM rows`, sParams)).rows[0]!;
+      let keyset = "true";
+      if (after) {
+        if (after.key === null) {
+          keyset = `(n.sort_key IS NULL AND n.id > ${p(after.id)}::uuid)`;
+        } else {
+          const $k = p(after.key);
+          const $id = p(after.id);
+          keyset = `(n.sort_key > ${$k}::text OR (n.sort_key = ${$k}::text AND n.id > ${$id}::uuid) OR n.sort_key IS NULL)`;
+        }
+      }
+      const { rows: out } = await c.query<SummaryCols & Partial<PipelineRow> & { sort_key: string | null }>(`${base},
+      summary AS (
+        SELECT count(*)::int AS s_total,
+               count(*) FILTER (WHERE stage <> 'not_started')::int AS s_marketing,
+               count(*) FILTER (WHERE sub_n > 0)::int AS s_submitted,
+               count(*) FILTER (WHERE iv_n > 0)::int AS s_interviewing,
+               count(*) FILTER (WHERE asm_n > 0)::int AS s_assessment,
+               count(*) FILTER (WHERE pl_id IS NOT NULL)::int AS s_confirmed,
+               count(*) FILTER (WHERE pl_status IN ('paperwork', 'bgc', 'ready', 'joined'))::int AS s_paperwork,
+               count(*) FILTER (WHERE pl_status = 'joined')::int AS s_joined,
+               count(*) FILTER (WHERE not_responding)::int AS s_not_responding,
+               (SELECT pg_catalog.jsonb_object_agg(stage, n) FROM (SELECT stage, count(*)::int AS n FROM rows GROUP BY stage) g) AS s_by_stage
+          FROM rows),
+      page AS (
+        SELECT k.*, te.name AS technology, tm.name AS team, ru.display_name AS recruiter, lo.name AS location
+          FROM (SELECT n.* FROM (
+                  SELECT r.*, CASE WHEN pe.id IS NOT NULL THEN pe.first_name || ' ' || pe.last_name END AS name,
+                         lower(pe.first_name || ' ' || pe.last_name) AS sort_key
+                    FROM rows r LEFT JOIN eureka.person pe ON pe.id = r.person_id) n
+                 WHERE ${keyset}
+                 ORDER BY n.sort_key NULLS LAST, n.id
+                 LIMIT ${p(q.limit + 1)} OFFSET ${p(q.offset)}) k
+          LEFT JOIN eureka.technology te ON te.id = k.technology_id
+          LEFT JOIN eureka.team tm ON tm.id = k.team_id
+          LEFT JOIN eureka.app_user ru ON ru.id = k.recruiter_id
+          LEFT JOIN eureka.location lo ON lo.id = k.location_id)
+      SELECT s.*, pg.* FROM summary s LEFT JOIN page pg ON true
+       ORDER BY pg.sort_key NULLS LAST, pg.id`, params);
+      const s = out[0]!;
+      const fetched = (out[0]!.id === null || out[0]!.id === undefined ? [] : out) as (PipelineRow & { sort_key: string | null })[];
+      const truncated = fetched.length > q.limit;
+      const pageRows = fetched.slice(0, q.limit);
+      const last = pageRows[pageRows.length - 1];
       return {
         period: q.from ? { from: q.from, to: q.to } : null,
-        total: s.total,
+        total: s.s_total,
         funnel: {
-          marketing: s.marketing, submitted: s.submitted, interviewing: s.interviewing, assessment: s.assessment,
-          confirmed: s.confirmed, paperwork: s.paperwork, joined: s.joined,
+          marketing: s.s_marketing, submitted: s.s_submitted, interviewing: s.s_interviewing, assessment: s.s_assessment,
+          confirmed: s.s_confirmed, paperwork: s.s_paperwork, joined: s.s_joined,
         },
-        notResponding: s.not_responding,
-        byStage: s.by_stage ?? {},
-        items: page.rows.map((r) => ({
+        notResponding: s.s_not_responding,
+        byStage: s.s_by_stage ?? {},
+        items: pageRows.map((r) => ({
           candidate: { id: r.id, name: r.name },
           technology: { id: r.technology_id, name: r.technology },
           team: { id: r.team_id, name: r.team },
@@ -151,7 +190,12 @@ export class PipelineReportService {
           stage: r.stage,
         })),
         limit: q.limit,
+        /** Deprecated (use `nextCursor`); echoes the request. */
         offset: q.offset,
+        /** More candidates follow this page. */
+        truncated,
+        /** Pass as `cursor` for the next page; null on the last page. */
+        nextCursor: truncated && last ? encodePipelineCursor(last.sort_key, last.id) : null,
       };
     });
   }
@@ -245,7 +289,7 @@ export class PipelineReportService {
           LEFT JOIN pl ON pl.candidate_id = cand.id
           LEFT JOIN ck ON ck.placement_id = pl.id
           LEFT JOIN nr ON nr.candidate_id = cand.id),
-      rows AS (SELECT * FROM agg${filters.length ? ` WHERE ${filters.join(" AND ")}` : ""})`;
+      rows AS MATERIALIZED (SELECT * FROM agg${filters.length ? ` WHERE ${filters.join(" AND ")}` : ""})`;
   }
 
   // ---------------------------------------------------------------- assessments (PV-3, PV-4)

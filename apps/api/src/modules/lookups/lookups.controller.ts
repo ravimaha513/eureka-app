@@ -1,4 +1,4 @@
-import { Body, ConflictException, Controller, ForbiddenException, Get, HttpCode, Injectable, Post, UnprocessableEntityException } from "@nestjs/common";
+import { Body, ConflictException, Controller, ForbiddenException, Get, HttpCode, Injectable, Post, Query, UnprocessableEntityException } from "@nestjs/common";
 import { z } from "zod";
 import { can, type Permission, type UserAccess } from "@eureka/shared";
 import { AuditService } from "../../platform/audit.service.js";
@@ -6,6 +6,7 @@ import { CurrentUser, RequirePermission, SelfService, type AuthedUser } from "..
 import { DbService } from "../../platform/db.service.js";
 import { dbErrorMapper } from "../../platform/errors.js";
 import { ApiBody } from "../../platform/http/api-doc.js";
+import { likeContains } from "../../platform/sql.js";
 
 type Item = { id: string; name: string };
 
@@ -25,6 +26,19 @@ export const CreateTechnology = z.object({
 export const CreateParty = z.object({
   name: z.string().trim().min(1).max(60).regex(/^[^\p{Cc}]*$/u, "Must not contain control characters"),
 }).strict();
+
+/** Party lists per narrowed lookup when `q` is given without `limit`. */
+export const PARTY_SEARCH_DEFAULT_LIMIT = 50;
+
+/**
+ * GET /lookups query (all optional). Not strict: the route took no query before, so unknown
+ * keys stay ignored (no breaking change).
+ */
+export const LookupsQuery = z.object({
+  q: z.string().trim().min(1).max(60).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+}).strip();
+export type LookupsQuery = z.infer<typeof LookupsQuery>;
 
 const mapCreatePartyError = dbErrorMapper({
   invalid_name: () => new UnprocessableEntityException("Name must be 1–60 characters"),
@@ -47,19 +61,37 @@ const mapCreateTechnologyError = dbErrorMapper({
 export class LookupsService {
   constructor(private readonly db: DbService, private readonly audit: AuditService) {}
 
-  async all(user: AuthedUser) {
+  /**
+   * Without a query: every list complete, in exactly the shape it always had. With `q` and/or `limit`
+   * (C-09): clients, vendors and implementation partners are narrowed to names containing `q`
+   * (case-insensitive) and capped at `limit` (default PARTY_SEARCH_DEFAULT_LIMIT) each; the response
+   * then also carries `truncated` (true when any of those three lists was cut at the cap).
+   */
+  async all(user: AuthedUser, search: LookupsQuery = {}) {
     const coaches = canAny(user.access, COACH_PERMISSIONS);
     const parties = canAny(user.access, PARTY_PERMISSIONS);
+    const narrowed = search.q !== undefined || search.limit !== undefined;
+    const cap = search.limit ?? PARTY_SEARCH_DEFAULT_LIMIT;
+    let truncated = false;
     return this.db.withUser(user.id, async (c) => {
       const q = async (sql: string) => (await c.query<Item>(sql)).rows;
+      const party = async (table: string): Promise<Item[]> => {
+        if (!narrowed) return q(`SELECT id, name FROM eureka.${table} ORDER BY name, id`);
+        const rows = (await c.query<Item>(
+          `SELECT id, name FROM eureka.${table} WHERE ($1::text IS NULL OR name ILIKE $1) ORDER BY name, id LIMIT $2`,
+          [search.q === undefined ? null : likeContains(search.q), cap + 1])).rows;
+        if (rows.length > cap) truncated = true;
+        return rows.slice(0, cap);
+      };
       const none: Item[] = [];
+      const clients = parties ? await party("client") : none;
+      const vendors = parties ? await party("vendor") : none;
+      const implementationPartners = parties ? await party("implementation_partner") : none;
       return {
         technologies: await q(`SELECT id, name FROM eureka.technology WHERE active ORDER BY name, id`),
-        clients: parties ? await q(`SELECT id, name FROM eureka.client ORDER BY name, id`) : none,
-        vendors: parties ? await q(`SELECT id, name FROM eureka.vendor ORDER BY name, id`) : none,
-        implementationPartners: parties
-          ? await q(`SELECT id, name FROM eureka.implementation_partner ORDER BY name, id`)
-          : none,
+        clients,
+        vendors,
+        implementationPartners,
         locations: await q(`SELECT id, name FROM eureka.location ORDER BY name, id`),
         coaches: coaches
           ? await q(
@@ -74,6 +106,7 @@ export class LookupsService {
         // Live business roles for owner / folder-role pickers (docs/roles-api.md): key as id, label as name.
         roles: await q(`SELECT key AS id, label AS name FROM eureka.role
                         WHERE archived_at IS NULL AND NOT is_admin ORDER BY track, level, label, key`),
+        ...(narrowed ? { truncated } : {}),
       };
     });
   }
@@ -119,8 +152,8 @@ export class LookupsController {
 
   @Get()
   @SelfService()
-  all(@CurrentUser() user: AuthedUser) {
-    return this.svc.all(user);
+  all(@CurrentUser() user: AuthedUser, @Query() query: unknown) {
+    return this.svc.all(user, LookupsQuery.parse(query ?? {}));
   }
 
   @ApiBody(CreateTechnology)

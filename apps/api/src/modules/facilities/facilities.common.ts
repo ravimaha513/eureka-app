@@ -63,11 +63,12 @@ export function requireVersion(expected: number | null, current: number): void {
 export function encodeCursor(parts: string[]): string {
   return Buffer.from(JSON.stringify(parts), "utf8").toString("base64url");
 }
-export function decodeCursor(cursor: string | undefined, n: number): string[] | null {
+/** `maxLen`: the longest part accepted (200 by default; longer for free-text sort keys such as names). */
+export function decodeCursor(cursor: string | undefined, n: number, maxLen = 200): string[] | null {
   if (cursor === undefined) return null;
   try {
     const v = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
-    if (Array.isArray(v) && v.length === n && v.every((x) => typeof x === "string" && x.length <= 200)) return v as string[];
+    if (Array.isArray(v) && v.length === n && v.every((x) => typeof x === "string" && x.length <= maxLen)) return v as string[];
   } catch { /* fall through */ }
   throw new UnprocessableEntityException("invalid_cursor");
 }

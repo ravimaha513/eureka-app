@@ -29,7 +29,14 @@ could list.
 
 Query (all optional): `from`, `to` (calendar days, UTC, `to` inclusive, both or neither, at most 366 days),
 `technologyId`, `teamId`, `recruiterId`, `locationId`, `marketingStatus`, `stage`, `notResponding=true|false`,
-`limit` (1-200, default 50), `offset` (0-10000).
+`limit` (1-200, default 50), `cursor` (the previous page's `nextCursor`), `offset` (0-10000, **deprecated**: use
+`cursor`; still honoured; `cursor` with `offset` > 0 is 422).
+
+Paging and cost (R-23, E-03): the page and the summary (`total`, `funnel`, `byStage`, `notResponding`) come from one
+statement over one materialized aggregation, so they always agree (same snapshot) and the full-history aggregation runs
+once per request, not twice. Rows are ordered by lower-case candidate name (hidden names last), then id; `cursor` is a
+keyset on that order. `truncated` says more candidates follow this page; `nextCursor` is null on the last page.
+Measurements: `docs/backend-audit/perf-baseline.md` "Pipeline report".
 
 With a period, counts cover the period and only candidates with pipeline activity in it are listed (a submission,
 a live interview, a cleared interview, an assessment, the marketing start date, a placement created or joined).
@@ -51,7 +58,7 @@ a live interview, a cleared interview, an assessment, the marketing start date, 
     "placement": { "id", "status", "confirmedAt", "tentativeStart", "joinedAt", "paperwork": { "done", "total" } | null } | null,
     "notResponding": false, "stage": "paperwork"
   }],
-  "limit": 50, "offset": 0
+  "limit": 50, "offset": 0, "truncated": true, "nextCursor": "<opaque>"
 }
 ```
 
@@ -136,7 +143,7 @@ by the new lead. Recruiters never see each other's entries.
 
 | Route | Permission | Notes |
 |---|---|---|
-| **PV-9** `GET /api/v1/preferred-vendors?q=&ownerId=&technologyId=&archived=&limit=&offset=` | either vendor permission (403 otherwise) | `{ items, total, owners, actions: { create } }`; each item has `owner`, `actions: { edit, archive }` (owner only). `q` matches vendor name, contact name or clients |
+| **PV-9** `GET /api/v1/preferred-vendors?q=&ownerId=&technologyId=&archived=&limit=&cursor=` | either vendor permission (403 otherwise) | `{ items, total, truncated, nextCursor, owners, actions: { create } }`; each item has `owner`, `actions: { edit, archive }` (owner only). `q` matches vendor name, contact name or clients. Ordered by lower-case vendor name, then id; `cursor=<nextCursor>` is a keyset on that order (R-23) and `total` stays exact on every page. `offset` (0-10000) still works but is **deprecated**; `cursor` with `offset` > 0 is 422 |
 | `GET /api/v1/preferred-vendors/:id` | either | 404 when not visible |
 | **PV-10** `POST /api/v1/preferred-vendors` | `vendor.preferred:create` | 201; 409 `vendor_exists` (same name, case-insensitive, among the owner's active entries); 422 `limit_reached` (500 active per owner) |
 | **PV-11** `PATCH /api/v1/preferred-vendors/:id` | `vendor.preferred:create` | Full replacement; `If-Match` (428/412); 404 not visible, 403 not the owner; 422 `vendor_archived` |

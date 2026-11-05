@@ -247,6 +247,12 @@ describe("chat API", () => {
     const everyone = (await ok("r2a", "GET", `${C}/people?limit=50`)).items as { id: string }[];
     expect(everyone.map((p) => p.id)).not.toContain(U.r2a);
     expect(Object.keys(everyone[0]!).sort()).toEqual(["designation", "id", "name"]); // no presence in the directory
+    // R-23: the picker says when more people match than it returned.
+    expect((await ok("r2a", "GET", `${C}/people?q=hr`)).truncated).toBe(false);
+    const two = await ok("r2a", "GET", `${C}/people?limit=2`);
+    expect(two.items).toHaveLength(2);
+    expect(two.truncated).toBe(everyone.length > 2);
+    expect(two.items).toEqual(everyone.slice(0, 2));
   });
 
   it("presence only for people the caller shares a chat with", async () => {

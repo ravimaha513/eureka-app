@@ -473,6 +473,39 @@ describe("access log, audit rows and the audit export (ids only)", () => {
     expect((await call("acct", "GET", `/api/v1/document-access?documentId=${restricted.id}&extra=1`)).statusCode).toBe(422);
   });
 
+  it("pages the log by (at, id) keyset: rows sharing a timestamp across a page boundary are neither lost nor repeated (B-07)", async () => {
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL session_replication_role = replica");
+      await c.query(`INSERT INTO eureka.document_access (document_id, user_id, action, doc_type, classification, at)
+        SELECT $1, $2, 'download', 'i9', 'restricted', '2031-01-01T00:00:00.123456Z' FROM generate_series(1, 3)`, [restricted.id, U.hr]);
+      await c.query("COMMIT");
+    } finally { c.release(); }
+    const url = `/api/v1/document-access?documentId=${restricted.id}`;
+    const everything = (await call("acct", "GET", url)).json();
+    expect(everything).toMatchObject({ truncated: false, nextCursor: null });
+    expect(everything.items).toHaveLength(4);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < 6; i++) {
+      const r = await call("acct", "GET", `${url}&limit=2${cursor ? `&cursor=${cursor}` : ""}`);
+      expect(r.statusCode, r.body).toBe(200);
+      seen.push(...(r.json().items as { id: string }[]).map((x) => x.id));
+      expect(r.json().truncated).toBe(r.json().nextCursor !== null);
+      cursor = r.json().nextCursor;
+      if (!cursor) break;
+    }
+    expect(seen).toEqual((everything.items as { id: string }[]).map((x) => x.id));
+    // Page 1 ends inside the tie: the deprecated `before` drops the third tied row, the cursor keeps it.
+    const first = (await call("acct", "GET", `${url}&limit=2`)).json();
+    const before = (await call("acct", "GET", `${url}&before=${encodeURIComponent(first.items[1].at)}`)).json().items as unknown[];
+    expect(before.length).toBeLessThan(2);
+    for (const q of [`&cursor=nope`, `&cursor=${first.nextCursor}&before=2031-01-01T00:00:00Z`]) {
+      expect((await call("acct", "GET", url + q)).statusCode, q).toBe(422);
+    }
+  });
+
   it("each view is in the audit export as document.viewed with ids and codes only", async () => {
     const DAY = "2026-03-20";
     // Backdate this document's audit rows to a finished UTC day the worker may export.
@@ -651,5 +684,39 @@ describe("configuration", () => {
     expect(loadConfig(dev).STEP_UP_TTL_MINUTES).toBe(10);
     expect(() => loadConfig({ ...dev, STEP_UP_TTL_MINUTES: "16" })).toThrow();
     expect(() => loadConfig({ ...dev, STEP_UP_MAX_AGE_SECONDS: "3600" })).toThrow();
+  });
+});
+
+describe("document list paging (R-23, B-07)", () => {
+  it("no query: everything up to the cap as before, with truncated=false; ?limit pages by (created_at, id) keyset", async () => {
+    const cand = await newCandidate(db, { teamId: own().teamId, recruiterId: U.r1a, locationId: own().locationId });
+    const path = `/api/v1/candidates/${cand.id}/documents`;
+    // Three documents sharing one creation time (the id breaks the tie), written directly: earlier tests
+    // used up the per-minute upload budget.
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL session_replication_role = replica");
+      await c.query(`WITH f AS (
+          INSERT INTO eureka.file_object (classification, content_type, size_bytes, uploaded_by, upload_expires_at)
+          SELECT 'internal', 'application/pdf', 10, $2, now() + interval '1 hour' FROM generate_series(1, 3) RETURNING id)
+        INSERT INTO eureka.document (candidate_id, doc_type, classification, file_id, created_by, created_at)
+        SELECT $1, 'offer_letter', 'internal', f.id, $2, '2030-05-05T05:05:05.555555Z' FROM f`, [cand.id, U.r1a]);
+      await c.query("COMMIT");
+    } finally { c.release(); }
+    const all = (await call("r1a", "GET", path)).json();
+    expect(all).toMatchObject({ truncated: false, nextCursor: null, canUpload: true });
+    expect(all.items).toHaveLength(3);
+    const p1 = (await call("r1a", "GET", `${path}?limit=2`)).json();
+    expect(p1.truncated).toBe(true);
+    expect(p1.items).toHaveLength(2);
+    const p2 = (await call("r1a", "GET", `${path}?limit=2&cursor=${p1.nextCursor}`)).json();
+    expect(p2).toMatchObject({ truncated: false, nextCursor: null });
+    expect([...p1.items, ...p2.items].map((d: { id: string }) => d.id)).toEqual(all.items.map((d: { id: string }) => d.id));
+    // Unknown keys stay ignored (the route took no query before); a malformed cursor or limit is 422.
+    expect((await call("r1a", "GET", `${path}?foo=1`)).statusCode).toBe(200);
+    for (const q of ["cursor=nope", "limit=0", "limit=201"]) expect((await call("r1a", "GET", `${path}?${q}`)).statusCode, q).toBe(422);
+    // Scope still applies to outsiders.
+    expect([403, 404]).toContain((await call("r2a", "GET", `${path}?limit=2`)).statusCode);
   });
 });

@@ -55,9 +55,13 @@ export const PipelineQuery = z
     /** Only candidates with an open "not responding" flag. */
     notResponding: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
+    /** Deprecated: page with `cursor` (the previous page's `nextCursor`) instead. Still honoured, up to 10,000. */
     offset: z.coerce.number().int().min(0).max(10_000).default(0),
+    /** Keyset cursor (opaque): the previous page's `nextCursor`. Not combined with `offset`. */
+    cursor: z.string().min(1).max(1200).optional(),
   })
   .strict()
+  .refine((q) => q.cursor === undefined || q.offset === 0, { message: "give cursor or offset, not both", path: ["offset"] })
   .refine((q) => !q.from || !q.to || q.from <= q.to, { message: "to must not be before from", path: ["to"] })
   .refine((q) => !q.from || !q.to || Date.parse(q.to) - Date.parse(q.from) <= 366 * 86_400_000,
     { message: "the period can cover at most 366 days", path: ["from"] })

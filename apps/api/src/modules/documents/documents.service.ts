@@ -19,7 +19,10 @@ import { SharedRateLimiter } from "../../platform/rate-limit.js";
 import { documentDownloadName, documentQuarantineKey, documentStoredKey } from "../../platform/storage/content.js";
 import { DOCUMENT_STORAGE, type DocumentStorage } from "../../platform/storage/document-storage.js";
 import { scopePredicate } from "../candidates/candidates.service.js";
-import type { AccessLogQuery, DocumentUpload, ReplaceDocumentFile, UpdateDocument } from "./documents.schemas.js";
+import {
+  DOCUMENT_LIST_CAP, type AccessLogQuery, type DocumentListQuery, type DocumentUpload, type ReplaceDocumentFile, type UpdateDocument,
+} from "./documents.schemas.js";
+import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import { AuditService } from "../../platform/audit.service.js";
 import type { z } from "zod";
 import { dbErrorMapper } from "../../platform/errors.js";
@@ -153,16 +156,33 @@ export class DocumentsService {
     return p.candidate_id;
   }
 
-  async list(user: AuthedUser, owner: Owner) {
+  /**
+   * Newest first. Without a query: the newest DOCUMENT_LIST_CAP, as always; `truncated` and
+   * `nextCursor` (keyset on created_at, id, exact to the microsecond) reach the rest.
+   */
+  async list(user: AuthedUser, owner: Owner, q: DocumentListQuery = { limit: DOCUMENT_LIST_CAP }) {
     return this.db.withUser(user.id, async (c) => {
       const candidateId = await this.candidateOf(c, owner);
       const access = documentAccess(user.access, await this.candidate(c, user, candidateId));
       if (!access.read) throw new ForbiddenException("Not permitted");
-      const where = owner.kind === "candidate" ? `d.candidate_id = $1` : `d.placement_id = $1`;
-      const { rows } = await c.query<DocumentRow>(
-        `SELECT ${DOCUMENT_COLUMNS} FROM ${DOCUMENT_FROM} WHERE ${where} ORDER BY d.created_at DESC, d.id DESC LIMIT 200`, [owner.id]);
+      const params: unknown[] = [owner.id];
+      const where = [owner.kind === "candidate" ? `d.candidate_id = $1` : `d.placement_id = $1`];
+      if (q.cursor) {
+        const [micros, id] = splitCursor(q.cursor);
+        params.push(micros, id);
+        where.push(`(d.created_at, d.id) < (${fromMicros("$2")}, $3::uuid)`);
+      }
+      params.push(q.limit + 1);
+      const { rows } = await c.query<DocumentRow & { k: string }>(
+        `SELECT ${DOCUMENT_COLUMNS}, ${toMicros("d.created_at")} AS k FROM ${DOCUMENT_FROM} WHERE ${where.join(" AND ")}
+          ORDER BY d.created_at DESC, d.id DESC LIMIT $${params.length}`, params);
+      const page = rows.slice(0, q.limit);
+      const last = page[page.length - 1];
+      const truncated = rows.length > q.limit;
       return {
-        items: rows.map(present),
+        items: page.map(present),
+        truncated,
+        nextCursor: truncated && last ? `${last.k}.${last.id}` : null,
         canUpload: access.upload,
         canUploadRestricted: access.uploadRestricted,
         canViewRestricted: access.readRestricted,
@@ -303,14 +323,26 @@ export class DocumentsService {
       const where: string[] = [];
       if (q.documentId) { params.push(q.documentId); where.push(`a.document_id = $${params.length}`); }
       if (q.before) { params.push(q.before); where.push(`a.at < $${params.length}`); }
-      params.push(q.limit);
-      const { rows } = await c.query<{ id: string; document_id: string; doc_type: string; classification: string; user_id: string;
-        user_name: string | null; action: string; step_up_grant_id: string | null; at: Date }>(
-        `SELECT a.id, a.document_id, a.doc_type, a.classification, a.user_id, u.display_name AS user_name, a.action, a.step_up_grant_id, a.at
+      if (q.cursor) {
+        // Keyset on (at, id): rows sharing a timestamp across a page boundary are neither skipped nor repeated.
+        const [micros, id] = splitCursor(q.cursor);
+        params.push(micros, id);
+        where.push(`(a.at, a.id) < (${fromMicros(`$${params.length - 1}`)}, $${params.length}::uuid)`);
+      }
+      params.push(q.limit + 1);
+      const { rows: all } = await c.query<{ id: string; document_id: string; doc_type: string; classification: string; user_id: string;
+        user_name: string | null; action: string; step_up_grant_id: string | null; at: Date; k: string }>(
+        `SELECT a.id, a.document_id, a.doc_type, a.classification, a.user_id, u.display_name AS user_name, a.action, a.step_up_grant_id, a.at,
+                ${toMicros("a.at")} AS k
          FROM eureka.document_access a LEFT JOIN eureka.app_user u ON u.id = a.user_id
          ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
          ORDER BY a.at DESC, a.id DESC LIMIT $${params.length}`, params);
+      const rows = all.slice(0, q.limit);
+      const last = rows[rows.length - 1];
+      const truncated = all.length > q.limit;
       return {
+        truncated,
+        nextCursor: truncated && last ? `${last.k}.${last.id}` : null,
         items: rows.map((r) => ({
           id: r.id, documentId: r.document_id, docType: r.doc_type, classification: r.classification,
           user: { id: r.user_id, name: r.user_name }, action: r.action, steppedUp: r.step_up_grant_id !== null, at: r.at.toISOString(),

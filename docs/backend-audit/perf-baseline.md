@@ -3448,3 +3448,60 @@ Planning:
 Planning Time: 0.256 ms
 Execution Time: 13.171 ms
 ```
+
+
+# Pipeline report: one evaluation per request and keyset paging (R-23, E-03)
+
+Measured by W3-H on 2026-11-05. Before = `pipeline-report.service.ts` at 6cc3ad5 (a page query with
+`count(*) OVER ()` + `ORDER BY lower(name) … OFFSET`, then a second statement that rebuilt and re-ran the
+whole `baseSql` CTE for the summary). After = one statement: `rows AS MATERIALIZED` feeds a `summary` CTE and a
+`page` CTE (keyset on `(lower(name) NULLS LAST, id)`, the deprecated `OFFSET` still applied), joined
+`summary LEFT JOIN page`, with the lookup joins (technology, team, recruiter, location) done after the
+`LIMIT`. No index was added (migration 0489 not used): the sort key is computed after the aggregation, so no
+index can serve it; the cost is the aggregation itself.
+
+## Environment and method
+
+- Same cluster as above (PostgreSQL 16.15, tmpfs, `fsync=off`, 4 vCPU, shared with other agents' test runs,
+  so ±30 % noise). Scratch database `eureka_perf_w3h` from `pnpm --filter @eureka/api db:seed-load`
+  (default volume: 50,000 candidates, 58,352 submissions, 16,214 interviews, 892 placements, 167 users),
+  plus one `perf-ceo@eureka.example` user holding `ceo` (org scope), then `VACUUM ANALYZE`.
+- A script booted the real API (`createApp`, `AUTH_MODE=dev`, swc decorators) against the scratch database,
+  signed in, called `GET /api/v1/reports/pipeline?…` and captured the exact SQL and parameters the service
+  sent. Each captured statement was run with `EXPLAIN (ANALYZE, BUFFERS)` five times in a rolled-back
+  transaction as the API runs it (`SET LOCAL ROLE eureka_app`, `eureka.user_id` = caller). "Exec" = median
+  execution time, summed over the statements of one request; "Buffers" = shared hits of the top plan node,
+  summed; "HTTP" = median of three `app.inject` round trips after one warm-up. Two full runs each side; both
+  are shown (before run 1 used a period with no activity, so its `period` row is omitted).
+- Cases: `org` = perf-ceo, `team` = `load-lead-01`; `page1` = `limit=50`; `offset5000` = `limit=50&offset=5000`;
+  `period` = `limit=50&from=2026-09-01&to=2026-10-31` (29,556 candidates match); `cursor@5000` (after only) =
+  `limit=50&cursor=<nextCursor of the page ending at row 5000>`, the keyset equivalent of `offset5000`.
+
+## Results
+
+| Case | Rows matched | Statements before → after | Exec before (ms) | Exec after (ms) | Buffers before → after | HTTP before (ms) | HTTP after (ms) |
+|---|--:|---|--:|--:|---|--:|--:|
+| org/page1 | 50,000 | 2 → 1 | 1,157 / 1,540 | 623 / 530 | 653K → 328K | 1,238 / 1,609 | 499 / 487 |
+| org/offset5000 | 50,000 | 2 → 1 | 2,794 / 1,684 | 633 / 518 | 653K → 328K | 2,496 / 1,261 | 505 / 457 |
+| org/cursor@5000 | 50,000 | – → 1 | – | 757 / 586 | – → 328K | – | 498 / 479 |
+| org/period | 29,556 | 2 → 1 | – / 1,210 | 524 / 540 | 654K → 328K | – / 878 | 460 / 395 |
+| team/page1 | 1,667 | 2 → 1 | 132 / 153 | 51 / 50 | 43.1K → 22.8K | 166 / 188 | 71 / 57 |
+
+## Findings
+
+- **Half the database work per request, as predicted.** Shared-buffer touches halve in every case (one
+  evaluation of the full-history aggregation instead of two), and execution time drops 55–70 % for org
+  scope and about 65 % for team scope. HTTP latency drops from 0.9–2.5 s to about 0.4–0.5 s at org scope.
+- **Deep pages no longer cost more than the first.** Before, `offset=5000` paid for the window count, the
+  full sort and the skipped rows on top of the second evaluation; after, `offset5000`, `cursor@5000` and
+  `page1` are within noise of each other because the aggregation (≈ 370 ms of the ≈ 500 ms at org scope:
+  hash joins over all 50,000 candidates' submissions, interviews and assessments) dominates. The keyset does
+  not make org-scope pages cheap by itself; it makes the page cost independent of depth and removes the
+  10,000 offset ceiling for clients that adopt `cursor`.
+- **Page and summary always agree.** Both are read from the same materialized `rows` in one statement and
+  therefore one snapshot; before, a write committed between the two statements could make `total`/`funnel`
+  disagree with the page.
+- **Remaining cost (not done here):** the org-scope report still aggregates every candidate's whole history
+  on each call (≈ 0.5 s on this data). The finding's further option, a persisted "furthest stage" per
+  candidate maintained by triggers or the outbox, or a short per-user summary cache, would be the next step
+  if the report becomes hot; both need a design decision (trigger upkeep and backfill, or staleness).

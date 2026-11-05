@@ -4,6 +4,15 @@ Reference lists for pickers (`apps/api/src/modules/lookups`). JSON over HTTPS; e
 problem details; writes need the session cookie and `x-csrf-token`. Reading the lists
 (`GET /api/v1/lookups`, who sees which list) is documented in `docs/placements-api.md` "Lookups".
 
+## Narrowing the party lists (R-23, C-09)
+
+`GET /api/v1/lookups` with no query returns every list complete, in the same shape as always. With `q`
+(1–60 characters; case-insensitive substring, `%` and `_` literal) and/or `limit` (1–500; default 50 when
+only `q` is given), `clients`, `vendors` and `implementationPartners` are narrowed to matching names and
+capped at `limit` each (ordered by name, id), and the response also carries `truncated: boolean` (true when
+any of the three was cut at the cap). The other lists are unaffected; callers without the party permissions
+still get `[]`. Unknown query keys are ignored (the route took no query before); bad values are 422.
+
 ## Add a technology (migration 0250, 2026-10-29)
 
 `POST /api/v1/lookups/technologies` — `technology:create` (org scope): Sales `lead`, `manager`,

@@ -49,7 +49,7 @@ Lists take `?q=&status=&locationId=&limit=(1-200, default 50)&cursor=` and retur
 - `GET /api/v1/companies/:id/employee-options?q=` (`company:manage`) → `{ items: [{ employeeId, name }] }` (≤ 50)
 - `POST /api/v1/companies/:id/employees` `{ employeeId, startDate }` → 201 `{ employeeId, startDate, endDate: null }`
 - `POST /api/v1/companies/:id/employees/:employeeId/end` `{ endDate }` → 200 `{ employeeId, startDate, endDate }`
-- `GET /api/v1/companies/:id/incharges` → `{ items: [{ id, name, assignedAt }] }`; `GET …/incharge-options?q=` (`company:manage`) → `{ items: [{ id, name }] }`;
+- `GET /api/v1/companies/:id/incharges` → `{ items: [{ id, name, assignedAt }] }`; `GET …/incharge-options?q=` (`company:manage`) → `{ items: [{ id, name }], truncated }` (at most 50; `truncated`: more match, narrow `q`);
   `POST …/incharges` `{ userId }` → 201 `{ id, name, assignedAt }`; `DELETE …/incharges/:userId` → 204
 
 ### Facilities (`facility:*`)
