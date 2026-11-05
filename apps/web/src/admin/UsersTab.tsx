@@ -128,14 +128,19 @@ export function UsersTab() {
     <div className="ua-users">
       <div className="ua-tools">
         {summary.data && (
-          <div className="ua-rolesum" role="group" aria-label="Active users per role (filter by role)">
+          <div className="ua-rolesum">
             <span className="ua-total"><b>{summary.data.active}</b> active{summary.data.inactive ? <> · <b>{summary.data.inactive}</b> inactive</> : null}</span>
-            {summary.data.roles.map((r) => (
-              <button key={r.key} type="button" className="togglechip ua-rolechip" aria-pressed={role === r.key}
-                onClick={() => setFilter({ role: role === r.key ? "" : r.key })}>
-                {r.label}<span className="ua-rolecount">{r.count}</span>
-              </button>
-            ))}
+            {/* Each count is also a Role filter toggle. */}
+            <ul className="ua-rolelist" aria-label="Active users per role">
+              {summary.data.roles.map((r) => (
+                <li key={r.key}>
+                  <button type="button" className="ua-rolechip" aria-pressed={role === r.key}
+                    onClick={() => setFilter({ role: role === r.key ? "" : r.key })}>
+                    {r.label}<span className="ua-rolecount">{r.count}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </div>

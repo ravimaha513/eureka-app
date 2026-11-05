@@ -16,7 +16,9 @@
 .tb-card { position: relative; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; transition: border-color .12s; }
 .tb-card:hover { border-color: var(--pri-200); }
 .tb-card:has(.tb-open:focus-visible) { outline: 2px solid var(--pri); outline-offset: 2px; }
-.tb-open { position: static; }
+/* The open button itself spans the card (a real hit area for pointer, touch and automation). */
+.tb-open { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; border-radius: inherit; background: none; }
+.tb-open::after { content: none; }
 .tb-top { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
 .tb-titles { flex: 1 1 auto; min-width: 0; }
 .tb-title { font-size: 15px; font-weight: 700; color: var(--text); overflow-wrap: anywhere; line-height: 1.3; }
@@ -35,7 +37,7 @@
 .tb-bar > span { display: block; height: 100%; background: var(--pri); }
 .tb-bar > span.done { background: var(--ok-fg); }
 /* Controls inside a whole-card link sit above its stretched hit area. */
-.tb-del { position: absolute; right: 8px; bottom: 8px; z-index: 1; color: var(--bad-fg); }
+.tb-del { position: absolute; right: 8px; bottom: 8px; z-index: 2; color: var(--bad-fg); }
 .tb-card:has(.tb-del) .tb-sched { padding-right: 36px; }
 .tb-del:hover { background: var(--bad-bg); color: var(--bad-fg); }
 
