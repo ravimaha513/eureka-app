@@ -6,7 +6,6 @@ import { adminApi, type Department } from "./adminApi";
 export const keys = {
   meta: ["admin", "meta"] as const,
   users: ["admin", "users"] as const,
-  people: ["admin", "users", "people"] as const,
   requests: ["admin", "role-requests"] as const,
   teams: ["admin", "teams"] as const,
   departments: ["admin", "departments"] as const,
@@ -41,10 +40,6 @@ export function departmentOptions(items: Department[]): { id: string; label: str
     ...items.filter((d) => d.parentId === t.id).map((d) => ({ id: d.id, label: `${t.name} › ${d.name}`, sub: true })),
   ]);
 }
-
-/** Active users for pickers (manager, lead, member). Capped at the API max of 200. */
-export const usePeople = () =>
-  useQuery({ queryKey: keys.people, queryFn: () => adminApi.users({ status: "active", limit: 200 }).then((p) => p.items) });
 
 export const fmtDate = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "—";

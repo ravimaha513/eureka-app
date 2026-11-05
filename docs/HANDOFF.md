@@ -294,6 +294,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Landing page + sign-in redesign (#118): `/` shows an animated isometric landing once per device (Get started → `/login`); sign-in gets brand panel, password reveal, "or continue with" Google; styles in `apps/web/src/login/login.css`
 - Team lead picker: New team and Change lead search people on the server by name or email (`apps/web/src/admin/PersonPicker.tsx`) instead of a dropdown capped at 200.
 - E2E sign-in + row menus: shared `signInAs` in `apps/web/e2e/support.ts` goes to `/login`; `admin.spec.ts` green. Row menus no longer close when an unrelated input scrolls. Later steps in `roles.spec.ts` and `sales.spec.ts` still fail.
+- Manager picker: Set manager searches people on the server (`PersonPicker`, which now takes a value with no email), so anyone active can be chosen, not only the first 200; `usePeople` removed.
 - Hot List open-to-all emphasis: solid violet "Open to all teams" chip (`--violet-solid`), violet row tint + left bar (`tr.opentoall`); "Selected teams" stays tinted (`.badge.shared_teams`)
 
 ## Next tasks (Phase 2 to MVP), in suggested order

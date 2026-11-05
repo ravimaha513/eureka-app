@@ -397,18 +397,39 @@ describe("Users tab", () => {
     renderPage();
     await rowAction("Rohit Lead", "Set manager");
     const dlg = await screen.findByRole("dialog", { name: "Set manager for Rohit Lead" });
-    await within(dlg).findByRole("option", { name: /Priya Rao/ });
-    expect(within(dlg).queryByRole("option", { name: /Rohit Lead/ })).not.toBeInTheDocument();
-    fireEvent.change(within(dlg).getByLabelText("Manager"), { target: { value: "u-priya" } });
+    const box = within(dlg).getByRole("combobox", { name: "Manager" });
+    expect(box).toHaveValue("");
+    // Searched on the server; the person being edited is never offered.
+    fireEvent.change(box, { target: { value: "r" } });
+    // Highlighting splits the matched name into <mark>s, so compare text rather than accessible names.
+    const options = await within(dlg).findAllByRole("option");
+    expect(calls.some((c) => c.path === "/api/v1/admin/users" && c.url.searchParams.get("search") === "r" && c.url.searchParams.get("status") === "active")).toBe(true);
+    expect(options.some((o) => o.textContent?.includes("Priya Rao"))).toBe(true);
+    expect(options.some((o) => o.textContent?.includes("Rohit Lead"))).toBe(false);
+    fireEvent.click(options.find((o) => o.textContent?.includes("Priya Rao"))!);
     fireEvent.click(within(dlg).getByRole("button", { name: "Save manager" }));
     expect(await within(dlg).findByRole("alert")).toHaveTextContent(ERROR_MESSAGES.cycle!);
     expect(lastWrite().body).toEqual({ managerId: "u-priya" });
 
     fail = false;
-    fireEvent.change(within(dlg).getByLabelText("Manager"), { target: { value: "" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Clear Manager" }));
+    expect(box).toHaveValue("");
     fireEvent.click(within(dlg).getByRole("button", { name: "Save manager" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(lastWrite().body).toEqual({ managerId: null });
+    await waitFor(() => expect(status()).toHaveTextContent("Rohit Lead has no manager now."));
+  });
+
+  it("shows the current manager by name, and keeps them when saved unchanged", async () => {
+    routes["PUT /api/v1/admin/users/u-priya/manager"] = () => ({ status: 204 });
+    renderPage();
+    await rowAction("Priya Rao", "Set manager");
+    const dlg = await screen.findByRole("dialog", { name: "Set manager for Priya Rao" });
+    // A row's manager has an id and a name only, so no "(undefined)" where the email would go.
+    expect(within(dlg).getByRole("combobox", { name: "Manager" })).toHaveValue("Rohit Lead");
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save manager" }));
+    await waitFor(() => expect(status()).toHaveTextContent("Priya Rao now reports to Rohit Lead."));
+    expect(lastWrite().body).toEqual({ managerId: "u-lead" });
   });
 });
 

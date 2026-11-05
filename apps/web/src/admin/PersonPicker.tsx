@@ -11,6 +11,9 @@ const PAGE = 20;
 const MIN_BELOW = 160;
 const GUTTER = 12;
 
+/** The current pick. A saved reference may have no email; search results always do. */
+export type PersonPickerValue = Pick<AdminUser, "id" | "displayName"> & { email?: string };
+
 /**
  * Pick one active person by searching the server on name or email. Nothing is listed until you
  * type: the directory can be far larger than a dropdown should hold, and larger than one page.
@@ -19,7 +22,7 @@ const GUTTER = 12;
  * The popup is position: fixed so a dialog's overflow does not clip it.
  */
 export function PersonPicker({ id, label, value, onChange, exclude = [] }: {
-  id: string; label: string; value: AdminUser | null; onChange: (p: AdminUser | null) => void; exclude?: string[];
+  id: string; label: string; value: PersonPickerValue | null; onChange: (p: AdminUser | null) => void; exclude?: string[];
 }) {
   const auto = useId();
   const listId = `${auto}-list`;
@@ -76,7 +79,7 @@ export function PersonPicker({ id, label, value, onChange, exclude = [] }: {
     if (open) document.getElementById(`${auto}-opt-${current}`)?.scrollIntoView?.({ block: "nearest" });
   }, [open, current, auto]);
 
-  const summary = value ? `${value.displayName} (${value.email})` : "";
+  const summary = value ? (value.email ? `${value.displayName} (${value.email})` : value.displayName) : "";
   const show = () => { setQuery(""); setSearch(""); setActive(0); setOpen(true); };
   const close = () => { setOpen(false); setQuery(""); setSearch(""); };
   const pick = (p: AdminUser) => { onChange(p); close(); };

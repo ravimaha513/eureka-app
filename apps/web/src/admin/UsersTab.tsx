@@ -12,7 +12,8 @@ import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { FilterBar, type FilterChip } from "../ui/FilterBar";
 import { Menu } from "../ui/Menu";
 import { friendlyError, skipReason } from "./errors";
-import { departmentOptions, keys, useAccess, useDepartments, useMeta, usePeople } from "./shared";
+import { PersonPicker, type PersonPickerValue } from "./PersonPicker";
+import { departmentOptions, keys, useAccess, useDepartments, useMeta } from "./shared";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { useAuthMethods } from "../shell/useAuthMethods";
 import { Loading } from "../ui/Loading";
@@ -665,26 +666,19 @@ function DepartmentsDialog({ departments, onClose, onChanged }: {
 }
 
 function ManagerDialog({ user, onClose, onDone }: { user: AdminUser; onClose: () => void; onDone: (msg: string) => void }) {
-  const people = usePeople();
-  const [managerId, setManagerId] = useState(user.manager?.id ?? "");
+  // Starts as the row's manager, which carries no email; picking someone replaces it. Clearing means no manager.
+  const [manager, setManager] = useState<PersonPickerValue | null>(user.manager);
   const { busy, error, run } = useSubmit((e) => friendlyError(e));
-  const options = (people.data ?? []).filter((p) => p.id !== user.id);
   return (
     <Dialog title={`Set manager for ${user.displayName}`} onClose={onClose}>
       <form onSubmit={(e) => {
         e.preventDefault();
         void run(async () => {
-          await adminApi.setManager(user.id, managerId || null);
-          const name = options.find((p) => p.id === managerId)?.displayName;
-          onDone(name ? `${user.displayName} now reports to ${name}.` : `${user.displayName} has no manager now.`);
+          await adminApi.setManager(user.id, manager?.id ?? null);
+          onDone(manager ? `${user.displayName} now reports to ${manager.displayName}.` : `${user.displayName} has no manager now.`);
         });
       }}>
-        <div className="field"><label htmlFor="mg-select">Manager</label>
-          <select id="mg-select" data-autofocus value={managerId} onChange={(e) => setManagerId(e.target.value)} disabled={people.isLoading}>
-            <option value="">No manager</option>
-            {user.manager && !options.some((p) => p.id === user.manager!.id) && <option value={user.manager.id}>{user.manager.displayName}</option>}
-            {options.map((p) => <option key={p.id} value={p.id}>{p.displayName} ({p.email})</option>)}
-          </select></div>
+        <PersonPicker id="mg-manager" label="Manager" value={manager} onChange={setManager} exclude={[user.id]} />
         <DialogActions onCancel={onClose} submitLabel="Save manager" busy={busy} error={error} />
       </form>
     </Dialog>

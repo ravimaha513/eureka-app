@@ -151,7 +151,8 @@ test("org admin: reporting line, teams, members and moving a member", async ({ p
   let row = await userRow(page, member.email, member.name);
   await rowAction(page, row, member.name, "Set manager");
   let dlg = page.getByRole("dialog", { name: `Set manager for ${member.name}` });
-  await dlg.getByLabel("Manager").selectOption({ label: `${lead1.name} (${lead1.email})` });
+  await dlg.getByRole("combobox", { name: "Manager", exact: true }).fill(lead1.email);
+  await dlg.getByRole("option", { name: lead1.name }).click();
   await dlg.getByRole("button", { name: "Save manager" }).click();
   await expect(dlg).toBeHidden();
   await expect(row.getByText(lead1.name)).toBeVisible();
@@ -159,7 +160,8 @@ test("org admin: reporting line, teams, members and moving a member", async ({ p
   row = await userRow(page, lead1.email, lead1.name);
   await rowAction(page, row, lead1.name, "Set manager");
   dlg = page.getByRole("dialog", { name: `Set manager for ${lead1.name}` });
-  await dlg.getByLabel("Manager").selectOption({ label: `${member.name} (${member.email})` });
+  await dlg.getByRole("combobox", { name: "Manager", exact: true }).fill(member.email);
+  await dlg.getByRole("option", { name: member.name }).click();
   await dlg.getByRole("button", { name: "Save manager" }).click();
   await expect(dlg.getByRole("alert")).toContainText("reporting loop");
   await page.keyboard.press("Escape");
