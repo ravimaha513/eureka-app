@@ -33,3 +33,4 @@
   .si-bills td.c-act .iconbtn, .si-utils td.c-act .iconbtn, .si-utils .secret .iconbtn { width: 44px; height: 44px; }
   .si-utils td[data-label="Password"] .secret { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 }
+@media (max-width: 768px) { .si-owners td.sharecell { display: none; } }

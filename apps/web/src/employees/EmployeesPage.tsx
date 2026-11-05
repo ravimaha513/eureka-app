@@ -173,7 +173,7 @@ export function EmployeesPage({ me, initialOpenId = null, onOpenChange }: {
         {q.isLoading ? <Loading /> : q.error ? (
           <QueryError query={q} message={employmentError(q.error)} />
         ) : (
-          <table className="dtable emtable" aria-label="Employees" aria-busy={q.isFetching || undefined}>
+          <table className="dtable bo-dtable emtable" aria-label="Employees" aria-busy={q.isFetching || undefined}>
             <thead><tr>
               <th>Employee</th><th>Status</th><th>Client · assignment</th><th>Dates</th><th>Lead / recruiter</th>
               <th className="p2">Location / team</th><th className="em-contact">Contact</th>
@@ -306,7 +306,7 @@ function EmployeeDrawer({ id, initial, onClose, onNotice }: {
                 <p className="muted">No assignment you can see.</p>
               ) : (
                 // Seven columns that fit the drawer: employment fields stack in one cell instead of five clipped ones.
-                <div className="tablewrap"><table className="mini dtable em-assign" aria-labelledby={`${hid}-as`}>
+                <div className="tablewrap"><table className="mini dtable bo-dtable em-assign" aria-labelledby={`${hid}-as`}>
                   <thead><tr>
                     <th>Client · vendor</th><th>Dates</th><th>Employment</th>{showRate && <th className="num">Pay rate</th>}
                     {acts?.editEmployment && <th className="c-act"><span className="sr-only">Edit</span></th>}
@@ -324,7 +324,8 @@ function EmployeeDrawer({ id, initial, onClose, onNotice }: {
                         </td>
                         <td data-label="Employment">
                           <span className="em-emp">{x.payrollCompany?.name ?? <span className="muted">No payroll company</span>}</span>
-                          <span className="block">E-Verify {x.everifyDate ? fmtDay(x.everifyDate) : "—"} · Onboarded {x.onboardedDate ? fmtDay(x.onboardedDate) : "—"}</span>
+                          <span className="block">E-Verify {x.everifyDate ? fmtDay(x.everifyDate) : "—"}</span>
+                          <span className="block">Onboarded {x.onboardedDate ? fmtDay(x.onboardedDate) : "—"}</span>
                         </td>
                         {showRate && <td className="num" data-label="Pay rate">{"payRate" in x ? (typeof x.payRate === "number" ? `${fmtUsd(x.payRate)}/h` : "—") : <span className="muted">Hidden</span>}</td>}
                         {acts?.editEmployment && (

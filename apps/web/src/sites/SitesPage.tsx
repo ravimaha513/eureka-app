@@ -136,7 +136,7 @@ export function SitesPage({ kind, me, initialOpenId = null, onOpenChange }: { ki
         {list.isLoading ? <Loading /> : list.error ? (
           <QueryError query={list} message={sitesError(list.error, k.one)} />
         ) : (
-          <table className="dtable sitetable" aria-label={k.Many} aria-busy={list.isFetching || undefined}>
+          <table className="dtable bo-dtable sitetable" aria-label={k.Many} aria-busy={list.isFetching || undefined}>
             <thead><tr>
               <th scope="col">{k.One}</th><th scope="col">Status</th><th scope="col">State</th><th scope="col">Zip</th>
               {kind === "facilities" && <><th scope="col" className="num">Rent</th><th scope="col" className="num">Capacity</th><th scope="col" className="p2">Lease</th></>}
@@ -257,14 +257,14 @@ function BillCharts({ kind, summary, months }: { kind: SiteKind; summary: BillsS
       <section className="card listcard" aria-labelledby={`${kind}-byo`}>
         <div className="cardhead"><h2 id={`${kind}-byo`}>Bills total by {k.one}</h2></div>
         {owners.length === 0 ? <p className="empty">No bills in this period.</p> : (
-          <div className="tablewrap"><table aria-labelledby={`${kind}-byo`}>
+          <div className="tablewrap"><table className="dtable bo-dtable si-owners" aria-labelledby={`${kind}-byo`}>
             <thead><tr><th scope="col">{k.One}</th><th scope="col" className="num">Bills</th><th scope="col" className="num">Amount</th><th scope="col" className="sharecell"><span className="sr-only">Share</span></th></tr></thead>
             <tbody>
               {owners.map((o) => (
                 <tr key={o.id}>
-                  <td><b>{o.name}</b></td>
-                  <td className="num">{o.count}</td>
-                  <td className="num">{fmtMoney(o.amount)}</td>
+                  <td className="c-primary"><b>{o.name}</b></td>
+                  <td className="num" data-label="Bills">{o.count}</td>
+                  <td className="num" data-label="Amount">{fmtMoney(o.amount)}</td>
                   <td className="sharecell"><span className="sharebar" aria-hidden="true"><span style={{ width: `${Math.round((num(o.amount) / max) * 100)}%` }} /></span></td>
                 </tr>
               ))}

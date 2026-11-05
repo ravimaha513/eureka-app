@@ -165,7 +165,7 @@ function WorkQueue({ onOpen }: { onOpen: (placementId: string) => void }) {
         {q.isLoading ? <Loading /> : q.error ? (
           <QueryError query={q} message={paperworkError(q.error)} />
         ) : (
-          <table className="dtable pwqueue" aria-label="Paperwork queue" aria-busy={q.isFetching || undefined}>
+          <table className="dtable bo-dtable pwqueue" aria-label="Paperwork queue" aria-busy={q.isFetching || undefined}>
             <thead><tr>
               <th>Candidate</th><th>BGC</th><th>Checklist</th><th className="num">Overdue</th><th>Next due</th>
               <th>Placement</th><th className="p2">Client · type</th><th className="p3">Starts</th>

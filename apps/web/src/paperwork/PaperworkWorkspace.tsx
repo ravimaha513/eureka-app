@@ -239,7 +239,7 @@ function ChecklistPanel({ d, me, placementId, onDone }: { d: PaperworkDetail; me
           <p className="muted">{d.checklist.total - d.checklist.open} of {d.checklist.total} done
             {d.checklist.overdue > 0 && `, ${d.checklist.overdue} overdue`}.</p>
           {quick?.error && <p className="error" role="alert">{quick.error}</p>}
-          <div className="tablewrap"><table className="mini dtable pw-checklist" aria-labelledby={`${hid}-k`}>
+          <div className="tablewrap"><table className="mini dtable bo-dtable pw-checklist" aria-labelledby={`${hid}-k`}>
             <thead><tr><th>Document</th><th>Status</th><th>Due</th><th>Owner</th><th className="c-act"><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {d.items.map((i) => {
@@ -253,7 +253,7 @@ function ChecklistPanel({ d, me, placementId, onDone }: { d: PaperworkDetail; me
                         {i.notes && <span className="block note">{i.notes}</span>}</td>
                       <td className="c-badge" data-label="Status"><span className={`badge cl-${i.status}`}>{paperworkLabel(i.status)}</span>
                         {i.statusReason && <span className="block muted">{i.statusReason}</span>}</td>
-                      <td data-label="Due"><DueDate on={i.dueOn} done={!i.overdue} />
+                      <td data-label="Due"><DueDate on={i.dueOn} done />
                         {i.overdue && <> <span className="badge overdue">{i.status === "received" ? "Verification overdue" : "Overdue"}</span></>}</td>
                       <td data-label="Owner"><RoleName k={i.ownerRole} /></td>
                       <td className="c-act">

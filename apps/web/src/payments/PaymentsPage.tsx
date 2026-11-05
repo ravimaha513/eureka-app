@@ -146,7 +146,7 @@ export function PaymentsPage({ me, initialOpenId = null, onOpenChange }: {
         {q.isLoading ? <Loading /> : q.error ? (
           <QueryError query={q} message={paymentError(q.error)} />
         ) : (
-          <table className="dtable paytable" aria-label="Invoices" aria-busy={q.isFetching || undefined}>
+          <table className="dtable bo-dtable paytable" aria-label="Invoices" aria-busy={q.isFetching || undefined}>
             <thead><tr>
               <th>Candidate</th><th>Status</th><th>Invoice</th>{showMoney && <th className="num">Amount</th>}<th>Expected</th><th>Received</th>
               <th>Client / vendor</th><th>Recruiter / TL</th><th className="p2">Manager / AD</th>

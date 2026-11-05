@@ -130,7 +130,7 @@ export function BillsTab({ kind, ownerId, canManage }: { kind: SiteKind; ownerId
         : q.error ? <p className="error" role="alert">{sitesError(q.error, "bill")}</p>
         : items.length === 0 ? <p className="muted">{search ? "No bills match this search." : "No bills yet."}</p>
         : (
-          <div className="tablewrap roundtable listcard"><table className="dtable si-bills" aria-label="Bills" aria-busy={q.isFetching || undefined}>
+          <div className="tablewrap roundtable listcard"><table className="dtable bo-dtable si-bills" aria-label="Bills" aria-busy={q.isFetching || undefined}>
             <thead><tr>
               <th scope="col">Utility</th><th scope="col">Status</th><th scope="col" className="num">Amount</th>
               <th scope="col">Period</th><th scope="col">Due</th><th scope="col">Payment</th>

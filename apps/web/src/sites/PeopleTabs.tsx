@@ -102,7 +102,7 @@ export function EmployeesTab({ companyId, canManage }: { companyId: string; canM
         : q.error ? <p className="error" role="alert">{sitesError(q.error, "company")}</p>
         : items.length === 0 ? <p className="muted">No employees assigned.</p>
         : (
-          <div className="tablewrap roundtable listcard"><table className="dtable" aria-label="Company employees">
+          <div className="tablewrap roundtable listcard"><table className="dtable bo-dtable" aria-label="Company employees">
             <thead><tr>
               <th scope="col">Employee</th>{showEmail && <th scope="col">Email</th>}<th scope="col">Start</th><th scope="col">End</th><th scope="col">Employment</th>
               <th scope="col" className="c-act"><span className="sr-only">Actions</span></th>

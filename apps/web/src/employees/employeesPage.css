@@ -8,6 +8,11 @@
 @media (min-width: 769px) and (max-width: 1599px) { .emtable .em-contact { display: none; } }
 .em-strip .as-note .duedate { white-space: nowrap; }
 .em-assign td.c-primary .badge { margin-left: 4px; }
+/* The drawer is 572px: values wrap inside their cells instead of pushing Pay rate and Edit out of view. */
+.em-assign td { white-space: normal; overflow-wrap: anywhere; }
+.em-assign td .em-range { white-space: normal; }
+.em-assign th:first-child { width: 34%; }
+@media (min-width: 769px) { .em-strip .as-actions .btn { height: var(--h-compact); padding: 0 10px; } }
 @media (max-width: 768px) {
   .em-soon { min-height: 44px; }
   .emtable td.c-badge .em-since { display: none; }

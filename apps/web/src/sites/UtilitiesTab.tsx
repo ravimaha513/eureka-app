@@ -88,7 +88,7 @@ export function UtilitiesTab({ kind, ownerId, canManage, canReveal }: { kind: Si
         : q.error ? <p className="error" role="alert">{sitesError(q.error, "utility")}</p>
         : items.length === 0 ? <p className="muted">No utilities yet.</p>
         : (
-          <div className="tablewrap roundtable listcard"><table className="dtable si-utils" aria-label="Utilities">
+          <div className="tablewrap roundtable listcard"><table className="dtable bo-dtable si-utils" aria-label="Utilities">
             <thead><tr>
               <th scope="col">Utility</th><th scope="col">Account</th><th scope="col">Username</th><th scope="col">Password</th>
               <th scope="col">Status</th><th scope="col" className="c-act"><span className="sr-only">Actions</span></th>

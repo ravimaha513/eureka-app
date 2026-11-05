@@ -22,3 +22,5 @@
   .dh-filetable td.c-act .iconbtn { width: 44px; height: 44px; }
   .dh-folder { min-height: 44px; }
 }
+/* Phones: master-detail. With no folder open, the folder list is the screen (no empty files pane below it). */
+@media (max-width: 768px) { .dh-files:not(:has(.dh-folderhead)) { display: none; } }

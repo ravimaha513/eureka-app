@@ -21,6 +21,7 @@ import {
 import { fmtDateTime } from "../lib/format";
 import { useSearchParam } from "../lib/router";
 import { Menu } from "../ui/Menu";
+import "../payments/cells.css";
 import "./datahub.css";
 
 export const DATAHUB_POLL_MS = 3000;
@@ -665,7 +666,7 @@ export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
                   : files.error ? <p className="error">{datahubError(files.error)}</p>
                   : !files.data?.items.length ? <div className="dh-empty"><p>No documents in this folder yet.</p></div>
                   : (
-                    <div className="tablewrap listcard dh-filewrap"><table className="dtable dh-filetable" aria-label={`Files in ${selected.name}`}>
+                    <div className="tablewrap listcard dh-filewrap"><table className="dtable bo-dtable dh-filetable" aria-label={`Files in ${selected.name}`}>
                       <thead><tr>
                         <th scope="col">Name</th><th scope="col">Status</th><th scope="col" className="num">Version</th><th scope="col" className="num">Size</th>
                         <th scope="col" className="p2">Uploaded by</th><th scope="col">Date</th><th scope="col" className="c-act"><span className="sr-only">Actions</span></th>
