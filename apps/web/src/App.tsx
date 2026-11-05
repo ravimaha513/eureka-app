@@ -7,7 +7,7 @@ import { navigate, usePathname } from "./lib/router";
 import { HotListPage } from "./sales/HotListPage";
 import { NotificationBell, type InboxItem } from "./notifications/Inbox";
 import { ChatNavBadge } from "./chat/ChatNavBadge";
-import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, X } from "lucide-react";
+import { Eye, EyeOff, Lock, Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, X } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { BrandMark, NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
 import { Loading } from "./ui/Loading";
@@ -16,6 +16,8 @@ import { useAuthMethods } from "./shell/useAuthMethods";
 import { QuickJump, isQuickJumpKey } from "./shell/QuickJump";
 import { BusyBanner, OfflineBanner } from "./shell/OfflineBanner";
 import "./shell/shell.css";
+import "./login/login.css";
+import { FEATURES, Landing, shouldShowLanding } from "./login/Landing";
 
 // Every screen but the default landing (the Hot List) is its own chunk, loaded on first visit.
 const SettingsPage = lazyNamed(() => import("./settings/SettingsPage"), "SettingsPage");
@@ -60,8 +62,10 @@ function PasswordForm({ onSignedIn, onError }: { onSignedIn: () => void; onError
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [show, setShow] = useState(false);
+  const [forgot, setForgot] = useState(false);
   return (
-    <form onSubmit={async (e) => {
+    <form className="pwform" onSubmit={async (e) => {
       e.preventDefault();
       setBusy(true); onError("");
       try {
@@ -73,12 +77,20 @@ function PasswordForm({ onSignedIn, onError }: { onSignedIn: () => void; onError
           : er instanceof ApiError && er.status === 401 ? "Invalid email or password." : (er as Error).message);
       } finally { setBusy(false); }
     }}>
-      <p className="sub">Sign in with your email and password.</p>
       <div className="field"><label htmlFor="pw-email">Email</label>
-        <input id="pw-email" type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-      <div className="field"><label htmlFor="pw-pass">Password</label>
-        <input id="pw-pass" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></div>
-      <button type="submit" className="btn primary block" disabled={busy}>Sign in</button>
+        <input id="pw-email" type="email" autoComplete="username" placeholder="you@company.com" required value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+      <div className="field">
+        <div className="labelrow"><label htmlFor="pw-pass">Password</label>
+          <button type="button" className="linkbtn forgot" aria-expanded={forgot} onClick={() => setForgot(!forgot)}>Forgot password?</button></div>
+        <div className="pwwrap">
+          <input id="pw-pass" type={show ? "text" : "password"} autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+          <button type="button" className="pweye" aria-label={show ? "Hide password" : "Show password"} aria-pressed={show} onClick={() => setShow(!show)}>
+            {show ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+          </button>
+        </div>
+        {forgot && <p className="hint forgotnote">Ask an administrator to send you a new set-password link.</p>}
+      </div>
+      <button type="submit" className="btn ctabtn block" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
     </form>
   );
 }
@@ -209,57 +221,79 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
   const methods = useAuthMethods();
   const passwordLogin = methods.data?.password === true;
   const [theme, setTheme] = useTheme();
+  const google = methods.data?.google !== false;
+  const googleButton = (
+    <a className="btn block googlebtn" href="/api/auth/login">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path fill="#4285F4" d="M23.5 12.27c0-.85-.08-1.67-.22-2.45H12v4.64h6.45a5.52 5.52 0 0 1-2.39 3.62v3h3.87c2.26-2.09 3.57-5.16 3.57-8.81z" />
+        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.07 7.93-2.91l-3.87-3c-1.08.72-2.45 1.15-4.06 1.15-3.12 0-5.77-2.11-6.71-4.95H1.29v3.1A11.99 11.99 0 0 0 12 24z" />
+        <path fill="#FBBC05" d="M5.29 14.29A7.2 7.2 0 0 1 4.91 12c0-.8.14-1.57.38-2.29v-3.1H1.29A11.99 11.99 0 0 0 0 12c0 1.94.46 3.77 1.29 5.39l4-3.1z" />
+        <path fill="#EA4335" d="M12 4.77c1.76 0 3.34.61 4.58 1.8l3.43-3.43C17.94 1.19 15.24 0 12 0 7.31 0 3.26 2.69 1.29 6.61l4 3.1C6.23 6.88 8.88 4.77 12 4.77z" />
+      </svg>
+      Continue with Google
+    </a>
+  );
   return (
     <div className="loginpage">
       <section className="loginhero" aria-label="About Eureka">
-        <div className="brand"><BrandMark size={30} /><span className="brandtext">Eureka<small>Staffing</small></span></div>
+        <div className="brand"><BrandMark size={40} /><span className="brandtext loginname">Eureka<small>Staffing</small></span></div>
         <div className="herotext">
           <h2>The bench, the pipeline and the paperwork, in one record.</h2>
+          <p>A unified staffing platform to source, screen, manage and place talent, faster.</p>
           <ul>
-            <li>Hot List and candidates, scoped to your team</li>
-            <li>Submissions, interview rounds and placements</li>
-            <li>Paperwork, BGC, employees and payments</li>
+            {FEATURES.map(({ icon: Icon, title, text }) => (
+              <li key={title}><span className="feaicon"><Icon size={19} aria-hidden="true" /></span><span><b>{title}</b><small>{text}</small></span></li>
+            ))}
           </ul>
         </div>
+        <svg className="herowave" viewBox="0 0 600 260" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="hw1" x1="0" x2="1"><stop offset="0" stopColor="#6d5bd0" stopOpacity=".05" /><stop offset="1" stopColor="#ff6a61" stopOpacity=".55" /></linearGradient>
+            <linearGradient id="hw2" x1="0" x2="1"><stop offset="0" stopColor="#4b55c8" stopOpacity=".18" /><stop offset="1" stopColor="#c04a8a" stopOpacity=".45" /></linearGradient>
+          </defs>
+          <path d="M0 210 C120 150 220 250 340 190 S520 40 600 60 L600 260 L0 260 Z" fill="url(#hw2)" />
+          <path d="M0 240 C140 190 250 260 380 215 S540 110 600 120 L600 260 L0 260 Z" fill="url(#hw1)" />
+          <path d="M0 200 C130 140 230 240 350 180 S520 30 600 48" fill="none" stroke="#ff8a83" strokeOpacity=".35" />
+        </svg>
       </section>
       <main className="loginpanel">
         <div className="loginbox">
           <div className="loginbar">
-            <div className="brand loginbrand"><BrandMark />Eureka</div>
+            <div className="brand loginbrand"><BrandMark size={32} />Eureka</div>
             <button type="button" className="btn ghost themechip" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-              {theme === "dark" ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}{theme === "dark" ? "Light theme" : "Dark theme"}
+              {theme === "dark" ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}{theme === "dark" ? "Light theme" : "Dark theme"}
             </button>
           </div>
-          <h1>Sign in to Eureka</h1>
+          <div className="loginhead">
+            <h1>Sign in to Eureka</h1>
+            <p className="sub">{passwordLogin ? "Sign in with your email and password." : devMode ? "Development sign-in with fictional users." : "Sign in with your company Google account."}</p>
+          </div>
           {passwordLogin && <PasswordForm onSignedIn={onSignedIn} onError={setErr} />}
           {passwordLogin && err && <p className="error" role="alert">{err}</p>}
           {devMode ? (
             <>
-              <p className="sub">{passwordLogin ? "Or, for development: sign in as a fictional user." : "Development sign-in with fictional users."}</p>
+              {passwordLogin && <div className="ordivider"><span>or, for development</span></div>}
               <div className="field">
                 <label htmlFor="who">Sign in as</label>
                 <select id="who" value={who} onChange={(e) => setWho(e.target.value)}>
                   {DEV_USERS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
                 </select>
               </div>
-              <button type="button" className={passwordLogin ? "btn block" : "btn primary block"} onClick={async () => {
+              <button type="button" className={passwordLogin ? "btn block" : "btn ctabtn block"} onClick={async () => {
                 try {
                   await api("/api/auth/dev-login", { method: "POST", body: JSON.stringify({ email: `${who}@eureka.example` }) });
                   onSignedIn();
                 } catch (e) { setErr((e as Error).message); }
               }}>Sign in</button>
             </>
-          ) : methods.data?.google === false ? null : (
+          ) : google ? (
             <>
-              <p className="sub">{passwordLogin ? "Or sign in with your company Google account." : "Sign in with your company Google account."}</p>
-              <a className="btn primary block googlebtn" href="/api/auth/login">
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M21.35 11.1H12v2.9h5.35c-.25 1.5-1.7 4.4-5.35 4.4-3.2 0-5.85-2.65-5.85-5.9S8.8 6.6 12 6.6c1.85 0 3.05.8 3.75 1.45l2.55-2.45C16.7 4.1 14.55 3.1 12 3.1 7.05 3.1 3.1 7.05 3.1 12s3.95 8.9 8.9 8.9c5.15 0 8.55-3.6 8.55-8.7 0-.6-.05-1.05-.2-1.1z" /></svg>
-                Sign in with Google
-              </a>
+              {passwordLogin && <div className="ordivider"><span>or continue with</span></div>}
+              {googleButton}
             </>
-          )}
+          ) : null}
           {!passwordLogin && err && <p className="error" role="alert">{err}</p>}
-          <p className="loginfoot">Access is limited to your organisation's accounts. Every sign-in is recorded.</p>
+          <p className="loginfoot"><Lock size={14} aria-hidden="true" />Authorized team members only. Every sign-in is recorded.</p>
         </div>
       </main>
     </div>
@@ -596,7 +630,10 @@ export default function App() {
       </div></main></div>
     );
   }
-  if (!me.data) return <Login onSignedIn={() => qc.invalidateQueries()} />;
+  if (!me.data) {
+    if (pathname === "/" && shouldShowLanding()) return <Landing />;
+    return <Login onSignedIn={() => qc.invalidateQueries()} />;
+  }
   const signOut = async () => {
     // A 401 here means the session is already gone; either way the client must return to the sign-in screen.
     try { await api("/api/auth/logout", { method: "POST" }); } catch { /* already signed out */ }

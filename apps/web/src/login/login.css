@@ -1,0 +1,156 @@
+/* Sign-in, set/change password and the landing page.
+   The sign-in surfaces are identity surfaces: the brand red carries the one call to action here
+   (sign in, get started); inside the app the One Red Rule still holds. */
+
+:root {
+  --cta: var(--brand); --cta-hover: var(--brand-ink); --on-cta: #fff;
+  --land-bg: #f3f4fd; --land-bg2: #e9ebfb;
+  /* Illustration palette (HeroArt) */
+  --ha-screen1: #7d8ff0; --ha-screen2: #4f62d8; --ha-portal: #8fb0ff;
+  --ha-metal1: #e9ecfb; --ha-metal2: #d3d8f3; --ha-metal3: #b9c0e6; --ha-key: #d6dbf5;
+  --ha-card: #f7f8ff; --ha-line: #c9cfee; --ha-blue: #4f6bd8; --ha-navy: #2b3270; --ha-coral: #ff6a61;
+  --ha-leaf: #2fd3b4; --ha-leaf2: #22b8a0; --ha-pot: #e3e6f8; --ha-pot2: #f1f3fd;
+  --ha-floor: rgba(98, 112, 214, .10); --ha-shadow: rgba(43, 50, 112, .14);
+}
+:root[data-theme="dark"] {
+  --cta-hover: #ff8a83; --on-cta: #1b1e3a;
+  --land-bg: #11142a; --land-bg2: #171b38;
+  --ha-screen1: #6577e6; --ha-screen2: #3445b8; --ha-portal: #7f9cff;
+  --ha-metal1: #3a4170; --ha-metal2: #2d335c; --ha-metal3: #232848; --ha-key: #2c3260;
+  --ha-card: #e9ecff; --ha-line: #9aa3d6; --ha-pot: #3a4170; --ha-pot2: #4a5288;
+  --ha-floor: rgba(120, 136, 255, .10); --ha-shadow: rgba(0, 0, 0, .35);
+}
+
+.btn.ctabtn { background: var(--cta); border-color: var(--cta); color: var(--on-cta); font-weight: 650; }
+.btn.ctabtn:hover:not(:disabled) { background: var(--cta-hover); border-color: var(--cta-hover); }
+.btn.ctabtn:disabled { opacity: .7; cursor: default; }
+.themechip { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; }
+
+/* ---------- Sign-in: brand panel left, form right ---------- */
+.loginpage { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); min-height: 100vh; background: var(--surface); }
+.loginhero { position: relative; overflow: hidden; isolation: isolate; color: var(--side-text); display: flex; flex-direction: column; gap: 48px;
+  padding: 44px 56px 64px; min-height: 100vh;
+  background: radial-gradient(120% 70% at 0% 0%, #262a55 0%, transparent 60%), linear-gradient(180deg, #1b1e3a 0%, #1d1f45 100%); }
+.loginhero .brand { color: #fff; }
+.loginname { font-stretch: 100%; text-transform: none; letter-spacing: -.01em; font-size: 26px; }
+.loginname small { color: #b9bcd6; font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; }
+.herotext { max-width: 500px; margin: auto 0; position: relative; z-index: 1; }
+.herotext h2 { font-size: clamp(32px, 3.4vw, 46px); line-height: 1.08; letter-spacing: -.025em; color: #fff; font-weight: 750; text-wrap: balance; }
+.herotext > p { margin-top: 20px; font-size: 17px; line-height: 1.5; color: #b9bcd6; max-width: 440px; }
+.herotext ul { list-style: none; padding: 0; margin-top: 34px; display: grid; gap: 18px; }
+.herotext li, .landfeatures li { display: flex; gap: 16px; align-items: center; }
+.herotext li b, .landfeatures b { display: block; font-size: 15px; font-weight: 650; color: #fff; }
+.herotext li small, .landfeatures small { display: block; font-size: 13.5px; color: #a8abc8; margin-top: 3px; }
+.feaicon { flex: none; width: 46px; height: 46px; border-radius: 11px; display: grid; place-items: center; color: #d9dcf2;
+  background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .08); }
+.herowave { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 36%; z-index: -1; opacity: .7; }
+
+.loginpanel { display: flex; align-items: center; justify-content: center; padding: 32px 24px; }
+.loginbox { width: min(452px, 100%); display: flex; flex-direction: column; gap: 16px; }
+.loginbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 36px; }
+.loginbrand { font-size: 21px; letter-spacing: -.01em; }
+@media (min-width: 961px) {
+  .loginpanel { position: relative; }
+  .loginbox .loginbar { position: absolute; top: 40px; right: 48px; left: 48px; margin: 0; }
+  .loginbrand { visibility: hidden; }
+}
+.loginbox h1 { font-size: clamp(28px, 2.6vw, 36px); letter-spacing: -.02em; font-weight: 750; }
+.loginhead .sub { font-size: 15px; margin-top: 8px; }
+.loginbox .sub { margin-bottom: 4px; }
+.loginbox .field { margin-bottom: 16px; gap: 7px; }
+.loginbox .field label { font-weight: 600; font-size: 13.5px; }
+.loginbox .field input, .loginbox .field select { width: 100%; height: 50px; font-size: 15px; padding: 0 16px; border-radius: 8px; }
+.loginbox .field input::placeholder { color: var(--faint); }
+.pwform { display: flex; flex-direction: column; }
+.labelrow { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.linkbtn.forgot { color: var(--muted); font-size: 13px; }
+.linkbtn.forgot:hover { color: var(--text); text-decoration: underline; }
+.forgotnote { margin: 2px 0 0; font-size: 12.5px; }
+.pwwrap { position: relative; }
+.pwwrap input { padding-right: 52px !important; }
+.pweye { position: absolute; right: 6px; top: 50%; translate: 0 -50%; width: 40px; height: 40px; border: 0; background: none; border-radius: 6px;
+  color: var(--muted); display: grid; place-items: center; }
+.pweye:hover { color: var(--text); background: var(--hover); }
+.pwform .btn.block, .loginbox > .btn.block, .googlebtn { height: 50px; font-size: 15.5px; border-radius: 8px; margin-top: 4px; }
+.ordivider { display: flex; align-items: center; gap: 16px; color: var(--muted); font-size: 13.5px; margin: 6px 0 2px; }
+.ordivider::before, .ordivider::after { content: ""; flex: 1; height: 1px; background: var(--line-strong); }
+.googlebtn { display: flex; align-items: center; justify-content: center; gap: 12px; text-decoration: none; font-weight: 650;
+  background: #fff; color: #1f2342; border: 1px solid var(--line-strong); }
+.googlebtn:hover { background: #f4f5fb; color: #1f2342; }
+.loginfoot { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 14px; text-align: center; color: var(--muted); font-size: 13px; }
+.loginfoot svg { flex: none; }
+@media (max-width: 960px) {
+  .loginpage { grid-template-columns: minmax(0, 1fr); }
+  .loginhero { display: none; }
+  .loginpanel { align-items: flex-start; padding: 28px 16px 40px; }
+  .loginbar { margin-bottom: 28px; }
+}
+
+/* ---------- Landing ---------- */
+.landing { min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden;
+  background: radial-gradient(90% 70% at 85% 30%, var(--land-bg2) 0%, transparent 70%), var(--land-bg); color: var(--text); }
+.landbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 28px clamp(16px, 5vw, 72px) 0; }
+.landname { display: flex; flex-direction: column; font-size: 24px; font-weight: 750; letter-spacing: -.015em; line-height: 1; }
+.landname small { font-size: 12px; font-weight: 500; color: var(--muted); margin-top: 3px; letter-spacing: .02em; }
+.landactions { display: flex; align-items: center; gap: 8px; }
+.btn.landsignin { font-weight: 650; height: 38px; padding: 0 18px; background: var(--surface); }
+.landhero { flex: 1; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); align-items: center; gap: 24px;
+  padding: 24px clamp(16px, 5vw, 72px); max-width: 1360px; width: 100%; margin: 0 auto; }
+.landcopy h1 { font-size: clamp(34px, 4.4vw, 60px); line-height: 1.04; letter-spacing: -.03em; font-weight: 780; text-wrap: balance; max-width: 13ch; }
+.landlede { margin-top: 20px; font-size: clamp(16px, 1.4vw, 19px); line-height: 1.5; color: var(--text2); max-width: 30em; }
+.btn.landcta { margin-top: 32px; height: 52px; padding: 0 26px; font-size: 16px; border-radius: 10px; display: inline-flex; align-items: center; gap: 10px;
+  box-shadow: 0 10px 24px -10px color-mix(in srgb, var(--cta) 70%, transparent); }
+.btn.landcta svg { transition: translate .2s ease; }
+.btn.landcta:hover svg { translate: 3px 0; }
+.landart { min-width: 0; }
+.heroart { display: block; width: 100%; height: auto; max-height: 72vh; overflow: visible; }
+.landfeatures { list-style: none; padding: 8px clamp(16px, 5vw, 72px) 0; margin: 0 auto; max-width: 1360px; width: 100%;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.landfeatures li { padding: 18px; border-radius: 12px; background: color-mix(in srgb, var(--surface) 75%, transparent); border: 1px solid var(--line); }
+.landfeatures b { color: var(--text); }
+.landfeatures small { color: var(--muted); }
+.landfeatures .feaicon { background: var(--pri-50); border-color: var(--line); color: var(--ha-blue); }
+.landfoot { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 13px; padding: 28px 16px 32px; }
+.landing .landcopy, .landing .landfeatures, .landing .landbar { transition: opacity .5s ease .5s, translate .5s ease .5s; }
+.landing.is-entering .landcopy, .landing.is-entering .landfeatures { opacity: 0; translate: 0 8px; }
+
+@media (max-width: 900px) {
+  .landhero { grid-template-columns: minmax(0, 1fr); text-align: left; padding-top: 32px; }
+  .landart { order: 2; margin: 0 -8px; }
+  .landfeatures { grid-template-columns: minmax(0, 1fr); }
+  .landbar .themechip span { display: none; }
+}
+@media (max-width: 480px) {
+  .landbar .themechip { font-size: 0; gap: 0; padding: 0 10px; }
+  .landbar .themechip svg { width: 18px; height: 18px; }
+}
+
+/* ---------- Illustration motion ---------- */
+.ha-person { transform-box: fill-box; transform-origin: 50% 100%; animation: ha-bob 3.2s ease-in-out var(--d, 0s) infinite; }
+.ha-doc { animation: ha-float 5s ease-in-out infinite; }
+.ha-sway { transform-box: fill-box; transform-origin: 50% 100%; animation: ha-sway 6s ease-in-out infinite; }
+.ha-portal { opacity: .18; transform-box: fill-box; transform-origin: center; animation: ha-pulse 3.6s ease-in-out infinite; }
+.ha-check { stroke-dasharray: 12; stroke-dashoffset: 12; animation: ha-draw .5s ease-out forwards; }
+.ha-mark { opacity: 0; }
+.ha-mark > * { transform-box: view-box; }
+@keyframes ha-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -3px; } }
+@keyframes ha-float { 0%, 100% { translate: 0 0; } 50% { translate: 0 -8px; } }
+@keyframes ha-sway { 0%, 100% { rotate: -2deg; } 50% { rotate: 2deg; } }
+@keyframes ha-pulse { 0%, 100% { opacity: .14; scale: .9; } 50% { opacity: .32; scale: 1; } }
+@keyframes ha-draw { to { stroke-dashoffset: 0; } }
+
+/* Get started: people step into the glowing screen, the scene folds away, the Eureka mark lands. */
+.heroart.is-entering .ha-portal { animation: ha-open .7s ease-out forwards; }
+.heroart.is-entering .ha-person { animation: ha-enter .75s cubic-bezier(.5, 0, .75, 0) calc(var(--i) * 60ms) forwards; }
+.heroart.is-entering .ha-scene, .heroart.is-entering .ha-doc, .heroart.is-entering .ha-plant {
+  transform-box: view-box; transform-origin: 58% 55%; animation: ha-fold .55s ease-in .75s forwards; }
+.heroart.is-entering .ha-mark { animation: ha-mark .5s cubic-bezier(.2, 1.4, .4, 1) 1s forwards; transform-box: fill-box; transform-origin: center; }
+@keyframes ha-open { to { opacity: 1; scale: 1.6; } }
+@keyframes ha-enter { to { translate: var(--tx) var(--ty); scale: .15; opacity: 0; } }
+@keyframes ha-fold { to { scale: .55; opacity: 0; } }
+@keyframes ha-mark { from { opacity: 0; scale: .4; } to { opacity: 1; scale: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .ha-person, .ha-doc, .ha-sway, .ha-portal { animation: none; }
+  .ha-check { animation: none; stroke-dashoffset: 0; }
+}

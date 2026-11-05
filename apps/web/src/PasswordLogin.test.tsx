@@ -40,7 +40,7 @@ describe("password sign-in screen", () => {
   it("does not offer a password form when the server does not", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ password: false, google: true, dev: false }));
     wrap(<Login onSignedIn={() => undefined} devMode={false} />);
-    expect(await screen.findByText("Sign in with Google")).toBeInTheDocument();
+    expect(await screen.findByText("Continue with Google")).toBeInTheDocument();
     expect(screen.queryByLabelText("Password")).toBeNull();
   });
 });

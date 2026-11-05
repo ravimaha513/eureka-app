@@ -171,27 +171,8 @@ tbody tr[aria-selected="true"] td, tbody tr.selected td { background: var(--sel)
 .persontext > b, .persontext .linkbtn { white-space: nowrap; }
 .persontext .block { font-size: 12px; }
 
-/* Sign-in: brand panel on the left, the form on the right */
-.loginpage { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); min-height: 100vh; background: var(--surface); }
-.loginhero { margin: 0; color: var(--side-text); display: flex; flex-direction: column; justify-content: space-between; padding: 40px 48px 56px;
-  background: var(--side-bg); min-height: 100vh; }
-.loginhero .brand { color: #fff; }
-.herotext { max-width: 520px; }
-.herotext h2 { font-size: 36px; line-height: 1.12; letter-spacing: -.02em; color: #fff; font-weight: 700; text-wrap: balance; }
-.herotext ul { list-style: none; padding: 0; margin-top: 28px; display: grid; gap: 12px; font-size: 15px; }
-.herotext li { padding-top: 12px; border-top: 1px solid var(--side-line); }
-.loginpanel { display: flex; align-items: center; justify-content: center; padding: 32px 20px; }
-.loginbox { width: min(420px, 100%); display: flex; flex-direction: column; gap: 14px; }
-.loginbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
-.loginbox h1 { font-size: 28px; }
-@media (min-width: 961px) { .loginbrand { visibility: hidden; } }
-.loginbox .sub { margin: -6px 0 6px; }
-.loginbox .field select { width: 100%; height: 46px; }
+/* Sign-in and landing: see login/login.css */
 .btn.block { width: 100%; height: 44px; font-size: 14.5px; }
-.googlebtn { display: flex; align-items: center; justify-content: center; gap: 10px; text-decoration: none; }
-.loginfoot { margin-top: 10px; padding-top: 16px; border-top: 1px solid var(--line); text-align: center; color: var(--muted); font-size: 12.5px; }
-.themechip { display: inline-flex; align-items: center; gap: 6px; }
-@media (max-width: 960px) { .loginpage { grid-template-columns: minmax(0, 1fr); } .loginhero { display: none; } }
 
 /* Users & Access (admin) */
 /* Real tabs (role=tab) read as an underline, never like the filter toggles above. */
