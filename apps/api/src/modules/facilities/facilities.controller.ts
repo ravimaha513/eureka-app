@@ -227,11 +227,13 @@ export class BillsController {
     return this.svc.update(user, id, parseIfMatch(ifMatch), () => BillUpdate.parse(body));
   }
 
+  /** Optional If-Match: the rowVersion the client saw (412 when stale; no header: voids as before). */
   @Post(":id/void")
   @HttpCode(200)
   @RequirePermission("bill:manage")
-  void(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.svc.void(user, id, () => BillVoid.parse(body));
+  void(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
+    @Headers("if-match") ifMatch: string | undefined) {
+    return this.svc.void(user, id, () => BillVoid.parse(body), parseIfMatch(ifMatch));
   }
 
   /** Presigned POST into quarantine (2 minutes); the invoice opens after a clean scan. */

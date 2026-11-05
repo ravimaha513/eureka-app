@@ -114,6 +114,12 @@ const anyAssignment = (cond: string) => `EXISTS (
 
 const ref = (id: string | null, name: string | null) => (id ? { id, name } : null);
 
+/** The optional-version employment functions (0478) raise `stale`: 412, as on the other If-Match routes. */
+function staleToPrecondition(err: unknown): void {
+  const e = err as { message?: string; code?: string };
+  if (e.message === "stale" && e.code !== undefined) throw new HttpException("stale", HttpStatus.PRECONDITION_FAILED);
+}
+
 /** Hot List style: the last two digits only. */
 export const maskPhone = (v: string | null) => (v === null ? null : `•••-•••-${v.replace(/\D/g, "").slice(-2).padStart(2, "•")}`);
 /** First character of the mailbox and the domain. */
@@ -281,12 +287,13 @@ export class EmployeesService {
         vendor_id: string | null; vendor_name: string | null; payroll_company_id: string | null; payroll_company_name: string | null;
         everify_date: string | null; onboarded_date: string | null;
         recruiter_id: string; team_id: string | null; location_id: string | null;
+        plan_version: number | null; employment_version: number | null;
       }>(
         `SELECT a.id, a.assignment_no, a.start_date::text, a.end_date::text, a.end_reason, pp.planned_end_date::text,
                 pl.id AS placement_id, pl.client_id, cl.name AS client_name, pl.is_first_placement,
                 pl.vendor_id, v.name AS vendor_name, ae.payroll_company_id, pc.name AS payroll_company_name,
                 ae.everify_date::text AS everify_date, ae.onboarded_date::text AS onboarded_date,
-                pl.recruiter_id, pl.team_id, pl.location_id
+                pl.recruiter_id, pl.team_id, pl.location_id, pp.row_version AS plan_version, ae.row_version AS employment_version
          FROM eureka.assignment a
          JOIN eureka.placement pl ON pl.id = a.placement_id
          JOIN eureka.client cl ON cl.id = pl.client_id
@@ -316,6 +323,8 @@ export class EmployeesService {
           vendor: ref(a.vendor_id, a.vendor_name),
           payrollCompany: ref(a.payroll_company_id, a.payroll_company_name),
           everifyDate: a.everify_date, onboardedDate: a.onboarded_date,
+          /** Optional If-Match values for PUT planned-end-date / PATCH employment (0: nothing stored yet). */
+          plannedEndDateVersion: a.plan_version ?? 0, employmentVersion: a.employment_version ?? 0,
           // The key is present (value or null) only for callers who may see and set the pay rate.
           ...(ownsActivity(rateScope, { recruiterId: a.recruiter_id, teamId: a.team_id, locationId: a.location_id })
             ? { payRate: rates.get(a.id) ?? null } : {}),
@@ -389,23 +398,29 @@ export class EmployeesService {
     });
   }
 
-  /** Planned end date: set, extend or bring forward (today or later). */
-  async setPlannedEndDate(user: AuthedUser, id: string, body: PlannedEndDate) {
+  /**
+   * Planned end date: set, extend or bring forward (today or later). `expected`:
+   * the optional If-Match (plannedEndDateVersion); stale -> 412, checked by the
+   * database under the assignment lock.
+   */
+  async setPlannedEndDate(user: AuthedUser, id: string, body: PlannedEndDate, expected: number | null = null) {
     return this.db.withUser(user.id, async (c) => {
       const a = await this.loadAssignment(c, user, id);
       if (a.end_date !== null) throw new UnprocessableEntityException("assignment_closed");
-      let r: { previous_date: string | null; planned_date: string };
+      let r: { previous_date: string | null; planned_date: string; new_version: number };
       try {
         r = (await c.query<typeof r>(
-          `SELECT previous_date::text, planned_date::text FROM authz.set_assignment_end_date($1, $2::date)`, [id, body.plannedEndDate])).rows[0]!;
+          `SELECT previous_date::text, planned_date::text, new_version FROM authz.set_assignment_end_date($1, $2::date, $3::int)`,
+          [id, body.plannedEndDate, expected])).rows[0]!;
       } catch (err) {
+        staleToPrecondition(err);
         mapEmploymentError(err);
       }
       await this.audit.record(c, {
         actorId: user.id, action: "assignment.planned_end", entityType: "assignment", entityId: id,
         changes: { from: r.previous_date, to: r.planned_date },
       });
-      return { id, plannedEndDate: r.planned_date, previousPlannedEndDate: r.previous_date };
+      return { id, plannedEndDate: r.planned_date, previousPlannedEndDate: r.previous_date, rowVersion: r.new_version };
     });
   }
 
@@ -471,17 +486,22 @@ export class EmployeesService {
    * rate also needs rate:read over the placement's actor snapshot. Audited with
    * the changed field names (and the company id) only, never the rate (rule 5).
    */
-  async setEmployment(user: AuthedUser, id: string, body: AssignmentEmployment) {
+  async setEmployment(user: AuthedUser, id: string, body: AssignmentEmployment, expected: number | null = null) {
     return this.db.withUser(user.id, async (c) => {
       const a = await this.loadAssignment(c, user, id);
       const actor = { recruiterId: a.recruiter_id, teamId: a.team_id, locationId: a.location_id };
       const rateVisible = ownsActivity(resolveScope(user.access, "rate:read"), actor);
       if (body.payRate !== undefined && !rateVisible) throw new ForbiddenException("Not permitted");
       let changed: string[];
+      let rowVersion: number;
       try {
-        changed = (await c.query<{ f: string[] }>(`SELECT authz.set_assignment_employment($1, $2::jsonb) AS f`,
-          [id, JSON.stringify(body)])).rows[0]!.f;
+        const w = (await c.query<{ changed: string[]; new_version: number }>(
+          `SELECT changed, new_version FROM authz.set_assignment_employment($1, $2::jsonb, $3::int)`,
+          [id, JSON.stringify(body), expected])).rows[0]!;
+        changed = w.changed;
+        rowVersion = w.new_version;
       } catch (err) {
+        staleToPrecondition(err);
         mapEmploymentError(err);
       }
       await this.audit.record(c, {
@@ -496,7 +516,7 @@ export class EmployeesService {
         ? (await c.query<{ pay_rate: string }>(`SELECT pay_rate::text FROM authz.assignment_pay_rates($1) WHERE assignment_id = $2`, [a.person_id, id])).rows[0]
         : undefined;
       return {
-        id, changed,
+        id, changed, rowVersion,
         payrollCompany: ref(r?.payroll_company_id ?? null, r?.payroll_company_name ?? null),
         everifyDate: r?.everify_date ?? null, onboardedDate: r?.onboarded_date ?? null,
         ...(rateVisible ? { payRate: rate ? Number(rate.pay_rate) : null } : {}),

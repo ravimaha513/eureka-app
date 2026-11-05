@@ -73,9 +73,9 @@ async function login(key: Key) {
   sessions.set(key, s);
   return s;
 }
-async function call(key: Key, method: "GET" | "POST" | "PUT" | "PATCH", url: string, payload?: unknown) {
+async function call(key: Key, method: "GET" | "POST" | "PUT" | "PATCH", url: string, payload?: unknown, extra: Record<string, string> = {}) {
   const s = await login(key);
-  return app.inject({ method, url, payload: payload as never, headers: { cookie: s.cookie, ...(method !== "GET" ? { "x-csrf-token": s.csrf } : {}) } });
+  return app.inject({ method, url, payload: payload as never, headers: { cookie: s.cookie, ...(method !== "GET" ? { "x-csrf-token": s.csrf } : {}), ...extra } });
 }
 const audits = async (action: string, entityId?: string) => (await db.admin.query(
   `SELECT actor_id, entity_type, entity_id, changes FROM eureka.audit_event WHERE action = $1 AND ($2::uuid IS NULL OR entity_id = $2) ORDER BY seq`,
@@ -110,7 +110,7 @@ describe("database: assignment_employment and the 0150 functions", () => {
        WHERE n.nspname = 'authz' AND p.proname IN ('payroll_companies','set_assignment_employment','assignment_pay_rates',
          'employment_movements','assign_employee_team','notification_recipients') ORDER BY 1`)).rows;
     expect(fns.map((f) => f.proname)).toEqual(["assign_employee_team", "assignment_pay_rates", "employment_movements",
-      "notification_recipients", "payroll_companies", "set_assignment_employment"]);
+      "notification_recipients", "payroll_companies", "set_assignment_employment", "set_assignment_employment"]); // + the 0478 If-Match overload
     for (const f of fns) {
       expect(f.secdef, f.proname).toBe(true);
       expect(f.cfg, f.proname).toContain("search_path=pg_catalog, pg_temp");
@@ -185,7 +185,7 @@ describe("employment facts through the API", () => {
     const r1 = await employment(j.assignmentId, { payrollCompanyId: CO.a, everifyDate: addDays(today, -58), onboardedDate: addDays(today, -59) });
     expect(r1.statusCode, r1.body).toBe(200);
     expect(r1.json()).toEqual({
-      id: j.assignmentId, changed: ["payrollCompanyId", "everifyDate", "onboardedDate"],
+      id: j.assignmentId, changed: ["payrollCompanyId", "everifyDate", "onboardedDate"], rowVersion: 1,
       payrollCompany: { id: CO.a, name: "Eureka Payroll LLC" }, everifyDate: addDays(today, -58), onboardedDate: addDays(today, -59),
     });
     expect((await employment(j.assignmentId, { payRate: 42 })).statusCode).toBe(403);
@@ -217,6 +217,29 @@ describe("employment facts through the API", () => {
     expect((await employment(j.assignmentId, { payRate: 0 }, "acct")).statusCode).toBe(422);
     expect((await employment(j.assignmentId, { updatedBy: U.hr })).statusCode).toBe(422);
     expect((await employment("00000000-0000-4000-8000-0000000000ff", { everifyDate: today })).statusCode).toBe(404);
+  });
+
+  it("optional If-Match (B-03): employmentVersion in the detail; stale is 412 and changes nothing; a match bumps it", async () => {
+    const j = await onAssignment();
+    const version = async () => (await call("hr", "GET", `/api/v1/employees/${j.personId}`)).json().assignments[0].employmentVersion as number;
+    expect(await version()).toBe(0); // nothing stored yet
+    // Version 0 (no row) cannot be claimed stale-free with a positive tag.
+    const early = await call("hr", "PATCH", `/api/v1/assignments/${j.assignmentId}/employment`, { everifyDate: addDays(today, -10) }, { "if-match": '"1"' });
+    expect([early.statusCode, early.json().detail]).toEqual([412, "stale"]);
+    expect((await employment(j.assignmentId, { everifyDate: addDays(today, -10) })).json().rowVersion).toBe(1);
+    // Accounts edits the pay rate meanwhile; HR's form still holds version 1.
+    expect((await call("acct", "PATCH", `/api/v1/assignments/${j.assignmentId}/employment`, { payRate: 50 }, { "if-match": "1" })).json().rowVersion).toBe(2);
+    const stale = await call("hr", "PATCH", `/api/v1/assignments/${j.assignmentId}/employment`, { everifyDate: addDays(today, -9) }, { "if-match": "1" });
+    expect([stale.statusCode, stale.json().detail]).toEqual([412, "stale"]);
+    expect((await call("hr", "GET", `/api/v1/employees/${j.personId}`)).json().assignments[0].everifyDate).toBe(addDays(today, -10));
+    expect(await version()).toBe(2);
+    // 403 / 404 come before the version check.
+    expect([403, 404]).toContain((await call("r1a", "PATCH", `/api/v1/assignments/${j.assignmentId}/employment`, { everifyDate: today }, { "if-match": "1" })).statusCode);
+    const ok = await call("hr", "PATCH", `/api/v1/assignments/${j.assignmentId}/employment`, { everifyDate: addDays(today, -9) }, { "if-match": '"2"' });
+    expect([ok.statusCode, ok.json().rowVersion]).toEqual([200, 3]);
+    // The database holds the version: clients cannot write it, and the guard sets it.
+    expect((await employment(j.assignmentId, { rowVersion: 9 })).statusCode).toBe(422);
+    expect((await db.admin.query(`SELECT row_version FROM eureka.assignment_employment WHERE assignment_id = $1`, [j.assignmentId])).rows).toEqual([{ row_version: 3 }]);
   });
 
   it("ended assignments can be corrected (history)", async () => {

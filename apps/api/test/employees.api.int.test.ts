@@ -57,9 +57,9 @@ async function login(key: Key) {
   sessions.set(key, s);
   return s;
 }
-async function call(key: Key, method: "GET" | "POST" | "PUT", url: string, payload?: unknown) {
+async function call(key: Key, method: "GET" | "POST" | "PUT", url: string, payload?: unknown, extra: Record<string, string> = {}) {
   const s = await login(key);
-  return app.inject({ method, url, payload: payload as never, headers: { cookie: s.cookie, ...(method !== "GET" ? { "x-csrf-token": s.csrf } : {}) } });
+  return app.inject({ method, url, payload: payload as never, headers: { cookie: s.cookie, ...(method !== "GET" ? { "x-csrf-token": s.csrf } : {}), ...extra } });
 }
 const audits = async (action: string, entityId?: string) => (await db.admin.query(
   `SELECT actor_id, entity_type, entity_id, changes FROM eureka.audit_event WHERE action = $1 AND ($2::uuid IS NULL OR entity_id = $2) ORDER BY seq`,
@@ -205,12 +205,33 @@ describe("lifecycle through the API", () => {
     const j = await onAssignment();
     const d1 = addDays(today, 30), d2 = addDays(today, 120);
     expect((await call("ahr", "PUT", `/api/v1/assignments/${j.assignmentId}/planned-end-date`, { plannedEndDate: d1 })).json())
-      .toEqual({ id: j.assignmentId, plannedEndDate: d1, previousPlannedEndDate: null });
+      .toEqual({ id: j.assignmentId, plannedEndDate: d1, previousPlannedEndDate: null, rowVersion: 1 });
     expect((await call("hr", "PUT", `/api/v1/assignments/${j.assignmentId}/planned-end-date`, { plannedEndDate: d2 })).json())
-      .toEqual({ id: j.assignmentId, plannedEndDate: d2, previousPlannedEndDate: d1 });
+      .toEqual({ id: j.assignmentId, plannedEndDate: d2, previousPlannedEndDate: d1, rowVersion: 2 });
     expect((await audits("assignment.planned_end", j.assignmentId)).map((x) => x.changes)).toEqual([{ from: null, to: d1 }, { from: d1, to: d2 }]);
     const same = await call("hr", "PUT", `/api/v1/assignments/${j.assignmentId}/planned-end-date`, { plannedEndDate: d2 });
     expect([same.statusCode, same.json().detail]).toEqual([422, "unchanged"]);
+  });
+
+  it("planned end date takes an optional If-Match (B-03): stale is 412; the ending-soon mark does not move the version", async () => {
+    const j = await onAssignment();
+    const url = `/api/v1/assignments/${j.assignmentId}/planned-end-date`;
+    const version = async () => (await call("hr", "GET", `/api/v1/employees/${j.personId}`)).json().assignments[0].plannedEndDateVersion as number;
+    expect(await version()).toBe(0);
+    expect((await call("hr", "PUT", url, { plannedEndDate: addDays(today, 5) })).json().rowVersion).toBe(1);
+    await db.worker.query(`SELECT authz.assignment_ending_soon_scan(30)`);
+    expect((await db.admin.query(`SELECT ending_notice_for IS NOT NULL AS marked FROM eureka.assignment_plan WHERE assignment_id = $1`, [j.assignmentId])).rows)
+      .toEqual([{ marked: true }]);
+    expect(await version()).toBe(1);
+    // Accounts extends it; Associate HR's form still shows version 1.
+    expect((await call("acct", "PUT", url, { plannedEndDate: addDays(today, 60) }, { "if-match": '"1"' })).json().rowVersion).toBe(2);
+    const stale = await call("ahr", "PUT", url, { plannedEndDate: addDays(today, 90) }, { "if-match": '"1"' });
+    expect([stale.statusCode, stale.json().detail]).toEqual([412, "stale"]);
+    expect((await audits("assignment.planned_end", j.assignmentId)).length).toBe(2);
+    expect((await call("r1a", "PUT", url, { plannedEndDate: addDays(today, 90) }, { "if-match": '"1"' })).statusCode).toBe(403);
+    const ok = await call("ahr", "PUT", url, { plannedEndDate: addDays(today, 90) }, { "if-match": '"2"' });
+    expect([ok.statusCode, ok.json().rowVersion]).toEqual([200, 3]);
+    expect(await version()).toBe(3);
   });
 
   it("exit and return to market", async () => {

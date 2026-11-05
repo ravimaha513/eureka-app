@@ -74,7 +74,9 @@ Utility types: `electricity, water, gas, internet, phone, waste, sewage, hvac, s
   (newest billing period first; `from`/`to` filter `billingStart`; `q` matches type, provider, payment method)
 - `POST /api/v1/{companies|facilities}/:id/bills` `{ utilityId, paymentMethod, amount, billingStart, billingEnd, dueDate, paidOn? }` → 201 item
 - `PATCH /api/v1/bills/:id` (If-Match) same fields (`paidOn: null` clears) → item
-- `POST /api/v1/bills/:id/void` `{ reason }` → 200 `{ id, voided: true, rowVersion }`
+- `POST /api/v1/bills/:id/void` `{ reason }` → 200 `{ id, voided: true, rowVersion }`. Optional `If-Match: "<rowVersion>"`
+  (migration 0478, audit D-13): stale → 412 `stale` and the bill stays (checked again by `authz.bill_void(uuid, text, integer)`
+  under the row lock); without the header the void behaves as before (no 428, unlike PATCH).
 - `POST /api/v1/bills/:id/invoice` (`bill:manage`) `{ contentType, size, fileName? }` (PDF, DOCX, PNG, JPEG ≤ 15 MB; `fileName` accepted and ignored) →
   201 `{ id, documentId, fileId, classification: "internal", status: "pending", upload: { url, fields, expiresAt } }`
 - `GET /api/v1/bills/:id/invoice` (`bill:read`) → `{ url, expiresAt }`; 404 `no_invoice`; 409 `not_available` until the scan is clean

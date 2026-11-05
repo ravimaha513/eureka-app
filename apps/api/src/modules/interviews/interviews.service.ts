@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import type pg from "pg";
 import {
   activityVisible,
@@ -72,6 +72,7 @@ interface InterviewRow {
   cf_notes: string | null;
   cf_at: Date | null;
   updated_at: Date;
+  row_version: number;
   k: string;
   c_recruiter: string | null;
   c_team: string | null;
@@ -87,7 +88,7 @@ const SELECT = `
          i.round, i.starts_at, i.ends_at, i.coach_id, i.invite_received, i.call_status, i.cleared, i.cleared_at,
          i.result, i.result_at, sub.status AS submission_status, pl.id AS placement_id, pl.status AS placement_status,
          i.otter_url, i.recording_url, i.consent_captured, i.system_name, i.interview_type, i.meeting_url,
-         i.updated_at, ${toMicros("i.starts_at")} AS k,
+         i.updated_at, i.row_version, ${toMicros("i.starts_at")} AS k,
          ${CANDIDATE_NAME} AS candidate_name,
          ru.display_name AS recruiter_name, cu.display_name AS coach_name,
          tm.name AS team_name, l.name AS location_name, cl.name AS client_name,
@@ -110,6 +111,9 @@ const SELECT = `
     SELECT x.id, x.status FROM eureka.placement x
     WHERE x.submission_id = i.submission_id ORDER BY x.created_at DESC, x.id DESC LIMIT 1
   ) pl ON true`;
+
+/** Call statuses that book nobody (as the candidate overlap constraint, 0017). */
+const NOT_LIVE: ReadonlySet<string> = new Set(["cancelled", "rescheduled", "no_invite"]);
 
 const SALES_SCOPES: readonly Scope[] = ["own", "team", "hierarchy", "org"];
 const FEEDBACK_SCOPES: Record<FeedbackKind, readonly Scope[]> = {
@@ -203,6 +207,8 @@ export class InterviewsService {
        */
       candidateFeedback: r.cf_at === null ? null : { rating: r.cf_rating, notes: r.cf_notes, submittedAt: r.cf_at },
       updatedAt: r.updated_at,
+      /** Optimistic concurrency (IS-12): send it back as `If-Match` on PATCH / clear-and-select. */
+      rowVersion: r.row_version,
       /** Presentation hint for the board; the server re-checks on write. */
       editableFields: [...editableFields(access, ref(r))].sort(),
       feedbackKinds: feedbackKinds(access, ref(r)),
@@ -303,6 +309,40 @@ export class InterviewsService {
     }
   }
 
+  /**
+   * IS-13: the coach and panel members in `users` must not be booked (as coach or
+   * panel member) into another live interview overlapping this one. Checked in the
+   * database under per-person advisory locks, after this interview's row and panel
+   * are written; 409 interviewer_conflict (the other interview is not named).
+   */
+  private async assertStaffFree(c: pg.PoolClient, id: string, users: (string | null | undefined)[]) {
+    const ids = [...new Set(users.filter((u): u is string => typeof u === "string"))];
+    if (!ids.length) return;
+    try {
+      await c.query("SELECT authz.assert_interview_staff_free($1, $2::uuid[])", [id, ids]);
+    } catch (err) {
+      if ((err as { message?: string }).message === "interviewer_conflict") throw new ConflictException("interviewer_conflict");
+      mapPipelineError(err);
+    }
+  }
+
+  /**
+   * E-04: serialises writes that decide on the round results of one submission
+   * (a result change here, clear-and-select) so the "no rejected round" check
+   * and the write cannot interleave. Taken before the interview row lock, in
+   * this order everywhere.
+   */
+  private async lockSubmissionResults(c: pg.PoolClient, id: string) {
+    await c.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended('interview_result:' || i.submission_id::text, 0))
+         FROM eureka.interview i WHERE i.id = $1`, [id]);
+  }
+
+  /** Row lock for the update (empty when RLS lets the caller read but not update the row). */
+  private async lockRow(c: pg.PoolClient, id: string): Promise<boolean> {
+    return ((await c.query(`SELECT 1 FROM eureka.interview WHERE id = $1 FOR NO KEY UPDATE`, [id])).rowCount ?? 0) > 0;
+  }
+
   /** Authorized against the parent submission (design B4.8): the caller must be able to update it. */
   async create(user: AuthedUser, body: CreateInterview) {
     return this.db.withUser(user.id, async (c) => {
@@ -334,11 +374,13 @@ export class InterviewsService {
         mapPipelineError(err);
       }
       if (body.panelIds?.length) await this.setPanel(c, id, body.panelIds, body.leadId ?? null);
+      await this.assertStaffFree(c, id, [body.coachId, ...(body.panelIds ?? [])]);
       // IS-8: the meeting link is a shareable secret: audited as present, never its value.
+      // Rule 5: the round name is free text; the audit records that it was set, not what it says.
       await this.audit.record(c, {
         actorId: user.id, action: "interview.created", entityType: "interview", entityId: id,
         changes: {
-          submissionId: body.submissionId, round: body.round, startsAt: body.startsAt, endsAt,
+          submissionId: body.submissionId, round: "set", startsAt: body.startsAt, endsAt,
           interviewType: body.interviewType ?? null, meetingUrl: body.meetingUrl ? "set" : null,
           panelSize: body.panelIds?.length ?? 0, leadId: body.leadId ?? null,
         },
@@ -347,14 +389,22 @@ export class InterviewsService {
     });
   }
 
-  async update(user: AuthedUser, id: string, body: UpdateInterview) {
+  /**
+   * PATCH. `expected` is the optional If-Match rowVersion (IS-12): when sent and
+   * stale, 412 and nothing changes. The row is locked before it is read, so the
+   * consent, duration and panel decisions use the values the write replaces.
+   */
+  async update(user: AuthedUser, id: string, body: UpdateInterview, expected: number | null = null) {
     return this.db.withUser(user.id, async (c) => {
+      if (body.result !== undefined) await this.lockSubmissionResults(c, id);
+      const locked = await this.lockRow(c, id);
       const row = await this.load(c, user, id);
       const allowed = editableFields(user.access, ref(row));
-      if (allowed.size === 0) throw new ForbiddenException("Not permitted");
+      if (allowed.size === 0 || !locked) throw new ForbiddenException("Not permitted");
       const fields = Object.keys(body) as InterviewField[];
       const denied = fields.filter((f) => !allowed.has(f));
       if (denied.length) throw new UnprocessableEntityException(`field_not_permitted: ${denied.sort().join(", ")}`);
+      if (expected !== null && expected !== row.row_version) throw new HttpException("stale", HttpStatus.PRECONDITION_FAILED);
 
       const { durationMin, panelIds, leadId, ...columns } = body;
       if (durationMin !== undefined) {
@@ -370,32 +420,51 @@ export class InterviewsService {
       if (timeProblem) throw new UnprocessableEntityException(timeProblem);
       if (columns.coachId) await this.assertCoach(c, columns.coachId);
 
+      const before = await this.panel(c, id);
+      const currentPanel = before.panel.map((m) => m.id);
       const colFields = Object.keys(columns) as InterviewColumnField[];
-      if (colFields.length) {
-        const params: unknown[] = [id];
-        const sets = colFields.map((f) => { params.push(columns[f]); return `${COLUMN[f]} = $${params.length}`; });
+      const params: unknown[] = [id];
+      const sets = colFields.map((f) => { params.push(columns[f]); return `${COLUMN[f]} = $${params.length}`; });
+      // A panel-only change still bumps the version (the guard does that on every update).
+      if (!sets.length && panelIds !== undefined) sets.push("round = round");
+      if (sets.length) {
+        let where = "id = $1";
+        if (expected !== null) { params.push(expected); where += ` AND row_version = $${params.length}`; }
         let updated = 0;
         try {
-          updated = (await c.query(`UPDATE eureka.interview SET ${sets.join(", ")} WHERE id = $1`, params)).rowCount ?? 0;
+          updated = (await c.query(`UPDATE eureka.interview SET ${sets.join(", ")} WHERE ${where}`, params)).rowCount ?? 0;
         } catch (err) {
           mapPipelineError(err);
         }
-        if (updated !== 1) throw new ForbiddenException("Not permitted"); // RLS refused the row
+        if (updated !== 1) throw new ForbiddenException("Not permitted"); // RLS refused the row (the version was checked under the lock)
       }
       let lead: string | null | undefined = leadId;
       if (panelIds !== undefined) {
         if (lead === undefined) {
           // Keep the current lead while they stay on the panel.
-          const cur = (await this.panel(c, id)).lead?.id ?? null;
+          const cur = before.lead?.id ?? null;
           lead = cur !== null && panelIds.includes(cur) ? cur : null;
         }
         await this.setPanel(c, id, panelIds, lead);
       }
+      // IS-13: whose booking changed. A new slot (or a call brought back from
+      // cancelled) books the coach and the whole panel again; otherwise only a
+      // new coach and newly added panel members are checked.
+      const revived = columns.callStatus !== undefined && NOT_LIVE.has(row.call_status) && !NOT_LIVE.has(columns.callStatus);
+      const moved = columns.startsAt !== undefined || columns.endsAt !== undefined;
+      const coach = columns.coachId !== undefined ? columns.coachId : row.coach_id;
+      await this.assertStaffFree(c, id, moved || revived
+        ? [coach, ...(panelIds ?? currentPanel)]
+        : [columns.coachId !== undefined && columns.coachId !== row.coach_id ? columns.coachId : null,
+          ...(panelIds ?? []).filter((m) => !currentPanel.includes(m))]);
+
       // Recording, Otter and meeting links are shareable secrets: audit that they changed, not their value.
+      // Rule 5: the round and the location's system name are free text: audited as changed, never their value.
       const changes: Record<string, unknown> = { ...columns };
-      for (const k of ["otterUrl", "recordingUrl", "meetingUrl"] as const) {
+      for (const k of ["otterUrl", "recordingUrl", "meetingUrl", "systemName"] as const) {
         if (k in columns) changes[k] = columns[k] === null ? "cleared" : "set";
       }
+      if ("round" in columns) changes.round = "changed";
       if (durationMin !== undefined) changes.durationMin = durationMin;
       if (panelIds !== undefined) { changes.panelSize = panelIds.length; changes.leadId = lead ?? null; }
       await this.audit.record(c, { actorId: user.id, action: "interview.updated", entityType: "interview", entityId: id, changes });
@@ -407,15 +476,20 @@ export class InterviewsService {
    * IS-11 "Clear and place": marks this round cleared and moves its submission
    * forward, one step at a time through authz.transition_submission, to
    * selected, in one transaction. The placement itself is created next with
-   * POST /placements. Refused when another visible round was rejected.
+   * POST /placements. Refused when another visible round was rejected. The
+   * submission's round results are locked first (E-04), so a sibling round
+   * rejected concurrently is seen. Optional If-Match as on PATCH (IS-12).
    */
-  async clearAndSelect(user: AuthedUser, id: string) {
+  async clearAndSelect(user: AuthedUser, id: string, expected: number | null = null) {
     return this.db.withUser(user.id, async (c) => {
+      await this.lockSubmissionResults(c, id);
+      const locked = await this.lockRow(c, id);
       const row = await this.load(c, user, id);
-      if (!editableFields(user.access, ref(row)).has("result")
+      if (!locked || !editableFields(user.access, ref(row)).has("result")
           || !ownsActivity(resolveScope(user.access, "submission:update"), ref(row))) {
         throw new ForbiddenException("Not permitted");
       }
+      if (expected !== null && expected !== row.row_version) throw new HttpException("stale", HttpStatus.PRECONDITION_FAILED);
       if (row.call_status === "cancelled" || row.call_status === "no_invite") throw new UnprocessableEntityException("interview_not_held");
       const sub = await c.query<{ status: string }>(`SELECT status FROM eureka.submission WHERE id = $1`, [row.submission_id]);
       const from = sub.rows[0]?.status;
@@ -428,10 +502,14 @@ export class InterviewsService {
       const sets = ["result = 'cleared'"];
       if (row.call_status !== "completed") sets.push("call_status = 'completed'");
       let updated = 0;
+      let rowVersion = row.row_version;
       try {
         if (row.result !== "cleared" || row.call_status !== "completed") {
-          updated = (await c.query(`UPDATE eureka.interview SET ${sets.join(", ")} WHERE id = $1`, [id])).rowCount ?? 0;
+          const u = await c.query<{ row_version: number }>(
+            `UPDATE eureka.interview SET ${sets.join(", ")} WHERE id = $1 RETURNING row_version`, [id]);
+          updated = u.rowCount ?? 0;
           if (updated !== 1) throw new ForbiddenException("Not permitted");
+          rowVersion = u.rows[0]!.row_version;
         }
         let status = from;
         while (status !== "selected") {
@@ -449,7 +527,7 @@ export class InterviewsService {
         await this.audit.record(c, { actorId: user.id, action: "submission.status", entityType: "submission", entityId: row.submission_id,
           changes: { from, to: "selected", viaInterview: id } });
       }
-      return { interviewId: id, result: "cleared", submissionId: row.submission_id, submissionStatus: "selected" };
+      return { interviewId: id, result: "cleared", submissionId: row.submission_id, submissionStatus: "selected", rowVersion };
     });
   }
 

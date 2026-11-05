@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, Res } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, Query, Res } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
+import { parseIfMatch } from "../../platform/http/if-match.js";
 import { CreateFeedback, CreateInterview, InterviewListQuery, UpdateInterview } from "./interviews.schemas.js";
 import { InterviewsService } from "./interviews.service.js";
 
@@ -40,17 +41,20 @@ export class InterviewsController {
     return this.svc.create(user, CreateInterview.parse(body));
   }
 
+  /** Optional If-Match: the rowVersion the client saw (412 when stale; no header: last write wins, IS-12). */
   @Patch(":id")
   @RequirePermission("interview:update")
-  update(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.svc.update(user, id, UpdateInterview.parse(body));
+  update(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
+    @Headers("if-match") ifMatch: string | undefined) {
+    return this.svc.update(user, id, UpdateInterview.parse(body), parseIfMatch(ifMatch));
   }
 
   /** IS-11: mark the round cleared and move its submission to selected (ready for a placement). */
   @Post(":id/clear-and-select")
   @RequirePermission("interview:update")
-  clearAndSelect(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
-    return this.svc.clearAndSelect(user, id);
+  clearAndSelect(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string,
+    @Headers("if-match") ifMatch: string | undefined) {
+    return this.svc.clearAndSelect(user, id, parseIfMatch(ifMatch));
   }
 
   /** IS-7: calendar file of a scheduled interview. */

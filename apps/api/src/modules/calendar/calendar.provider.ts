@@ -157,6 +157,10 @@ export class DevCalendarProvider implements CalendarProvider {
   readonly events = new Map<string, DevCalendarEvent>();
   /** When set, the next createEvent fails (tests). */
   failNext: Error | null = null;
+  /** When set, the next deleteEvent fails (tests). */
+  failNextDelete: Error | null = null;
+  /** When set, runs once inside the next createEvent, before it returns (tests: changes made while the provider is called). */
+  duringCreate: (() => Promise<void>) | null = null;
 
   authUrl(redirectUri: string, state: string): string {
     const u = new URL(redirectUri);
@@ -173,9 +177,13 @@ export class DevCalendarProvider implements CalendarProvider {
     if (this.failNext) { const e = this.failNext; this.failNext = null; throw e; }
     const id = `dev-${randomUUID()}`;
     this.events.set(id, { id, calendarId, ...ev });
+    const hook = this.duringCreate;
+    this.duringCreate = null;
+    if (hook) await hook();
     return id;
   }
   async deleteEvent(_token: string, _calendarId: string, eventId: string): Promise<void> {
+    if (this.failNextDelete) { const e = this.failNextDelete; this.failNextDelete = null; throw e; }
     this.events.delete(eventId);
   }
   /** The fake calendar's events that overlap the window, as intervals (never the summary or description). */

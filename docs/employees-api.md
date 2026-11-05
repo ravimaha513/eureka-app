@@ -41,8 +41,12 @@ advisory lock, assignment row, employee row.
   the candidate moves `placed → bench` (only if still `placed`); the employee goes to the bench (unless another assignment
   is open). `bgc_failed` is set only by the placement flow.
 - `PUT /api/v1/assignments/:id/planned-end-date` `{ plannedEndDate }` (`assignment:update`) → `{ id, plannedEndDate,
-  previousPlannedEndDate }`. Set, extend or bring forward the planned end of an open assignment (today or later, not before
-  the start); a change re-arms the ending-soon notice.
+  previousPlannedEndDate, rowVersion }`. Set, extend or bring forward the planned end of an open assignment (today or later, not before
+  the start); a change re-arms the ending-soon notice. Optional `If-Match: "<plannedEndDateVersion>"` (migration 0478,
+  audit B-03): stale → 412 `stale`, checked by `authz.set_assignment_end_date(uuid, date, integer)` under the assignment
+  lock after 404/403; without the header the last write wins as before. The worker's ending-soon mark does not move the
+  version. Employee detail `assignments[]` carry `plannedEndDateVersion` and `employmentVersion` (0 = nothing stored yet;
+  a first write needs no header).
 - `POST /api/v1/employees/:personId/exit` `{ exitDate, reason: "resigned"|"terminated"|"other" }` (`assignment:update`) →
   `{ id, status: "exited" }`. Only from `bench`; the date is not before the last assignment's end and not in the future.
 - `POST /api/v1/employees/:personId/return-to-market` `{}` (`assignment:update`) → `{ id, candidateStatus: "active" }`.
@@ -139,7 +143,9 @@ Endpoints (additions):
 - `GET /api/v1/employees/teams` (`assignment:update`, and `employee:read` at org) → `{ items: [{ id, name, lead: {id,name}, location }] }`.
 - `PATCH /api/v1/assignments/:id/employment` `{ payrollCompanyId?: uuid|null, everifyDate?: date|null, onboardedDate?: date|null,
   payRate?: number|null }` (at least one; `assignment:update`) → `{ id, changed: [field], payrollCompany, everifyDate,
-  onboardedDate, payRate? }`. A new company must be active. Audit `assignment.employment_updated` `{ fields, payrollCompanyId? }`.
+  onboardedDate, payRate?, rowVersion }`. A new company must be active. Audit `assignment.employment_updated` `{ fields, payrollCompanyId? }`.
+  Optional `If-Match: "<employmentVersion>"` (0478, B-03): stale → 412 `stale` (one version for the whole row, so HR's
+  date edit and Accounts' pay-rate edit see each other), checked by `authz.set_assignment_employment(uuid, jsonb, integer)`.
 - `POST /api/v1/employees/:id/assign-team` `{ teamId }` (`assignment:update`) → `{ id, candidateId, team: {id,name}, recruiter: null }`.
   Audit `employee.team_assigned` `{ candidateId, fromTeamId, toTeamId }`.
 - `GET /api/v1/reports/joinings-exits`: items add `isFirstAssignment` (assignment no. 1 vs a later one), `technology` (the
