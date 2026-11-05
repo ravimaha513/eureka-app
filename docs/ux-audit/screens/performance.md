@@ -1,5 +1,5 @@
 # Performance — `/performance`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `performance:read` (nav.ts:35) — recruiters (own), leads, managers, AD, CEO; `performance.target:manage` sets targets
 Source: `apps/web/src/performance/PerformancePage.tsx`
 Evidence: `performance-desktop-full.png`, `performance-mobile.png`, `performance-mobile-full.png`, `performance-drill-desktop.png` (new), `performance-drill-desktop-full.png` (new)
@@ -60,4 +60,20 @@ PerformancePage.tsx only, plus a shared PeriodPicker (small). No API change.
 | Design consistency | 5 | Period, status labels, ratio tiles (#5-#7) |
 
 ## Validation
-Visual inspection: CEO at 1440 and 390, drill-down opened. No page-level horizontal overflow at 390 (measured). Redesign validation: pending (not implemented).
+Visual inspection: CEO at 1440 and 390, drill-down opened. No page-level horizontal overflow at 390 (measured). Redesign validation: see wave 2 below.
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Drill-down off-screen (High) | Counts and "Show rows" open the rows in a wide drawer (880px, full width on phones). It takes focus and returns it on close. It shows the title ("Submissions: Priya Shah"), the period and the row count | `after/performance-drill-desktop.png`; unit test "drawer that takes focus" |
+| #2 Numbers not aligned | Count and ratio columns are `num`: right-aligned, tabular. Counts are plain underlined number links; zeros are muted | `after/performance-desktop.png` |
+| #3 Clipped at 1440 | Ratio heads shortened to "Sub → int", "Int → plc" and "Plc rate", with the formula in an `<abbr title>`. The table fits at 1440 without scrolling | `after/performance-desktop.png` |
+| #4 Zero rows first | Default order is most active first, and people with no activity always come last. Every column head sorts (aria-sort) | `after/performance-desktop.png`; unit test |
+| #5 Ratios undefined, uneven tiles | One "Conversion" tile holds the three ratios, with the formulas in a caption under the tiles. Tiles are a compact stat strip | `after/performance-desktop.png` |
+| #6 Period differs | Shared `PeriodPresets` (Last 7 / 30 / 90 days, the same as Dashboard), plus From/Through for custom ranges | `after/performance-desktop.png` |
+| #7 Raw status, repeated recruiter | Status shows as a chip via `pipelineLabel`. The Recruiter column is hidden when drilled to one person | `after/performance-drill-desktop.png` |
+| #8 "Active" with an end date | Section note: "On a project on any day of the period, including projects that ended in it" | `after/performance-desktop.png` |
+| #9 Empty targets table | One-line empty state, with "Set target" in the section head | `after/performance-desktop.png` |
+| #10 Phone table | Each person is a card: name + team, five counts as label over value (tappable), ratios below | `after/performance-mobile.png` |
+
+**Validation (wave 2):** checked the same way as the Dashboard (see its note): a Playwright run against fictional fixtures at 1440 and 390, light and dark. Page width at 390 is 390, and the "Teams and designations" actions sit inside the viewport at 1440. Unit tests pass, including two new ones: row order and sorting, and the drill drawer plus presets.

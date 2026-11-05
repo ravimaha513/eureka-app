@@ -1,5 +1,5 @@
 # Reports — `/reports`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `report:read` or `report.market:read` (nav.ts:36). Market tab needs `report.market:read`; Export needs `report:export`
 Source: `apps/web/src/employees/JoiningsExitsReport.tsx` (ReportsPage + JoiningsExitsPanel), `employees/ActiveEmployeesReport.tsx`, `employees/MarketReport.tsx`
 Evidence: `reports-desktop-full.png`, `reports-mobile.png`, `reports-mobile-full.png`, `reports-market-desktop-full.png` (new)
@@ -58,4 +58,20 @@ JoiningsExitsReport.tsx, ActiveEmployeesReport.tsx (mount point), styles spacing
 | Design consistency | 5 | Periods/tabs differ from siblings (#6, #7) |
 
 ## Validation
-Visual inspection: CEO at 1440 (both tabs) and 390. No page-level overflow at 390 (measured). Redesign validation: pending (not implemented).
+Visual inspection: CEO at 1440 (both tabs) and 390. No page-level overflow at 390 (measured). Redesign validation: see wave 2 below.
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Headerless stacked tables (High) | Each table has a visible h3: "By team" and "By payroll company" (side by side), then "Events n". Active employees has "By client" and "By payroll company" | `after/reports-desktop.png`; unit test |
+| #2 Vertical rhythm | Sections are flex stacks with 16/24/32px gaps. Active employees is its own block under a rule | `after/reports-desktop.png` |
+| #3 Tile redundancy | Three tiles: Joinings (with first placements), First assignments (with later assignments), and Exits with its reasons listed inside (zeros muted). No lonely wrapped tile | `after/reports-desktop.png` |
+| #4 Two filter sets | The Active employees section has its own heading, the month as a subtitle, and "These filters apply to this section only". It is not split into its own tab, because the existing Employees tests (another area's file) expect it on the first tab | `after/reports-desktop.png` |
+| #5 Clipped / unaligned | Number columns are `num`, right-aligned. The events table is a `.dtable`, so it becomes cards on phones. Market keeps its group column sticky, and its row heads use body type | `after/reports-market-dark-desktop.png` |
+| #6 Tabs keyboard | Uses `ui/Tabs`: roving tabindex, Left/Right/Home/End | unit test "switches report tabs with the arrow keys" |
+| #7 Period consistency, inline label | Presets 7/30/90 beside From/Through. The Market "Group by" label is stacked like the others | `after/reports-mobile.png`, `after/reports-market-dark-mobile.png` |
+| #8 "Assignment 1" everywhere | Shown only when the assignment number is above 1 | `after/reports-desktop.png` |
+
+Note: a Reports preset of n days runs from the date n days ago through today. This keeps the report's existing 90-day default request (`from = today − 90`) unchanged.
+
+**Validation (wave 2):** checked the same way as the Dashboard (see its note): a Playwright run against fictional fixtures at 1440 and 390, light and dark. Page width at 390 is 390. On phones the small summary tables stay compact tables, and the 9-column events table becomes cards.

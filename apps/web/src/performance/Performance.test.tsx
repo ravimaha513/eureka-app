@@ -136,6 +136,40 @@ describe("Performance", () => {
   });
 });
 
+describe("Performance layout (wave 2)", () => {
+  it("lists the most active first with zero-activity people last, and sorts by a column", async () => {
+    api.routes["GET /api/v1/performance/summary"] = () => ({ body: { ...SUMMARY, people: [
+      { user: { id: "u-lead", name: "Anil Lead", designation: "Team Lead", active: true }, team: null, counts: zero,
+        ratios: { submissionToInterview: null, interviewToPlacement: null, placement: null } },
+      ...SUMMARY.people.slice().reverse(),
+    ] } });
+    wrap(<PerformancePage me={meFor("manager")} />);
+    const table = await screen.findByRole("table", { name: "By person" });
+    const names = () => within(table).getAllByRole("row").slice(1).map((r) => r.querySelector("b")!.textContent);
+    expect(names()).toEqual(["Priya Shah", "Ravi Kumar", "Anil Lead"]);
+    fireEvent.click(within(table).getByRole("button", { name: /^Person/ }));
+    expect(names()).toEqual(["Priya Shah", "Ravi Kumar", "Anil Lead"]);
+    expect(within(table).getByRole("columnheader", { name: /^Person/ })).toHaveAttribute("aria-sort", "ascending");
+  });
+
+  it("opens the rows behind a count in a drawer that takes focus, and presets change the period", async () => {
+    wrap(<PerformancePage me={meFor("manager")} />);
+    expect(await screen.findByRole("button", { name: "Last 30 days" })).toHaveAttribute("aria-pressed", "true");
+    const table = await screen.findByRole("table", { name: "By person" });
+    fireEvent.click(within(table).getByRole("button", { name: "Submissions of Priya Shah: 3" }));
+    const drawer = await screen.findByRole("dialog", { name: "Submissions: Priya Shah" });
+    await waitFor(() => expect(drawer.contains(document.activeElement)).toBe(true));
+    expect(within(drawer).getByText("Under review")).toBeInTheDocument();
+    expect(within(drawer).queryByRole("columnheader", { name: "Recruiter" })).toBeNull();
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close rows" }));
+    const n = api.gets("/api/v1/performance/summary").length;
+    fireEvent.click(screen.getByRole("button", { name: "Last 7 days" }));
+    await waitFor(() => expect(api.gets("/api/v1/performance/summary").length).toBeGreaterThan(n));
+    const q = api.gets("/api/v1/performance/summary").at(-1)!.url.searchParams;
+    expect(Math.round((Date.parse(q.get("to")!) - Date.parse(q.get("from")!)) / 86_400_000)).toBe(7);
+  });
+});
+
 describe("period helpers", () => {
   it("finds the start of the week, month and quarter", () => {
     expect(periodStartOf("week", "2026-10-15")).toBe("2026-10-12");
