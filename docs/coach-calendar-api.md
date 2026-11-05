@@ -75,6 +75,8 @@ kept is the refresh token, AES-256-GCM under `CALENDAR_TOKEN_KEY`, in
 CC-7 and CC-8 are audited (`coach_calendar.google_connected`, `.google_disconnected`) with the
 provider only. Reads are not audited.
 
-**Setup:** add `<PUBLIC_BASE_URL>/api/v1/coach-calendar/google/callback` to the OAuth client's
+**Setup:** enable the Google Calendar API on the OAuth client's Google Cloud project (without it every
+read fails: coaches connect fine but show "Google events unavailable", and the API log has `events read
+failed: Error 403 accessNotConfigured`). Add `<PUBLIC_BASE_URL>/api/v1/coach-calendar/google/callback` to the OAuth client's
 authorised redirect URIs, and `calendar.events.readonly` to the consent screen. That scope is
 sensitive: an **Internal** consent screen needs no Google review, an External one does.

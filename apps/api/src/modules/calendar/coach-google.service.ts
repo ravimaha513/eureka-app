@@ -1,4 +1,4 @@
-import { ForbiddenException, HttpException, Inject, Injectable, UnprocessableEntityException } from "@nestjs/common";
+import { ForbiddenException, HttpException, Inject, Injectable, Logger, UnprocessableEntityException } from "@nestjs/common";
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
@@ -23,7 +23,7 @@ interface MeRow { can_connect: boolean; connected: boolean; account_email: strin
 
 /** A refused token means the coach must reconnect; anything else may pass by itself. Never forwards the provider's message. */
 const needsReconnect = (e: unknown) =>
-  /token request failed \((400|401)\)|events read failed \(401\)/.test(String((e as { message?: unknown })?.message ?? ""));
+  /token request failed \((400|401)\)|events read failed \((401|403 insufficientPermissions)/.test(String((e as { message?: unknown })?.message ?? ""));
 
 /**
  * Coaches' own Google Calendars on the coach grid (docs/coach-calendar-api.md CC-6..CC-8, migration
@@ -32,6 +32,7 @@ const needsReconnect = (e: unknown) =>
  */
 @Injectable()
 export class CoachGoogleService {
+  private readonly log = new Logger("CoachGoogle");
   private readonly readLimiter = new RateLimiter(READS_PER_MINUTE, 60_000);
   constructor(
     private readonly db: DbService, private readonly audit: AuditService, private readonly calendar: CalendarService,
@@ -122,6 +123,8 @@ export class CoachGoogleService {
         items = await this.provider.coachEvents(token, window.from, window.to);
       } catch (e) {
         status.set(k.coach_id, needsReconnect(e) ? "reconnect" : "unavailable");
+        // Status and Google's reason word only, never the response body.
+        this.log.warn(`events read failed: ${(e as Error)?.name ?? "Error"} ${/\(([^)]*)\)/.exec(String((e as Error)?.message))?.[1] ?? ""}`.trim());
         return;
       }
       status.set(k.coach_id, "connected");

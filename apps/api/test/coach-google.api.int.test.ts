@@ -270,6 +270,13 @@ describe("when Google fails", () => {
     expect(r.body).not.toContain("read failed");
   });
 
+  it("a Calendar API switched off is unavailable, and a missing permission asks for a reconnect", async () => {
+    provider().coachCalendars.set("tok-coach", new Error("calendar events read failed (403 accessNotConfigured)"));
+    expect((await google(U.ceo)).coaches).toContainEqual({ coachId: U.coach, status: "unavailable" });
+    provider().coachCalendars.set("tok-coach", new Error("calendar events read failed (403 insufficientPermissions)"));
+    expect((await google(U.ceo)).coaches).toContainEqual({ coachId: U.coach, status: "reconnect" });
+  });
+
   it("a token that no longer decrypts asks for a reconnect", async () => {
     await db.admin.query(`UPDATE eureka.coach_google_connection SET token_enc = 'AAAA' WHERE user_id = $1`, [U.coach]).catch(async () => {
       await db.admin.query(`ALTER TABLE eureka.coach_google_connection DISABLE TRIGGER USER; UPDATE eureka.coach_google_connection SET token_enc = 'AAAA'; ALTER TABLE eureka.coach_google_connection ENABLE TRIGGER USER`);
