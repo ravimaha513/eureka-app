@@ -29,8 +29,9 @@ test("candidate submits feedback via the public link, once; the recruiter sees i
   await expect(page.getByRole("complementary", { name: "Main navigation" })).toHaveCount(0); // no staff shell
 
   const send = page.getByRole("button", { name: "Send feedback" });
-  await expect(send).toBeDisabled(); // a rating is required
-  await page.getByRole("radio", { name: "4" }).check();
+  await send.click(); // a rating is required: the form says so and sends nothing
+  await expect(page.getByText("Choose how your interview went (1 to 5).")).toBeVisible();
+  await page.getByRole("radio", { name: "4 Good" }).check({ force: true });
   await page.getByRole("combobox", { name: "Interview format (optional)", exact: true }).selectOption("Video");
   await page.getByLabel("Duration in minutes (optional)").fill("45");
   await page.getByLabel("Topics covered (optional)").fill("Java, Spring Boot");

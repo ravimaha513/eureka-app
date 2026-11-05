@@ -1,5 +1,5 @@
 # Public interview feedback — `/feedback/<token>`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: anyone holding a 43-character emailed token (no session; PublicFeedback.tsx:13, :29). The form is answered by the **interviewee** (the consultant/candidate) about their client interview ("How was your interview?", "Questions you found difficult"), not by an interviewer.
 Source: apps/web/src/feedback/PublicFeedback.tsx, feedback/feedback.css; mounted outside the staff app in main.tsx:25, :33
 Evidence: feedback-public-{desktop,mobile}.png, feedback-public-{desktop,mobile}-full.png, feedback-public-focus-{desktop,mobile}.png, feedback-public-error-{desktop,mobile}.png, feedback-public-invalid-{desktop,mobile}.png. (The older public-feedback-*.png shows the staff login, not this form.)
@@ -66,3 +66,18 @@ PublicFeedback.tsx + feedback.css only. No API change (same fields, same POST).
 
 ## Validation
 Visual inspection: desktop 1440 + mobile 390 with a mocked invitation (see Limitation), keyboard Tab into the rating group, mocked submit failure, invalid-token state. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Submit errors at the top, focus not moved (High) | Submit errors now appear directly above "Send feedback" and take focus (`tabIndex=-1`). Load errors and a closed link still show at the top, where there is no form. | `after/feedback-public-error-mobile.png`, PublicFeedback.test.tsx "preserves answers on throttling…" |
+| #2 Disabled Send with no reason (Medium) | Send stays enabled. Without a rating it shows "Choose how your interview went (1 to 5)." under the scale, outlines the options and moves focus to the first one. Nothing is sent. | `after/feedback-public-norating-mobile.png` |
+| #3 Two axes on one scale (Medium) | There is one question ("How did your interview go?") and one axis. Every option is labelled: 1 Very poor · 2 Poor · 3 OK · 4 Good · 5 Very good. The submitted value is still 1–5. | `after/feedback-public-desktop.png` |
+| #4 Weak focus on rating options (Medium) | The whole option is the target (64px tall) and shows a 2px ink focus ring. The selected option fills with carbon ink. | feedback.css |
+| #5 Hard-coded colours, no dark mode, other brand (Medium) | feedback.css now uses only DESIGN.md tokens, and the page follows the saved or system theme (`useTheme`). It uses the shared BrandMark + condensed EUREKA wordmark. There is no shadow and the corners are 8px. | `after/feedback-public-desktop-dark.png`, `after/feedback-public-mobile-dark.png` |
+| #6 Six optional fields of equal weight (Medium) | The order is rating, "Anything you'd like your team to know?", then an "Interview details (optional)" section (format + duration side by side, topics, difficult questions, next steps). Every field stays visible. | `after/feedback-public-desktop.png` |
+| #7 Raw expiry with seconds, after the form (Low) | The expiry is formatted like the interview time and moved under the greeting: "Rating is the only required answer. This link accepts one response and expires …". | `after/feedback-public-desktop.png` |
+| #8 Small left-aligned submit (Low) | The submit is 44px. On phones it is full width. | `after/feedback-public-error-mobile.png` |
+| #9 Invalid link has no way forward (Low) | Not changed (needs recruiter data the token endpoint does not return). | — |
+
+Validation (wave 2): typecheck passes. `vitest run src/feedback` passes (6/6; the rating-required and focus-to-error cases are asserted). I rendered the page in the real app with `GET /api/public/feedback/<token>` mocked (fictional invitation) and POST mocked to 500 for the error state, at 1440 and 390, light and dark. Page width stays 390. `e2e/feedback.spec.ts` was updated for the enabled Send button and the "4 Good" label. It was not run, because it needs the live API.

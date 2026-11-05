@@ -19,8 +19,10 @@ test("applicant applies through the portal; HR moves the application and schedul
   const dlg = page.getByRole("dialog", { name: "Create job" });
   await dlg.getByLabel("Job title").fill(title);
   await dlg.getByRole("textbox", { name: "Description" }).fill("Answer questions from consultants.");
+  // New jobs start as Draft; publishing needs Open + Publish, and the submit names it.
+  await dlg.getByRole("combobox", { name: "Status", exact: true }).selectOption("open");
   await dlg.getByLabel(/Publish on the careers portal/).check();
-  await dlg.getByRole("button", { name: "Create job" }).click();
+  await dlg.getByRole("button", { name: "Create and publish" }).click();
   await expect(page.getByText("Job created.")).toBeVisible();
   await expect(page.getByRole("table", { name: "Jobs" }).locator("tbody tr").filter({ hasText: title })).toBeVisible();
 
@@ -38,9 +40,10 @@ test("applicant applies through the portal; HR moves the application and schedul
   const link = /(https?:\/\/[^\s]+\/portal\/verify#token=[^\s]+)/.exec(mail.items[0].text)![1]!;
   await ap.goto(new URL(link).pathname + new URL(link).hash);
   await ap.getByRole("button", { name: "Continue" }).click();
-  await expect(ap.getByRole("heading", { level: 1, name: "Finding Job" })).toBeVisible();
+  await expect(ap.getByRole("heading", { level: 1, name: /Open positions/ })).toBeVisible();
   const card = ap.getByRole("article", { name: title });
   await card.getByRole("button", { name: "Apply now" }).click();
+  await ap.getByRole("dialog", { name: `Apply for ${title}` }).getByRole("button", { name: "Send application" }).click();
   await expect(card.getByRole("button", { name: "Applied" })).toBeDisabled();
 
   // Staff routes refuse the applicant session.
@@ -50,7 +53,7 @@ test("applicant applies through the portal; HR moves the application and schedul
   await screen(page, "Applications");
   await page.getByRole("searchbox", { name: "Applicant" }).fill("Ela Applicant");
   const row = page.getByRole("table", { name: "Applications" }).locator("tbody tr").filter({ hasText: title });
-  await row.getByRole("button", { name: /^Open application of/ }).click();
+  await row.getByRole("link", { name: /^Open application of/ }).click();
   const drawer = page.getByRole("dialog", { name: new RegExp(title) });
   await drawer.getByRole("button", { name: "Change status…" }).click();
   const st = page.getByRole("dialog", { name: "Application status" });
@@ -59,9 +62,9 @@ test("applicant applies through the portal; HR moves the application and schedul
   await st.getByRole("button", { name: "Save status" }).click();
   await expect(drawer.getByRole("status")).toContainText("Status changed to Shortlisted");
   await drawer.getByRole("button", { name: "Schedule interview…" }).click();
-  const iv = page.getByRole("dialog", { name: "Create interview" });
+  const iv = page.getByRole("dialog", { name: "Schedule interview" });
   await iv.getByLabel("Meeting link (optional)").fill("https://meet.example.com/e2e");
-  await iv.getByRole("button", { name: "Create interview" }).click();
+  await iv.getByRole("button", { name: "Schedule interview" }).click();
   await expect(drawer.getByRole("status")).toContainText("Interview scheduled");
 
   // The applicant sees the status and the interview, nothing internal.

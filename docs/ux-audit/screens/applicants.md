@@ -1,5 +1,5 @@
 # Applicants — `/applicants`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `applicant:read` (HR) (nav.ts:24). Phones are unmasked only with `applicant.phone:read` (ApplicantsPage.tsx:12).
 Source: apps/web/src/jobs/ApplicantsPage.tsx, applicationsApi.ts
 Evidence: applicants-desktop.png, applicants-mobile.png, applicants-desktop-full.png, applicants-mobile-full.png
@@ -59,3 +59,15 @@ ApplicantsPage.tsx only (+ shared card CSS). No API change (`q` search on applic
 
 ## Validation
 Visual inspection: existing hr screenshots at desktop 1440 and mobile 390, plus measurements as hr (no overflow; smallest target the 32px pager on desktop). Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Dead end (Medium) | The name and the Applications count link to `/applications?q=<name>`. The applications search matches names, not emails, so the name is the key. People with no applications are not linked. | Applications.test.tsx "applicants list … links to the person's applications" |
+| #2 Columns off-screen at 390px (Medium) | Kit `dtable`: on phones each applicant is a card with the name (avatar), email (plus Unverified), phone, applications and signed-up date. | `after/applicants-mobile.png` |
+| #3 No result count, no `aria-busy` (Low) | The h1 shows a count box, the footer reads "n applicants on page x", and the table sets `aria-busy` while refetching. Search is kept in the URL (`?q=`). | `after/applicants-desktop.png` |
+| #4 Export errors look like success (Medium) | A failure shows as `.livemsg.error` with `role=alert`. | hiringUi.tsx `NoticeLine` |
+| #5 Full Yes/No verified column (Low) | The column is removed. Unverified accounts get a warn "Unverified" chip next to the email. | `after/applicants-desktop.png` |
+| #6 Raw E.164 phones (Low) | US/Canada numbers display as "+1 212 555 0123". Masked and other numbers are unchanged, and exports are untouched. | `after/applicants-desktop.png` |
+
+Validation (wave 2): typecheck passes. Unit tests pass. I checked on Vite with the API mocked at 1440 and 390, light and dark, with no horizontal overflow. There is a single search field, so there is no Filters sheet on phones, just a full-width search.

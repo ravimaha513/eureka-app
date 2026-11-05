@@ -5,17 +5,23 @@ import { JOB_KINDS, JOB_STATUSES, jobLabel } from "@eureka/shared";
 import { can, type Me } from "../api";
 import { Drawer, fmtDate } from "../sales/ui";
 import { Person } from "../shell/ui";
+import { useRoutedId, useSearchParams } from "../lib/router";
+import { FilterBar } from "../ui/FilterBar";
+import { RecordLink } from "../ui/RecordLink";
 import { JobDialog } from "./JobDialog";
 import { RichTextView } from "./RichText";
 import { jobError, jobKeys, jobsApi, type Job } from "./jobsApi";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
+import { ScreenLink, fromControl } from "./hiringUi";
 import "./jobs.css";
 import { Loading } from "../ui/Loading";
 
 const PAGE_SIZE = 50;
 
 export const JobStatus = ({ status }: { status: string }) => <span className={`badge job-${status}`}>{jobLabel(status)}</span>;
+/** Shown wherever a job is live for applicants (published internal opening). */
+export const PortalBadge = () => <span className="badge kind">On careers portal</span>;
 
 export function payText(j: Pick<Job, "pay" | "payHidden">): string {
   if (j.pay) {
@@ -28,23 +34,34 @@ export function payText(j: Pick<Job, "pay" | "payHidden">): string {
 export const employerName = (j: Pick<Job, "kind" | "client" | "company">) =>
   j.kind === "client_requirement" ? j.client?.name ?? "Client" : j.company?.name ?? "Internal opening";
 
+/** Applications to an internal opening open in Applications filtered to the job; client requirements count submissions. */
+const applicationsHref = (jobId: string) => `/applications?jobId=${encodeURIComponent(jobId)}`;
+
 /** Jobs (docs/jobs-portal-api.md): client requirements and internal openings with filters, create and edit. */
-export function JobsPage({ me }: { me: Pick<Me, "capabilities" | "id"> }) {
+export function JobsPage({ me, initialOpenId, onOpenChange }: {
+  me: Pick<Me, "capabilities" | "id">; initialOpenId?: string | null;
+  /** The open job changed (the shell keeps it in the URL as /jobs/<id>). */
+  onOpenChange?: (id: string | null) => void;
+}) {
   const id = useId();
   const qc = useQueryClient();
-  const [kind, setKind] = useState("");
-  const [status, setStatus] = useState("");
-  const [searchText, setSearchText] = useState("");
-  const [search, setSearch] = useState("");
+  // Filters live in the address bar (?kind=&status=&q=): refresh, back from a record and shared links keep them.
+  const [params, setParams] = useSearchParams(["kind", "status", "q"] as const);
+  const kind = (JOB_KINDS as readonly string[]).includes(params.kind) ? params.kind : "";
+  const status = (JOB_STATUSES as readonly string[]).includes(params.status) ? params.status : "";
+  const search = params.q;
+  const [searchText, setSearchText] = useState(search);
   const pager = useCursorPager();
   const { page, reset } = pager;
   const [editing, setEditing] = useState<Job | "new" | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useRoutedId(initialOpenId ?? null, onOpenChange);
   const [notice, setNotice] = useState("");
   useEffect(() => {
-    const t = setTimeout(() => { setSearch(searchText.trim()); reset(); }, 300);
+    if (searchText.trim() === search) return;
+    const t = setTimeout(() => { setParams({ q: searchText.trim() }); reset(); }, 300);
     return () => clearTimeout(t);
   }, [searchText]);
+  const setFilter = (patch: Partial<Record<"kind" | "status" | "q", string>>) => { setParams(patch); reset(); };
 
   const filters = { kind, status, search, cursor: pager.cursor ?? "", limit: PAGE_SIZE };
   const q = useQuery({ queryKey: [...jobKeys.all, "list", filters], queryFn: () => jobsApi.list(filters), placeholderData: keepPreviousData });
@@ -52,67 +69,80 @@ export function JobsPage({ me }: { me: Pick<Me, "capabilities" | "id"> }) {
   const canCreate = can(me, "job:manage");
   const hasFilters = Boolean(kind || status || search);
   const n = items.length;
+  const count = q.isLoading || q.error ? "" : `${n}${q.data?.nextCursor ? "+" : ""}`;
 
   return (
     <>
       <div className="pagehead">
-        <div style={{ flex: 1 }}>
-          <h1 tabIndex={-1}>Jobs</h1>
+        <div>
+          <h1 tabIndex={-1}>Jobs{count && <span className="h1count" aria-label={`, ${count} jobs`}>{count}</span>}</h1>
           <p className="sub">Client requirements your teams submit candidates to, and openings at our own companies.</p>
         </div>
-        {canCreate && <button type="button" className="btn primary" onClick={() => setEditing("new")}><Plus size={16} aria-hidden="true" /> Add job</button>}
+        {canCreate && <div className="pageactions"><button type="button" className="btn primary" onClick={() => setEditing("new")}><Plus size={16} aria-hidden="true" /> Add job</button></div>}
       </div>
 
-      <form className="filters" role="search" aria-label="Job filters" onSubmit={(e) => e.preventDefault()}>
-        <div className="chipfilter">
-          <span id={`${id}-k`} className="chiplabel">Type</span>
-          <div className="tabs wrap" role="group" aria-labelledby={`${id}-k`}>
-            <button type="button" className="tab" aria-pressed={kind === ""} onClick={() => { setKind(""); reset(); }}>All</button>
-            {JOB_KINDS.map((k) => <button key={k} type="button" className="tab" aria-pressed={kind === k} onClick={() => { setKind(kind === k ? "" : k); reset(); }}>{jobLabel(k)}</button>)}
-          </div>
-        </div>
-        <div className="chipfilter">
-          <span id={`${id}-s`} className="chiplabel">Status</span>
-          <div className="tabs wrap" role="group" aria-labelledby={`${id}-s`}>
-            <button type="button" className="tab" aria-pressed={status === ""} onClick={() => { setStatus(""); reset(); }}>All</button>
-            {JOB_STATUSES.map((s) => <button key={s} type="button" className="tab" aria-pressed={status === s} onClick={() => { setStatus(status === s ? "" : s); reset(); }}>{jobLabel(s)}</button>)}
-          </div>
-        </div>
-        <div className="toolbar">
-          <div className="field inline">
+      <FilterBar label="Job filters" hasFilters={hasFilters} activeCount={[kind, status].filter(Boolean).length}
+        onClear={() => { setSearchText(""); setFilter({ kind: "", status: "", q: "" }); }}
+        search={
+          <div className="field inline fb-search">
             <label htmlFor={`${id}-q`}>Job title</label>
-            <input id={`${id}-q`} type="search" value={searchText} maxLength={80} onChange={(e) => setSearchText(e.target.value)} />
+            <input id={`${id}-q`} type="search" placeholder="Search job title" value={searchText} maxLength={80} onChange={(e) => setSearchText(e.target.value)} />
           </div>
-          {hasFilters && <button type="button" className="btn" onClick={() => { setKind(""); setStatus(""); setSearchText(""); setSearch(""); reset(); }}>Clear filters</button>}
-        </div>
-      </form>
+        }
+        primary={
+          <>
+            <div className="field inline">
+              <label htmlFor={`${id}-kind`}>Type</label>
+              <select id={`${id}-kind`} value={kind} onChange={(e) => setFilter({ kind: e.target.value })}>
+                <option value="">Any type</option>
+                {JOB_KINDS.map((k) => <option key={k} value={k}>{jobLabel(k)}</option>)}
+              </select>
+            </div>
+            <div className="field inline fb-status">
+              <label htmlFor={`${id}-status`}>Status</label>
+              <select id={`${id}-status`} value={status} onChange={(e) => setFilter({ status: e.target.value })}>
+                <option value="">Any status</option>
+                {JOB_STATUSES.map((s) => <option key={s} value={s}>{jobLabel(s)}</option>)}
+              </select>
+            </div>
+          </>
+        }
+        summaryEnd={<p role="status" aria-live="polite" className="livemsg hiring-inline">{notice}</p>}
+      />
 
-      <p role="status" aria-live="polite" className="livemsg">{notice}</p>
-
-      <div className="card tablewrap">
+      <div className="card tablewrap listcard">
         {q.isLoading ? <Loading /> : q.error ? (
           <QueryError query={q} message={jobError(q.error)} />
         ) : (
-          <div className="tablewrap"><table aria-label="Jobs" aria-busy={q.isFetching || undefined}>
-            <thead><tr><th>Job title</th><th>Client / company</th><th>Hiring manager</th><th>Deadline</th><th>Applicants</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead>
+          <table className="dtable jobstable" aria-label="Jobs" aria-busy={q.isFetching || undefined}>
+            <thead><tr>
+              <th>Job title</th><th>Status</th><th>Client / company</th><th className="p2">Hiring manager</th><th>Deadline</th>
+              <th className="num">Applicants</th><th className="c-act"><span className="sr-only">Actions</span></th>
+            </tr></thead>
             <tbody>
               {items.map((j) => (
-                <tr key={j.id}>
-                  <td><b>{j.title}</b><span className="block muted">{jobLabel(j.kind)}{j.publishedToPortal ? " · on careers portal" : ""}</span></td>
-                  <td>{employerName(j)}</td>
-                  <td>{j.hiringManager ? <Person name={j.hiringManager.name}>{j.hiringManager.name}</Person> : <span className="muted">—</span>}</td>
-                  <td>{fmtDate(j.deadline)}</td>
-                  <td>{j.applicants}</td>
-                  <td><JobStatus status={j.status} /></td>
-                  <td className="rowactions">
-                    <button type="button" className="btn sm" onClick={() => setOpenId(j.id)} aria-label={`View job ${j.title}`}>View</button>
+                <tr key={j.id} className="rowopen" aria-current={openId === j.id || undefined} onClick={(e) => { if (!fromControl(e)) setOpenId(j.id); }}>
+                  <td className="c-primary">
+                    <RecordLink kind="job" id={j.id} onOpen={setOpenId} label={`View job ${j.title}`}><b>{j.title}</b></RecordLink>
+                    <small className="block muted">{jobLabel(j.kind)}</small>
+                  </td>
+                  <td className="c-badge"><span className="badges"><JobStatus status={j.status} />{j.publishedToPortal && <PortalBadge />}</span></td>
+                  <td data-label={j.kind === "client_requirement" ? "Client" : "Company"}>{employerName(j)}</td>
+                  <td className="p2" data-label="Hiring manager">{j.hiringManager ? <Person name={j.hiringManager.name}>{j.hiringManager.name}</Person> : <span className="muted">—</span>}</td>
+                  <td data-label="Deadline">{j.deadline ? fmtDate(j.deadline) : <span className="muted">—</span>}</td>
+                  <td className="num" data-label={j.kind === "client_requirement" ? "Submissions" : "Applicants"}>
+                    {j.kind === "internal_opening" && j.applicants > 0
+                      ? <ScreenLink href={applicationsHref(j.id)} label={`${j.applicants} ${j.applicants === 1 ? "application" : "applications"} for ${j.title}`}>{j.applicants}</ScreenLink>
+                      : j.applicants}
+                  </td>
+                  <td className="c-act">
                     {j.actions.edit && <button type="button" className="btn sm" onClick={() => setEditing(j)} aria-label={`Edit job ${j.title}`}>Edit</button>}
                   </td>
                 </tr>
               ))}
               {items.length === 0 && <tr><td colSpan={7} className="empty">{hasFilters ? "No jobs match these filters." : "No jobs yet."}</td></tr>}
             </tbody>
-          </table></div>
+          </table>
         )}
       </div>
       <div className="listfoot">
@@ -120,7 +150,7 @@ export function JobsPage({ me }: { me: Pick<Me, "capabilities" | "id"> }) {
         <Pager pager={pager} label="Job pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
       </div>
 
-      {openId && <JobDrawer id={openId} initial={items.find((j) => j.id === openId)} onClose={() => setOpenId(null)} onEdit={(j) => setEditing(j)} />}
+      {openId && <JobDrawer id={openId} initial={items.find((j) => j.id === openId)} suspended={editing !== null} onClose={() => setOpenId(null)} onEdit={(j) => setEditing(j)} />}
       {editing && (
         <JobDialog job={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} onSaved={(_id, created) => {
           setEditing(null);
@@ -150,18 +180,35 @@ export function JobFacts({ j }: { j: Job }) {
   );
 }
 
-function JobDrawer({ id, initial, onClose, onEdit }: { id: string; initial?: Job; onClose: () => void; onEdit: (j: Job) => void }) {
+/** What applicants see: only open, published internal openings are on the careers portal. */
+export function portalNote(j: Pick<Job, "kind" | "status" | "publishedToPortal">): string {
+  if (j.kind !== "internal_opening") return "Client requirement: never shown on the careers portal.";
+  if (!j.publishedToPortal) return "Not published: applicants cannot see this job.";
+  return j.status === "open" ? "Applicants can see and apply on the careers portal." : "Published, but hidden from applicants until the status is Open.";
+}
+
+function JobDrawer({ id, initial, suspended, onClose, onEdit }: { id: string; initial?: Job; suspended: boolean; onClose: () => void; onEdit: (j: Job) => void }) {
   const q = useQuery({ queryKey: jobKeys.detail(id), queryFn: () => jobsApi.get(id), placeholderData: initial });
   const j = q.data;
   return (
-    <Drawer title={j?.title ?? "Job"} onClose={onClose} wide closeLabel="Close job details">
+    <Drawer title={j?.title ?? "Job"} onClose={onClose} wide suspended={suspended} closeLabel="Close job details">
       {!j ? (q.isLoading ? <Loading /> : <p className="error" role="alert">{jobError(q.error)}</p>) : (
         <>
-          <p><JobStatus status={j.status} />{" "}{j.publishedToPortal && <span className="badge kind">On careers portal</span>}</p>
+          <div className="actionstrip">
+            <div className="as-status">
+              <JobStatus status={j.status} />{j.publishedToPortal && <PortalBadge />}
+              <span className="as-note">{portalNote(j)}</span>
+            </div>
+            <div className="as-actions">
+              {j.kind === "internal_opening" && j.applicants > 0 && (
+                <ScreenLink className="btn" href={applicationsHref(j.id)}>{j.applicants} {j.applicants === 1 ? "application" : "applications"}</ScreenLink>
+              )}
+              {j.actions.edit && <button type="button" className="btn primary" onClick={() => onEdit(j)}>Edit job</button>}
+            </div>
+          </div>
           <JobFacts j={j} />
           <section className="manageblock"><h3>Requirements</h3><RichTextView doc={j.requirements} /></section>
           <section className="manageblock"><h3>Description</h3><RichTextView doc={j.description} /></section>
-          {j.actions.edit && <div className="rowactions"><button type="button" className="btn" onClick={() => { onClose(); onEdit(j); }}>Edit job</button></div>}
         </>
       )}
     </Drawer>

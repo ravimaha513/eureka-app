@@ -1,5 +1,5 @@
 # Application detail — `/applications/<id>` (drawer)
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: same as Applications (nav.ts:23). Actions come from the server: `actions.transition[]`, `scheduleInterview`, `createCandidate`, per-interview `scorecard` / `setStatus`.
 Source: apps/web/src/jobs/ApplicationsPage.tsx:141-432 (ApplicationDrawer, StatusDialog, ScheduleDialog, CandidateDialog, ScorecardDialog, PeopleDialog, InterviewDialog); routed through `useRoutedId` (ApplicationsPage.tsx:49) and App.tsx:490
 Evidence: applications-detail-desktop.png, applications-detail-mobile.png, applications-detail-interviews-desktop.png, applications-detail-interviews-mobile.png, applications-status-dialog-desktop.png, applications-schedule-dialog-desktop.png, applications-schedule-dialog-mobile.png, applications-detail-hired-desktop.png
@@ -72,3 +72,20 @@ ApplicationsPage.tsx only for the drawer and dialogs; styles.css for `select[mul
 
 ## Validation
 Visual inspection: desktop 1440 + mobile 390 as hr on seeded application 199cb25b… (interview scheduled) and fd848f9a… (hired); Status and Create interview dialogs opened (not submitted, so no data changed). Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Opens on Job details (High) | The drawer title is now "Applicant · Job". It opens on **Overview**: applicant facts, the Interviews table and History together. "Job details" is the second tab. Tabs use the kit `Tabs` (roving tabindex, arrow keys). | `after/application-detail-desktop.png`, Applications.test.tsx "drawer opens on the applicant…" |
+| #2 Silent email, preselected status (High) | The Status select opens on "Choose a status…" with no preselection. Saving without a choice shows "Choose the new status." and sends nothing. An info note above Save reads "**This emails the applicant.** <name> (<email>) is told the new status, <status>, when you save." The dialog shows the current status and uses the dirty guard. | `after/application-status-desktop.png` |
+| #3 Review preselects 3/3/3/3 (High) | A new review starts unrated (an existing review loads its own scores). Save needs all four: "Rate all four areas (n left)." Each missing area is marked and focus moves to the first one. A scale hint reads "1 = poor · 3 = meets the bar · 5 = excellent". | `after/application-review-mobile.png`, Applications.test.tsx "scorecard…" |
+| #4 Ctrl-only panel multi-select (High) | The panel is a checkbox list (`PeoplePicker`, scrolls at 200px, at most 10, 44px rows on phones) in Schedule interview and in Lead and panel. The lead is left out of the panel list. | `after/application-schedule-desktop.png`, Applications.test.tsx "schedules with a checkbox panel picker…" |
+| #5 No previous/next (Medium) | A "Previous · n of N · Next" stepper moves through the applications on the current list page, and the URL follows. | `after/application-detail-desktop.png` |
+| #6 Hand-rolled tabs (Medium) | Replaced by the kit `Tabs`. | — |
+| #7 Mark cancelled / no show run at once (Medium) | Both now ask first in an inline confirm ("Cancel this interview? The applicant sees it as cancelled.") with Keep as is / Mark …. "Mark completed" still runs at once. | ApplicationsPage.tsx `InterviewDialog` |
+| #8 Three steps for common moves (Medium) | Not reduced. A separate button per transition would preselect a status, which #2 rules out. "Change status…" is the primary action in the action strip. | — |
+| #9 Decisions are small buttons (Medium) | Kit action strip: status chip, a note ("Applied … · Overall rating … · company"), then full-height buttons. The one primary is Change status, or Create candidate when that is allowed. On phones the buttons are 44px and the primary takes its own row. | `after/application-detail-mobile.png` |
+| #10 Odd default slot; label mismatch (Low) | The default slot is tomorrow at 10:00 local time, with the hint "Your local time." The trigger, title and submit all read "Schedule interview". The dialog says the applicant is emailed. | `after/application-schedule-desktop.png` |
+| #11 History hidden under the job (Low) | History is on Overview, below interviews. | `after/application-detail-desktop.png` |
+
+Validation (wave 2): typecheck passes. Unit tests pass (21/21). I checked on Vite with the API mocked (fictional fixtures; no dialog submitted against real data) at 1440 and 390, light and dark. Page width stays 390 at 390. The interview row actions (Review, Details) are visible at 1440. On phones each interview is a card.

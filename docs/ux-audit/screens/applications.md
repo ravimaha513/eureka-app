@@ -1,5 +1,5 @@
 # Applications — `/applications`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `application:read` (HR, all), `job:read` (hiring managers: their jobs), `interview:read` (interviewers: those they review) (nav.ts:23). Export needs `application:read` (ApplicationsPage.tsx:63). The record view is audited separately in `application-detail.md`.
 Source: apps/web/src/jobs/ApplicationsPage.tsx:35-139, applicationsApi.ts, jobs.css; ui/Pager.tsx, sales/ui.tsx
 Evidence: applications-desktop.png (ceo, empty), applications-mobile.png, applications-hr-desktop.png, applications-hr-mobile.png
@@ -64,3 +64,18 @@ ApplicationsPage.tsx (columns, linkbtn, default filter), styles.css (card mode, 
 
 ## Validation
 Visual inspection: desktop 1440 and mobile 390 as ceo (empty) and hr (3 seeded applications). No page-level horizontal overflow; smallest targets 30px (desktop), 34px (mobile). Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Status and Open off-screen at 390px (High) | Kit `dtable`: on phones each application is a card with the applicant (name + email) as the title, the status chip top right, then job + company, applied date and rating. The applicant name is a real link, and tapping the row opens the record. | `after/applications-mobile.png` |
+| #2 Job title first, repeated (Medium) | Column order is Applicant · Status · Job (company below) · Applied · Rating. | `after/applications-desktop.png` |
+| #3 Only target is the Open button (Medium) | The applicant name is a `RecordLink` to `/applications/<id>` and the whole row opens the drawer. The Open button is gone. | Applications.test.tsx "lists applicant first…" |
+| #4 Eight status chips wrap to three rows (Medium) | Status is one select in the kit `FilterBar`, and the Job select sits next to it. On phones there is search plus a "Filters" sheet. Counts per status would need an API change (not built). | `after/applications-desktop.png` |
+| #5 Default should be the actionable set (Medium) | Not changed: `status` takes a single value, so an "Active" default needs an API change. Statuses are listed in workflow order. | (deferred) |
+| #6 Export errors look like success (Medium) | A success is announced in the polite live region. A failure shows as `.livemsg.error` with `role=alert`. | hiringUi.tsx `NoticeLine` |
+| #7 Empty rating column (Low) | The Rating column appears only when a row on the page has a rating. | `after/applications-desktop.png` |
+| #8 Job filter appears and disappears (Low) | The Job filter still needs `job:read`. A `jobId` that arrives from a link (Jobs → applicants count) but is not in the picker shows as a removable "Job: …" chip. | ApplicationsPage.tsx |
+| #9 Empty state reads as "none exist" (Low) | The empty state now says: "You see applications to the jobs you manage, or that you interview for." | ApplicationsPage.tsx |
+
+Validation (wave 2): typecheck passes. Unit tests pass (`vitest run src/jobs` 21/21). The shared API was down, so I checked the screen on Vite :5206 with the API mocked (fictional fixtures) at 1440 and 390, light and dark. Page width stays 1440 / 390 with no overflow. Filters (`?status=&jobId=&q=`) are kept in the URL.
