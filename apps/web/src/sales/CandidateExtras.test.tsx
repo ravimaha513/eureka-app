@@ -5,6 +5,7 @@ import { capabilities, type Role } from "@eureka/shared";
 import { setCsrf, type Me } from "../api";
 import { CandidateProfile } from "./CandidateProfile";
 import { CandidatesPage } from "./CandidatesPage";
+import { pickOption } from "../ui/testHelpers";
 
 // Batches, timeline and the duplicate check (API: apps/api/src/modules/candidates, migration 0026).
 
@@ -90,11 +91,25 @@ async function openCreate(me: Me = LEAD, onOpenProfile = vi.fn()) {
 describe("Candidates list: batches", () => {
   it("filters the list by batch and resets to page 1", async () => {
     wrap(<CandidatesPage me={RECRUITER} />);
-    const sel = await screen.findByLabelText("Batch");
-    await within(sel).findByRole("option", { name: "Java · Dallas · Nov 2026" });
-    fireEvent.change(sel, { target: { value: B1 } });
+    await screen.findByRole("combobox", { name: "Batch" });
+    await pickOption("Batch", "Java · Dallas · Nov 2026");
     await waitFor(() => expect(lastGet("/api/v1/candidates").url.searchParams.get("batchId")).toBe(B1));
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(lastGet("/api/v1/candidates").url.searchParams.get("batchId")).toBeNull());
+  });
+
+  it("shows active filters as chips and offers to drop one filter when nothing matches", async () => {
+    routes["GET /api/v1/candidates"] = () => ({ body: { items: [], nextCursor: null } });
+    wrap(<CandidatesPage me={RECRUITER} />);
+    await pickOption("Batch", "Java · Dallas · Nov 2026");
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "on_hold" } });
+    const chips = screen.getByRole("list", { name: "Active filters" });
+    expect(within(chips).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["StatusOn hold", "BatchJava · Dallas · Nov 2026"]);
+    const relax = await screen.findByRole("list", { name: "Remove one filter" });
+    fireEvent.click(within(relax).getByRole("button", { name: "Remove Status: On hold" }));
+    await waitFor(() => expect(lastGet("/api/v1/candidates").url.searchParams.get("status")).toBeNull());
+    expect(lastGet("/api/v1/candidates").url.searchParams.get("batchId")).toBe(B1);
+    fireEvent.click(within(screen.getByRole("list", { name: "Active filters" })).getByRole("button", { name: "Remove Batch filter" }));
     await waitFor(() => expect(lastGet("/api/v1/candidates").url.searchParams.get("batchId")).toBeNull());
   });
 

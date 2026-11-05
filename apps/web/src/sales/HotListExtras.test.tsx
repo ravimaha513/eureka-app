@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { capabilities, type Role } from "@eureka/shared";
 import { setCsrf, type Me } from "../api";
 import { HotListPage } from "./HotListPage";
+import { openMoreFilters, pickOption, pickSegment } from "../ui/testHelpers";
 
 // ---- fixtures (shapes from apps/api/src/modules/hotlist) ---------------------------------------
 
@@ -292,16 +293,15 @@ describe("Hot List sheet filters, sort and columns", () => {
   it("filters by priority, team, recruiter, in person and guest house, and sorts; the sort is not a filter", async () => {
     wrap(<HotListPage me={meFor("recruiter")} />);
     await rowOf("Asha Iyer");
-    const team = screen.getByLabelText("Team");
-    await within(team).findByRole("option", { name: "Team Rohit (Rohit Rao)" });
     fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "priority" } });
     await waitFor(() => expect(lastCall("GET", "/api/v1/hotlist")!.url.searchParams.get("sort")).toBe("priority"));
     expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Priority"), { target: { value: "P1" } });
-    fireEvent.change(team, { target: { value: "t1" } });
-    fireEvent.change(screen.getByLabelText("Recruiter"), { target: { value: "r1" } });
-    fireEvent.change(screen.getByLabelText("In person"), { target: { value: "yes" } });
-    fireEvent.change(screen.getByLabelText("Guest house"), { target: { value: "gh1" } });
+    openMoreFilters();
+    pickSegment("Priority", "P1");
+    await pickOption("Team", "Team Rohit (Rohit Rao)");
+    await pickOption("Recruiter", "Sanjana");
+    pickSegment("In person", "Yes");
+    await pickOption("Guest house", "Dallas GH");
     await waitFor(() => {
       const p = lastCall("GET", "/api/v1/hotlist")!.url.searchParams;
       expect(Object.fromEntries(["priority", "teamId", "recruiterId", "inPerson", "ghLocationId", "sort"].map((k) => [k, p.get(k)])))

@@ -5,7 +5,7 @@ import { navigate } from "../lib/router";
 import { screenPath } from "../nav";
 import { CreateCandidateDialog } from "./CreateCandidateDialog";
 import { CandidateName, type ListPageProps } from "./HotListPage";
-import { ListFilters, ListFooter } from "./ListControls";
+import { ListFilters, ListFooter, NoMatches } from "./ListControls";
 import { STATUSES, salesApi, salesKeys } from "./salesApi";
 import { OpenToAllBadge, SharedBadge, Phone, Priority, StatusBadge } from "./ui";
 import { useCandidateList } from "./useCandidateList";
@@ -60,7 +60,7 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
                   <td>{c.technicalRating ? `${c.technicalRating}/5` : "—"}</td>
                 </tr>
               ))}
-              {items.length === 0 && <tr><td colSpan={9} className="empty">{s.hasFilters ? "No candidates match these filters." : "No candidates in your scope yet."}</td></tr>}
+              {items.length === 0 && <tr><td colSpan={9} className="empty">{s.hasFilters ? <NoMatches s={s} batches={batches.data?.items ?? []} /> : "No candidates in your scope yet."}</td></tr>}
             </tbody>
           </table>
         )}

@@ -1084,3 +1084,65 @@ tr.editing:hover td { background: var(--surface2); }
 .doceditgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 12px; }
 .doceditgrid .field input, .doceditgrid .field select { min-width: 0; width: 100%; }
 @media (max-width: 640px) { .doceditgrid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Candidate list filters (sales/ListControls): main row, "More filters" panel (bottom sheet on phones), chips, combobox, segmented. */
+.filterbar { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 12px; }
+.lf-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.lf-row .grow { flex: 1 1 220px; }
+.lf-row .grow input { min-width: 0; width: 100%; }
+.filterbar .field select { height: 40px; }
+.morefilters { height: 40px; }
+.morefilters.on { background: var(--pri-50); border-color: var(--pri-200); color: var(--pri-700); }
+.morefilters .count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--pri-btn); color: #fff; font-size: 11px; line-height: 18px; }
+.filterpanel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 14px 16px; box-shadow: var(--shadow-sm); }
+.filterpanel[hidden] { display: none; }
+.filtergrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px 16px; align-items: end; }
+.filtergrid .field select, .filtergrid .field input { min-width: 0; width: 100%; }
+.sheethead, .sheetfoot, .sheetscrim { display: none; }
+.activefilters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.filterchips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.fchip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 12px; border: 1px solid var(--pri-200); border-radius: 999px; background: var(--pri-50); color: var(--text); font-size: 13px; }
+.fchip .k { color: var(--muted); }
+.fchip b { font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fchip button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 999px; background: none; color: var(--muted); padding: 0; }
+.fchip button:hover { background: var(--pri-100); color: var(--bad-fg); }
+.fchip button:focus-visible { outline: 2px solid var(--pri); outline-offset: 1px; }
+.updating { font-size: 12px; }
+/* Combobox (ui/Combobox) */
+.combo { position: relative; }
+.combo input { width: 100%; padding-right: 34px; box-sizing: border-box; }
+.combo .combo-caret { position: absolute; right: 11px; top: 12px; color: var(--muted); pointer-events: none; }
+.combo .combo-clear { position: absolute; right: 6px; top: 8px; width: 24px; height: 24px; border: 0; border-radius: 999px; background: none; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+.combo .combo-clear:hover { background: var(--hover); color: var(--text); }
+.combo.hasvalue input { border-color: var(--pri-200); background: var(--pri-50); }
+.combo-list { position: absolute; z-index: 40; left: 0; right: 0; top: calc(100% + 4px); min-width: 220px; max-height: 280px; overflow-y: auto; margin: 0; padding: 4px; list-style: none; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-lg); }
+.combo-list li { padding: 8px 10px; border-radius: 8px; font-size: 13.5px; color: var(--text); cursor: pointer; }
+.combo-list li.any { color: var(--muted); }
+.combo-list li.active { background: var(--pri-50); }
+.combo-list li[aria-selected="true"] { font-weight: 600; color: var(--pri-700); }
+.combo-list li mark { background: none; color: var(--pri); font-weight: 700; }
+.combo-list .combo-empty { color: var(--muted); cursor: default; }
+/* Segmented (ui/Segmented) */
+.field .label { font-weight: 600; color: var(--text2); font-size: 13px; }
+.seg { display: flex; height: 40px; box-sizing: border-box; padding: 3px; gap: 3px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface2); }
+.seg label { position: relative; flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; border-radius: 7px; font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.seg label.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); font-weight: 600; }
+.field .seg input { position: absolute; inset: 0; opacity: 0; margin: 0; height: auto; min-width: 0; cursor: pointer; }
+.seg label:has(input:focus-visible) { outline: 2px solid var(--pri); outline-offset: 1px; }
+/* No matches: drop one filter */
+.nomatch { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 18px 8px; }
+.nomatch p { margin: 0; }
+.nomatch ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+@media (max-width: 768px) {
+  .lf-row > .field, .lf-row > .btn { flex: 1 1 calc(50% - 6px); min-width: 0; }
+  .lf-row > .field.grow { flex-basis: 100%; }
+  .lf-row .field select, .lf-row .field input { min-width: 0; width: 100%; }
+  .filterpanel:not([hidden]) { position: fixed; z-index: 60; left: 0; right: 0; bottom: 0; max-height: 85vh; display: flex; flex-direction: column; border-radius: 18px 18px 0 0; padding: 0; box-shadow: var(--shadow-lg); }
+  .filterpanel .sheethead { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 8px; }
+  .filterpanel .sheethead h2 { margin: 0; font-size: 17px; }
+  .filterpanel .filtergrid { grid-template-columns: minmax(0, 1fr); padding: 4px 16px 16px; overflow-y: auto; }
+  .filterpanel .sheetfoot { display: flex; gap: 10px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+  .filterpanel .sheetfoot .primary { flex: 1; height: 46px; }
+  .filterpanel .sheetfoot .btn:first-child { height: 46px; }
+  .sheetscrim { display: block; position: fixed; inset: 0; z-index: 59; background: var(--scrim); }
+}
