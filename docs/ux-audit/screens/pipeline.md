@@ -1,5 +1,5 @@
 # Candidate Pipeline — `/pipeline`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `report:read` (nav.ts:40). The API also checks `candidate:read`. Leads, managers, CEO, location ops.
 Source: `apps/web/src/pipelinereport/PipelineReportPage.tsx`, `pipelinereport/AssessmentsSection.tsx` (rendered in the submission drawer, `SubmissionsPage.tsx:286`), `pipelinereport/pipelineReportApi.ts`; routing `App.tsx:493`
 Evidence: `pipeline-desktop.png`, `pipeline-desktop-full.png`, `pipeline-mobile.png`, `pipeline-mobile-full.png`, `submissions-drawer-desktop.png` (Assessments section)
@@ -64,3 +64,19 @@ The report becomes actionable instead of read-only. It behaves the same way as t
 
 ## Validation
 Visual inspection: existing desktop and mobile screenshots plus the submission drawer (Assessments). Control count, checkbox size and table width measured at 1440 and 390. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 candidate names dead (High) | Candidate name is a RecordLink to the profile (works without the App prop; `onOpenCandidate` still honoured) | `after/pipeline-desktop.png` |
+| #2 funnel looks clickable (Medium) | Stages-reached figures are a plain strip (they count stages reached; the Stage filter is the current stage, so clicking would mislead). The one tile that does filter, `Not responding`, is a toggle button | PipelineVendors.test |
+| #3 zero-heavy columns (Medium) | One Activity column (`2 submissions · 1 interview (1 cleared)` + last activity), muted sentence when nothing yet; days-in-stage needs an API field (not invented) | — |
+| #4 raw lowercase placement (Low) | `pipelineLabel` | — |
+| #5 filters not in URL (Medium) | All filters + page offset in the URL; period is two optional dates (both empty = all time) | — |
+| #6 phone overflow (High) | Cards; funnel one scroll row; filters in the sheet | `pipeline-mobile.png` |
+| #7 13px checkboxes (Low) | Checkboxes removed (dates and the Not-responding toggle) | — |
+| #8 Assessments block (Medium) | Inline button, completion-date error text, own status chip colours | — |
+| #9 odd pager (Low) | Kit `.pager` look with Previous / range / Next | — |
+
+**Validation (wave 2):** `pnpm --filter @eureka/web typecheck` clean; `vitest run src/pipeline src/interviews src/pipelinereport` 103/103 (tests updated only where markup intentionally changed: status selects instead of chip groups, row menus, the shared scheduling form, `More filters` disclosure). The shared API on :3000 was down during this wave (no Postgres or Docker in the session), so the after-shots were taken against the branch's Vite build with Playwright route fixtures shaped like the API (fictional data, read-only). Checked at 1440x900 and 390x844 in light and dark: `document.documentElement.scrollWidth` = 390 on phones, row actions inside the viewport at 1440 (`td.c-act` right edge 1411). E2E specs not run (they create records and need the live API).
+After: `../screenshots/after/pipeline-{desktop,mobile}.png`, `pipeline-dark-{desktop,mobile}.png`

@@ -42,8 +42,7 @@ describe("Submissions list", () => {
     expect(lastList().get("to")).toBeNull();
     expect(screen.getByLabelText("Submitted from")).toHaveValue("2026-01-05");
 
-    const chips = screen.getByRole("group", { name: "Status" });
-    fireEvent.click(within(chips).getByRole("button", { name: "Rejected" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), { target: { value: "rejected" } });
     await waitFor(() => expect(new URLSearchParams(window.location.search).get("status")).toBe("rejected"));
     expect(window.location.pathname).toBe("/submissions");
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
@@ -73,9 +72,9 @@ describe("Submissions list", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() => expect(lastList().get("cursor")).toBe("123.abc"));
 
-    const chips = screen.getByRole("group", { name: "Status" });
-    fireEvent.click(within(chips).getByRole("button", { name: "Interview scheduled" }));
-    expect(within(chips).getByRole("button", { name: "Interview scheduled" })).toHaveAttribute("aria-pressed", "true");
+    const statusSelect = screen.getByRole("combobox", { name: "Status" });
+    fireEvent.change(statusSelect, { target: { value: "interview_scheduled" } });
+    expect(statusSelect).toHaveValue("interview_scheduled");
     await waitFor(() => expect(lastList().get("status")).toBe("interview_scheduled"));
     expect(lastList().get("cursor")).toBeNull();
 
@@ -106,6 +105,7 @@ describe("Submissions list", () => {
     fireEvent.change(screen.getByLabelText("Candidate"), { target: { value: " asha " } });
     await waitFor(() => expect(lastList().get("candidate")).toBe("asha"));
     expect(api.gets("/api/v1/submissions/summary").at(-1)!.url.searchParams.get("candidate")).toBe("asha");
+    fireEvent.click(screen.getByRole("button", { name: /^More filters/ }));
     await screen.findByRole("option", { name: "Java · Dallas · Nov 2026" });
     fireEvent.change(screen.getByRole("combobox", { name: /^Batch$/ }), { target: { value: "b1" } });
     await waitFor(() => expect(lastList().get("batchId")).toBe("b1"));
@@ -242,8 +242,9 @@ describe("Submission detail", () => {
     await waitFor(() => expect(api.writes()[0]!.body).toEqual({ to: "withdrawn" }));
   });
 
-  it("schedules an interview with a coach from the lookups and maps a conflict", async () => {
+  it("schedules an interview with an active coach and maps a conflict", async () => {
     let n = 0;
+    api.routes["GET /api/v1/interviews/coaches"] = () => ({ body: { items: [{ id: COACH, name: "Coach One" }] } });
     api.routes["POST /api/v1/interviews"] = () => (++n === 1 ? problem(409, { detail: "interview_conflict" }) : { status: 201, body: { id: "i1" } });
     wrap(<SubmissionsPage me={RECRUITER} />);
     const drawer = await openDrawer("Asha Iyer");
@@ -258,8 +259,8 @@ describe("Submission detail", () => {
 
     fireEvent.change(within(dlg).getByLabelText("Other date"), { target: { value: "2031-10-01" } });
     fireEvent.change(within(dlg).getByLabelText("Start time"), { target: { value: "11:00" } });
-    fireEvent.click(within(dlg).getByRole("button", { name: "45 min" }));
-    expect(within(dlg).getByRole("button", { name: "45 min" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.change(within(dlg).getByRole("combobox", { name: "Duration" }), { target: { value: "45" } });
+    expect(within(dlg).getByRole("combobox", { name: "Duration" })).toHaveValue("45");
     expect(within(dlg).getByText(/October 1/)).toBeInTheDocument();
     fireEvent.change(within(dlg).getByLabelText("Coach (optional)"), { target: { value: COACH } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Schedule" }));
@@ -496,8 +497,8 @@ describe("Edit submission details (lead and above)", () => {
     };
     wrap(<SubmissionsPage me={LEAD} />);
     const drawer = await openDrawer("Asha Iyer");
-    // Status moves stay under Next steps; the edit lives with the details.
-    expect(within(drawer).getByRole("heading", { name: "Next steps" })).toBeInTheDocument();
+    // Status moves sit in the action strip at the top; the edit lives with the details.
+    expect(within(drawer).getByRole("group", { name: "Change status" })).toBeInTheDocument();
     fireEvent.click(within(drawer).getByRole("button", { name: "Edit details" }));
     const dlg = await screen.findByRole("dialog", { name: "Edit submission details" });
     expect(within(dlg).queryByLabelText("Rate per hour")).not.toBeInTheDocument();

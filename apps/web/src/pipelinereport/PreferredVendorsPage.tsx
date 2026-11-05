@@ -3,6 +3,12 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { useLookups } from "../lookups";
 import { Field } from "../sales/ui";
+import { useSearchParams } from "../lib/router";
+import { FilterBar } from "../ui/FilterBar";
+import { Menu } from "../ui/Menu";
+import { useDebouncedParam } from "../pipeline/ui";
+import "../pipeline/pipeline.css";
+import "./pipelinereport.css";
 import { pvApi, pvError, pvKeys, type PreferredVendor, type PreferredVendorInput } from "./pipelineReportApi";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
@@ -10,73 +16,97 @@ import { Loading } from "../ui/Loading";
 /**
  * Preferred vendors (PV-9..PV-12): recruiters keep the vendors they prefer; only
  * they and their superiors (lead, manager, associate director, CEO) see them.
+ * Search (debounced), recruiter and the Active / Archived list are in the URL.
  */
 export function PreferredVendorsPage() {
   const id = useId();
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
-  const [ownerId, setOwnerId] = useState("");
-  const [archived, setArchived] = useState(false);
+  const [searchInput, setSearchInput, search] = useDebouncedParam("q");
+  const [url, setUrl] = useSearchParams(["ownerId", "archived"] as const);
+  const ownerId = url.ownerId;
+  const archived = url.archived === "true";
   const [modal, setModal] = useState<{ kind: "edit"; vendor: PreferredVendor | null } | { kind: "archive"; vendor: PreferredVendor } | null>(null);
   const [message, setMessage] = useState("");
-  const f = { q: search.trim() || undefined, ownerId: ownerId || undefined, archived: archived || undefined };
-  const q = useQuery({ queryKey: pvKeys.vendorList({ q: search.trim(), ownerId, archived }), queryFn: () => pvApi.vendors(f), placeholderData: keepPreviousData });
+  const f = { q: search || undefined, ownerId: ownerId || undefined, archived: archived || undefined };
+  const q = useQuery({ queryKey: pvKeys.vendorList({ q: search, ownerId, archived }), queryFn: () => pvApi.vendors(f), placeholderData: keepPreviousData });
   const d = q.data;
   const refresh = () => void qc.invalidateQueries({ queryKey: pvKeys.vendors });
+  const canAdd = Boolean(d?.actions.create);
+  const hasFilters = Boolean(search || ownerId);
+  const add = () => setModal({ kind: "edit", vendor: null });
 
   return (
-    <>
+    <section className="panel pr-page">
       <div className="pagehead">
         <div>
-          <h1 tabIndex={-1}>Preferred vendors</h1>
+          <h1 tabIndex={-1}>Preferred vendors{d && <span className="h1count" aria-hidden="true">{d.total}</span>}</h1>
           <p className="sub">Vendors recruiters prefer to work with. Each entry is visible only to the recruiter who added it and their superiors.</p>
         </div>
-        {d?.actions.create && <button type="button" className="btn primary" onClick={() => setModal({ kind: "edit", vendor: null })}>Add vendor</button>}
+        {canAdd && <div className="rowactions push"><button type="button" className="btn primary" onClick={add}>Add vendor</button></div>}
       </div>
 
-      <form className="filters" aria-label="Vendor filters" onSubmit={(e) => e.preventDefault()}>
-        <div className="toolbar">
-          <div className="field inline">
+      <FilterBar label="Vendor filters" hasFilters={hasFilters} onClear={() => { setSearchInput(""); setUrl({ ownerId: "" }); }}
+        activeCount={[search, ownerId].filter(Boolean).length} moreCount={0}
+        search={
+          <div className="field inline fb-search">
             <label htmlFor={`${id}-q`}>Search</label>
-            <input id={`${id}-q`} type="search" value={search} maxLength={100} placeholder="Vendor, contact or client" onChange={(e) => setSearch(e.target.value)} />
+            <input id={`${id}-q`} type="search" value={searchInput} maxLength={100} placeholder="Vendor, contact or client" onChange={(e) => setSearchInput(e.target.value)} />
           </div>
-          {(d?.owners.length ?? 0) > 1 && (
+        }
+        primary={
+          (d?.owners.length ?? 0) > 1 ? (
             <div className="field inline">
               <label htmlFor={`${id}-owner`}>Recruiter</label>
-              <select id={`${id}-owner`} value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+              <select id={`${id}-owner`} value={ownerId} onChange={(e) => setUrl({ ownerId: e.target.value })}>
                 <option value="">All</option>
                 {d!.owners.map((o) => <option key={o.id} value={o.id}>{o.name ?? "Unnamed"}</option>)}
               </select>
             </div>
-          )}
-          <label className="check"><input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> Archived</label>
-        </div>
-      </form>
+          ) : null
+        }
+        summaryEnd={
+          <div className="pr-seg" role="group" aria-label="Which vendors">
+            <button type="button" aria-pressed={!archived} onClick={() => setUrl({ archived: "" })}>Active</button>
+            <button type="button" aria-pressed={archived} onClick={() => setUrl({ archived: "true" })}>Archived</button>
+          </div>
+        }
+      />
 
       <p role="status" aria-live="polite" className="livemsg">{message}</p>
       {q.isLoading ? <Loading /> : q.error ? (
         <QueryError query={q} message={pvError(q.error)} />
       ) : d ? (
-        <div className="card tablewrap" aria-busy={q.isFetching || undefined}>
-          <table aria-label="Preferred vendors">
-            <thead><tr><th>Vendor</th><th>Contact</th><th>Technology</th><th>Clients</th><th>Added by</th><th><span className="sr-only">Actions</span></th></tr></thead>
+        <div className="card tablewrap listcard" aria-busy={q.isFetching || undefined}>
+          <table className="dtable pv-table" aria-label="Preferred vendors">
+            <thead><tr><th>Vendor</th><th>Contact</th><th>Clients</th><th className="p2">Added by</th><th className="c-act"><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {d.items.map((v) => (
                 <tr key={v.id}>
-                  <td><b>{v.vendorName}</b>{v.notes && <span className="block muted">{v.notes}</span>}</td>
-                  <td>{v.contactName ?? "—"}
-                    {v.contactEmail && <span className="block"><a href={`mailto:${v.contactEmail}`}>{v.contactEmail}</a></span>}
-                    {v.contactPhone && <span className="block muted">{v.contactPhone}</span>}</td>
-                  <td>{v.technology?.name ?? "—"}</td>
-                  <td>{v.clients ?? "—"}</td>
-                  <td>{v.owner.name ?? "—"}</td>
-                  <td>
-                    {v.actions.edit && <button type="button" className="btn sm" onClick={() => setModal({ kind: "edit", vendor: v })} aria-label={`Edit ${v.vendorName}`}>Edit</button>}
-                    {v.actions.archive && <button type="button" className="btn sm danger" onClick={() => setModal({ kind: "archive", vendor: v })} aria-label={`Archive ${v.vendorName}`}>Archive</button>}
+                  <td className="c-primary">
+                    <b>{v.vendorName}</b>{v.technology?.name && <span className="pv-tag">{v.technology.name}</span>}
+                    {v.notes && <small className="block muted pv-notes" title={v.notes}>{v.notes}</small>}
+                  </td>
+                  <td data-label="Contact"><span>{v.contactName ?? "—"}
+                    {v.contactEmail && <small className="block"><a href={`mailto:${v.contactEmail}`}>{v.contactEmail}</a></small>}
+                    {v.contactPhone && <small className="block"><a href={`tel:${v.contactPhone}`}>{v.contactPhone}</a></small>}</span></td>
+                  <td data-label="Clients">{v.clients ?? <span className="muted">—</span>}</td>
+                  <td className="p2" data-label="Added by">{v.owner.name ?? "—"}</td>
+                  <td className="c-act">
+                    <div className="pl-act">
+                      {v.actions.edit && <button type="button" className="btn sm" onClick={() => setModal({ kind: "edit", vendor: v })} aria-label={`Edit ${v.vendorName}`}>Edit</button>}
+                      <Menu label={`More actions for ${v.vendorName}`} items={[
+                        v.actions.archive && { label: "Archive…", danger: true, onSelect: () => setModal({ kind: "archive", vendor: v }) },
+                      ]} />
+                    </div>
                   </td>
                 </tr>
               ))}
-              {d.items.length === 0 && <tr><td colSpan={6} className="empty">{archived ? "No archived vendors." : "No preferred vendors yet."}</td></tr>}
+              {d.items.length === 0 && (
+                <tr><td colSpan={5} className="empty">
+                  {archived ? "No archived vendors." : hasFilters ? "No vendors match this search." : "No preferred vendors yet."}
+                  {!archived && !hasFilters && canAdd && <div className="pv-emptyact"><button type="button" className="btn" onClick={add}>Add your first vendor</button></div>}
+                </td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -93,24 +123,28 @@ export function PreferredVendorsPage() {
           <p>The entry moves to the archived list. It cannot be edited afterwards.</p>
         </ConfirmDialog>
       )}
-    </>
+    </section>
   );
 }
 
+/** The form's starting values (an existing entry, or blank). */
+const v0 = (vendor: PreferredVendor | null): PreferredVendorInput => ({
+  vendorName: vendor?.vendorName ?? "", vendorId: vendor?.vendor?.id ?? null, contactName: vendor?.contactName ?? null,
+  contactEmail: vendor?.contactEmail ?? null, contactPhone: vendor?.contactPhone ?? null, technologyId: vendor?.technology?.id ?? null,
+  clients: vendor?.clients ?? null, notes: vendor?.notes ?? null,
+});
+
 function VendorDialog({ vendor, onClose, onSaved }: { vendor: PreferredVendor | null; onClose: () => void; onSaved: (name: string) => void }) {
   const lookups = useLookups();
-  const [v, setV] = useState<PreferredVendorInput>({
-    vendorName: vendor?.vendorName ?? "", vendorId: vendor?.vendor?.id ?? null, contactName: vendor?.contactName ?? null,
-    contactEmail: vendor?.contactEmail ?? null, contactPhone: vendor?.contactPhone ?? null, technologyId: vendor?.technology?.id ?? null,
-    clients: vendor?.clients ?? null, notes: vendor?.notes ?? null,
-  });
+  const [v, setV] = useState<PreferredVendorInput>(() => v0(vendor));
   const { busy, error, run } = useSubmit(pvError);
   const set = <K extends keyof PreferredVendorInput>(k: K, val: string) =>
     setV((o) => ({ ...o, [k]: k === "vendorName" ? val : val.trim() === "" ? null : val }));
   const vendors = lookups.data?.vendors ?? [];
+  const initial = JSON.stringify(v0(vendor));
 
   return (
-    <Dialog title={vendor ? `Edit ${vendor.vendorName}` : "Add preferred vendor"} onClose={onClose} wide>
+    <Dialog title={vendor ? `Edit ${vendor.vendorName}` : "Add preferred vendor"} onClose={onClose} wide dirty={JSON.stringify(v) !== initial}>
       <form onSubmit={(e) => {
         e.preventDefault();
         void run(async () => {

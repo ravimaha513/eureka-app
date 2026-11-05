@@ -1,0 +1,101 @@
+/* Pipeline screens: Submissions, Placements, the submission and placement drawers, the scheduling form.
+   Tokens only (DESIGN.md). Kit classes (dtable, actionstrip, filterbar, menu) are not restyled here;
+   these are screen classes layered on top. */
+
+/* ---- Shared list bits ---- */
+.pl-act { display: flex; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; }
+.pl-nowrap, td .pl-nowrap { white-space: nowrap; }
+.pl-date input { width: 150px; }
+.pl-notice { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pl-notice:has(.livemsg:empty) { display: none; }
+.plpage { display: flex; flex-direction: column; gap: 14px; }
+.plpage > .pagehead { margin-bottom: 0; }
+.plpage .listfoot { margin-top: -4px; }
+
+/* Interview-round trail in a row: small corners (no pills), quiet tints. */
+.pl-subs .trail-step { border-radius: var(--r-sm); }
+.pl-subs td[data-label="Rounds"] { min-width: 160px; }
+.pl-subs td.c-primary { min-width: 150px; }
+
+/* Funnel: one row of compact steps; scrolls sideways on narrow screens instead of wrapping. */
+.plpage .funnel { margin: 0; }
+.plpage .funnel ol { grid-template-columns: repeat(8, minmax(104px, 1fr)); }
+.plpage .funnel li > button { padding: 8px 10px; gap: 0; }
+.plpage .funnel b { font-size: 19px; line-height: 1.2; }
+.plpage .funnel .fl-label { font-size: 13px; font-weight: 600; color: var(--text2); }
+.plpage .funnel .fl-hint { font-size: 12px; color: var(--muted); }
+.plpage .fl-other { margin: 6px 0 0; font-size: 13px; }
+
+/* An empty summary row (no chips, nothing set) leaves no gap above the list. */
+.plpage .fb-summary:not(:has(.chip, .linkbtn, .pl-sum)), .ivpage .fb-summary:not(:has(.chip, .linkbtn, .pl-sum)),
+.pr-page .fb-summary:not(:has(.chip, .linkbtn, .pl-sum, .pr-seg)) { display: none; }
+
+/* ---- Drawers: action strip first ---- */
+/* Drawers are narrow: status on the first line, then the actions left to right. */
+.drawer .pl-strip { flex-direction: column; align-items: stretch; gap: 10px; }
+.drawer .pl-strip .as-status { flex: 0 0 auto; }
+.drawer .pl-strip .as-actions { margin-left: 0; justify-content: flex-start; }
+.pl-strip .pl-moves .btn.danger:first-of-type, .pl-strip .pl-exit:first-of-type { margin-left: auto; }
+.pl-moves { display: contents; }
+.pl-hint { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; background: var(--info-bg); border-color: var(--info-line); color: var(--info-fg); }
+.pl-hint span { font-size: 13.5px; }
+.pl-readonly { margin: 0; font-size: 13px; color: var(--muted); }
+.pl-section { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line2); }
+.pl-section > h3 { font-size: 13px; }
+.pl-section .hint { margin: 0; }
+
+/* Stage stepper (placement drawer): Confirmed · Paperwork · BGC · Ready · Joined. */
+.pl-steps { list-style: none; margin: 0; padding: 0; display: flex; gap: 0; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; background: var(--surface); }
+.pl-steps li { flex: 1 1 0; min-width: 0; padding: 6px 8px; font-size: 12.5px; font-weight: 600; color: var(--muted); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 1px solid var(--line2); }
+.pl-steps li:first-child { border-left: 0; }
+.pl-steps li.done { color: var(--text2); background: var(--surface2); }
+.pl-steps li.now { color: var(--text); background: var(--pri-50); box-shadow: inset 0 -2px 0 var(--pri); }
+.pl-steps.exited li.now { color: var(--bad-fg); background: var(--bad-bg); }
+
+/* Grouped facts (Job · People · Dates) in two columns on the wide drawer. */
+.pl-factgroups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; }
+.pl-factgroups h4 { font-size: 11.5px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; font-stretch: 82%; color: var(--muted); margin: 0 0 6px; }
+.pl-factgroups .facts { gap: 5px 12px; }
+
+/* Contact and checklist rows as definition cards on phones. */
+.pl-mini { width: 100%; }
+.pl-mini td, .pl-mini th { white-space: normal; }
+
+/* Placement list next-step line. */
+.pl-next { font-size: 13px; color: var(--text2); }
+.pl-next.soon { color: var(--warn-fg); font-weight: 600; }
+.pl-next.past { color: var(--muted); }
+.pl-tag { display: inline-block; margin-left: 6px; padding: 0 5px; font-size: 11.5px; font-weight: 600; line-height: 1.5; border: 1px solid var(--line-strong); border-radius: var(--r-sm); color: var(--muted); vertical-align: 1px; }
+
+/* ---- Scheduling form ---- */
+.scheduleform .slotpicker { border: 0; padding: 0; margin: 0 0 4px; min-width: 0; }
+.scheduleform .slot-zone select { width: 100%; }
+.scheduleform .slot-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.scheduleform .slot-row select { width: 100%; min-width: 0; }
+.scheduleform .slotchip { border-radius: var(--r-md); }
+.scheduleform .schedule-for { margin: 2px 0 10px; color: var(--text2); }
+.scheduleform .schedule-sub { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.scheduleform .actions.left { justify-content: flex-start; border: 0; padding: 0; margin: 4px 0 0; position: static; }
+
+@media (max-width: 768px) {
+  .plpage { gap: 12px; }
+  .plpage .funnel { overflow-x: auto; margin-inline: -14px; padding-inline: 14px; scrollbar-width: thin; }
+  .plpage .funnel ol { grid-template-columns: repeat(8, 104px); }
+  .plpage .funnel .fl-hint { display: none; }
+  .plpage .funnel li > button { padding: 6px 10px; }
+  .pl-date input { width: 100%; }
+  .pl-moves > .btn { height: 44px; flex: 1 1 auto; }
+  .pl-act { flex-wrap: wrap; }
+  .pl-subs td[data-label="Rounds"], .pl-subs td.c-primary { min-width: 0; }
+  .pl-factgroups { grid-template-columns: minmax(0, 1fr); }
+  .pl-steps { overflow-x: auto; }
+  .pl-steps li { flex: 0 0 auto; padding: 8px 10px; }
+  /* Mini tables (contacts, checklist) become stacked definition cards. */
+  .pl-mini thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .pl-mini, .pl-mini tbody { display: block; }
+  .pl-mini tbody { display: grid; gap: 8px; }
+  .pl-mini tr { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-lg); }
+  .tablewrap .pl-mini td, .pl-mini td { display: grid; grid-template-columns: minmax(84px, 34%) minmax(0, 1fr); gap: 10px; padding: 0; border: 0; overflow-wrap: anywhere; }
+  .pl-mini td::before { content: attr(data-label); color: var(--muted); font-size: 12.5px; }
+  .tablewrap:has(> .pl-mini) { overflow: visible; border: 0; }
+}

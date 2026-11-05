@@ -1,5 +1,5 @@
 # Preferred vendors — `/vendors`
-Status: Audited · Redesign proposed (minor)
+Status: Audited · Redesign proposed (minor) · Implemented (rebrand wave 2)
 Who / permission: `vendor.preferred:create` or `vendor.preferred:read` (nav.ts:41) — recruiters (own entries) and their superiors (lead, manager, AD, CEO).
 Source: `apps/web/src/pipelinereport/PreferredVendorsPage.tsx`, `pipelinereport/pipelineReportApi.ts`, `ui/Dialog.tsx`, `sales/ui.tsx` (Field)
 Evidence: `vendors-desktop.png`, `vendors-desktop-full.png`, `vendors-mobile.png`, `vendors-mobile-full.png`, new: `vendors-recruiter-desktop.png`, `vendors-recruiter-mobile.png`
@@ -58,3 +58,17 @@ PreferredVendorsPage.tsx, styles.css; LogSubmissionDialog.tsx for #1. No new API
 
 ## Validation
 Visual inspection: desktop 1440 (ceo, r1a) and mobile 390 (r1a), empty state only (no seeded vendors); populated table assessed from code. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 preferred vendors not offered in Log submission (Medium) | Not changed: `LogSubmissionDialog` is in `src/sales/` (another area). The data is available client-side (`pvApi.vendors` returns `vendor.id` for entries linked to a vendor on file), so the picker can list them first in an optgroup — see shared_requests | — |
+| #2 Add vendor placement, empty state (Low) | Add vendor right-aligned in the page head; empty state offers `Add your first vendor` | `after/vendors-desktop.png` |
+| #3 red Archive in every row (Low) | Edit + ⋯ menu with `Archive…` (danger, still confirmed) | PipelineVendors.test |
+| #4 no debounce (Low) | Search debounced 250 ms and kept in the URL | — |
+| #5 long notes (Low) | Notes one line with the full text on hover; count beside the h1 | — |
+| #6 Archived checkbox as a mode (Low) | Active / Archived segmented toggle (`aria-pressed`, 44px on phones) | — |
+| #7 phone table (Medium) | Cards with tap-to-mail / tap-to-call | `vendors-mobile.png` |
+
+**Validation (wave 2):** `pnpm --filter @eureka/web typecheck` clean; `vitest run src/pipeline src/interviews src/pipelinereport` 103/103 (tests updated only where markup intentionally changed: status selects instead of chip groups, row menus, the shared scheduling form, `More filters` disclosure). The shared API on :3000 was down during this wave (no Postgres or Docker in the session), so the after-shots were taken against the branch's Vite build with Playwright route fixtures shaped like the API (fictional data, read-only). Checked at 1440x900 and 390x844 in light and dark: `document.documentElement.scrollWidth` = 390 on phones, row actions inside the viewport at 1440 (`td.c-act` right edge 1411). E2E specs not run (they create records and need the live API).
+After: `../screenshots/after/vendors-{desktop,mobile}.png`, `vendors-dark-{desktop,mobile}.png`

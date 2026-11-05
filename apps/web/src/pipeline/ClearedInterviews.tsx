@@ -4,6 +4,7 @@ import type { Interview } from "../interviews/InterviewsPage";
 import { navigate } from "../lib/router";
 import { screenPath } from "../nav";
 import { Pager, useCursorPager } from "../ui/Pager";
+import { RecordLink } from "../ui/RecordLink";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
 import { pipelineError } from "./errors";
@@ -17,8 +18,10 @@ const PAGE_SIZE = 50;
  * "cleared", latest first, in the caller's interview scope (a team lead sees
  * their team; Manager, AD and CEO every team, narrowed by the Team filter).
  */
-export function ClearedInterviews({ teamId, candidate, batchId, onOpenPlacement }: {
+export function ClearedInterviews({ teamId, candidate, batchId, onOpenPlacement, canOpenCandidate = false }: {
   teamId: string; candidate: string; batchId: string; onOpenPlacement: (id: string) => void;
+  /** Link candidate names to their profile (candidate:read). */
+  canOpenCandidate?: boolean;
 }) {
   const pager = useCursorPager();
   const { reset } = pager;
@@ -36,38 +39,38 @@ export function ClearedInterviews({ teamId, candidate, batchId, onOpenPlacement 
 
   return (
     <>
-      <div className="card tablewrap">
+      <div className="card tablewrap listcard">
         {q.isLoading ? <Loading /> : q.error ? (
           <QueryError query={q} message={pipelineError(q.error)} />
         ) : (
-            <div className="tablewrap">
-              <table aria-label="Cleared interviews" aria-busy={q.isFetching || undefined}>
-                <thead><tr>
-                  <th>Candidate</th><th>Client / position</th><th>Round</th><th>Cleared on</th><th>Recruiter / team</th><th>Next step</th>
-                </tr></thead>
-                <tbody>
-                  {items.map((i: Interview) => (
-                    <tr key={i.id}>
-                      <td><b>{i.candidate.name ?? "Candidate"}</b></td>
-                      <td>{i.client?.name ?? "—"}{i.position && <span className="block">{i.position}</span>}</td>
-                      <td>{i.round}<span className="block">{fmtDateTime(i.startsAt)}</span></td>
-                      <td>{i.resultAt ? fmtDateTime(i.resultAt) : "—"}</td>
-                      <td>{i.recruiter.name}<span className="block">{i.team?.name ?? "No team"}</span></td>
-                      <td>
-                        {i.placement
-                          ? <button type="button" className="linkbtn" onClick={() => onOpenPlacement(i.placement!.id)}>Placement: {pipelineLabel(i.placement.status)}</button>
-                          : i.submissionStatus ? <>Submission <PipelineStatus status={i.submissionStatus} /></> : "—"}
-                        <span className="block">
-                          <button type="button" className="linkbtn" onClick={() => navigate(screenPath("interviews", i.id))}>Open interview</button>
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                  {!items.length && <tr><td colSpan={6} className="empty">{teamId || candidate || batchId ? "No cleared interviews match these filters." : "No cleared interviews yet. Mark a round's result as Cleared on the Interviews board."}</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <table className="dtable" aria-label="Cleared interviews" aria-busy={q.isFetching || undefined}>
+            <thead><tr>
+              <th>Candidate</th><th>Client / position</th><th>Round</th><th>Cleared on</th><th className="p2">Recruiter / team</th><th>Next step</th>
+              <th className="c-act"><span className="sr-only">Actions</span></th>
+            </tr></thead>
+            <tbody>
+              {items.map((i: Interview) => (
+                <tr key={i.id}>
+                  <td className="c-primary"><RecordLink kind="candidate" id={i.candidate.id} allowed={canOpenCandidate}><b>{i.candidate.name ?? "Candidate"}</b></RecordLink></td>
+                  <td data-label="Client"><span>{i.client?.name ?? "—"}{i.position && <small className="block muted">{i.position}</small>}</span></td>
+                  <td data-label="Round"><span>{i.round}<small className="block muted">{fmtDateTime(i.startsAt)}</small></span></td>
+                  <td data-label="Cleared on">{i.resultAt ? fmtDateTime(i.resultAt) : "—"}</td>
+                  <td className="p2" data-label="Recruiter"><span>{i.recruiter.name}<small className="block muted">{i.team?.name ?? "No team"}</small></span></td>
+                  <td data-label="Next step">
+                    {i.placement
+                      ? <RecordLink kind="placement" id={i.placement.id} onOpen={onOpenPlacement}>Placement: {pipelineLabel(i.placement.status)}</RecordLink>
+                      : i.submissionStatus ? <span>Submission <PipelineStatus status={i.submissionStatus} /></span> : "—"}
+                  </td>
+                  <td className="c-act">
+                    <a className="btn sm" href={screenPath("interviews", i.id)} aria-label={`Open the ${i.round} interview of ${i.candidate.name ?? "the candidate"}`}
+                      onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); navigate(screenPath("interviews", i.id)); } }}>Open interview</a>
+                  </td>
+                </tr>
+              ))}
+              {!items.length && <tr><td colSpan={7} className="empty">{teamId || candidate || batchId ? "No cleared interviews match these filters." : "No cleared interviews yet. Mark a round's result as Cleared on the Interviews board."}</td></tr>}
+            </tbody>
+          </table>
+        )}
       </div>
       <div className="listfoot">
         <p role="status" aria-live="polite" className="muted">{countMsg}</p>

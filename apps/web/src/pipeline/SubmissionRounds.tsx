@@ -1,8 +1,10 @@
 import { useId, useState } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { ResultBadge, type Interview } from "../interviews/InterviewsPage";
+import type { Interview } from "../interviews/InterviewsPage";
+import { ResultBadge } from "../interviews/InterviewFields";
 import { Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { Loading } from "../ui/Loading";
+import { RecordLink } from "../ui/RecordLink";
 import { pipelineError } from "./errors";
 import { fmtDateTime, pipelineApi, pipelineKeys, pipelineLabel, type Submission } from "./pipelineApi";
 
@@ -20,14 +22,17 @@ export function nextRoundName(round: string | undefined): string {
  * (IS-10). Sales can mark a round cleared or rejected (and back), and from any
  * held round clear it and place the candidate (IS-11).
  */
-export function SubmissionRounds({ submission: s, onPlace, onReject, onSchedule, onNotice }: {
+export function SubmissionRounds({ submission: s, onPlace, onReject, onSchedule, onNotice, canOpenInterview = false }: {
   submission: Submission;
   /** Opens the reject-round dialog (rendered by the drawer, which suspends itself while it's open). */
   onReject: (round: Interview) => void;
   /** Opens the placement dialog for this round (cleared first when still pending). */
   onPlace: (round: Interview) => void;
-  onSchedule: (defaultRound: string) => void;
+  /** Offers "Schedule next round" under the list; omit when the caller shows it elsewhere (the drawer's action strip). */
+  onSchedule?: (defaultRound: string) => void;
   onNotice: (m: string) => void;
+  /** Each round's name opens it on the Interviews board (interview:read). */
+  canOpenInterview?: boolean;
 }) {
   const headId = useId();
   const qc = useQueryClient();
@@ -71,7 +76,7 @@ export function SubmissionRounds({ submission: s, onPlace, onReject, onSchedule,
                   <span className="round-dot" aria-hidden="true">{state === "ok" ? "✓" : state === "no" ? "✗" : i + 1}</span>
                   <div className="round-body">
                     <div className="round-head">
-                      <b>Round {i + 1} · {r.round}</b>
+                      <RecordLink kind="interview" id={r.id} allowed={canOpenInterview}><b>Round {i + 1} · {r.round}</b></RecordLink>
                       {dead(r) ? <span className="muted">{pipelineLabel(r.callStatus)}</span> : <ResultBadge result={r.result} />}
                     </div>
                     <span className="muted">{meta}</span>
@@ -106,7 +111,7 @@ export function SubmissionRounds({ submission: s, onPlace, onReject, onSchedule,
               {s.actions.placeBlocked === "confirmation" ? " (another placement is in progress). Back that placement out or move them to Active first." : ". Move them to Active first."}
             </p>
           )}
-          {s.actions?.createInterview && (
+          {onSchedule && s.actions?.createInterview && (
             <div className="rowactions">
               <button type="button" className="btn sm" onClick={() => onSchedule(nextRoundName(latest?.round))}>
                 {rounds.length ? "Schedule next round" : "Schedule interview"}

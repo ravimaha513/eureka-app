@@ -1,34 +1,44 @@
-import { useId, useState } from "react";
+import { useId } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useLookups } from "../lookups";
 import { fmtDate } from "../sales/ui";
-import { localToday, shiftDays } from "../employees/employeesApi";
+import { useSearchParams } from "../lib/router";
+import { FilterBar, type FilterChip } from "../ui/FilterBar";
+import { RecordLink } from "../ui/RecordLink";
 import {
   FUNNEL, PIPELINE_STAGES, STAGE_LABELS, pvApi, pvError, pvKeys, type PipelineFilters, type PipelineItem,
 } from "./pipelineReportApi";
+import { pipelineLabel } from "../pipeline/pipelineApi";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
+import "../pipeline/pipeline.css";
+import "./pipelinereport.css";
 
 const PAGE = 50;
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const PARAMS = ["from", "to", "technologyId", "locationId", "stage", "notResponding", "offset"] as const;
 
 /**
  * Candidate pipeline (docs/pipeline-vendors-api.md PV-1, PV-2): marketing start →
  * submissions → interviews → assessments → confirmation → paperwork → joining,
- * one row per candidate the caller's reports cover.
+ * one row per candidate the caller's reports cover. Filters and the page are in the URL,
+ * so opening a candidate and coming back keeps the view.
  */
 export function PipelineReportPage({ onOpenCandidate }: { onOpenCandidate?: (id: string) => void }) {
   const id = useId();
   const lookups = useLookups();
-  const today = localToday();
-  const [usePeriod, setUsePeriod] = useState(false);
-  const [from, setFrom] = useState(shiftDays(today, -30));
-  const [to, setTo] = useState(today);
-  const [technologyId, setTechnologyId] = useState("");
-  const [locationId, setLocationId] = useState("");
-  const [stage, setStage] = useState("");
-  const [notResponding, setNotResponding] = useState(false);
-  const [offset, setOffset] = useState(0);
+  const [url, setUrl] = useSearchParams(PARAMS);
+  const from = ISO_DAY.test(url.from) ? url.from : "";
+  const to = ISO_DAY.test(url.to) ? url.to : "";
+  const { technologyId, locationId } = url;
+  const stage = (PIPELINE_STAGES as readonly string[]).includes(url.stage) ? url.stage : "";
+  const notResponding = url.notResponding === "true";
+  const offset = Math.max(0, Number(url.offset) || 0);
+  const usePeriod = Boolean(from || to);
   const invalid = usePeriod && (!from || !to || from > to);
+  // Any filter change goes back to the first page.
+  const patch = (p: Partial<Record<(typeof PARAMS)[number], string>>) => setUrl({ offset: "", ...p });
   const filters: PipelineFilters = {
     ...(usePeriod ? { from, to } : {}),
     technologyId: technologyId || undefined, locationId: locationId || undefined, stage: stage || undefined,
@@ -37,124 +47,143 @@ export function PipelineReportPage({ onOpenCandidate }: { onOpenCandidate?: (id:
   const q = useQuery({
     queryKey: pvKeys.report(filters), queryFn: () => pvApi.report(filters), enabled: !invalid, placeholderData: keepPreviousData,
   });
-  const reset = <T,>(set: (v: T) => void) => (v: T) => { set(v); setOffset(0); };
   const d = q.data;
+  const techs = lookups.data?.technologies ?? [];
+  const locs = lookups.data?.locations ?? [];
+  const chips: FilterChip[] = [];
+  if (notResponding) chips.push({ key: "nr", label: "Not responding only", onRemove: () => patch({ notResponding: "" }) });
+  const hasFilters = Boolean(from || to || technologyId || locationId || stage || notResponding);
+  const activeCount = [from || to, technologyId, locationId, stage, notResponding].filter(Boolean).length;
+  const clear = () => setUrl({ from: "", to: "", technologyId: "", locationId: "", stage: "", notResponding: "", offset: "" });
 
   return (
-    <>
-      <div>
-        <h1 tabIndex={-1}>Candidate pipeline</h1>
-        <p className="sub">Where each candidate is: marketing, submissions, interviews, assessments, confirmation, paperwork and joining.
-          Only the candidates your reports cover are listed.</p>
+    <section className="panel pr-page">
+      <div className="pagehead">
+        <div>
+          <h1 tabIndex={-1}>Candidate pipeline{d && !q.isLoading && <span className="h1count" aria-hidden="true">{d.total.toLocaleString("en-US")}</span>}</h1>
+          <p className="sub">Where each candidate is: marketing, submissions, interviews, assessments, confirmation, paperwork and joining.
+            Only the candidates your reports cover are listed.</p>
+        </div>
       </div>
 
-      <form className="filters" aria-label="Pipeline filters" onSubmit={(e) => e.preventDefault()}>
-        <div className="toolbar">
-          <label className="check"><input type="checkbox" checked={usePeriod} onChange={(e) => reset(setUsePeriod)(e.target.checked)} /> Limit to a period</label>
-          {usePeriod && (
-            <>
-              <div className="field inline">
-                <label htmlFor={`${id}-from`}>From</label>
-                <input id={`${id}-from`} type="date" value={from} onChange={(e) => reset(setFrom)(e.target.value)} />
-              </div>
-              <div className="field inline">
-                <label htmlFor={`${id}-to`}>Through</label>
-                <input id={`${id}-to`} type="date" value={to} onChange={(e) => reset(setTo)(e.target.value)}
-                  aria-invalid={invalid || undefined} aria-describedby={invalid ? `${id}-range` : undefined} />
-              </div>
-            </>
-          )}
+      <FilterBar label="Pipeline filters" hasFilters={hasFilters} onClear={clear} chips={chips} moreCount={0} activeCount={activeCount}
+        primary={<>
+          <div className="field inline fb-status">
+            <label htmlFor={`${id}-stage`}>Stage</label>
+            <select id={`${id}-stage`} value={stage} onChange={(e) => patch({ stage: e.target.value })}>
+              <option value="">All stages{d ? ` · ${d.total}` : ""}</option>
+              {PIPELINE_STAGES.map((s) => <option key={s} value={s}>{STAGE_LABELS[s]}{d && !stage ? ` · ${d.byStage[s] ?? 0}` : ""}</option>)}
+            </select>
+          </div>
           <div className="field inline">
             <label htmlFor={`${id}-tech`}>Technology</label>
-            <select id={`${id}-tech`} value={technologyId} onChange={(e) => reset(setTechnologyId)(e.target.value)}>
+            <select id={`${id}-tech`} value={technologyId} onChange={(e) => patch({ technologyId: e.target.value })}>
               <option value="">All</option>
-              {(lookups.data?.technologies ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {techs.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </div>
           <div className="field inline">
             <label htmlFor={`${id}-loc`}>Location</label>
-            <select id={`${id}-loc`} value={locationId} onChange={(e) => reset(setLocationId)(e.target.value)}>
+            <select id={`${id}-loc`} value={locationId} onChange={(e) => patch({ locationId: e.target.value })}>
               <option value="">All</option>
-              {(lookups.data?.locations ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              {locs.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
           </div>
-          <div className="field inline">
-            <label htmlFor={`${id}-stage`}>Stage</label>
-            <select id={`${id}-stage`} value={stage} onChange={(e) => reset(setStage)(e.target.value)}>
-              <option value="">All</option>
-              {PIPELINE_STAGES.map((s) => <option key={s} value={s}>{STAGE_LABELS[s]}</option>)}
-            </select>
+          <div className="field inline pr-date">
+            <label htmlFor={`${id}-from`}>Period from</label>
+            <input id={`${id}-from`} type="date" value={from} onChange={(e) => patch({ from: e.target.value })} />
           </div>
-          <label className="check"><input type="checkbox" checked={notResponding} onChange={(e) => reset(setNotResponding)(e.target.checked)} /> Not responding only</label>
-        </div>
-        {invalid && <p id={`${id}-range`} className="error" role="alert">Choose a start date on or before the end date.</p>}
-      </form>
+          <div className="field inline pr-date">
+            <label htmlFor={`${id}-to`}>Through</label>
+            <input id={`${id}-to`} type="date" value={to} onChange={(e) => patch({ to: e.target.value })}
+              aria-invalid={invalid || undefined} aria-describedby={invalid ? `${id}-range` : undefined} />
+          </div>
+        </>}
+      />
+      {invalid && <p id={`${id}-range`} className="error" role="alert">Choose both dates, with the start on or before the end. Leave both empty for all time.</p>}
 
       {invalid ? null : q.isLoading ? <Loading /> : q.error ? (
         <QueryError query={q} message={pvError(q.error)} />
       ) : d ? (
-        <section aria-labelledby={`${id}-h`} aria-busy={q.isFetching || undefined}>
-          <h2 id={`${id}-h`}>{d.total.toLocaleString("en-US")} {d.total === 1 ? "candidate" : "candidates"}
-            {d.period ? `, ${fmtDate(d.period.from)} – ${fmtDate(d.period.to)}` : ""}</h2>
-          <ul className="tiles" aria-label="Pipeline funnel">
-            {FUNNEL.map(([k, label]) => (
-              <li key={k} className="tile card"><span className="tilelabel">{label}</span><span className="tilevalue">{d.funnel[k]}</span></li>
-            ))}
-            <li className="tile card"><span className="tilelabel">Not responding</span><span className="tilevalue">{d.notResponding}</span>
-              <span className="tilehint">Open flags</span></li>
-          </ul>
+        <section aria-labelledby={`${id}-h`} aria-busy={q.isFetching || undefined} className="pr-page">
+          <h2 id={`${id}-h`} className="pr-total">{d.total.toLocaleString("en-US")} {d.total === 1 ? "candidate" : "candidates"}
+            {d.period ? `, ${fmtDate(d.period.from)} – ${fmtDate(d.period.to)}` : ", all time"}</h2>
+          <div className="pr-funnelrow">
+            {/* Stages reached: a count, not a filter (the Stage filter is the candidate's current stage). */}
+            <ul className="pr-funnel" aria-label="Pipeline funnel">
+              {FUNNEL.map(([k, label]) => (
+                <li key={k}><span className="tilelabel">{label}</span><span className="tilevalue">{d.funnel[k]}</span></li>
+              ))}
+            </ul>
+            <button type="button" className="pr-nrtile" aria-pressed={notResponding} aria-label="Not responding only"
+              onClick={() => patch({ notResponding: notResponding ? "" : "true" })}>
+              <span className="tilelabel">Not responding</span><span className="tilevalue">{d.notResponding}</span>
+              <span className="tilehint">{notResponding ? "Showing only these · clear" : "Open flags · show only these"}</span>
+            </button>
+          </div>
 
-          <div className="card tablewrap">
-            <table aria-label="Candidate pipeline">
+          <div className="card tablewrap listcard">
+            <table className="dtable pr-table" aria-label="Candidate pipeline">
               <thead>
-                <tr><th>Candidate</th><th>Stage</th><th>Marketing start</th><th>Submissions</th><th>Interviews</th>
-                  <th>Assessments</th><th>Placement</th><th>Team / recruiter</th></tr>
+                <tr><th>Candidate</th><th>Stage</th><th>Marketing start</th><th>Activity</th>
+                  <th>Placement</th><th className="p2">Team / recruiter</th></tr>
               </thead>
               <tbody>
                 {d.items.map((i) => <Row key={i.candidate.id} i={i} onOpen={onOpenCandidate} />)}
-                {d.items.length === 0 && <tr><td colSpan={8} className="empty">No candidates match these filters.</td></tr>}
+                {d.items.length === 0 && <tr><td colSpan={6} className="empty">No candidates match these filters.</td></tr>}
               </tbody>
             </table>
           </div>
           {d.total > PAGE && (
-            <div className="rowactions" role="group" aria-label="Pages">
-              <button type="button" className="btn sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
-              <span className="muted">{offset + 1}–{Math.min(offset + PAGE, d.total)} of {d.total}</span>
-              <button type="button" className="btn sm" disabled={offset + PAGE >= d.total} onClick={() => setOffset(offset + PAGE)}>Next</button>
-            </div>
+            <nav className="pager" aria-label="Candidate pages">
+              <button type="button" disabled={offset === 0} onClick={() => setUrl({ offset: offset - PAGE > 0 ? String(offset - PAGE) : "" })}><ChevronLeft size={15} aria-hidden="true" />Previous</button>
+              <span className="muted pr-range">{offset + 1}–{Math.min(offset + PAGE, d.total)} of {d.total}</span>
+              <button type="button" disabled={offset + PAGE >= d.total} onClick={() => setUrl({ offset: String(offset + PAGE) })}>Next<ChevronRight size={15} aria-hidden="true" /></button>
+            </nav>
           )}
         </section>
       ) : null}
-    </>
+    </section>
   );
 }
 
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const latest = (...ds: (string | null)[]) => ds.filter(Boolean).sort().at(-1) ?? null;
+
 function Row({ i, onOpen }: { i: PipelineItem; onOpen?: (id: string) => void }) {
   const name = i.candidate.name ?? "Candidate";
+  const quiet = !i.submissions.count && !i.interviews.count && !i.assessments.count;
+  const last = latest(i.submissions.lastAt, i.interviews.lastAt, i.assessments.lastOn);
   return (
     <tr>
-      <td>
-        {onOpen ? <button type="button" className="linkbtn" onClick={() => onOpen(i.candidate.id)}>{name}</button> : name}
-        <span className="block muted">{i.technology.name ?? ""}{i.location.name ? ` · ${i.location.name}` : ""}</span>
-        {i.notResponding && <span className="badge st-backout">Not responding</span>}
+      <td className="c-primary">
+        <RecordLink kind="candidate" id={i.candidate.id} onOpen={onOpen}><b>{name}</b></RecordLink>
+        <small className="block muted">{i.technology.name ?? ""}{i.location.name ? ` · ${i.location.name}` : ""}</small>
+        {i.notResponding && <span className="badge st-backout pr-nr">Not responding</span>}
       </td>
-      <td><span className={`badge st-${i.stage}`}>{STAGE_LABELS[i.stage]}</span></td>
-      <td>{fmtDate(i.marketingStartDate)}</td>
-      <td>{i.submissions.count}{i.submissions.lastAt && <span className="block muted">Last {fmtDate(i.submissions.lastAt)}</span>}</td>
-      <td>{i.interviews.count}<span className="block muted">{i.interviews.cleared} cleared</span></td>
-      <td>{i.assessments.count}<span className="block muted">{i.assessments.passed} passed</span></td>
-      <td>
+      <td className="c-badge" data-label="Stage"><span className={`badge st-${i.stage}`}>{STAGE_LABELS[i.stage]}</span></td>
+      <td data-label="Marketing start" className="pl-nowrap">{i.marketingStartDate ? fmtDate(i.marketingStartDate) : <span className="muted">—</span>}</td>
+      <td data-label="Activity" className={quiet ? "muted" : undefined}>
+        {quiet ? <span>No submissions, interviews or assessments yet</span> : (
+          <span>
+            {plural(i.submissions.count, "submission")} · {plural(i.interviews.count, "interview")}{i.interviews.count ? ` (${i.interviews.cleared} cleared)` : ""}
+            {i.assessments.count ? ` · ${plural(i.assessments.count, "assessment")} (${i.assessments.passed} passed)` : ""}
+            {last && <small className="block muted">Last activity {fmtDate(last)}</small>}
+          </span>
+        )}
+      </td>
+      <td data-label="Placement">
         {i.placement ? (
-          <>
-            <span className={`badge st-${i.placement.status}`}>{i.placement.status === "bgc" ? "Background check" : i.placement.status.replace("_", " ")}</span>
-            <span className="block muted">
+          <span>
+            <span className={`badge st-${i.placement.status}`}>{i.placement.status === "bgc" ? "Background check" : pipelineLabel(i.placement.status)}</span>
+            <small className="block muted">
               {i.placement.joinedAt ? `Joined ${fmtDate(i.placement.joinedAt)}` : `Start ${fmtDate(i.placement.tentativeStart)}`}
-            </span>
-            {i.placement.paperwork && <span className="block muted">Paperwork {i.placement.paperwork.done}/{i.placement.paperwork.total}</span>}
-          </>
-        ) : "—"}
+            </small>
+            {i.placement.paperwork && <small className="block muted">Paperwork {i.placement.paperwork.done}/{i.placement.paperwork.total}</small>}
+          </span>
+        ) : <span className="muted">—</span>}
       </td>
-      <td>{i.team.name ?? "—"}<span className="block muted">{i.recruiter?.name ?? "Unassigned"}</span></td>
+      <td className="p2" data-label="Team"><span>{i.team.name ?? "—"}<small className="block muted">{i.recruiter?.name ?? "Unassigned"}</small></span></td>
     </tr>
   );
 }

@@ -1,5 +1,5 @@
 # Submissions — `/submissions`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `submission:read` (nav.ts:17): recruiters, leads, managers, CEO. Row/drawer actions are gated by server `actions` (transition, createInterview, createPlacement, clearAndPlace, editDetails, editRate).
 Source: `apps/web/src/pipeline/SubmissionsPage.tsx`, `EditSubmissionDialog.tsx`, `SubmissionRounds.tsx`, `ScheduleInterviewDialog.tsx`, `SlotPicker.tsx`, `CreatePlacementDialog.tsx`, `pipeline/ui.tsx`, `pipelineApi.ts`, `pipelinereport/AssessmentsSection.tsx`; routing `App.tsx:472`
 Evidence: `submissions-desktop.png`, `submissions-desktop-full.png`, `submissions-mobile.png`, `submissions-mobile-full.png`, new: `submissions-drawer-{desktop,mobile}.png`, `submissions-drawer-bottom-desktop.png`, `submissions-schedule-dialog-{desktop,mobile}.png`, `submissions-schedule-errors-{desktop,mobile}.png`, `submissions-edit-dialog-desktop.png`, `submissions-reject-dialog-desktop.png`, `submissions-placement-dialog-{desktop,mobile}.png`, `submissions-focus-desktop.png`
@@ -76,3 +76,24 @@ Web only, no API changes. Touches `SubmissionsPage.tsx`, `SubmissionRounds.tsx`,
 
 ## Validation
 Visual inspection: desktop 1440 and mobile 390 list, drawer, schedule dialog (empty and error state), edit/reject/placement dialogs, keyboard tab order; overflow measured with Playwright (no page overflow; table 1298/1110 and 1298/360). No data was mutated. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 actions clipped at 1440, status off-screen on phones (High) | `dtable` with Status as `c-badge`, Submitted+recruiter merged, Rate `p2`; one primary row action (Create placement, else Schedule interview / next round) + Open, the other in a ⋯ menu; phone rows are record cards | `after/submissions-desktop.png` (actions at x 1169-1411), `submissions-mobile.png` |
+| #2 status in two places, linear ladder (High) | Drawer opens with an action strip: status chip + next round or last change, then Create placement / Schedule (next round), then the allowed moves and Reject… / Withdraw… in one `Change status` group. After booking from an earlier status a banner offers `Move to Interview scheduled` (status is never changed automatically) | `submissions-drawer-desktop.png`, `-mobile.png` |
+| #3 no cross-links (High) | Candidate name → `/candidates/<id>` (RecordLink, candidate:read); each round → `/interviews/<id>` (interview:read); placement in the drawer facts → placement; row-created placement notice keeps `Open placement` | Submissions.test, SubmissionRounds.test |
+| #4 drawer not in URL (Medium) | `initialOpenId`/`onOpenChange` props with `useRoutedId`; needs the App.tsx line in app_requests to go live | SubmissionsPage.tsx |
+| #5 time zone hidden until the end, weekend chips, no round default (High) | Shared `SlotPicker`: Time zone select first (remembered per browser, `zones.ts`), next 5 working days, start times 06:00-22:45 in that zone, zone abbreviation under Start time, window spelled out with the viewer's own time when different; Round has the datalist and the next round prefilled | `interviews-schedule-dialog-desktop.png`, SlotPicker.test |
+| #6 two scheduling forms (Medium) | One `ScheduleInterviewDialog` for the drawer, the row and the Interviews board: submission (board only), round, slot, type, meeting link, coach, panel (board), invite | Interviews + Submissions tests |
+| #7 chips without counts, funnel base (Medium) | Status is a select with per-status counts from the summary; Placed now compares with `Got an interview` | `submissions-desktop.png` |
+| #8 15 controls before data (Medium) | FilterBar: Candidate, Status, Job/client, dates inline; Batch and Interview reached under More filters; phone shows search + Filters sheet, funnel is a one-row scroll strip | `submissions-mobile.png` |
+| #9 searches not in URL (Low) | Candidate and Job/client searches are debounced URL params (`useDebouncedParam`) | Submissions.test |
+| #10 30px targets (Low) | Phone card actions 40px, strip buttons 44px | `submissions-drawer-mobile.png` |
+| #11 time in every row (Low) | Date only in the list; time stays in the drawer | — |
+| #12 full-width Record assessment (Low) | Inline sm button; completion date error text; assessment chips use their own words/colours | AssessmentsSection.tsx |
+
+Not done: per-row placement link on the `Placed · X` trail chip (the list row has no placement id; API change).
+
+**Validation (wave 2):** `pnpm --filter @eureka/web typecheck` clean; `vitest run src/pipeline src/interviews src/pipelinereport` 103/103 (tests updated only where markup intentionally changed: status selects instead of chip groups, row menus, the shared scheduling form, `More filters` disclosure). The shared API on :3000 was down during this wave (no Postgres or Docker in the session), so the after-shots were taken against the branch's Vite build with Playwright route fixtures shaped like the API (fictional data, read-only). Checked at 1440x900 and 390x844 in light and dark: `document.documentElement.scrollWidth` = 390 on phones, row actions inside the viewport at 1440 (`td.c-act` right edge 1411). E2E specs not run (they create records and need the live API).
+After: `../screenshots/after/submissions-{desktop,mobile}.png`, `submissions-drawer-{desktop,mobile}.png`, `submissions-dark-{desktop,mobile}.png`
