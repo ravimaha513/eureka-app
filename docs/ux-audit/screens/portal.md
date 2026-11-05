@@ -1,5 +1,5 @@
 # Applicant portal ("Eureka Careers") — `/portal/*`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2; signed-out job listing deferred: API change)
 Who / permission: external applicants with their own portal session (one-time email link, no password). No staff permission applies. Routes: `/portal/sign-up` (default when signed out), `/portal/sign-in`, `/portal/verify#token=…`, `/portal/jobs`, `/portal/applications`.
 Source: apps/web/src/portal/PortalApp.tsx, PortalJobs.tsx, PortalApplications.tsx, portalApi.ts; apps/web/src/jobs/jobs.css:41-73 (portal styles); docs/jobs-portal-api.md:89 (jobs endpoints)
 Evidence: public-portal-desktop.png, public-portal-mobile.png, portal-signedout-jobs-{desktop,mobile}.png, portal-signin-{desktop,mobile}.png, portal-signin-sent-{desktop,mobile}.png, portal-verify-{desktop,mobile}.png, portal-verify-expired-desktop.png, portal-jobs-{desktop,mobile}.png, portal-jobs-{desktop,mobile}-full.png, portal-jobdetail-{desktop,mobile}.png, portal-applications-{desktop,mobile}.png, portal-appdetail-{desktop,mobile}.png
@@ -73,3 +73,21 @@ Portal files + jobs.css only for #2–#12. Public browse (#1) needs a new unauth
 
 ## Validation
 Visual inspection: desktop 1440 + mobile 390, signed out (sign-up, sign-in, link sent, expired link) and signed in as seeded applicants mina.park and venkat.rao via the dev mailbox link (jobs, job drawer, My applications, application drawer with an interview). Apply and Withdraw were not submitted, to keep seed data intact. Measured: no horizontal overflow; all targets ≥38px high. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Account wall before any job (Critical) | **Not built.** A signed-out job listing needs an unauthenticated read of published jobs (API change). Sign-up and sign-in work as before. | (deferred: API change) |
+| #2 One-tap irreversible apply (High) | "Apply now" (on the card or as "Apply for this job" in the detail) now opens a review step: "Apply for <title>". It shows the job and employer, says that the hiring team sees the name, email (shown) and phone from the account, and offers Send application / Cancel. Nothing is sent before Send. Withdraw keeps its confirmation ("…cannot be undone"), and it is also available inside the application detail. | `after/portal-apply-mobile.png`, PortalScreens.test.tsx |
+| #3 Status hidden on mobile (High) | My applications uses the kit `dtable`. On phones each application is a card with the job title, mode/type/location, a large status chip, company, applied date, last update and Withdraw / View (40px). | `after/portal-applications-mobile.png` |
+| #4 Confirmation far from the card (Medium) | After applying, the card itself shows "Application sent. Follow it under My applications" (a link), and the button becomes a disabled "Applied". The drawer shows the same message in its footer. Apply errors stay in the confirm dialog. | `after/portal-desktop.png` |
+| #5 Drawer lacks employer; Apply not sticky (Medium) | The detail opens with "Employer · location" and a facts list (work mode, employment, experience, hours, posted). Apply sits in a sticky 44px footer. | `after/portal-job-mobile.png` |
+| #6 "Finding Job" (Medium) | The page is titled "Open positions" with a count. | `after/portal-desktop.png` |
+| #7 Brand hidden on mobile; nav wraps (Medium) | The header uses the shared BrandMark with the "EUREKA / CAREERS" wordmark at every width. On phones, Jobs / My applications form a two-tab row under the header, with the signal-red underline on the current tab. The theme switch is an icon button, and Sign out keeps its label. | `after/portal-mobile.png` |
+| #8 Phone before email at sign-up (Medium) | Email now comes before phone, and each field says why it is needed. Phone stays required, as the API requires it. | `after/portal-signup-mobile.png` |
+| #9 Redundant "Open" pill (Low) | Removed. Cards show work mode, employment type and experience. | `after/portal-desktop.png` |
+| #10 Thin application drawer (Low) | Added an action strip with the status, "Applied … · updated …" and Withdraw, plus a job summary line. Interviews are shown as cards on phones, each with a "Join link" button. | `after/portal-appdetail-mobile.png` |
+| #11 No job search (Low) | Not built (3 seeded jobs; not worth the extra controls yet). | — |
+| #12 Auth card touches the edges (Low) | The card is `min(440px, 100% - 32px)` with 44px fields and 16px inputs on phones. | `after/portal-signup-mobile.png` |
+
+Validation (wave 2): typecheck passes. Unit tests pass (`vitest run src/portal` 9/9, including review-before-apply and withdraw-confirm). The shared API was down, so I checked on Vite :5206 with the portal API mocked (fictional applicant; Apply and Withdraw were not sent) at 1440 and 390, light and dark. Page width stays 1440 / 390.

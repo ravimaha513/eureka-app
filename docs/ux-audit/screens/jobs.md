@@ -1,5 +1,5 @@
 # Jobs — `/jobs`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `job:read` (nav.ts:21). Create/edit: `job:manage` (JobsPage.tsx:52) plus per-row `actions.edit`. Seen as ceo (2 client requirements only) and hr (4 internal openings, "Add job" offered, internal-opening type only).
 Source: apps/web/src/jobs/JobsPage.tsx, JobDialog.tsx, RichText.tsx, jobsApi.ts, jobs.css; shared ui/Dialog.tsx, sales/ui.tsx (Drawer, Field)
 Evidence: jobs-desktop.png, jobs-mobile.png, jobs-detail-desktop.png, jobs-detail-mobile.png, jobs-hr-desktop.png, jobs-hr-mobile.png, jobs-dialog-desktop.png, jobs-dialog-mobile.png, jobs-dialog-mobile-full.png, jobs-dialog-errors-desktop.png
@@ -75,3 +75,22 @@ JobsPage.tsx, JobDialog.tsx, App.tsx (pass routed id), ui/Dialog.tsx (dirty guar
 
 ## Validation
 Visual inspection: desktop 1440 and mobile 390 as ceo and hr (list, drawer, create dialog, empty-submit validation). Measured: no horizontal page overflow; smallest targets 30px (desktop) / 34px (mobile); dialog scroll 1102/808 (desktop), 1589/810 (mobile). Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence |
+|---|---|---|
+| #1 Publish buried at the bottom, Status defaults to Open (High) | A "Status and visibility" block is now first in the dialog: Status (with "Draft is visible to staff only. Open accepts submissions and applications."), the "Publish on the careers portal" checkbox (internal openings) and a live line that says what applicants will see ("Not published…", "Published, but hidden until Open", "Applicants will see this job…"). New jobs default to **Draft** in the UI, matching the API default (`status` defaults to `draft` in jobs.schemas.ts), so nothing goes live silently. The submit label follows the state: "Create draft" / "Create job" / "Create and publish". | `after/jobs-dialog-desktop.png`, `after/jobs-dialog-mobile.png`, Jobs.test.tsx "HR picks a company…" |
+| #2 Backdrop/Escape loses the form (High) | `JobDialog` passes the kit's `dirty` flag (form differs from its initial values): Escape or a backdrop click asks "Discard unsaved changes?"; Cancel still closes. | `after/jobs-dialog-dirty-desktop.png`, Jobs.test.tsx "asks before Escape discards…" |
+| #3 Status and actions off-screen at 390px (High) | Table is the kit `dtable`: on phones each job is a card with title + type, status and "On careers portal" chips top right, client/company, deadline, applicants (or submissions), and Edit as a 40px button. | `after/jobs-mobile.png` |
+| #4 Rows not clickable, View only target (Medium) | Title is a `RecordLink` (real link), the whole row opens the drawer, and the separate View button is gone; Edit stays the only row button. | `after/jobs-desktop.png` |
+| #5 Drawer not routed (Medium) | `JobsPage` now takes `initialOpenId` / `onOpenChange` and keeps the open job in `useRoutedId`. Needs the one-line App.tsx change in this wave's app_requests to make `/jobs/<id>` load the drawer. | code: JobsPage.tsx |
+| #6 Applicants count is plain text (Medium) | For internal openings the count links to `/applications?jobId=<id>` (row and drawer action strip "n applications"). Client requirements count submissions; that column is labelled "Submissions" on phone cards and stays plain (Submissions has no job filter). | Jobs.test.tsx "links an opening's applicants count…" |
+| #7 Pay split across rows (Medium) | Pay is one fieldset row: amount, frequency, currency. | `after/jobs-dialog-desktop.png` |
+| #8 18 fields with no sections (Medium) | Sections: Status and visibility, Job (title, client/company, category, experience, hiring manager), Terms (employment type, work mode, location, deadline, hours), Pay, Content (skills, requirements, description). | `after/jobs-dialog-desktop.png` |
+| #9 Three stacked filter rows (Medium) | Kit `FilterBar`: Job title search, Type and Status selects in one row; on phones search + "Filters" sheet. Filters live in the URL (`?kind=&status=&q=`). The empty summary row collapses. Table starts at y≈247 (was ≈350). | `after/jobs-desktop.png` |
+| #10 No sticky footer (Medium) | Kit Dialog: the actions footer sticks to the bottom of the scrolling dialog. | `after/jobs-dialog-mobile.png` |
+| #11 Portal status as muted text (Low) | "On careers portal" violet chip next to the status chip in the row and the drawer; the drawer note says what applicants see. Filtering by portal state needs an API parameter (not built). | `after/jobs-desktop.png`, `after/jobs-drawer-desktop.png` |
+| #12 Duplicate `.dialog.wide` (Low) | jobs.css no longer overrides the shared `.dialog.wide`; the job dialog uses its own `.dialog.jobdialog` (860px). | jobs.css |
+| #13 Small targets (Low) | Kit: 40px row buttons on phones. | `after/jobs-mobile.png` |
+
+Validation (wave 2): typecheck clean; `vitest run src/jobs` 21/21 (full web suite 553/553). The shared API on :3000 was down for this wave (no Postgres, no API process, and this session could not start them), so screens were checked in the real app on Vite :5206 with the API mocked at the network layer (fictional fixtures, nothing written) at 1440×900 and 390×844, light and dark: page width 1440 / 390 (no horizontal overflow), Edit visible in every row at 1440 (none clipped). E2E `jobs-portal.spec.ts` updated for Draft-by-default ("Create and publish") but not run (needs the live API).
