@@ -960,6 +960,7 @@ const CASES: RejectCase[] = [
       teamId: T.t2, recruiterId: U.r2a, visibility: "all_teams", technicalRating: 5, status: "stopped", marketingStatus: "stopped",
       locationId: LOC.austin, personId: FOREIGN_ID, firstName: "X", phone: "+14695559999", benchSince: "2020-01-01",
       teamAssignedAt: PAST, everifyCompanyId: FOREIGN_ID, documentsStatus: "complete", ghLocationId: LOC.austin, ghRemote: true,
+      row_version: 99, ifMatch: "1",
     },
   },
   {
@@ -970,7 +971,7 @@ const CASES: RejectCase[] = [
     }),
     forbidden: {
       teamId: T.t2, recruiterId: U.r2a, priority: "P1", linkedinUrl: "https://linkedin.com/in/x", visaCategory: "h1b",
-      teamAssignedAt: PAST, rowVersion: 99, candidateId: FOREIGN_ID,
+      teamAssignedAt: PAST, rowVersion: 99, candidateId: FOREIGN_ID, row_version: 99, ifMatch: "1",
     },
   },
   {
@@ -979,7 +980,7 @@ const CASES: RejectCase[] = [
       url: `/api/v1/candidates/${own().id}/visibility`, body: { visibility: "all_teams" },
       state: () => rows(`SELECT * FROM eureka.candidate WHERE id = $1`, [own().id]),
     }),
-    forbidden: { teamId: T.t2, recruiterId: U.r2a, candidateId: FOREIGN_ID, status: "stopped" },
+    forbidden: { teamId: T.t2, recruiterId: U.r2a, candidateId: FOREIGN_ID, status: "stopped", row_version: 99, ifMatch: "1" },
   },
   {
     route: "PUT /api/v1/candidates/:id/technical-rating", actor: "locD",
@@ -987,7 +988,7 @@ const CASES: RejectCase[] = [
       url: `/api/v1/candidates/${own().id}/technical-rating`, body: { rating: 4 },
       state: () => rows(`SELECT * FROM eureka.candidate WHERE id = $1`, [own().id]),
     }),
-    forbidden: { candidateId: FOREIGN_ID, ratedBy: U.coach, locationId: LOC.austin, priority: "P1" },
+    forbidden: { candidateId: FOREIGN_ID, ratedBy: U.coach, locationId: LOC.austin, priority: "P1", row_version: 99, ifMatch: "1" },
   },
   {
     route: "POST /api/v1/candidates/:id/transition", actor: "r1a",
@@ -995,7 +996,7 @@ const CASES: RejectCase[] = [
       url: `/api/v1/candidates/${own().id}/transition`, body: { to: "on_hold" },
       state: () => rows(`SELECT * FROM eureka.candidate WHERE id = $1`, [own().id]),
     }),
-    forbidden: { from: "terminated", force: true, status: "terminated", teamId: T.t2, benchSince: "2020-01-01" },
+    forbidden: { from: "terminated", force: true, status: "terminated", teamId: T.t2, benchSince: "2020-01-01", row_version: 99, ifMatch: "1" },
   },
   {
     route: "POST /api/v1/batches", actor: "l1",
@@ -1552,7 +1553,8 @@ const CASES: RejectCase[] = [
         body: { dryRun: true, rows: [{ firstName: "Mass", lastName: "Assign", phone: "+14695550177", email: "mass.assign@example.com" }] },
         state: () => rows(`SELECT count(*)::int AS n FROM eureka.candidate`) };
     },
-    forbidden: { recruiterId: U.r2a, locationId: LOC.austin, technologyId: FOREIGN_ID, status: "active", batchId: FOREIGN_ID },
+    forbidden: { recruiterId: U.r2a, locationId: LOC.austin, technologyId: FOREIGN_ID, status: "active", batchId: FOREIGN_ID,
+      budget: 100000, rowsChecked: 0, checked: 0, taken: 0 },
   },
   {
     route: "PUT /api/v1/candidates/:id/recruiter", actor: "l1",
@@ -1560,7 +1562,7 @@ const CASES: RejectCase[] = [
       url: `/api/v1/candidates/${own().id}/recruiter`, body: { recruiterId: U.r1a },
       state: () => rows(`SELECT * FROM eureka.candidate WHERE id = $1`, [own().id]),
     }),
-    forbidden: { teamId: T.t2, candidateId: FOREIGN_ID, status: "stopped", locationId: LOC.austin },
+    forbidden: { teamId: T.t2, candidateId: FOREIGN_ID, status: "stopped", locationId: LOC.austin, row_version: 99, ifMatch: "1" },
   },
   {
     route: "PUT /api/v1/candidates/:id/team", actor: "l1",
