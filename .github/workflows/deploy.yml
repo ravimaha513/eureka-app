@@ -1,8 +1,12 @@
 name: deploy
-# Every push to main that passes CI deploys to production (the only environment
-# that runs by default, to keep cost down; see infra/README.md "Cost").
+# After CI passes on main, deploys run automatically to each environment that is
+# switched on by a repository variable (a job-level `if` cannot read environment
+# variables, so these must be repository variables):
+#   STAGING_AUTO_DEPLOY = true   -> staging (us-east-2)
+#   AWS_ACCOUNT_ID set           -> production (us-east-1)
+# Both can be on; each environment deploys in its own job. Any environment can
+# also be deployed by hand: Actions -> deploy -> Run workflow.
 # Optional approval: add required reviewers to the "production" GitHub environment.
-# Staging is deployed only by hand (Run workflow -> staging) after creating it.
 # AWS access uses GitHub OIDC -> eureka-github-deploy-<env> (infra/bootstrap);
 # there are no long-lived AWS keys in this repository or its secrets.
 
@@ -29,22 +33,48 @@ env:
   TG_NON_INTERACTIVE: "true"
 
 jobs:
+  targets:
+    # Which environments this run deploys: the chosen one when run by hand; after a
+    # green CI on main, every environment switched on by a repository variable.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    outputs:
+      environments: ${{ steps.pick.outputs.environments }}
+    steps:
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          CHOSEN: ${{ inputs.environment }}
+          STAGING_AUTO: ${{ vars.STAGING_AUTO_DEPLOY }}
+          ACCOUNT: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            ENVS=$(jq -cn --arg e "$CHOSEN" '[$e]')
+          else
+            ENVS=$(jq -cn --arg s "$STAGING_AUTO" --arg a "$ACCOUNT" \
+              '[if $s == "true" then "staging" else empty end, if $a != "" then "production" else empty end]')
+          fi
+          echo "deploying to: $ENVS"
+          echo "environments=$ENVS" >> "$GITHUB_OUTPUT"
+
   deploy:
-    # A job-level `if` sees repository variables only, not the target environment's.
-    # Run by hand: always runs; the first step checks AWS_ACCOUNT_ID from the chosen
-    # environment (or the repository). After CI on main: runs only when AWS_ACCOUNT_ID
-    # is a repository variable, so an account id set only on the staging environment
-    # never starts automatic production deploys.
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && vars.AWS_ACCOUNT_ID != '')
+    needs: targets
+    if: needs.targets.outputs.environments != '[]'
+    strategy:
+      fail-fast: false # a failed staging deploy never cancels production, or the reverse
+      matrix:
+        environment: ${{ fromJSON(needs.targets.outputs.environments) }}
     runs-on: ubuntu-24.04-arm # native ARM64 build for Fargate Graviton
     timeout-minutes: 60
-    environment: ${{ inputs.environment || 'production' }}
+    environment: ${{ matrix.environment }}
+    # One deploy per environment at a time; a newer pending run replaces an older
+    # pending one, so a burst of merges to main ships as one staging deploy.
     concurrency:
-      group: deploy-${{ inputs.environment || 'production' }}
+      group: deploy-${{ matrix.environment }}
       cancel-in-progress: false
     env:
-      ENVIRONMENT: ${{ inputs.environment || 'production' }}
-      AWS_REGION: ${{ (inputs.environment || 'production') == 'production' && 'us-east-1' || 'us-east-2' }}
+      ENVIRONMENT: ${{ matrix.environment }}
+      AWS_REGION: ${{ matrix.environment == 'production' && 'us-east-1' || 'us-east-2' }}
       IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
       TF_VAR_image_tag: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
