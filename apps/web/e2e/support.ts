@@ -19,6 +19,14 @@ export const COACH_ID = "00000000-0000-0000-0000-000000000013";
 /** A short id unique to this run and call, for names and job titles. */
 export const uniq = () => `${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
 
+/** Signs in through the dev picker on the sign-in page (`/` shows a fresh browser the landing page). */
+export async function signInAs(page: Page, label: string) {
+  await page.goto("/login");
+  await page.getByRole("combobox", { name: "Sign in as", exact: true }).selectOption({ label });
+  await page.getByRole("button", { name: "Sign in as selected user", exact: true }).click();
+  await expect(page.getByRole("complementary", { name: "Main navigation" })).toBeVisible();
+}
+
 /** Signs the browser in through the dev sign-in endpoint and waits for the shell. */
 export async function login(page: Page, email: string) {
   await page.goto("/");

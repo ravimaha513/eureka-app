@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { signInAs } from "./support";
 
 /**
  * Org admin journey through Users & Access (docs/admin-api.md, AD-1..AD-9).
@@ -10,10 +11,7 @@ const run = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`;
 const person = (tag: string) => ({ name: `E2E ${tag} ${run}`, email: `e2e-${tag.toLowerCase()}-${run}@eureka.example` });
 
 async function signIn(page: Page, label: string) {
-  await page.goto("/");
-  await page.getByLabel("Sign in as").selectOption({ label });
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("complementary", { name: "Main navigation" })).toBeVisible();
+  await signInAs(page, label);
 }
 
 async function openAccess(page: Page) {
@@ -21,7 +19,13 @@ async function openAccess(page: Page) {
   await expect(page.getByRole("heading", { level: 1, name: "Users & Access" })).toBeVisible();
 }
 
-const liveStatus = (page: Page) => page.getByRole("status");
+// The offline banners are status regions too, empty unless offline.
+const liveStatus = (page: Page) => page.getByRole("status").filter({ hasText: /\S/ });
+
+async function rowAction(page: Page, row: Locator, name: string, item: string) {
+  await row.getByRole("button", { name: `More actions for ${name}` }).click();
+  await page.getByRole("menuitem", { name: item }).click();
+}
 
 async function openTab(page: Page, name: "Users" | "Approvals" | "Teams") {
   await page.getByRole("tab", { name }).click();
@@ -32,17 +36,20 @@ async function createUser(page: Page, p: { name: string; email: string }) {
   await openTab(page, "Users");
   await page.getByRole("button", { name: "New user" }).click();
   const dlg = page.getByRole("dialog", { name: "New user" });
-  await dlg.getByLabel("Email").fill(p.email);
+  await dlg.getByLabel("Email", { exact: true }).fill(p.email);
   await dlg.getByLabel("Name").fill(p.name);
   await dlg.getByRole("button", { name: "Create user" }).click();
   await expect(dlg).toBeHidden();
-  await expect(liveStatus(page)).toContainText(`Created ${p.name}.`);
+  await expect(liveStatus(page)).toContainText(`Created ${p.name}`);
 }
 
 async function userRow(page: Page, search: string, name: string): Promise<Locator> {
   await openTab(page, "Users");
   await page.getByLabel("Search users").fill(search);
-  const row = page.getByRole("table", { name: "Users" }).getByRole("row").filter({ hasText: name });
+  const rows = page.getByRole("table", { name: "Users" }).getByRole("row");
+  // Header + the one match: the debounced search has landed, so the table won't reflow under a menu.
+  await expect(rows).toHaveCount(2);
+  const row = rows.filter({ hasText: name });
   await expect(row).toHaveCount(1);
   return row;
 }
@@ -119,18 +126,18 @@ test("org admin: create a user, grant and revoke roles, second approver, deactiv
   await expect(row.getByText("No roles")).toBeVisible();
 
   // Deactivation revokes sessions at once (AD-5).
-  await row.getByRole("button", { name: `Deactivate ${a.name}` }).click();
+  await rowAction(page, row, a.name, "Deactivate…");
   dlg = page.getByRole("dialog", { name: `Deactivate ${a.name}?` });
   await expect(dlg).toContainText(/sessions are revoked immediately/i);
   await dlg.getByRole("button", { name: "Deactivate", exact: true }).click();
   await expect(dlg).toBeHidden();
-  await expect(row.getByText("inactive", { exact: true })).toBeVisible();
+  await expect(row.getByText("Inactive", { exact: true })).toBeVisible();
 
   await row.getByRole("button", { name: `Reactivate ${a.name}` }).click();
   dlg = page.getByRole("dialog", { name: `Reactivate ${a.name}?` });
   await dlg.getByRole("button", { name: "Reactivate", exact: true }).click();
   await expect(dlg).toBeHidden();
-  await expect(row.getByText("active", { exact: true })).toBeVisible();
+  await expect(row.getByText("Active", { exact: true })).toBeVisible();
 });
 
 test("org admin: reporting line, teams, members and moving a member", async ({ page }) => {
@@ -142,7 +149,7 @@ test("org admin: reporting line, teams, members and moving a member", async ({ p
 
   // Reporting line, then a cycle is refused with a friendly message (AD-9).
   let row = await userRow(page, member.email, member.name);
-  await row.getByRole("button", { name: `Set manager for ${member.name}` }).click();
+  await rowAction(page, row, member.name, "Set manager");
   let dlg = page.getByRole("dialog", { name: `Set manager for ${member.name}` });
   await dlg.getByLabel("Manager").selectOption({ label: `${lead1.name} (${lead1.email})` });
   await dlg.getByRole("button", { name: "Save manager" }).click();
@@ -150,7 +157,7 @@ test("org admin: reporting line, teams, members and moving a member", async ({ p
   await expect(row.getByText(lead1.name)).toBeVisible();
 
   row = await userRow(page, lead1.email, lead1.name);
-  await row.getByRole("button", { name: `Set manager for ${lead1.name}` }).click();
+  await rowAction(page, row, lead1.name, "Set manager");
   dlg = page.getByRole("dialog", { name: `Set manager for ${lead1.name}` });
   await dlg.getByLabel("Manager").selectOption({ label: `${member.name} (${member.email})` });
   await dlg.getByRole("button", { name: "Save manager" }).click();

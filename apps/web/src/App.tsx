@@ -284,7 +284,7 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
                   await api("/api/auth/dev-login", { method: "POST", body: JSON.stringify({ email: `${who}@eureka.example` }) });
                   onSignedIn();
                 } catch (e) { setErr((e as Error).message); }
-              }}>Sign in</button>
+              }} aria-label="Sign in as selected user">Sign in</button>
             </>
           ) : google ? (
             <>

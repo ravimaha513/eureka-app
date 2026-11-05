@@ -1,11 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
-import { cell, expectMaskedPhone } from "./support";
+import { cell, expectMaskedPhone, signInAs } from "./support";
 
 async function signIn(page: Page, label: string) {
-  await page.goto("/");
-  await page.getByLabel("Sign in as").selectOption({ label });
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("complementary", { name: "Main navigation" })).toBeVisible();
+  await signInAs(page, label);
 }
 
 // Hot List is team-scoped (Eureka App 4): the user's own team plus candidates

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { cell } from "./support";
+import { cell, signInAs } from "./support";
 
 /**
  * Sales journeys against the full stack with the dev seed (apps/api/test/fixtures.ts):
@@ -13,10 +13,7 @@ const CLIENT_ID = "00000000-0000-0000-0000-000000000601";
 const run = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`;
 
 async function signIn(page: Page, label: string) {
-  await page.goto("/");
-  await page.getByLabel("Sign in as").selectOption({ label });
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("complementary", { name: "Main navigation" })).toBeVisible();
+  await signInAs(page, label);
   await expect(page.getByRole("heading", { level: 1, name: "Hot List" })).toBeVisible();
 }
 

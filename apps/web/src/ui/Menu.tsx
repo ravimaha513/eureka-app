@@ -65,7 +65,12 @@ export function Menu({ label, items, text, className }: {
       const t = e.target as Node;
       if (!menu.current?.contains(t) && !btn.current?.contains(t)) close(false);
     };
-    const onMove = (e: Event) => { if (!menu.current?.contains(e.target as Node)) close(false); };
+    // Only a scroll that moves the button matters: a long value scrolling inside an unrelated
+    // input (the search box, as focus leaves it) must not close the menu.
+    const onMove = (e: Event) => {
+      if (e.type === "scroll" && e.target instanceof Node && !e.target.contains(btn.current)) return;
+      close(false);
+    };
     document.addEventListener("mousedown", onDown);
     window.addEventListener("scroll", onMove, true);
     window.addEventListener("resize", onMove);
