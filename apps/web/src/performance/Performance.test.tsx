@@ -146,10 +146,38 @@ describe("Performance layout (wave 2)", () => {
     wrap(<PerformancePage me={meFor("manager")} />);
     const table = await screen.findByRole("table", { name: "By person" });
     const names = () => within(table).getAllByRole("row").slice(1).map((r) => r.querySelector("b")!.textContent);
+    expect(names()).toEqual(["Priya Shah", "Ravi Kumar"]);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show 1 with no activity" }));
     expect(names()).toEqual(["Priya Shah", "Ravi Kumar", "Anil Lead"]);
     fireEvent.click(within(table).getByRole("button", { name: /^Person/ }));
     expect(names()).toEqual(["Priya Shah", "Ravi Kumar", "Anil Lead"]);
     expect(within(table).getByRole("columnheader", { name: /^Person/ })).toHaveAttribute("aria-sort", "ascending");
+  });
+
+  it("filters people by name and team, finds idle people by name, and caps a long list", async () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      user: { id: `u-${i}`, name: `Person ${String(i).padStart(2, "0")}`, designation: null, active: true },
+      team: i % 2 ? { id: "t2", name: "Team Anjali" } : { id: "t1", name: "Team Rohit" },
+      counts: { ...zero, submissions: 30 - i }, ratios: { submissionToInterview: 0, interviewToPlacement: null, placement: 0 },
+    }));
+    api.routes["GET /api/v1/performance/summary"] = () => ({ body: { ...SUMMARY, people: [...many,
+      { user: { id: "u-idle", name: "Idle Ira", designation: null, active: true }, team: null, counts: zero,
+        ratios: { submissionToInterview: null, interviewToPlacement: null, placement: null } }] } });
+    wrap(<PerformancePage me={meFor("manager")} />);
+    const table = await screen.findByRole("table", { name: "By person" });
+    const count = () => within(table).getAllByRole("row").length - 1;
+    expect(count()).toBe(15);
+    fireEvent.click(screen.getByRole("button", { name: "Show all 30" }));
+    expect(count()).toBe(30);
+    fireEvent.change(screen.getByLabelText("Team"), { target: { value: "t2" } });
+    expect(count()).toBe(15);
+    expect(within(table).queryByText("Person 00")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Team"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Find a person"), { target: { value: "ira" } });
+    expect(within(table).getByText("Idle Ira")).toBeInTheDocument();
+    expect(count()).toBe(1);
+    fireEvent.change(screen.getByLabelText("Find a person"), { target: { value: "nobody" } });
+    expect(within(table).getByText("No one matches these filters.")).toBeInTheDocument();
   });
 
   it("opens the rows behind a count in a drawer that takes focus, and presets change the period", async () => {
