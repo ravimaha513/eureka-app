@@ -14,9 +14,10 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { toProblem } from "../../platform/errors.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
-import { CandidatesService, moreFilters } from "../candidates/candidates.service.js";
+import { CandidatesService } from "../candidates/candidates.service.js";
+import { filterSummary, hotlistMore } from "../candidates/list-filters.js";
 import { toCsv } from "./csv.js";
-import type { BulkPriority, BulkStatus, BulkVisibility, CreateView, HotlistFilters, UpdateView } from "./hotlist.schemas.js";
+import { HotlistFilters, type BulkPriority, type BulkStatus, type BulkVisibility, type CreateView, type UpdateView } from "./hotlist.schemas.js";
 import { likeContains } from "../../platform/sql.js";
 
 /** Row cap for a Hot List export (design A6.5 and B7: 50,000). */
@@ -56,17 +57,14 @@ export interface BulkResult { id: string; ok: boolean; error?: BulkError }
 
 const label = (s: string) => { const t = s.replace(/_/g, " "); return t.charAt(0).toUpperCase() + t.slice(1); };
 
-/** Audit-safe summary of the filters: free text (name search, technology) is recorded only as a flag (rule 5). */
-export const filterSummary = (f: HotlistFilters) => ({
-  status: f.status, technology: f.technology ? true : undefined, visibility: f.visibility, search: f.search ? true : undefined,
-  locationId: f.locationId, visa: f.visa, documents: f.documents, resume: f.resume, stay: f.stay,
-  priority: f.priority, teamId: f.teamId, recruiterId: f.recruiterId, inPerson: f.inPerson, ghLocationId: f.ghLocationId, sort: f.sort,
-});
-
-
-const presentView = (r: ViewRow) => ({
-  id: r.id, name: r.name, filters: r.filters, createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
-});
+/** Views saved before the multi-value filters hold single strings: read back in today's shape (arrays). */
+const presentView = (r: ViewRow) => {
+  const parsed = HotlistFilters.safeParse(r.filters);
+  return {
+    id: r.id, name: r.name, filters: parsed.success ? parsed.data : r.filters,
+    createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(),
+  };
+};
 
 /** Saved views, bulk actions and export for the Hot List (FR-HOT; HANDOFF task 2). */
 @Injectable()
@@ -200,10 +198,9 @@ export class HotlistService {
     const rows = await this.db.withUser(user.id, async (c) => {
       await c.query(`SET LOCAL statement_timeout = '60s'`); // design N9: separate export timeout
       const r = (await c.query<ExportRow>(
-        `SELECT * FROM authz.hotlist_export($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [f.status ?? null, f.technology ?? null, f.visibility ?? null, f.search ? likeContains(f.search) : null, EXPORT_ROW_CAP + 1,
-          f.locationId ?? null, f.visa ?? null, f.documents ?? null, f.resume === undefined ? null : f.resume === "yes", f.stay ?? null,
-          moreFilters(f)],
+        `SELECT * FROM authz.hotlist_export(NULL, NULL, NULL, $1, $2, NULL, NULL, NULL, $3, $4, $5)`,
+        [f.search ? likeContains(f.search) : null, EXPORT_ROW_CAP + 1, f.resume === undefined ? null : f.resume === "yes", f.stay ?? null,
+          hotlistMore(f)],
       )).rows;
       await this.audit.record(c, {
         actorId: user.id, action: "hotlist.export", entityType: "candidate",

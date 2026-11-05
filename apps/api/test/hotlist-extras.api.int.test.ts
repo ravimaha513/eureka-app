@@ -81,20 +81,27 @@ describe("permission matrix (generated from the catalog)", () => {
 });
 
 describe("saved views", () => {
+  it("reads a view saved with single values back as lists", async () => {
+    const id = (await call("r2a", "POST", "/api/v1/hotlist/views", { name: "Old view", filters: {} })).json().id as string;
+    await db.admin.query(`UPDATE eureka.hotlist_view SET filters = $2 WHERE id = $1`, [id, { status: "bench", teamId: T.t1, resume: "yes" }]);
+    const v = (await call("r2a", "GET", "/api/v1/hotlist/views")).json().items.find((x: { name: string }) => x.name === "Old view");
+    expect(v.filters).toEqual({ status: ["bench"], teamId: [T.t1], resume: "yes" });
+  });
+
   it("a user saves, lists, renames, updates and deletes their own views", async () => {
     const created = await call("r1a", "POST", "/api/v1/hotlist/views", { name: " Java bench ", filters: { status: "bench", technology: "Java" } });
     expect(created.statusCode).toBe(201);
     const v = created.json();
-    expect(v).toMatchObject({ name: "Java bench", filters: { status: "bench", technology: "Java" } });
+    expect(v).toMatchObject({ name: "Java bench", filters: { status: ["bench"], technology: ["Java"] } });
     await call("r1a", "POST", "/api/v1/hotlist/views", { name: "Active", filters: { status: "active" } });
 
     const list = (await call("r1a", "GET", "/api/v1/hotlist/views")).json();
     expect(list.items.map((i: { name: string }) => i.name)).toEqual(["Active", "Java bench"]);
 
     const renamed = await call("r1a", "PATCH", `/api/v1/hotlist/views/${v.id}`, { name: "Bench (Java)" });
-    expect(renamed.json()).toMatchObject({ id: v.id, name: "Bench (Java)", filters: { status: "bench", technology: "Java" } });
+    expect(renamed.json()).toMatchObject({ id: v.id, name: "Bench (Java)", filters: { status: ["bench"], technology: ["Java"] } });
     const refiltered = await call("r1a", "PATCH", `/api/v1/hotlist/views/${v.id}`, { filters: { visibility: "all_teams" } });
-    expect(refiltered.json().filters).toEqual({ visibility: "all_teams" });
+    expect(refiltered.json().filters).toEqual({ visibility: ["all_teams"] });
 
     expect((await call("r1a", "POST", "/api/v1/hotlist/views", { name: "active", filters: {} })).statusCode).toBe(409);
     expect((await call("r1a", "DELETE", `/api/v1/hotlist/views/${v.id}`)).statusCode).toBe(204);
@@ -255,7 +262,7 @@ describe("export", () => {
     const r = await call("m1", "POST", "/api/v1/hotlist/export", { status: "on_hold", visibility: "all_teams", search: "Cand" });
     expect(csvRows(r.body)).toHaveLength(expectedFor("m1", (c) => c.marketingStatus === "on_hold" && c.visibility === "all_teams").length);
     const audit = (await audits("hotlist.export", U.m1)).at(-1)!.changes;
-    expect(audit.filters).toEqual({ status: "on_hold", visibility: "all_teams", search: true });
+    expect(audit.filters).toEqual({ status: ["on_hold"], visibility: ["all_teams"], search: true });
     expect(JSON.stringify(audit)).not.toMatch(/Cand|1469/);
   });
 
@@ -267,6 +274,14 @@ describe("export", () => {
     const audit = (await audits("hotlist.export", U.l2)).at(-1)!.changes;
     expect(audit.filters).toEqual({ technology: true });
     expect(JSON.stringify(audit)).not.toMatch(/Jane|Doe|1469|example\.com|@/);
+  });
+
+  it("takes several values per filter and not= in the body, like the list", async () => {
+    const r = await call("m1", "POST", "/api/v1/hotlist/export", { status: ["on_hold", "bench"], not: ["status"] });
+    expect(r.statusCode).toBe(200);
+    expect(csvRows(r.body)).toHaveLength(expectedFor("m1", (c) => c.marketingStatus !== "on_hold" && c.marketingStatus !== "bench").length);
+    const audit = (await audits("hotlist.export", U.m1)).at(-1)!.changes as { filters: unknown };
+    expect(audit.filters).toEqual({ status: ["on_hold", "bench"], not: ["status"] });
   });
 
   it("rejects unknown filters and needs the CSRF token", async () => {
