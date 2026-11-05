@@ -288,10 +288,11 @@ describe("submission state machine", () => {
 
   it("walks the happy path to selected, then stays terminal", async () => {
     const id = await fresh();
-    for (const to of ["under_review", "interview_requested", "interview_scheduled", "interview_completed", "selected"]) {
+    for (const [i, to] of ["under_review", "interview_requested", "interview_scheduled", "interview_completed", "selected"].entries()) {
       const r = await move(id, to);
       expect(r.statusCode, r.body).toBe(200);
-      expect(r.json()).toEqual({ id, status: to, rejectionReason: null });
+      // Every transition bumps the row version (0477).
+      expect(r.json()).toEqual({ id, status: to, rejectionReason: null, rowVersion: i + 2 });
     }
     for (const to of ["rejected", "withdrawn", "submitted"]) {
       const r = await move(id, to, to === "rejected" ? { rejectionReason: "x" } : {});
@@ -317,7 +318,7 @@ describe("submission state machine", () => {
     expect((await move(id, "rejected", { rejectionReason: "   " })).statusCode).toBe(422);
     expect((await move(id, "under_review", { rejectionReason: "why" })).statusCode).toBe(422);
     const ok = await move(id, "rejected", { rejectionReason: "Client chose another vendor" });
-    expect(ok.json()).toEqual({ id, status: "rejected", rejectionReason: "Client chose another vendor" });
+    expect(ok.json()).toEqual({ id, status: "rejected", rejectionReason: "Client chose another vendor", rowVersion: 2 });
     const w = await fresh();
     await move(w, "under_review");
     await move(w, "interview_requested");

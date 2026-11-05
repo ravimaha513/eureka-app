@@ -188,8 +188,13 @@ describe("folders", () => {
     expect(a.statusCode).toBe(201);
     expect(b.statusCode).toBe(201);
     expect(b.json()).toEqual(a.json());
+    // The canonical body is hashed (platform/idempotency.ts): key order does not matter.
+    const reordered = await call("hr", "POST", "/api/v1/datahub/folders", { level: "internal", name: "Retry me" }, { "idempotency-key": "dh-retry-1" });
+    expect([reordered.statusCode, reordered.json()]).toEqual([201, a.json()]);
     const c = await call("hr", "POST", "/api/v1/datahub/folders", { ...body, name: "Other" }, { "idempotency-key": "dh-retry-1" });
-    expect(c.statusCode).toBe(409);
+    expect([c.statusCode, c.json().detail]).toEqual([409, "idempotency_key_reused"]);
+    const bad = await call("hr", "POST", "/api/v1/datahub/folders", body, { "idempotency-key": "has spaces" });
+    expect([bad.statusCode, bad.json().detail]).toEqual([400, "invalid_idempotency_key"]);
   });
 
   it("the folder panel per user: readable and managed folders with their actions", async () => {

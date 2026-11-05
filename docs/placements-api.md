@@ -81,7 +81,7 @@ and `packages/shared/src/authz/{state-machines,actions}.ts`. Deviations and prec
   `candidate.transition` on the candidate, `{ from, to, via: "placement" }`; none is written when the
   candidate did not move (e.g. terminated meanwhile).
 - **Idempotency-Key**: printable ASCII, 1–200 characters. Missing or malformed → **400**
-  `idempotency_key_required`. Keys are per user and endpoint; the body hash ignores key order. A repeat
+  `idempotency_key_required` (shared helper `platform/idempotency.ts`; replay order unchanged: the key is checked before visibility). Keys are per user and endpoint; the body hash ignores key order. A repeat
   returns the same 201 body; a failed request (any 4xx) does not consume the key.
 - **Extra fields** (additive): `Placement.implementationPartner: {id,name}|null`; `team` and `location` may
   be `null` (the actor had no team); `candidate.name` is `null` when the caller cannot read the candidate's
