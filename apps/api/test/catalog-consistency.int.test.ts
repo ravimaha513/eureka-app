@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  CANDIDATE_STATUSES, CHECKLIST_ITEM_STATUSES, PERMISSIONS, PLACEMENT_STATUSES, SUBMISSION_STATUSES,
+  CANDIDATE_STATUSES, CHECKLIST_ITEM_STATUSES, GRANTS, PERMISSIONS, PLACEMENT_STATUSES, ROLE_TRAITS, ROLES, SUBMISSION_STATUSES,
+  roleClassification,
 } from "@eureka/shared";
 import { createTestDb, type TestDb } from "./db-harness.js";
 
@@ -37,5 +38,15 @@ describe("SQL agrees with the shared catalog", () => {
     expect(rows).toHaveLength(1);
     const allowed = [...rows[0]!.def.matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1]);
     expect(allowed.sort()).toEqual([...statuses].sort());
+  });
+
+  // Admin is only admin (0480): SQL and the catalog classify the built-in roles alike, and none is
+  // admin_compatible_only (the role_permission holder guard leaves system roles to the catalog).
+  it("authz.role_classes agrees with roleClassification for every built-in role", async () => {
+    const { rows } = await db.admin.query<{ role_key: string; classification: string }>(
+      `SELECT role_key, classification FROM authz.role_classes() WHERE role_key = ANY ($1::text[])`, [[...ROLES]]);
+    expect(Object.fromEntries(rows.map((r) => [r.role_key, r.classification])))
+      .toEqual(Object.fromEntries(ROLES.map((r) => [r, roleClassification(ROLE_TRAITS[r], GRANTS[r])])));
+    expect(rows.filter((r) => r.classification === "admin_compatible_only")).toEqual([]);
   });
 });

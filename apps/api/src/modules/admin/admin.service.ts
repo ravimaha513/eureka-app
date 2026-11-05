@@ -49,19 +49,24 @@ type RoleRow = {
   is_sales: boolean; is_location_bound: boolean; is_admin: boolean; is_recruiter: boolean; is_coach: boolean;
   track: string; level: number; department_id: string | null; department_name: string | null; cloned_from: string | null;
   archived_at: Date | null; holders: number; row_version: number;
+  /** Admin separation class (authz.role_classes, migration 0480; docs/roles-api.md "Admin separation"). */
+  classification: "admin" | "data" | "admin_compatible_only";
 };
 const ROLE_ROWS_SQL = `
   SELECT r.key, r.label, r.description, r.is_system, r.is_restricted, r.is_sales, r.is_location_bound, r.is_admin,
          r.is_recruiter, r.is_coach, r.track, r.level, r.department_id, d.name AS department_name, r.cloned_from, r.archived_at, r.row_version,
          (SELECT count(DISTINCT ur.user_id) FROM eureka.user_role ur JOIN eureka.app_user u ON u.id = ur.user_id
-           WHERE ur.role_key = r.key AND ur.valid @> now() AND u.status = 'active')::int AS holders
-  FROM eureka.role r LEFT JOIN eureka.department d ON d.id = r.department_id`;
+           WHERE ur.role_key = r.key AND ur.valid @> now() AND u.status = 'active')::int AS holders,
+         rc.classification
+  FROM eureka.role r LEFT JOIN eureka.department d ON d.id = r.department_id
+  JOIN authz.role_classes() rc ON rc.role_key = r.key`;
 const roleItem = (r: RoleRow, grants?: Record<string, string>) => ({
   key: r.key, label: r.label, description: r.description, isSystem: r.is_system, restricted: r.is_restricted,
   traits: { sales: r.is_sales, locationBound: r.is_location_bound, admin: r.is_admin, recruiter: r.is_recruiter, coach: r.is_coach },
   track: r.track, level: r.level,
   department: r.department_id ? { id: r.department_id, name: r.department_name! } : null,
   clonedFrom: r.cloned_from, holders: r.holders, archivedAt: r.archived_at, rowVersion: r.row_version,
+  classification: r.classification,
   ...(grants ? { grants } : {}),
 });
 
@@ -83,7 +88,7 @@ const roleIndex = (roles: RoleRow[]) =>
 
 /** request_role failures that are a problem with one row, not with the import. */
 const ROW_ROLE_ERRORS = new Set([
-  "separation_of_duties", "location_required", "location_not_allowed", "role_already_held", "role_archived", "role_department_mismatch",
+  "separation_of_duties", "role_violates_admin_separation", "location_required", "location_not_allowed", "role_already_held", "role_archived", "role_department_mismatch",
 ]);
 /** admin_add_team_member failures that are a problem with one row (cycle: the member is above the team's lead, 0370). */
 const ROW_TEAM_ERRORS = new Set(["already_member", "user_inactive", "cycle"]);
@@ -427,7 +432,10 @@ export class AdminService {
           if (roles.includes(null)) { fail("unknown_role"); continue; }
           const wanted = roles as RoleRow[];
           if (new Set(wanted.map((x) => x.key)).size !== wanted.length) { fail("duplicate_role"); continue; }
-          if (wanted.some((x) => x.is_admin) && wanted.some((x) => !x.is_admin)) { fail("separation_of_duties"); continue; }
+          // Admin is only admin (0480): admin and data roles never together; admin_compatible_only goes with either.
+          if (wanted.some((x) => x.classification === "admin") && wanted.some((x) => x.classification === "data")) {
+            fail("separation_of_duties"); continue;
+          }
           if (wanted.some((x) => x.is_location_bound) && !locationId) { fail("location_required"); continue; }
           const managerEmail = r.manager?.trim().toLowerCase() || null;
           if (managerEmail) {
@@ -680,6 +688,23 @@ export class AdminService {
         items: rows.map((r) => ({
           key: r.role_key, label: r.label, isSystem: r.is_system, admin: r.is_admin, archived: r.archived,
           holders: r.holders, permissions: r.permissions,
+        })),
+      };
+    });
+  }
+
+  /**
+   * Users holding admin and data roles at once (docs/roles-api.md "Admin separation", migration 0480);
+   * read-only report, nothing is stripped.
+   */
+  async listUserViolations(user: AuthedUser) {
+    return this.tx(user, async (c) => {
+      const { rows } = await c.query<{
+        user_id: string; display_name: string; status: string; admin_roles: string[]; data_roles: string[];
+      }>(`SELECT * FROM authz.user_admin_violations()`);
+      return {
+        items: rows.map((r) => ({
+          id: r.user_id, displayName: r.display_name, status: r.status, adminRoles: r.admin_roles, dataRoles: r.data_roles,
         })),
       };
     });

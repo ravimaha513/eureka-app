@@ -948,3 +948,15 @@ export function adminSeparationViolations(traits: Pick<RoleTraits, "admin">, gra
     ? !ADMIN_PERMISSIONS.includes(p) && !ADMIN_COMPATIBLE_PERMISSIONS.includes(p)
     : ADMIN_PERMISSIONS.includes(p));
 }
+
+/**
+ * Admin separation class of a role (docs/roles-api.md "Admin separation"; migration 0480,
+ * authz.role_classes): "admin" for the admin trait; "admin_compatible_only" when, without it, every
+ * grant is in ADMIN_COMPATIBLE_PERMISSIONS (or there is none); "data" otherwise. A user holds admin
+ * roles or data roles, never both; admin_compatible_only roles go with either.
+ */
+export type RoleClassification = "admin" | "data" | "admin_compatible_only";
+export function roleClassification(traits: Pick<RoleTraits, "admin">, grants: Grants): RoleClassification {
+  if (traits.admin) return "admin";
+  return (Object.keys(grants) as Permission[]).every((p) => ADMIN_COMPATIBLE_PERMISSIONS.includes(p)) ? "admin_compatible_only" : "data";
+}

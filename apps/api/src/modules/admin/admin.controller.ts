@@ -57,6 +57,12 @@ export class AdminController {
     return this.svc.userSummary(user);
   }
 
+  /** Users holding admin and data roles at once (read-only report; docs/roles-api.md "Admin separation"). */
+  @Get("users/violations")
+  listUserViolations(@CurrentUser() user: AuthedUser) {
+    return this.svc.listUserViolations(user);
+  }
+
   @Post("users")
   createUser(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     return this.svc.createUser(user, CreateUser.parse(body));
