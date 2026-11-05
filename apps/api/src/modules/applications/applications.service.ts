@@ -20,7 +20,7 @@ import { fromMicros, splitCursor, toMicros } from "../submissions/pipeline.js";
 import type {
   ApplicantListQuery, ApplicationExport, ApplicationListQuery, CreateCandidateFromApplication, ScheduleInterview, Scorecard, SetPeople, StatusChange,
 } from "./applications.schemas.js";
-import { likeContains } from "../../platform/sql.js";
+import { likeContains, nameSearch } from "../../platform/sql.js";
 import { dbErrorMapper } from "../../platform/errors.js";
 
 /**
@@ -154,7 +154,7 @@ export class ApplicationsService {
     const where = ["true"];
     if (q.status) where.push(`a.status = ${p(q.status)}`);
     if (q.jobId) where.push(`a.job_id = ${p(q.jobId)}::uuid`);
-    if (q.search) where.push(`(ap.first_name || ' ' || ap.last_name) ILIKE ${p(likeContains(q.search))} ESCAPE '\\'`);
+    if (q.search) where.push(nameSearch("ap", p(likeContains(q.search))));
     if (cursor) {
       const [t, id] = splitCursor(cursor);
       where.push(`(a.applied_at, a.id) < (${fromMicros(p(t))}, ${p(id)}::uuid)`);
@@ -381,7 +381,7 @@ export class ApplicationsService {
     const where = ["true"];
     if (q.search) {
       const s = p(likeContains(q.search));
-      where.push(`((ap.first_name || ' ' || ap.last_name) ILIKE ${s} ESCAPE '\\' OR ap.email ILIKE ${s} ESCAPE '\\')`);
+      where.push(`(${nameSearch("ap", s)} OR ap.email ILIKE ${s} ESCAPE '\\')`);
     }
     if (q.cursor) {
       const [t, id] = splitCursor(q.cursor);
