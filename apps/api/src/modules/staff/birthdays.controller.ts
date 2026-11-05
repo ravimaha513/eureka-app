@@ -1,8 +1,13 @@
-import { Body, Controller, ForbiddenException, Get, Injectable, NotFoundException, Param, ParseUUIDPipe, Put, UnprocessableEntityException } from "@nestjs/common";
+import {
+  Body, Controller, ForbiddenException, Get, Injectable, NotFoundException, Param, ParseUUIDPipe, Put, Query, UnprocessableEntityException,
+} from "@nestjs/common";
 import { AuditService } from "../../platform/audit.service.js";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
-import { BirthdayUpdate } from "./birthdays.schemas.js";
+import { decodeCursor, encodeCursor } from "../facilities/facilities.common.js";
+import { BIRTHDAY_LIST_CAP, BirthdayListQuery, BirthdayUpdate } from "./birthdays.schemas.js";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface StaffRow {
   id: string; display_name: string; email: string; designation: string | null; location: string | null;
@@ -20,9 +25,19 @@ interface StaffRow {
 export class StaffBirthdaysService {
   constructor(private readonly db: DbService, private readonly audit: AuditService) {}
 
-  async list(user: AuthedUser) {
+  /** By name. `truncated` / `nextCursor` (keyset on display name, id) reach people past the page. */
+  async list(user: AuthedUser, q: BirthdayListQuery = { limit: BIRTHDAY_LIST_CAP }) {
+    const params: unknown[] = [];
+    let after = "";
+    const cur = decodeCursor(q.cursor, 2, 2000);
+    if (cur) {
+      if (!UUID.test(cur[1]!)) throw new UnprocessableEntityException("invalid_cursor");
+      params.push(cur[0], cur[1]);
+      after = `AND (u.display_name, u.id) > ($1::text, $2::uuid)`;
+    }
+    params.push(q.limit + 1);
     return this.db.withUser(user.id, async (c) => {
-      const { rows } = await c.query<StaffRow>(
+      const { rows: fetched } = await c.query<StaffRow>(
         `SELECT u.id, u.display_name, u.email::text AS email, u.designation, l.name AS location,
                 ARRAY(SELECT r.label FROM eureka.user_role ur JOIN eureka.role r ON r.key = ur.role_key
                        WHERE ur.user_id = u.id AND ur.valid @> now() ORDER BY r.label) AS roles,
@@ -30,8 +45,13 @@ export class StaffBirthdaysService {
            FROM eureka.app_user u
            LEFT JOIN eureka.location l ON l.id = u.primary_location_id
            LEFT JOIN eureka.staff_profile p ON p.user_id = u.id
-          WHERE u.status = 'active' ORDER BY u.display_name, u.id LIMIT 2000`);
+          WHERE u.status = 'active' ${after} ORDER BY u.display_name, u.id LIMIT $${params.length}`, params);
+      const truncated = fetched.length > q.limit;
+      const rows = fetched.slice(0, q.limit);
+      const last = rows[rows.length - 1];
       return {
+        truncated,
+        nextCursor: truncated && last ? encodeCursor([last.display_name, last.id]) : null,
         items: rows.map((r) => ({
           id: r.id, name: r.display_name, email: r.email, designation: r.designation, location: r.location,
           roles: r.roles ?? [],
@@ -65,8 +85,8 @@ export class StaffBirthdaysController {
 
   @Get("birthdays")
   @RequirePermission("staff.birthday:manage")
-  list(@CurrentUser() user: AuthedUser) {
-    return this.svc.list(user);
+  list(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
+    return this.svc.list(user, BirthdayListQuery.parse(q ?? {}));
   }
 
   @Put(":id/birthday")

@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from "@nestjs/common";
 import { CurrentUser, RequirePermission, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
-import { AccessLogQuery, DocumentUpload, ReplaceDocumentFile, UpdateDocument } from "./documents.schemas.js";
+import { AccessLogQuery, DocumentListQuery, DocumentUpload, ReplaceDocumentFile, UpdateDocument } from "./documents.schemas.js";
 import { DocumentsService } from "./documents.service.js";
 
 /**
@@ -24,8 +24,8 @@ export class DocumentsController {
 
   @Get("candidates/:id/documents")
   @RequirePermission("document:read")
-  listForCandidate(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
-    return this.svc.list(user, { kind: "candidate", id });
+  listForCandidate(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Query() q: unknown) {
+    return this.svc.list(user, { kind: "candidate", id }, DocumentListQuery.parse(q ?? {}));
   }
 
   /** Returns a presigned POST into quarantine/ (2 minutes); the file opens after a clean scan. */
@@ -37,8 +37,8 @@ export class DocumentsController {
 
   @Get("placements/:id/documents")
   @RequirePermission("document:read")
-  listForPlacement(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string) {
-    return this.svc.list(user, { kind: "placement", id });
+  listForPlacement(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Query() q: unknown) {
+    return this.svc.list(user, { kind: "placement", id }, DocumentListQuery.parse(q ?? {}));
   }
 
   @Post("placements/:id/documents")

@@ -293,6 +293,21 @@ describe("staff birthdays and the CEO digest (BD-1..BD-5)", () => {
     const items = list.json().items as { id: string; name: string; roles: string[]; birthday: { month: number; day: number } | null }[];
     expect(items.find((i) => i.id === U.ceo)).toMatchObject({ name: "ceo", roles: ["CEO"], birthday: bd });
     expect(items.find((i) => i.id === U.r1a)!.birthday).toEqual({ month: 3, day: 14 });
+    // R-23 (C-09): the whole directory by default (truncated=false); ?limit pages by (name, id) keyset.
+    expect(list.json()).toMatchObject({ truncated: false, nextCursor: null });
+    const paged: string[] = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < 100; i++) {
+      const page = await call("hr", "GET", `/api/v1/staff/birthdays?limit=7${cursor ? `&cursor=${cursor}` : ""}`);
+      expect(page.statusCode, page.body).toBe(200);
+      paged.push(...(page.json().items as { id: string }[]).map((x) => x.id));
+      expect(page.json().truncated).toBe(page.json().nextCursor !== null);
+      cursor = page.json().nextCursor;
+      if (!cursor) break;
+    }
+    expect(paged).toEqual(items.map((i) => i.id));
+    expect((await call("hr", "GET", "/api/v1/staff/birthdays?cursor=nope")).statusCode).toBe(422);
+    expect((await call("hr", "GET", `/api/v1/staff/birthdays?cursor=${Buffer.from(JSON.stringify(["a", "b"])).toString("base64url")}`)).statusCode).toBe(422);
     expect((await call("r1a", "GET", "/api/v1/staff/birthdays")).statusCode).toBe(403);
     expect((await audits("staff_birthday.updated")).map((a) => a.changes)).toEqual([{ birthdaySet: true }, { birthdaySet: true }, { birthdaySet: true }]);
     // HR writes only through the definer function; an admin cannot touch another profile row directly.

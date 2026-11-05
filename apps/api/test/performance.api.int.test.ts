@@ -204,6 +204,42 @@ describe("PF-2 drill-down", () => {
     expect(past).toMatchObject({ total: 7, items: [] });
     expect((await call("m1", "GET", `/api/v1/performance/activity?${PERIOD}&kind=bogus`)).statusCode).toBe(422);
   });
+
+  it("pages by keyset cursor on (time DESC, id), stable under equal times (R-23, D-10)", async () => {
+    // Two submissions at the same instant, so a page boundary can fall inside the tie.
+    const c = await db.admin.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SET LOCAL session_replication_role = replica");
+      await c.query(`UPDATE eureka.submission SET submitted_at = (SELECT submitted_at FROM eureka.submission WHERE id = $1) WHERE id = $2`,
+        [ids.r1aSubs[0], ids.r1aSubs[1]]);
+      await c.query("COMMIT");
+    } finally { c.release(); }
+    const all = (await call("m1", "GET", `/api/v1/performance/activity?${PERIOD}&kind=submissions`)).json();
+    expect(all).toMatchObject({ total: 7, truncated: false, nextCursor: null });
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let first = true;
+    for (let i = 0; i < 8; i++) {
+      const r = await call("m1", "GET", `/api/v1/performance/activity?${PERIOD}&kind=submissions&limit=2${cursor ? `&cursor=${cursor}` : ""}`);
+      expect(r.statusCode, r.body).toBe(200);
+      const j = r.json();
+      // The exact total on the first page only; later pages skip the count.
+      expect(j.total).toBe(first ? 7 : null);
+      expect(j.truncated).toBe(j.nextCursor !== null);
+      seen.push(...(j.items as { id: string }[]).map((x) => x.id));
+      cursor = j.nextCursor;
+      first = false;
+      if (!cursor) break;
+    }
+    expect(seen).toEqual((all.items as { id: string }[]).map((x) => x.id));
+    // The deprecated offset still pages and now says whether more follow.
+    expect((await call("m1", "GET", `/api/v1/performance/activity?${PERIOD}&kind=submissions&limit=2&offset=4`)).json())
+      .toMatchObject({ total: 7, truncated: true });
+    for (const q of ["cursor=nope", `cursor=1.${U.r1a}&offset=2`]) {
+      expect((await call("m1", "GET", `/api/v1/performance/activity?${PERIOD}&kind=submissions&${q}`)).statusCode, q).toBe(422);
+    }
+  });
 });
 
 describe("PF-5 active candidates on end-client projects", () => {

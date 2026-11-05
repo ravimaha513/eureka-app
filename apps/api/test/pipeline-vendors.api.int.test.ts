@@ -105,7 +105,10 @@ interface Item {
   assessments: { count: number; passed: number };
   placement: { status: string; paperwork: { done: number; total: number } | null } | null;
 }
-interface Report { total: number; funnel: Record<string, number>; byStage: Record<string, number>; notResponding: number; items: Item[] }
+interface Report {
+  total: number; funnel: Record<string, number>; byStage: Record<string, number>; notResponding: number; items: Item[];
+  limit: number; offset: number; truncated: boolean; nextCursor: string | null;
+}
 
 const ids: Record<string, string> = {};
 let subA = "";
@@ -210,6 +213,49 @@ describe("pipeline report (PV-1, PV-2)", () => {
     const page = await report("ceo", "&limit=2&offset=0");
     expect(page.items).toHaveLength(2);
     expect(page.total).toBe(5);
+  });
+
+  it("pages by keyset cursor (R-23, E-03): same rows as offset paging; summary unchanged on every page", async () => {
+    // hr: org scope like ceo, so this test does not exhaust ceo's per-minute report budget.
+    const who = "hr" as const;
+    const full = await report(who);
+    expect(full).toMatchObject({ truncated: false, nextCursor: null, offset: 0, limit: 50 });
+    const order = full.items.map((i) => i.candidate.id);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const r: Report = await report(who, `&limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      expect(r.items.length).toBeLessThanOrEqual(2);
+      // The summary is computed from the same rows in the same statement, whatever the page.
+      expect({ total: r.total, funnel: r.funnel, byStage: r.byStage, notResponding: r.notResponding })
+        .toEqual({ total: full.total, funnel: full.funnel, byStage: full.byStage, notResponding: full.notResponding });
+      seen.push(...r.items.map((i) => i.candidate.id));
+      expect(r.truncated).toBe(r.nextCursor !== null);
+      cursor = r.nextCursor;
+      pages++;
+    } while (cursor && pages < 10);
+    expect(seen).toEqual(order);
+    expect(pages).toBe(3);
+    // The deprecated offset gives the same pages.
+    const byOffset = [...(await report(who, "&limit=2&offset=0")).items, ...(await report(who, "&limit=2&offset=2")).items,
+      ...(await report(who, "&limit=2&offset=4")).items].map((i) => i.candidate.id);
+    expect(byOffset).toEqual(order);
+    const past = await report(who, "&limit=2&offset=10");
+    expect(past).toMatchObject({ items: [], total: 5, truncated: false, nextCursor: null });
+    // A cursor works with filters; a cursor past every key (NULL sort key, max id) ends the list.
+    const t1 = await report(who, `&teamId=${T.t1}&limit=1`);
+    expect(t1.truncated).toBe(true);
+    const t1b = await report(who, `&teamId=${T.t1}&limit=5&cursor=${encodeURIComponent(t1.nextCursor!)}`);
+    expect([t1.items[0]!.candidate.id, ...t1b.items.map((i) => i.candidate.id)])
+      .toEqual(full.items.filter((i) => ["A", "B", "E"].some((k) => ids[k] === i.candidate.id)).map((i) => i.candidate.id));
+    const nullKey = Buffer.from(JSON.stringify([null, "ffffffff-ffff-4fff-bfff-ffffffffffff"])).toString("base64url");
+    expect((await report(who, `&cursor=${nullKey}`)).items).toEqual([]);
+    // Cursor and offset together, or a malformed cursor: 422.
+    for (const q of [`&cursor=${encodeURIComponent(t1.nextCursor!)}&offset=2`, "&cursor=nope", `&cursor=${Buffer.from("[1,2]").toString("base64url")}`,
+      `&cursor=${Buffer.from(JSON.stringify(["a", "not-a-uuid"])).toString("base64url")}`]) {
+      expect((await call(who, "GET", `/api/v1/reports/pipeline?technologyId=${TECH}${q}`)).statusCode, q).toBe(422);
+    }
   });
 
   it("validates the query strictly", async () => {
@@ -329,6 +375,27 @@ describe("preferred vendors (PV-9..PV-12)", () => {
       const res = await call(k, "POST", "/api/v1/preferred-vendors", { vendorName: `Own ${k}` });
       expect(res.statusCode, res.body).toBe(201);
       expect(res.json()).toMatchObject({ owner: { id: U[k] }, actions: { edit: true, archive: true } });
+    }
+  });
+
+  it("pages by keyset cursor (R-23): truncated + nextCursor; the total stays exact on every page", async () => {
+    // Sorted case-insensitively by name, then id.
+    for (const n of ["pv page b", "PV Page A", "PV Page C"]) {
+      expect((await call("r2a", "POST", "/api/v1/preferred-vendors", { vendorName: n })).statusCode).toBe(201);
+    }
+    const all = (await call("r2a", "GET", "/api/v1/preferred-vendors")).json();
+    expect(all).toMatchObject({ total: 3, truncated: false, nextCursor: null });
+    expect(all.items.map((i: { vendorName: string }) => i.vendorName)).toEqual(["PV Page A", "pv page b", "PV Page C"]);
+    const p1 = (await call("r2a", "GET", "/api/v1/preferred-vendors?limit=2")).json();
+    expect(p1).toMatchObject({ total: 3, truncated: true });
+    expect(p1.items.map((i: { vendorName: string }) => i.vendorName)).toEqual(["PV Page A", "pv page b"]);
+    const p2 = (await call("r2a", "GET", `/api/v1/preferred-vendors?limit=2&cursor=${p1.nextCursor}`)).json();
+    expect(p2).toMatchObject({ total: 3, truncated: false, nextCursor: null });
+    expect(p2.items.map((i: { vendorName: string }) => i.vendorName)).toEqual(["PV Page C"]);
+    // The deprecated offset: past the end the total is still exact.
+    expect((await call("r2a", "GET", "/api/v1/preferred-vendors?offset=5")).json()).toMatchObject({ items: [], total: 3 });
+    for (const q of [`cursor=${p1.nextCursor}&offset=1`, "cursor=nope", `cursor=${Buffer.from(JSON.stringify(["a", "b"])).toString("base64url")}`]) {
+      expect((await call("r2a", "GET", `/api/v1/preferred-vendors?${q}`)).statusCode, q).toBe(422);
     }
   });
 });

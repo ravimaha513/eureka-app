@@ -96,6 +96,32 @@ describe("lookups", () => {
     }
   });
 
+  it("?q / ?limit narrow clients, vendors and partners and add `truncated` (R-23, C-09); other lists stay whole", async () => {
+    const cookie = await login("ceo");
+    const get = async (qs: string) => {
+      const res = await app.inject({ method: "GET", url: `/api/v1/lookups?${qs}`, headers: { cookie } });
+      return res;
+    };
+    const full = await lookups("ceo");
+    expect(full).not.toHaveProperty("truncated");
+    const acme = (await get("q=acme")).json();
+    expect(acme.truncated).toBe(false);
+    expect(acme.vendors.map((v: { name: string }) => v.name)).toEqual(["Acme Staffing"]);
+    expect(acme.clients).toEqual(full.clients!.filter((c) => /acme/i.test(c.name)));
+    expect(acme.technologies).toEqual(full.technologies);
+    expect(acme.roles).toEqual(full.roles);
+    const one = (await get("limit=1")).json();
+    expect(one.clients).toEqual(full.clients!.slice(0, 1));
+    expect(one.truncated).toBe(full.clients!.length > 1 || full.vendors!.length > 1 || full.implementationPartners!.length > 1);
+    // LIKE wildcards are literal; unknown keys stay ignored (the route took no query before); bad values 422.
+    expect((await get("q=%25")).json().vendors).toEqual([]);
+    expect((await get("foo=1")).json()).toEqual(full);
+    for (const qs of ["limit=0", "limit=501", `q=${"x".repeat(61)}`]) expect((await get(qs)).statusCode, qs).toBe(422);
+    // No party lists for callers without the permission, narrowed or not.
+    const coach = await app.inject({ method: "GET", url: "/api/v1/lookups?q=acme", headers: { cookie: await login("coach") } });
+    expect(coach.json()).toMatchObject({ clients: [], vendors: [], implementationPartners: [], truncated: false });
+  });
+
   it("the coach and admin roles see neither restricted list", async () => {
     for (const key of ["coach", "admin", "imm"] as const) {
       const j = await lookups(key);

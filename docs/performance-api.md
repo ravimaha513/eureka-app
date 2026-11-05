@@ -56,9 +56,12 @@ under RLS, narrowed to the caller's `performance:read` scope over the row's **ac
 
 - `GET /api/v1/performance/summary?from&to&tz` returns
   `{ period, kinds, totals: { counts, ratios }, people: [{ user: { id, name, designation, active }, team, counts, ratios }] }`.
-- `GET /api/v1/performance/activity?kind&from&to&tz&userId?&offset=0..10000&limit=1..200` returns
-  `{ kind, period, total, items: [{ id, at, candidate: { id, name|null }, recruiter, team, client, status, detail }] }`,
-  newest first. `detail`: `{ jobTitle }` (submissions), `{ round, cleared }` (interviews),
+- `GET /api/v1/performance/activity?kind&from&to&tz&userId?&cursor?&limit=1..200` returns
+  `{ kind, period, total, truncated, nextCursor, items: [{ id, at, candidate: { id, name|null }, recruiter, team, client, status, detail }] }`,
+  newest first (time DESC, id). Paging (R-23, D-10): `cursor=<nextCursor>` (keyset `"<epoch µs>.<id>"`, stable under
+  equal times); `total` is exact on the first page and `null` on cursor pages (no full recount per page); `truncated`
+  says more rows follow. `offset=0..10000` still works (with an exact total) but is **deprecated**; `cursor` with
+  `offset` > 0 is 422. `detail`: `{ jobTitle }` (submissions), `{ round, cleared }` (interviews),
   `{ vendor, tentativeStart, placementType }` (placements). Names follow person RLS (null when hidden).
   A `userId` outside the caller's scope returns no rows (not an error).
 

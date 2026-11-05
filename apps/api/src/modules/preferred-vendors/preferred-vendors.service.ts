@@ -1,4 +1,4 @@
-import { ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
+import { ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 import { can } from "@eureka/shared";
 import { z } from "zod";
 import type { AuthedUser } from "../../platform/auth.guard.js";
@@ -6,6 +6,9 @@ import { AuditService } from "../../platform/audit.service.js";
 import { DbService } from "../../platform/db.service.js";
 import { mapPvError } from "../pipeline-report/pipeline-report.errors.js";
 import { likeContains } from "../../platform/sql.js";
+import { decodeCursor, encodeCursor } from "../facilities/facilities.common.js";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** docs/pipeline-vendors-api.md PV-9..PV-12. Strict schemas (rule 4). */
 const Text = (max: number) => z.string().trim().min(1).max(max).regex(/^[^\u0000-\u001f\u007f]*$/, "no control characters");
@@ -32,8 +35,12 @@ export const PreferredVendorQuery = z.object({
   q: z.string().trim().min(1).max(100).optional(),
   archived: z.enum(["true", "false"]).transform((v) => v === "true").default("false"),
   limit: z.coerce.number().int().min(1).max(200).default(100),
+  /** Deprecated: page with `cursor` (the previous page's `nextCursor`) instead. Still honoured, up to 10,000. */
   offset: z.coerce.number().int().min(0).max(10_000).default(0),
-}).strict();
+  /** Keyset cursor (opaque) on (lower(vendor name), id). Not combined with `offset`. */
+  cursor: z.string().min(1).max(600).optional(),
+}).strict()
+  .refine((q) => q.cursor === undefined || q.offset === 0, { message: "give cursor or offset, not both", path: ["offset"] });
 export type PreferredVendorQuery = z.infer<typeof PreferredVendorQuery>;
 
 interface Row {
@@ -91,14 +98,34 @@ export class PreferredVendorsService {
         const pat = p(likeContains(q.q));
         where.push(`(pv.vendor_name ILIKE ${pat} OR pv.contact_name ILIKE ${pat} OR pv.clients ILIKE ${pat})`);
       }
-      const rows = (await c.query<Row>(`${SELECT.replace("pv.row_version", "pv.row_version, count(*) OVER ()::int AS total")}
-        WHERE ${where.join(" AND ")} ORDER BY lower(pv.vendor_name), pv.id LIMIT ${p(q.limit)} OFFSET ${p(q.offset)}`, params)).rows;
+      // The total counts every match (computed before the keyset), so it is the same on every page.
+      const countParams = params.length;
+      let after = "true";
+      const cur = decodeCursor(q.cursor, 2);
+      if (cur) {
+        if (!UUID.test(cur[1]!)) throw new UnprocessableEntityException("invalid_cursor");
+        after = `(x.sort_key, x.id) > (${p(cur[0])}::text, ${p(cur[1])}::uuid)`;
+      }
+      const fetched = (await c.query<Row & { sort_key: string }>(`SELECT * FROM (
+          ${SELECT.replace("pv.row_version", "pv.row_version, lower(pv.vendor_name) AS sort_key, count(*) OVER ()::int AS total")}
+          WHERE ${where.join(" AND ")}) x
+        WHERE ${after} ORDER BY x.sort_key, x.id LIMIT ${p(q.limit + 1)} OFFSET ${p(q.offset)}`, params)).rows;
+      const truncated = fetched.length > q.limit;
+      const rows = fetched.slice(0, q.limit);
+      const last = rows[rows.length - 1];
+      let total = rows[0]?.total;
+      if (total === undefined && (q.offset > 0 || cur)) {
+        total = (await c.query<{ n: number }>(`SELECT count(*)::int AS n FROM eureka.preferred_vendor pv WHERE ${where.join(" AND ")}`,
+          params.slice(0, countParams))).rows[0]!.n;
+      }
       // Owners the caller can filter by: every owner of a visible entry.
       const owners = (await c.query<{ id: string; name: string | null }>(`SELECT DISTINCT pv.owner_id AS id, u.display_name AS name
         FROM eureka.preferred_vendor pv LEFT JOIN eureka.app_user u ON u.id = pv.owner_id ORDER BY 2, 1`)).rows;
       return {
         items: rows.map((r) => this.present(user, r)),
-        total: rows[0]?.total ?? 0,
+        total: total ?? 0,
+        truncated,
+        nextCursor: truncated && last ? encodeCursor([last.sort_key, last.id]) : null,
         owners,
         actions: { create: can(user.access, "vendor.preferred:create") },
       };

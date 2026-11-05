@@ -238,7 +238,9 @@ describe("companies and facilities: create, edit, validation", () => {
 describe("incharges and employees", () => {
   it("incharges: active users with a role at the location; duplicate 409; outsider 422; remove 204 then 404", async () => {
     const c = await company("locD", LOC.dallas);
-    const opts = (await ok<{ items: { id: string }[] }>("locD", "GET", `/api/v1/companies/${c.id}/incharge-options`)).items.map((x) => x.id);
+    const picker = await ok<{ items: { id: string }[]; truncated: boolean }>("locD", "GET", `/api/v1/companies/${c.id}/incharge-options`);
+    expect(picker.truncated).toBe(false); // R-23: true only when more than 50 people match
+    const opts = picker.items.map((x) => x.id);
     expect(opts).toContain(U.locD);
     expect(opts).not.toContain(U.r1a);
     expect(opts).not.toContain(opsA);

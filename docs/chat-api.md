@@ -33,7 +33,7 @@ Code: `db/migrations/0070_chat.sql`, `apps/api/src/modules/chat`, `packages/shar
   archived, favorite, muted, unread, unreadCapped, lastMessage: { id, preview, mine, sender, createdAt } | null, activityAt }`.
   `q` matches the group name or the other person's name.
 - `GET /unread` returns `{ unread, capped, conversations }` (unmuted conversations).
-- `GET /people?q=&limit=` returns `{ items: [{ id, name, designation }] }`: active staff who may chat, not the caller.
+- `GET /people?q=&limit=` returns `{ items: [{ id, name, designation }], truncated }`: active staff who may chat, not the caller. `truncated` (R-23): more people match than `limit`; narrow `q`.
 - `POST /conversations/direct` `{ userId }` returns the conversation (201 created, 200 existing; 422 `invalid_member`).
 - `POST /conversations/group` `{ name, memberIds }` returns 201 with the conversation.
 - `GET /conversations/:id` returns `{ id, kind, title, name, rowVersion, createdAt, archived, favorite, muted, myRole,

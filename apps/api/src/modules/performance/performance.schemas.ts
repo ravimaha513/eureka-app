@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { validTimeZone } from "../../platform/time-zone.js";
-import { QueryInstant } from "../submissions/pipeline.js";
+import { Cursor, QueryInstant } from "../submissions/pipeline.js";
 
 const uuid = z.string().uuid();
 
@@ -30,10 +30,14 @@ export const ActivityQuery = z
     tz: TimeZone.optional(),
     kind: z.enum(ACTIVITY_KINDS),
     userId: uuid.optional(),
+    /** Deprecated: page with `cursor` (the previous page's `nextCursor`) instead. Still honoured, up to 10,000. */
     offset: z.coerce.number().int().min(0).max(10_000).default(0),
+    /** Keyset cursor "<epoch microseconds>.<id>" on (time DESC, id). Pages after the first omit the total (null). */
+    cursor: Cursor.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })
-  .strict();
+  .strict()
+  .refine((q) => q.cursor === undefined || q.offset === 0, { message: "give cursor or offset, not both", path: ["offset"] });
 export type ActivityQuery = z.infer<typeof ActivityQuery>;
 
 export const ActiveCandidatesQuery = z

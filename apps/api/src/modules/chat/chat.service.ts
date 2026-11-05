@@ -479,7 +479,7 @@ export class ChatService {
   async people(user: AuthedUser, q: { q?: string; limit: number }) {
     this.read(user);
     return this.db.withUser(user.id, async (c) => {
-      const params: unknown[] = [user.id, q.limit];
+      const params: unknown[] = [user.id, q.limit + 1];
       let match = "";
       if (q.q) {
         params.push(likeContains(q.q));
@@ -489,7 +489,8 @@ export class ChatService {
         `SELECT u.id, u.display_name, u.designation FROM eureka.app_user u
           WHERE u.id <> $1 AND ${chatUser("u")} ${match}
           ORDER BY u.display_name, u.id LIMIT $2`, params);
-      return { items: rows.map((r) => ({ id: r.id, name: r.display_name, designation: r.designation })) };
+      // `truncated`: more people match than `limit` (narrow the search).
+      return { items: rows.slice(0, q.limit).map((r) => ({ id: r.id, name: r.display_name, designation: r.designation })), truncated: rows.length > q.limit };
     });
   }
 }

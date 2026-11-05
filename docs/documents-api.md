@@ -34,7 +34,10 @@ This file starts with migration 0461 (editing); the upload, download and access-
 ## Endpoints
 
 - `GET /api/v1/candidates/:id/documents`, `GET /api/v1/placements/:id/documents` (`document:read`) return
-  `{ items: [Document], canUpload, canUploadRestricted, canViewRestricted }`, newest first.
+  `{ items: [Document], canUpload, canUploadRestricted, canViewRestricted, truncated, nextCursor }`, newest first.
+  With no query: the newest 200, as before. `truncated` (R-23): more documents exist; `?limit=1..200&cursor=<nextCursor>`
+  pages on (`created_at`, `id`), exact to the microsecond (`"<epoch µs>.<id>"`); `nextCursor` is null on the last page.
+  Unknown query keys are ignored (the route took no query before); a bad `cursor`/`limit` is 422.
 - `POST /api/v1/candidates/:id/documents`, `POST /api/v1/placements/:id/documents` (`document:upload`) with
   `{ docType, contentType, size }` return 201 `{ id, fileId, classification, status: "pending", upload: { url, fields, expiresAt } }`.
 - `PATCH /api/v1/documents/:documentId` (`document:upload`) with any of `{ title|null, docType, expectedVersion }` returns `Document` (DOC-4).
@@ -42,7 +45,10 @@ This file starts with migration 0461 (editing); the upload, download and access-
   `{ id, fileId, classification, status: "pending", upload }` (DOC-5); post the file to `upload` as for a new document.
 - `POST /api/v1/documents/:documentId/download` (`document:read`) returns `{ url, expiresAt }` (60 s) for the current clean
   file; restricted opens count toward the per-user cap above (429 `too_many_restricted_opens`).
-- `GET /api/v1/document-access?documentId=&before=&limit=` returns the access log (`audit:read`: all; restricted readers: one document).
+- `GET /api/v1/document-access?documentId=&cursor=&limit=` returns the access log (`audit:read`: all; restricted readers: one document)
+  as `{ items, truncated, nextCursor }`, newest first. Page with `cursor=<nextCursor>` (keyset on `at`, `id`: rows sharing a
+  timestamp across a page boundary are neither skipped nor repeated; B-07). `before=<instant>` (rows strictly older) still
+  works but is **deprecated**: it drops rows that share the boundary time. `cursor` and `before` together: 422.
 
 `Document` = `{ id, candidateId, placementId, docType, docTypeLabel, classification, status, reason, contentType, sizeBytes, sha256,
 uploadedBy: {id,name}, createdAt, scannedAt, title, version, replacement: { status, reason, contentType, sizeBytes, createdAt } | null }`

@@ -53,7 +53,7 @@ detail. The payload / inbox rule is unchanged; the producers' no-personal-data t
 ### Endpoints
 
 - `GET /api/v1/settings/profile` adds `birthday: { month, day } | null`; `PUT` accepts `birthday?` (strict object, 422 for a non-day).
-- `GET /api/v1/staff/birthdays` (`staff.birthday:manage`) → `{ items: [{ id, name, email, designation, location, roles: [labels], birthday }] }` (active users, up to 2000).
+- `GET /api/v1/staff/birthdays` (`staff.birthday:manage`) → `{ items: [{ id, name, email, designation, location, roles: [labels], birthday }], truncated, nextCursor }` (active users by name, up to 2000 by default). R-23: `truncated` says more people follow; `?limit=1..2000&cursor=<nextCursor>` pages by (name, id) keyset.
 - `PUT /api/v1/staff/:id/birthday` (`staff.birthday:manage`) `{ birthday: { month, day } | null }` → `{ id, birthday }`; 404 for an inactive or unknown user.
 
 ## Support calendar (CA)
