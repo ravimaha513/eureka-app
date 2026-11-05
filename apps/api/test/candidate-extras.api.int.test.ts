@@ -239,6 +239,7 @@ describe("review follow-ups (0032)", () => {
   it("batch status audits the status it changed from when another change lands first (D-06)", async () => {
     const id = (await call("l1", "POST", "/api/v1/batches", { name: "Race batch", locationId: LOC.austin, technologyId: TECH_ID, startMonth: "2028-04" })).json().id;
     let pending: ReturnType<typeof call> | undefined;
+    let waited = false;
     // Another writer moves the batch to in_training and holds the row lock while the API request
     // reads "planned", then waits on the lock inside authz.set_batch_status.
     await asUser(db.app, U.l1, async (c) => {
@@ -247,11 +248,12 @@ describe("review follow-ups (0032)", () => {
       for (let i = 0; i < 100; i++) {
         const waiting = (await db.admin.query<{ n: number }>(
           `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`)).rows[0]!.n;
-        if (waiting > 0) break;
+        if (waiting > 0) { waited = true; break; }
         await new Promise((r) => setTimeout(r, 50));
       }
     }, true);
     const res = await pending!;
+    expect(waited).toBe(true); // the request really read "planned" and then queued on the lock
     expect(res.json()).toEqual({ id, status: "cancelled" });
     const audit = await db.admin.query(`SELECT changes FROM eureka.audit_event WHERE action = 'batch.status' AND entity_id = $1`, [id]);
     expect(audit.rows).toEqual([{ changes: { from: "in_training", to: "cancelled" } }]);
