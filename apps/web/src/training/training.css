@@ -1,0 +1,94 @@
+/* Training batches, batch detail and courses (training/*). Tokens only (DESIGN.md). */
+
+/* List tools */
+.tb-tools { align-items: flex-end; }
+.tb-search input { width: 260px; }
+.tb-filters { align-items: flex-end; gap: 8px 12px; margin-bottom: 4px; }
+.tb-check { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; font-size: 13.5px; font-weight: 600; color: var(--text2); cursor: pointer; }
+.tb-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--pri); }
+.tb-summary { font-size: 13px; font-variant-numeric: tabular-nums; margin: -4px 0 8px; }
+.tb-note { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; font-size: 13px; color: var(--text2); }
+.badge.tb-empty, .badge.tb-behind { background: var(--warn-bg); color: var(--warn-fg); }
+.tr-stname .badge, .tr-acctoggle .badge.tb-empty { margin-left: 8px; vertical-align: 1px; }
+
+/* Cards: no cover art, the whole card opens the record. */
+.tb-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 12px; }
+.tb-card { position: relative; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; transition: border-color .12s; }
+.tb-card:hover { border-color: var(--pri-200); }
+.tb-card:has(.tb-open:focus-visible) { outline: 2px solid var(--pri); outline-offset: 2px; }
+/* The open button itself spans the card (a real hit area for pointer, touch and automation). */
+.tb-open { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; border-radius: inherit; background: none; }
+.tb-open::after { content: none; }
+.tb-top { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.tb-titles { flex: 1 1 auto; min-width: 0; }
+.tb-title { font-size: 15px; font-weight: 700; color: var(--text); overflow-wrap: anywhere; line-height: 1.3; }
+.tb-card:hover .tb-title { text-decoration: underline; text-underline-offset: 2px; }
+.tb-sub { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.tb-facts { display: flex; align-items: center; gap: 8px 20px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.tb-trainer { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 140px; }
+.tb-trainer small { color: var(--text2); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-stat { display: inline-flex; align-items: baseline; gap: 5px; }
+.tb-stat b { color: var(--text); font-size: 14px; }
+.tb-stat small { color: var(--muted); font-size: 12.5px; }
+.tb-sched { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; padding-top: 10px; border-top: 1px solid var(--line2); font-size: 12.5px; }
+.tb-dates { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.tb-schedlabel { color: var(--text2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.tb-bar { grid-column: 1 / -1; display: block; height: 6px; border-radius: var(--r-sm); background: var(--line2); overflow: hidden; }
+.tb-bar > span { display: block; height: 100%; background: var(--pri); }
+.tb-bar > span.done { background: var(--ok-fg); }
+/* Controls inside a whole-card link sit above its stretched hit area. */
+.tb-del { position: absolute; right: 8px; bottom: 8px; z-index: 2; color: var(--bad-fg); }
+.tb-card:has(.tb-del) .tb-sched { padding-right: 36px; }
+.tb-del:hover { background: var(--bad-bg); color: var(--bad-fg); }
+
+/* Batch detail header: no cover art; title, status and the next action on one line, figures in a row. */
+.tb-head { display: flex; flex-direction: column; gap: 14px; padding: 16px; }
+.tb-headtop { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.tb-headtitle { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.tb-headtitle p { margin: 0; }
+.tb-headacts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+.tb-stats { list-style: none; margin: 0; padding: 12px 0 0; border-top: 1px solid var(--line2); display: flex; flex-wrap: wrap; gap: 8px 32px; font-variant-numeric: tabular-nums; }
+.tb-stats li { display: flex; flex-direction: column-reverse; gap: 2px; min-width: 0; }
+.tb-stats b { color: var(--text); font-size: 14px; font-weight: 650; }
+.tb-stats span { color: var(--muted); font-size: 12px; }
+.tb-tabpanel { padding-top: 12px; }
+.tb-tabpanel:focus-visible { outline: 2px solid var(--pri); outline-offset: 4px; border-radius: var(--r-sm); }
+.tb-paneltools { display: flex; align-items: flex-end; gap: 8px 12px; flex-wrap: wrap; }
+.tb-paneltools .toolbar { align-items: flex-end; }
+.tb-behindnote { margin: 0 0 8px; font-size: 13px; color: var(--muted); align-self: center; }
+.tb-behindnote b { color: var(--warn-fg); }
+
+/* Module rows: completion date in its own column; read-only marks instead of disabled boxes. */
+.tb-modrow { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--line2); }
+.tb-modrow:last-child { border-bottom: 0; }
+.tb-done { font-size: 12px; text-align: right; }
+.tb-mark { display: inline-flex; align-items: center; gap: 8px; color: var(--text2); font-weight: 500; }
+.tb-mark > svg { flex: none; color: var(--faint); }
+.tb-mark.done > svg { color: var(--ok-fg); }
+.tb-push { margin-left: auto; }
+.tb-emptynote { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-line); border-radius: var(--r-md); padding: 8px 12px; font-size: 13px; }
+
+@media (max-width: 768px) {
+  .tb-tools { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+  .tb-tools .tb-search { grid-column: 1 / -1; }
+  .tb-tools .field select, .tb-tools .btn { width: 100%; height: 44px; }
+  .tb-search input { width: 100%; height: 44px; font-size: 16px; }
+  .tb-filters { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  .tb-filters .tb-search { grid-column: 1 / -1; }
+  .tb-filters select { width: 100%; height: 44px; }
+  .tb-check { min-height: 44px; }
+  .tb-card { padding: 12px; gap: 10px; }
+  .tb-head { padding: 12px; gap: 10px; }
+  .tb-headacts { width: 100%; }
+  .tb-headacts .btn { height: 44px; flex: 1 1 auto; }
+  .tb-headacts .iconbtn { width: 44px; height: 44px; }
+  .tb-stats { gap: 8px 20px; }
+  .tb-paneltools .field { flex: 1 1 140px; }
+  .tb-paneltools .field input, .tb-paneltools .field select { width: 100%; height: 44px; font-size: 16px; }
+  .tb-paneltools .toolbar { width: 100%; }
+  .tb-paneltools .toolbar .btn { height: 44px; flex: 1 1 auto; }
+  .tb-modrow { grid-template-columns: minmax(0, 1fr); }
+  .tb-done { text-align: left; }
+  .tr-checks .check { min-height: 40px; display: flex; align-items: center; gap: 8px; }
+  .tr-checks .check input { width: 20px; height: 20px; }
+}

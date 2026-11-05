@@ -10,6 +10,7 @@ import { HotListPage } from "./HotListPage";
 import { DUPLICATE_WARNING } from "./LogSubmissionDialog";
 import { STALE_MESSAGE } from "../lib/errorText";
 import { refetchOnStale } from "../lib/queryClient";
+import { negate, openMoreFilters, pickOption } from "../ui/testHelpers";
 
 // ---- fixtures (shapes from apps/api/src/modules/candidates/candidates.service.ts) ---------------
 
@@ -98,8 +99,7 @@ describe("Hot List", () => {
   it("masks other teams' phones with a hidden explanation, labels Open to all teams, never shows DOB", async () => {
     wrap(<HotListPage me={RECRUITER} onOpenProfile={() => undefined} />);
     const foreign = await rowOf("Divya Menon");
-    // The recruiter may change status, so the first column holds the row-selection checkbox.
-    const phoneCell = within(foreign).getAllByRole("cell")[12]!;
+    const phoneCell = foreign.querySelector<HTMLElement>("td.c-phone")!;
     expect(phoneCell).toHaveClass("masked");
     expect(within(phoneCell).getByText("•••-•••-42")).toHaveAttribute("aria-hidden", "true");
     expect(within(phoneCell).getByText(/Phone hidden, ends in 42\. Not your team's candidate\./)).toHaveClass("sr-only");
@@ -133,18 +133,24 @@ describe("Hot List", () => {
     await waitFor(() => expect(lastGet("/api/v1/hotlist").url.searchParams.get("cursor")).toBe(OTHER));
     expect(screen.getByText("Page 2")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "on_hold" } });
-    fireEvent.change(screen.getByLabelText("Visibility"), { target: { value: "all_teams" } });
+    await pickOption("Status", "On hold", "Bench");
+    openMoreFilters();
+    await pickOption("Visibility", "Open to all teams");
+    negate("Visibility");
     fireEvent.change(screen.getByLabelText("Search name"), { target: { value: " divya " } });
-    fireEvent.change(screen.getByLabelText("Technology"), { target: { value: "Java" } });
+    await pickOption("Technology", "Java");
     await waitFor(() => {
       const p = lastGet("/api/v1/hotlist").url.searchParams;
       expect(p.get("search")).toBe("divya");
       expect(p.get("technology")).toBe("Java");
     });
     const p = lastGet("/api/v1/hotlist").url.searchParams;
-    expect(p.get("status")).toBe("on_hold");
+    expect(p.getAll("status")).toEqual(["on_hold", "bench"]);
     expect(p.get("visibility")).toBe("all_teams");
+    expect(p.getAll("not")).toEqual(["visibility"]);
+    // Counts are asked for with the same filters, without paging.
+    const f = lastGet("/api/v1/hotlist/facets").url.searchParams;
+    expect([f.getAll("status"), f.get("search"), f.get("limit")]).toEqual([["on_hold", "bench"], "divya", null]);
     expect(p.get("cursor")).toBeNull();
     expect(screen.getByText("Page 1")).toBeInTheDocument();
 
@@ -670,8 +676,10 @@ describe("Candidate profile", () => {
     routes[`DELETE /api/v1/candidates/${CID}`] = () => problem(409, { detail: "candidate_placed" });
     const onBack = vi.fn();
     renderProfile(RECRUITER, onBack);
-    fireEvent.click(await screen.findByRole("button", { name: "Delete…" }));
-    const dlg = screen.getByRole("dialog", { name: "Delete Asha Iyer?" });
+    // Delete lives in the More menu, away from the primary action.
+    fireEvent.click(await screen.findByRole("button", { name: "More actions for Asha Iyer" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete…" }));
+    const dlg = await screen.findByRole("dialog", { name: "Delete Asha Iyer?" });
     fireEvent.click(within(dlg).getByRole("button", { name: "Delete candidate" }));
     expect(await within(dlg).findByRole("alert")).toHaveTextContent("placement or employee record");
     expect(onBack).not.toHaveBeenCalled();
@@ -685,7 +693,7 @@ describe("Candidate profile", () => {
   it("without hints, shows Delete to candidate:delete holders only", async () => {
     renderProfile(RECRUITER);
     await screen.findByRole("heading", { level: 1, name: "Asha Iyer" });
-    expect(screen.queryByRole("button", { name: "Delete…" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "More actions for Asha Iyer" })).not.toBeInTheDocument();
   });
 
   it("explains a 403 on an Open-to-all-teams candidate the user can see but not change", async () => {
@@ -724,13 +732,15 @@ describe("Log submission", () => {
     expect(within(dlg).getByLabelText("Job title")).toHaveAccessibleDescription("Enter the job title.");
     expect(within(dlg).getByLabelText("Client")).toHaveAttribute("aria-invalid", "true");
     expect(within(dlg).getByLabelText("Vendor")).toHaveAccessibleDescription("Choose a vendor.");
-    expect(within(dlg).getByLabelText("Rate per hour")).toHaveAccessibleDescription("Enter the hourly rate.");
+    expect(within(dlg).getByLabelText("Rate per hour")).toHaveAccessibleDescription("US dollars per hour, up to 1,000. Enter the hourly rate.");
     fill(dlg);
     fireEvent.click(within(dlg).getByRole("button", { name: "Log submission" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(writes()[0]).toMatchObject({ path: "/api/v1/submissions", body: { candidateId: CID, jobTitle: "Senior Java Developer", clientId: CLIENT, vendorId: VENDOR, rate: 65 } });
-    expect(screen.getByRole("status")).toHaveTextContent("Submission logged.");
+    expect(screen.getByText("Submission logged.")).toHaveAttribute("role", "status");
     expect(screen.queryByText(DUPLICATE_WARNING)).not.toBeInTheDocument();
+    // The profile lands on the Submissions tab so the new row is in view.
+    expect(screen.getByRole("tab", { name: "Submissions" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("sends the vendor picked from the lookup list", async () => {
@@ -752,7 +762,8 @@ describe("Log submission", () => {
     expect(within(done).getByRole("button", { name: "Done" })).toHaveFocus();
     fireEvent.click(within(done).getByRole("button", { name: "Done" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent(DUPLICATE_WARNING);
+    // Kept on the page (the profile also switches to the Submissions tab).
+    expect(screen.getByText(DUPLICATE_WARNING)).toHaveAttribute("role", "alert");
   });
 
   it("shows a 409 conflict as a duplicate warning and keeps the form", async () => {
@@ -880,7 +891,7 @@ describe("Focus after a failed submit: Log submission", () => {
     submitWith(dlg, "Log submission");
     const rate = within(dlg).getByLabelText("Rate per hour");
     await waitFor(() => expect(rate).toHaveFocus());
-    expect(rate).toHaveAccessibleDescription("Enter an hourly rate between 0 and 1000.");
+    expect(rate).toHaveAccessibleDescription("US dollars per hour, up to 1,000. Enter an hourly rate between 0 and 1000.");
     expect(writes()).toHaveLength(0);
   });
 
@@ -922,7 +933,7 @@ describe("Sales navigation", () => {
   it("opens a profile from the Hot List and returns to the same filtered list", async () => {
     wrap(<Shell me={RECRUITER} onSignOut={() => undefined} />);
     await rowOf("Asha Iyer");
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "active" } });
+    await pickOption("Status", "Active");
     const link = await screen.findByRole("button", { name: "Open profile of Asha Iyer" });
     link.focus();
     fireEvent.click(link);
@@ -932,7 +943,7 @@ describe("Sales navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "← Back to Hot List" }));
     expect(screen.getByRole("table", { name: "Hot List" })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/hotlist");
-    expect(screen.getByLabelText("Status")).toHaveValue("active");
+    expect(screen.getByRole("combobox", { name: "Status" })).toHaveValue("Active");
     await waitFor(() => expect(screen.getByRole("button", { name: "Open profile of Asha Iyer" })).toHaveFocus());
   });
 
@@ -941,5 +952,53 @@ describe("Sales navigation", () => {
     fireEvent.click(within(screen.getByRole("complementary", { name: "Main navigation" })).getByRole("button", { name: "Candidates" }));
     expect(await screen.findByRole("heading", { level: 1, name: "Candidates" })).toBeInTheDocument();
     expect(await screen.findByRole("table", { name: "Candidates" })).toBeInTheDocument();
+  });
+});
+
+// ---- Profile layout (rebrand wave 2) -----------------------------------------------------------
+
+describe("Candidate profile layout", () => {
+  afterEach(() => window.history.replaceState(null, "", "/"));
+
+  it("puts Delete in the More menu, never beside the primary Log submission", async () => {
+    routes[`GET /api/v1/candidates/${CID}`] = () => ({
+      body: { ...PROFILE, actions: { edit: true, transition: [], visibility: false, rating: false, logSubmission: true, delete: true } },
+    });
+    renderProfile(RECRUITER);
+    const primary = await screen.findByRole("button", { name: "Log submission" });
+    expect(primary.closest(".as-actions")!.querySelector(".btn.danger")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete…" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Asha Iyer" }));
+    expect(await screen.findByRole("menuitem", { name: "Delete…" })).toBeInTheDocument();
+  });
+
+  it("shows one quiet line instead of zero metrics, after Details", async () => {
+    routes[`GET /api/v1/candidates/${CID}/metrics`] = () => ({ body: {
+      submissions: { total: 0, last30Days: 0, withInterview: 0, clients: 0, firstAt: null, lastAt: null, byStatus: {} },
+      interviews: { total: 0, upcoming: 0, completed: 0, cleared: 0, notCleared: 0, cancelled: 0, lastAt: null, nextAt: null, byRound: {} },
+    } });
+    renderProfile(RECRUITER);
+    const card = (await screen.findByText("No submissions or interviews yet.")).closest("section")!;
+    expect(card).toHaveAccessibleName("Metrics");
+    expect(within(card).queryByRole("list", { name: "Candidate metrics" })).toBeNull();
+    const details = screen.getByRole("region", { name: "Details" });
+    expect(details.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("keeps the open tab in the URL", async () => {
+    renderProfile(RECRUITER);
+    fireEvent.click(await screen.findByRole("tab", { name: "Activity" }));
+    expect(new URLSearchParams(window.location.search).get("tab")).toBe("activity");
+    expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+    expect(new URLSearchParams(window.location.search).get("tab")).toBeNull();
+  });
+
+  it("cautions before logging a submission for a terminated candidate", async () => {
+    routes[`GET /api/v1/candidates/${CID}`] = () => ({ body: { ...PROFILE, status: "terminated" } });
+    renderProfile(RECRUITER);
+    fireEvent.click(await screen.findByRole("button", { name: "Log submission" }));
+    const dlg = screen.getByRole("dialog", { name: "Log submission for Asha Iyer" });
+    expect(within(dlg).getByText(/Asha Iyer is Terminated\. Check with your lead/)).toBeInTheDocument();
   });
 });

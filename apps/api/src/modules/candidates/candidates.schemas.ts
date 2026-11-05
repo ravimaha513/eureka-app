@@ -1,15 +1,13 @@
 import { z } from "zod";
 import { BATCH_STATUSES } from "../training/training.schemas.js";
+import { listFilterFields, many } from "./list-filters.js";
 import {
   CANDIDATE_STATUSES,
   CANDIDATE_VISIBILITIES,
-  DOCUMENTS_FILTERS,
   DOCUMENTS_STATUS_LIST,
   ELIGIBILITY_LIST,
-  LIST_SORTS,
   MARKETING_LOCATIONS_MAX,
   PHONE_PROBLEM_MESSAGES,
-  STAY_FILTERS,
   VISA_CATEGORY_LIST,
   normalizeEmail,
   normalizePhoneE164,
@@ -19,42 +17,26 @@ import {
 const uuid = z.string().uuid();
 
 /**
- * Hot List filters added for the Eureka App 4 spec (also on the Candidates
- * list): office location, marketed visa, documents status ("none" = not
- * recorded), resume on file (an uploaded current resume or a resume link) and
- * stay (guest house or remote).
+ * Candidates list / Hot List query: the shared list filters (./list-filters.ts; every
+ * pick-from-a-list filter takes several values and can be inverted with `not`), the name
+ * search, the batch (Candidates list only, FR-CAN-02) and keyset paging.
  */
-export const ExtraListFilters = {
-  locationId: uuid.optional(),
-  visa: z.enum(VISA_CATEGORY_LIST as [string, ...string[]]).optional(),
-  documents: z.enum(DOCUMENTS_FILTERS).optional(),
-  resume: z.enum(["yes", "no"]).optional(),
-  stay: z.enum(STAY_FILTERS).optional(),
-  // Hot List sheet columns (0290): priority, team (the sheet's Lead), recruiter, in-person, which guest house.
-  priority: z.enum(["P1", "P2", "P3"]).optional(),
-  teamId: uuid.optional(),
-  recruiterId: uuid.optional(),
-  inPerson: z.enum(["yes", "no"]).optional(),
-  ghLocationId: uuid.optional(),
-  /** Row order; paging stays keyset (sort key, id). */
-  sort: z.enum(LIST_SORTS).optional(),
-};
-
 export const CandidateListQuery = z
   .object({
-    status: z.enum(CANDIDATE_STATUSES).optional(),
-    technology: z.string().max(80).optional(),
-    visibility: z.enum(CANDIDATE_VISIBILITIES).optional(),
+    ...listFilterFields(CANDIDATE_STATUSES),
     search: z.string().max(80).optional(),
-    ...ExtraListFilters,
-    /** Candidates list only (FR-CAN-02); the Hot List has no batch filter. */
-    batchId: uuid.optional(),
+    batchId: many(uuid),
     cursor: uuid.optional(),
     limit: z.coerce.number().int().min(1).max(200).default(50),
   })
   .strict();
 export type CandidateListQuery = z.infer<typeof CandidateListQuery>;
 export const HotlistQuery = CandidateListQuery.omit({ batchId: true });
+/** A saved Candidates-list view: the list's filters and sort, without paging. */
+export const CandidateViewFilters = CandidateListQuery.omit({ cursor: true, limit: true });
+/** Facet counts take the list's filters without paging. */
+export const CandidateFacetQuery = CandidateListQuery.omit({ cursor: true, limit: true, sort: true });
+export const HotlistFacetQuery = CandidateFacetQuery.omit({ batchId: true });
 
 /**
  * A phone number as typed, normalized to E.164 (country code required; see

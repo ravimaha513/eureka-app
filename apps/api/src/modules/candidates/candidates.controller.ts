@@ -6,12 +6,14 @@ import { BatchStatusChange } from "../training/training.schemas.js";
 import {
   BatchListQuery,
   BulkBatchCandidates,
+  CandidateFacetQuery,
   CandidateListQuery,
   ComplianceUpdate,
   CreateBatch,
   AssignCandidateTeam,
   CreateCandidate,
   DuplicateCheck,
+  HotlistFacetQuery,
   HotlistQuery,
   ProfileUpdate,
   RatingUpdate,
@@ -51,6 +53,22 @@ export class CandidatesController {
   @RequirePermission("hotlist:read")
   hotlist(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.lists.list(user, "hotlist:read", HotlistQuery.parse(q));
+  }
+
+  /** Facet counts for the Hot List filters (same filters as GET /hotlist, no paging). */
+  @ApiQuery(HotlistFacetQuery)
+  @Get("hotlist/facets")
+  @RequirePermission("hotlist:read")
+  hotlistFacets(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
+    return this.lists.facets(user, "hotlist:read", HotlistFacetQuery.parse(q));
+  }
+
+  /** Facet counts for the Candidates list filters (same filters as GET /candidates, no paging). */
+  @ApiQuery(CandidateFacetQuery)
+  @Get("candidates/facets")
+  @RequirePermission("candidate:read")
+  candidateFacets(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
+    return this.lists.facets(user, "candidate:read", CandidateFacetQuery.parse(q));
   }
 
   @ApiQuery(CandidateListQuery)

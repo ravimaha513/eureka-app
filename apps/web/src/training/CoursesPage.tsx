@@ -10,6 +10,7 @@ import {
   fmtMinutes, trainingApi, trainingError, trainingKeys, type Cover, type CourseDetail, type CourseModule,
 } from "./trainingApi";
 import { CoverArt, CoverPicker } from "./ui";
+import "./training.css";
 import { Loading } from "../ui/Loading";
 import { QueryError } from "../ui/QueryError";
 
@@ -23,37 +24,62 @@ export function CoursesPage({ me }: { me: Me }) {
   const [notice, setNotice] = useState("");
   const q = useQuery({ queryKey: trainingKeys.courses(archived), queryFn: () => trainingApi.courses(archived) });
   const items = q.data?.items ?? [];
+  const [text, setText] = useState("");
+  const [loc, setLoc] = useState("");
+  const locations = [...new Map(items.map((c) => [c.location.id, c.location.name ?? ""])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  const needle = text.trim().toLowerCase();
+  const shown = items.filter((c) => (!loc || c.location.id === loc) && (!needle || c.title.toLowerCase().includes(needle)));
+  const empties = items.filter((c) => c.modules === 0 && !c.archived).length;
   return (
     <>
       <div className="pagehead">
         <div>
-          <h1 tabIndex={-1}>Courses</h1>
+          <h1 tabIndex={-1}>Courses{q.data && <span className="h1count">{items.length}</span>}</h1>
           <p className="sub">The course library: ordered modules with durations. Assign courses to batches from a batch.</p>
         </div>
         <div className="toolbar push">
-          <label className="check" htmlFor={`${id}-a`}>
-            <input id={`${id}-a`} type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> Show archived
-          </label>
           {q.data?.canCreate && <button type="button" className="btn primary" onClick={() => setCreating(true)}><Plus size={16} aria-hidden="true" />Add course</button>}
         </div>
       </div>
+      <div className="toolbar tb-filters">
+        <div className="field inline tb-search"><label htmlFor={`${id}-q`}>Search</label>
+          <input id={`${id}-q`} type="search" placeholder="Course title" value={text} onChange={(e) => setText(e.target.value)} /></div>
+        {locations.length > 1 && (
+          <div className="field inline"><label htmlFor={`${id}-l`}>Location</label>
+            <select id={`${id}-l`} value={loc} onChange={(e) => setLoc(e.target.value)}>
+              <option value="">All locations</option>
+              {locations.map(([lid, name]) => <option key={lid} value={lid}>{name}</option>)}
+            </select></div>
+        )}
+        <label className="tb-check" htmlFor={`${id}-a`}>
+          <input id={`${id}-a`} type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> Show archived
+        </label>
+      </div>
+      {empties > 0 && (
+        <p className="tb-note"><span className="badge tb-empty">No modules</span>
+          {empties === 1 ? "1 course has" : `${empties} courses have`} no modules yet. Students in a batch that uses {empties === 1 ? "it" : "them"} can't reach 100%.</p>
+      )}
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
       {q.isLoading ? <Loading /> : q.error ? <QueryError query={q} message={trainingError(q.error)} />
-        : items.length === 0 ? <div className="card"><p className="empty">No courses yet.</p></div> : (
-          <ul className="tr-grid" aria-label="Courses">
-            {items.map((c) => (
-              <li key={c.id} className="card tr-card">
-                <CoverArt cover={c.cover} caption="Course" />
-                <h2 className="tr-title">{c.title}</h2>
-                <div>{c.archived && <span className="badge tr-cancelled">Archived</span>} <span className="muted">{c.location.name}</span></div>
-                <div className="tr-meta">
-                  <span><b>{c.modules}</b><small>Modules</small></span>
-                  <span><b>{fmtMinutes(c.totalMinutes)}</b><small>Duration</small></span>
-                  <span><b>{c.batches}</b><small>Batches</small></span>
+        : items.length === 0 ? <div className="card"><p className="empty">No courses yet.</p></div>
+        : shown.length === 0 ? <div className="card"><p className="empty">No courses match. <button type="button" className="linkbtn" onClick={() => { setText(""); setLoc(""); }}>Clear filters</button></p></div> : (
+          <ul className="tb-grid" aria-label="Courses">
+            {shown.map((c) => (
+              <li key={c.id} className="card tb-card">
+                <div className="tb-top">
+                  <CoverArt cover={c.cover} size="sm" />
+                  <div className="tb-titles">
+                    <h2 className="tb-title">{c.title}</h2>
+                    <p className="tb-sub">{c.location.name}</p>
+                  </div>
+                  {c.archived ? <span className="badge tr-cancelled">Archived</span> : c.modules === 0 ? <span className="badge tb-empty">No modules</span> : null}
                 </div>
-                <div className="tr-foot">
-                  <span />
-                  <button type="button" className="btn sm" aria-label={`Open course ${c.title}`} onClick={() => setOpenId(c.id)}>Open</button>
+                {/* The whole card opens the course: one affordance, stretched over the card. */}
+                <button type="button" className="cardopen tb-open" aria-label={`Open course ${c.title}`} onClick={() => setOpenId(c.id)} />
+                <div className="tb-facts">
+                  <span className="tb-stat"><b>{c.modules}</b><small>{c.modules === 1 ? "Module" : "Modules"}</small></span>
+                  <span className="tb-stat"><b>{fmtMinutes(c.totalMinutes)}</b><small>Duration</small></span>
+                  <span className="tb-stat"><b>{c.batches}</b><small>{c.batches === 1 ? "Batch" : "Batches"}</small></span>
                 </div>
               </li>
             ))}
@@ -158,14 +184,14 @@ function CourseDrawer({ id, onClose, onNotice, onDeleted }: {
               <button type="button" className="btn sm" onClick={() => setEditing(true)}><Pencil size={14} aria-hidden="true" />Edit course</button>
               <button type="button" className="btn sm" onClick={() => void run(() => trainingApi.updateCourse(c.id, c.rowVersion, { archived: !c.archived }),
                 c.archived ? `${c.title} restored.` : `${c.title} archived.`)}>{c.archived ? "Restore" : "Archive"}</button>
-              <button type="button" className="btn sm danger" onClick={() => setDeleting(true)}><Trash2 size={14} aria-hidden="true" />Delete</button>
+              <button type="button" className="btn sm danger tb-push" onClick={() => setDeleting(true)}><Trash2 size={14} aria-hidden="true" />Delete course</button>
             </div>
           )}
           <div className="pagehead">
             <h3>Modules</h3>
             {c.canEdit && <button type="button" className="btn sm push" onClick={() => setModuleEdit("new")}><Plus size={14} aria-hidden="true" />Add module</button>}
           </div>
-          {c.modules.length === 0 ? <p className="muted">No modules yet.</p> : (
+          {c.modules.length === 0 ? <p className="banner tb-emptynote">No modules yet. Students in a batch that uses this course can't reach 100% until it has modules.</p> : (
             <ol className="tr-modules editable">
               {c.modules.map((m, i) => (
                 <li key={m.id}>

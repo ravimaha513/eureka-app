@@ -1,0 +1,44 @@
+/* Paperwork & BGC queue and workspace. Tokens only (DESIGN.md); kit classes are not restyled here. */
+.pw-sections { border-bottom: 1px solid var(--line); gap: 4px; }
+.pw-sectionpanel { display: flex; flex-direction: column; gap: 16px; }
+.pw-sectionpanel:focus { outline: none; }
+.pw-mine { min-height: var(--h-control); }
+.pw-count { font-variant-numeric: tabular-nums; font-size: 13px; }
+
+/* Checklist progress in a queue row: count, a thin bar, then the required-open line. */
+.pw-progress { display: inline-flex; flex-direction: column; gap: 3px; min-width: 96px; }
+.pw-bar { display: block; height: 4px; width: 96px; border-radius: 2px; background: var(--line2); overflow: hidden; }
+.pw-bar > span { display: block; height: 100%; background: var(--ok-fg); }
+.pwqueue td.num .badge { font-variant-numeric: tabular-nums; }
+
+/* Received means "in hand, not yet verified": informational, not a warning next to a red Overdue. */
+.badge.cl-received { background: var(--info-bg); color: var(--info-fg); }
+
+/* Workspace: the action strip carries what needs doing before the facts. */
+.pw-strip .as-status { gap: 6px 10px; }
+.pw-strip .pw-stripstat { font-variant-numeric: tabular-nums; color: var(--text); font-weight: 600; font-size: 13.5px; }
+.pw-strip .pw-stripsep { width: 1px; height: 18px; background: var(--line); }
+.pw-tabs { border-bottom: 1px solid var(--line); gap: 4px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.pw-tabs .tab { white-space: nowrap; }
+.pw-checklist td.c-act .btn + .btn { margin-left: 4px; }
+.pw-histrow > td { background: var(--surface2); padding: 10px 14px; }
+.pw-histrow .history { margin: 0; }
+.pw-statusform { display: flex; flex-direction: column; gap: 12px; }
+
+@media (max-width: 768px) {
+  .pw-view { flex: 1 1 auto; min-width: 0; }
+  .pw-view .bo-toggleslabel { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .pw-view .tabs.seg { height: 44px; }
+  .pw-view .tabs.seg .tab { flex: 1; justify-content: center; padding: 0 8px; }
+  .pw-mine { min-height: 44px; }
+  .pwqueue td.num { text-align: left; }
+  .pw-bar { width: 100%; max-width: 160px; }
+  .pw-progress { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+  .pw-progress .block { margin: 0; }
+  .pw-histrow > td { padding: 10px 0 0; background: none; }
+  .pw-checklist tr.pw-histrow { border-top: 0; margin-top: -8px; border-top-left-radius: 0; border-top-right-radius: 0; }
+  /* "Needs attention" is in the action strip above the tabs on phones; the rail keeps only the facts. */
+  .pwrail .pw-attn { display: none; }
+  .pw-strip .as-actions > .btn { flex: 1 1 auto; }
+}
+.pwcardhead .pushright { margin-left: auto; }

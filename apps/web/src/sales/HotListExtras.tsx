@@ -1,6 +1,7 @@
 /** Hot List saved views, bulk actions and export (apps/api/src/modules/hotlist). The server checks every action. */
 import { useId, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { BookmarkPlus, Download } from "lucide-react";
 import { ApiError, type Candidate } from "../api";
 import { saveBlob } from "../lib/download";
 import { TeamChecklist } from "./TeamChecklist";
@@ -10,9 +11,11 @@ import {
   salesKeys,
   statusLabel,
   viewFilters,
+  viewsApi,
   type BulkError,
   type BulkResponse,
   type Priority,
+  type ViewList,
   type Visibility,
 } from "./salesApi";
 import type { useCandidateList } from "./useCandidateList";
@@ -26,6 +29,7 @@ function viewError(e: unknown): string {
   if (e instanceof ApiError) {
     if (e.status === 409) return "You already have a saved view with that name.";
     if (e.status === 422 && e.detail === "too_many_views") return "You can keep up to 50 saved views. Delete one first.";
+    if (e.status === 422 && e.detail === "no_team") return "You are not on a team, so there is no one to share this view with.";
     if (e.status === 422) return "Give the view a name of 1 to 80 characters.";
     if (e.status === 404) return "That saved view no longer exists.";
   }
@@ -34,38 +38,54 @@ function viewError(e: unknown): string {
 
 // ---- saved views -------------------------------------------------------------------------------
 
-export function SavedViews({ s }: { s: ListState }) {
+/**
+ * Saved views of one list: your own (rename, update, delete) and those your team shares with you
+ * (apply only). Saving can share the view with your team.
+ */
+export function SavedViews({ s, list = "hotlist" }: { s: ListState; list?: ViewList }) {
   const id = useId();
   const qc = useQueryClient();
-  const views = useQuery({ queryKey: salesKeys.hotlistViews, queryFn: hotlistApi.views });
+  const api = viewsApi(list);
+  const key = salesKeys.views(list);
+  const views = useQuery({ queryKey: key, queryFn: api.views });
   const items = views.data?.items ?? [];
+  const mine = items.filter((v) => v.mine);
+  const team = items.filter((v) => !v.mine);
   const [selected, setSelected] = useState("");
   const [mode, setMode] = useState<null | "save" | "rename" | "delete">(null);
   const [name, setName] = useState("");
+  const [share, setShare] = useState(false);
   const [msg, setMsg] = useState("");
   const current = items.find((v) => v.id === selected);
 
-  const done = (text: string) => { setMsg(text); setMode(null); void qc.invalidateQueries({ queryKey: salesKeys.hotlistViews }); };
+  const done = (text: string) => { setMsg(text); setMode(null); void qc.invalidateQueries({ queryKey: key }); };
   const save = useMutation({
-    mutationFn: () => hotlistApi.createView(name.trim(), viewFilters(s.applied)),
-    onSuccess: (v) => { setSelected(v.id); done(`Saved view “${v.name}”.`); },
+    mutationFn: () => api.createView(name.trim(), viewFilters(s.applied), share),
+    onSuccess: (v) => { setSelected(v.id); done(v.shared ? `Saved view “${v.name}”, shared with your team.` : `Saved view “${v.name}”.`); },
   });
   const rename = useMutation({
-    mutationFn: () => hotlistApi.updateView(selected, { name: name.trim() }),
+    mutationFn: () => api.updateView(selected, { name: name.trim() }),
     onSuccess: (v) => done(`Renamed to “${v.name}”.`),
   });
   const refilter = useMutation({
-    mutationFn: () => hotlistApi.updateView(selected, { filters: viewFilters(s.applied) }),
+    mutationFn: () => api.updateView(selected, { filters: viewFilters(s.applied) }),
     onSuccess: (v) => done(`Updated “${v.name}” with the current filters.`),
   });
+  const reshare = useMutation({
+    mutationFn: (on: boolean) => api.updateView(selected, { shared: on }),
+    onSuccess: (v) => done(v.shared ? `“${v.name}” is shared with your team.` : `“${v.name}” is now only yours.`),
+  });
   const remove = useMutation({
-    mutationFn: () => hotlistApi.deleteView(selected),
+    mutationFn: () => api.deleteView(selected),
     onSuccess: () => { const n = current?.name ?? ""; setSelected(""); done(`Deleted view “${n}”.`); },
   });
-  const failed = [save, rename, refilter, remove].find((m) => m.isError);
-  const reset = () => [save, rename, refilter, remove].forEach((m) => m.reset());
+  const all = [save, rename, refilter, reshare, remove];
+  const failed = all.find((m) => m.isError);
+  const reset = () => all.forEach((m) => m.reset());
 
-  const open = (m: "save" | "rename" | "delete") => { reset(); setMsg(""); setMode(m); setName(m === "rename" ? current?.name ?? "" : ""); };
+  const open = (m: "save" | "rename" | "delete") => {
+    reset(); setMsg(""); setMode(m); setShare(false); setName(m === "rename" ? current?.name ?? "" : "");
+  };
   const submit = (e: FormEvent) => { e.preventDefault(); if (!name.trim()) return; (mode === "rename" ? rename : save).mutate(); };
 
   return (
@@ -79,17 +99,32 @@ export function SavedViews({ s }: { s: ListState }) {
             if (v) { s.apply(v.filters); setMsg(`Showing saved view “${v.name}”.`); } else setMsg("");
           }}>
             <option value="">{views.isLoading ? "Loading…" : items.length ? "Choose a saved view" : "No saved views yet"}</option>
-            {items.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            {team.length === 0 ? mine.map((v) => <option key={v.id} value={v.id}>{v.name}{v.shared ? " (shared)" : ""}</option>) : (
+              <>
+                {mine.length > 0 && (
+                  <optgroup label="My views">
+                    {mine.map((v) => <option key={v.id} value={v.id}>{v.name}{v.shared ? " (shared)" : ""}</option>)}
+                  </optgroup>
+                )}
+                <optgroup label="Shared by my team">
+                  {team.map((v) => <option key={v.id} value={v.id}>{v.name} · {v.owner}</option>)}
+                </optgroup>
+              </>
+            )}
           </select>
         </div>
-        <button type="button" className="btn" onClick={() => open("save")}>Save current filters…</button>
-        {current && (
+        <button type="button" className="btn" onClick={() => open("save")}><BookmarkPlus size={16} aria-hidden="true" /><span className="btnlabel">Save current filters…</span></button>
+        {current?.mine && (
           <>
             <button type="button" className="btn" onClick={() => open("rename")}>Rename</button>
             <button type="button" className="btn" disabled={refilter.isPending} onClick={() => { reset(); refilter.mutate(); }}>Update with current filters</button>
+            <button type="button" className="btn" disabled={reshare.isPending} onClick={() => { reset(); reshare.mutate(!current.shared); }}>
+              {current.shared ? "Stop sharing" : "Share with my team"}
+            </button>
             <button type="button" className="btn danger" onClick={() => open("delete")}>Delete</button>
           </>
         )}
+        {current && !current.mine && <span className="muted">Shared by {current.owner}</span>}
       </div>
       {(mode === "save" || mode === "rename") && (
         <form className="toolbar" aria-label={mode === "save" ? "Save view" : "Rename view"} onSubmit={submit}>
@@ -97,6 +132,12 @@ export function SavedViews({ s }: { s: ListState }) {
             <label htmlFor={`${id}-name`}>View name</label>
             <input id={`${id}-name`} value={name} maxLength={80} autoFocus onChange={(e) => setName(e.target.value)} />
           </div>
+          {mode === "save" && (
+            <label className="checkline">
+              <input type="checkbox" checked={share} onChange={(e) => setShare(e.target.checked)} />
+              Share with my team
+            </label>
+          )}
           <button type="submit" className="btn primary" disabled={!name.trim() || save.isPending || rename.isPending}>
             {mode === "save" ? "Save view" : "Save name"}
           </button>
@@ -105,7 +146,7 @@ export function SavedViews({ s }: { s: ListState }) {
       )}
       {mode === "delete" && current && (
         <div className="toolbar" role="group" aria-label="Confirm delete">
-          <span>Delete saved view “{current.name}”? This only removes the view, not any candidates.</span>
+          <span>Delete saved view “{current.name}”?{current.shared ? " Your team will lose it too." : ""} This only removes the view, not any candidates.</span>
           <button type="button" className="btn danger" disabled={remove.isPending} onClick={() => remove.mutate()}>Delete view</button>
           <button type="button" className="btn" onClick={() => setMode(null)}>Cancel</button>
         </div>
@@ -126,10 +167,11 @@ export function ExportButton({ s }: { s: ListState }) {
   const n = run.data?.rows ?? 0;
   return (
     <div className="export">
-      <button type="button" className="btn" disabled={run.isPending} onClick={() => run.mutate()}>
-        {run.isPending ? "Exporting…" : "Export CSV"}
+      <button type="button" className="btn" disabled={run.isPending} onClick={() => run.mutate()} aria-describedby="hotlist-export-hint"
+        title={`Exports this view for candidates in your scope, up to ${EXPORT_ROW_CAP.toLocaleString("en-US")} rows. Phones are masked.`}>
+        <Download size={16} aria-hidden="true" /><span className="btnlabel">{run.isPending ? "Exporting…" : "Export CSV"}</span>
       </button>
-      <small className="hint">Exports this view for candidates in your scope, up to {EXPORT_ROW_CAP.toLocaleString("en-US")} rows. Phones are masked.</small>
+      <small id="hotlist-export-hint" className="sr-only">Exports this view for candidates in your scope, up to {EXPORT_ROW_CAP.toLocaleString("en-US")} rows. Phones are masked.</small>
       {run.isError ? (
         <p className="error" role="alert">
           {run.error instanceof ApiError && run.error.status === 429 ? run.error.message
@@ -186,9 +228,15 @@ export function BulkBar({ selected, items, canStatus, canVisibility, onDone }: {
   const r: BulkResponse | undefined = run.data;
   const n = selected.size;
   const pickTeams = vis === "selected_teams";
+  // The bar shows while rows are selected, and stays after a change (which clears the selection) to report its outcome.
+  if (n === 0 && run.isIdle) return null;
 
   return (
     <section className="bulkbar" aria-label="Bulk actions">
+      {n === 0 ? (
+        <div className="toolbar"><span className="muted">Bulk change finished.</span>
+          <button type="button" className="btn sm push" onClick={() => run.reset()}>Dismiss</button></div>
+      ) : (
       <div className="toolbar">
         <span className="muted"><b>{n}</b> {n === 1 ? "candidate" : "candidates"} selected</span>
         {canStatus && (
@@ -230,7 +278,8 @@ export function BulkBar({ selected, items, canStatus, canVisibility, onDone }: {
         )}
         <button type="button" className="btn" disabled={!n} onClick={onDone}>Clear selection</button>
       </div>
-      {canVisibility && pickTeams && (
+      )}
+      {n > 0 && canVisibility && pickTeams && (
         <div className="bulkteams">
           <p id={`${id}-teams`} className="hint">
             Picked teams can see and submit these candidates while they're active. Each candidate's own team always sees it.

@@ -10,6 +10,7 @@ import { PipelineFunnel, PipelineStatus, ReachedFilter, StageTrail, StatusChips,
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
+import "../sales/profile.css";
 
 const PAGE_SIZE = 25;
 
@@ -18,7 +19,11 @@ const PAGE_SIZE = 25;
  * with the funnel (submitted -> interview -> screening/L1/L2/L3+/final -> placed),
  * per-status counts, each submission's interview trail and a job/client search.
  */
-export function CandidateSubmissions({ candidateId, onOpenPlacement }: { candidateId: string; onOpenPlacement?: (id: string) => void }) {
+export function CandidateSubmissions({ candidateId, onOpenPlacement, onLogSubmission }: {
+  candidateId: string; onOpenPlacement?: (id: string) => void;
+  /** Offered in the empty state when the caller may log a submission. */
+  onLogSubmission?: () => void;
+}) {
   const id = useId();
   const [status, setStatusRaw] = useState("");
   const [reached, setReachedRaw] = useState<Reached>({ interviewed: "", stage: "" });
@@ -49,6 +54,20 @@ export function CandidateSubmissions({ candidateId, onOpenPlacement }: { candida
   const hasFilters = Boolean(status || reached.interviewed || reached.stage || search);
   const sum = summary.data;
   const cols = showRate ? 7 : 6;
+  // No submissions at all: skip the funnel, the zero-count chips and the filters; say so once.
+  const none = sum?.total === 0 && !hasFilters && items.length === 0 && !q.isLoading;
+
+  if (none) {
+    return (
+      <section aria-labelledby={`${id}-h`}>
+        <h2 id={`${id}-h`} className="sr-only">Submissions</h2>
+        <div className="card pad cs-empty">
+          <p>No submissions yet for this candidate.</p>
+          {onLogSubmission && <button type="button" className="btn primary" onClick={onLogSubmission}>Log submission</button>}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section aria-labelledby={`${id}-h`}>
@@ -56,7 +75,8 @@ export function CandidateSubmissions({ candidateId, onOpenPlacement }: { candida
       {sum && <PipelineFunnel summary={sum} value={reached} onPick={setReached} />}
 
       <form className="filters" role="search" aria-label="Candidate submission filters" onSubmit={(e) => e.preventDefault()}>
-        <StatusChips label="Status" statuses={SUBMISSION_STATUSES} value={status} onChange={setStatus}
+        {/* Only statuses this candidate has (and the picked one); zero-count chips are noise on one record. */}
+        <StatusChips label="Status" statuses={sum ? SUBMISSION_STATUSES.filter((k) => (sum.byStatus[k] ?? 0) > 0 || k === status) : SUBMISSION_STATUSES} value={status} onChange={setStatus}
           counts={sum?.byStatus} total={sum?.total} />
         <div className="toolbar">
           <div className="field inline">
@@ -72,26 +92,27 @@ export function CandidateSubmissions({ candidateId, onOpenPlacement }: { candida
 
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
 
-      <div className="card tablewrap">
+      <div className="card tablewrap listcard">
         {q.isLoading ? <Loading /> : q.error ? (
           <QueryError query={q} message={pipelineError(q.error)} />
         ) : (
-          <div className="tablewrap"><table aria-label="Candidate submissions" aria-busy={q.isFetching || undefined}>
+          <table className="dtable cs-table" aria-label="Candidate submissions" aria-busy={q.isFetching || undefined}>
             <thead><tr>
-              <th>Job / client</th><th>Status</th><th>Interview rounds</th><th>Submitted</th><th>Recruiter</th>
-              {showRate && <th>Rate</th>}
-              <th><span className="sr-only">Actions</span></th>
+              <th scope="col">Job / client</th><th scope="col">Status</th><th scope="col">Interview rounds</th><th scope="col">Submitted</th>
+              <th scope="col" className="p2">Recruiter</th>
+              {showRate && <th scope="col" className="num">Rate</th>}
+              <th scope="col" className="c-act"><span className="sr-only">Actions</span></th>
             </tr></thead>
             <tbody>
               {items.map((s) => (
                 <tr key={s.id}>
-                  <td><b>{s.jobTitle}</b><span className="block">{s.client}</span></td>
-                  <td><PipelineStatus status={s.status} /></td>
-                  <td><StageTrail s={s} /></td>
-                  <td>{fmtDateTime(s.submittedAt)}</td>
-                  <td>{s.recruiterName ?? "—"}</td>
-                  {showRate && <td>{"rate" in s ? fmtRate(s.rate) : <span className="muted">—</span>}</td>}
-                  <td className="rowactions">
+                  <td className="c-primary"><b>{s.jobTitle}</b><span className="block">{s.client}</span></td>
+                  <td className="c-badge"><PipelineStatus status={s.status} /></td>
+                  <td data-label="Rounds"><StageTrail s={s} /></td>
+                  <td data-label="Submitted">{fmtDateTime(s.submittedAt)}</td>
+                  <td data-label="Recruiter" className="p2">{s.recruiterName ?? "—"}</td>
+                  {showRate && <td data-label="Rate" className="num">{"rate" in s ? fmtRate(s.rate) : <span className="muted">—</span>}</td>}
+                  <td className="c-act">
                     <button type="button" className="btn sm" onClick={() => setOpenId(s.id)}
                       aria-label={`Open submission for ${s.jobTitle} at ${s.client}`}>Open</button>
                     <ScheduleInterviewButton submission={s} onNotice={setNotice} />
@@ -103,7 +124,7 @@ export function CandidateSubmissions({ candidateId, onOpenPlacement }: { candida
                 <tr><td colSpan={cols} className="empty">{hasFilters ? "No submissions match these filters." : "No submissions yet. Use Log submission to add one."}</td></tr>
               )}
             </tbody>
-          </table></div>
+          </table>
         )}
       </div>
       <div className="listfoot">

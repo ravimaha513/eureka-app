@@ -7,7 +7,7 @@ Internal talent-ops platform. pnpm monorepo, Node 22+, Postgres 16.
 - `apps/api` — NestJS API + worker. `src/modules/<area>/{<area>.controller,service,schemas}.ts`; `src/platform/` = auth, db, audit, mail, storage; `src/db/` = migrate + dev seeds; `test/*.int.test.ts` = integration
 - `apps/web` — React + Vite. `src/<area>/`; `e2e/` = Playwright
 - `db/migrations/00NN_*.sql` — append-only, checksum-pinned. Next number = highest + 1 (`ls db/migrations | tail -1`). Functions with a file in `db/functions/` are edited there, never in a new migration
-- `infra/` — Terraform/Terragrunt (AWS compute currently deleted; ignore unless asked)
+- `infra/` — Terraform/Terragrunt; ignore unless asked. Staging (us-east-2) is live: deploy via the train below, or GitHub Actions `deploy.yml` → Run workflow → `staging` (native ARM, OIDC; no local aws/terragrunt needed). Automatic production deploys after CI are off (runs show "skipped")
 - `.claude/skills/eureka-*` — project skills (migration, definer-fn, rls-policy, sql-review, new-module, authz-grant, outbox-event, handoff, test-run, int-test, shard-split, mass-assignment, e2e, security-gate)
 
 ## Commands

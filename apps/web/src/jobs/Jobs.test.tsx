@@ -28,7 +28,7 @@ beforeEach(() => {
     "PATCH /api/v1/jobs/j1": () => ({ body: { ...J1, rowVersion: 4 } }),
   });
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); window.history.replaceState(null, "", "/"); });
 
 const rowOf = async (title: string) => (await screen.findByText(title, { selector: "b" })).closest("tr")!;
 
@@ -41,7 +41,7 @@ describe("Jobs page", () => {
     expect(within(r1).getByText("Open")).toHaveClass("badge", "job-open");
     expect(within(r1).getByRole("button", { name: "Edit job Java Developer" })).toBeInTheDocument();
     const r2 = await rowOf("HR Generalist");
-    expect(within(r2).getByText(/on careers portal/)).toBeInTheDocument();
+    expect(within(r2).getByText("On careers portal")).toBeInTheDocument();
     expect(within(r2).queryByRole("button", { name: /Edit job/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Add job/ })).toBeInTheDocument();
   });
@@ -50,10 +50,13 @@ describe("Jobs page", () => {
     wrap(<JobsPage me={meFor("recruiter")} />);
     await rowOf("Java Developer");
     expect(screen.queryByRole("button", { name: /Add job/ })).toBeNull();
-    fireEvent.click(within(screen.getByRole("group", { name: "Status" })).getByRole("button", { name: "Closed" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), { target: { value: "closed" } });
     await waitFor(() => expect(api.gets("/api/v1/jobs").at(-1)!.url.searchParams.get("status")).toBe("closed"));
-    fireEvent.click(within(screen.getByRole("group", { name: "Type" })).getByRole("button", { name: "Internal opening" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Type" }), { target: { value: "internal_opening" } });
     await waitFor(() => expect(api.gets("/api/v1/jobs").at(-1)!.url.searchParams.get("kind")).toBe("internal_opening"));
+    // Filters are kept in the address bar.
+    expect(new URLSearchParams(window.location.search).get("status")).toBe("closed");
+    expect(new URLSearchParams(window.location.search).get("kind")).toBe("internal_opening");
   });
 
   it("creates a client requirement with an idempotency key and validates first", async () => {
@@ -62,7 +65,9 @@ describe("Jobs page", () => {
     const dlg = await screen.findByRole("dialog", { name: "Create job" });
     const client = within(dlg).getByRole("combobox", { name: "Client" });
     await waitFor(() => expect(client).not.toBeDisabled());
-    fireEvent.click(within(dlg).getByRole("button", { name: "Create job" }));
+    // New jobs start as Draft (nothing is published by default) and the submit says so.
+    expect(within(dlg).getByRole("combobox", { name: "Status" })).toHaveValue("draft");
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create draft" }));
     expect(await within(dlg).findByText("Enter the job title.")).toBeInTheDocument();
     expect(within(dlg).getByText("Choose the client.")).toBeInTheDocument();
     fireEvent.change(within(dlg).getByLabelText("Job title"), { target: { value: "  Spring Developer " } });
@@ -70,10 +75,10 @@ describe("Jobs page", () => {
     const skills = within(dlg).getByLabelText("Skills");
     fireEvent.change(skills, { target: { value: "Spring" } });
     fireEvent.keyDown(skills, { key: "Enter" });
-    fireEvent.click(within(dlg).getByRole("button", { name: "Create job" }));
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create draft" }));
     await waitFor(() => expect(api.writes()).toHaveLength(1));
     const w = api.writes()[0]!;
-    expect(w.body).toMatchObject({ kind: "client_requirement", title: "Spring Developer", clientId: "cl1", skills: ["Spring"], publishedToPortal: false, companyId: null });
+    expect(w.body).toMatchObject({ kind: "client_requirement", title: "Spring Developer", clientId: "cl1", skills: ["Spring"], status: "draft", publishedToPortal: false, companyId: null });
     expect(w.headers["idempotency-key"]).toMatch(/^job-/);
     expect(await screen.findByText("Job created.")).toBeInTheDocument();
   });
@@ -88,9 +93,17 @@ describe("Jobs page", () => {
     await waitFor(() => expect(within(company).getByRole("option", { name: "Endeavour Technology" })).toBeInTheDocument());
     fireEvent.change(within(dlg).getByLabelText("Job title"), { target: { value: "HR Generalist" } });
     fireEvent.change(company, { target: { value: "co2" } });
-    fireEvent.click(within(dlg).getByRole("button", { name: "Create job" }));
+    // Publishing is explicit: the note and the submit label follow Status + Publish.
+    const publish = within(dlg).getByRole("checkbox", { name: "Publish on the careers portal" });
+    expect(publish).not.toBeChecked();
+    expect(within(dlg).getByText(/applicants will not see this job/)).toBeInTheDocument();
+    fireEvent.click(publish);
+    expect(within(dlg).getByText(/only while the status is Open/)).toBeInTheDocument();
+    fireEvent.change(within(dlg).getByRole("combobox", { name: "Status" }), { target: { value: "open" } });
+    expect(within(dlg).getByText(/Applicants will see this job/)).toBeInTheDocument();
+    fireEvent.click(within(dlg).getByRole("button", { name: "Create and publish" }));
     await waitFor(() => expect(api.writes()).toHaveLength(1));
-    expect(api.writes()[0]!.body).toMatchObject({ kind: "internal_opening", companyId: "co2", clientId: null });
+    expect(api.writes()[0]!.body).toMatchObject({ kind: "internal_opening", companyId: "co2", clientId: null, status: "open", publishedToPortal: true });
   });
 
   it("does not ask for company options when the caller can only create client requirements", async () => {
@@ -112,10 +125,31 @@ describe("Jobs page", () => {
 
   it("shows details with requirements rendered as text", async () => {
     wrap(<JobsPage me={meFor("lead")} />);
-    fireEvent.click(within(await rowOf("Java Developer")).getByRole("button", { name: "View job Java Developer" }));
+    fireEvent.click(within(await rowOf("Java Developer")).getByRole("link", { name: "View job Java Developer" }));
     const d = await screen.findByRole("dialog", { name: "Java Developer" });
     expect(within(d).getByText("Five years of Java")).toBeInTheDocument();
     expect(within(d).getByText("Hidden (rate)")).toBeInTheDocument();
+  });
+});
+
+describe("Jobs page links and guards", () => {
+  it("links an opening's applicants count to Applications filtered by the job", async () => {
+    api.routes["GET /api/v1/jobs"] = () => ({ body: { items: [{ ...J2, applicants: 3 }], nextCursor: null } });
+    wrap(<JobsPage me={meFor("hr")} />);
+    const link = await screen.findByRole("link", { name: "3 applications for HR Generalist" });
+    expect(link).toHaveAttribute("href", "/applications?jobId=j2");
+  });
+
+  it("asks before Escape discards a typed job form; Cancel still closes", async () => {
+    wrap(<JobsPage me={meFor("lead")} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Add job/ }));
+    const dlg = await screen.findByRole("dialog", { name: "Create job" });
+    fireEvent.change(within(dlg).getByLabelText("Job title"), { target: { value: "Draft title" } });
+    fireEvent.keyDown(document.activeElement ?? dlg, { key: "Escape" });
+    expect(await within(dlg).findByText("Discard unsaved changes?")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Create job" })).toBeInTheDocument();
+    fireEvent.click(within(dlg).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Create job" })).toBeNull());
   });
 });
 

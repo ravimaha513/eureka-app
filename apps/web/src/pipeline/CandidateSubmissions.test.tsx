@@ -75,3 +75,28 @@ describe("Candidate submissions tab", () => {
     });
   });
 });
+
+describe("Candidate submissions tab: no submissions yet", () => {
+  it("skips the funnel, chips and filters and offers Log submission", async () => {
+    api = mockApi({
+      "GET /api/v1/submissions": () => ({ body: { items: [], nextCursor: null } }),
+      "GET /api/v1/submissions/summary": () => ({ body: { ...SUMMARY, total: 0, interviewed: 0,
+        byStatus: Object.fromEntries(Object.keys(SUMMARY.byStatus).map((k) => [k, 0])) } }),
+      "GET /api/v1/lookups": () => ({ body: LOOKUPS }),
+    });
+    const onLog = vi.fn();
+    wrap(<CandidateSubmissions candidateId={CAND} onLogSubmission={onLog} />);
+    expect(await screen.findByText("No submissions yet for this candidate.")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Submission funnel" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Status" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Log submission" }));
+    expect(onLog).toHaveBeenCalled();
+  });
+
+  it("lists only the statuses the candidate has", async () => {
+    wrap(<CandidateSubmissions candidateId={CAND} />);
+    const group = await screen.findByRole("group", { name: "Status" });
+    await waitFor(() => expect(within(group).queryByRole("button", { name: /Under review/ })).toBeNull());
+    expect(within(group).getByRole("button", { name: /Selected\s*1/ })).toBeInTheDocument();
+  });
+});

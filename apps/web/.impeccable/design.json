@@ -1,0 +1,1107 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-05T03:57:18+00:00",
+  "title": "Design System: Eureka",
+  "extensions": {
+    "colorMeta": {
+      "signal-red": {
+        "role": "primary",
+        "displayName": "Signal Red",
+        "canonical": "#c0262d",
+        "oklch": "oklch(52.7% 0.189 24.7)",
+        "cssVar": "--brand",
+        "dark": "#ff6a61",
+        "tonalRamp": [
+          "#250000",
+          "#4e0003",
+          "#7a0a14",
+          "#a92127",
+          "#d54948",
+          "#f27d76",
+          "#ffada5",
+          "#ffd9d2"
+        ],
+        "note": "Only the brand mark, current-nav rule and selected-tab underline."
+      },
+      "carbon-ink": {
+        "role": "primary",
+        "displayName": "Carbon Ink",
+        "canonical": "#1f2342",
+        "oklch": "oklch(26.9% 0.058 276.3)",
+        "cssVar": "--pri / --pri-btn",
+        "dark": "#e9eaf2",
+        "tonalRamp": [
+          "#080a16",
+          "#1f2335",
+          "#393e57",
+          "#555b7b",
+          "#777ea1",
+          "#9da3c1",
+          "#c4c9e2",
+          "#e9edff"
+        ]
+      },
+      "carbon-ink-hover": {
+        "role": "primary",
+        "displayName": "Carbon Ink Hover",
+        "canonical": "#31375f",
+        "oklch": "oklch(35.1% 0.070 275.7)",
+        "cssVar": "--pri-btn-hover",
+        "dark": "#ffffff",
+        "tonalRamp": [
+          "#080a18",
+          "#1e2238",
+          "#383d5c",
+          "#535b81",
+          "#757da7",
+          "#9ba2c7",
+          "#c2c9e7",
+          "#e8edff"
+        ]
+      },
+      "on-ink": {
+        "role": "primary",
+        "displayName": "On Ink",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "cssVar": "--on-pri",
+        "dark": "#15182a",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#404040",
+          "#5d5d5d",
+          "#808080",
+          "#a4a4a4",
+          "#cacaca",
+          "#eeeeee"
+        ]
+      },
+      "ink-wash-50": {
+        "role": "primary",
+        "displayName": "Ink Wash 50",
+        "canonical": "#eef0f6",
+        "oklch": "oklch(95.5% 0.008 271.3)",
+        "cssVar": "--pri-50",
+        "dark": "#20243b",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#232426",
+          "#3e4043",
+          "#5c5d62",
+          "#7e8085",
+          "#a3a4a9",
+          "#c9cace",
+          "#edeef1"
+        ]
+      },
+      "ink-wash-100": {
+        "role": "primary",
+        "displayName": "Ink Wash 100",
+        "canonical": "#e1e4ee",
+        "oklch": "oklch(91.9% 0.014 272.7)",
+        "cssVar": "--pri-100",
+        "dark": "#2a2f4b",
+        "tonalRamp": [
+          "#0a0b0e",
+          "#232428",
+          "#3e3f45",
+          "#5b5d65",
+          "#7d8088",
+          "#a2a4ab",
+          "#c8cad0",
+          "#edeef3"
+        ]
+      },
+      "ink-wash-200": {
+        "role": "primary",
+        "displayName": "Ink Wash 200",
+        "canonical": "#c9cdde",
+        "oklch": "oklch(85.0% 0.024 275.3)",
+        "cssVar": "--pri-200",
+        "dark": "#3b4166",
+        "tonalRamp": [
+          "#0a0b10",
+          "#22242b",
+          "#3d3f4a",
+          "#5a5d6a",
+          "#7c7f8e",
+          "#a1a4b0",
+          "#c7cad4",
+          "#eceef6"
+        ]
+      },
+      "carbon-sidebar": {
+        "role": "secondary",
+        "displayName": "Carbon Sidebar",
+        "canonical": "#1b1e3a",
+        "oklch": "oklch(24.8% 0.053 277.2)",
+        "cssVar": "--side-bg",
+        "dark": "#191c34",
+        "tonalRamp": [
+          "#090a15",
+          "#202334",
+          "#3a3e55",
+          "#575b79",
+          "#787e9e",
+          "#9ea3bf",
+          "#c5c9e0",
+          "#eaedff"
+        ]
+      },
+      "sidebar-line": {
+        "role": "secondary",
+        "displayName": "Sidebar Line",
+        "canonical": "#2a2e50",
+        "oklch": "oklch(31.5% 0.061 277.2)",
+        "cssVar": "--side-line",
+        "dark": "#2a2e4c",
+        "tonalRamp": [
+          "#080a17",
+          "#1f2236",
+          "#393e58",
+          "#565b7d",
+          "#777da2",
+          "#9da2c2",
+          "#c4c9e3",
+          "#e9edff"
+        ]
+      },
+      "sidebar-text": {
+        "role": "secondary",
+        "displayName": "Sidebar Text",
+        "canonical": "#c9cbdc",
+        "oklch": "oklch(84.6% 0.024 280.5)",
+        "cssVar": "--side-text",
+        "dark": "#c6c9d8",
+        "tonalRamp": [
+          "#0a0b10",
+          "#23232b",
+          "#3e3f49",
+          "#5b5c6a",
+          "#7d7f8e",
+          "#a2a4b0",
+          "#c8cad4",
+          "#edeef6"
+        ]
+      },
+      "sidebar-muted": {
+        "role": "secondary",
+        "displayName": "Sidebar Muted",
+        "canonical": "#9a9db8",
+        "oklch": "oklch(70.3% 0.039 280.3)",
+        "cssVar": "--side-muted",
+        "dark": "#8b90a8",
+        "tonalRamp": [
+          "#0a0a13",
+          "#222330",
+          "#3c3e50",
+          "#595c72",
+          "#7c7e96",
+          "#a0a3b8",
+          "#c7c9da",
+          "#ecedfb"
+        ]
+      },
+      "sidebar-hover": {
+        "role": "secondary",
+        "displayName": "Sidebar Hover",
+        "canonical": "#262a4c",
+        "oklch": "oklch(29.9% 0.062 276.9)",
+        "cssVar": "--side-hover",
+        "dark": "#22264a",
+        "tonalRamp": [
+          "#080a17",
+          "#1f2236",
+          "#393e58",
+          "#555b7d",
+          "#777da3",
+          "#9da2c3",
+          "#c4c9e3",
+          "#e9edff"
+        ]
+      },
+      "sidebar-current": {
+        "role": "secondary",
+        "displayName": "Sidebar Current",
+        "canonical": "#2c3058",
+        "oklch": "oklch(32.6% 0.071 277.4)",
+        "cssVar": "--side-current",
+        "dark": "#2b3060",
+        "tonalRamp": [
+          "#080918",
+          "#1f2238",
+          "#393d5c",
+          "#555a82",
+          "#767da8",
+          "#9ca2c7",
+          "#c3c9e7",
+          "#e9edff"
+        ]
+      },
+      "ground": {
+        "role": "neutral",
+        "displayName": "Ground",
+        "canonical": "#f4f5f7",
+        "oklch": "oklch(97.0% 0.003 264.5)",
+        "cssVar": "--bg",
+        "dark": "#0e1020",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#242425",
+          "#3f4041",
+          "#5d5e5f",
+          "#7f8082",
+          "#a4a4a6",
+          "#cacacc",
+          "#eeeeef"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "cssVar": "--surface",
+        "dark": "#15182a",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#404040",
+          "#5d5d5d",
+          "#808080",
+          "#a4a4a4",
+          "#cacaca",
+          "#eeeeee"
+        ]
+      },
+      "surface-sunk": {
+        "role": "neutral",
+        "displayName": "Surface Sunk",
+        "canonical": "#f8f9fb",
+        "oklch": "oklch(98.2% 0.003 264.5)",
+        "cssVar": "--surface2",
+        "dark": "#191c30",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#242425",
+          "#3f4041",
+          "#5d5e5f",
+          "#7f8082",
+          "#a4a4a6",
+          "#cacacc",
+          "#eeeeef"
+        ]
+      },
+      "hover-wash": {
+        "role": "neutral",
+        "displayName": "Hover Wash",
+        "canonical": "#f0f1f5",
+        "oklch": "oklch(95.9% 0.005 275.0)",
+        "cssVar": "--hover",
+        "dark": "#1f2339",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#232426",
+          "#3f4042",
+          "#5d5d60",
+          "#7f8083",
+          "#a4a4a7",
+          "#cacacd",
+          "#eeeef0"
+        ]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#e3e5eb",
+        "oklch": "oklch(92.2% 0.008 271.3)",
+        "cssVar": "--line",
+        "dark": "#262a42",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#232427",
+          "#3e4043",
+          "#5c5d62",
+          "#7e8085",
+          "#a3a4a9",
+          "#c9cace",
+          "#edeef1"
+        ]
+      },
+      "hairline-soft": {
+        "role": "neutral",
+        "displayName": "Hairline Soft",
+        "canonical": "#eceef2",
+        "oklch": "oklch(94.9% 0.006 264.5)",
+        "cssVar": "--line2",
+        "dark": "#1f2337",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#232426",
+          "#3e4042",
+          "#5c5e61",
+          "#7e8083",
+          "#a3a4a7",
+          "#c9cacd",
+          "#edeef0"
+        ]
+      },
+      "rule-strong": {
+        "role": "neutral",
+        "displayName": "Rule Strong",
+        "canonical": "#d3d6df",
+        "oklch": "oklch(87.6% 0.013 271.3)",
+        "cssVar": "--line-strong",
+        "dark": "#353a5a",
+        "tonalRamp": [
+          "#0a0b0e",
+          "#232428",
+          "#3e4045",
+          "#5b5d64",
+          "#7d8088",
+          "#a2a4ab",
+          "#c8cad0",
+          "#edeef2"
+        ]
+      },
+      "field-stroke": {
+        "role": "neutral",
+        "displayName": "Field Stroke",
+        "canonical": "#868e9e",
+        "oklch": "oklch(64.6% 0.026 264.4)",
+        "cssVar": "--field-line",
+        "dark": "#6b7590",
+        "tonalRamp": [
+          "#090b10",
+          "#20242c",
+          "#3b404a",
+          "#575e6b",
+          "#79808f",
+          "#9ea5b1",
+          "#c5cbd5",
+          "#eaeff7"
+        ]
+      },
+      "ink-text": {
+        "role": "neutral",
+        "displayName": "Ink Text",
+        "canonical": "#171a2e",
+        "oklch": "oklch(22.6% 0.039 276.3)",
+        "cssVar": "--text",
+        "dark": "#e9eaf2",
+        "tonalRamp": [
+          "#090b13",
+          "#212330",
+          "#3b3f50",
+          "#585c72",
+          "#7a7f96",
+          "#9fa3b8",
+          "#c6cada",
+          "#ebeefb"
+        ]
+      },
+      "ink-text-secondary": {
+        "role": "neutral",
+        "displayName": "Ink Text Secondary",
+        "canonical": "#353a52",
+        "oklch": "oklch(35.4% 0.042 275.0)",
+        "cssVar": "--text2",
+        "dark": "#c6c9d8",
+        "tonalRamp": [
+          "#090a13",
+          "#202331",
+          "#3b3f51",
+          "#575c74",
+          "#797f98",
+          "#9ea3ba",
+          "#c5cadc",
+          "#eaeefc"
+        ]
+      },
+      "muted-text": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "canonical": "#5f6675",
+        "oklch": "oklch(51.0% 0.025 265.6)",
+        "cssVar": "--muted",
+        "dark": "#969cb2",
+        "tonalRamp": [
+          "#090b10",
+          "#20242c",
+          "#3b404a",
+          "#575e6b",
+          "#79808f",
+          "#9fa5b1",
+          "#c6cbd5",
+          "#ebeef6"
+        ]
+      },
+      "faint": {
+        "role": "neutral",
+        "displayName": "Faint",
+        "canonical": "#a0a5b3",
+        "oklch": "oklch(72.2% 0.021 270.1)",
+        "cssVar": "--faint",
+        "dark": "#5f6582",
+        "tonalRamp": [
+          "#0a0b0f",
+          "#22242a",
+          "#3c3f48",
+          "#595d69",
+          "#7b808c",
+          "#a0a4af",
+          "#c7cad3",
+          "#eceef5"
+        ],
+        "note": "2.5:1 on white: placeholders, disabled and decorative glyphs only, never informational text."
+      },
+      "highlighter": {
+        "role": "tertiary",
+        "displayName": "Highlighter",
+        "canonical": "#fbf3d6",
+        "oklch": "oklch(96.3% 0.039 94.3)",
+        "cssVar": "--sel",
+        "dark": "rgba(250, 204, 21, .10)",
+        "tonalRamp": [
+          "#0e0b04",
+          "#282417",
+          "#45402e",
+          "#645e47",
+          "#878068",
+          "#aaa590",
+          "#cfcbba",
+          "#f2efe2"
+        ]
+      },
+      "highlighter-line": {
+        "role": "tertiary",
+        "displayName": "Highlighter Line",
+        "canonical": "#ecd889",
+        "oklch": "oklch(88.1% 0.101 95.6)",
+        "cssVar": "--sel-line",
+        "dark": "rgba(250, 204, 21, .32)",
+        "tonalRamp": [
+          "#110a00",
+          "#2d2300",
+          "#4c3f00",
+          "#6d5d11",
+          "#918038",
+          "#b3a56b",
+          "#d6cb9e",
+          "#f8efcc"
+        ]
+      },
+      "ok-bg": {
+        "role": "tertiary",
+        "displayName": "Ok Bg",
+        "canonical": "#e7f5ec",
+        "oklch": "oklch(95.7% 0.019 157.9)",
+        "cssVar": "--ok-bg",
+        "dark": "rgba(34, 197, 94, .14)",
+        "tonalRamp": [
+          "#080c0a",
+          "#202622",
+          "#3a423d",
+          "#56615a",
+          "#78847c",
+          "#9da7a1",
+          "#c5cdc8",
+          "#eaf0ec"
+        ]
+      },
+      "ok-fg": {
+        "role": "tertiary",
+        "displayName": "Ok Fg",
+        "canonical": "#17663a",
+        "oklch": "oklch(45.2% 0.103 153.8)",
+        "cssVar": "--ok-fg",
+        "dark": "#5fdc8c",
+        "tonalRamp": [
+          "#001003",
+          "#032c15",
+          "#164b2c",
+          "#2b6d44",
+          "#4e9165",
+          "#7db48e",
+          "#acd7b8",
+          "#d7f8e0"
+        ]
+      },
+      "ok-line": {
+        "role": "tertiary",
+        "displayName": "Ok Line",
+        "canonical": "#b9e2c7",
+        "oklch": "oklch(87.6% 0.057 156.2)",
+        "cssVar": "--ok-line",
+        "dark": "rgba(34, 197, 94, .35)",
+        "tonalRamp": [
+          "#030e07",
+          "#15291d",
+          "#2d4736",
+          "#456752",
+          "#678a73",
+          "#8fad99",
+          "#b9d2c1",
+          "#e1f4e7"
+        ]
+      },
+      "warn-bg": {
+        "role": "tertiary",
+        "displayName": "Warn Bg",
+        "canonical": "#fdf3e1",
+        "oklch": "oklch(96.7% 0.026 82.4)",
+        "cssVar": "--warn-bg",
+        "dark": "rgba(245, 158, 11, .14)",
+        "tonalRamp": [
+          "#0e0b06",
+          "#28231b",
+          "#453f34",
+          "#645d4f",
+          "#877f70",
+          "#aba497",
+          "#d0cabf",
+          "#f2eee6"
+        ]
+      },
+      "warn-fg": {
+        "role": "tertiary",
+        "displayName": "Warn Fg",
+        "canonical": "#9a4d00",
+        "oklch": "oklch(50.6% 0.126 54.6)",
+        "cssVar": "--warn-fg",
+        "dark": "#f5bd4f",
+        "tonalRamp": [
+          "#1c0300",
+          "#3f1700",
+          "#652f00",
+          "#8d490c",
+          "#b56b34",
+          "#d49469",
+          "#f2be9c",
+          "#ffe5cb"
+        ]
+      },
+      "warn-line": {
+        "role": "tertiary",
+        "displayName": "Warn Line",
+        "canonical": "#f2d49b",
+        "oklch": "oklch(88.2% 0.081 83.2)",
+        "cssVar": "--warn-line",
+        "dark": "rgba(245, 158, 11, .35)",
+        "tonalRamp": [
+          "#120900",
+          "#2f2104",
+          "#4f3d15",
+          "#715a29",
+          "#967c4a",
+          "#b8a278",
+          "#dac8a7",
+          "#fbedd3"
+        ]
+      },
+      "bad-bg": {
+        "role": "tertiary",
+        "displayName": "Bad Bg",
+        "canonical": "#fdeeee",
+        "oklch": "oklch(96.1% 0.016 17.4)",
+        "cssVar": "--bad-bg",
+        "dark": "rgba(244, 63, 94, .14)",
+        "tonalRamp": [
+          "#0e0a0a",
+          "#292222",
+          "#463d3d",
+          "#665a5a",
+          "#897d7d",
+          "#aca2a2",
+          "#d1c8c8",
+          "#f3eded"
+        ]
+      },
+      "bad-fg": {
+        "role": "tertiary",
+        "displayName": "Bad Fg",
+        "canonical": "#b3261e",
+        "oklch": "oklch(50.1% 0.178 28.7)",
+        "cssVar": "--bad-fg",
+        "dark": "#ff7f86",
+        "tonalRamp": [
+          "#240000",
+          "#4c0000",
+          "#77130e",
+          "#a52a21",
+          "#d14f42",
+          "#ee8172",
+          "#ffb0a2",
+          "#ffdbd0"
+        ]
+      },
+      "bad-line": {
+        "role": "tertiary",
+        "displayName": "Bad Line",
+        "canonical": "#f5c6c4",
+        "oklch": "oklch(86.7% 0.054 21.1)",
+        "cssVar": "--bad-line",
+        "dark": "rgba(244, 63, 94, .35)",
+        "tonalRamp": [
+          "#140707",
+          "#321e1d",
+          "#533736",
+          "#775352",
+          "#9c7573",
+          "#bd9b99",
+          "#dfc3c1",
+          "#ffe8e7"
+        ]
+      },
+      "info-bg": {
+        "role": "tertiary",
+        "displayName": "Info Bg",
+        "canonical": "#e9f0fb",
+        "oklch": "oklch(95.3% 0.017 259.4)",
+        "cssVar": "--info-bg",
+        "dark": "rgba(96, 145, 230, .16)",
+        "tonalRamp": [
+          "#090b0e",
+          "#212429",
+          "#3c4047",
+          "#595e66",
+          "#7b818a",
+          "#a0a5ad",
+          "#c7cbd1",
+          "#ebeff4"
+        ]
+      },
+      "info-fg": {
+        "role": "tertiary",
+        "displayName": "Info Fg",
+        "canonical": "#1e4f9c",
+        "oklch": "oklch(44.0% 0.136 259.4)",
+        "cssVar": "--info-fg",
+        "dark": "#9dbcf2",
+        "tonalRamp": [
+          "#000924",
+          "#08224b",
+          "#1b3e75",
+          "#305ca2",
+          "#5080cb",
+          "#7da6e6",
+          "#abccff",
+          "#d6f0ff"
+        ]
+      },
+      "info-line": {
+        "role": "tertiary",
+        "displayName": "Info Line",
+        "canonical": "#c5d7f2",
+        "oklch": "oklch(87.4% 0.042 258.4)",
+        "cssVar": "--info-line",
+        "dark": "rgba(96, 145, 230, .35)",
+        "tonalRamp": [
+          "#070b13",
+          "#1c2430",
+          "#354051",
+          "#515e73",
+          "#728198",
+          "#98a6b9",
+          "#c1cbdc",
+          "#e7effc"
+        ]
+      },
+      "neutral-bg": {
+        "role": "neutral",
+        "displayName": "Neutral Bg",
+        "canonical": "#eff1f4",
+        "oklch": "oklch(95.7% 0.005 258.3)",
+        "cssVar": "--neutral-bg",
+        "dark": "#222639",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#232425",
+          "#3f4042",
+          "#5c5e60",
+          "#7f8083",
+          "#a3a5a7",
+          "#c9cacc",
+          "#edeef0"
+        ]
+      },
+      "neutral-fg": {
+        "role": "neutral",
+        "displayName": "Neutral Fg",
+        "canonical": "#474d5e",
+        "oklch": "oklch(42.1% 0.029 269.8)",
+        "cssVar": "--neutral-fg",
+        "dark": "#b3b8c9",
+        "tonalRamp": [
+          "#090b11",
+          "#21242d",
+          "#3b3f4c",
+          "#585d6d",
+          "#7a8091",
+          "#9fa4b3",
+          "#c6cad7",
+          "#ebeef8"
+        ]
+      },
+      "violet-bg": {
+        "role": "tertiary",
+        "displayName": "Violet Bg",
+        "canonical": "#f1edfb",
+        "oklch": "oklch(95.3% 0.019 299.1)",
+        "cssVar": "--violet-bg",
+        "dark": "rgba(139, 92, 246, .16)",
+        "tonalRamp": [
+          "#0c0a0e",
+          "#252329",
+          "#413e46",
+          "#5f5c66",
+          "#817e8a",
+          "#a6a3ad",
+          "#cbc9d1",
+          "#efedf4"
+        ]
+      },
+      "violet-fg": {
+        "role": "tertiary",
+        "displayName": "Violet Fg",
+        "canonical": "#5b3aa8",
+        "oklch": "oklch(45.0% 0.167 292.1)",
+        "cssVar": "--violet-fg",
+        "dark": "#c4b5fd",
+        "tonalRamp": [
+          "#0e0227",
+          "#271550",
+          "#432d7b",
+          "#6247aa",
+          "#846bd4",
+          "#a795ee",
+          "#ccbfff",
+          "#efe6ff"
+        ]
+      }
+    },
+    "avatarTints": {
+      "note": "Avatar initials only; tint chosen by a stable hash of the name; never semantic.",
+      "light": {
+        "indigo": {
+          "fg": "#3a4386",
+          "bg": "#e8eaf5"
+        },
+        "teal": {
+          "fg": "#0f6d64",
+          "bg": "#e2f2ef"
+        },
+        "amber": {
+          "fg": "#8f5a00",
+          "bg": "#fbf0dc"
+        },
+        "rose": {
+          "fg": "#a8323d",
+          "bg": "#f9e8ea"
+        },
+        "violet": {
+          "fg": "#5b3aa8",
+          "bg": "#efeaf9"
+        },
+        "sky": {
+          "fg": "#1d5f8c",
+          "bg": "#e3eff8"
+        }
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Login brand-panel statement only."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page h1 (21px on phones); login form h1 at 28px."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Drawer heads and the phone filter sheet; dialogs at 18px."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Root size: navigation, fields, running text."
+      },
+      "body-dense": {
+        "displayName": "Body Dense",
+        "purpose": "Table cells and buttons (600); tabular figures."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field labels, tabs, toggle buttons."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Hints, secondary cell lines, footers (12-12.5px)."
+      },
+      "chip": {
+        "displayName": "Chip",
+        "purpose": "Status and filter chips."
+      },
+      "column-head": {
+        "displayName": "Column Head",
+        "purpose": "Table header cells: uppercase, condensed 82%."
+      },
+      "nav-section": {
+        "displayName": "Nav Section",
+        "purpose": "Sidebar group labels: uppercase, condensed 78%."
+      },
+      "wordmark": {
+        "displayName": "Wordmark",
+        "purpose": "\"EUREKA\" beside the mark: uppercase, condensed 78%."
+      }
+    },
+    "fontLoading": {
+      "package": "@fontsource-variable/archivo/wdth.css",
+      "axes": [
+        "wght",
+        "wdth"
+      ],
+      "condensedWidths": {
+        "column-head": "82%",
+        "nav-section": "78%",
+        "wordmark": "78%"
+      }
+    },
+    "controlHeights": {
+      "default": "36px (--h-control)",
+      "compact": "30px (--h-compact)",
+      "phone": "40-44px",
+      "tableRowAction": "26px"
+    },
+    "shadows": [
+      {
+        "name": "none-at-rest",
+        "value": "none",
+        "purpose": "--shadow-sm: in-flow cards, tables, fields and buttons are flat."
+      },
+      {
+        "name": "float",
+        "value": "0 16px 40px rgba(17, 20, 40, .16), 0 2px 6px rgba(17, 20, 40, .08)",
+        "dark": "0 20px 50px rgba(0, 0, 0, .55)",
+        "purpose": "--shadow-lg: user menu, status popovers, chart tooltips, sticky selection bar, phone filter sheet, docked phone bulk bar."
+      },
+      {
+        "name": "scrim",
+        "value": "rgba(17, 20, 40, .42)",
+        "dark": "rgba(2, 4, 12, .62)",
+        "purpose": "--scrim: behind dialogs, drawers, phone nav and the filter sheet."
+      },
+      {
+        "name": "field-focus-halo",
+        "value": "0 0 0 3px var(--pri-100)",
+        "purpose": "Focused input/select, with a carbon-ink border."
+      },
+      {
+        "name": "focus-outline",
+        "value": "2px solid var(--pri), offset 2px",
+        "purpose": "Keyboard focus everywhere; white on the sidebar."
+      }
+    ],
+    "motion": [
+      {
+        "name": "sheet-in",
+        "value": ".2s cubic-bezier(.2, .8, .2, 1); from translateY(24px), opacity 0",
+        "purpose": "Phone filter bottom sheet; only under prefers-reduced-motion: no-preference."
+      },
+      {
+        "name": "drawer-slide",
+        "value": "transform .2s ease",
+        "purpose": "Phone off-canvas sidebar; removed under reduced motion."
+      },
+      {
+        "name": "spinner",
+        "value": "spin .7s linear infinite",
+        "purpose": "Loading indicator; slowed to 2.4s under reduced motion."
+      },
+      {
+        "name": "card-border",
+        "value": "border-color .15s",
+        "purpose": "Hover border on clickable cards."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "768px",
+        "purpose": "max-width: off-canvas nav, record cards, filter sheet, docked bulk bar, 16px inputs."
+      },
+      {
+        "name": "profile-stack",
+        "value": "900px",
+        "purpose": "max-width: candidate profile grids collapse to one column."
+      },
+      {
+        "name": "login-single",
+        "value": "960px",
+        "purpose": "max-width: login brand panel drops."
+      },
+      {
+        "name": "cols-p2",
+        "value": "1400px",
+        "purpose": "below: p2 table columns hidden."
+      },
+      {
+        "name": "cols-p3",
+        "value": "1600px",
+        "purpose": "below: p3 columns hidden; team lead moves into a Team-cell tooltip."
+      }
+    ],
+    "shell": {
+      "sidebar": "232px (64px collapsed; 280px / 85vw drawer on phones)",
+      "topBar": "56px (60px on phones)",
+      "contentPadding": "24px 28px 40px (18px 14px 28px on phones)",
+      "blockGap": "16px"
+    },
+    "iconography": "lucide-react line icons, 16-18px, currentColor; inline SVG masks for empty and error states."
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one primary action per view: carbon ink, inverts in dark.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Apply status</button>",
+      "css": ".ds-btn{height:36px;padding:0 14px;border-radius:var(--r-md,6px);border:1px solid var(--line-strong,#d3d6df);background:var(--surface,#fff);color:var(--text,#171a2e);font:600 13.5px/1 \"Archivo Variable\",system-ui,sans-serif;display:inline-flex;align-items:center;gap:6px;cursor:pointer}.ds-btn-primary{background:var(--pri-btn,#1f2342);border-color:var(--pri-btn,#1f2342);color:var(--on-pri,#fff)}.ds-btn-primary:hover{background:var(--pri-btn-hover,#31375f)}.ds-btn:focus-visible{outline:2px solid var(--pri,#1f2342);outline-offset:2px}.ds-btn:disabled{opacity:.5;cursor:not-allowed}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Every non-primary action; outlined surface with a leading line icon.",
+      "html": "<button class=\"ds-btn2\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"/><path d=\"m7 10 5 5 5-5\"/><path d=\"M12 15V3\"/></svg>Export CSV</button>",
+      "css": ".ds-btn2{height:36px;padding:0 14px;border-radius:var(--r-md,6px);border:1px solid var(--line-strong,#d3d6df);background:var(--surface,#fff);color:var(--text,#171a2e);font:600 13.5px/1 \"Archivo Variable\",system-ui,sans-serif;display:inline-flex;align-items:center;gap:6px;cursor:pointer}.ds-btn2:hover{background:var(--hover,#f0f1f5)}.ds-btn2:focus-visible{outline:2px solid var(--pri,#1f2342);outline-offset:2px}"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Labelled input: field-stroke border, carbon focus with ink-wash halo.",
+      "html": "<label class=\"ds-field\"><span>Search name</span><input placeholder=\"Candidate name\"></label>",
+      "css": ".ds-field{display:flex;flex-direction:column;gap:4px;font-family:\"Archivo Variable\",system-ui,sans-serif}.ds-field span{font-weight:600;font-size:13px;color:var(--text2,#353a52)}.ds-field input{height:36px;width:220px;border-radius:var(--r-md,6px);border:1px solid var(--field-line,#868e9e);padding:0 10px;background:var(--surface,#fff);color:var(--text,#171a2e);font:400 14px \"Archivo Variable\",system-ui,sans-serif}.ds-field input::placeholder{color:var(--faint,#a0a5b3)}.ds-field input:focus{border-color:var(--pri,#1f2342);box-shadow:0 0 0 3px var(--pri-100,#e1e4ee);outline:none}"
+    },
+    {
+      "name": "Status and Priority Chips",
+      "kind": "chip",
+      "refersTo": "status-chip",
+      "description": "Quiet tinted chips in plain words; P1 is carbon, never red.",
+      "html": "<span class=\"ds-badge ds-ok\">Active</span> <span class=\"ds-badge ds-violet\">Open to all teams</span> <span class=\"ds-badge ds-warn\">On hold</span> <span class=\"ds-badge\">Bench</span> <span class=\"ds-prio ds-p1\">P1</span> <span class=\"ds-prio ds-p2\">P2</span> <span class=\"ds-prio\">P3</span>",
+      "css": ".ds-badge{display:inline-block;padding:2px 7px;border-radius:var(--r-sm,4px);font:600 12px/1.35 \"Archivo Variable\",system-ui,sans-serif;background:var(--neutral-bg,#eff1f4);color:var(--neutral-fg,#474d5e)}.ds-ok{background:var(--ok-bg,#e7f5ec);color:var(--ok-fg,#17663a)}.ds-warn{background:var(--warn-bg,#fdf3e1);color:var(--warn-fg,#9a4d00)}.ds-violet{background:var(--violet-bg,#f1edfb);color:var(--violet-fg,#5b3aa8)}.ds-prio{font:700 11.5px \"Archivo Variable\",system-ui,sans-serif;font-variant-numeric:tabular-nums;padding:1px 6px;border-radius:var(--r-sm,4px);background:var(--neutral-bg,#eff1f4);color:var(--neutral-fg,#474d5e)}.ds-p1{background:var(--pri-btn,#1f2342);color:var(--on-pri,#fff)}.ds-p2{background:var(--warn-bg,#fdf3e1);color:var(--warn-fg,#9a4d00)}"
+    },
+    {
+      "name": "Filter Chip",
+      "kind": "chip",
+      "refersTo": "filter-chip",
+      "description": "An active filter in the summary row, removable.",
+      "html": "<span class=\"ds-fchip\">Status: Active<button class=\"ds-fx\" aria-label=\"Remove\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"><path d=\"M18 6 6 18M6 6l12 12\"/></svg></button></span>",
+      "css": ".ds-fchip{display:inline-flex;align-items:center;gap:4px;padding:2px 2px 2px 8px;border-radius:var(--r-sm,4px);background:var(--surface,#fff);border:1px solid var(--line-strong,#d3d6df);color:var(--text,#171a2e);font:500 12px \"Archivo Variable\",system-ui,sans-serif}.ds-fx{border:0;background:none;color:var(--muted,#5f6675);width:24px;height:24px;border-radius:var(--r-sm,4px);display:inline-grid;place-items:center;padding:0;cursor:pointer}.ds-fx:hover{background:var(--line-strong,#d3d6df);color:var(--bad-fg,#b3261e)}.ds-fx:focus-visible{outline:2px solid var(--pri,#1f2342);outline-offset:2px}"
+    },
+    {
+      "name": "Dense Table",
+      "kind": "card",
+      "refersTo": "table-head",
+      "description": "Hairline card with condensed caps heads, 34px rows, highlighter selection, pinned row action.",
+      "html": "<div class=\"ds-card\"><table class=\"ds-t\"><thead><tr><th>Candidate</th><th>Status</th><th>Pri</th><th class=\"n\">Days</th><th></th></tr></thead><tbody><tr aria-selected=\"true\"><td><b>Cand25 Test</b></td><td><span class=\"ds-badge ds-ok\">Active</span></td><td><span class=\"ds-prio ds-p1\">P1</span></td><td class=\"n\">7</td><td><button class=\"ds-btn2 sm\">View</button></td></tr><tr><td><b>Cand42 Test</b></td><td><span class=\"ds-badge\">Bench</span></td><td><span class=\"ds-prio\">P3</span></td><td class=\"n\">13</td><td><button class=\"ds-btn2 sm\">View</button></td></tr></tbody></table></div>",
+      "css": ".ds-card{background:var(--surface,#fff);border:1px solid var(--line,#e3e5eb);border-radius:var(--r-lg,8px);overflow:hidden;font-family:\"Archivo Variable\",system-ui,sans-serif}.ds-t{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.ds-t th{font-size:11.5px;font-weight:650;font-stretch:82%;text-transform:uppercase;letter-spacing:.07em;color:var(--muted,#5f6675);text-align:left;padding:10px;background:var(--surface2,#f8f9fb);border-bottom:1px solid var(--line,#e3e5eb)}.ds-t td{padding:7px 10px;font-size:13.5px;color:var(--text2,#353a52);border-bottom:1px solid var(--line2,#eceef2)}.ds-t td b{color:var(--text,#171a2e)}.ds-t .n{text-align:right}.ds-t tbody tr:hover td{background:var(--surface2,#f8f9fb)}.ds-t tr[aria-selected=\"true\"] td{background:var(--sel,#fbf3d6)}.ds-t .ds-badge{display:inline-block;padding:2px 7px;border-radius:4px;font-size:12px;font-weight:600;background:var(--neutral-bg,#eff1f4);color:var(--neutral-fg,#474d5e)}.ds-t .ds-ok{background:var(--ok-bg,#e7f5ec);color:var(--ok-fg,#17663a)}.ds-t .ds-prio{font-size:11.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:var(--neutral-bg,#eff1f4);color:var(--neutral-fg,#474d5e)}.ds-t .ds-p1{background:var(--pri-btn,#1f2342);color:var(--on-pri,#fff)}.ds-t .ds-btn2.sm{height:26px;padding:0 10px;border-radius:6px;border:1px solid var(--line-strong,#d3d6df);background:var(--surface,#fff);font:600 13px \"Archivo Variable\",system-ui,sans-serif;cursor:pointer}.ds-t .ds-btn2.sm:hover{background:var(--hover,#f0f1f5)}"
+    },
+    {
+      "name": "Sidebar Navigation",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Carbon frame: condensed caps group label, items with line icons, signal-red rule on the current page.",
+      "html": "<nav class=\"ds-side\"><div class=\"ds-brand\"><span class=\"ds-logo\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 14 14\" fill=\"currentColor\"><rect x=\"1\" y=\"1.5\" width=\"12\" height=\"2.4\" rx=\".5\"/><rect x=\"1\" y=\"5.8\" width=\"9\" height=\"2.4\" rx=\".5\"/><rect x=\"1\" y=\"10.1\" width=\"12\" height=\"2.4\" rx=\".5\"/></svg></span><span class=\"ds-wm\">Eureka<small>Staffing</small></span></div><div class=\"ds-sec\">Workspace</div><a class=\"ds-nav\" href=\"#\">Dashboard</a><a class=\"ds-nav\" href=\"#\" aria-current=\"page\">Hot List</a><a class=\"ds-nav\" href=\"#\">Candidates</a></nav>",
+      "css": ".ds-side{background:var(--side-bg,#1b1e3a);color:var(--side-text,#c9cbdc);width:232px;padding:0 10px 12px;display:flex;flex-direction:column;gap:2px;font-family:\"Archivo Variable\",system-ui,sans-serif}.ds-brand{display:flex;align-items:center;gap:10px;height:60px;padding:3px 6px 0;color:#fff}.ds-logo{width:26px;height:26px;border-radius:var(--r-sm,4px);background:var(--brand,#c0262d);color:#fff;display:grid;place-items:center}.ds-wm{display:flex;flex-direction:column;line-height:1;font-stretch:78%;text-transform:uppercase;letter-spacing:.08em;font-size:17px;font-weight:750}.ds-wm small{font-size:10.5px;font-weight:500;color:var(--side-muted,#9a9db8);letter-spacing:.1em;margin-top:4px}.ds-sec{font-size:11px;color:var(--side-muted,#9a9db8);padding:14px 10px 4px;font-weight:650;font-stretch:78%;text-transform:uppercase;letter-spacing:.1em}.ds-nav{position:relative;display:flex;align-items:center;height:34px;padding:0 10px;border-radius:var(--r-md,6px);color:var(--side-text,#c9cbdc);text-decoration:none;font-size:14px;font-weight:500}.ds-nav:hover{background:var(--side-hover,#262a4c);color:#fff}.ds-nav[aria-current=\"page\"]{background:var(--side-current,#2c3058);color:#fff;font-weight:600}.ds-nav[aria-current=\"page\"]::before{content:\"\";position:absolute;left:-10px;top:7px;bottom:7px;width:3px;border-radius:0 2px 2px 0;background:var(--brand,#c0262d)}.ds-nav:focus-visible{outline:2px solid #fff;outline-offset:2px}"
+    },
+    {
+      "name": "Underline Tabs",
+      "kind": "nav",
+      "refersTo": "tab",
+      "description": "role=tab: underline on a hairline baseline; selected takes a 2px signal-red rule.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button class=\"ds-tab\" role=\"tab\" aria-selected=\"true\">Overview</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">Submissions</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">Documents</button></div>",
+      "css": ".ds-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line,#e3e5eb)}.ds-tab{border:0;background:none;height:38px;padding:0 10px;margin-bottom:-1px;border-bottom:2px solid transparent;color:var(--muted,#5f6675);font:600 13px \"Archivo Variable\",system-ui,sans-serif;cursor:pointer}.ds-tab:hover{color:var(--text,#171a2e)}.ds-tab[aria-selected=\"true\"]{color:var(--text,#171a2e);border-bottom-color:var(--brand,#c0262d)}.ds-tab:focus-visible{outline:2px solid var(--pri,#1f2342);outline-offset:2px}"
+    },
+    {
+      "name": "Bulk Bar",
+      "kind": "custom",
+      "refersTo": "bulk-bar",
+      "description": "Highlighter strip that replaces the filter summary while rows are selected.",
+      "html": "<div class=\"ds-bulk\"><span><b>2</b> candidates selected</span><select><option>Choose a status</option></select><button class=\"ds-bp\">Apply status</button><button class=\"ds-bs\">Clear selection</button></div>",
+      "css": ".ds-bulk{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--sel-line,#ecd889);border-radius:var(--r-md,6px);background:var(--sel,#fbf3d6);color:var(--text2,#353a52);font:400 14px \"Archivo Variable\",system-ui,sans-serif}.ds-bulk select{height:36px;width:150px;border-radius:6px;border:1px solid var(--field-line,#868e9e);background:var(--surface,#fff);padding:0 10px;font:inherit}.ds-bp,.ds-bs{height:36px;padding:0 14px;border-radius:6px;font:600 13.5px \"Archivo Variable\",system-ui,sans-serif;cursor:pointer}.ds-bp{background:var(--pri-btn,#1f2342);border:1px solid var(--pri-btn,#1f2342);color:var(--on-pri,#fff)}.ds-bp:hover{background:var(--pri-btn-hover,#31375f)}.ds-bs{background:var(--surface,#fff);border:1px solid var(--line-strong,#d3d6df);color:var(--text,#171a2e)}.ds-bs:hover{background:var(--hover,#f0f1f5)}.ds-bp:focus-visible,.ds-bs:focus-visible{outline:2px solid var(--pri,#1f2342);outline-offset:2px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Carbon Ledger",
+    "overview": "Eureka is a working instrument for bench sales, and the list is the product. The world is a near-white neutral ground framed by a deep carbon-navy sidebar, with carbon-ink text, hairline rules, small corners and no resting shadows. One restrained signal red marks identity and place (the brand mark, the current-nav rule, the selected-tab underline) and otherwise means only \"error\". Everything else is ink, neutral tints and quiet status colour.\n\nDensity is the point. Users arrive from Google Sheets and judge the tool by how fast a filtered list appears, so screens put filters, active chips and the first table rows in the first viewport, rows run about 34px tall, and numbers sit in tabular figures. Archivo is the single family: normal width for everything you read, a condensed caps cut for column heads, sidebar section labels and the wordmark. Light and dark are both first-class; the carbon frame stays carbon in both, and the primary action inverts (carbon on light, near-white on dark).\n\nThe world rejects the previous indigo card-dashboard: gradient logo, soft shadows on every card, pill tabs and airy rows. Desktop and phone are distinct layouts, not one squeezed into the other: on phones, tables become stacked record cards, filters move into a bottom sheet, and the bulk bar docks to the bottom edge.",
+    "keyCharacteristics": [
+      "Carbon sidebar (232px, 64px collapsed) with off-white type, plus a white 56px top bar.",
+      "One signal red, used only for identity, current place and errors.",
+      "Carbon-ink primary actions; P1 priority is a carbon chip, not red.",
+      "Hairline borders and tonal surfaces; elevation only for things that float.",
+      "Archivo variable in two widths; condensed caps used only as labels.",
+      "Status is a quiet tinted chip with plain words.",
+      "Selection is a pale highlighter yellow, distinct from every status tint."
+    ],
+    "rules": [
+      {
+        "name": "The One Red Rule",
+        "body": "Signal red marks the brand, the current place (nav rule, selected tab) and nothing else. Any other red on screen is an error state (`--bad-fg`). If a new element wants red, it wants carbon ink.",
+        "section": "colors"
+      },
+      {
+        "name": "The Carbon Primary Rule",
+        "body": "The primary action is carbon ink, never red. A red button next to an error message reads as destructive.",
+        "section": "colors"
+      },
+      {
+        "name": "The Highlighter Rule",
+        "body": "Selection is pale highlighter yellow (`--sel`). Selection never uses a status tint, the ink wash or red.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Widths Rule",
+        "body": "Condensed caps are for labels that name a column or a group: column heads, sidebar section labels, the wordmark. Never set a sentence, a value or a heading in them, and never put them above a heading as a lead-in.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Tables, counts, the pager and every numeric cell use tabular figures, and numeric columns align right.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-At-Rest Rule",
+        "body": "Nothing that sits in the page flow has a shadow. If it does not float over content, it gets a hairline, not a shadow.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Small Corners Rule",
+        "body": "No corner exceeds 8px, and controls, chips and tabs are never pill-shaped.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "**Do** reference tokens (`var(--brand)`, `var(--pri-btn)`, `var(--ok-bg)`) so both themes follow; never hard-code hex in components.",
+      "**Do** keep signal red to the mark, the current-nav rule and the selected-tab underline; use `--bad-*` for errors.",
+      "**Do** make the one primary action carbon ink (`--pri-btn`), and everything else secondary or ghost.",
+      "**Do** show status as a tinted chip in plain words, and selection as the highlighter (`--sel`).",
+      "**Do** set column heads and sidebar group labels in condensed caps (78–82% width, uppercase, tracked), and everything else in normal width.",
+      "**Do** use tabular figures for every count and number, and right-align numeric columns.",
+      "**Do** keep corners at 4 / 6 / 8px and separate surfaces with hairlines.",
+      "**Do** design phones as their own layout: record cards, a filter bottom sheet, a docked bulk bar, 40–44px targets and 16px inputs."
+    ],
+    "donts": [
+      "**Don't** use red for primary buttons, P1, badges or emphasis. It is identity, place or error.",
+      "**Don't** put shadows on in-flow cards, tables, fields or buttons; `--shadow-lg` is for floating layers only.",
+      "**Don't** use decorative gradients. The only gradient in the build is the hatched coverage-gap pattern, which shows data.",
+      "**Don't** make tabs, chips or filter controls pill-shaped; circles are for avatars and the bell.",
+      "**Don't** add lead-in labels above headings, or set sentences in condensed caps.",
+      "**Don't** use shipping metaphors, ticket shapes, route codes or ornament.",
+      "**Don't** use `--faint` for text that carries information; it is below 3:1.",
+      "**Don't** fabricate metrics, logos or testimonials on the login panel or anywhere else."
+    ]
+  }
+}

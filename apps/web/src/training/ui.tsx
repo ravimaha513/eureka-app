@@ -57,3 +57,40 @@ export function CoverPicker({ value, onChange }: { value: Cover; onChange: (c: C
     </div>
   );
 }
+
+const DAY = 86_400_000;
+const dayStart = (iso: string) => {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1).getTime();
+};
+
+/**
+ * Where a batch is in its calendar (client-side, from startDate/endDate): "Week 3 of 8" and the
+ * share of the planned days elapsed. Not student progress: the batch list API does not return it.
+ * `pct` is null when there is no end date to measure against.
+ */
+export function schedule(b: { status: string; startDate: string; endDate: string | null }, now = new Date()): { label: string; pct: number | null } | null {
+  if (b.status === "cancelled") return null;
+  if (b.status === "completed") return { label: "Finished", pct: 100 };
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const start = dayStart(b.startDate);
+  if (today < start) {
+    const days = Math.round((start - today) / DAY);
+    return { label: days === 1 ? "Starts tomorrow" : `Starts in ${days} days`, pct: b.endDate ? 0 : null };
+  }
+  const week = Math.floor((today - start) / DAY / 7) + 1;
+  if (!b.endDate) return { label: `Week ${week}`, pct: null };
+  const end = dayStart(b.endDate);
+  const total = Math.max(1, Math.ceil((end - start + DAY) / DAY / 7));
+  const pct = Math.max(0, Math.min(100, Math.round(((today - start) / Math.max(DAY, end - start)) * 100)));
+  return { label: today > end ? "Past end date" : `Week ${Math.min(week, total)} of ${total}`, pct };
+}
+
+/** Elapsed share of a batch's calendar (0–100), or null without an end date / before start. For "behind" flags. */
+export function elapsedPercent(b: { startDate: string; endDate: string | null }, now = new Date()): number | null {
+  if (!b.endDate) return null;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const start = dayStart(b.startDate), end = dayStart(b.endDate);
+  if (today < start) return null;
+  return Math.max(0, Math.min(100, Math.round(((today - start) / Math.max(DAY, end - start)) * 100)));
+}

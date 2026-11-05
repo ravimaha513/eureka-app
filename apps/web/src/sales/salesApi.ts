@@ -131,27 +131,34 @@ export const VISIBILITY_LABELS: Record<Visibility, string> = {
 export interface ShareTeam { id: string; name: string; lead: string | null }
 export type Priority = "P1" | "P2" | "P3";
 
-export interface ListFilters {
+/**
+ * Filters that take several values (repeat the parameter; `not` inverts one). Mirrors MULTI_KEYS
+ * in apps/api/src/modules/candidates/list-filters.ts.
+ */
+export const MULTI_FILTER_KEYS = [
+  "status", "technology", "visibility", "batchId", "locationId", "visa", "documents",
+  "priority", "teamId", "recruiterId", "ghLocationId",
+] as const;
+export type MultiKey = (typeof MULTI_FILTER_KEYS)[number];
+/** Two-choice filters (Any / one / the other). */
+export const SINGLE_FILTER_KEYS = ["resume", "stay", "inPerson"] as const;
+
+export interface SingleFilters {
+  resume: "" | "yes" | "no";
+  stay: "" | "guest_house" | "remote";
+  inPerson: "" | "yes" | "no";
+  sort: "" | ListSort;
+}
+
+export interface ListFilters extends Partial<Record<MultiKey, string[]>>, Partial<SingleFilters> {
   search?: string;
-  status?: string;
-  technology?: string;
-  visibility?: Visibility | "";
-  /** Candidates list only. */
-  batchId?: string;
-  locationId?: string;
-  visa?: string;
-  documents?: string;
-  resume?: "yes" | "no" | "";
-  stay?: "guest_house" | "remote" | "";
-  priority?: Priority | "";
-  teamId?: string;
-  recruiterId?: string;
-  inPerson?: "yes" | "no" | "";
-  ghLocationId?: string;
-  sort?: ListSort | "";
+  not?: MultiKey[];
   cursor?: string | null;
   limit?: number;
 }
+
+/** GET /candidates/facets, /hotlist/facets: per filter, candidates per value with the other filters applied. */
+export interface FacetCounts { total: number; facets: Partial<Record<MultiKey | (typeof SINGLE_FILTER_KEYS)[number], { value: string; count: number }[]>> }
 
 /** Profile fields a `candidate:update` holder may change (ProfileUpdate schema; strict). */
 export interface ProfileUpdate {
@@ -231,14 +238,14 @@ const enc = encodeURIComponent;
 const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
 const edit = (method: string, body: unknown, version?: number): RequestInit => ({ method, ...json(body), headers: ifMatch(version) });
 
-function listQuery(f: ListFilters): string {
+function listQuery(f: ListFilters, paging = true): string {
   const q = new URLSearchParams();
   if (f.search) q.set("search", f.search);
-  if (f.status) q.set("status", f.status);
-  if (f.technology) q.set("technology", f.technology);
-  if (f.visibility) q.set("visibility", f.visibility);
-  if (f.batchId) q.set("batchId", f.batchId);
-  for (const k of EXTRA_FILTER_KEYS) { const v = f[k]; if (v) q.set(k, v); }
+  for (const k of MULTI_FILTER_KEYS) for (const v of f[k] ?? []) q.append(k, v);
+  for (const k of f.not ?? []) if (f[k]?.length) q.append("not", k);
+  for (const k of SINGLE_FILTER_KEYS) { const v = f[k]; if (v) q.set(k, v); }
+  if (!paging) return q.toString();
+  if (f.sort) q.set("sort", f.sort);
   if (f.cursor) q.set("cursor", f.cursor);
   q.set("limit", String(f.limit ?? 50));
   return q.toString();
@@ -247,6 +254,8 @@ function listQuery(f: ListFilters): string {
 export const salesApi = {
   hotlist: (f: ListFilters) => api<Page<Candidate>>(`/api/v1/hotlist?${listQuery(f)}`),
   candidates: (f: ListFilters) => api<Page<Candidate>>(`/api/v1/candidates?${listQuery(f)}`),
+  hotlistFacets: (f: ListFilters) => api<FacetCounts>(`/api/v1/hotlist/facets?${listQuery(f, false)}`),
+  candidateFacets: (f: ListFilters) => api<FacetCounts>(`/api/v1/candidates/facets?${listQuery(f, false)}`),
   candidate: (id: string) => api<CandidateProfile>(`/api/v1/candidates/${enc(id)}`),
   create: (b: CreateCandidate) => api<{ id: string }>("/api/v1/candidates", { method: "POST", ...json(b) }),
   // `version` on the edits below: the profile's rowVersion, sent as the optional If-Match (412 `stale` when someone saved first).
@@ -286,28 +295,8 @@ export const salesApi = {
  * Hot List filters added for Eureka App 4 and the company sheet (also on the
  * Candidates list, saved views and export), and the sort.
  */
-export const EXTRA_FILTER_KEYS = [
-  "locationId", "visa", "documents", "resume", "stay", "priority", "teamId", "recruiterId", "inPerson", "ghLocationId", "sort",
-] as const;
-
-/** Filters a saved view stores (the Hot List filters, no paging). */
-export interface ViewFilters {
-  search?: string;
-  status?: string;
-  technology?: string;
-  visibility?: Visibility;
-  locationId?: string;
-  visa?: string;
-  documents?: string;
-  resume?: "yes" | "no";
-  stay?: "guest_house" | "remote";
-  priority?: Priority;
-  teamId?: string;
-  recruiterId?: string;
-  inPerson?: "yes" | "no";
-  ghLocationId?: string;
-  sort?: ListSort;
-}
+/** Filters a saved view stores (its list's filters, no paging; empty values dropped). */
+export type ViewFilters = Omit<ListFilters, "cursor" | "limit">;
 
 /** Choices for the team, recruiter and guest-house filters (GET /hotlist/filter-options). */
 export interface FilterOptions {
@@ -316,7 +305,12 @@ export interface FilterOptions {
   guestHouses: { id: string; name: string }[];
 }
 
-export interface SavedView { id: string; name: string; filters: ViewFilters; createdAt: string; updatedAt: string }
+/** A saved view. `mine`: the caller owns it; otherwise a teammate shared it (`owner` names who). */
+export interface SavedView {
+  id: string; name: string; filters: ViewFilters; shared: boolean; mine: boolean; owner: string | null;
+  createdAt: string; updatedAt: string;
+}
+export type ViewList = "hotlist" | "candidates";
 
 /** Statuses offered in bulk (BULK_STATUSES in apps/api/src/modules/hotlist); terminated and confirmation stay per record. */
 export const BULK_STATUS_OPTIONS = ["active", "on_hold", "full_of_interviews", "stopped"] as const;
@@ -330,30 +324,29 @@ export type { ExportResult };
 export function viewFilters(f: ListFilters): ViewFilters {
   const out: ViewFilters = {};
   if (f.search) out.search = f.search;
-  if (f.status) out.status = f.status;
-  if (f.technology) out.technology = f.technology;
-  if (f.visibility) out.visibility = f.visibility;
-  if (f.locationId) out.locationId = f.locationId;
-  if (f.visa) out.visa = f.visa;
-  if (f.documents) out.documents = f.documents;
-  if (f.resume) out.resume = f.resume;
-  if (f.stay) out.stay = f.stay;
-  if (f.priority) out.priority = f.priority;
-  if (f.teamId) out.teamId = f.teamId;
-  if (f.recruiterId) out.recruiterId = f.recruiterId;
-  if (f.inPerson) out.inPerson = f.inPerson;
-  if (f.ghLocationId) out.ghLocationId = f.ghLocationId;
+  for (const k of MULTI_FILTER_KEYS) if (f[k]?.length) out[k] = f[k];
+  const not = (f.not ?? []).filter((k) => f[k]?.length);
+  if (not.length) out.not = not;
+  for (const k of SINGLE_FILTER_KEYS) { const v = f[k]; if (v) (out as Record<string, string>)[k] = v; }
   if (f.sort && f.sort !== "default") out.sort = f.sort;
   return out;
 }
 
+/** Saved views of one list (/hotlist/views or /candidates/views). */
+export const viewsApi = (list: ViewList) => {
+  const base = `/api/v1/${list}/views`;
+  return {
+    views: () => api<{ items: SavedView[] }>(base),
+    createView: (name: string, filters: ViewFilters, shared = false) =>
+      api<SavedView>(base, { method: "POST", ...json({ name, filters, shared }) }),
+    updateView: (id: string, b: { name?: string; filters?: ViewFilters; shared?: boolean }) =>
+      api<SavedView>(`${base}/${enc(id)}`, { method: "PATCH", ...json(b) }),
+    deleteView: (id: string) => api<void>(`${base}/${enc(id)}`, { method: "DELETE" }),
+  };
+};
+
 export const hotlistApi = {
-  views: () => api<{ items: SavedView[] }>("/api/v1/hotlist/views"),
-  createView: (name: string, filters: ViewFilters) =>
-    api<SavedView>("/api/v1/hotlist/views", { method: "POST", ...json({ name, filters }) }),
-  updateView: (id: string, b: { name?: string; filters?: ViewFilters }) =>
-    api<SavedView>(`/api/v1/hotlist/views/${enc(id)}`, { method: "PATCH", ...json(b) }),
-  deleteView: (id: string) => api<void>(`/api/v1/hotlist/views/${enc(id)}`, { method: "DELETE" }),
+  ...viewsApi("hotlist"),
   bulkStatus: (ids: string[], to: string) =>
     api<BulkResponse>("/api/v1/hotlist/bulk/status", { method: "POST", ...json({ ids, to }) }),
   bulkPriority: (ids: string[], priority: Priority) =>
@@ -371,6 +364,8 @@ export const salesKeys = {
   candidates: ["candidates"] as const,
   candidate: (id: string) => ["candidate", id] as const,
   hotlistViews: ["hotlist-views"] as const,
+  views: (list: ViewList) => (list === "hotlist" ? ["hotlist-views"] : ["candidate-views"]) as readonly string[],
+  facets: (kind: ViewList) => [kind === "hotlist" ? "hotlist" : "candidates", "facets"] as const,
   timeline: (id: string) => ["candidate", id, "timeline"] as const,
   metrics: (id: string) => ["candidate", id, "metrics"] as const,
   batches: ["batches"] as const,

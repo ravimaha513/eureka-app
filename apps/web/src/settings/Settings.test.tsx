@@ -79,6 +79,9 @@ describe("Settings & Preferences", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Notifications" }));
     const mandatory = await screen.findByRole("switch", { name: "Work authorization expiring" });
     expect(mandatory).toBeDisabled();
+    // Grouped by the work they are about; the section is kept in the address.
+    expect(screen.getByRole("group", { name: "Employees and assignments" })).toContainElement(mandatory);
+    expect(window.location.search).toContain("tab=notifications");
     expect(mandatory).toHaveAttribute("aria-checked", "true");
     const bench = screen.getByRole("switch", { name: "Employee on the bench" });
     fireEvent.click(bench);

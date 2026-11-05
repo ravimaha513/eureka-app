@@ -205,8 +205,8 @@ export function SiteFormDialog({ kind, me, record, onClose, onSaved }: {
         </div>
         {error && <p className="error formerr" role="alert" tabIndex={-1}>{error}</p>}
         <div className="actions">
+          <button type="button" className="btn ghost si-reset" onClick={reset}>Reset form</button>
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn" onClick={reset}>Reset</button>
           <button type="submit" className="btn primary" disabled={busy} aria-busy={busy || undefined}>
             {busy ? "Working…" : record ? "Save changes" : `Add ${k.one}`}
           </button>

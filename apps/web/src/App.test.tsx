@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { capabilities, ROLES, type Role } from "@eureka/shared";
 import App, { HotList, SIGN_IN_ERRORS, Shell } from "./App";
 import { BUSY_EVENT, type Me } from "./api";
-import { visibleNav } from "./nav";
+import { landingScreen, visibleNav } from "./nav";
 
 const meFor = (role: Role): Me => ({
   id: "u1", email: "u@eureka.example", displayName: "Test User", csrfToken: "t",
@@ -101,6 +101,45 @@ describe("mobile menu", () => {
     expect(menu).toHaveAttribute("aria-expanded", "false");
     expect(menu).toHaveFocus();
   });
+
+  it("is a modal while open: focus moves in, the page is inert, and the close button returns to the menu button", () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    wrap(<Shell me={meFor("org_admin")} onSignOut={() => undefined} />);
+    const menu = screen.getByRole("button", { name: "Menu" });
+    fireEvent.click(menu);
+    const drawer = screen.getByRole("dialog", { name: "Main navigation" });
+    expect(drawer).toHaveAttribute("aria-modal", "true");
+    expect(drawer).toContainElement(document.activeElement as HTMLElement);
+    expect(document.querySelector("main")).toHaveAttribute("inert");
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close menu" }));
+    expect(menu).toHaveAttribute("aria-expanded", "false");
+    expect(menu).toHaveFocus();
+    expect(document.querySelector("main")).not.toHaveAttribute("inert");
+    expect(screen.getByRole("complementary", { name: "Main navigation" })).toBeInTheDocument();
+  });
+});
+
+describe("sidebar grouping", () => {
+  it("groups screens by task in a fixed order without changing who sees what", () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    wrap(<Shell me={meFor("ceo")} onSignOut={() => undefined} />);
+    const nav = screen.getByRole("complementary", { name: "Main navigation" });
+    const heads = [...nav.querySelectorAll(".navsec")].map((h) => h.textContent);
+    expect(heads[0]).toBe("Work");
+    expect(heads).not.toContain("Other");
+    const work = nav.querySelector(".navgroup")!;
+    expect([...work.querySelectorAll(".navlabel")].map((l) => l.textContent)).toEqual(expect.arrayContaining(["Hot List", "Chat"]));
+  });
+
+  it("keeps each role's landing screen: Hot List, else Dashboard, else the first screen other than Chat", () => {
+    for (const role of ROLES) {
+      const items = visibleNav(meFor(role).capabilities);
+      const expected = items.find((i) => i.key === "hotlist")?.key ?? items.find((i) => i.key === "dashboard")?.key
+        ?? items.find((i) => i.key !== "chat")?.key ?? items[0]?.key;
+      expect(landingScreen(items), role).toBe(expected);
+      if (items.some((i) => i.key !== "chat")) expect(landingScreen(items), role).not.toBe("chat");
+    }
+  });
 });
 
 describe("theme and account menu", () => {
@@ -138,7 +177,7 @@ describe("sign-in errors (/login?error=)", () => {
     window.history.replaceState(null, "", `/login?error=${code}&keep=1`);
     wrap(<App />);
     expect(await screen.findByRole("alert")).toHaveTextContent(text);
-    expect(screen.getByRole("heading", { name: "Hi, welcome back!" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Sign in to Eureka" })).toBeInTheDocument();
     await waitFor(() => expect(window.location.search).toBe("?keep=1"));
     expect(window.location.pathname).toBe("/login");
   });
@@ -151,7 +190,7 @@ describe("sign-in errors (/login?error=)", () => {
     unmount();
     window.history.replaceState(null, "", "/login");
     wrap(<App />);
-    await screen.findByRole("heading", { name: "Hi, welcome back!" });
+    await screen.findByRole("heading", { name: "Sign in to Eureka" });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -192,7 +231,7 @@ describe("sign out", () => {
     wrap(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Account: Test User" }));
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
-    expect(await screen.findByRole("heading", { name: "Hi, welcome back!" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Sign in to Eureka" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", expect.objectContaining({ method: "POST" }));
   });
 });
@@ -247,7 +286,7 @@ describe("screen switcher and tab titles", () => {
     // Screens this role lacks are never offered.
     expect(within(dialog).queryByRole("option", { name: /Users & Access/ })).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: "plac" } });
-    expect(within(dialog).getAllByRole("option").map((o) => o.textContent)).toEqual(["PlacementsWorkspace"]);
+    expect(within(dialog).getAllByRole("option").map((o) => o.textContent)).toEqual(["PlacementsWork"]);
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(window.location.pathname).toBe("/placements"));
     expect(screen.queryByRole("dialog", { name: "Go to screen" })).not.toBeInTheDocument();
@@ -299,7 +338,7 @@ describe('"/" shortcut', () => {
     window.history.replaceState(null, "", "/hotlist");
     wrap(<Shell me={meFor("recruiter")} onSignOut={() => undefined} />);
     const box = await screen.findByPlaceholderText("Candidate name");
-    const tech = screen.getByPlaceholderText("e.g. Java");
+    const tech = screen.getByRole("combobox", { name: "Technology" });
     tech.focus();
     fireEvent.keyDown(tech, { key: "/" });
     expect(tech).toHaveFocus();

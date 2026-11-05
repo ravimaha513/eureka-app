@@ -21,7 +21,9 @@ export {
   profileExtras,
   scopePredicate,
 } from "./candidate-common.js";
-export { HOTLIST_PAGES_PER_MINUTE, extraFilterPredicates, moreFilters, sortKey } from "./candidate-list.service.js";
+export { HOTLIST_PAGES_PER_MINUTE, sortKey } from "./candidate-list.service.js";
+// List filters are shared by the Candidates list, the Hot List and saved views.
+export { filterPredicates, filterSummary, hotlistMore } from "./list-filters.js";
 export { DUPLICATE_CHECKS_PER_MINUTE } from "./candidate-create.service.js";
 export { BULK_CANDIDATE_CALLS_PER_MINUTE, BULK_CANDIDATE_ROWS_PER_DAY } from "./candidate-batches.service.js";
 

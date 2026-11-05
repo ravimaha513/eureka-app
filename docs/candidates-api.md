@@ -63,13 +63,50 @@ Paging stays keyset: with a sort the cursor is still the last row's id, and the 
 after that row's (sort key, id). Both list paths (scoped SQL in `candidate-list.service.ts`, open
 `authz.hotlist_page`) order the same way.
 
-Saved views (`POST/PATCH /hotlist/views`) and `POST /hotlist/export` accept the same keys (the export
+Saved views (`POST/PATCH /hotlist/views`, `/candidates/views`) and `POST /hotlist/export` accept the same keys (the export
 is ordered by `sort` too). The export adds the columns Visa, Documents and Stay, and (0290) Lead
 and In person. Unknown values are 422.
 
 List rows add `statusLabel`, `stay`, `ghLocation` (`{ id?, name }`), `visaCategory`,
 `documentsStatus`, `hasResume`, `inPersonOk`, `team.lead` (the lead's name), and (Candidates list
 and team Hot List) `teamAssignedAt`.
+
+### Several values, `not` (filters UI)
+
+`status`, `technology`, `visibility`, `batchId` (Candidates list), `locationId`, `visa`, `documents`,
+`priority`, `teamId`, `recruiterId` and `ghLocationId` take one or more values: repeat the
+parameter (`status=active&status=bench`) or, in a view / export body, send an array (a lone string
+still parses, so older views keep working and read back as arrays). At most 50 values per filter.
+`not=<filter>` (repeatable) inverts that filter: "is none of". A candidate with no value for the
+column (no recruiter, no visa) never matches a list, so it is kept by "none of". `resume`, `stay`
+and `inPerson` stay single-valued. The filter shape is `modules/candidates/list-filters.ts`; the
+open Hot List gets the same filters through `p_more.f` (arrays) and `p_more.not` of
+`authz.hotlist_page` / `hotlist_export`. Audit summaries record ids and fixed choices as given and
+the technology filter as a flag only.
+
+### Facet counts
+
+`GET /api/v1/candidates/facets` (`candidate:read`) and `GET /api/v1/hotlist/facets`
+(`hotlist:read`) take the list's filters (no `cursor`, `limit`, `sort`) and return
+`{ total, facets: { <filter>: [{ value, count }] } }`: for each filter, how many candidates in the
+caller's list carry each value with every OTHER filter applied (so a filter's own choices keep
+their counts), sorted by count. `total` applies all filters. Values are the filter's own values
+(ids, enum keys, technology names; `documents: "none"` = not recorded; `resume`/`inPerson`:
+`yes`/`no`). The Hot List has no `batchId` facet. Same scope as the list; the open Hot List goes
+through `authz.hotlist_facets`. Counts only, so not audited per read; Hot List facets have their own
+per-user limit (60 a minute).
+
+### Saved views per list, shared with the team (0470)
+
+`/api/v1/hotlist/views` (`hotlist:read`) and `/api/v1/candidates/views` (`candidate:read`) are two
+separate sets: `GET`, `POST { name, filters, shared? }`, `PATCH /:id { name?, filters?, shared? }`,
+`DELETE /:id`. `filters` are checked against that list's filters (the Hot List has no `batchId`).
+Names are unique per owner and list; 50 views per user in all; `filters` up to 8 KB.
+`shared: true` shares the view with the owner's team: the server sets the team (the owner's
+current team, else the team they lead; none → 422 `no_team`). Teammates and the team lead see it in
+`GET` with `mine: false` and `owner` (display name); only the owner can change or delete it (404
+for anyone else). A view grants nothing: the list still applies the reader's own scope. Items:
+`{ id, name, filters, shared, mine, owner, createdAt, updatedAt }`, own views first.
 
 `GET /api/v1/hotlist/filter-options` (`hotlist:read`): `{ teams: [{ id, name, lead }], recruiters:
 [{ id, name }], guestHouses: [{ id, name }] }` for the filter selects (current recruiter-role

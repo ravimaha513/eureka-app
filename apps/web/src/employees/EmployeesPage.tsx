@@ -6,7 +6,6 @@ import { saveBlob } from "../lib/download";
 import { can, type Me } from "../api";
 import { ConfirmDialog, Dialog, DialogActions, useSubmit } from "../ui/Dialog";
 import { useLookups } from "../lookups";
-import { StatusChips } from "../pipeline/ui";
 import { Drawer, Field, fmtDate, useFocusAfterFailure } from "../sales/ui";
 import {
   EMPLOYEE_STATUSES, END_REASONS, EXIT_REASONS, employeeKeys, employeesApi, employmentError, employmentLabel, localToday,
@@ -15,6 +14,11 @@ import {
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
+import { FilterBar, type FilterChip } from "../ui/FilterBar";
+import { RecordLink } from "../ui/RecordLink";
+import { useRoutedId, useSearchParams } from "../lib/router";
+import { DueDate, ToggleGroup, fmtDay, fmtUsd, fromControl } from "../payments/cells";
+import "./employeesPage.css";
 
 const PAGE_SIZE = 50;
 const SOON_DAYS = 30;
@@ -40,33 +44,40 @@ function Contact({ e }: { e: Employee }) {
   );
 }
 
-export function EmployeesPage({ me }: { me?: Pick<Me, "capabilities"> }) {
+const FILTER_KEYS = ["status", "loc", "client", "current", "vendor", "payroll", "soon", "q"] as const;
+type FilterKey = (typeof FILTER_KEYS)[number];
+
+export function EmployeesPage({ me, initialOpenId = null, onOpenChange }: {
+  me?: Pick<Me, "capabilities">;
+  /** The open employee from the URL (/employees/<id>), when the app routes it. */
+  initialOpenId?: string | null;
+  onOpenChange?: (id: string | null) => void;
+}) {
   const id = useId();
   const lookups = useLookups();
-  const [status, setStatus] = useState("");
-  const [locationId, setLocationId] = useState("");
-  const [clientId, setClientId] = useState("");
-  const [currentOnly, setCurrentOnly] = useState(false);
-  const [vendorId, setVendorId] = useState("");
-  const [payrollCompanyId, setPayrollCompanyId] = useState("");
-  const [soon, setSoon] = useState(false);
-  const [searchText, setSearchText] = useState("");
-  const [search, setSearch] = useState("");
+  const [p, setP] = useSearchParams(FILTER_KEYS);
+  const status = (EMPLOYEE_STATUSES as readonly string[]).includes(p.status) ? p.status : "";
+  const soon = p.soon === "1";
+  const currentOnly = p.current === "1";
+  const [searchText, setSearchText] = useState(p.q);
+  const search = p.q;
   const pager = useCursorPager();
   const { page, reset } = pager;
-  const [openId, setOpenId] = useState<string | null>(null);
+  const set = (patch: Partial<Record<FilterKey, string>>) => { setP(patch); reset(); };
+  const [openId, setOpenId] = useRoutedId(initialOpenId, onOpenChange);
   const [notice, setNotice] = useState("");
 
   // Name search applies after a short pause (one request per typed word, not per key).
   useEffect(() => {
-    const t = setTimeout(() => { setSearch(searchText.trim()); reset(); }, 300);
+    const t = setTimeout(() => { if (searchText.trim() !== search) set({ q: searchText.trim() }); }, 300);
     return () => clearTimeout(t);
   }, [searchText]);
 
   // 0150: the client, vendor and payroll company filters match any assignment (employment history), unless "current only".
-  const clientMatch = clientId && currentOnly ? ("current" as const) : undefined;
+  const clientMatch = p.client && currentOnly ? ("current" as const) : undefined;
   const exportFilters = {
-    status, locationId, clientId, clientMatch, vendorId, payrollCompanyId, endingWithinDays: soon ? SOON_DAYS : undefined, search,
+    status, locationId: p.loc, clientId: p.client, clientMatch, vendorId: p.vendor, payrollCompanyId: p.payroll,
+    endingWithinDays: soon ? SOON_DAYS : undefined, search,
   };
   const filters = { ...exportFilters, cursor: pager.cursor ?? "", limit: PAGE_SIZE };
   const companies = useQuery({ queryKey: employeeKeys.payrollCompanies, queryFn: employeesApi.payrollCompanies, staleTime: 10 * 60_000 });
@@ -76,7 +87,7 @@ export function EmployeesPage({ me }: { me?: Pick<Me, "capabilities"> }) {
     placeholderData: keepPreviousData,
   });
   const items = q.data?.items ?? [];
-  const hasFilters = Boolean(status || locationId || clientId || vendorId || payrollCompanyId || soon || search);
+  const hasFilters = Boolean(status || p.loc || p.client || p.vendor || p.payroll || soon || search);
   const n = items.length;
   const countMsg = q.isLoading || q.error ? ""
     : `${n} ${n === 1 ? "employee" : "employees"} on page ${page + 1}${q.data?.nextCursor ? ", more on the next page" : ""}.`;
@@ -92,113 +103,113 @@ export function EmployeesPage({ me }: { me?: Pick<Me, "capabilities"> }) {
       setNotice(`Exported ${r.rows} ${r.rows === 1 ? "employee" : "employees"}${r.truncated ? " (capped: narrow the filters for the rest)" : ""}.`);
     },
   });
+  const nameIn = (list: { id: string; name: string }[], v: string) => list.find((x) => x.id === v)?.name ?? v;
+  const chips: FilterChip[] = [];
+  if (p.client) chips.push({ key: "client", label: `Client: ${nameIn(clients, p.client)}${currentOnly ? " (current)" : ""}`, onRemove: () => set({ client: "", current: "" }) });
+  if (p.vendor) chips.push({ key: "vendor", label: `Vendor: ${nameIn(vendors, p.vendor)}`, onRemove: () => set({ vendor: "" }) });
+  if (p.payroll) chips.push({ key: "payroll", label: `Payroll: ${nameIn(companyList, p.payroll)}`, onRemove: () => set({ payroll: "" }) });
+  const sel = (key: FilterKey, label: string, any: string, list: { id: string; name: string }[]) => (
+    <div className="field inline">
+      <label htmlFor={`${id}-${key}`}>{label}</label>
+      <select id={`${id}-${key}`} value={p[key]} onChange={(e) => set(key === "client" ? { client: e.target.value, current: "" } : { [key]: e.target.value })}>
+        <option value="">{any}</option>
+        {list.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+      </select>
+    </div>
+  );
 
   return (
     <>
-      <div>
-        <h1 tabIndex={-1}>Employees</h1>
-        <p className="sub">People placed through Eureka: on assignment, on the bench, or exited. Open an employee for their assignments and history.</p>
+      <div className="pagehead">
+        <div>
+          <h1 tabIndex={-1}>Employees</h1>
+          <p className="sub">People placed through Eureka: on assignment, on the bench, or exited. Open an employee for their assignments and history.</p>
+        </div>
+        {canExport && (
+          <div className="pageactions">
+            <button type="button" className="btn" disabled={exportRun.isPending} aria-busy={exportRun.isPending || undefined}
+              onClick={() => exportRun.mutate()}><Download size={15} aria-hidden="true" /><span className="btnlabel">{exportRun.isPending ? "Exporting…" : "Export CSV"}</span></button>
+          </div>
+        )}
       </div>
 
-      <form className="filters" role="search" aria-label="Employee filters" onSubmit={(e) => e.preventDefault()}>
-        <StatusChips label="Status" statuses={EMPLOYEE_STATUSES} value={status} onChange={(v) => { setStatus(v); reset(); }} />
-        <div className="toolbar">
-          <div className="field inline">
+      <FilterBar label="Employee filters" chips={chips} moreCount={chips.length}
+        activeCount={chips.length + (status ? 1 : 0) + (soon ? 1 : 0) + (p.loc ? 1 : 0)}
+        hasFilters={hasFilters} onClear={() => { setSearchText(""); set({ status: "", loc: "", client: "", current: "", vendor: "", payroll: "", soon: "", q: "" }); }}
+        search={
+          <div className="field inline fb-search">
             <label htmlFor={`${id}-q`}>Name</label>
-            <input id={`${id}-q`} type="search" value={searchText} maxLength={80} onChange={(e) => setSearchText(e.target.value)} />
+            <input id={`${id}-q`} type="search" placeholder="Employee name" value={searchText} maxLength={80} onChange={(e) => setSearchText(e.target.value)} />
           </div>
-          <label className="field inline">Location
-            <select value={locationId} onChange={(e) => { setLocationId(e.target.value); reset(); }}>
-              <option value="">All locations</option>
-              {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select>
-          </label>
-          {clients.length > 0 && (
-            <label className="field inline">Client
-              <select value={clientId} onChange={(e) => { setClientId(e.target.value); reset(); }}>
-                <option value="">All clients</option>
-                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </label>
-          )}
-          {clientId && (
-            <label className="check">
-              <input type="checkbox" checked={currentOnly} onChange={(e) => { setCurrentOnly(e.target.checked); reset(); }} />
-              {" "}Current assignment only
-            </label>
-          )}
-          {vendors.length > 0 && (
-            <label className="field inline">Vendor
-              <select value={vendorId} onChange={(e) => { setVendorId(e.target.value); reset(); }}>
-                <option value="">All vendors</option>
-                {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-              </select>
-            </label>
-          )}
-          {companyList.length > 0 && (
-            <label className="field inline">Payroll company
-              <select value={payrollCompanyId} onChange={(e) => { setPayrollCompanyId(e.target.value); reset(); }}>
-                <option value="">All companies</option>
-                {companyList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </label>
-          )}
-          <label className="check">
-            <input type="checkbox" checked={soon} onChange={(e) => { setSoon(e.target.checked); reset(); }} />
-            {" "}Ending within {SOON_DAYS} days
-          </label>
-          {hasFilters && (
-            <button type="button" className="btn" onClick={() => {
-              setStatus(""); setLocationId(""); setClientId(""); setCurrentOnly(false); setVendorId(""); setPayrollCompanyId("");
-              setSoon(false); setSearchText(""); setSearch(""); reset();
-            }}>Clear filters</button>
-          )}
-          {canExport && (
-            <button type="button" className="btn push" disabled={exportRun.isPending} aria-busy={exportRun.isPending || undefined}
-              onClick={() => exportRun.mutate()}><Download size={15} aria-hidden="true" /> {exportRun.isPending ? "Exporting…" : "Export CSV"}</button>
-          )}
-        </div>
-      </form>
+        }
+        primary={
+          <>
+            <ToggleGroup label="Status" options={[["", "All"], ...EMPLOYEE_STATUSES.map((s) => [s, employmentLabel(s)] as const)]}
+              value={status} onChange={(v) => set({ status: v === status ? "" : v })} />
+            <label className="check em-soon"><input type="checkbox" checked={soon} onChange={(e) => set({ soon: e.target.checked ? "1" : "" })} />
+              {" "}Ending within {SOON_DAYS} days</label>
+            {sel("loc", "Location", "All locations", locations)}
+          </>
+        }
+        more={
+          <>
+            {clients.length > 0 && sel("client", "Client", "All clients", clients)}
+            {p.client && (
+              <label className="check">
+                <input type="checkbox" checked={currentOnly} onChange={(e) => set({ current: e.target.checked ? "1" : "" })} />
+                {" "}Current assignment only
+              </label>
+            )}
+            {vendors.length > 0 && sel("vendor", "Vendor", "All vendors", vendors)}
+            {companyList.length > 0 && sel("payroll", "Payroll company", "All companies", companyList)}
+          </>
+        }
+        summaryEnd={!q.isLoading && !q.error ? <span className="muted em-count">{n}{q.data?.nextCursor ? "+" : ""} {n === 1 ? "employee" : "employees"}</span> : null} />
       {exportRun.error && <p className="error" role="alert">{employmentError(exportRun.error)}</p>}
 
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
 
-      <div className="card tablewrap">
+      <div className="card tablewrap listcard">
         {q.isLoading ? <Loading /> : q.error ? (
           <QueryError query={q} message={employmentError(q.error)} />
         ) : (
-          <div className="tablewrap"><table aria-label="Employees" aria-busy={q.isFetching || undefined}>
+          <table className="dtable bo-dtable emtable" aria-label="Employees" aria-busy={q.isFetching || undefined}>
             <thead><tr>
-              <th>Employee</th><th>Contact</th><th>Status</th><th>Current client</th><th>Assignment</th><th>Planned end</th><th>Location / team</th>
-              <th>Lead / recruiter</th>
-              <th><span className="sr-only">Actions</span></th>
+              <th>Employee</th><th>Status</th><th>Client · assignment</th><th>Dates</th><th>Lead / recruiter</th>
+              <th className="p2">Location / team</th><th className="em-contact">Contact</th>
+              <th className="c-act"><span className="sr-only">Actions</span></th>
             </tr></thead>
             <tbody>
               {items.map((e) => {
                 const a = e.assignment;
                 const open = a !== null && a.endDate === null;
                 return (
-                  <tr key={e.id}>
-                    <td><Person name={nameOf(e)}><b>{nameOf(e)}</b><span className="block muted">Since {fmtDate(e.employeeSince)}</span></Person></td>
-                    <td><Contact e={e} /></td>
-                    <td><EmployeeStatus status={e.status} /><span className="block muted">{fmtDate(e.statusSince)}</span></td>
-                    <td>{open && a.client ? a.client.name : <span className="muted">—</span>}</td>
-                    <td>{a ? <>No. {a.assignmentNo}<span className="block muted">{fmtDate(a.startDate)} – {a.endDate ? fmtDate(a.endDate) : "ongoing"}</span></> : <span className="muted">—</span>}</td>
-                    <td>{open && a.plannedEndDate ? fmtDate(a.plannedEndDate) : <span className="muted">—</span>}</td>
-                    <td>{e.location?.name ?? "—"}<span className="block muted">{e.team?.name ?? ""}</span></td>
-                    <td>{e.lead?.name ?? <span className="muted">—</span>}
+                  <tr key={e.id} className="rowopen" onClick={(ev) => { if (!fromControl(ev)) setOpenId(e.id); }}>
+                    <td className="c-primary"><Person name={nameOf(e)}>
+                      <RecordLink kind="employee" id={e.id} onOpen={setOpenId}><b>{nameOf(e)}</b></RecordLink>
+                      <span className="block muted">Since {fmtDate(e.employeeSince)}</span></Person></td>
+                    <td className="c-badge" data-label="Status"><EmployeeStatus status={e.status} /><span className="block muted em-since">{fmtDate(e.statusSince)}</span></td>
+                    <td data-label="Client">{open && a.client ? a.client.name : <span className="muted">—</span>}
+                      {a && <span className="block muted">No. {a.assignmentNo}</span>}</td>
+                    <td data-label="Dates">{a ? <>
+                      <span className="em-range">{fmtDay(a.startDate)} → {a.endDate ? fmtDay(a.endDate) : "ongoing"}</span>
+                      {open && a.plannedEndDate && <span className="block">Planned end <DueDate on={a.plannedEndDate} soonDays={SOON_DAYS} lateWord="past" /></span>}
+                    </> : <span className="muted">—</span>}</td>
+                    <td data-label="Lead">{e.lead?.name ?? <span className="muted">—</span>}
                       <span className="block muted">{e.recruiter?.name ? `Recruiter: ${e.recruiter.name}` : "No recruiter"}</span></td>
-                    <td className="rowactions">
+                    <td className="p2" data-label="Location">{e.location?.name ?? "—"}<span className="block muted">{e.team?.name ?? ""}</span></td>
+                    <td className="em-contact" data-label="Contact"><Contact e={e} /></td>
+                    <td className="c-act">
                       <button type="button" className="btn sm" onClick={() => setOpenId(e.id)} aria-label={`Open employee ${nameOf(e)}`}>Open</button>
                     </td>
                   </tr>
                 );
               })}
               {items.length === 0 && (
-                <tr><td colSpan={9} className="empty">{hasFilters ? "No employees match these filters." : "No employees yet. A person becomes an employee when their placement is marked Joined."}</td></tr>
+                <tr><td colSpan={8} className="empty">{hasFilters ? "No employees match these filters." : "No employees yet. A person becomes an employee when their placement is marked Joined."}</td></tr>
               )}
             </tbody>
-          </table></div>
+          </table>
         )}
       </div>
       <div className="listfoot">
@@ -252,64 +263,73 @@ function EmployeeDrawer({ id, initial, onClose, onNotice }: {
           <p className="error" role="alert">{employmentError(q.error)}</p>
         ) : (
           <>
-            <p><EmployeeStatus status={e.status} /></p>
-            <dl className="facts">
-              <dt>Employee since</dt><dd>{fmtDate(e.employeeSince)}</dd>
-              <dt>Status since</dt><dd>{fmtDate(e.statusSince)}</dd>
-              {e.exitedOn && <><dt>Exited</dt><dd>{fmtDate(e.exitedOn)}{e.exitReason && ` · ${employmentLabel(e.exitReason)}`}</dd></>}
-              <dt>Location</dt><dd>{e.location?.name ?? "—"}</dd>
-              <dt>Team</dt><dd>{e.team?.name ?? "—"}</dd>
-              <dt>Lead</dt><dd>{e.lead?.name ?? "—"}</dd>
-              <dt>Recruiter</dt><dd>{e.recruiter?.name ?? "—"}</dd>
-              {a && <><dt>Current client</dt><dd>{open && a.client ? a.client.name : "None"}</dd></>}
-              {open && <><dt>Planned end</dt><dd>{a.plannedEndDate ? fmtDate(a.plannedEndDate) : "Not set"}</dd></>}
-            </dl>
+            {/* Action strip: status and the next step first, then the facts. Destructive steps sit last, in danger style. */}
+            <div className="actionstrip em-strip">
+              <div className="as-status">
+                <EmployeeStatus status={e.status} />
+                <span className="as-note">
+                  {open && a.client ? <>{a.client.name} · No. {a.assignmentNo}{a.plannedEndDate ? <> · ends <DueDate on={a.plannedEndDate} soonDays={SOON_DAYS} lateWord="past" /></> : " · no planned end"}</>
+                    : e.exitedOn ? `Exited ${fmtDay(e.exitedOn)}` : `Since ${fmtDay(e.statusSince)}`}
+                </span>
+              </div>
+              {any && (
+                <div className="as-actions" role="group" aria-label="Actions">
+                  {acts.setEndDate && <button type="button" className="btn primary" onClick={() => setAction("planned")}>{a?.plannedEndDate ? "Extend or change end date…" : "Set planned end date…"}</button>}
+                  {acts.returnToMarket && <button type="button" className={`btn${acts.setEndDate ? "" : " primary"}`} onClick={() => setAction("market")}>Return to marketing…</button>}
+                  {acts.assignTeam && <button type="button" className="btn" onClick={() => setAction("team")}>Assign a team…</button>}
+                  {acts.endAssignment && <button type="button" className="btn danger" onClick={() => setAction("end")}>End assignment…</button>}
+                  {acts.exit && <button type="button" className="btn danger" onClick={() => setAction("exit")}>Record exit…</button>}
+                </div>
+              )}
+            </div>
+            {any && e.status === "bench" && !acts.returnToMarket && acts.exit && (
+              <small className="hint">Returning to marketing isn't offered after a failed background check, or once Sales has moved the candidate.</small>
+            )}
 
             <p role="status" aria-live="polite" className="livemsg">{message}</p>
 
-            {any && (
-              <section className="manageblock" aria-labelledby={`${hid}-act`}>
-                <h3 id={`${hid}-act`}>Actions</h3>
-                <div className="rowactions" role="group" aria-labelledby={`${hid}-act`}>
-                  {acts.setEndDate && <button type="button" className="btn sm" onClick={() => setAction("planned")}>{a?.plannedEndDate ? "Extend or change end date…" : "Set planned end date…"}</button>}
-                  {acts.endAssignment && <button type="button" className="btn sm danger" onClick={() => setAction("end")}>End assignment (project exit)…</button>}
-                  {acts.returnToMarket && <button type="button" className="btn sm" onClick={() => setAction("market")}>Reassign: return to marketing…</button>}
-                  {acts.assignTeam && <button type="button" className="btn sm" onClick={() => setAction("team")}>Assign a team…</button>}
-                  {acts.exit && <button type="button" className="btn sm danger" onClick={() => setAction("exit")}>Record exit…</button>}
-                </div>
-                {e.status === "bench" && !acts.returnToMarket && acts.exit && (
-                  <small className="hint">Returning to marketing isn't offered after a failed background check, or once Sales has moved the candidate.</small>
-                )}
-              </section>
-            )}
+            <dl className="bo-facts">
+              <div><dt>Employee since</dt><dd>{fmtDay(e.employeeSince)}</dd></div>
+              <div><dt>Status since</dt><dd>{fmtDay(e.statusSince)}</dd></div>
+              {e.exitedOn && <div><dt>Exited</dt><dd>{fmtDay(e.exitedOn)}{e.exitReason && ` · ${employmentLabel(e.exitReason)}`}</dd></div>}
+              {a && <div><dt>Current client</dt><dd>{open && a.client ? a.client.name : "None"}</dd></div>}
+              {open && <div><dt>Planned end</dt><dd>{a.plannedEndDate ? fmtDay(a.plannedEndDate) : "Not set"}</dd></div>}
+              <div><dt>Location</dt><dd>{e.location?.name ?? "—"}</dd></div>
+              <div><dt>Team</dt><dd>{e.team?.name ?? "—"}</dd></div>
+              <div><dt>Lead</dt><dd>{e.lead?.name ?? "—"}</dd></div>
+              <div><dt>Recruiter</dt><dd>{e.recruiter?.name ?? "—"}</dd></div>
+            </dl>
 
             <section className="manageblock" aria-labelledby={`${hid}-as`}>
               <h3 id={`${hid}-as`}>Assignments</h3>
               {!full ? <p className="muted">Loading assignments…</p> : e.assignments.length === 0 ? (
                 <p className="muted">No assignment you can see.</p>
               ) : (
-                <div className="tablewrap"><table className="mini" aria-labelledby={`${hid}-as`}>
+                // Seven columns that fit the drawer: employment fields stack in one cell instead of five clipped ones.
+                <div className="tablewrap"><table className="mini dtable bo-dtable em-assign" aria-labelledby={`${hid}-as`}>
                   <thead><tr>
-                    <th>No.</th><th>Client</th><th>Vendor</th><th>Started</th><th>Ended</th><th>Planned end</th><th>Reason</th>
-                    <th>Payroll company</th><th>E-Verify</th><th>Onboarded</th>{showRate && <th>Pay rate</th>}
-                    {acts?.editEmployment && <th><span className="sr-only">Edit</span></th>}
+                    <th>Client · vendor</th><th>Dates</th><th>Employment</th>{showRate && <th className="num">Pay rate</th>}
+                    {acts?.editEmployment && <th className="c-act"><span className="sr-only">Edit</span></th>}
                   </tr></thead>
                   <tbody>
                     {e.assignments.map((x) => (
                       <tr key={x.id}>
-                        <td>{x.assignmentNo}</td>
-                        <td>{x.client.name}{x.isFirstPlacement && <>{" "}<span className="badge first">First placement</span></>}</td>
-                        <td>{x.vendor?.name ?? "—"}</td>
-                        <td>{fmtDate(x.startDate)}</td>
-                        <td>{x.endDate ? fmtDate(x.endDate) : "Ongoing"}</td>
-                        <td>{x.plannedEndDate && !x.endDate ? fmtDate(x.plannedEndDate) : "—"}</td>
-                        <td>{x.endReason ? employmentLabel(x.endReason) : "—"}</td>
-                        <td>{x.payrollCompany?.name ?? "—"}</td>
-                        <td>{x.everifyDate ? fmtDate(x.everifyDate) : "—"}</td>
-                        <td>{x.onboardedDate ? fmtDate(x.onboardedDate) : "—"}</td>
-                        {showRate && <td>{"payRate" in x ? (typeof x.payRate === "number" ? `$${x.payRate.toFixed(2)}/h` : "—") : <span className="muted">Hidden</span>}</td>}
+                        <td className="c-primary"><b>No. {x.assignmentNo} · {x.client.name}</b>
+                          {x.isFirstPlacement && <>{" "}<span className="badge first">First placement</span></>}
+                          <span className="block">{x.vendor?.name ?? "No vendor"}</span></td>
+                        <td data-label="Dates">
+                          <span className="em-range">{fmtDay(x.startDate)} → {x.endDate ? fmtDay(x.endDate) : <span>Ongoing</span>}</span>
+                          {x.plannedEndDate && !x.endDate && <span className="block">Planned end {fmtDay(x.plannedEndDate)}</span>}
+                          {x.endReason && <span className="block">{employmentLabel(x.endReason)}</span>}
+                        </td>
+                        <td data-label="Employment">
+                          <span className="em-emp">{x.payrollCompany?.name ?? <span className="muted">No payroll company</span>}</span>
+                          <span className="block">E-Verify {x.everifyDate ? fmtDay(x.everifyDate) : "—"}</span>
+                          <span className="block">Onboarded {x.onboardedDate ? fmtDay(x.onboardedDate) : "—"}</span>
+                        </td>
+                        {showRate && <td className="num" data-label="Pay rate">{"payRate" in x ? (typeof x.payRate === "number" ? `${fmtUsd(x.payRate)}/h` : "—") : <span className="muted">Hidden</span>}</td>}
                         {acts?.editEmployment && (
-                          <td className="rowactions">
+                          <td className="c-act">
                             <button type="button" className="btn sm" onClick={() => setEditing(x)} aria-label={`Edit employment details of assignment ${x.assignmentNo}`}>Edit</button>
                           </td>
                         )}

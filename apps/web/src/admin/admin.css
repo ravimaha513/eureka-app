@@ -1,0 +1,94 @@
+/* Users & Access (admin/*). Tokens only (DESIGN.md); kit classes (.dtable, .filterbar, .menu, .tabs) are not restyled here. */
+
+.ua-head { margin-bottom: 0; }
+.ua-panel { display: flex; flex-direction: column; gap: 12px; padding-top: 14px; }
+.ua-panel:focus-visible { outline: 2px solid var(--pri); outline-offset: 4px; border-radius: var(--r-sm); }
+.ua-users { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+/* Role summary: one row of filter toggles ("Recruiter 4"), with the page actions on the right. */
+.ua-tools { display: flex; align-items: flex-start; gap: 8px 16px; }
+.ua-rolesum { display: flex; flex-wrap: nowrap; align-items: baseline; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.ua-rolelist { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; flex: 1 1 0; }
+.ua-total { font-size: 13px; color: var(--muted); margin-right: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ua-total b { color: var(--text); font-weight: 650; }
+.ua-rolechip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--text2); font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.ua-rolechip:hover { background: var(--hover); }
+.ua-rolecount { color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 600; }
+.ua-rolechip[aria-pressed="true"] { background: var(--pri-btn); border-color: var(--pri-btn); color: var(--on-pri); }
+.ua-rolechip[aria-pressed="true"] .ua-rolecount { color: inherit; opacity: .8; }
+.ua-rolechip:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; }
+.ua-actions { display: flex; gap: 8px; flex: none; order: 2; margin-top: 22px; }
+.ua-filterrow { display: flex; align-items: flex-start; gap: 8px 16px; }
+.ua-filterrow > .filterbar { flex: 1 1 auto; min-width: 0; }
+.ua-count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Users table: user, designation, roles, team, status, actions — fits 1440 without sideways scroll. */
+.ua-table td { white-space: normal; vertical-align: top; }
+.ua-table td.c-sel, .ua-table td.c-act, .ua-table td.c-badge { vertical-align: middle; }
+.ua-table td.ua-user { min-width: 200px; }
+.ua-table td.ua-user .persontext { min-width: 0; }
+.ua-table td.ua-user small.block { color: var(--muted); overflow-wrap: anywhere; }
+.ua-table .ua-dept, .ua-table .ua-mgr { color: var(--muted); }
+.ua-table td.ua-team { white-space: nowrap; }
+.ua-name { display: flex; align-items: center; min-width: 0; }
+.ua-name > b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ua-table .ua-mgr span { color: var(--text2); }
+.ua-roles { gap: 4px; max-width: 340px; }
+.ua-roles .chip { padding: 1px 1px 1px 7px; min-height: 26px; }
+/* Revoke: a 24px target with a visible glyph (WCAG 2.5.8), bad-red on hover like a filter chip. */
+.ua-roles .chipx { width: 24px; height: 24px; }
+/* Kit .menu is position:fixed but lives inside the sticky .c-act cell (its own stacking context); lift the open row so later rows do not paint over the menu. */
+.ua-table td.c-act:has(.menu) { z-index: 3; }
+.ua-act { display: inline-flex; align-items: center; gap: 4px; justify-content: flex-end; }
+.ua-self { font-size: 12.5px; white-space: normal; display: inline-block; max-width: 160px; text-align: right; }
+
+/* Org chart: the find field matches the Teams filter. */
+.searchfield.push input { width: 220px; }
+
+/* Roles: one column grid shared by every track table, so Traits/Holders/Permissions line up down the page. */
+.rolegroup table.mini { table-layout: fixed; }
+.rolegroup table.mini th:nth-child(1) { width: 64px; }
+.rolegroup table.mini th:nth-child(2) { width: 34%; }
+.rolegroup table.mini th:nth-child(4), .rolegroup table.mini th:nth-child(5) { width: 104px; }
+.rolegroup table.mini th:nth-child(6) { width: 150px; }
+.rolegroup table.mini td { white-space: normal; }
+.rolegroup table.mini td:nth-child(4), .rolegroup table.mini td:nth-child(5),
+.rolegroup table.mini th:nth-child(4), .rolegroup table.mini th:nth-child(5) { text-align: right; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 1100px) {
+  .ua-filterrow { flex-direction: column; align-items: stretch; }
+  .ua-actions { order: -1; margin-top: 0; justify-content: flex-end; }
+}
+
+@media (max-width: 768px) {
+  .ua-tabs { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+  .ua-tabs .tab { flex: none; }
+  .ua-panel { padding-top: 10px; }
+  /* Actions first (one row), then the role toggles as a single sideways-scrolling strip. */
+  .ua-filterrow { gap: 10px; }
+  .ua-users > * { order: 2; }
+  .ua-users > .ua-filterrow { order: 0; }
+  .ua-users > .ua-tools { order: 1; }
+  .ua-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; }
+  .ua-actions .btn { height: 44px; padding: 0 8px; }
+  .ua-rolesum { flex-wrap: nowrap; overflow-x: auto; margin: 0 -14px; padding: 0 14px 2px; scrollbar-width: none; }
+  .ua-rolelist { flex-wrap: nowrap; flex: none; }
+  .ua-rolechip { height: 36px; }
+  /* Row card: avatar + name, status top right; roles, team; actions bottom right. */
+  .ua-table td.ua-user { min-width: 0; }
+  /* Kit .dtable gives every cell grid-column 1/-1, which makes the absolutely placed checkbox resolve
+     against the grid area (inside the 44px padding) and land on the name; anchor it to the card instead. */
+  .ua-table td.c-sel { grid-column: auto !important; grid-row: auto; left: 12px !important; top: 14px !important; }
+  .ua-table td.ua-user .person { min-width: 0; }
+  .ua-table td.ua-user .avatar { display: none; }
+  .ua-table td.ua-team { white-space: normal; }
+  .ua-table td { vertical-align: baseline; }
+  .ua-roles { max-width: none; }
+  .ua-roles .chip { min-height: 32px; font-size: 12.5px; }
+  .ua-roles .chipx { width: 32px; height: 32px; }
+  .ua-act .btn.sm { height: 40px; }
+  .ua-self { max-width: none; text-align: left; }
+  .searchfield.push { flex: 1 1 100%; }
+  .searchfield.push input { width: 100%; height: 44px; }
+}

@@ -2,6 +2,7 @@ import { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { lazyDefault, lazyNamed } from "./lib/lazy";
+import "@fontsource-variable/archivo/wdth.css";
 import { queryRetry, refetchOnStale } from "./lib/queryClient";
 import "./styles.css";
 import { Loading } from "./ui/Loading";

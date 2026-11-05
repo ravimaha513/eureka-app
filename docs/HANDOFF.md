@@ -289,6 +289,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Candidate with no team yet (0410): "No team yet" in the New candidate Team picker; Assign team on the profile (`PUT /candidates/:id/team`, `authz.assign_candidate_team`); no Hot List until assigned.
 - Combined #98–#105 (#106): New candidate starts on "Not yet assigned" team, Status select (`initialStatus`), "Several candidates" tab; batch name required on both create paths (PATCH can't clear it); named batches labelled "name · location"; `GET /interviews?search=` (candidate or coach name, API only); `docs/eureka-app-4-gaps.md`; mass-assignment cases for 5 uncovered write routes.
 - Combined today's session branches (#109, supersedes #107/#108): admins delete a team (0430); Lead+ delete an empty batch, optional team on batch bulk add (0420); Lead+ edit submission details (0440); clearing a BGC records the placement actual start (0450, in the new paperwork workspace); BGC employment/address history rows (0460); document edit: title, type, replacement file (0461); change batch inline on profile; candidate personal phone/email limited to HR, Accounts and leadership; PowerShell deploy train.
+- **Rebrand + UX redesign (PR #113):** carbon/red identity (Archivo, DESIGN.md), ui/ kit (FilterBar, Tabs, Menu, RecordLink, dtable), every staff screen redesigned for desktop and phone; audit in docs/ux-audit/.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

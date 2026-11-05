@@ -16,16 +16,15 @@ export function SiteIcon({ kind, size = "sm" }: { kind: SiteKind; size?: "sm" | 
 }
 
 export const StatusPill = ({ status }: { status: string }) =>
-  <span className={`badge pill ${status === "active" ? "active" : "inactive"}`}>{status === "active" ? "Active" : "Inactive"}</span>;
+  <span className={`badge ${status === "active" ? "active" : "inactive"}`}>{status === "active" ? "Active" : "Inactive"}</span>;
 
 export const BillStatusPill = ({ status }: { status: BillStatus }) =>
-  <span className={`badge pill bill-${status}`}>{BILL_STATUS_LABELS[status] ?? status}</span>;
+  <span className={`badge bill-${status}`}>{BILL_STATUS_LABELS[status] ?? status}</span>;
 
-/** A KPI card: tinted icon on top, label, big value, a hint. */
-export function Kpi({ icon: Icon, tint, label, value, hint }: { icon: LucideIcon; tint: string; label: string; value: ReactNode; hint?: string }) {
+/** A KPI tile: label, big tabular value, a hint. Flat and undecorated (the icon props are kept for callers, not drawn). */
+export function Kpi({ label, value, hint }: { icon?: LucideIcon; tint?: string; label: string; value: ReactNode; hint?: string }) {
   return (
-    <li className="tile card kpi">
-      <span className={`tileicon tint-${tint}`}><Icon size={18} strokeWidth={1.9} aria-hidden="true" /></span>
+    <li className="tile card kpi si-kpi">
       <span className="tilelabel">{label}</span>
       <span className="tilevalue">{value}</span>
       {hint && <span className="tilehint">{hint}</span>}
@@ -88,7 +87,7 @@ export function PillTabs<T extends string>({ tabs, value, onChange, label, idPre
     refs.current[next]?.focus();
   };
   return (
-    <div className="tabs wrap pilltabs" role="tablist" aria-label={label}>
+    <div className="tabs pilltabs si-tabs" role="tablist" aria-label={label}>
       {tabs.map((t, i) => (
         <button key={t.key} ref={(el) => { refs.current[t.key] = el; }} type="button" className="tab" role="tab" id={`${idPrefix}-tab-${t.key}`}
           aria-selected={value === t.key} aria-controls={`${idPrefix}-panel`} tabIndex={value === t.key ? 0 : -1}

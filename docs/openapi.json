@@ -5174,18 +5174,26 @@
         "parameters": [
           {
             "schema": {
-              "type": "string",
-              "enum": [
-                "in_training",
-                "active",
-                "on_hold",
-                "stopped",
-                "full_of_interviews",
-                "confirmation",
-                "placed",
-                "bench",
-                "terminated"
-              ]
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "in_training",
+                  "active",
+                  "on_hold",
+                  "stopped",
+                  "full_of_interviews",
+                  "confirmation",
+                  "placed",
+                  "bench",
+                  "terminated"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "status",
@@ -5193,8 +5201,17 @@
           },
           {
             "schema": {
-              "type": "string",
-              "maxLength": 80
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "technology",
@@ -5202,12 +5219,20 @@
           },
           {
             "schema": {
-              "type": "string",
-              "enum": [
-                "team",
-                "all_teams",
-                "selected_teams"
-              ]
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "team",
+                  "all_teams",
+                  "selected_teams"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "visibility",
@@ -5215,17 +5240,16 @@
           },
           {
             "schema": {
-              "type": "string",
-              "maxLength": 80
-            },
-            "required": false,
-            "name": "search",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "locationId",
@@ -5233,21 +5257,29 @@
           },
           {
             "schema": {
-              "type": "string",
-              "enum": [
-                "us_citizen",
-                "green_card",
-                "gc_ead",
-                "h1b",
-                "h4_ead",
-                "l2_ead",
-                "f1_opt",
-                "f1_stem_opt",
-                "f1_cpt",
-                "tn",
-                "o1",
-                "other"
-              ]
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "us_citizen",
+                  "green_card",
+                  "gc_ead",
+                  "h1b",
+                  "h4_ead",
+                  "l2_ead",
+                  "f1_opt",
+                  "f1_stem_opt",
+                  "f1_cpt",
+                  "tn",
+                  "o1",
+                  "other"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "visa",
@@ -5255,13 +5287,21 @@
           },
           {
             "schema": {
-              "type": "string",
-              "enum": [
-                "pending",
-                "partial",
-                "complete",
-                "none"
-              ]
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "partial",
+                  "complete",
+                  "none"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "documents",
@@ -5293,12 +5333,20 @@
           },
           {
             "schema": {
-              "type": "string",
-              "enum": [
-                "P1",
-                "P2",
-                "P3"
-              ]
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "P1",
+                  "P2",
+                  "P3"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "priority",
@@ -5306,8 +5354,16 @@
           },
           {
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "teamId",
@@ -5315,8 +5371,16 @@
           },
           {
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "recruiterId",
@@ -5336,11 +5400,48 @@
           },
           {
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "ghLocationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "status",
+                  "technology",
+                  "visibility",
+                  "batchId",
+                  "locationId",
+                  "visa",
+                  "documents",
+                  "priority",
+                  "teamId",
+                  "recruiterId",
+                  "ghLocationId"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "not",
             "in": "query"
           },
           {
@@ -5360,7 +5461,24 @@
           {
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "maxLength": 80
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "batchId",
@@ -7115,6 +7233,459 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/candidates/facets": {
+      "get": {
+        "operationId": "CandidatesController_candidateFacets",
+        "tags": [
+          "candidates"
+        ],
+        "description": "Staff session; the guard requires the permission in x-eureka-permission (data scope from RLS).",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "permission",
+        "x-eureka-permission": "candidate:read",
+        "parameters": [
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "in_training",
+                  "active",
+                  "on_hold",
+                  "stopped",
+                  "full_of_interviews",
+                  "confirmation",
+                  "placed",
+                  "bench",
+                  "terminated"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "technology",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "team",
+                  "all_teams",
+                  "selected_teams"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "visibility",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "locationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "us_citizen",
+                  "green_card",
+                  "gc_ead",
+                  "h1b",
+                  "h4_ead",
+                  "l2_ead",
+                  "f1_opt",
+                  "f1_stem_opt",
+                  "f1_cpt",
+                  "tn",
+                  "o1",
+                  "other"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "visa",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "partial",
+                  "complete",
+                  "none"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "documents",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "yes",
+                "no"
+              ]
+            },
+            "required": false,
+            "name": "resume",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "guest_house",
+                "remote"
+              ]
+            },
+            "required": false,
+            "name": "stay",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "P1",
+                  "P2",
+                  "P3"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "priority",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "teamId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "recruiterId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "yes",
+                "no"
+              ]
+            },
+            "required": false,
+            "name": "inPerson",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "ghLocationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "status",
+                  "technology",
+                  "visibility",
+                  "batchId",
+                  "locationId",
+                  "visa",
+                  "documents",
+                  "priority",
+                  "teamId",
+                  "recruiterId",
+                  "ghLocationId"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "not",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "batchId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/candidates/views": {
+      "get": {
+        "operationId": "HotlistController_listCandidateViews",
+        "tags": [
+          "hotlist"
+        ],
+        "description": "Staff session; the guard requires the permission in x-eureka-permission (data scope from RLS).",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "permission",
+        "x-eureka-permission": "candidate:read",
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "HotlistController_createCandidateView",
+        "tags": [
+          "hotlist"
+        ],
+        "description": "Staff session; the guard requires the permission in x-eureka-permission (data scope from RLS).",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "permission",
+        "x-eureka-permission": "candidate:read",
+        "responses": {
+          "201": {
+            "description": "Success"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/candidates/views/{id}": {
+      "delete": {
+        "operationId": "HotlistController_deleteCandidateView",
+        "tags": [
+          "hotlist"
+        ],
+        "description": "Staff session; the guard requires the permission in x-eureka-permission (data scope from RLS).",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "permission",
+        "x-eureka-permission": "candidate:read",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "HotlistController_updateCandidateView",
+        "tags": [
+          "hotlist"
+        ],
+        "description": "Staff session; the guard requires the permission in x-eureka-permission (data scope from RLS).",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "permission",
+        "x-eureka-permission": "candidate:read",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success"
@@ -12348,18 +12919,26 @@
         "parameters": [
           {
             "schema": {
-              "type": "string",
-              "enum": [
-                "in_training",
-                "active",
-                "on_hold",
-                "stopped",
-                "full_of_interviews",
-                "confirmation",
-                "placed",
-                "bench",
-                "terminated"
-              ]
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "in_training",
+                  "active",
+                  "on_hold",
+                  "stopped",
+                  "full_of_interviews",
+                  "confirmation",
+                  "placed",
+                  "bench",
+                  "terminated"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "status",
@@ -12367,8 +12946,17 @@
           },
           {
             "schema": {
-              "type": "string",
-              "maxLength": 80
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "technology",
@@ -12376,12 +12964,20 @@
           },
           {
             "schema": {
-              "type": "string",
-              "enum": [
-                "team",
-                "all_teams",
-                "selected_teams"
-              ]
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "team",
+                  "all_teams",
+                  "selected_teams"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "visibility",
@@ -12389,17 +12985,16 @@
           },
           {
             "schema": {
-              "type": "string",
-              "maxLength": 80
-            },
-            "required": false,
-            "name": "search",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "locationId",
@@ -12407,21 +13002,29 @@
           },
           {
             "schema": {
-              "type": "string",
-              "enum": [
-                "us_citizen",
-                "green_card",
-                "gc_ead",
-                "h1b",
-                "h4_ead",
-                "l2_ead",
-                "f1_opt",
-                "f1_stem_opt",
-                "f1_cpt",
-                "tn",
-                "o1",
-                "other"
-              ]
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "us_citizen",
+                  "green_card",
+                  "gc_ead",
+                  "h1b",
+                  "h4_ead",
+                  "l2_ead",
+                  "f1_opt",
+                  "f1_stem_opt",
+                  "f1_cpt",
+                  "tn",
+                  "o1",
+                  "other"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "visa",
@@ -12429,13 +13032,21 @@
           },
           {
             "schema": {
-              "type": "string",
-              "enum": [
-                "pending",
-                "partial",
-                "complete",
-                "none"
-              ]
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "partial",
+                  "complete",
+                  "none"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "documents",
@@ -12467,12 +13078,20 @@
           },
           {
             "schema": {
-              "type": "string",
-              "enum": [
-                "P1",
-                "P2",
-                "P3"
-              ]
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "P1",
+                  "P2",
+                  "P3"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "priority",
@@ -12480,8 +13099,16 @@
           },
           {
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "teamId",
@@ -12489,8 +13116,16 @@
           },
           {
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "recruiterId",
@@ -12510,11 +13145,48 @@
           },
           {
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
             },
             "required": false,
             "name": "ghLocationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "status",
+                  "technology",
+                  "visibility",
+                  "batchId",
+                  "locationId",
+                  "visa",
+                  "documents",
+                  "priority",
+                  "teamId",
+                  "recruiterId",
+                  "ghLocationId"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "not",
             "in": "query"
           },
           {
@@ -12529,6 +13201,15 @@
             },
             "required": false,
             "name": "sort",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "required": false,
+            "name": "search",
             "in": "query"
           },
           {
@@ -12660,6 +13341,316 @@
         ],
         "x-eureka-auth": "permission",
         "x-eureka-permission": "report:export",
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/hotlist/facets": {
+      "get": {
+        "operationId": "CandidatesController_hotlistFacets",
+        "tags": [
+          "candidates"
+        ],
+        "description": "Staff session; the guard requires the permission in x-eureka-permission (data scope from RLS).",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "permission",
+        "x-eureka-permission": "hotlist:read",
+        "parameters": [
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "in_training",
+                  "active",
+                  "on_hold",
+                  "stopped",
+                  "full_of_interviews",
+                  "confirmation",
+                  "placed",
+                  "bench",
+                  "terminated"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "technology",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "team",
+                  "all_teams",
+                  "selected_teams"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "visibility",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "locationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "us_citizen",
+                  "green_card",
+                  "gc_ead",
+                  "h1b",
+                  "h4_ead",
+                  "l2_ead",
+                  "f1_opt",
+                  "f1_stem_opt",
+                  "f1_cpt",
+                  "tn",
+                  "o1",
+                  "other"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "visa",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "partial",
+                  "complete",
+                  "none"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "documents",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "yes",
+                "no"
+              ]
+            },
+            "required": false,
+            "name": "resume",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "guest_house",
+                "remote"
+              ]
+            },
+            "required": false,
+            "name": "stay",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "P1",
+                  "P2",
+                  "P3"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "priority",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "teamId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "recruiterId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "yes",
+                "no"
+              ]
+            },
+            "required": false,
+            "name": "inPerson",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "ghLocationId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string",
+                "enum": [
+                  "status",
+                  "technology",
+                  "visibility",
+                  "batchId",
+                  "locationId",
+                  "visa",
+                  "documents",
+                  "priority",
+                  "teamId",
+                  "recruiterId",
+                  "ghLocationId"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 50
+            },
+            "required": false,
+            "name": "not",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success"

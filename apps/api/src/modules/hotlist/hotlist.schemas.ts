@@ -1,28 +1,28 @@
 import { z } from "zod";
 import { CANDIDATE_VISIBILITIES, HOTLIST_STATUSES } from "@eureka/shared";
-import { ExtraListFilters, ShareTeamIds } from "../candidates/candidates.schemas.js";
+import { ShareTeamIds } from "../candidates/candidates.schemas.js";
+import { listFilterFields } from "../candidates/list-filters.js";
 
-/** The Hot List filters a saved view or an export carries (same names as GET /hotlist). */
+/** The Hot List filters a saved view or an export carries (same names and shapes as GET /hotlist). */
 export const HotlistFilters = z
   .object({
-    status: z.enum(HOTLIST_STATUSES).optional(),
-    technology: z.string().trim().min(1).max(80).optional(),
-    visibility: z.enum(CANDIDATE_VISIBILITIES).optional(),
+    ...listFilterFields(HOTLIST_STATUSES),
     search: z.string().trim().min(1).max(80).optional(),
-    ...ExtraListFilters,
   })
   .strict();
 export type HotlistFilters = z.infer<typeof HotlistFilters>;
 
 const ViewName = z.string().trim().min(1).max(80);
+/** A view's filters are checked against its list's schema by the controller (CreateView / UpdateView keep them opaque). */
+const ViewFilters = z.record(z.unknown());
 
-export const CreateView = z.object({ name: ViewName, filters: HotlistFilters }).strict();
+export const CreateView = z.object({ name: ViewName, filters: ViewFilters, shared: z.boolean().optional() }).strict();
 export type CreateView = z.infer<typeof CreateView>;
 
 export const UpdateView = z
-  .object({ name: ViewName.optional(), filters: HotlistFilters.optional() })
+  .object({ name: ViewName.optional(), filters: ViewFilters.optional(), shared: z.boolean().optional() })
   .strict()
-  .refine((b) => b.name !== undefined || b.filters !== undefined, { message: "Nothing to change" });
+  .refine((b) => b.name !== undefined || b.filters !== undefined || b.shared !== undefined, { message: "Nothing to change" });
 export type UpdateView = z.infer<typeof UpdateView>;
 
 /** Most candidates one bulk request may touch; every record is checked on its own. */

@@ -1,20 +1,21 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api, can, setCsrf, type Me } from "./api";
-import { SETTINGS_NAV, parseScreenPath, screenPath, visibleNav, type NavItem } from "./nav";
+import { NAV_SECTIONS, SETTINGS_NAV, landingScreen, parseScreenPath, screenPath, visibleNav, type NavItem } from "./nav";
 import { lazyNamed } from "./lib/lazy";
 import { navigate, usePathname } from "./lib/router";
 import { HotListPage } from "./sales/HotListPage";
 import { NotificationBell, type InboxItem } from "./notifications/Inbox";
 import { ChatNavBadge } from "./chat/ChatNavBadge";
-import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, Sparkles, Sun } from "lucide-react";
+import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, X } from "lucide-react";
 import { useTheme } from "./shell/theme";
-import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
+import { BrandMark, NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
 import { Loading } from "./ui/Loading";
 import { QueryError } from "./ui/QueryError";
 import { useAuthMethods } from "./shell/useAuthMethods";
 import { QuickJump, isQuickJumpKey } from "./shell/QuickJump";
 import { BusyBanner, OfflineBanner } from "./shell/OfflineBanner";
+import "./shell/shell.css";
 
 // Every screen but the default landing (the Hot List) is its own chunk, loaded on first visit.
 const SettingsPage = lazyNamed(() => import("./settings/SettingsPage"), "SettingsPage");
@@ -210,47 +211,28 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
   const [theme, setTheme] = useTheme();
   return (
     <div className="loginpage">
-      <section className="loginhero" aria-hidden="true">
-        <div className="herogrid" />
-        <div className="heroshots">
-          <div className="heroshot main">
-            <div className="heroshot-bar"><span className="logo sm"><Sparkles size={12} /></span>Eureka<i /><i /><i /></div>
-            <div className="heroshot-kpis">
-              {[["Submissions", "48"], ["Interviews", "28"], ["Placements", "8"], ["Joined", "5"]].map(([l, v]) => (
-                <div key={l}><small>{l}</small><b>{v}</b></div>
-              ))}
-            </div>
-            <svg className="heroshot-line" viewBox="0 0 300 80" preserveAspectRatio="none">
-              <defs><linearGradient id="hg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#14b8a6" stopOpacity=".35" /><stop offset="1" stopColor="#14b8a6" stopOpacity="0" /></linearGradient></defs>
-              <path d="M0 60 C30 40 45 70 70 50 S110 20 135 42 S180 62 205 30 S255 22 300 12 L300 80 L0 80Z" fill="url(#hg)" />
-              <path d="M0 60 C30 40 45 70 70 50 S110 20 135 42 S180 62 205 30 S255 22 300 12" fill="none" stroke="#14b8a6" strokeWidth="2.5" />
-            </svg>
-          </div>
-          <div className="heroshot funnel">
-            <b>Pipeline funnel</b>
-            <svg viewBox="0 0 260 70" preserveAspectRatio="none">
-              <defs><linearGradient id="hf" x1="0" x2="1"><stop offset="0" stopColor="#8b5cf6" /><stop offset=".5" stopColor="#6366f1" /><stop offset="1" stopColor="#5eead4" /></linearGradient></defs>
-              <path d="M0 0 H70 C100 0 100 14 130 14 H170 C200 14 200 24 230 24 H260 V46 H230 C200 46 200 56 170 56 H130 C100 56 100 70 70 70 H0Z" fill="url(#hf)" />
-            </svg>
-            <div className="heroshot-steps"><span>48</span><span>28</span><span>14</span><span>8</span></div>
-          </div>
-        </div>
+      <section className="loginhero" aria-label="About Eureka">
+        <div className="brand"><BrandMark size={30} /><span className="brandtext">Eureka<small>Staffing</small></span></div>
         <div className="herotext">
-          <h2>Welcome to Eureka</h2>
-          <p>Hot list, submissions, interviews and placements for your staffing teams, in one place.</p>
+          <h2>The bench, the pipeline and the paperwork, in one record.</h2>
+          <ul>
+            <li>Hot List and candidates, scoped to your team</li>
+            <li>Submissions, interview rounds and placements</li>
+            <li>Paperwork, BGC, employees and payments</li>
+          </ul>
         </div>
       </section>
       <main className="loginpanel">
         <div className="loginbox">
           <div className="loginbar">
-            <div className="brand"><span className="logo"><Sparkles size={16} aria-hidden="true" /></span>Eureka</div>
-            <button type="button" className="btn ghost themechip" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}>
-              {theme === "dark" ? <Moon size={15} aria-hidden="true" /> : <Sun size={15} aria-hidden="true" />}{theme === "dark" ? "Dark" : "Light"}
+            <div className="brand loginbrand"><BrandMark />Eureka</div>
+            <button type="button" className="btn ghost themechip" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+              {theme === "dark" ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}{theme === "dark" ? "Light theme" : "Dark theme"}
             </button>
           </div>
-          <h1>Hi, welcome back!</h1>
+          <h1>Sign in to Eureka</h1>
           {passwordLogin && <PasswordForm onSignedIn={onSignedIn} onError={setErr} />}
+          {passwordLogin && err && <p className="error" role="alert">{err}</p>}
           {devMode ? (
             <>
               <p className="sub">{passwordLogin ? "Or, for development: sign in as a fictional user." : "Development sign-in with fictional users."}</p>
@@ -260,7 +242,7 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
                   {DEV_USERS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
                 </select>
               </div>
-              <button type="button" className="btn primary block" onClick={async () => {
+              <button type="button" className={passwordLogin ? "btn block" : "btn primary block"} onClick={async () => {
                 try {
                   await api("/api/auth/dev-login", { method: "POST", body: JSON.stringify({ email: `${who}@eureka.example` }) });
                   onSignedIn();
@@ -271,12 +253,12 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
             <>
               <p className="sub">{passwordLogin ? "Or sign in with your company Google account." : "Sign in with your company Google account."}</p>
               <a className="btn primary block googlebtn" href="/api/auth/login">
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="#fff" d="M21.35 11.1H12v2.9h5.35c-.25 1.5-1.7 4.4-5.35 4.4-3.2 0-5.85-2.65-5.85-5.9S8.8 6.6 12 6.6c1.85 0 3.05.8 3.75 1.45l2.55-2.45C16.7 4.1 14.55 3.1 12 3.1 7.05 3.1 3.1 7.05 3.1 12s3.95 8.9 8.9 8.9c5.15 0 8.55-3.6 8.55-8.7 0-.6-.05-1.05-.2-1.1z" /></svg>
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M21.35 11.1H12v2.9h5.35c-.25 1.5-1.7 4.4-5.35 4.4-3.2 0-5.85-2.65-5.85-5.9S8.8 6.6 12 6.6c1.85 0 3.05.8 3.75 1.45l2.55-2.45C16.7 4.1 14.55 3.1 12 3.1 7.05 3.1 3.1 7.05 3.1 12s3.95 8.9 8.9 8.9c5.15 0 8.55-3.6 8.55-8.7 0-.6-.05-1.05-.2-1.1z" /></svg>
                 Sign in with Google
               </a>
             </>
           )}
-          {err && <p className="error" role="alert">{err}</p>}
+          {!passwordLogin && err && <p className="error" role="alert">{err}</p>}
           <p className="loginfoot">Access is limited to your organisation's accounts. Every sign-in is recorded.</p>
         </div>
       </main>
@@ -306,7 +288,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const has = (key: string) => items.some((i) => i.key === key);
   // The address bar holds the screen (/<key>) and any open record (/<key>/<id>), so refresh,
   // back/forward and shared links work. "/" and screens this role lacks land on the default screen.
-  const landing = items.find((i) => i.key === "hotlist")?.key ?? items[0]?.key;
+  const landing = landingScreen(items);
   const route = parseScreenPath(usePathname());
   const routed = route.key !== null && (route.key === SETTINGS_NAV.key || has(route.key));
   const active = routed ? route.key : landing;
@@ -348,7 +330,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     opener.current = document.activeElement as HTMLElement | null;
     go(candidateScreen, e.id);
   };
-  const sections = [...new Set(items.map((i) => i.section))];
+  const sections = NAV_SECTIONS.filter((s) => items.some((i) => i.section === s));
   const current = active === SETTINGS_NAV.key ? SETTINGS_NAV : items.find((i) => i.key === active);
   // Phones: the sidebar is an off-canvas drawer opened from the top bar's menu button.
   const [navOpen, setNavOpen] = useState(false);
@@ -420,22 +402,74 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   }, []);
   const menuBtn = useRef<HTMLButtonElement>(null);
   const sideRef = useRef<HTMLElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  // Phones: the open drawer is a modal. Focus moves to the current (or first) screen in it, Tab
+  // stays inside, the page behind is inert, and Escape or the close button returns to the menu button.
+  const closeNav = () => { setNavOpen(false); menuBtn.current?.focus(); };
   useEffect(() => {
     if (!navOpen) return;
-    sideRef.current?.querySelector<HTMLElement>(".nav")?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setNavOpen(false); menuBtn.current?.focus(); } };
+    const side = sideRef.current;
+    const main = mainRef.current;
+    main?.setAttribute("inert", "");
+    const focusFirst = () => (side?.querySelector<HTMLElement>('.nav[aria-current="page"]') ?? side?.querySelector<HTMLElement>(".nav"))?.focus();
+    focusFirst();
+    // The drawer becomes visible as its slide-in starts; focus again once it can take focus.
+    const frame = window.requestAnimationFrame(() => { if (!side?.contains(document.activeElement)) focusFirst(); });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setNavOpen(false); menuBtn.current?.focus(); return; }
+      if (e.key !== "Tab" || !side) return;
+      const focusable = [...side.querySelectorAll<HTMLElement>("button:not(:disabled), a[href]")].filter((el) => el.offsetParent !== null || el === document.activeElement);
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (!side.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => { window.cancelAnimationFrame(frame); document.removeEventListener("keydown", onKey); main?.removeAttribute("inert"); };
   }, [navOpen]);
+  // A desktop-wide window never shows the drawer: close it if the window grows past the phone layout.
+  useEffect(() => {
+    if (!navOpen || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(min-width: 769px)");
+    const onChange = () => { if (mq.matches) setNavOpen(false); };
+    mq.addEventListener?.("change", onChange);
+    return () => mq.removeEventListener?.("change", onChange);
+  }, [navOpen]);
+  const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+  // Collapsed rail: the screen name shows beside the icon on hover and on keyboard focus (a title
+  // tooltip shows on neither focus nor touch). Visual only; the button's name is already the label.
+  const [tip, setTip] = useState<{ label: string; top: number } | null>(null);
+  const showTip = (label: string, el: HTMLElement) => {
+    if (!collapsed || navOpen) return;
+    const r = el.getBoundingClientRect();
+    setTip({ label, top: r.top + r.height / 2 });
+  };
+  const tipHandlers = (label: string) => ({
+    onMouseEnter: (e: React.MouseEvent<HTMLElement>) => showTip(label, e.currentTarget),
+    onMouseLeave: () => setTip(null),
+    onFocus: (e: React.FocusEvent<HTMLElement>) => {
+      if (!collapsed) return;
+      let keyboard = true;
+      try { keyboard = e.currentTarget.matches(":focus-visible"); } catch { /* selector unsupported: show it */ }
+      if (keyboard) showTip(label, e.currentTarget);
+    },
+    onBlur: () => setTip(null),
+  });
   return (
     <div className={collapsed ? "app collapsed" : "app"}>
       <a href="#main-content" className="skiplink" onClick={skipToContent}>Skip to main content</a>
-      <aside id="mainnav" ref={sideRef} className={navOpen ? "side open" : "side"} aria-label="Main navigation">
+      <aside id="mainnav" ref={sideRef} className={navOpen ? "side open" : "side"} aria-label="Main navigation"
+        role={navOpen ? "dialog" : undefined} aria-modal={navOpen || undefined}>
         <div className="brandrow">
-          <div className="brand"><span className="logo"><Sparkles size={16} aria-hidden="true" /></span><span className="brandtext">Eureka<small>Staffing pipeline</small></span></div>
+          <div className="brand"><BrandMark /><span className="brandtext">Eureka<small>Staffing</small></span></div>
           <button type="button" className="collapsebtn" onClick={() => setCollapsed(!collapsed)} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
             {collapsed ? <PanelLeftOpen size={17} aria-hidden="true" /> : <PanelLeftClose size={17} aria-hidden="true" />}
           </button>
+          {navOpen && (
+            <button type="button" className="navclose" onClick={closeNav} aria-label="Close menu"><X size={20} aria-hidden="true" /></button>
+          )}
         </div>
         <nav className="navlist">
           {sections.map((s) => (
@@ -444,7 +478,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
               {items.filter((i) => i.section === s).map((i) => {
                 const Icon = NAV_ICONS[i.key];
                 return (
-                  <button key={i.key} className="nav" title={collapsed ? i.label : undefined} aria-current={i.key === active ? "page" : undefined}
+                  <button key={i.key} className="nav" aria-current={i.key === active ? "page" : undefined} {...tipHandlers(i.label)}
                     aria-describedby={i.key === "chat" ? "chat-nav-unread" : undefined}
                     onClick={() => { go(i.key); setNavOpen(false); }}>
                     {Icon && <Icon className="navicon" size={19} strokeWidth={1.8} aria-hidden="true" />}<span className="navlabel">{i.label}</span>
@@ -458,16 +492,21 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         {items.some((i) => i.key === "chat") && <ChatNavBadge id="chat-nav-unread" part="text" />}
         <ThemeSwitch theme={theme} onChange={setTheme} />
       </aside>
+      {tip && collapsed && <span className="navtip" style={{ top: tip.top }} aria-hidden="true">{tip.label}</span>}
       {jumpOpen && <QuickJump items={jumpItems} onGo={(key) => go(key)} onClose={() => setJumpOpen(false)} />}
       {navOpen && <div className="navscrim" aria-hidden="true" onClick={() => setNavOpen(false)} />}
-      <main className="main">
+      <main className="main" ref={mainRef}>
         <div className="top">
           <button ref={menuBtn} type="button" className="menubtn" aria-label="Menu" aria-controls="mainnav" aria-expanded={navOpen}
             onClick={() => setNavOpen((o) => !o)}><Menu size={19} aria-hidden="true" /></button>
-          <span className="topbrand"><span className="logo"><Sparkles size={14} aria-hidden="true" /></span>Eureka</span>
+          <span className="topbrand"><BrandMark size={22} />Eureka</span>
+          {/* Desktop: a field-shaped button that names what it does and its shortcut; phones: an icon button. */}
+          <button type="button" className="qjfield" aria-label="Go to screen" aria-keyshortcuts="Control+K Meta+K"
+            onClick={() => setJumpOpen(true)}>
+            <Search size={16} aria-hidden="true" /><span className="qjfield-text" aria-hidden="true">Go to screen…</span>
+            <kbd className="qjfield-kbd" aria-hidden="true">{mac ? "⌘K" : "Ctrl K"}</kbd>
+          </button>
           <div className="topright">
-            <button type="button" className="bell" aria-label="Go to screen" aria-keyshortcuts="Control+K Meta+K" title="Go to screen (Ctrl+K)"
-              onClick={() => setJumpOpen(true)}><Search size={18} aria-hidden="true" /></button>
             <NotificationBell onOpen={openEntity} canOpen={canOpenEntity} />
             <UserMenu name={me.displayName} roles={me.roles.map((r) => r.label).join(", ")} onSignOut={onSignOut}
               onSettings={() => { go(SETTINGS_NAV.key); setNavOpen(false); }} />
@@ -493,28 +532,28 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                   )}
                 </>
               )
-              : current.key === "submissions" ? <SubmissionsPage me={me} onOpenPlacement={has("placements") ? (id) => go("placements", id) : undefined} />
-              : current.key === "placements" ? <PlacementsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("placements", id)} />
-              : current.key === "interviews" ? <InterviewsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("interviews", id)} />
+              : current.key === "submissions" ? <SubmissionsPage me={me} onOpenPlacement={has("placements") ? (id) => go("placements", id) : undefined} initialOpenId={recordId} onOpenChange={(id) => go("submissions", id)} />
+              : current.key === "placements" ? <PlacementsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("placements", id)} onOpenSubmission={has("submissions") ? (id) => go("submissions", id) : undefined} />
+              : current.key === "interviews" ? <InterviewsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("interviews", id)} onOpenSubmission={has("submissions") ? (id) => go("submissions", id) : undefined} />
               : current.key === "paperwork" ? <PaperworkPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("paperwork", id)} />
               : current.key === "access" ? <AccessPage me={me} />
               : current.key === "birthdays" ? <BirthdaysPage />
-              : current.key === "employees" ? <EmployeesPage me={me} />
+              : current.key === "employees" ? <EmployeesPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("employees", id)} />
               : current.key === "reports" ? <ReportsPage me={me} />
               : current.key === "performance" ? <PerformancePage me={me} />
               : current.key === "interview-reports" ? <InterviewReportsPage me={me} />
-              : current.key === "companies" ? <CompaniesPage key="companies" me={me} />
-              : current.key === "facilities" ? <FacilitiesPage key="facilities" me={me} />
+              : current.key === "companies" ? <CompaniesPage key="companies" me={me} initialOpenId={recordId} onOpenChange={(id) => go("companies", id)} />
+              : current.key === "facilities" ? <FacilitiesPage key="facilities" me={me} initialOpenId={recordId} onOpenChange={(id) => go("facilities", id)} />
               : current.key === "datahub" ? <DataHubPage />
               : current.key === "training" ? <TrainingPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("training", id)} />
               : current.key === "courses" ? <CoursesPage me={me} />
               : current.key === "settings" ? <SettingsPage me={me} />
               : current.key === "chat" ? <ChatPage me={me} initialConversationId={recordId} onOpenChange={(id) => go("chat", id)} />
-              : current.key === "jobs" ? <JobsPage me={me} />
+              : current.key === "jobs" ? <JobsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("jobs", id)} />
               : current.key === "applications" ? <ApplicationsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("applications", id)} />
               : current.key === "applicants" ? <ApplicantsPage />
-              : current.key === "payments" ? <PaymentsPage me={me} />
-              : current.key === "pipeline" ? <PipelineReportPage />
+              : current.key === "payments" ? <PaymentsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("payments", id)} />
+              : current.key === "pipeline" ? <PipelineReportPage onOpenCandidate={has("candidates") ? (id) => go("candidates", id) : undefined} />
               : current.key === "vendors" ? <PreferredVendorsPage />
               : current.key === "myteam" ? <MyTeamPage />
               : current.key === "coaching" ? <CoachingPage />

@@ -5,16 +5,47 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
 /**
  * Modal dialog: moves focus inside on open, traps Tab, closes on Escape and
  * returns focus to the element that opened it.
+ *
+ * `dirty`: while the form has unsaved input, Escape and a backdrop click do not close; they show
+ * an inline "Discard unsaved changes?" bar (Keep editing / Discard) with focus on Keep editing.
+ * Escape again keeps editing. Explicit Cancel/close buttons still call `onClose` directly.
+ * The last `.actions` footer (DialogActions) sticks to the bottom while the dialog scrolls.
  */
-export function Dialog({ title, onClose, children, describedBy, className, wide = false }: {
+export function Dialog({ title, onClose, children, describedBy, className, wide = false, dirty = false }: {
   title: string; onClose: () => void; children: ReactNode; describedBy?: string; wide?: boolean;
   /** Extra classes on the dialog box. */
   className?: string;
+  /** Unsaved changes: confirm before Escape / backdrop click discard them. */
+  dirty?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const confirmId = useId();
+  const [confirming, setConfirming] = useState(false);
+  const keepBtn = useRef<HTMLButtonElement>(null);
+  const returnTo = useRef<HTMLElement | null>(null);
+  const keepEditing = () => {
+    setConfirming(false);
+    const back = returnTo.current;
+    requestAnimationFrame(() => (back && ref.current?.contains(back) ? back : ref.current)?.focus());
+  };
+  /** Escape / backdrop: close, or ask first while dirty (Escape while asking keeps editing). */
+  const requestClose = () => {
+    if (!dirtyRef.current) { onCloseRef.current(); return; }
+    if (confirmingRef.current) { keepEditing(); return; }
+    returnTo.current = document.activeElement as HTMLElement | null;
+    setConfirming(true);
+  };
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const confirmingRef = useRef(confirming);
+  confirmingRef.current = confirming;
+  const requestCloseRef = useRef(requestClose);
+  requestCloseRef.current = requestClose;
+  useEffect(() => { if (confirming) keepBtn.current?.focus(); }, [confirming]);
+  useEffect(() => { if (!dirty) setConfirming(false); }, [dirty]);
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
@@ -24,7 +55,7 @@ export function Dialog({ title, onClose, children, describedBy, className, wide 
     // Escape works even when focus fell to <body> (e.g. the submit button was
     // disabled while busy), and focus that escapes the dialog is pulled back.
     const onDocKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); onCloseRef.current(); }
+      if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); requestCloseRef.current(); }
     };
     const onFocusIn = (e: FocusEvent) => {
       if (!node.contains(e.target as Node)) node.focus();
@@ -49,11 +80,18 @@ export function Dialog({ title, onClose, children, describedBy, className, wide 
   };
 
   return (
-    <div className="backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
       <div ref={ref} className={["dialog", wide ? "wide" : "", className ?? ""].filter(Boolean).join(" ")} role="dialog" aria-modal="true" aria-labelledby={titleId}
         aria-describedby={describedBy} tabIndex={-1} onKeyDown={onKeyDown}>
         <h2 id={titleId}>{title}</h2>
         {children}
+        {confirming && (
+          <div className="dialog-discard" role="group" aria-labelledby={confirmId}>
+            <p id={confirmId} role="alert">Discard unsaved changes?</p>
+            <button ref={keepBtn} type="button" className="btn" onClick={keepEditing}>Keep editing</button>
+            <button type="button" className="btn danger" onClick={() => onCloseRef.current()}>Discard</button>
+          </div>
+        )}
       </div>
     </div>
   );

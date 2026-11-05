@@ -1,0 +1,28 @@
+/* Documents section (DocumentsSection.tsx). Tokens only (DESIGN.md); kit .dtable is used as-is. */
+
+.docs-table td.c-act { white-space: nowrap; }
+.docs-table td.c-act > * + * { margin-left: 6px; }
+.docs-table td.c-primary .badge { margin-left: 6px; }
+.docs-table .docs-editcell { white-space: normal; }
+
+/* Upload: one row of type, file and a secondary-weight Upload button; hint and progress below. */
+.docupload { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line2); }
+.docupload h3 { margin: 0; font-size: 14px; }
+.du-row { display: grid; grid-template-columns: minmax(180px, 280px) minmax(0, 1fr) auto; gap: 8px 12px; align-items: end; }
+.du-row .field { margin: 0; min-width: 0; }
+.du-row select, .du-row input[type="file"] { width: 100%; }
+.du-row input[type="file"] { height: 36px; padding: 6px 10px; font-size: 13px; }
+.du-progress { display: flex; align-items: center; gap: 10px; color: var(--info-fg); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.du-progress progress { appearance: none; -webkit-appearance: none; width: min(320px, 100%); height: 6px; border: 0; border-radius: var(--r-sm); background: var(--line2); overflow: hidden; }
+.du-progress progress::-webkit-progress-bar { background: var(--line2); border-radius: var(--r-sm); }
+.du-progress progress::-webkit-progress-value { background: var(--info-fg); border-radius: var(--r-sm); }
+.du-progress progress::-moz-progress-bar { background: var(--info-fg); border-radius: var(--r-sm); }
+
+@media (max-width: 768px) {
+  .du-row { grid-template-columns: minmax(0, 1fr); }
+  .du-row input[type="file"] { height: auto; min-height: 44px; font-size: 16px; }
+  .du-submit { width: 100%; height: 44px; }
+  .docs-table td.c-act { flex-wrap: wrap; }
+  .docs-table td.c-act > * + * { margin-left: 0; }
+  .docs-table td.c-primary .badge { margin-left: 0; }
+}

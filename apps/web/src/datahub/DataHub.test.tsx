@@ -40,6 +40,7 @@ const problem = (status: number, detail?: string): Reply => ({ status, body: { t
 
 beforeEach(() => {
   setCsrf("tok");
+  window.history.replaceState(null, "", "/datahub");
   calls = [];
   routes = {
     "GET /api/v1/lookups": () => ({ body: { technologies: [], clients: [], vendors: [], implementationPartners: [], roles: ROLE_LOOKUPS, locations: [{ id: "loc-d", name: "Dallas" }], coaches: [] } }),
@@ -124,35 +125,38 @@ describe("DataHub page", () => {
     // A manager who is not a member of a restricted folder sees settings, not files.
     fireEvent.click(within(panel).getByRole("button", { name: /Payroll exports/ }));
     expect(await screen.findByText(/aren't one of its members/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Members" })).toBeInTheDocument();
+    // Settings, Members, Access log and Delete sit in the folder's Manage menu.
+    fireEvent.click(screen.getByRole("button", { name: "Manage folder" }));
+    expect(screen.getByRole("menuitem", { name: "Members" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete folder…" })).toHaveClass("danger");
     expect(calls.some((c) => c.path.startsWith(`/api/v1/datahub/folders/${F3}/files`))).toBe(false);
   });
 
-  it("Create New Folder: the reference fields; Confidential needs roles; sent with an Idempotency-Key", async () => {
+  it("New folder: the reference fields; Confidential needs roles; sent with an Idempotency-Key", async () => {
     routes["GET /api/v1/datahub/folders"] = folderList([]);
     let sent: unknown;
     routes["POST /api/v1/datahub/folders"] = (b) => { sent = b; return { status: 201, body: { id: F1, rowVersion: 1 } }; };
     wrap();
     fireEvent.click(await screen.findByRole("button", { name: "New folder" }));
-    const dialog = screen.getByRole("dialog", { name: "Create New Folder" });
+    const dialog = screen.getByRole("dialog", { name: "New folder" });
     const level = within(dialog).getByRole("combobox", { name: "Security level" });
     expect(within(level).getAllByRole("option").map((o) => o.textContent)).toEqual([
       "Internal – All employees", "Confidential – Specific roles", "Restricted – Limited access"]);
     expect(within(dialog).getByText("Accessible to all employees in the organisation.")).toBeInTheDocument();
-    expect(within(dialog).getByLabelText("Description (Optional)")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Description (optional)")).toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Create Folder" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create folder" }));
     expect(await within(dialog).findByText("Enter a folder name.")).toBeInTheDocument();
-    fireEvent.change(within(dialog).getByLabelText("Folder name *"), { target: { value: " Java Resumes " } });
+    fireEvent.change(within(dialog).getByLabelText("Folder name"), { target: { value: " Java Resumes " } });
     fireEvent.change(level, { target: { value: "confidential" } });
     const role = within(dialog).getByRole("searchbox", { name: "Role" });
     expect(role).toHaveAttribute("placeholder", "Eg. Employee, Manager…");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Create Folder" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create folder" }));
     expect(await within(dialog).findByText("Choose at least one role.")).toBeInTheDocument();
     fireEvent.change(role, { target: { value: "lead" } });
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Lead (Sales)" }));
-    fireEvent.change(within(dialog).getByLabelText("Description (Optional)"), { target: { value: "Sample resumes" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Create Folder" }));
+    fireEvent.change(within(dialog).getByLabelText("Description (optional)"), { target: { value: "Sample resumes" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create folder" }));
     await waitFor(() => expect(sent).toEqual({ name: "Java Resumes", level: "confidential", description: "Sample resumes", roleKeys: ["lead"], parentId: null }));
     const post = calls.find((c) => c.method === "POST" && c.path === "/api/v1/datahub/folders")!;
     expect(post.headers["idempotency-key"]).toMatch(/^dh-[0-9a-f]{32}$/);
@@ -166,15 +170,55 @@ describe("DataHub page", () => {
     routes["POST /api/v1/datahub/folders"] = (b) => { sent = b; return problem(409, "name_taken"); };
     wrap();
     fireEvent.click(await screen.findByRole("button", { name: "New folder" }));
-    const dialog = screen.getByRole("dialog", { name: "Create New Folder" });
-    fireEvent.change(within(dialog).getByLabelText("Folder name *"), { target: { value: "Leases" } });
+    const dialog = screen.getByRole("dialog", { name: "New folder" });
+    fireEvent.change(within(dialog).getByLabelText("Folder name"), { target: { value: "Leases" } });
     fireEvent.change(within(dialog).getByRole("combobox", { name: "Security level" }), { target: { value: "restricted" } });
     fireEvent.click(await within(dialog).findByRole("button", { name: "Add Riya Rao" }));
     expect(within(within(dialog).getByRole("list", { name: "Chosen people" })).getByText("Riya Rao")).toBeInTheDocument();
     expect(within(dialog).getByRole("combobox", { name: "Location" })).toHaveValue("loc-d");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Create Folder" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create folder" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("A folder with this name already exists here.");
     expect(sent).toEqual({ name: "Leases", level: "restricted", description: null, memberIds: [U1], parentId: null, locationId: "loc-d" });
+  });
+
+  it("removing a restricted folder's member asks first and states the consequence", async () => {
+    routes["GET /api/v1/datahub/folders"] = folderList([folder(F1, "Payroll exports", { level: "restricted", memberCount: 1 })]);
+    routes[`GET /api/v1/datahub/folders/${F1}/files`] = () => ({ body: { items: [], nextCursor: null } });
+    routes[`GET /api/v1/datahub/folders/${F1}/members`] = () => ({ body: { items: [{ id: U1, name: "Riya Rao" }] } });
+    routes[`DELETE /api/v1/datahub/folders/${F1}/members/${U1}`] = () => ({ status: 204 });
+    wrap();
+    fireEvent.click(await screen.findByRole("button", { name: /Payroll exports/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Manage folder" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Members" }));
+    const dialog = await screen.findByRole("dialog", { name: "Members: Payroll exports" });
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Remove Riya Rao" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Remove Riya Rao? They lose access to this folder now.");
+    expect(calls.filter((c) => c.method === "DELETE")).toEqual([]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep Riya Rao" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove Riya Rao" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove access for Riya Rao" }));
+    await waitFor(() => expect(calls.filter((c) => c.method === "DELETE").map((c) => c.path)).toEqual([`/api/v1/datahub/folders/${F1}/members/${U1}`]));
+  });
+
+  it("upload dialog never switches folders silently: a read-only open folder means choosing a target", async () => {
+    routes["GET /api/v1/datahub/folders"] = folderList([
+      folder(F1, "Company policies", { actions: { read: true, upload: false, manage: false, createSubfolder: false } }),
+      folder(F2, "Templates"),
+    ]);
+    routes[`GET /api/v1/datahub/folders/${F1}/files`] = () => ({ body: { items: [], nextCursor: null } });
+    wrap();
+    fireEvent.click(await screen.findByRole("button", { name: /Company policies/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    const dialog = screen.getByRole("dialog", { name: "Upload a file" });
+    expect(within(dialog).getByText("You can't upload to Company policies. Choose a folder that takes uploads.")).toBeInTheDocument();
+    const target = within(dialog).getByRole("combobox", { name: "Folder" });
+    expect(target).toHaveValue("");
+    fireEvent.change(within(dialog).getByLabelText("File"), { target: { files: [new File([new Uint8Array(10)], "a.pdf", { type: PDF })] } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Upload" }));
+    expect(await within(dialog).findByText("Choose the folder to upload to.")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "POST")).toEqual([]);
+    fireEvent.change(target, { target: { value: F2 } });
+    expect(target).toHaveAccessibleDescription("Uploads to Templates.");
   });
 
   it("upload dialog: presigned POST with progress, then scanning until clean", async () => {

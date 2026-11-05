@@ -102,20 +102,20 @@ export function EmployeesTab({ companyId, canManage }: { companyId: string; canM
         : q.error ? <p className="error" role="alert">{sitesError(q.error, "company")}</p>
         : items.length === 0 ? <p className="muted">No employees assigned.</p>
         : (
-          <div className="tablewrap roundtable"><table aria-label="Company employees">
+          <div className="tablewrap roundtable listcard"><table className="dtable bo-dtable" aria-label="Company employees">
             <thead><tr>
               <th scope="col">Employee</th>{showEmail && <th scope="col">Email</th>}<th scope="col">Start</th><th scope="col">End</th><th scope="col">Employment</th>
-              <th scope="col"><span className="sr-only">Actions</span></th>
+              <th scope="col" className="c-act"><span className="sr-only">Actions</span></th>
             </tr></thead>
             <tbody>
               {items.map((e) => (
                 <tr key={`${e.employeeId}-${e.startDate}`}>
-                  <td><Person name={e.name}><b>{e.name}</b></Person></td>
-                  {showEmail && <td>{e.email ?? <span className="muted">—</span>}</td>}
-                  <td>{fmtDate(e.startDate)}</td>
-                  <td>{e.endDate ? fmtDate(e.endDate) : <span className="muted">Current</span>}</td>
-                  <td><span className={`badge emp-${e.status}`}>{employmentLabel(e.status)}</span></td>
-                  <td className="rowactions">
+                  <td className="c-primary"><Person name={e.name}><b>{e.name}</b></Person></td>
+                  {showEmail && <td data-label="Email">{e.email ?? <span className="muted">—</span>}</td>}
+                  <td data-label="Start">{fmtDate(e.startDate)}</td>
+                  <td data-label="End">{e.endDate ? fmtDate(e.endDate) : <span className="muted">Current</span>}</td>
+                  <td className="c-badge" data-label="Employment"><span className={`badge emp-${e.status}`}>{employmentLabel(e.status)}</span></td>
+                  <td className="c-act">
                     {canManage && !e.endDate && (
                       <button type="button" className="btn sm ghost" onClick={() => setEnding(e)} aria-label={`Remove employee ${e.name}`}>
                         <UserMinus size={15} aria-hidden="true" />Remove
