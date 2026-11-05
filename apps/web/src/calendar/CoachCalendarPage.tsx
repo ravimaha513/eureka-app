@@ -22,7 +22,7 @@ const weekdayLabel = (day: string) =>
 type GridEvent = CalendarEvent | GoogleEvent;
 const isGoogle = (e: GridEvent): e is GoogleEvent => !("interviewId" in e);
 const STATUS_WORDS: Partial<Record<GoogleCoachStatus, string>> = {
-  not_connected: "Google not connected", reconnect: "Google needs reconnecting", unavailable: "Google didn't respond",
+  not_connected: "Google not connected", reconnect: "Google needs reconnecting", unavailable: "Google events unavailable",
 };
 
 /** Finished, double-booked or scheduled: the class and the words that say so without colour. */

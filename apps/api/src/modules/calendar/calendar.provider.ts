@@ -86,6 +86,18 @@ interface GoogleEventItem {
   attendees?: { self?: unknown; responseStatus?: unknown }[];
 }
 
+/**
+ * Google's machine-readable reason (for example accessNotConfigured), so a failure can be diagnosed.
+ * A single word only: the rest of the body can name the account.
+ */
+async function googleReason(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: { errors?: { reason?: unknown }[] } };
+    const reason = body.error?.errors?.[0]?.reason;
+    return typeof reason === "string" && /^[A-Za-z_]{1,64}$/.test(reason) ? ` ${reason}` : "";
+  } catch { return ""; }
+}
+
 /** One Google event as the grid sees it, or null when it should not show. Exported for its unit test. */
 export function toCoachEvent(ev: GoogleEventItem): CoachEvent | null {
   if (ev.status === "cancelled") return null;
@@ -142,7 +154,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
       const res = await this.fetchImpl(`${GOOGLE_CALENDAR}/calendars/primary/events?${params}`, {
         headers: { authorization: `Bearer ${access}` }, signal: AbortSignal.timeout(10_000),
       });
-      if (!res.ok) throw new Error(`calendar events read failed (${res.status})`);
+      if (!res.ok) throw new Error(`calendar events read failed (${res.status}${await googleReason(res)})`);
       const body = (await res.json()) as { items?: GoogleEventItem[]; nextPageToken?: unknown };
       for (const item of body.items ?? []) {
         const ev = toCoachEvent(item);

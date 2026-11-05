@@ -64,6 +64,23 @@ describe("GoogleCalendarProvider for coaches", () => {
     expect(read.searchParams.getAll("eventTypes")).not.toContain("workingLocation");
   });
 
+  it("carries Google's reason word, and nothing else from the body", async () => {
+    const p = new GoogleCalendarProvider("id", "secret");
+    p.fetchImpl = (async (input: string) => String(input).includes("/token")
+      ? new Response(JSON.stringify({ access_token: "a" }))
+      : new Response(JSON.stringify({ error: { message: "coach@x.example is blocked", errors: [{ reason: "accessNotConfigured", message: "coach@x.example" }] } }), { status: 403 })) as typeof fetch;
+    const err = await p.coachEvents("r", new Date(0), new Date(1000)).catch((e: Error) => e);
+    expect((err as Error).message).toBe("calendar events read failed (403 accessNotConfigured)");
+  });
+
+  it("drops a reason that isn't a single word", async () => {
+    const p = new GoogleCalendarProvider("id", "secret");
+    p.fetchImpl = (async (input: string) => String(input).includes("/token")
+      ? new Response(JSON.stringify({ access_token: "a" }))
+      : new Response(JSON.stringify({ error: { errors: [{ reason: "coach@x.example denied" }] } }), { status: 403 })) as typeof fetch;
+    await expect(p.coachEvents("r", new Date(0), new Date(1000))).rejects.toThrow(/^calendar events read failed \(403\)$/);
+  });
+
   it("does not carry Google's response body in an error", async () => {
     const p = new GoogleCalendarProvider("id", "secret");
     p.fetchImpl = (async (input: string) => String(input).includes("/token")
