@@ -52,7 +52,9 @@ describe("Coach assignments (Interview Lead, AD-11)", () => {
     reply["DELETE /api/v1/teams/t1/coaches/u-coach"] = { status: 403, body: { status: 403, detail: "not_in_scope" } };
     renderPage();
     fireEvent.click(within(await card("Team Rohit")).getByRole("button", { name: "Remove coach Cora Coach from Team Rohit" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("You can only assign coaches who report to you.");
+    const dlg = await screen.findByRole("dialog", { name: "Remove Cora Coach from Team Rohit?" });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Remove coach" }));
+    expect(await within(dlg).findByRole("alert")).toHaveTextContent("You can only assign coaches who report to you.");
     expect(writes).toEqual([{ method: "DELETE", path: "/api/v1/teams/t1/coaches/u-coach", body: undefined }]);
   });
 });

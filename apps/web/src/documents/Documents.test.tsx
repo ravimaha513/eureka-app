@@ -2,9 +2,9 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setCsrf } from "../api";
-import { browser } from "../sales/resumesApi";
+import { browser, postToStorage } from "../sales/resumesApi";
 import { DocumentsSection } from "./DocumentsSection";
-import { documentFileProblem, documentTypeOf, pageNav, returnPath, uploadableTypes } from "./documentsApi";
+import { documentFileProblem, documentStorage, documentTypeOf, pageNav, returnPath, uploadableTypes } from "./documentsApi";
 
 // Paperwork documents and step-up (API: apps/api/src/modules/documents, identity/step-up; migration 0043).
 
@@ -45,6 +45,8 @@ beforeEach(() => {
     const r = h(body);
     return new Response(r.status === 204 ? null : JSON.stringify(r.body ?? {}), { status: r.status ?? 200 });
   });
+  // Uploads report progress through XMLHttpRequest in the browser; here they go through the fetch mock.
+  vi.spyOn(documentStorage, "post").mockImplementation((t, f, onProgress) => { onProgress(1); return postToStorage(t, f); });
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -103,6 +105,35 @@ describe("Paperwork documents section", () => {
     expect([...form.keys()]).toEqual(["key", "policy", "file"]);
     items = [doc(D1)];
     expect(await screen.findByText("Offer letter is ready.")).toBeInTheDocument();
+  });
+
+  it("shows the upload as info (progress, then scanning), not as success", async () => {
+    let items: unknown[] = [];
+    routes[`GET ${BASE}`] = () => listing(items)();
+    routes[`POST ${BASE}`] = () => {
+      items = [doc(D1, { status: "pending", scannedAt: null })];
+      return { status: 201, body: { id: D1, fileId: D3, classification: "internal", status: "pending",
+        upload: { url: "https://bucket.example/", fields: { key: "k" }, expiresAt: "2026-09-20T10:02:00Z" } } };
+    };
+    let finish: () => void = () => undefined;
+    vi.mocked(documentStorage.post).mockImplementation((_t, _f, onProgress) => new Promise<void>((resolve) => { onProgress(0.4); finish = resolve; }));
+    wrap();
+    fireEvent.change(await screen.findByRole("combobox", { name: "Document type" }), { target: { value: "offer_letter" } });
+    fireEvent.change(screen.getByLabelText("Document file"), { target: { files: [new File([new Uint8Array(10)], "offer.pdf", { type: PDF })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Upload document" }));
+    expect(await screen.findByRole("progressbar", { name: "Upload progress" })).toHaveAttribute("value", "40");
+    expect(screen.getByText("Uploading… 40%")).toBeInTheDocument();
+    finish();
+    const msg = await screen.findByText(/^Uploaded\. Scanning for malware/);
+    expect(msg).toHaveClass("livemsg", "info");
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("tells read-only users who uploads paperwork", async () => {
+    routes[`GET ${BASE}`] = listing([], { canUpload: false });
+    wrap();
+    expect(await screen.findByText("No documents yet. HR, Accounts and Immigration upload paperwork here.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Upload document" })).toBeNull();
   });
 
   it("edits a title and a type of the same access level; a classification change is explained", async () => {

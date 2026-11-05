@@ -1,0 +1,26 @@
+/* DataHub: header actions, folder header, file cards, member removal. Tokens only (DESIGN.md). */
+.dh-headactions { align-items: center; }
+.dh-count { border-radius: var(--r-sm); font-variant-numeric: tabular-nums; }
+.dh-folderactions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dh-back { display: none; }
+.dh-filewrap { border: 0; border-radius: 0; }
+.dh-filetable td.c-act { white-space: nowrap; }
+.dh-filetable td.num { font-variant-numeric: tabular-nums; }
+
+/* Removing a restricted member is confirmed in the row, with the consequence stated. */
+.members li.dh-removing { flex-wrap: wrap; gap: 8px; padding: 8px 10px; background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: var(--r-md); }
+.dh-confirmtext { color: var(--warn-fg); font-weight: 600; font-size: 13.5px; flex: 1 1 220px; }
+.dh-confirmbtns { display: inline-flex; gap: 8px; margin-left: auto; }
+
+@media (max-width: 768px) {
+  .dh-headactions { width: 100%; }
+  .dh-headactions .btn { flex: 1; height: 44px; }
+  .dh-back { display: inline-flex; }
+  .dh-folderactions { width: 100%; }
+  .dh-folderactions .btn { height: 40px; }
+  .dh-filewrap { padding: 12px; }
+  .dh-filetable td.c-act .iconbtn { width: 44px; height: 44px; }
+  .dh-folder { min-height: 44px; }
+}
+/* Phones: master-detail. With no folder open, the folder list is the screen (no empty files pane below it). */
+@media (max-width: 768px) { .dh-files:not(:has(.dh-folderhead)) { display: none; } }

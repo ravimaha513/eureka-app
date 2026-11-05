@@ -83,6 +83,28 @@ export const pageNav = {
 
 export const isStepUpRequired =(e: unknown) => e instanceof ApiError && e.status === 403 && e.detail === "step_up_required";
 
+/**
+ * Sends a document to its presigned storage target with upload progress (XMLHttpRequest, as
+ * fetch has no upload progress): the signed fields first, the file last, no cookies. Same
+ * contract as `postToStorage`; tests replace `documentStorage.post`.
+ */
+export const documentStorage = {
+  post(ticket: UploadTicket, file: Blob, onProgress: (fraction: number) => void): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const form = new FormData();
+      for (const [k, v] of Object.entries(ticket.fields)) form.append(k, v);
+      form.append("file", file);
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", ticket.url);
+      xhr.withCredentials = false;
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total); };
+      xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new ApiError(xhr.status, "upload_failed", "upload_failed")));
+      xhr.onerror = () => reject(new ApiError(0, "upload_failed", "upload_failed"));
+      xhr.send(form);
+    });
+  },
+};
+
 /** Same-origin path to come back to after Google (mirrors the server's ReturnPath rule); "/" when unusable. */
 export function returnPath(loc: { pathname: string; search: string } = window.location): string {
   const p = `${loc.pathname}${loc.search}`;

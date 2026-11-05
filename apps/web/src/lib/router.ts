@@ -62,3 +62,26 @@ export function useSearchParam(name: string): [string, (value: string) => void] 
   };
   return [value, set];
 }
+
+/**
+ * Several query-string parameters as one state object ("" when absent), updated together in a
+ * single history replace, so a list screen's filters survive refresh, back from a record and
+ * shared links. An empty value removes its parameter; keys outside `keys` are left alone.
+ */
+export function useSearchParams<K extends string>(keys: readonly K[]): [Record<K, string>, (patch: Partial<Record<K, string>>) => void] {
+  const search = useSyncExternalStore(subscribe, () => window.location.search);
+  const params = new URLSearchParams(search);
+  const values = Object.fromEntries(keys.map((k) => [k, params.get(k) ?? ""])) as Record<K, string>;
+  const set = (patch: Partial<Record<K, string>>) => {
+    const next = new URLSearchParams(window.location.search);
+    for (const [k, v] of Object.entries(patch) as [K, string | undefined][]) {
+      if (v) next.set(k, v); else next.delete(k);
+    }
+    const qs = next.toString();
+    const url = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`;
+    if (url === `${window.location.pathname}${window.location.search}${window.location.hash}`) return;
+    window.history.replaceState(window.history.state, "", url);
+    window.dispatchEvent(new Event(CHANGE));
+  };
+  return [values, set];
+}

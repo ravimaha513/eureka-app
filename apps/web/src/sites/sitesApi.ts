@@ -118,7 +118,8 @@ export interface Bill {
   dueDate: string;
   paidOn: string | null;
   status: BillStatus;
-  invoice: { documentId: string; fileName: string } | null;
+  /** status: the current invoice's scan state (pending, clean, infected, failed, rejected, expired). */
+  invoice: { documentId: string; fileName: string; status?: string } | null;
   rowVersion: number;
 }
 
@@ -185,7 +186,7 @@ export const sitesApi = {
   revealPassword: (id: string) => api<{ password: string }>(`/api/v1/utilities/${enc(id)}/reveal-password`, { method: "POST" }),
 
   // Bills.
-  bills: (kind: SiteKind, id: string, f: { q?: string; from?: string; to?: string } = {}) => api<{ items: Bill[] }>(`${one(kind, id)}/bills${qs(f)}`),
+  bills: (kind: SiteKind, id: string, f: { q?: string; from?: string; to?: string; limit?: number; cursor?: string } = {}) => api<{ items: Bill[]; nextCursor?: string | null }>(`${one(kind, id)}/bills${qs(f)}`),
   createBill: (kind: SiteKind, id: string, body: BillInput) => api<Bill>(`${one(kind, id)}/bills`, { method: "POST", ...json(body) }),
   voidBill: (id: string, reason: string) => api<unknown>(`/api/v1/bills/${enc(id)}/void`, { method: "POST", ...json({ reason }) }),
   /** Starts an invoice upload: a presigned POST, as for paperwork documents. */
@@ -195,8 +196,10 @@ export const sitesApi = {
 };
 
 /** CSV exports (read permission; no passwords, no owner contact). Plain links: the browser downloads them with the session cookie. */
-export const exportUrl = (kind: SiteKind) => `/api/v1/${kind}/export.csv`;
-export const billsExportUrl = (kind: SiteKind, id: string) => `${one(kind, id)}/bills/export.csv`;
+/** The list export, with the same search and status filter as the list (OwnerExportQuery). */
+export const exportUrl = (kind: SiteKind, f: { q?: string; status?: string } = {}) => `/api/v1/${kind}/export.csv${qs(f)}`;
+/** A site's bills export, with the same search as the Bills tab (BillExportQuery). */
+export const billsExportUrl = (kind: SiteKind, id: string, q?: string) => `${one(kind, id)}/bills/export.csv${qs({ q })}`;
 
 export const siteKeys = {
   all: (kind: SiteKind) => [kind] as const,

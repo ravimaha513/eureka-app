@@ -117,6 +117,24 @@ describe("inbox panel", () => {
     expect(bell()).toHaveFocus();
   });
 
+  it("closes on a click outside the panel, without moving focus", async () => {
+    wrap();
+    fireEvent.click(bell());
+    await screen.findByRole("region", { name: "Notifications" });
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("region", { name: "Notifications" })).not.toBeInTheDocument();
+    expect(bell()).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("offers Retry when the list cannot load", async () => {
+    routes["GET /api/v1/notifications"] = () => ({ status: 500, body: {} });
+    wrap();
+    fireEvent.click(bell());
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Could not load notifications.");
+    expect(within(alert).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
   it("marks one entry read or unread, and all read up to the newest entry shown", async () => {
     wrap();
     fireEvent.click(bell());

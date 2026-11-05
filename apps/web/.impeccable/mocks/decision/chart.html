@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Eureka · Hot List — Reservation chart</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#f7f6f0;--surface:#fdfcf8;--ink:#1c1c1a;--muted:#5f5e57;--faint:#6b6961;--rule:#dcd9cc;--rule-2:#ebe9df;--blue:#1f4e9c;--blue-t:#e6ecf6;--side:#1f3f7a;
+--ok:#1e7a46;--ok-t:#e3f1e8;--wl:#a86200;--wl-t:#f8ecd9;--cx:#b42318;--cx-t:#f9e4e1;--mono:"JetBrains Mono",ui-monospace,monospace;--ui:"Archivo",system-ui,sans-serif}
+*{box-sizing:border-box}html,body{width:1440px;height:900px;overflow:hidden;margin:0}
+body{background:var(--paper);color:var(--ink);font:13px/1.4 var(--ui);display:grid;grid-template-columns:224px 1fr}
+aside{background:var(--side);color:#fff;padding:16px 12px;display:flex;flex-direction:column;gap:14px}
+.brand{display:flex;align-items:center;gap:8px;padding:2px 8px 6px;font:700 19px/1 var(--ui);letter-spacing:-.01em}
+.brand i{display:inline-block;width:10px;height:18px;background:#fff;box-shadow:inset 0 0 0 3px #5b86d1}
+.brand small{font:500 10px/1 var(--mono);color:#d0daee;letter-spacing:.08em;margin-left:auto}
+nav h6{margin:0 0 4px;padding:0 8px;font:600 10.5px/1 var(--ui);letter-spacing:.09em;text-transform:uppercase;color:#c3d0ea}
+nav a{display:flex;align-items:center;height:28px;padding:0 8px;border-radius:4px;color:#e8eefa;text-decoration:none;font-size:13.5px}
+nav a.on{background:#fff;color:var(--side);font-weight:600}
+nav a b{margin-left:auto;font:600 11px/18px var(--mono);background:#f2c14e;color:#1c1c1a;padding:0 6px;border-radius:3px}
+main{display:flex;flex-direction:column;min-width:0}
+header.top{height:52px;display:flex;align-items:center;gap:16px;padding:0 24px;border-bottom:1px solid var(--rule);background:var(--surface)}
+.jump{width:340px;height:32px;border:1px solid var(--rule);border-radius:4px;background:var(--paper);display:flex;align-items:center;padding:0 10px;color:var(--faint);gap:8px}
+.jump kbd{margin-left:auto;font:500 11px var(--mono);border:1px solid var(--rule);border-radius:3px;padding:1px 5px;color:var(--muted)}
+.bell{margin-left:auto;position:relative;width:32px;height:32px;border:1px solid var(--rule);border-radius:4px;background:var(--surface);display:grid;place-items:center}
+.bell b{position:absolute;top:-6px;right:-6px;font:700 10px/16px var(--mono);background:var(--cx);color:#fff;min-width:16px;text-align:center;border-radius:8px}
+.user{display:flex;align-items:center;gap:8px;font-size:13px}.user span{width:28px;height:28px;border-radius:50%;background:var(--blue);color:#fff;display:grid;place-items:center;font:600 11px var(--ui)}
+.user em{font-style:normal;color:var(--muted)}
+.page{padding:18px 24px 0;display:flex;flex-direction:column;gap:12px;min-height:0}
+h1{margin:0;font:700 22px/1.1 var(--ui);letter-spacing:-.01em}.sub{margin:4px 0 0;color:var(--muted);font-size:13.5px}
+.filters{display:flex;gap:8px;align-items:flex-end}
+label{display:flex;flex-direction:column;gap:3px;font:500 11.5px var(--ui);color:var(--muted)}
+input,select,button{font:13px var(--ui);color:var(--ink);height:32px;border:1px solid #cfccbe;border-radius:4px;background:var(--surface);padding:0 9px}
+select{appearance:none;padding-right:26px;background:var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%235f5e57' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 9px center}
+button{font-weight:500;cursor:pointer}.btn-p{background:var(--blue);border-color:var(--blue);color:#fff}
+.chips{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.chip{height:24px;display:inline-flex;align-items:center;gap:6px;padding:0 4px 0 8px;border:1px solid var(--rule);border-radius:3px;background:var(--surface);font-size:12px}
+.chip u{text-decoration:none;color:var(--faint);padding:0 4px}.chip strong{font-weight:600}
+.link{color:var(--blue);font-weight:500;font-size:12.5px;margin-left:4px}
+.count{margin-left:auto;display:flex;align-items:baseline;gap:10px;font-size:13px}.count b{font:700 13px var(--mono)}
+.stamp{font:500 11px var(--mono);color:var(--muted);border-left:1px solid var(--rule);padding-left:10px;letter-spacing:.02em}
+.grid{border:1px solid var(--rule);border-radius:4px;background:var(--surface);overflow:hidden}
+.sel{height:36px;display:flex;align-items:center;gap:6px;padding:0 10px;background:var(--blue-t);border-bottom:1px solid #c9d5ea;font-size:13px}
+.sel b{font:700 12.5px var(--mono);color:var(--blue);margin-right:6px}.sel button{height:26px;font-size:12.5px}.sel .ghost{border-color:transparent;background:none;color:var(--blue)}
+table{width:100%;border-collapse:collapse;font:12.5px/1 var(--mono);font-variant-numeric:tabular-nums}
+thead th{height:32px;background:var(--blue);color:#fff;font:600 11.5px var(--ui);letter-spacing:.04em;text-transform:uppercase;text-align:left;padding:0 10px;white-space:nowrap}
+th.s::after{content:" \2195";opacity:.55}th.sd::after{content:" \2193";opacity:1}
+td{height:32px;padding:0 10px;border-bottom:1px solid var(--rule-2);white-space:nowrap}
+tbody tr:nth-child(even) td{background:#faf9f3}tbody tr.ck td{background:#eef2f9}
+td.n,th.n{text-align:right}td.name{font-weight:700}
+.otl{font:500 10.5px var(--ui);color:var(--blue);margin-left:6px;letter-spacing:.02em}
+.code{display:inline-block;width:52px;text-align:center;font:700 11.5px/20px var(--mono);letter-spacing:.06em;border-radius:2px;margin-right:8px}
+.ACT{background:var(--ok-t);color:var(--ok)}.CNF{background:var(--ok);color:#fff}.FOI,.BENCH{background:var(--wl-t);color:var(--wl)}.HOLD{background:var(--cx-t);color:var(--cx)}
+.word{font:12px var(--ui);color:var(--faint)}.dim{color:var(--faint)}
+input[type=checkbox]{width:15px;height:15px;margin:0;accent-color:var(--blue);vertical-align:middle}
+td.act a{font:600 12.5px var(--ui);color:var(--blue);text-decoration:none}
+.pager{display:flex;justify-content:space-between;align-items:center;height:40px;padding:0 10px;font:12px var(--mono);color:var(--muted)}
+.pager div{display:flex;gap:6px}.pager button{height:26px;font-size:12px}
+</style></head><body>
+<aside>
+  <div class="brand"><i></i>Eureka<small>STAFF</small></div>
+  <nav><h6>Work</h6><a class="on" href="#">Hot List</a><a href="#">Candidates</a><a href="#">Submissions</a><a href="#">Interviews</a><a href="#">Placements</a><a href="#">Chat<b>3</b></a></nav>
+  <nav><h6>Hiring</h6><a href="#">Jobs</a><a href="#">Applications</a></nav>
+  <nav><h6>Operations</h6><a href="#">Paperwork &amp; BGC</a><a href="#">Employees</a><a href="#">Payments</a><a href="#">DataHub</a></nav>
+  <nav><h6>Insights</h6><a href="#">Dashboard</a><a href="#">Performance</a><a href="#">Reports</a></nav>
+</aside>
+<main>
+  <header class="top">
+    <div class="jump"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#6b6961" stroke-width="1.6"><circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/></svg>Quick jump<kbd>Ctrl K</kbd></div>
+    <div class="bell"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#1c1c1a" stroke-width="1.4"><path d="M4 11V7a4 4 0 018 0v4l1.5 1.5h-11zM6.5 14h3"/></svg><b>2</b></div>
+    <div class="user"><span>RA</span>Riya A. <em>· Recruiter</em></div>
+  </header>
+  <div class="page">
+    <div><h1>Hot List</h1><p class="sub">Team Rohit's candidates and every candidate open to all teams</p></div>
+    <div class="filters">
+      <label>Search name<input style="width:170px" placeholder="Name or ID"></label>
+      <label>Technology<input style="width:120px" value="Java"></label>
+      <label>Status<select style="width:140px"><option>Active, Bench</option></select></label>
+      <label>Priority<select style="width:80px"><option>P1</option></select></label>
+      <label>Team<select style="width:130px"><option>Any team</option></select></label>
+      <label>Recruiter<select style="width:140px"><option>Any recruiter</option></select></label>
+      <button>More filters · 2</button>
+      <label style="margin-left:auto">Saved view<select style="width:150px"><option>My P1 Java</option></select></label>
+    </div>
+    <div class="chips">
+      <span class="chip">Technology: <strong>Java</strong><u>×</u></span><span class="chip">Status: <strong>Active, Bench</strong><u>×</u></span><span class="chip">Priority: <strong>P1</strong><u>×</u></span><span class="chip">Visa: <strong>H1B</strong><u>×</u></span><span class="chip">Location: <strong>Dallas</strong><u>×</u></span><a class="link">Clear all</a>
+      <div class="count"><span><b>38</b> candidates</span><span class="stamp">CHART PREPARED 09:42</span></div>
+    </div>
+    <div class="grid">
+      <div class="sel"><b>3 selected</b><button>Set status ▾</button><button>Set priority ▾</button><button class="ghost">Clear</button></div>
+      <table>
+        <thead><tr><th style="width:36px"><input type="checkbox" aria-label="Select all"></th><th class="s">Candidate</th><th class="s">Technology</th><th class="s">Status</th><th class="s">Pri</th><th class="s">Team</th><th class="s">Recruiter</th><th class="s">Location</th><th>Visa</th><th class="n sd">Days in market</th><th class="s">Stage</th><th></th></tr></thead>
+        <tbody>
+<tr><td><input type="checkbox"></td><td class="name">Cand25 Test</td><td>Java</td><td><span class="code ACT">ACT</span><span class="word">Active</span></td><td>P1</td><td>Team Rohit</td><td>r1a</td><td>Dallas</td><td>H1B</td><td class="n">31</td><td>Hot list</td><td class="act"><a href="#">Open</a></td></tr>
+<tr class="ck"><td><input type="checkbox" checked></td><td class="name">Cand18 Test</td><td>Java</td><td><span class="code FOI">FOI</span><span class="word">Full of interviews</span></td><td>P1</td><td>Team Rohit</td><td>r1b</td><td>Dallas</td><td>H1B</td><td class="n">54</td><td>Interview R2</td><td class="act"><a href="#">Open</a></td></tr>
+<tr class="ck"><td><input type="checkbox" checked></td><td class="name">Cand10 Test</td><td>Java Spring</td><td><span class="code ACT">ACT</span><span class="word">Active</span></td><td>P1</td><td>Team Rohit</td><td>r1a</td><td>Austin</td><td>H1B</td><td class="n">12</td><td>Submitted ×3</td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td><input type="checkbox"></td><td class="name">Cand24 Test</td><td>Java</td><td><span class="code FOI">FOI</span><span class="word">Full of interviews</span></td><td>P1</td><td>Team Rohit</td><td>r1b</td><td>Dallas</td><td>H1B</td><td class="n">77</td><td>Interview R1</td><td class="act"><a href="#">Open</a></td></tr>
+<tr class="ck"><td><input type="checkbox" checked></td><td class="name">Cand15 Test</td><td>Java / AWS</td><td><span class="code FOI">FOI</span><span class="word">Full of interviews</span></td><td>P1</td><td>Team Rohit</td><td>r1b</td><td>Dallas</td><td>H1B</td><td class="n">40</td><td>Interview R3</td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td><input type="checkbox"></td><td class="name">Cand82 Test<span class="otl">Open to all teams</span></td><td>Java</td><td><span class="code ACT">ACT</span><span class="word">Active</span></td><td>P1</td><td>Team Vikram</td><td>r3a</td><td>Austin</td><td>H1B</td><td class="n">8</td><td>Hot list</td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td><input type="checkbox"></td><td class="name">Cand26 Test</td><td>Java</td><td><span class="code HOLD">HOLD</span><span class="word">On hold</span></td><td>P1</td><td>Team Rohit</td><td class="dim">Unassigned</td><td>Dallas</td><td>H1B</td><td class="n">103</td><td>Hot list</td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td><input type="checkbox"></td><td class="name">Cand9 Test</td><td>Java</td><td><span class="code FOI">FOI</span><span class="word">Full of interviews</span></td><td>P1</td><td>Team Rohit</td><td>r1a</td><td>Dallas</td><td>H1B</td><td class="n">66</td><td>Interview R2</td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td><input type="checkbox"></td><td class="name">Cand84 Test<span class="otl">Open to all teams</span></td><td>Java</td><td><span class="code FOI">FOI</span><span class="word">Full of interviews</span></td><td>P1</td><td>Team Vikram</td><td class="dim">Unassigned</td><td>Austin</td><td>H1B</td><td class="n">21</td><td>Interview R1</td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td><input type="checkbox"></td><td class="name">Cand11 Test</td><td>Java</td><td><span class="code CNF">CNF</span><span class="word">Confirmation</span></td><td>P1</td><td>Team Rohit</td><td class="dim">Unassigned</td><td>Dallas</td><td>H1B</td><td class="n">95</td><td>Placed</td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td><input type="checkbox"></td><td class="name">Cand54 Test<span class="otl">Open to all teams</span></td><td>Java / Kafka</td><td><span class="code FOI">FOI</span><span class="word">Full of interviews</span></td><td>P1</td><td>Team Anjali</td><td class="dim">Unassigned</td><td>Austin</td><td>H1B</td><td class="n">49</td><td>Interview R1</td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td><input type="checkbox"></td><td class="name">Cand78 Test</td><td>Java</td><td><span class="code FOI">FOI</span><span class="word">Full of interviews</span></td><td>P1</td><td>Team Vikram</td><td class="dim">Unassigned</td><td>Dallas</td><td>H1B</td><td class="n">18</td><td>Submitted ×1</td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td><input type="checkbox"></td><td class="name">Cand12 Test</td><td>Java</td><td><span class="code BENCH">BENCH</span><span class="word">Bench</span></td><td>P1</td><td>Team Rohit</td><td>r1a</td><td>Austin</td><td>H1B</td><td class="n">140</td><td>Hot list</td><td class="act"><a href="#">Open</a></td></tr>
+        </tbody>
+      </table>
+      <div class="pager"><span>1–38 of 38</span><div><button disabled>‹ Prev</button><button disabled>Next ›</button></div></div>
+    </div>
+  </div>
+</main>
+</body></html>

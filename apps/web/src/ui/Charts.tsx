@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 /**
@@ -8,10 +8,12 @@ import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContaine
  * the theme (styles.css), so the charts follow light and dark mode.
  */
 
-/** Categorical palette, readable on white and on the dark surface. */
-export const PALETTE = ["#6366f1", "#14b8a6", "#f59e0b", "#f43f5e", "#8b5cf6", "#0ea5e9", "#64748b"];
-/** Funnel stages run violet → indigo → teal → aqua → sky, like water narrowing. */
-const FUNNEL_COLOURS = ["#8b5cf6", "#6366f1", "#14b8a6", "#2dd4bf", "#7dd3fc", "#a5b4fc"];
+/**
+ * Categorical palette: the `--chart-1..6` tokens (styles.css), redefined for dark theme, so a
+ * series keeps its hue in both themes. Values are CSS `var()` strings, usable as SVG fill/stroke
+ * and inline `background`. No red: red means error.
+ */
+export const PALETTE = [1, 2, 3, 4, 5, 6].map((n) => `var(--chart-${n})`);
 
 const shortDay = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
@@ -36,20 +38,11 @@ export function TrendChart({ data, series, label, xFormat = shortDay, yFormat, v
   valueFormat?: (n: number) => string;
   height?: number;
 }) {
-  const id = useId().replace(/:/g, "");
   const total = (k: string) => data.reduce((n, r) => n + Number(r[k] ?? 0), 0);
   const fmt = valueFormat ?? String;
   return (
     <Figure height={height} label={`${label}: ${series.map((s) => `${s.label} ${fmt(total(s.key))} in total`).join(", ")}`}>
       <AreaChart data={data} margin={{ top: 10, right: 12, bottom: 0, left: -14 }}>
-        <defs>
-          {series.map((s) => (
-            <linearGradient key={s.key} id={`${id}-${s.key}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={s.color} stopOpacity={0.28} />
-              <stop offset="95%" stopColor={s.color} stopOpacity={0} />
-            </linearGradient>
-          ))}
-        </defs>
         <CartesianGrid vertical={false} strokeDasharray="4 4" />
         <XAxis dataKey="date" tickFormatter={xFormat} tickLine={false} axisLine={false} minTickGap={24} dy={6} />
         <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={yFormat ? 56 : 44} tickFormatter={yFormat} />
@@ -57,7 +50,7 @@ export function TrendChart({ data, series, label, xFormat = shortDay, yFormat, v
           formatter={valueFormat ? (v) => valueFormat(Number(v)) : undefined} />
         {series.map((s) => (
           <Area key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={s.color} strokeWidth={2.25}
-            fill={`url(#${id}-${s.key})`} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} isAnimationActive={false} />
+            fill={s.color} fillOpacity={0.08} dot={false} activeDot={{ r: 5, strokeWidth: 2 }} isAnimationActive={false} />
         ))}
       </AreaChart>
     </Figure>
@@ -99,15 +92,13 @@ export function PieShare({ parts, label, centre, format = String, centreFormat }
 }
 
 /**
- * The pipeline as a flowing funnel: one column per stage with its count on top, a band
- * whose height follows the count, and smooth necks between stages.
+ * The pipeline as a funnel: one column per stage with its count on top, a flat band (solid
+ * `--chart-n`) whose height follows the count, and smooth necks between stages.
  */
 export function FunnelBars({ stages, label }: { stages: { key: string; label: string; value: number }[]; label: string }) {
-  const id = useId().replace(/:/g, "");
   const W = 100 * stages.length, H = 200, mid = H / 2, neck = 26;
   const max = Math.max(1, ...stages.map((s) => s.value));
   const half = (v: number) => Math.max(8, (v / max) * (H / 2 - 6));
-  const halo = 7;
   // Each stage is a flat band; between stages a cubic curve narrows to the next height.
   const bandPath = (i: number, pad: number) => {
     const x0 = i * 100, x1 = x0 + 100;
@@ -123,16 +114,7 @@ export function FunnelBars({ stages, label }: { stages: { key: string; label: st
         {stages.map((s) => <div key={s.key}><span>{s.label}</span><b>{s.value}</b></div>)}
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
-        <defs>
-          {stages.map((s, i) => (
-            <linearGradient key={s.key} id={`${id}-${i}`} x1="0" x2="1">
-              <stop offset="0" stopColor={FUNNEL_COLOURS[i % FUNNEL_COLOURS.length]} />
-              <stop offset="1" stopColor={FUNNEL_COLOURS[(i + 1) % FUNNEL_COLOURS.length]} stopOpacity={i + 1 < stages.length ? 1 : 0.85} />
-            </linearGradient>
-          ))}
-        </defs>
-        {stages.map((s, i) => <path key={`h-${s.key}`} d={bandPath(i, halo)} fill={FUNNEL_COLOURS[i % FUNNEL_COLOURS.length]} opacity={0.18} />)}
-        {stages.map((s, i) => <path key={s.key} d={bandPath(i, 0)} fill={`url(#${id}-${i})`} />)}
+        {stages.map((s, i) => <path key={s.key} d={bandPath(i, 0)} fill={PALETTE[i % PALETTE.length]} />)}
         {stages.slice(1).map((s, i) => <line key={`l-${s.key}`} x1={(i + 1) * 100} x2={(i + 1) * 100} y1={0} y2={H} className="funneldiv" vectorEffect="non-scaling-stroke" />)}
       </svg>
     </div>

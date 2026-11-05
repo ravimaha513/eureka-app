@@ -30,6 +30,8 @@ const resultCount = (page: Page) => page.getByRole("status").filter({ hasText: /
 /** Filters to active, team-only candidates and waits for the result count to settle. */
 async function filterActiveTeamOnly(page: Page) {
   await filter(page, "Status").selectOption({ label: "Active" });
+  // Visibility sits behind "More filters".
+  await filters(page).getByRole("button", { name: /^More filters/ }).click();
   await filter(page, "Visibility").selectOption({ label: "Team only" });
   await expect(resultCount(page)).toContainText("on page 1");
   await expect(hotlist(page)).not.toHaveAttribute("aria-busy", "true");

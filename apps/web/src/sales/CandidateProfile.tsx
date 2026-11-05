@@ -1,8 +1,11 @@
 import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import "./profile.css";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isSafeHttpsUrl } from "@eureka/shared";
 import { ApiError, type Me } from "../api";
 import { ConfirmDialog } from "../ui/Dialog";
+import { Menu } from "../ui/Menu";
+import { Tabs } from "../ui/Tabs";
 import { CandidateResumes } from "./CandidateResumes";
 import { DocumentsSection } from "../documents/DocumentsSection";
 import { CandidateMetrics } from "./CandidateMetrics";
@@ -10,7 +13,7 @@ import { CandidateTimeline } from "./CandidateTimeline";
 import { NonResponseCard } from "../pipelinereport/NonResponseCard";
 import { CandidateWorkAuthorization } from "../workauth/CandidateWorkAuthorization";
 import { CandidateTraining } from "../training/CandidateTraining";
-import { navigate } from "../lib/router";
+import { navigate, useSearchParams } from "../lib/router";
 import { screenPath } from "../nav";
 import { CandidateSubmissions } from "../pipeline/CandidateSubmissions";
 import { pipelineKeys } from "../pipeline/pipelineApi";
@@ -48,8 +51,17 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
   const pendingWarning = useRef("");
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("overview");
-  const tabsId = useId();
+  // The open tab lives in the URL (?tab=submissions) so reload and shared links keep it.
+  const [, setParams] = useSearchParams(["tab"]);
+  const showTab = (t: Tab) => setParams({ tab: t === "overview" ? "" : t });
+  // The list behind the profile shares the query string: drop ?tab= once this profile closes.
+  useEffect(() => () => {
+    const sp = new URLSearchParams(window.location.search);
+    if (!sp.has("tab") || window.location.pathname.endsWith(`/${id}`)) return;
+    sp.delete("tab");
+    const qs = sp.toString();
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`);
+  }, [id]);
 
   const q = useQuery({ queryKey: salesKeys.candidate(id), queryFn: () => salesApi.candidate(id) });
 
@@ -71,7 +83,7 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
     finally { setBusy(null); }
   };
 
-  const back = <button type="button" className="btn sm backbtn" onClick={onBack}>← {backLabel}</button>;
+  const back = <button type="button" className="btn sm backbtn cp-back" onClick={() => { setParams({ tab: "" }); onBack(); }}>← {backLabel}</button>;
 
   if (q.isLoading) return <>{back}<Loading /></>;
   if (q.error || !q.data) {
@@ -159,38 +171,43 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
     ...(caps.has("training:read") ? [{ key: "training" as const, label: "Training" }] : []),
     { key: "activity", label: "Activity" },
   ];
-  const current = tabs.some((t) => t.key === tab) ? tab : "overview";
+  const openSubmit = () => { pendingWarning.current = ""; setWarning(""); setModal({ kind: "submit" }); };
+  // "Active/All Teams" repeats the Open to all teams chip and "N/A" says nothing; other combined labels stay.
+  const extraLabel = c.statusLabel && c.statusLabel.includes("/") && c.statusLabel !== "N/A" && c.visibility !== "all_teams" ? c.statusLabel : null;
 
   return (
     <>
       {back}
-      <div className="pagehead">
-        <div>
-          <h1 ref={headingRef} tabIndex={-1}>{c.name}</h1>
-          <p className="sub">
-            <StatusBadge status={c.status} />{" "}
-            {c.statusLabel && c.statusLabel.includes("/") && <>{c.statusLabel}{" "}</>}
-            {c.visibility === "all_teams" && <><OpenToAllBadge />{" "}</>}
-            {c.visibility === "selected_teams" && <><SharedBadge />{" "}</>}
-            <Priority p={c.priority} /> · {c.technology} · {c.team.name}
-          </p>
+      <div className="pagehead cp-head">
+        <h1 ref={headingRef} tabIndex={-1}>{c.name}</h1>
+      </div>
+      <div className="actionstrip cp-strip">
+        <div className="as-status">
+          <StatusBadge status={c.status} />
+          {c.visibility === "all_teams" && <OpenToAllBadge />}
+          {c.visibility === "selected_teams" && <SharedBadge />}
+          <Priority p={c.priority} />
+          <span className="as-note">
+            {extraLabel && <>{extraLabel} · </>}{c.technology} · {c.team.name} · {c.location.name}
+          </span>
         </div>
-        <div className="rowactions push">
+        <div className="as-actions">
+          {canSubmit && <button type="button" className="btn primary" onClick={openSubmit}>Log submission</button>}
           {canAddToHotList && (
             <button type="button" className="btn" disabled={busy !== null} aria-busy={busy === "to:active" || undefined}
               onClick={() => void act("to:active", () => salesApi.transition(c.id, "active"), "Added to the Hot List (status Active).", "transition")}>
               Add to Hot List
             </button>
           )}
+          {c.canAssignTeam && <button type="button" className="btn" onClick={() => setModal({ kind: "team" })}>Assign team</button>}
           {showStatus && (
             <StatusMenu from={c.status} next={next} busy={busy}
               onPick={(to) => to === "terminated" ? setModal({ kind: "terminate" })
                 : void act(`to:${to}`, () => salesApi.transition(c.id, to), `Status changed to ${statusLabel(to)}.`, "transition")} />
           )}
-          {c.canAssignTeam && <button type="button" className="btn" onClick={() => setModal({ kind: "team" })}>Assign team</button>}
           {canUpdate && <button type="button" className="btn" onClick={() => setModal({ kind: "edit" })}>Edit profile</button>}
-          {canSubmit && <button type="button" className="btn primary" onClick={() => { pendingWarning.current = ""; setWarning(""); setModal({ kind: "submit" }); }}>Log submission</button>}
-          {canDelete && <button type="button" className="btn danger" onClick={() => setModal({ kind: "delete" })}>Delete…</button>}
+          <Menu text="More" className="cp-more" label={`More actions for ${c.name}`}
+            items={[canDelete && { label: "Delete…", danger: true, onSelect: () => setModal({ kind: "delete" }) }]} />
         </div>
       </div>
 
@@ -198,89 +215,76 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
       {warning && <p className="note warn" role="alert">{warning}</p>}
       {actionError && <p className="banner error" role="alert">{actionError}</p>}
 
-      <div className="tabs cp-tabs" role="tablist" aria-label="Candidate sections">
-        {tabs.map((t) => (
-          <button key={t.key} type="button" role="tab" id={`${tabsId}-t-${t.key}`} className="tab" aria-selected={current === t.key}
-            aria-controls={`${tabsId}-p-${t.key}`} tabIndex={current === t.key ? 0 : -1} onClick={() => setTab(t.key)}
-            onKeyDown={(e) => {
-              const i = tabs.findIndex((x) => x.key === t.key);
-              const j = e.key === "ArrowRight" ? (i + 1) % tabs.length : e.key === "ArrowLeft" ? (i - 1 + tabs.length) % tabs.length : -1;
-              if (j < 0) return;
-              e.preventDefault(); setTab(tabs[j]!.key);
-              document.getElementById(`${tabsId}-t-${tabs[j]!.key}`)?.focus();
-            }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs label="Candidate sections" tabs={tabs} urlKey="tab" className="cp-tabs" panelClassName="cp-panel">
+        {(current) => <>
+          {current === "overview" && (
+            <div className="cp-overview">
+              <section className="card pad cp-details" aria-labelledby="facts-h">
+                <h2 id="facts-h">Details</h2>
+                <div className="cp-facts">{factList(filled)}</div>
+                {blank.length > 0 && (
+                  <details className="cp-blank">
+                    <summary>Not recorded ({blank.length})</summary>
+                    <div className="cp-facts">{factList(blank)}</div>
+                  </details>
+                )}
+              </section>
+              {/* Full width under Details and the side cards on desktop; right after Details on phones. */}
+              <div className="cp-metricscell"><CandidateMetrics candidateId={c.id} /></div>
+              <div className="cp-side">
+                {(canVisibility || canRate) && (
+                  <section className="card pad" aria-labelledby="manage-h">
+                    <h2 id="manage-h">Sharing and rating</h2>
+                    {canVisibility && (
+                      <VisibilitySwitch value={c.visibility} busy={busy === "vis"}
+                        onChange={(to) => void act("vis", () => salesApi.setVisibility(c.id, to),
+                          to === "all_teams" ? `${c.name} is now open to all teams.` : `${c.name} is now visible to your team only.`)} />
+                    )}
+                    {canVisibility && c.visibility !== "all_teams" && (
+                      <TeamSharePicker ownTeamId={c.team.id} shared={c.sharedTeams ?? []} busy={busy === "share"}
+                        onSave={(ids) => void act("share", () => salesApi.setVisibility(c.id, ids.length ? "selected_teams" : "team", ids.length ? ids : undefined),
+                          ids.length ? `${c.name} is now shared with ${ids.length === 1 ? "1 team" : `${ids.length} teams`}.` : `${c.name} is now visible to your team only.`)} />
+                    )}
+                    {canRate && (
+                      <RatingForm current={c.technicalRating} busy={busy === "rating"}
+                        onSave={(r) => void act("rating", () => salesApi.setRating(c.id, r), `Technical rating set to ${r} of 5.`)} />
+                    )}
+                  </section>
+                )}
+                <NonResponseCard candidateId={c.id} />
+              </div>
+            </div>
+          )}
 
-      <div role="tabpanel" id={`${tabsId}-p-${current}`} aria-labelledby={`${tabsId}-t-${current}`}>
-        {current === "overview" && <CandidateMetrics candidateId={c.id} />}
-        {current === "overview" && (
-          <div className="cp-overview">
-            <section className="card pad" aria-labelledby="facts-h">
-              <h2 id="facts-h">Details</h2>
-              <div className="cp-facts">{factList(filled)}</div>
-              {blank.length > 0 && (
-                <details className="cp-blank">
-                  <summary>Not recorded ({blank.length})</summary>
-                  <div className="cp-facts">{factList(blank)}</div>
-                </details>
-              )}
-            </section>
-            <div className="cp-side">
-              {(canVisibility || canRate) && (
-                <section className="card pad" aria-labelledby="manage-h">
-                  <h2 id="manage-h">Sharing and rating</h2>
-                  {canVisibility && (
-                    <VisibilitySwitch value={c.visibility} busy={busy === "vis"}
-                      onChange={(to) => void act("vis", () => salesApi.setVisibility(c.id, to),
-                        to === "all_teams" ? `${c.name} is now open to all teams.` : `${c.name} is now visible to your team only.`)} />
-                  )}
-                  {canVisibility && c.visibility !== "all_teams" && (
-                    <TeamSharePicker ownTeamId={c.team.id} shared={c.sharedTeams ?? []} busy={busy === "share"}
-                      onSave={(ids) => void act("share", () => salesApi.setVisibility(c.id, ids.length ? "selected_teams" : "team", ids.length ? ids : undefined),
-                        ids.length ? `${c.name} is now shared with ${ids.length === 1 ? "1 team" : `${ids.length} teams`}.` : `${c.name} is now visible to your team only.`)} />
-                  )}
-                  {canRate && (
-                    <RatingForm current={c.technicalRating} busy={busy === "rating"}
-                      onSave={(r) => void act("rating", () => salesApi.setRating(c.id, r), `Technical rating set to ${r} of 5.`)} />
-                  )}
+          {current === "documents" && (
+            <div className="cp-docs">
+              {caps.has("document:read") && <CandidateResumes candidateId={c.id} />}
+              {(c.companies !== undefined || c.documentsStatus !== undefined) && (
+                <section className="card pad" aria-labelledby="compliance-h">
+                  <h2 id="compliance-h">Companies and documents</h2>
+                  <dl className="facts">
+                    <dt>Documents status</dt><dd>{documentsLabel(c.documentsStatus)}</dd>
+                    {c.companies && (
+                      <>
+                        <dt>E-Verify company</dt><dd>{c.companies.everify?.name ?? "—"}</dd>
+                        <dt>Offer letter company</dt><dd>{c.companies.offerLetter?.name ?? "—"}</dd>
+                        <dt>1099 company</dt><dd>{c.companies.form1099?.name ?? "—"}</dd>
+                      </>
+                    )}
+                  </dl>
+                  {c.canEditCompliance && <button type="button" className="btn" onClick={() => setModal({ kind: "compliance" })}>Edit companies and documents</button>}
                 </section>
               )}
-              <NonResponseCard candidateId={c.id} />
+              {caps.has("document:read") && <div className="cp-wide"><DocumentsSection owner={{ kind: "candidate", id: c.id }} title="Paperwork documents" /></div>}
+              {caps.has("visa:read") && <div className="cp-wide"><CandidateWorkAuthorization candidateId={c.id} /></div>}
             </div>
-          </div>
-        )}
+          )}
 
-        {current === "documents" && (
-          <div className="cp-docs">
-            {caps.has("document:read") && <CandidateResumes candidateId={c.id} />}
-            {(c.companies !== undefined || c.documentsStatus !== undefined) && (
-              <section className="card pad" aria-labelledby="compliance-h">
-                <h2 id="compliance-h">Companies and documents</h2>
-                <dl className="facts">
-                  <dt>Documents status</dt><dd>{documentsLabel(c.documentsStatus)}</dd>
-                  {c.companies && (
-                    <>
-                      <dt>E-Verify company</dt><dd>{c.companies.everify?.name ?? "—"}</dd>
-                      <dt>Offer letter company</dt><dd>{c.companies.offerLetter?.name ?? "—"}</dd>
-                      <dt>1099 company</dt><dd>{c.companies.form1099?.name ?? "—"}</dd>
-                    </>
-                  )}
-                </dl>
-                {c.canEditCompliance && <button type="button" className="btn" onClick={() => setModal({ kind: "compliance" })}>Edit companies and documents</button>}
-              </section>
-            )}
-            {caps.has("document:read") && <div className="cp-wide"><DocumentsSection owner={{ kind: "candidate", id: c.id }} title="Paperwork documents" /></div>}
-            {caps.has("visa:read") && <div className="cp-wide"><CandidateWorkAuthorization candidateId={c.id} /></div>}
-          </div>
-        )}
-
-        {current === "submissions" && <CandidateSubmissions candidateId={c.id} />}
-        {current === "training" && <CandidateTraining candidateId={c.id} onChanged={refresh} />}
-        {current === "activity" && <CandidateTimeline id={c.id} />}
-      </div>
+          {current === "submissions" && <CandidateSubmissions candidateId={c.id} onLogSubmission={canSubmit ? openSubmit : undefined} />}
+          {current === "training" && <CandidateTraining candidateId={c.id} onChanged={refresh} />}
+          {current === "activity" && <CandidateTimeline id={c.id} />}
+        </>}
+      </Tabs>
 
       {modal?.kind === "edit" && (
         <EditProfileDialog candidate={c} onClose={() => setModal(null)} onSaved={() => { setModal(null); announce("Profile saved."); refresh(); }} />
@@ -292,10 +296,17 @@ export function CandidateProfile({ id, me, onBack, backLabel = "Back" }: {
         <ComplianceDialog candidate={c} onClose={() => setModal(null)} onSaved={() => { setModal(null); announce("Companies and documents saved."); refresh(); }} />
       )}
       {modal?.kind === "submit" && (
-        <LogSubmissionDialog candidate={c}
+        <LogSubmissionDialog candidate={{ id: c.id, name: c.name, status: c.status }}
           canAddClient={caps.has("client:create")} canAddVendor={caps.has("vendor:create")}
           onClose={() => { setModal(null); setWarning(pendingWarning.current); }}
-          onLogged={(r) => { announce("Submission logged."); void qc.invalidateQueries({ queryKey: pipelineKeys.submissions }); pendingWarning.current = r.duplicateWarning ? DUPLICATE_WARNING : ""; }} />
+          onLogged={(r) => {
+            announce("Submission logged.");
+            void qc.invalidateQueries({ queryKey: pipelineKeys.submissions });
+            void qc.invalidateQueries({ queryKey: salesKeys.metrics(c.id) });
+            pendingWarning.current = r.duplicateWarning ? DUPLICATE_WARNING : "";
+            // Land on the Submissions tab so the new row is in view.
+            if (caps.has("submission:read")) showTab("submissions");
+          }} />
       )}
       {modal?.kind === "terminate" && (
         <ConfirmDialog title={`Terminate ${c.name}?`} confirmLabel="Terminate" danger formatError={(e) => salesError(e, "transition")}

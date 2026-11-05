@@ -39,7 +39,7 @@ describe("portal screens", () => {
     expect(postedAgo("2026-10-05T01:00:00Z", now)).toBe("Posted today");
   });
 
-  it("Finding Job: cards with pills, posted time, Apply now / Applied; applies with the portal headers", async () => {
+  it("Open positions: cards with pills, posted time, Apply now / Applied; apply is confirmed, then sent with the portal headers", async () => {
     window.history.replaceState(null, "", "/portal/jobs");
     wrap(<PortalApp />);
     const card = await screen.findByRole("article", { name: "HR Generalist" });
@@ -47,7 +47,13 @@ describe("portal screens", () => {
     expect(within(card).getByText("Full time")).toBeInTheDocument();
     expect(within(card).getByText("4 days ago")).toBeInTheDocument();
     expect(within(await screen.findByRole("article", { name: "Sales Rep" })).getByRole("button", { name: "Applied" })).toBeDisabled();
+    expect(screen.getByRole("heading", { level: 1, name: /Open positions/ })).toBeInTheDocument();
     fireEvent.click(within(card).getByRole("button", { name: "Apply now" }));
+    // Review step: nothing is sent until the applicant confirms.
+    const dlg = await screen.findByRole("dialog", { name: "Apply for HR Generalist" });
+    expect(within(dlg).getByText(/r@example.com/)).toBeInTheDocument();
+    expect(api.writes()).toHaveLength(0);
+    fireEvent.click(within(dlg).getByRole("button", { name: "Send application" }));
     await waitFor(() => expect(api.writes()[0]!.path).toBe("/api/portal/jobs/j1/apply"));
     expect(api.writes()[0]!.headers["x-csrf-token"]).toBe("ptok");
     expect(await screen.findByText(/Application sent/)).toBeInTheDocument();
@@ -72,6 +78,8 @@ describe("portal screens", () => {
     expect(d.textContent).not.toMatch(/rating|notes|panel/i);
     fireEvent.click(within(d).getByRole("button", { name: "Close application details" }));
     fireEvent.click(within(row).getByRole("button", { name: "Withdraw application for HR Generalist" }));
+    expect(await screen.findByText(/cannot be undone/)).toBeInTheDocument();
+    expect(api.writes()).toHaveLength(0);
     fireEvent.click(await screen.findByRole("button", { name: "Withdraw" }));
     await waitFor(() => expect(api.writes()[0]!.path).toBe("/api/portal/applications/ap1/withdraw"));
     expect(await screen.findByText("Application withdrawn.")).toBeInTheDocument();

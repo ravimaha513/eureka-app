@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Eureka · Hot List</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
+<style>
+:root{--navy:#14254f;--red:#c8102e;--stock:#fff;--ground:#eef1f6;--carbon:#4b3a8c;--ink:#1b2333;--mute:#5d6880;--rule:#d5dbe6;--hair:#e6eaf1;--sel:#f3f0fb}
+*{box-sizing:border-box}
+html,body{width:1440px;height:900px;overflow:hidden;margin:0}
+body{background:var(--ground);color:var(--ink);font:400 13.5px/1.3 Archivo,system-ui,sans-serif;display:grid;grid-template-columns:224px 1fr}
+.cap{font-stretch:75%;font-weight:650;font-size:11px;letter-spacing:.09em;text-transform:uppercase}
+.num{font-variant-numeric:tabular-nums;color:var(--carbon);font-weight:600}
+/* shell */
+aside{background:var(--navy);color:#fff;border-right:3px solid var(--red);padding:18px 0;height:900px}
+.brand{padding:0 20px 18px;display:block}
+.brand b{font-stretch:75%;font-weight:800;font-size:26px;letter-spacing:.14em;display:block;line-height:1}
+.brand svg{display:block;margin-top:2px}
+.sec{padding:12px 20px 4px;color:#9fb0d6}
+nav a{display:flex;justify-content:space-between;align-items:center;padding:5px 20px;color:#e4e9f5;text-decoration:none;font-size:13.5px}
+nav a.on{background:#0d1a3b;color:#fff;font-weight:600;box-shadow:inset 3px 0 0 var(--red)}
+.badge{background:var(--red);color:#fff;font-size:11px;font-weight:700;border-radius:8px;padding:0 6px;font-variant-numeric:tabular-nums}
+main{display:flex;flex-direction:column;min-width:0}
+header{height:52px;background:#fff;border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:16px;padding:0 24px}
+.jump{width:360px;height:32px;border:1px solid var(--rule);border-radius:4px;display:flex;align-items:center;padding:0 10px;color:var(--mute);justify-content:space-between}
+kbd{font:600 11px Archivo;border:1px solid var(--rule);border-radius:3px;padding:1px 5px;color:var(--mute)}
+.bell{margin-left:auto;position:relative;width:32px;height:32px;display:grid;place-items:center;border:1px solid var(--rule);border-radius:4px;background:#fff}
+.bell .badge{position:absolute;top:-6px;right:-7px}
+.user{display:flex;align-items:center;gap:8px}.av{width:30px;height:30px;border-radius:50%;background:var(--navy);color:#fff;display:grid;place-items:center;font-size:11px;font-weight:700}
+.page{padding:16px 24px 0}
+h1{margin:0;font-stretch:75%;font-weight:750;font-size:24px;letter-spacing:.06em;text-transform:uppercase;color:var(--navy)}
+.sub{color:var(--mute);margin:2px 0 12px}
+.filters{display:flex;gap:8px;align-items:flex-end}
+label.f{display:flex;flex-direction:column;gap:3px;color:var(--mute)}
+input,select,button{font:inherit;color:var(--ink);height:30px;border:1px solid #c3cbd9;border-radius:4px;background:#fff;padding:0 8px}
+select{padding-right:22px;appearance:none;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2314254f' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 8px center}
+button{cursor:pointer}.btn2{border-color:var(--navy);color:var(--navy);font-weight:600}
+.chips{display:flex;gap:6px;align-items:center;margin:10px 0 8px}
+.chip{border:1px solid #c3cbd9;background:#fff;border-radius:3px;padding:2px 8px;font-size:12.5px}.chip i{font-style:normal;color:var(--mute);margin-left:4px}
+.clear{color:var(--red);font-weight:600;font-size:12.5px;margin-left:4px}
+.count{margin-left:auto;color:var(--mute)}
+.wrap{background:#fff;border:1px solid var(--rule);border-radius:4px;overflow:hidden}
+.selbar{height:34px;background:var(--navy);color:#fff;display:flex;align-items:center;gap:6px;padding:0 12px}
+.selbar button{height:24px;background:transparent;color:#fff;border-color:#4a5d8c;font-size:12.5px}
+.selbar .lnk{border:0;color:#ffb3bf;font-weight:600}
+table{width:100%;border-collapse:collapse}
+th{height:30px;text-align:left;color:var(--mute);background:#f6f8fb;border-bottom:1px solid var(--rule);padding:0 6px;white-space:nowrap}
+th.s::after{content:" ↕";color:#a7b1c4}th.sd::after{content:" ↓";color:var(--red)}
+td{height:34px;padding:0 6px;border-bottom:1px solid var(--hair);white-space:nowrap}
+tr.on td{background:var(--sel)}
+td.stub,th.stub{width:50px;padding:0 4px 0 8px;border-right:1px dashed #9aa6bd;background-clip:padding-box}
+td.stub input{vertical-align:middle;margin-right:5px}
+input[type=checkbox]{width:14px;height:14px;margin:0;accent-color:var(--carbon);padding:0}
+.p1{color:var(--red);font-stretch:75%;font-weight:750;font-size:11px;letter-spacing:.06em}
+.nm{font-weight:600;color:var(--navy)}.open{font-size:10.5px;color:var(--carbon);margin-left:5px;font-stretch:75%;font-weight:650;letter-spacing:.06em;text-transform:uppercase}
+.st{display:inline-block;padding:1px 6px;border-radius:2px;font-size:12px}
+.st.a{background:#e5f2ea;color:#1d6b3a}.st.f{background:#e9e6f6;color:var(--carbon)}.st.h{background:#fbefd9;color:#86560b}.st.b{background:#eef1f6;color:var(--mute)}.st.c{background:#fde6ea;color:var(--red)}
+.una{color:var(--mute);font-style:italic}
+.legs{display:flex;gap:2px;align-items:center}
+.leg{height:18px;min-width:30px;padding:0 5px;display:inline-grid;place-items:center;font-stretch:75%;font-weight:650;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--navy);border-radius:2px;color:var(--navy)}
+.leg+.leg{border-left-style:dashed}
+.leg.u{background:var(--navy);color:#fff}
+.leg.c{border:1.5px solid var(--red);color:var(--red);background:#fff}
+.leg.x{border-color:#e0b3bb;color:var(--red);background:#fff;text-decoration:line-through}
+.leg.n{border-color:#cdd4e1;min-width:10px;padding:0}
+td.act{text-align:right;padding-right:12px}td.act a{font-weight:600;color:var(--navy);text-decoration:none;border:1px solid #c3cbd9;border-radius:3px;padding:3px 9px;font-size:12.5px}
+.pager{display:flex;justify-content:space-between;align-items:center;height:36px;padding:0 12px;color:var(--mute)}
+.pager .legend{display:flex;gap:10px;align-items:center}.pager .legend .leg{min-width:0}
+</style></head><body>
+<aside>
+ <div class="brand"><b>EUREKA</b><svg width="132" height="14" viewBox="0 0 132 14"><path d="M2 3 Q66 18 130 2" fill="none" stroke="#c8102e" stroke-width="2.4" stroke-linecap="round"/></svg></div>
+ <nav>
+  <div class="sec cap">Work</div><a class="on" href="#">Hot List</a><a href="#">Candidates</a><a href="#">Submissions</a><a href="#">Interviews</a><a href="#">Placements</a><a href="#">Chat <span class="badge">3</span></a>
+  <div class="sec cap">Hiring</div><a href="#">Jobs</a><a href="#">Applications</a>
+  <div class="sec cap">Operations</div><a href="#">Paperwork &amp; BGC</a><a href="#">Employees</a><a href="#">Payments</a><a href="#">DataHub</a>
+  <div class="sec cap">Insights</div><a href="#">Dashboard</a><a href="#">Performance</a><a href="#">Reports</a>
+ </nav>
+</aside>
+<main>
+ <header>
+  <div class="jump"><span>Quick jump…</span><kbd>Ctrl K</kbd></div>
+  <button class="bell" aria-label="Notifications, 2 unread"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 2a4 4 0 0 0-4 4v3L3 11h10l-1-2V6a4 4 0 0 0-4-4zM6.5 13a1.5 1.5 0 0 0 3 0" fill="none" stroke="#14254f" stroke-width="1.4"/></svg><span class="badge">2</span></button>
+  <div class="user"><span class="av">RA</span><span><b>Riya A.</b> <span style="color:var(--mute)">· Recruiter</span></span></div>
+ </header>
+ <div class="page">
+  <h1>Hot List</h1>
+  <div class="sub">Team Rohit's candidates and every candidate open to all teams</div>
+  <div class="filters">
+   <label class="f"><span class="cap">Search name</span><input style="width:170px" placeholder="Name"></label>
+   <label class="f"><span class="cap">Technology</span><input style="width:110px" value="Java"></label>
+   <label class="f"><span class="cap">Status</span><select style="width:130px"><option>Active, Bench</option></select></label>
+   <label class="f"><span class="cap">Priority</span><select style="width:70px"><option>P1</option></select></label>
+   <label class="f"><span class="cap">Team</span><select style="width:118px"><option>Any team</option></select></label>
+   <label class="f"><span class="cap">Recruiter</span><select style="width:138px"><option>Any recruiter</option></select></label>
+   <button class="btn2">More filters · 2</button>
+   <label class="f" style="margin-left:auto"><span class="cap">Saved view</span><select style="width:140px"><option>My P1 Java</option></select></label>
+  </div>
+  <div class="chips"><span class="chip">Technology: Java<i>×</i></span><span class="chip">Status: Active, Bench<i>×</i></span><span class="chip">Priority: P1<i>×</i></span><span class="chip">Visa: H1B<i>×</i></span><span class="chip">Location: Dallas<i>×</i></span><span class="clear">Clear all</span><span class="count"><span class="num">38</span> candidates</span></div>
+  <div class="wrap">
+   <div class="selbar"><b><span style="font-variant-numeric:tabular-nums">3</span> selected</b><span style="opacity:.5">·</span><button>Set status ▾</button><button>Set priority ▾</button><button class="lnk">Clear</button></div>
+   <table>
+    <thead><tr><th class="stub"><input type="checkbox" aria-label="Select all"></th><th class="cap s">Candidate</th><th class="cap s">Technology</th><th class="cap s">Status</th><th class="cap s">Pri</th><th class="cap s">Team</th><th class="cap s">Recruiter</th><th class="cap s">Location</th><th class="cap">Visa</th><th class="cap sd">Days in market</th><th class="cap">Stage</th><th></th></tr></thead>
+    <tbody>
+<tr><td class="stub"><input type="checkbox"><span class="p1">P1</span></td><td class="nm">Cand25 Test</td><td>Java</td><td><span class="st a">Active</span></td><td>P1</td><td>Team Rohit</td><td>r1a</td><td>Dallas</td><td>H1B</td><td class="num">31</td><td><span class="legs"><span class="leg c">Hot list</span><span class="leg n"></span><span class="leg n"></span><span class="leg n"></span></span></td><td class="act"><a href="#">Open</a></td></tr>
+<tr class="on"><td class="stub"><input type="checkbox" checked><span class="p1">P1</span></td><td class="nm">Cand18 Test</td><td>Java</td><td><span class="st f">Full of interviews</span></td><td>P1</td><td>Team Rohit</td><td>r1b</td><td>Dallas</td><td>H1B</td><td class="num">54</td><td><span class="legs"><span class="leg u">Hot</span><span class="leg x">Void</span><span class="leg u">Sub</span><span class="leg c">Interview R2</span><span class="leg n"></span></span></td><td class="act"><a href="#">Open</a></td></tr>
+<tr class="on"><td class="stub"><input type="checkbox" checked><span class="p1">P1</span></td><td class="nm">Cand10 Test</td><td>Java Spring</td><td><span class="st a">Active</span></td><td>P1</td><td>Team Rohit</td><td>r1a</td><td>Austin</td><td>H1B</td><td class="num">12</td><td><span class="legs"><span class="leg u">Hot</span><span class="leg c">Submitted ×3</span><span class="leg n"></span><span class="leg n"></span></span></td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td class="stub"><input type="checkbox"><span class="p1">P1</span></td><td class="nm">Cand24 Test</td><td>Java</td><td><span class="st f">Full of interviews</span></td><td>P1</td><td>Team Rohit</td><td>r1b</td><td>Dallas</td><td>H1B</td><td class="num">77</td><td><span class="legs"><span class="leg u">Hot</span><span class="leg u">Sub</span><span class="leg c">Interview R1</span><span class="leg n"></span></span></td><td class="act"><a href="#">Open</a></td></tr>
+<tr class="on"><td class="stub"><input type="checkbox" checked><span class="p1">P1</span></td><td class="nm">Cand15 Test</td><td>Java / AWS</td><td><span class="st f">Full of interviews</span></td><td>P1</td><td>Team Rohit</td><td>r1b</td><td>Dallas</td><td>H1B</td><td class="num">40</td><td><span class="legs"><span class="leg u">Hot</span><span class="leg u">Sub</span><span class="leg c">Interview R3</span><span class="leg n"></span></span></td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td class="stub"><input type="checkbox"><span class="p1">P1</span></td><td class="nm">Cand82 Test<span class="open">Open to all teams</span></td><td>Java</td><td><span class="st a">Active</span></td><td>P1</td><td>Team Vikram</td><td>r3a</td><td>Austin</td><td>H1B</td><td class="num">8</td><td><span class="legs"><span class="leg c">Hot list</span><span class="leg n"></span><span class="leg n"></span><span class="leg n"></span></span></td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td class="stub"><input type="checkbox"><span class="p1">P1</span></td><td class="nm">Cand26 Test</td><td>Java</td><td><span class="st h">On hold</span></td><td>P1</td><td>Team Rohit</td><td class="una">Unassigned</td><td>Dallas</td><td>H1B</td><td class="num">103</td><td><span class="legs"><span class="leg c">Hot list</span><span class="leg n"></span><span class="leg n"></span><span class="leg n"></span></span></td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td class="stub"><input type="checkbox"><span class="p1">P1</span></td><td class="nm">Cand9 Test</td><td>Java</td><td><span class="st f">Full of interviews</span></td><td>P1</td><td>Team Rohit</td><td>r1a</td><td>Dallas</td><td>H1B</td><td class="num">66</td><td><span class="legs"><span class="leg u">Hot</span><span class="leg u">Sub</span><span class="leg c">Interview R2</span><span class="leg n"></span></span></td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td class="stub"><input type="checkbox"><span class="p1">P1</span></td><td class="nm">Cand84 Test<span class="open">Open to all teams</span></td><td>Java</td><td><span class="st f">Full of interviews</span></td><td>P1</td><td>Team Vikram</td><td class="una">Unassigned</td><td>Austin</td><td>H1B</td><td class="num">21</td><td><span class="legs"><span class="leg u">Hot</span><span class="leg u">Sub</span><span class="leg c">Interview R1</span><span class="leg n"></span></span></td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td class="stub"><input type="checkbox"><span class="p1">P1</span></td><td class="nm">Cand11 Test</td><td>Java</td><td><span class="st c">Confirmation</span></td><td>P1</td><td>Team Rohit</td><td class="una">Unassigned</td><td>Dallas</td><td>H1B</td><td class="num">95</td><td><span class="legs"><span class="leg u">Hot</span><span class="leg u">Sub</span><span class="leg u">Int</span><span class="leg c">Placed</span></span></td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td class="stub"><input type="checkbox"><span class="p1">P1</span></td><td class="nm">Cand54 Test<span class="open">Open to all teams</span></td><td>Java / Kafka</td><td><span class="st f">Full of interviews</span></td><td>P1</td><td>Team Anjali</td><td class="una">Unassigned</td><td>Austin</td><td>H1B</td><td class="num">49</td><td><span class="legs"><span class="leg u">Hot</span><span class="leg u">Sub</span><span class="leg c">Interview R1</span><span class="leg n"></span></span></td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td class="stub"><input type="checkbox"><span class="p1">P1</span></td><td class="nm">Cand78 Test</td><td>Java</td><td><span class="st f">Full of interviews</span></td><td>P1</td><td>Team Vikram</td><td class="una">Unassigned</td><td>Dallas</td><td>H1B</td><td class="num">18</td><td><span class="legs"><span class="leg u">Hot</span><span class="leg c">Submitted ×1</span><span class="leg n"></span><span class="leg n"></span></span></td><td class="act"><a href="#">Open</a></td></tr>
+<tr><td class="stub"><input type="checkbox"><span class="p1">P1</span></td><td class="nm">Cand12 Test</td><td>Java</td><td><span class="st b">Bench</span></td><td>P1</td><td>Team Rohit</td><td>r1a</td><td>Austin</td><td>H1B</td><td class="num">140</td><td><span class="legs"><span class="leg c">Hot list</span><span class="leg n"></span><span class="leg n"></span><span class="leg n"></span></span></td><td class="act"><a href="#">Open</a></td></tr>
+    </tbody>
+   </table>
+   <div class="pager"><span class="legend cap"><span class="leg u" style="width:14px"></span>Done <span class="leg c" style="width:14px"></span>Current <span class="leg x">Void</span>Withdrawn — kept in history</span><span><span class="num">1–38</span> of <span class="num">38</span> &nbsp;<button style="height:26px">‹</button> <button style="height:26px">›</button></span></div>
+  </div>
+ </div>
+</main>
+</body></html>

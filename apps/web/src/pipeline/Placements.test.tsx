@@ -44,7 +44,7 @@ describe("Placements list", () => {
   it("shows status, the first-placement badge, and no rate column when rates are withheld", async () => {
     wrap(<PlacementsPage me={RECRUITER} />);
     const first = await rowOf("Divya Menon");
-    expect(within(first).getByText("First placement")).toHaveClass("badge");
+    expect(within(first).getByText("First placement")).toHaveClass("pl-tag");
     expect(within(first).getByText("Joined")).toHaveClass("badge", "st-joined");
     expect(within(first).getByText("No vendor")).toBeInTheDocument();
     const other = await rowOf("Asha Iyer");
@@ -62,10 +62,10 @@ describe("Placements list", () => {
     expect(within(await rowOf("Divya Menon")).queryByText(/\$/)).not.toBeInTheDocument();
   });
 
-  it("filters by status chip", async () => {
+  it("filters by status", async () => {
     wrap(<PlacementsPage me={RECRUITER} />);
     await rowOf("Asha Iyer");
-    fireEvent.click(within(screen.getByRole("group", { name: "Status" })).getByRole("button", { name: "BGC failed" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), { target: { value: "bgc_failed" } });
     await waitFor(() => expect(lastList().get("status")).toBe("bgc_failed"));
   });
 
@@ -218,6 +218,7 @@ describe("Placements report (migration 0160)", () => {
     api.routes["GET /api/v1/lookups"] = () => ({ body: LOOKUPS });
     wrap(<PlacementsPage me={RECRUITER} />);
     await rowOf("Asha Iyer");
+    fireEvent.click(screen.getByRole("button", { name: /^More filters/ }));
     fireEvent.change(await screen.findByLabelText("Vendor"), { target: { value: "v1" } });
     fireEvent.change(screen.getByLabelText("End client"), { target: { value: "cl1" } });
     fireEvent.change(screen.getByLabelText("Technology"), { target: { value: "tech1" } });
@@ -244,7 +245,7 @@ describe("Placements report (migration 0160)", () => {
     unmount();
     wrap(<PlacementsPage me={meFor("lead")} />);
     await rowOf("Asha Iyer");
-    fireEvent.click(within(screen.getByRole("group", { name: "Status" })).getByRole("button", { name: "Joined" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), { target: { value: "joined" } });
     fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
     await waitFor(() => expect(api.writes()).toHaveLength(1));
     expect(api.writes()[0]!.body).toEqual({ status: "joined" });
@@ -303,6 +304,7 @@ describe("Placements team filter and cleared interviews (migration 0360)", () =>
   it("filters placements by team when the caller sees more than one", async () => {
     api.routes["GET /api/v1/placements/teams"] = () => ({ body: TEAMS });
     wrap(<PlacementsPage me={RECRUITER} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^More filters/ }));
     const team = await screen.findByRole("combobox", { name: /^Team$/ });
     fireEvent.change(team, { target: { value: "t2" } });
     await waitFor(() => expect(lastList().get("teamId")).toBe("t2"));
@@ -313,7 +315,8 @@ describe("Placements team filter and cleared interviews (migration 0360)", () =>
     wrap(<PlacementsPage me={RECRUITER} />);
     fireEvent.change(await screen.findByLabelText("Candidate"), { target: { value: " asha " } });
     await waitFor(() => expect(lastList().get("candidate")).toBe("asha"));
-    expect(new URLSearchParams(window.location.search).get("candidate")).toBe(" asha ");
+    expect(new URLSearchParams(window.location.search).get("candidate")).toBe("asha");
+    fireEvent.click(screen.getByRole("button", { name: /^More filters/ }));
     await screen.findByRole("option", { name: "Java · Dallas · Nov 2026" });
     fireEvent.change(screen.getByRole("combobox", { name: /^Batch$/ }), { target: { value: "b1" } });
     await waitFor(() => expect(lastList().get("batchId")).toBe("b1"));

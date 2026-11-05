@@ -88,10 +88,10 @@ export function UtilitiesTab({ kind, ownerId, canManage, canReveal }: { kind: Si
         : q.error ? <p className="error" role="alert">{sitesError(q.error, "utility")}</p>
         : items.length === 0 ? <p className="muted">No utilities yet.</p>
         : (
-          <div className="tablewrap roundtable"><table aria-label="Utilities">
+          <div className="tablewrap roundtable listcard"><table className="dtable bo-dtable si-utils" aria-label="Utilities">
             <thead><tr>
               <th scope="col">Utility</th><th scope="col">Account</th><th scope="col">Username</th><th scope="col">Password</th>
-              <th scope="col">Status</th><th scope="col"><span className="sr-only">Actions</span></th>
+              <th scope="col">Status</th><th scope="col" className="c-act"><span className="sr-only">Actions</span></th>
             </tr></thead>
             <tbody>
               {items.map((u) => {
@@ -99,16 +99,16 @@ export function UtilitiesTab({ kind, ownerId, canManage, canReveal }: { kind: Si
                 const shown = revealed?.id === u.id ? revealed.password : null;
                 return (
                   <tr key={u.id}>
-                    <td>
+                    <td className="c-primary">
                       <b>{label}</b>
                       <span className="block">{u.serviceProvider}</span>
                       {u.websiteUrl && (isSafeHttpsUrl(u.websiteUrl)
                         ? <a className="block small" href={u.websiteUrl} target="_blank" rel="noopener noreferrer">Portal<span className="sr-only"> for {label} (opens in a new tab)</span></a>
                         : <span className="block small">{u.websiteUrl}</span>)}
                     </td>
-                    <td>{u.accountNumber ?? <span className="muted">—</span>}</td>
-                    <td>{u.username ?? <span className="muted">—</span>}</td>
-                    <td>
+                    <td data-label="Account">{u.accountNumber ?? <span className="muted">—</span>}</td>
+                    <td data-label="Username">{u.username ?? <span className="muted">—</span>}</td>
+                    <td data-label="Password">
                       {!u.hasPassword ? <span className="muted">Not stored</span>
                         : shown !== null ? (
                           <span className="secret">
@@ -126,8 +126,8 @@ export function UtilitiesTab({ kind, ownerId, canManage, canReveal }: { kind: Si
                           </span>
                         )}
                     </td>
-                    <td><StatusPill status={u.status} /></td>
-                    <td className="rowactions">
+                    <td className="c-badge" data-label="Status"><StatusPill status={u.status} /></td>
+                    <td className="c-act">
                       {canManage && (
                         <button type="button" className="iconbtn sm" onClick={() => setEditing(u)} aria-label={`Edit utility ${label}`}><Pencil size={15} aria-hidden="true" /></button>
                       )}
@@ -285,9 +285,9 @@ function UtilityDialog({ kind, ownerId, record, onClose, onSaved }: {
         </div>
         {error && <p className="error formerr" role="alert" tabIndex={-1}>{error}</p>}
         <div className="actions">
+          <button type="button" className="btn ghost si-reset" onClick={() => { setV(initial(record)); setErrors({}); setError(""); setClearPw(false); }}>Reset form</button>
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn" onClick={() => { setV(initial(record)); setErrors({}); setError(""); setClearPw(false); }}>Reset</button>
-          <button type="submit" className="btn primary" disabled={busy} aria-busy={busy || undefined}>{busy ? "Working…" : record ? "Save" : "Submit"}</button>
+          <button type="submit" className="btn primary" disabled={busy} aria-busy={busy || undefined}>{busy ? "Working…" : record ? "Save" : "Add utility"}</button>
         </div>
       </form>
     </Dialog>

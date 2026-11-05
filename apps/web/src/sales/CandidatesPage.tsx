@@ -4,8 +4,8 @@ import { salesError } from "./errors";
 import { navigate } from "../lib/router";
 import { screenPath } from "../nav";
 import { CreateCandidateDialog } from "./CreateCandidateDialog";
-import { CandidateName, type ListPageProps } from "./HotListPage";
-import { ListFilters, ListFooter, NoMatches } from "./ListControls";
+import { CandidateName, profileOpenable, type ListPageProps } from "./HotListPage";
+import { ListFilters, ListFooter, NoMatches, resultCount } from "./ListControls";
 import { SavedViews } from "./HotListExtras";
 import { STATUSES, salesApi, salesKeys } from "./salesApi";
 import { OpenToAllBadge, SharedBadge, Phone, Priority, StatusBadge } from "./ui";
@@ -31,8 +31,9 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
   return (
     <>
       <div className="pagehead">
-        <div><h1 tabIndex={-1}>Candidates</h1><p className="sub">Candidates in your scope: your own, your team's, and those you manage.</p></div>
-        <div className="rowactions push">
+        <div><h1 tabIndex={-1}>Candidates{resultCount(s) && <span className="h1count" aria-label={`, ${resultCount(s)} candidates`}>{resultCount(s)}</span>}</h1><p className="sub">Candidates in your scope: your own, your team's, and those you manage.</p></div>
+        <div className="pageactions">
+          <SavedViews s={s} list="candidates" />
           {batches.data?.canCreate && (
             <button type="button" className="btn" onClick={() => setCreating("batch")}>New batch</button>
           )}
@@ -42,26 +43,32 @@ export function CandidatesPage({ me, onOpenProfile }: ListPageProps) {
         </div>
       </div>
       {message && <p role="status" aria-live="polite" className="livemsg">{message}</p>}
-      <SavedViews s={s} list="candidates" />
       <ListFilters s={s} label="Candidates" statuses={STATUSES} batches={batches.data?.items ?? []} />
-      <div className="card tablewrap">
+      <div className="card tablewrap listcard">
         {s.q.isLoading ? <Loading /> : s.q.error ? <QueryError query={s.q} message={salesError(s.q.error)} /> : (
-          <table aria-label="Candidates" aria-busy={s.q.isFetching || undefined}>
-            <thead><tr><th>Candidate</th><th>Technology</th><th>Status</th><th>Pri</th><th>Team</th><th>Recruiter</th><th>Location</th><th>Phone</th><th>Rating</th></tr></thead>
+          <table className="cardtable" aria-label="Candidates" aria-busy={s.q.isFetching || undefined}>
+            <thead><tr>
+              <th>Candidate</th><th>Technology</th><th>Status</th><th>Pri</th><th>Team</th><th>Recruiter</th>
+              <th className="p2">Location</th><th>Phone</th><th className="num">Rating</th>
+            </tr></thead>
             <tbody>
-              {items.map((c) => (
-                <tr key={c.id}>
-                  <td><CandidateName c={c} caps={caps} onOpenProfile={onOpenProfile} /></td>
-                  <td>{c.technology}</td>
-                  <td><StatusBadge status={c.status} />{" "}{c.visibility === "all_teams" && <OpenToAllBadge />}{c.visibility === "selected_teams" && <SharedBadge />}</td>
-                  <td><Priority p={c.priority} /></td>
-                  <td>{c.team.name}</td>
-                  <td>{c.recruiter?.name ?? "Unassigned"}</td>
-                  <td>{c.location.name}</td>
-                  <td className={c.phoneMasked ? "masked" : ""}><Phone c={c} /></td>
-                  <td>{c.technicalRating ? `${c.technicalRating}/5` : "—"}</td>
+              {items.map((c) => {
+                const openable = Boolean(onOpenProfile) && profileOpenable(c, caps);
+                return (
+                <tr key={c.id} className={openable ? "rowopen" : undefined}
+                  onClick={openable ? (e) => { if (!(e.target as HTMLElement).closest("a, button, input, select, label")) onOpenProfile!(c.id); } : undefined}>
+                  <td className="c-name"><CandidateName c={c} caps={caps} onOpenProfile={onOpenProfile} plain /></td>
+                  <td className="c-tech">{c.technology}</td>
+                  <td className="c-status"><span className="badges"><StatusBadge status={c.status} />{c.visibility === "all_teams" && <OpenToAllBadge />}{c.visibility === "selected_teams" && <SharedBadge />}</span></td>
+                  <td className="c-pri"><Priority p={c.priority} /></td>
+                  <td className="c-team">{c.team.name}</td>
+                  <td className="c-rec">{c.recruiter?.name ?? <span className="muted">Unassigned</span>}</td>
+                  <td className="p2">{c.location.name}</td>
+                  <td className={`c-phone${c.phoneMasked ? " masked" : ""}`}><Phone c={c} /></td>
+                  <td className="c-days num">{c.technicalRating ? <>{c.technicalRating}/5<span className="cardonly"> rating</span></> : "—"}</td>
                 </tr>
-              ))}
+                );
+              })}
               {items.length === 0 && <tr><td colSpan={9} className="empty">{s.hasFilters ? <NoMatches s={s} statuses={STATUSES} batches={batches.data?.items ?? []} /> : "No candidates in your scope yet."}</td></tr>}
             </tbody>
           </table>

@@ -1,5 +1,6 @@
-import { useEffect, useId, useState } from "react";
-import { ChevronLeft, ChevronRight, SlidersHorizontal, X } from "lucide-react";
+import { useId, type ReactNode } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { FilterBar } from "../ui/FilterBar";
 import { DOCUMENTS_STATUSES, LIST_SORTS, LIST_SORT_LABELS, VISA_CATEGORIES, type ListSort } from "@eureka/shared";
 import { useLookups } from "../lookups";
 import { MultiCombobox, type ComboOption } from "../ui/Combobox";
@@ -15,8 +16,13 @@ const RESUME = [["", "Any"], ["yes", "On file"], ["no", "None"]] as const;
 const STAY = [["", "Any"], ["guest_house", "Guest house"], ["remote", "Remote"]] as const;
 const IN_PERSON = [["", "Any"], ["yes", "Yes"], ["no", "No"]] as const;
 const DOCUMENTS: [string, string][] = [...Object.entries(DOCUMENTS_STATUSES), ["none", "Not recorded"]];
-/** Filters that live in the "More filters" panel rather than the main row. */
-const PANEL_MULTI: MultiKey[] = ["locationId", "visa", "documents", "priority", "teamId", "recruiterId", "ghLocationId"];
+/** Filters behind "More filters" (unless the list shows them inline). */
+const MORE_MULTI: MultiKey[] = ["visibility", "locationId", "visa", "documents", "batchId", "priority", "teamId", "recruiterId", "ghLocationId"];
+const ANY: Record<MultiKey, string> = {
+  status: "Any status", technology: "Any technology", visibility: "Any visibility", batchId: "Any batch", locationId: "Any location",
+  visa: "Any visa", documents: "Any documents status", priority: "Any priority", teamId: "Any team", recruiterId: "Any recruiter",
+  ghLocationId: "Any guest house",
+};
 const PANEL_SINGLE = ["resume", "stay", "inPerson"] as const;
 /** Filters whose column is never empty: "remove it" can say how many candidates come back. */
 const ALWAYS_SET: ReadonlySet<string> = new Set(["status", "technology", "visibility", "locationId", "priority", "teamId", "documents"]);
@@ -75,104 +81,83 @@ export function useActiveFilters(s: ListState, choices: Partial<Record<MultiKey,
 }
 
 /**
- * Candidate list filters: name search and the common filters in one row; the rest behind
- * "More filters" (a bottom sheet on phones). Pick-from-a-list filters take several values, can be
- * inverted ("is none of") and show how many candidates each value has. Every filter in effect shows
- * as a removable chip.
+ * Filter bar for a candidate list (ui/FilterBar). The filters people use most stay inline: search,
+ * technology and status, plus priority, team and recruiter on the Hot List (`options`) or batch on
+ * Candidates. The rest sit behind "More filters". On phones the bar collapses to the search box and
+ * a Filters button that opens every filter as a sheet. Pick-from-a-list filters take several
+ * values, can be inverted ("is none of") and show how many candidates each value has. Every filter
+ * in effect shows as a removable chip; every value lives in the URL (useCandidateList).
  */
-export function ListFilters({ s, label, statuses, batches, options }: {
+export function ListFilters({ s, label, statuses, batches, options, actions, selection, selecting = false }: {
   s: ListState; label: string; statuses: readonly string[]; batches?: Batch[]; options?: FilterOptions;
+  /** Extra controls on the right of the summary row. */
+  actions?: ReactNode;
+  /** The bulk-selection bar: while `selecting`, it takes the summary row's place. */
+  selection?: ReactNode;
+  selecting?: boolean;
 }) {
   const id = useId();
   const choices = useChoices(statuses, batches, options);
   const active = useActiveFilters(s, choices);
-  const panelCount = PANEL_MULTI.filter((k) => choices[k] && s.values(k).length).length + PANEL_SINGLE.filter((k) => s.single[k]).length;
-  const [open, setOpen] = useState(panelCount > 0);
-  // A saved view that sets a panel filter opens the panel, so the value is never hidden.
-  useEffect(() => { if (panelCount > 0) setOpen(true); }, [panelCount > 0]);
+  const inline: MultiKey[] = ["technology", "status", ...(options ? ["priority", "teamId", "recruiterId"] as MultiKey[] : ["batchId"] as MultiKey[])];
+  const moreMulti = MORE_MULTI.filter((k) => !inline.includes(k));
+  const moreCount = moreMulti.filter((k) => choices[k] && s.values(k).length).length + PANEL_SINGLE.filter((k) => s.single[k]).length;
 
   const multi = (k: MultiKey, any: string) => choices[k] && (
-    <MultiCombobox key={k} id={`${id}-${k}`} label={LABELS[k]} anyLabel={any} options={choices[k]!}
-      values={s.values(k)} onChange={(v) => s.setValues(k, v)} counts={s.counts(k)}
-      negated={s.isNot(k)} onNegate={(on) => s.setNot(k, on)} />
+    <div key={k} className={`fb-${k}`}>
+      <MultiCombobox id={`${id}-${k}`} label={LABELS[k]} anyLabel={any} options={choices[k]!}
+        values={s.values(k)} onChange={(v) => s.setValues(k, v)} counts={s.counts(k)}
+        negated={s.isNot(k)} onNegate={(on) => s.setNot(k, on)} />
+    </div>
   );
   const seg = <K extends (typeof PANEL_SINGLE)[number]>(k: K, opts: readonly (readonly [SingleFilters[K], string])[]) => (
     <Segmented label={LABELS[k]} value={s.single[k]} options={opts} onChange={(v) => s.setSingle(k, v)} />
   );
   const fetching = s.q.isFetching && s.q.isPlaceholderData;
   return (
-    <form className="filterbar" role="search" aria-label={`${label} filters`} onSubmit={(e) => e.preventDefault()}>
-      <div className="lf-row">
-        <div className="field inline grow">
+    <FilterBar label={`${label} filters`} selection={selection} selecting={selecting}
+      moreCount={moreCount} activeCount={active.length + (s.applied.search ? 1 : 0)}
+      chips={active.map((f) => ({ key: f.key, name: f.label, not: f.not, label: `${f.label}${f.not ? " is not" : ":"} ${f.value}`, onRemove: f.clear }))}
+      hasFilters={s.hasFilters} onClear={s.clear}
+      search={
+        <div className="field inline fb-search">
           <label htmlFor={`${id}-search`}>Search name</label>
           <input id={`${id}-search`} type="search" placeholder="Candidate name" value={s.searchInput} onChange={(e) => s.setSearchInput(e.target.value)} />
         </div>
-        {multi("technology", "Any technology")}
-        {multi("status", "Any status")}
-        {multi("visibility", "Any visibility")}
-        {multi("batchId", "Any batch")}
-        {options && (
-          <div className="field inline">
-            <label htmlFor={`${id}-sort`}>Sort by</label>
-            <select id={`${id}-sort`} value={s.single.sort || "default"}
-              onChange={(e) => s.setSingle("sort", e.target.value === "default" ? "" : e.target.value as ListSort)}>
-              {LIST_SORTS.map((k) => <option key={k} value={k}>{LIST_SORT_LABELS[k]}</option>)}
-            </select>
-          </div>
-        )}
-        <button type="button" className={`btn morefilters${open ? " on" : ""}`} aria-expanded={open} aria-controls={`${id}-panel`}
-          onClick={() => setOpen((o) => !o)}>
-          <SlidersHorizontal size={15} aria-hidden="true" />More filters
-          {panelCount > 0 && <span className="count" aria-label={`${panelCount} active`}>{panelCount}</span>}
-        </button>
-      </div>
-
-      <div id={`${id}-panel`} className="lf-panel" hidden={!open}>
-        <div className="lf-sheethead">
-          <h2 id={`${id}-panel-title`}>Filters</h2>
-          <button type="button" className="btn ghost sm" onClick={() => setOpen(false)}>Done</button>
-        </div>
-        <div className="lf-grid" role="group" aria-labelledby={`${id}-panel-title`}>
-          {multi("locationId", "Any location")}
-          {multi("visa", "Any visa")}
-          {multi("documents", "Any documents status")}
+      }
+      primary={<>{inline.map((k) => multi(k, ANY[k]))}</>}
+      more={
+        <>
+          {moreMulti.map((k) => multi(k, ANY[k]))}
           {seg("resume", RESUME)}
           {seg("stay", STAY)}
-          {options && (
-            <>
-              {multi("priority", "Any priority")}
-              {multi("teamId", "Any team")}
-              {multi("recruiterId", "Any recruiter")}
-              {seg("inPerson", IN_PERSON)}
-              {multi("ghLocationId", "Any guest house")}
-            </>
-          )}
-        </div>
-        <div className="lf-sheetfoot">
-          <button type="button" className="btn" disabled={!s.hasFilters} onClick={s.clear}>Reset</button>
-          <button type="button" className="btn primary" onClick={() => setOpen(false)}>
-            {s.facets.data ? `Show ${s.facets.data.total} ${s.facets.data.total === 1 ? "candidate" : "candidates"}` : "Show results"}
-          </button>
-        </div>
-      </div>
-      {open && <div className="lf-scrim" aria-hidden="true" onClick={() => setOpen(false)} />}
-
-      {(active.length > 0 || s.hasFilters) && (
-        <div className="activefilters">
-          <ul className="filterchips" aria-label="Active filters">
-            {active.map((f) => (
-              <li key={f.key} className={`fchip${f.not ? " not" : ""}`}>
-                <span className="k">{f.label}</span>{f.not && <span className="op">not</span>}<b title={f.value}>{f.value}</b>
-                <button type="button" aria-label={`Remove ${f.label} filter`} onClick={f.clear}><X size={13} aria-hidden="true" /></button>
-              </li>
-            ))}
-          </ul>
-          {s.hasFilters && <button type="button" className="btn ghost sm" onClick={s.clear}>Clear filters</button>}
+          {options && seg("inPerson", IN_PERSON)}
+        </>
+      }
+      summaryEnd={(fetching || options || actions) && (
+        <>
           {fetching && <span className="muted updating" aria-hidden="true">Updating…</span>}
-        </div>
+          {options && (
+            <div className="field inline fb-sort">
+              <label htmlFor={`${id}-sort`}>Sort by</label>
+              <select id={`${id}-sort`} value={s.single.sort || "default"}
+                onChange={(e) => s.setSingle("sort", e.target.value === "default" ? "" : e.target.value as ListSort)}>
+                {LIST_SORTS.map((k) => <option key={k} value={k}>{LIST_SORT_LABELS[k]}</option>)}
+              </select>
+            </div>
+          )}
+          {actions}
+        </>
       )}
-    </form>
+    />
   );
+}
+
+/** "38" or "50+" (more on the next page) for a heading; empty while loading. */
+export function resultCount(s: ListState): string {
+  const n = s.q.data?.items.length;
+  if (n === undefined || s.q.error) return "";
+  return `${n}${s.q.data?.nextCursor ? "+" : ""}`;
 }
 
 /** Empty list with filters on: offer to drop one filter at a time (with how many come back, when known). */

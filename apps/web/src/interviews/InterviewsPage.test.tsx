@@ -24,7 +24,18 @@ function setup(item = row, capabilities = me.capabilities, locations = [{ id: "d
  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><InterviewsPage me={{ ...me, capabilities }} /></QueryClientProvider>);
  return fetch;
 }
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); window.history.replaceState(null, "", "/"); });
+/** Row actions other than the primary one sit in the row's "More actions" menu. */
+const openRowAction = (item: string, name = "Alex Doe") => {
+  fireEvent.click(screen.getByRole("button", { name: `More actions for ${name}` }));
+  fireEvent.click(screen.getByRole("menuitem", { name: item }));
+};
+/** The one booking form: pick a day (any date), a start time and a length. */
+const pickSlot = (dlg: HTMLElement, stamp: string, duration?: number) => {
+  fireEvent.change(within(dlg).getByLabelText("Other date"), { target: { value: stamp.slice(0, 10) } });
+  fireEvent.change(within(dlg).getByLabelText("Start time"), { target: { value: stamp.slice(11, 16) } });
+  if (duration) fireEvent.change(within(dlg).getByRole("combobox", { name: "Duration" }), { target: { value: String(duration) } });
+};
 describe("interview board", () => {
  it("uses local midnight and the following local midnight for inclusive date filters", () => {
    expect(dateBoundary("2026-10-01")).toBe(new Date(2026, 9, 1).toISOString());
@@ -33,7 +44,7 @@ describe("interview board", () => {
  it("only offers location fields, sends changed fields, and never exposes links without consent", async () => {
    const fetch = setup(); await screen.findByText("Alex Doe");
    expect(screen.queryByRole("link", { name: "Otter" })).not.toBeInTheDocument();
-   fireEvent.click(screen.getByRole("button", { name: "Edit interview" }));
+   openRowAction("Edit interview");
    const dialog = screen.getByRole("dialog");
    expect(within(dialog).queryByRole("group", { name: "Panel list" })).not.toBeInTheDocument();
    expect(within(dialog).queryByLabelText("Meeting link")).not.toBeInTheDocument();
@@ -48,7 +59,9 @@ describe("interview board", () => {
    await screen.findByText("Alex Doe");
    expect(screen.queryByRole("button", { name: "Schedule interview" })).not.toBeInTheDocument();
    expect(screen.queryByRole("button", { name: "Edit interview" })).not.toBeInTheDocument();
-   fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+   fireEvent.click(screen.getByRole("button", { name: "More actions for Alex Doe" }));
+   expect(screen.queryByRole("menuitem", { name: "Edit interview" })).not.toBeInTheDocument();
+   fireEvent.click(screen.getByRole("menuitem", { name: "Feedback" }));
    expect(within(screen.getByLabelText("Feedback kind")).getAllByRole("option")).toHaveLength(1);
    fireEvent.change(screen.getByLabelText("Rating"), { target: { value: "4" } });
    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Clear technical examples" } });
@@ -60,22 +73,27 @@ describe("interview board", () => {
    const fetch = setup(); fireEvent.click(screen.getByRole("button", { name: "Schedule interview" }));
    await screen.findByRole("option", { name: "Alex Doe · Acme · Engineer" });
    expect(screen.queryByRole("option", { name: /Closed Candidate/ })).not.toBeInTheDocument();
+   const dlg = screen.getByRole("dialog", { name: "Schedule interview" });
    fireEvent.change(screen.getByLabelText("Submission"), { target: { value: "s1" } });
    fireEvent.change(screen.getByLabelText("Round"), { target: { value: "Technical" } });
-   expect(screen.getByLabelText("Position")).toHaveValue("Engineer");
-   expect(screen.getByLabelText("Candidate name")).toHaveValue("Alex Doe");
-   fireEvent.change(screen.getByLabelText("Interview slot"), { target: { value: "2026-10-01T10:00" } });
+   // The chosen submission is named under the picker (no read-only echo fields).
+   expect(within(dlg).getByText("Alex Doe · Engineer at Acme")).toBeInTheDocument();
+   // The time zone comes first; times are read in it.
+   expect(within(dlg).getByRole("combobox", { name: "Time zone" })).toBeInTheDocument();
+   pickSlot(dlg, "2026-10-01T10:00");
    await screen.findByRole("option", { name: "Coach One" });
-   fireEvent.change(screen.getByLabelText("Coach"), { target: { value: "coach" } });
-   fireEvent.click(screen.getByRole("button", { name: "Create interview" }));
+   fireEvent.change(screen.getByLabelText("Coach (optional)"), { target: { value: "coach" } });
+   fireEvent.click(within(dlg).getByRole("button", { name: "Schedule" }));
    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/v1/interviews", expect.objectContaining({ method: "POST", body: JSON.stringify({ submissionId: "s1", round: "Technical", startsAt: new Date("2026-10-01T10:00").toISOString(), durationMin: 60, coachId: "coach", inviteReceived: false, interviewType: "video" }) })));
  });
  it("filters the board by interview location when there is more than one", async () => {
    const fetch = setup(row, me.capabilities, [{ id: "dal", name: "Dallas" }, { id: "aus", name: "Austin" }]); await screen.findByText("Alex Doe");
+   fireEvent.click(screen.getByRole("button", { name: /^More filters/ }));
    const select = await screen.findByRole("combobox", { name: "Location filter" });
    fireEvent.change(select, { target: { value: "aus" } });
    await waitFor(() => expect(fetch.mock.calls.some(([u]) => String(u).startsWith("/api/v1/interviews?") && new URL(String(u), "http://x").searchParams.get("locationId") === "aus")).toBe(true));
-   fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+   expect(new URLSearchParams(window.location.search).get("locationId")).toBe("aus");
+   fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
    expect(select).toHaveValue("");
  });
  it("searches by candidate across every date unless the user picked dates", async () => {
@@ -85,12 +103,15 @@ describe("interview board", () => {
    fireEvent.change(screen.getByLabelText("Candidate"), { target: { value: " alex " } });
    await waitFor(() => expect(last().get("candidate")).toBe("alex"));
    expect(last().has("from")).toBe(false);
+   expect(new URLSearchParams(window.location.search).get("candidate")).toBe("alex");
    fireEvent.change(screen.getByLabelText("From date"), { target: { value: "2026-10-01" } });
    fireEvent.change(screen.getByLabelText("Candidate"), { target: { value: "alexa" } });
    await waitFor(() => expect(last().get("candidate")).toBe("alexa"));
    expect(last().has("from")).toBe(true);
-   fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+   fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
    expect(screen.getByLabelText("Candidate")).toHaveValue("");
+   // Clearing returns to the default board: today onward.
+   await waitFor(() => expect(last().has("from")).toBe(true));
  });
  it("offers no location filter with a single location", async () => {
    const fetch = setup(); await screen.findByText("Alex Doe");
@@ -108,6 +129,7 @@ describe("interview board", () => {
  it("creates an interview with type, panel, lead, duration and an https meeting link", async () => {
    const fetch = setup(); fireEvent.click(screen.getByRole("button", { name: "Schedule interview" }));
    await screen.findByRole("option", { name: "Alex Doe · Acme · Engineer" });
+   const dlg = screen.getByRole("dialog", { name: "Schedule interview" });
    fireEvent.click(screen.getByRole("radio", { name: "Phone" }));
    fireEvent.change(screen.getByLabelText("Submission"), { target: { value: "s1" } });
    fireEvent.change(screen.getByLabelText("Round"), { target: { value: "Initial Screening" } });
@@ -116,13 +138,13 @@ describe("interview board", () => {
    fireEvent.change(screen.getByLabelText("Find panel member"), { target: { value: "pawan" } });
    fireEvent.click(await screen.findByRole("button", { name: "Add Pawan Incharge" }));
    fireEvent.change(screen.getByRole("combobox", { name: "Lead user" }), { target: { value: "p2" } });
-   fireEvent.change(screen.getByLabelText("Interview slot"), { target: { value: "2026-10-15T16:00" } });
-   fireEvent.change(screen.getByRole("combobox", { name: "Duration (minutes)" }), { target: { value: "30" } });
-   fireEvent.change(screen.getByLabelText("Meeting link"), { target: { value: "http://meet.example.com/x" } });
-   fireEvent.click(screen.getByRole("button", { name: "Create interview" }));
-   expect(await screen.findByRole("alert")).toHaveTextContent("must start with https://");
-   fireEvent.change(screen.getByLabelText("Meeting link"), { target: { value: "https://meet.example.com/x" } });
-   fireEvent.click(screen.getByRole("button", { name: "Create interview" }));
+   pickSlot(dlg, "2026-10-15T16:00", 30);
+   fireEvent.change(screen.getByLabelText("Meeting link (optional)"), { target: { value: "http://meet.example.com/x" } });
+   fireEvent.click(within(dlg).getByRole("button", { name: "Schedule" }));
+   expect(await within(dlg).findByText(/must start with https:\/\//)).toBeInTheDocument();
+   expect(screen.getByLabelText("Meeting link (optional)")).toHaveAttribute("aria-invalid", "true");
+   fireEvent.change(screen.getByLabelText("Meeting link (optional)"), { target: { value: "https://meet.example.com/x" } });
+   fireEvent.click(within(dlg).getByRole("button", { name: "Schedule" }));
    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/v1/interviews", expect.objectContaining({ method: "POST" })));
    const post = fetch.mock.calls.find(([u, i]) => u === "/api/v1/interviews" && i?.method === "POST")!;
    expect(JSON.parse(String(post[1]!.body))).toEqual({ submissionId: "s1", round: "Initial Screening", startsAt: new Date("2026-10-15T16:00").toISOString(),
@@ -135,6 +157,10 @@ describe("interview board", () => {
    await screen.findByText("Alex Doe");
    fireEvent.click(screen.getByRole("button", { name: "Details of the interview with Alex Doe" }));
    const drawer = await screen.findByRole("dialog", { name: "Interview details" });
+   // The drawer leads with the status and the actions (no need to close it to edit or add feedback).
+   expect(within(drawer).getByRole("button", { name: "Feedback" })).toBeInTheDocument();
+   expect(within(drawer).getByRole("button", { name: "Edit interview" })).toBeInTheDocument();
+   expect(within(drawer).getByText("Scheduled", { selector: ".badge" })).toBeInTheDocument();
    expect(await within(drawer).findAllByText("Ajith Trainer", { selector: "dd" })).toHaveLength(2); // panel list and lead
    expect(within(drawer).getByRole("link", { name: "https://meet.example.com/abc" })).toHaveAttribute("rel", "noopener noreferrer");
    expect(within(drawer).getByRole("link", { name: /Add to calendar/ })).toHaveAttribute("href", "/api/v1/interviews/i1/calendar.ics");
@@ -147,7 +173,7 @@ describe("interview board", () => {
  it("sends a scorecard with coach feedback only when all four criteria are rated", async () => {
    const fetch = setup({ ...row, editableFields: [], feedbackKinds: ["coach"] }, ["interview:read"]);
    await screen.findByText("Alex Doe");
-   fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+   openRowAction("Feedback");
    const dialog = screen.getByRole("dialog");
    fireEvent.change(within(dialog).getByLabelText("Technical skills"), { target: { value: "4" } });
    fireEvent.click(within(dialog).getByRole("button", { name: "Add feedback" }));
@@ -163,8 +189,9 @@ describe("interview board", () => {
    const fetch = setup(row, me.capabilities, undefined, [], [{ startsAt: new Date("2026-10-01T10:30").toISOString(), endsAt: new Date("2026-10-01T11:00").toISOString() }]);
    fireEvent.click(screen.getByRole("button", { name: "Schedule interview" }));
    await screen.findByRole("option", { name: "Alex Doe · Acme · Engineer" });
+   const dlg = screen.getByRole("dialog", { name: "Schedule interview" });
    expect(fetch.mock.calls.some(([u]) => String(u).includes("/calendar/support/busy"))).toBe(false);
-   fireEvent.change(screen.getByLabelText("Interview slot"), { target: { value: "2026-10-01T10:00" } });
+   pickSlot(dlg, "2026-10-01T10:00");
    expect(await screen.findByText(/Support calendar is busy/)).toBeInTheDocument();
    // The day holding the slot is queried: local midnight to the next.
    const req = fetch.mock.calls.find(([u]) => String(u).includes("/calendar/support/busy"))!;
@@ -172,14 +199,14 @@ describe("interview board", () => {
    expect(params.get("from")).toBe(new Date(2026, 9, 1).toISOString());
    expect(params.get("to")).toBe(new Date(2026, 9, 2).toISOString());
    // A later slot on the same day is free without another request.
-   fireEvent.change(screen.getByLabelText("Interview slot"), { target: { value: "2026-10-01T14:00" } });
+   pickSlot(dlg, "2026-10-01T14:00");
    expect(await screen.findByText("Support calendar is free for this slot.")).toBeInTheDocument();
    expect(fetch.mock.calls.filter(([u]) => String(u).includes("/calendar/support/busy"))).toHaveLength(1);
    // Busy or not, the interview can be created.
-   fireEvent.change(screen.getByLabelText("Interview slot"), { target: { value: "2026-10-01T10:00" } });
+   pickSlot(dlg, "2026-10-01T10:00");
    fireEvent.change(screen.getByLabelText("Submission"), { target: { value: "s1" } });
    fireEvent.change(screen.getByLabelText("Round"), { target: { value: "Technical" } });
-   fireEvent.click(screen.getByRole("button", { name: "Create interview" }));
+   fireEvent.click(within(dlg).getByRole("button", { name: "Schedule" }));
    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/v1/interviews", expect.objectContaining({ method: "POST" })));
  });
  it("the edit dialog leaves the interview's own block out of the busy line", async () => {
@@ -187,7 +214,7 @@ describe("interview board", () => {
    setup({ ...row, editableFields: ["startsAt", "durationMin"], durationMin: 60 }, me.capabilities, undefined, [], [own],
      { id: "b", calendarId: "support@x", ...own, createdAt: "2026-09-30T00:00:00Z", createdBy: { id: "u", name: "Lead" } });
    await screen.findByText("Alex Doe");
-   fireEvent.click(screen.getByRole("button", { name: "Edit interview" }));
+   openRowAction("Edit interview");
    const dialog = screen.getByRole("dialog");
    expect(await within(dialog).findByText("No other bookings on the support calendar during this slot.")).toBeInTheDocument();
    fireEvent.change(within(dialog).getByLabelText("Interview slot"), { target: { value: "2026-10-01T09:00" } });
@@ -225,7 +252,7 @@ describe("interview board", () => {
  it("offers no scorecard for location feedback", async () => {
    setup();
    await screen.findByText("Alex Doe");
-   fireEvent.click(screen.getByRole("button", { name: "Feedback" }));
+   openRowAction("Feedback");
    expect(within(screen.getByRole("dialog")).queryByLabelText("Technical skills")).not.toBeInTheDocument();
  });
 });

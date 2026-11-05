@@ -1,7 +1,8 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState, type MouseEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { INTERVIEW_STAGE_LABELS, type InterviewStage } from "@eureka/shared";
 import { can, type Me } from "../api";
+import { useSearchParam } from "../lib/router";
 import { salesApi, salesKeys } from "../sales/salesApi";
 import { fmtDateTime, pipelineLabel, type Submission, type SubmissionSummary, type TrailStep } from "./pipelineApi";
 
@@ -11,6 +12,25 @@ export function useDebounced(value: string, ms = 250) {
   useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value, ms]);
   return v;
 }
+
+/**
+ * A search box backed by one URL parameter: `[input, setInput, value]`. The box updates at once;
+ * the parameter (and `value`, what queries use) follows 250 ms after typing stops, trimmed. A
+ * change from outside (Clear filters, back/forward) resets the box.
+ */
+export function useDebouncedParam(name: string, ms = 250): [string, (v: string) => void, string] {
+  const [param, setParam] = useSearchParam(name);
+  const [input, setInput] = useState(param);
+  const settled = useDebounced(input.trim(), ms);
+  const write = useRef(setParam);
+  write.current = setParam;
+  useEffect(() => { write.current(settled); }, [settled]);
+  useEffect(() => { setInput((i) => (i.trim() === param ? i : param)); }, [param]);
+  return [input, setInput, param];
+}
+
+/** Ignore row clicks that land on a control inside the row (links, buttons, fields, menus). */
+export const fromControl = (e: MouseEvent) => Boolean((e.target as HTMLElement).closest("a, button, input, select, textarea, label, [role='menu']"));
 
 /** Training batches for a list's Batch filter; empty without candidate:read (the server withholds them). */
 export function useBatchOptions(me?: Pick<Me, "capabilities">) {
@@ -101,8 +121,9 @@ export function PipelineFunnel({ summary, value, onPick }: {
     <section className="funnel" aria-label="Submission funnel">
       <ol>
         {steps.map((st, i) => {
-          // Compare with the last earlier step that has submissions (stages can be skipped, e.g. no screening).
-          const base = steps.slice(0, i).reverse().find((x) => x.n > 0);
+          // Compare with the last earlier step that has submissions (stages can be skipped, e.g. no screening);
+          // Placed compares with everyone who got an interview, not with the last round.
+          const base = st.key === "placed" ? steps[1] : steps.slice(0, i).reverse().find((x) => x.n > 0);
           const on = reachedValue(st.reached) === current;
           return (
             <li key={st.key} className={st.n === 0 && i > 0 ? "zero" : undefined}>

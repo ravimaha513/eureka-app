@@ -1,0 +1,77 @@
+/* Dashboard (wave 2): needs attention first, compact stat strip, trend + side cards, group table.
+   Tokens only (DESIGN.md). Shared insight classes live in insights.css. */
+.dash-v2 { gap: 24px; }
+
+/* Needs attention: one card, three lists, oldest first. */
+.dash-attention { padding: 14px 16px 6px; overflow: visible; }
+.dash-attentionhead { margin-bottom: 4px; }
+.dash-att { padding: 10px 0 10px; }
+.dash-att + .dash-att { border-top: 1px solid var(--line2); }
+.dash-atthead { display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.dash-atthead h3 { font-size: 14.5px; font-weight: 700; color: var(--text); display: flex; align-items: baseline; gap: 8px; }
+.dash-atthead h3:focus { outline: none; }
+.dash-atthead p { font-size: 12.5px; }
+.dash-attempty { color: var(--ok-fg); font-size: 13.5px; margin: 0; }
+.dash-atttable { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); }
+.dash-atttable table { table-layout: auto; }
+.dash-atttable td.dash-detail { max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+.dash-atttable td.c-primary { width: 22%; }
+.dash-attfoot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.dash-attfoot p { font-size: 12.5px; margin: 0; }
+
+/* Deltas: up in ok ink, down in neutral ink (a decrease is not an error, so never red), zero base in muted. */
+.dash-delta { font-weight: 600; }
+.dash-delta.up { color: var(--ok-fg); }
+.dash-delta.down { color: var(--text2); }
+.dash-delta.flat { color: var(--muted); font-weight: 500; }
+.dash-pct { font-weight: 500; }
+
+/* Trend (wide) beside a column of two compact cards; the side cards size to their content. */
+.dash-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); gap: 16px; align-items: start; }
+.dash-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.dash-card { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.dash-card .charttitle { font-size: 15px; }
+.dash-metric select { height: 30px; font-size: 13px; padding-block: 0; }
+
+/* Ranked bars: name, bar, value, change. A zero value draws no bar. */
+.dash-rank { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.dash-rank li { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) 40px minmax(88px, auto); align-items: center; gap: 10px; min-height: 24px; }
+.dash-stages li { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.6fr) 40px; }
+.dash-rankname { color: var(--text2); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-bar { height: 8px; border-radius: 2px; background: var(--line2); overflow: hidden; }
+.dash-bar > span { display: block; height: 100%; border-radius: 2px; }
+.dash-rankvalue { text-align: right; font-variant-numeric: tabular-nums; color: var(--text); font-size: 13.5px; }
+.dash-rankvalue.zero { color: var(--muted); font-weight: 500; }
+.dash-rank .ins-sub { min-height: 0; justify-content: flex-end; white-space: nowrap; }
+.dash-viewall { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; font-size: 13px; font-weight: 600; min-height: 28px; }
+
+.dash-groups td.c-primary { min-width: 180px; }
+
+@media (max-width: 1100px) { .dash-grid { grid-template-columns: minmax(0, 1fr); } }
+
+@media (max-width: 768px) {
+  .dash-v2 { gap: 20px; }
+  .dash-attention { padding: 12px 12px 4px; border: 0; background: none; padding: 0; overflow: visible; }
+  .dash-atttable { border: 0; background: none; border-radius: 0; overflow: visible; }
+  .dash-atthead { flex-direction: column; gap: 2px; }
+  .dash-atttable td.dash-detail { max-width: none; display: block; color: var(--text2); }
+  .dash-atttable td.dash-detail::before { content: none; }
+  .dash-atttable td.c-primary { width: auto; }
+  /* Card: name + status; details; recruiter and waiting on the left with Open beside them. */
+  .dash-atttable tr { grid-template-columns: minmax(0, 1fr) auto; }
+  .dash-atttable td.dash-detail { grid-row: 2; }
+  .dash-atttable td[data-label="Recruiter"] { grid-column: 1; grid-row: 3; grid-template-columns: 64px minmax(0, 1fr); }
+  .dash-atttable td[data-label="Waiting"] { grid-column: 1; grid-row: 4; grid-template-columns: 64px minmax(0, 1fr); }
+  .dash-atttable td.c-act { grid-column: 2; grid-row: 3 / span 2; align-self: end; margin-top: 0; }
+  .dash-attfoot .btn { height: 40px; }
+  .dash-card { padding: 14px; }
+  .dash-rank li { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px minmax(64px, auto); gap: 8px; }
+  .dash-stages li { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 32px; }
+  .dash-viewall { min-height: 40px; }
+  .dash-metric select { height: 40px; font-size: 16px; }
+  /* Group rows: name, then the counts as a three-column grid of label over value. */
+  .dash-groups tr { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; }
+  .dash-groups td.c-primary { grid-column: 1 / -1; min-width: 0; }
+  .dash-groups td.num { grid-column: auto; display: flex; flex-direction: column; gap: 0; text-align: left; font-size: 15px; font-weight: 600; color: var(--text); }
+  .dash-groups td.num::before { font-size: 11.5px; font-weight: 400; }
+}

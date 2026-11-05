@@ -1,6 +1,7 @@
 /** Hot List saved views, bulk actions and export (apps/api/src/modules/hotlist). The server checks every action. */
 import { useId, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { BookmarkPlus, Download } from "lucide-react";
 import { ApiError, type Candidate } from "../api";
 import { saveBlob } from "../lib/download";
 import { TeamChecklist } from "./TeamChecklist";
@@ -112,7 +113,7 @@ export function SavedViews({ s, list = "hotlist" }: { s: ListState; list?: ViewL
             )}
           </select>
         </div>
-        <button type="button" className="btn" onClick={() => open("save")}>Save current filters…</button>
+        <button type="button" className="btn" onClick={() => open("save")}><BookmarkPlus size={16} aria-hidden="true" /><span className="btnlabel">Save current filters…</span></button>
         {current?.mine && (
           <>
             <button type="button" className="btn" onClick={() => open("rename")}>Rename</button>
@@ -166,10 +167,11 @@ export function ExportButton({ s }: { s: ListState }) {
   const n = run.data?.rows ?? 0;
   return (
     <div className="export">
-      <button type="button" className="btn" disabled={run.isPending} onClick={() => run.mutate()}>
-        {run.isPending ? "Exporting…" : "Export CSV"}
+      <button type="button" className="btn" disabled={run.isPending} onClick={() => run.mutate()} aria-describedby="hotlist-export-hint"
+        title={`Exports this view for candidates in your scope, up to ${EXPORT_ROW_CAP.toLocaleString("en-US")} rows. Phones are masked.`}>
+        <Download size={16} aria-hidden="true" /><span className="btnlabel">{run.isPending ? "Exporting…" : "Export CSV"}</span>
       </button>
-      <small className="hint">Exports this view for candidates in your scope, up to {EXPORT_ROW_CAP.toLocaleString("en-US")} rows. Phones are masked.</small>
+      <small id="hotlist-export-hint" className="sr-only">Exports this view for candidates in your scope, up to {EXPORT_ROW_CAP.toLocaleString("en-US")} rows. Phones are masked.</small>
       {run.isError ? (
         <p className="error" role="alert">
           {run.error instanceof ApiError && run.error.status === 429 ? (run.error.detail ?? "Too many exports. Try again later.")
@@ -226,9 +228,15 @@ export function BulkBar({ selected, items, canStatus, canVisibility, onDone }: {
   const r: BulkResponse | undefined = run.data;
   const n = selected.size;
   const pickTeams = vis === "selected_teams";
+  // The bar shows while rows are selected, and stays after a change (which clears the selection) to report its outcome.
+  if (n === 0 && run.isIdle) return null;
 
   return (
     <section className="bulkbar" aria-label="Bulk actions">
+      {n === 0 ? (
+        <div className="toolbar"><span className="muted">Bulk change finished.</span>
+          <button type="button" className="btn sm push" onClick={() => run.reset()}>Dismiss</button></div>
+      ) : (
       <div className="toolbar">
         <span className="muted"><b>{n}</b> {n === 1 ? "candidate" : "candidates"} selected</span>
         {canStatus && (
@@ -270,7 +278,8 @@ export function BulkBar({ selected, items, canStatus, canVisibility, onDone }: {
         )}
         <button type="button" className="btn" disabled={!n} onClick={onDone}>Clear selection</button>
       </div>
-      {canVisibility && pickTeams && (
+      )}
+      {n > 0 && canVisibility && pickTeams && (
         <div className="bulkteams">
           <p id={`${id}-teams`} className="hint">
             Picked teams can see and submit these candidates while they're active. Each candidate's own team always sees it.

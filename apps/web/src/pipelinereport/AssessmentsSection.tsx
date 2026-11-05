@@ -6,6 +6,7 @@ import {
   type Assessment, type AssessmentInput,
 } from "./pipelineReportApi";
 import { localToday } from "../employees/employeesApi";
+import "./pipelinereport.css";
 
 const DONE = new Set(["completed", "passed", "failed"]);
 
@@ -27,7 +28,7 @@ export function AssessmentsSection({ submissionId }: { submissionId: string }) {
           {d.items.map((a) => (
             <li key={a.id}>
               <b>{PLATFORM_LABELS[a.platform] ?? a.platform}</b>{" "}
-              <span className={`badge st-${a.status === "passed" ? "joined" : a.status === "failed" ? "backout" : "confirmed"}`}>
+              <span className={`badge as-${a.status}`}>
                 {ASSESSMENT_STATUS_LABELS[a.status] ?? a.status}</span>
               <span className="block muted">
                 Assigned {fmtDate(a.assignedOn)}{a.dueOn ? ` · due ${fmtDate(a.dueOn)}` : ""}
@@ -43,7 +44,7 @@ export function AssessmentsSection({ submissionId }: { submissionId: string }) {
       {editing !== null ? (
         <AssessmentForm submissionId={submissionId} current={editing === "new" ? null : editing} onDone={() => setEditing(null)} />
       ) : d.actions.create && (
-        <button type="button" className="btn sm" onClick={() => setEditing("new")}>Record assessment</button>
+        <div className="rowactions"><button type="button" className="btn sm" onClick={() => setEditing("new")}>Record assessment</button></div>
       )}
     </section>
   );
@@ -96,7 +97,8 @@ function AssessmentForm({ submissionId, current, onDone }: { submissionId: strin
       <div className="field">
         <label htmlFor={`${id}-co`}>Completed on{DONE.has(v.status) ? "" : " (optional)"}</label>
         <input id={`${id}-co`} type="date" value={v.completedOn ?? ""} min={v.assignedOn} required={DONE.has(v.status)}
-          aria-invalid={needsDate || undefined} onChange={(e) => set("completedOn", e.target.value || null)} />
+          aria-invalid={needsDate || undefined} aria-describedby={needsDate ? `${id}-co-err` : undefined} onChange={(e) => set("completedOn", e.target.value || null)} />
+        {needsDate && <small id={`${id}-co-err`} className="error fielderr">Enter the completion date for a {ASSESSMENT_STATUS_LABELS[v.status]?.toLowerCase() ?? "finished"} assessment.</small>}
       </div>
       <div className="field">
         <label htmlFor={`${id}-sc`}>Score 0-100 (optional)</label>

@@ -1,0 +1,62 @@
+/* Insights (Dashboard, Performance, Reports): shared screen classes. Tokens only (DESIGN.md).
+   Imported by DashboardPage, PerformancePage and the Reports page. */
+
+/* Stat strip: one hairline-ruled card of compact figures instead of separate tinted tiles.
+   <ul class="ins-tiles"><li><span class="tilelabel">…</span><span class="tilevalue">…</span><span class="ins-sub">…</span></li></ul> */
+.ins-tiles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+.ins-tiles > li { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 12px 16px 12px;
+  border-right: 1px solid var(--line2); border-bottom: 1px solid var(--line2); margin: 0 -1px -1px 0; }
+.ins-tiles .tilelabel { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--text2); min-width: 0; }
+.ins-tiles .tilelabel > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ins-tiles .tilevalue { font-size: 24px; line-height: 1.15; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; letter-spacing: -.015em; }
+.ins-sub { font-size: 12px; color: var(--muted); min-height: 16px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.ins-sub .linkbtn { font-size: 12.5px; font-weight: 600; min-height: 24px; }
+.ins-swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+
+/* Section head: h2 with an optional count and actions on the right. */
+.ins-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 16px; flex-wrap: wrap; margin: 0 0 10px; }
+.ins-head h2, .ins-head h3 { font-size: 16px; font-weight: 700; color: var(--text); letter-spacing: -.01em; display: flex; align-items: baseline; gap: 8px; }
+.ins-head h3 { font-size: 15px; }
+.ins-head h2:focus, .ins-head h3:focus { outline: none; }
+.ins-head .muted { font-size: 12.5px; }
+.ins-count { font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; padding: 0 6px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); line-height: 1.5; }
+.ins-note { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
+.ins-section { display: flex; flex-direction: column; min-width: 0; }
+
+/* Period row: presets + dates on one line. */
+.ins-period { display: flex; align-items: flex-end; gap: 8px 12px; flex-wrap: wrap; }
+.ins-period .tabs.seg { height: 36px; align-items: center; }
+.ins-period .field.inline input { height: 36px; }
+
+/* Plain numeric link inside a table cell: reads as the number, opens the rows behind it. */
+.ins-numlink { background: none; border: 0; padding: 2px 0; font: inherit; color: var(--pri-700); font-variant-numeric: tabular-nums; font-weight: 600; text-decoration: underline; text-decoration-color: var(--pri-200); text-underline-offset: 3px; }
+.ins-numlink:hover { text-decoration-color: currentColor; }
+.ins-numlink:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; border-radius: var(--r-sm); }
+td.num .ins-zero { color: var(--muted); }
+
+/* Sortable column head: the whole head is the button. */
+th .ins-sort { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
+th .ins-sort:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; border-radius: var(--r-sm); }
+th .ins-sort:hover { color: var(--text); }
+th[aria-sort] .ins-sort { color: var(--text); }
+th.num .ins-sort { flex-direction: row-reverse; }
+th abbr { text-decoration: none; }
+
+@media (max-width: 768px) {
+  /* A secondary line inside a phone-card cell stays in the value column, under the value. */
+  .dtable td[data-label] > .block { grid-column: 2; margin-top: -8px; }
+  .ins-tiles { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
+  .ins-tiles > li { padding: 10px 10px 10px 12px; gap: 2px; }
+  .ins-tiles .tilelabel { font-size: 12px; }
+  .ins-tiles .tilelabel > span { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .ins-tiles .tilevalue { font-size: 20px; }
+  .ins-sub { font-size: 11.5px; }
+  .ins-sub .linkbtn { min-height: 32px; }
+  .ins-head h2 { font-size: 15px; }
+  .ins-period { flex-direction: column; align-items: stretch; }
+  .ins-period .tabs.seg { flex-wrap: nowrap; height: 40px; }
+  .ins-period .tabs.seg .tab { flex: 1; justify-content: center; white-space: nowrap; padding: 6px 4px; }
+  .ins-period .ins-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .ins-period .field.inline input { height: 44px; font-size: 16px; width: 100%; min-width: 0; }
+}

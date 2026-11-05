@@ -101,6 +101,8 @@ const writes = () => calls.filter((c) => c.method !== "GET");
 const lastWrite = () => writes().at(-1)!;
 
 beforeEach(() => {
+  // Tabs and Users filters live in the URL; start every test from a clean address.
+  window.history.replaceState(null, "", "/");
   setCsrf("tok");
   calls = [];
   routes = {
@@ -128,6 +130,11 @@ const renderPage = (tab?: "users" | "approvals" | "teams" | "locations" | "roles
 
 const status = () => screen.getByRole("status");
 const row = async (name: string) => (await screen.findByText(name, { selector: "b" })).closest("tr")!;
+/** Opens a user row's "More actions" menu and picks an item (secondary row actions live in the menu). */
+const rowAction = async (name: string, item: string) => {
+  fireEvent.click(within(await row(name)).getByRole("button", { name: `More actions for ${name}` }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: item }));
+};
 
 // ---- navigation --------------------------------------------------------------------------------
 
@@ -147,9 +154,9 @@ describe("Users & Access navigation", () => {
     const users = screen.getByRole("tab", { name: "Users" });
     users.focus();
     fireEvent.keyDown(users, { key: "ArrowRight" });
-    expect(screen.getByRole("tab", { name: "Approvals" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "Approvals" })).toHaveFocus();
-    fireEvent.keyDown(screen.getByRole("tab", { name: "Approvals" }), { key: "ArrowLeft" });
+    expect(screen.getByRole("tab", { name: /^Approvals/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /^Approvals/ })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("tab", { name: /^Approvals/ }), { key: "ArrowLeft" });
     expect(users).toHaveAttribute("aria-selected", "true");
   });
 });
@@ -157,6 +164,23 @@ describe("Users & Access navigation", () => {
 // ---- users ---------------------------------------------------------------------------------------
 
 describe("Users tab", () => {
+  it("shows the pending approvals count on the Approvals tab", async () => {
+    renderPage();
+    expect(await screen.findByRole("tab", { name: /^Approvals\W*pending\W*3$/ })).toBeInTheDocument();
+  });
+
+  it("role summary toggles filter by role and keep the filters in the URL", async () => {
+    routes["GET /api/v1/admin/users/summary"] = () => ({ body: { active: 3, inactive: 1, roles: [{ key: "recruiter", label: "Recruiter", count: 4 }] } });
+    renderPage();
+    await row("Priya Rao");
+    const chip = await screen.findByRole("button", { name: "Recruiter 4" });
+    fireEvent.click(chip);
+    expect(chip).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Role")).toHaveValue("recruiter");
+    expect(window.location.search).toContain("role=recruiter");
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/admin/users" && c.url.searchParams.get("role") === "recruiter")).toBe(true));
+  });
+
   it("lists users with role chips (with location), teams, manager and status", async () => {
     renderPage();
     const r = await row("Priya Rao");
@@ -165,7 +189,7 @@ describe("Users tab", () => {
     expect(within(cells.getByRole("list", { name: "Roles of Priya Rao" })).getByText(/Location Ops Admin · Dallas/)).toBeInTheDocument();
     expect(cells.getByText("Team Rohit")).toBeInTheDocument();
     expect(cells.getByText("Rohit Lead")).toBeInTheDocument();
-    expect(cells.getByText("active")).toBeInTheDocument();
+    expect(cells.getByText("Active")).toBeInTheDocument();
     // lead tag on teams, inactive user offers reactivate instead of deactivate/grant
     expect(within(await row("Rohit Lead")).getByText("lead")).toBeInTheDocument();
     const old = within(await row("Old Timer"));
@@ -234,7 +258,7 @@ describe("Users tab", () => {
   it("deactivates after a confirmation that says sessions are revoked immediately", async () => {
     routes["POST /api/v1/admin/users/u-priya/deactivate"] = () => ({ status: 204 });
     renderPage();
-    fireEvent.click(within(await row("Priya Rao")).getByRole("button", { name: "Deactivate Priya Rao" }));
+    await rowAction("Priya Rao", "Deactivate…");
     const dlg = await screen.findByRole("dialog", { name: "Deactivate Priya Rao?" });
     expect(dlg).toHaveAccessibleDescription(/sessions are revoked immediately/i);
     expect(within(dlg).getByText(/roles must be granted again/i)).toBeInTheDocument();
@@ -250,8 +274,10 @@ describe("Users tab", () => {
     renderPage();
     const old = within(await row("Old Timer"));
     expect(old.getByText(/^Deletes /)).toBeInTheDocument();
-    expect(within(await row("Priya Rao")).queryByRole("button", { name: "Delete Priya Rao" })).not.toBeInTheDocument();
-    fireEvent.click(old.getByRole("button", { name: "Delete Old Timer" }));
+    fireEvent.click(within(await row("Priya Rao")).getByRole("button", { name: "More actions for Priya Rao" }));
+    expect(screen.queryByRole("menuitem", { name: "Delete now…" })).not.toBeInTheDocument();
+    fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
+    await rowAction("Old Timer", "Delete now…");
     const dlg = await screen.findByRole("dialog", { name: "Delete Old Timer now?" });
     expect(dlg).toHaveAccessibleDescription(/can't be undone/i);
     fireEvent.click(within(dlg).getByRole("button", { name: "Delete permanently" }));
@@ -271,9 +297,10 @@ describe("Users tab", () => {
 
   it("closes a dialog on Escape and returns focus to the opener", async () => {
     renderPage();
-    const opener = within(await row("Priya Rao")).getByRole("button", { name: "Deactivate Priya Rao" });
+    // The menu hands focus back to its button before opening the dialog, so that button is the opener.
+    const opener = within(await row("Priya Rao")).getByRole("button", { name: "More actions for Priya Rao" });
     opener.focus();
-    fireEvent.click(opener);
+    await rowAction("Priya Rao", "Deactivate…");
     const dlg = await screen.findByRole("dialog");
     expect(within(dlg).getByRole("button", { name: "Cancel" })).toHaveFocus();
     fireEvent.keyDown(dlg, { key: "Escape" });
@@ -283,7 +310,7 @@ describe("Users tab", () => {
 
   it("closes on Escape even when focus has fallen to the page body (e.g. after a failed submit)", async () => {
     renderPage();
-    fireEvent.click(within(await row("Priya Rao")).getByRole("button", { name: "Deactivate Priya Rao" }));
+    await rowAction("Priya Rao", "Deactivate…");
     await screen.findByRole("dialog");
     (document.activeElement as HTMLElement | null)?.blur();
     fireEvent.keyDown(document.body, { key: "Escape" });
@@ -368,7 +395,7 @@ describe("Users tab", () => {
     let fail = true;
     routes["PUT /api/v1/admin/users/u-lead/manager"] = () => (fail ? problem(422, "cycle") : { status: 204 });
     renderPage();
-    fireEvent.click(within(await row("Rohit Lead")).getByRole("button", { name: "Set manager for Rohit Lead" }));
+    await rowAction("Rohit Lead", "Set manager");
     const dlg = await screen.findByRole("dialog", { name: "Set manager for Rohit Lead" });
     await within(dlg).findByRole("option", { name: /Priya Rao/ });
     expect(within(dlg).queryByRole("option", { name: /Rohit Lead/ })).not.toBeInTheDocument();
@@ -604,6 +631,8 @@ describe("Teams tab", () => {
     drawer = await openTeam("Team Rohit");
     expect(within(within(drawer).getByRole("list", { name: "Coaches of Team Rohit" })).getByText("Cora Coach")).toBeInTheDocument();
     fireEvent.click(within(drawer).getByRole("button", { name: "Remove coach Cora Coach from Team Rohit" }));
+    // Removing a coach asks first, like removing a member.
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Remove Cora Coach from Team Rohit?" })).getByRole("button", { name: "Remove coach" }));
     await waitFor(() => expect(status()).toHaveTextContent("Cora Coach no longer coaches Team Rohit."));
     expect(lastWrite()).toMatchObject({ method: "DELETE", path: "/api/v1/admin/teams/t1/coaches/u-coach" });
   });
@@ -827,18 +856,19 @@ describe("departments", () => {
       },
     });
     renderPage();
-    expect(within(await row("Priya Rao")).getAllByRole("cell")[3]).toHaveTextContent("—");
+    expect(within(await row("Priya Rao")).getAllByRole("cell")[2]).toHaveTextContent("No department");
+    fireEvent.click(screen.getByRole("button", { name: "More filters" })); // Department sits under More filters
     const filter = screen.getByLabelText("Department");
     await within(filter).findByRole("option", { name: "Sales › Interview Prep" });
     fireEvent.change(filter, { target: { value: "d-sales" } });
-    expect(within(await row("Kay Coach")).getAllByRole("cell")[3]).toHaveTextContent("Sales › Interview Prep");
+    expect(within(await row("Kay Coach")).getAllByRole("cell")[2]).toHaveTextContent("Sales › Interview Prep");
     expect(calls.filter((c) => c.path === "/api/v1/admin/users").at(-1)!.url.searchParams.get("departmentId")).toBe("d-sales");
   });
 
   it("sets a user's department", async () => {
     routes["PUT /api/v1/admin/users/u-priya/department"] = () => ({ status: 204 });
     renderPage();
-    fireEvent.click(within(await row("Priya Rao")).getByRole("button", { name: "Set department for Priya Rao" }));
+    await rowAction("Priya Rao", "Set department");
     const dlg = await screen.findByRole("dialog", { name: "Set department for Priya Rao" });
     await within(dlg).findByRole("option", { name: "Sales › Interview Prep" });
     fireEvent.change(within(dlg).getByLabelText("Department"), { target: { value: "d-prep" } });
@@ -923,7 +953,7 @@ describe("Roles tab", () => {
     expect(names).toEqual(["RecruiterBuilt-in", "Lead (Sales)Built-in", "Senior LeadRestricted · Healthcare"]);
     expect(within(sales).getAllByRole("row")[1]).toHaveTextContent("Sales, Recruiter");
     expect(within(sales).getAllByRole("row")[2]).toHaveTextContent("3");
-    expect(screen.getByRole("table", { name: "Hr roles" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "HR roles" })).toBeInTheDocument();
   });
 
   it("opens a built-in role read-only, with the permission grid grouped by area", async () => {

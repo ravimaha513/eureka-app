@@ -34,6 +34,8 @@ test("a saved view stores the filters, reapplies them after a reload and can be 
   const name = `E2E view ${uniq()}`;
   await login(page, "r1a@eureka.example");
   await filter(page, "Status").selectOption({ label: "On hold" });
+  // Visibility sits behind "More filters".
+  await filters(page).getByRole("button", { name: /^More filters/ }).click();
   await filter(page, "Visibility").selectOption({ label: "Open to all teams" });
 
   await views(page).getByRole("button", { name: "Save current filters…" }).click();
@@ -42,13 +44,17 @@ test("a saved view stores the filters, reapplies them after a reload and can be 
   await form.getByRole("button", { name: "Save view" }).click();
   await expect(views(page).getByRole("status")).toHaveText(`Saved view “${name}”.`);
 
-  // A new session: the view is still there and puts its filters back.
+  // Filters live in the address bar, so a reload keeps them.
   await page.reload();
+  await expect(filter(page, "Status")).toHaveValue("on_hold");
+  // A new visit starts clean: the view is still there and puts its filters back.
+  await page.goto("/hotlist");
   await expect(filter(page, "Status")).toHaveValue("");
   await views(page).getByRole("combobox", { name: "Saved view", exact: true }).selectOption({ label: name });
   await expect(views(page).getByRole("status")).toHaveText(`Showing saved view “${name}”.`);
   await expect(filter(page, "Status")).toHaveValue("on_hold");
-  await expect(filter(page, "Visibility")).toHaveValue("all_teams");
+  // Visibility is a "More filters" field: while set it shows as a chip.
+  await expect(page.getByRole("list", { name: "Active filters" })).toContainText("Visibility: Open to all teams");
   const rows = hotlist(page).locator("tbody tr");
   await expect(rows.first()).toBeVisible();
   // Polled as a whole: other journeys may add rows meanwhile and the list refetches.

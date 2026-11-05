@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { LogOut, Moon, Sparkles, Sun } from "lucide-react";
+import { LogOut, Moon, Sun } from "lucide-react";
 import { ApiError } from "../api";
 import { navigate, usePathname } from "../lib/router";
 import { Field } from "../sales/ui";
 import { useTheme } from "../shell/theme";
+import { BrandMark } from "../shell/ui";
 import { normalizePhoneE164, PHONE_PROBLEM_MESSAGES, phoneProblem } from "@eureka/shared";
 import { portal, portalError, setPortalCsrf, type Applicant } from "./portalApi";
 import { PortalJobs } from "./PortalJobs";
@@ -23,15 +24,15 @@ export function usePortalPath(): [string, (p: string) => void] {
 }
 
 function Brand() {
-  return <span className="brand"><span className="logo"><Sparkles size={16} aria-hidden="true" /></span><span className="brandname">Eureka Careers</span></span>;
+  return <span className="brand portalbrand"><BrandMark size={28} /><span className="brandtext">Eureka<small>Careers</small></span></span>;
 }
 
 function ThemeToggle() {
   const [theme, setTheme] = useTheme();
   return (
-    <button type="button" className="btn ghost themechip" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-      aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}>
-      {theme === "dark" ? <Moon size={15} aria-hidden="true" /> : <Sun size={15} aria-hidden="true" />}{theme === "dark" ? "Dark" : "Light"}
+    <button type="button" className="iconbtn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+      aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} title={theme === "dark" ? "Light theme" : "Dark theme"}>
+      {theme === "dark" ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
     </button>
   );
 }
@@ -78,8 +79,8 @@ function SignUp({ go }: { go: (p: string) => void }) {
         <form onSubmit={submit} noValidate>
           <Field label="First name" error={errors.firstName}>{(p) => <input {...p} value={v.firstName} onChange={set("firstName")} maxLength={80} autoComplete="given-name" />}</Field>
           <Field label="Last name" error={errors.lastName}>{(p) => <input {...p} value={v.lastName} onChange={set("lastName")} maxLength={80} autoComplete="family-name" />}</Field>
-          <Field label="Phone" error={errors.phone} hint="With the country code, e.g. +1 469 555 0142">{(p) => <input {...p} value={v.phone} onChange={set("phone")} maxLength={40} type="tel" autoComplete="tel" />}</Field>
-          <Field label="Email" error={errors.email}>{(p) => <input {...p} value={v.email} onChange={set("email")} maxLength={254} type="email" autoComplete="email" />}</Field>
+          <Field label="Email" error={errors.email} hint="Your sign-in links and application updates go here.">{(p) => <input {...p} value={v.email} onChange={set("email")} maxLength={254} type="email" autoComplete="email" />}</Field>
+          <Field label="Phone" error={errors.phone} hint="For arranging interviews. With the country code, e.g. +1 469 555 0142">{(p) => <input {...p} value={v.phone} onChange={set("phone")} maxLength={40} type="tel" autoComplete="tel" />}</Field>
           {err && <p className="error" role="alert">{err}</p>}
           <button type="submit" className="btn primary block" disabled={busy}>{busy ? "Working…" : "Sign up"}</button>
         </form>
@@ -148,19 +149,20 @@ function PortalShell({ me, path, go, onSignOut }: { me: Applicant; path: string;
     <div className="portal">
       <header className="portaltop">
         <Brand />
-        <nav aria-label="Portal">
+        <nav aria-label="Portal" className="portalnav">
           {SCREENS.map(([p, label]) => <button key={p} type="button" aria-current={current === p ? "page" : undefined} onClick={() => go(p)}>{label}</button>)}
         </nav>
         <span className="grow" />
+        <span className="pt-user">{me.firstName} {me.lastName}</span>
         <ThemeToggle />
-        <button type="button" className="btn ghost" onClick={onSignOut} aria-label={`Sign out ${me.firstName} ${me.lastName}`}>
-          <LogOut size={15} aria-hidden="true" /><span className="brandname">Sign out</span>
+        <button type="button" className="btn ghost pt-signout" onClick={onSignOut} aria-label={`Sign out ${me.firstName} ${me.lastName}`}>
+          <LogOut size={16} aria-hidden="true" /><span className="pt-label">Sign out</span>
         </button>
       </header>
       <main className="portalmain">
-        {current === "/portal/applications" ? <PortalApplications /> : <PortalJobs onApplied={() => undefined} go={go} />}
+        {current === "/portal/applications" ? <PortalApplications /> : <PortalJobs me={me} go={go} />}
       </main>
-      <footer className="portalfoot">Signed in as {me.email}</footer>
+      <footer className="portalfoot">Signed in as {me.email} · Your data is used only for your job applications.</footer>
     </div>
   );
 }

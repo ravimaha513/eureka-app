@@ -14,8 +14,12 @@ describe("candidate feedback", () => {
     await screen.findByText(/Hi Alex/);
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0]![1]).toMatchObject({ credentials: "omit", referrerPolicy: "no-referrer" });
-    expect(screen.getByRole("button", { name: "Send feedback" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("radio", { name: "4" }));
+    // Send stays enabled; without a rating it explains what is missing and sends nothing.
+    fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+    expect(await screen.findByText(/Choose how your interview went/)).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("radio", { name: "1 Very poor" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "4 Good" }));
     fireEvent.change(screen.getByLabelText(/Interview format/), { target: { value: "Video" } });
     fireEvent.change(screen.getByLabelText(/Duration in minutes/), { target: { value: "45" } });
     fireEvent.change(screen.getByLabelText(/Topics covered/), { target: { value: "React, SQL" } });
@@ -50,10 +54,14 @@ describe("candidate feedback", () => {
       .mockResolvedValueOnce(response({}, 429)).mockResolvedValueOnce(response({ submitted: true }));
     render(<PublicFeedback token={token} />);
     await screen.findByText(/Hi Alex/);
-    fireEvent.click(screen.getByRole("radio", { name: "3" }));
+    fireEvent.click(screen.getByRole("radio", { name: "3 OK" }));
     fireEvent.change(screen.getByLabelText(/Anything you'd like/), { target: { value: "My feedback" } });
     fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("wait a minute");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("wait a minute");
+    // The error sits next to the submit button and takes focus.
+    expect(alert.nextElementSibling).toBe(screen.getByRole("button", { name: "Send feedback" }));
+    await waitFor(() => expect(alert).toHaveFocus());
     expect(screen.getByLabelText(/Anything you'd like/)).toHaveValue("My feedback");
     await waitFor(() => expect(screen.getByRole("button", { name: "Send feedback" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));

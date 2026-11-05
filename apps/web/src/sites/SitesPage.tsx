@@ -1,24 +1,28 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BedDouble, Building2, CircleCheck, Download, House, Plus, Receipt, Search, Users, Wallet } from "lucide-react";
+import { BedDouble, Building2, CircleCheck, Download, House, Plus, Receipt, Users, Wallet } from "lucide-react";
 import type { Me } from "../api";
 import { PALETTE, PieShare, TrendChart } from "../ui/Charts";
-import { fmtDate } from "../sales/ui";
 import { EditSiteDialog, SiteFormDialog } from "./SiteFormDialog";
 import { SiteDrawer } from "./SiteDrawer";
 import {
   exportUrl, fmtMoney, fmtMoneyShort, fmtMonth, fmtRent, last12Months, num, siteKeys, sitesApi, sitesError, utilityLabel,
   type BillsSummary, type Company, type CompanyStats, type Facility, type FacilityStats, type Site, type SiteKind,
 } from "./sitesApi";
-import { KIND, Kpi, SiteIcon, StatusPill } from "./ui";
+import { KIND, Kpi, StatusPill } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
+import { FilterBar } from "../ui/FilterBar";
+import { useRoutedId, useSearchParams } from "../lib/router";
+import { fmtDay, fromControl } from "../payments/cells";
+import "./sites.css";
 
 const PAGE_SIZE = 25;
 
-export const CompaniesPage = ({ me }: { me: Pick<Me, "capabilities" | "roles"> }) => <SitesPage kind="companies" me={me} />;
-export const FacilitiesPage = ({ me }: { me: Pick<Me, "capabilities" | "roles"> }) => <SitesPage kind="facilities" me={me} />;
+type PageProps = { me: Pick<Me, "capabilities" | "roles">; initialOpenId?: string | null; onOpenChange?: (id: string | null) => void };
+export const CompaniesPage = (p: PageProps) => <SitesPage kind="companies" {...p} />;
+export const FacilitiesPage = (p: PageProps) => <SitesPage kind="facilities" {...p} />;
 
 /**
  * Companies (the group's own entities) or facilities (rented guest houses) of the
@@ -26,18 +30,20 @@ export const FacilitiesPage = ({ me }: { me: Pick<Me, "capabilities" | "roles"> 
  * charts, and a details drawer. Add and Edit show only with company:manage /
  * facility:manage; the API decides every action.
  */
-export function SitesPage({ kind, me }: { kind: SiteKind; me: Pick<Me, "capabilities" | "roles"> }) {
+export function SitesPage({ kind, me, initialOpenId = null, onOpenChange }: { kind: SiteKind } & PageProps) {
   const k = KIND[kind];
   const id = useId();
   const qc = useQueryClient();
   const caps = new Set(me.capabilities);
   const canManage = caps.has(kind === "companies" ? "company:manage" : "facility:manage");
   const canBills = caps.has("bill:read");
-  const [text, setText] = useState("");
-  const [search, setSearch] = useState("");
+  const [p, setP] = useSearchParams(["q", "status"] as const);
+  const search = p.q;
+  const status = p.status === "active" || p.status === "inactive" ? p.status : "";
+  const [text, setText] = useState(search);
   const pager = useCursorPager();
   const { page } = pager;
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useRoutedId(initialOpenId, onOpenChange);
   const [adding, setAdding] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -45,11 +51,11 @@ export function SitesPage({ kind, me }: { kind: SiteKind; me: Pick<Me, "capabili
   useEffect(() => {
     // Only a changed search resets paging; otherwise the mount-time run would undo an early Next.
     if (text.trim() === search) return;
-    const t = setTimeout(() => { setSearch(text.trim()); pager.reset(); }, 300);
+    const t = setTimeout(() => { setP({ q: text.trim() }); pager.reset(); }, 300);
     return () => clearTimeout(t);
   }, [text, search]);
 
-  const filters = { q: search, limit: PAGE_SIZE, cursor: pager.cursor ?? "" };
+  const filters = { q: search, status, limit: PAGE_SIZE, cursor: pager.cursor ?? "" };
   const list = useQuery({
     queryKey: siteKeys.list(kind, filters),
     queryFn: () => sitesApi.list(kind, filters),
@@ -64,6 +70,7 @@ export function SitesPage({ kind, me }: { kind: SiteKind; me: Pick<Me, "capabili
   });
 
   const items = (list.data?.items ?? []) as Site[];
+  const billsBy = new Map((summary.data?.byOwner ?? []).map((o) => [o.id, o]));
   const saved = (m: string) => {
     setAdding(false); setEditId(null); setNotice(m);
     void qc.invalidateQueries({ queryKey: siteKeys.all(kind) });
@@ -81,9 +88,14 @@ export function SitesPage({ kind, me }: { kind: SiteKind; me: Pick<Me, "capabili
             ? "The group's own companies and offices in your locations, with their employees, incharges, utilities and bills."
             : "Guest houses and other accommodation the group rents in your locations, with incharges, utilities and bills."}</p>
         </div>
-        {canManage && (
-          <button type="button" className="btn primary push" onClick={() => setAdding(true)}><Plus size={16} aria-hidden="true" />Add {k.one}</button>
-        )}
+        <div className="pageactions">
+          {/* Export follows the search and status filter shown below (the API takes the same q and status). */}
+          <a className="btn" href={exportUrl(kind, { q: search, status })} download>
+            <Download size={16} aria-hidden="true" /><span className="btnlabel">{search || status ? "Export matches" : "Export"}</span><span className="sr-only"> {k.many} as CSV</span></a>
+          {canManage && (
+            <button type="button" className="btn primary" onClick={() => setAdding(true)}><Plus size={16} aria-hidden="true" />Add {k.one}</button>
+          )}
+        </div>
       </div>
 
       <section aria-label={`${k.Many} at a glance`}>
@@ -96,77 +108,88 @@ export function SitesPage({ kind, me }: { kind: SiteKind; me: Pick<Me, "capabili
         </ul>
       </section>
 
+      <FilterBar label={`${k.One} filters`} hasFilters={Boolean(search || status)} onClear={() => { setText(""); setP({ q: "", status: "" }); pager.reset(); }}
+        search={
+          <div className="field inline fb-search">
+            <label htmlFor={`${id}-q`}>Search {k.many}</label>
+            <input id={`${id}-q`} type="search" placeholder="Name, city or zip" value={text} maxLength={80} onChange={(e) => setText(e.target.value)} />
+          </div>
+        }
+        primary={
+          <div className="field inline">
+            <label htmlFor={`${id}-st`}>Status</label>
+            <select id={`${id}-st`} value={status} onChange={(e) => { setP({ status: e.target.value }); pager.reset(); }}>
+              <option value="">Any</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        }
+        activeCount={status ? 1 : 0}
+        chips={status ? [{ key: "status", label: `Status: ${status === "active" ? "Active" : "Inactive"}`, onRemove: () => { setP({ status: "" }); pager.reset(); } }] : []}
+        moreCount={0}
+        summaryEnd={!list.isLoading && !list.error ? <span className="muted si-count">{n}{list.data?.nextCursor ? "+" : ""} {n === 1 ? k.one : k.many}</span> : null} />
+
       <p role="status" aria-live="polite" className="livemsg">{notice}</p>
 
-      <section className="card listcard" aria-labelledby={`${id}-title`}>
-        <div className="cardhead">
-          <h2 id={`${id}-title`}>{k.Many} List</h2>
-          <div className="cardtools">
-            <div className="searchbox">
-              <Search size={16} className="inicon" aria-hidden="true" />
-              <label htmlFor={`${id}-q`} className="sr-only">Search {k.many}</label>
-              <input id={`${id}-q`} type="search" placeholder="Search" value={text} maxLength={80} onChange={(e) => setText(e.target.value)} />
-            </div>
-            <a className="btn outline" href={exportUrl(kind)} download><Download size={16} aria-hidden="true" />Export<span className="sr-only"> {k.many} as CSV</span></a>
-          </div>
-        </div>
+      <section className="card tablewrap listcard" aria-label={`${k.Many} list`}>
         {list.isLoading ? <Loading /> : list.error ? (
           <QueryError query={list} message={sitesError(list.error, k.one)} />
         ) : (
-          <div className="tablewrap"><table aria-label={k.Many} aria-busy={list.isFetching || undefined}>
+          <table className="dtable bo-dtable sitetable" aria-label={k.Many} aria-busy={list.isFetching || undefined}>
             <thead><tr>
-              <th scope="col">{k.One}</th><th scope="col">State</th><th scope="col">Zip</th>
-              {kind === "facilities" && <><th scope="col" className="num">Rent</th><th scope="col" className="num">Capacity</th><th scope="col">Lease</th></>}
+              <th scope="col">{k.One}</th><th scope="col">Status</th><th scope="col">State</th><th scope="col">Zip</th>
+              {kind === "facilities" && <><th scope="col" className="num">Rent</th><th scope="col" className="num">Capacity</th><th scope="col" className="p2">Lease</th></>}
               <th scope="col">Incharge</th>
               {kind === "companies" && <th scope="col" className="num">Employees</th>}
-              <th scope="col">Status</th>
-              {canManage && <th scope="col"><span className="sr-only">Actions</span></th>}
+              {canBills && <th scope="col" className="num">Bills, 12 mo</th>}
+              {canManage && <th scope="col" className="c-act"><span className="sr-only">Actions</span></th>}
             </tr></thead>
             <tbody>
-              {items.map((s) => (
-                <tr key={s.id} className="clickrow" onClick={() => setOpenId(s.id)}>
-                  <td>
-                    <span className="person">
-                      <SiteIcon kind={kind} />
-                      <span className="persontext">
-                        <button type="button" className="linkbtn" onClick={(e) => { e.stopPropagation(); setOpenId(s.id); }} aria-label={`Open ${k.one} ${s.name}`}><b>{s.name}</b></button>
-                        <span className="block small">{[s.city, s.location.name].filter(Boolean).join(" · ")}</span>
-                      </span>
-                    </span>
-                  </td>
-                  <td>{s.state ?? <span className="muted">—</span>}</td>
-                  <td>{s.zip ?? <span className="muted">—</span>}</td>
-                  {kind === "facilities" && (() => {
-                    const f = s as Facility;
-                    return (
-                      <>
-                        <td className="num">{fmtRent(f)}</td>
-                        <td className="num">{f.capacity ?? "—"}{f.beds !== null && f.beds !== undefined && <span className="block small">{f.beds} beds</span>}</td>
-                        <td>{f.startDate ? fmtDate(f.startDate) : "—"}<span className="block small">{f.endDate ? `to ${fmtDate(f.endDate)}` : "open-ended"}</span></td>
-                      </>
-                    );
-                  })()}
-                  <td>{s.incharges.length ? s.incharges.map((u) => u.name).join(", ") : <span className="muted">None</span>}</td>
-                  {kind === "companies" && <td className="num">{(s as Company).employeeCount}</td>}
-                  <td><StatusPill status={s.status} /></td>
-                  {canManage && (
-                    <td className="rowactions">
-                      <button type="button" className="linkbtn editlink" onClick={(e) => { e.stopPropagation(); setEditId(s.id); }} aria-label={`Edit ${k.one} ${s.name}`}>Edit</button>
+              {items.map((s) => {
+                const bills = billsBy.get(s.id);
+                const place = s.city && s.city !== s.location.name ? `${s.city} · ${s.location.name}` : s.location.name;
+                return (
+                  <tr key={s.id} className="rowopen" onClick={(e) => { if (!fromControl(e)) setOpenId(s.id); }}>
+                    <td className="c-primary">
+                      <button type="button" className="linkbtn si-name" onClick={() => setOpenId(s.id)} aria-label={`Open ${k.one} ${s.name}`}><b>{s.name}</b></button>
+                      <span className="block">{place}</span>
                     </td>
-                  )}
-                </tr>
-              ))}
+                    <td className="c-badge" data-label="Status"><StatusPill status={s.status} /></td>
+                    <td data-label="State">{s.state ?? <span className="muted">—</span>}</td>
+                    <td data-label="Zip">{s.zip ?? <span className="muted">—</span>}</td>
+                    {kind === "facilities" && (() => {
+                      const f = s as Facility;
+                      return (
+                        <>
+                          <td className="num" data-label="Rent">{fmtRent(f)}</td>
+                          <td className="num" data-label="Capacity">{f.capacity ?? "—"}{f.beds !== null && f.beds !== undefined && <span className="block">{f.beds} beds</span>}</td>
+                          <td className="p2" data-label="Lease">{f.startDate ? fmtDay(f.startDate) : "—"}<span className="block">{f.endDate ? `to ${fmtDay(f.endDate)}` : "open-ended"}</span></td>
+                        </>
+                      );
+                    })()}
+                    <td data-label="Incharge">{s.incharges.length ? s.incharges.map((u) => u.name).join(", ") : <span className="muted">None</span>}</td>
+                    {kind === "companies" && <td className="num" data-label="Employees">{(s as Company).employeeCount}</td>}
+                    {canBills && <td className="num" data-label="Bills, 12 mo">{bills ? <>{fmtMoney(bills.amount)}<span className="block">{bills.count} {bills.count === 1 ? "bill" : "bills"}</span></> : <span className="muted">—</span>}</td>}
+                    {canManage && (
+                      <td className="c-act">
+                        <button type="button" className="btn sm" onClick={() => setEditId(s.id)} aria-label={`Edit ${k.one} ${s.name}`}>Edit</button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
               {items.length === 0 && (
                 <tr><td colSpan={12} className="empty">{search ? `No ${k.many} match this search.` : `No ${k.many} yet.`}</td></tr>
               )}
             </tbody>
-          </table></div>
+          </table>
         )}
-        <div className="listfoot cardfoot">
-          <p role="status" aria-live="polite" className="muted">{countMsg}</p>
-          <Pager pager={pager} label={`${k.One} pages`} nextCursor={list.data?.nextCursor} pending={list.isPlaceholderData} />
-        </div>
       </section>
+      <div className="listfoot">
+        <p role="status" aria-live="polite" className="muted">{countMsg}</p>
+        <Pager pager={pager} label={`${k.One} pages`} nextCursor={list.data?.nextCursor} pending={list.isPlaceholderData} />
+      </div>
 
       {canBills && (
         summary.error ? <p className="error" role="alert">{sitesError(summary.error)}</p>
@@ -234,14 +257,14 @@ function BillCharts({ kind, summary, months }: { kind: SiteKind; summary: BillsS
       <section className="card listcard" aria-labelledby={`${kind}-byo`}>
         <div className="cardhead"><h2 id={`${kind}-byo`}>Bills total by {k.one}</h2></div>
         {owners.length === 0 ? <p className="empty">No bills in this period.</p> : (
-          <div className="tablewrap"><table aria-labelledby={`${kind}-byo`}>
+          <div className="tablewrap"><table className="dtable bo-dtable si-owners" aria-labelledby={`${kind}-byo`}>
             <thead><tr><th scope="col">{k.One}</th><th scope="col" className="num">Bills</th><th scope="col" className="num">Amount</th><th scope="col" className="sharecell"><span className="sr-only">Share</span></th></tr></thead>
             <tbody>
               {owners.map((o) => (
                 <tr key={o.id}>
-                  <td><span className="person"><SiteIcon kind={kind} /><b>{o.name}</b></span></td>
-                  <td className="num">{o.count}</td>
-                  <td className="num">{fmtMoney(o.amount)}</td>
+                  <td className="c-primary"><b>{o.name}</b></td>
+                  <td className="num" data-label="Bills">{o.count}</td>
+                  <td className="num" data-label="Amount">{fmtMoney(o.amount)}</td>
                   <td className="sharecell"><span className="sharebar" aria-hidden="true"><span style={{ width: `${Math.round((num(o.amount) / max) * 100)}%` }} /></span></td>
                 </tr>
               ))}

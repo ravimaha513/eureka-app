@@ -9,7 +9,11 @@ import { isValidBirthday, type Birthday } from "@eureka/shared";
 import { BirthdayFields } from "../staff/BirthdayFields";
 import { DEVICE_LABELS, settingsApi, settingsError, settingsKeys, type Preference, type Profile, type SessionRow } from "./settingsApi";
 import { Loading } from "../ui/Loading";
+import { QueryError } from "../ui/QueryError";
 import { fmtDateTime } from "../lib/format";
+import { useSearchParam } from "../lib/router";
+import { useAuthMethods } from "../shell/useAuthMethods";
+import "./settings.css";
 
 type Tab = "profile" | "notifications" | "security";
 const TABS: { key: Tab; label: string; Icon: typeof Bell }[] = [
@@ -17,6 +21,24 @@ const TABS: { key: Tab; label: string; Icon: typeof Bell }[] = [
   { key: "notifications", label: "Notifications", Icon: Bell },
   { key: "security", label: "Security", Icon: ShieldCheck },
 ];
+
+/**
+ * Notification switches grouped by the work they are about (presentation only; the server's list
+ * and order are kept, and a type not listed here falls into "Other").
+ */
+const PREF_GROUPS: { title: string; types: readonly string[] }[] = [
+  { title: "Candidates and hiring", types: ["candidate.assigned", "candidate.not_responding", "application.received", "interview.requested"] },
+  { title: "Employees and assignments", types: ["work_authorization.expiring", "employee.benched", "employee.bench_time", "employee.exited", "assignment.ending_soon", "contract.created"] },
+  { title: "Paperwork", types: ["checklist.item_overdue"] },
+  { title: "Payments", types: ["payment.first_received", "payment.delayed"] },
+  { title: "Team and messages", types: ["performance.below_target", "staff.birthdays_today", "chat.direct_message"] },
+];
+export function groupPreferences(items: readonly Preference[]): { title: string; items: Preference[] }[] {
+  const known = new Set(PREF_GROUPS.flatMap((g) => g.types));
+  const groups = PREF_GROUPS.map((g) => ({ title: g.title, items: items.filter((p) => g.types.includes(p.type)) }));
+  groups.push({ title: "Other", items: items.filter((p) => !known.has(p.type)) });
+  return groups.filter((g) => g.items.length > 0);
+}
 
 
 /**
@@ -27,7 +49,10 @@ const TABS: { key: Tab; label: string; Icon: typeof Bell }[] = [
  */
 export function SettingsPage({ me }: { me: Pick<Me, "displayName"> }) {
   const id = useId();
-  const [tab, setTab] = useState<Tab>("profile");
+  // The open section is kept in the address (?tab=security), so refresh and shared links keep it.
+  const [tabParam, setTabParam] = useSearchParam("tab");
+  const tab: Tab = TABS.some((t) => t.key === tabParam) ? (tabParam as Tab) : "profile";
+  const setTab = (t: Tab) => setTabParam(t === "profile" ? "" : t);
   const refs = useRef<Record<Tab, HTMLButtonElement | null>>({ profile: null, notifications: null, security: null });
   const onKey = (e: KeyboardEvent) => {
     const i = TABS.findIndex((t) => t.key === tab);
@@ -45,7 +70,7 @@ export function SettingsPage({ me }: { me: Pick<Me, "displayName"> }) {
         <h1 tabIndex={-1}>Settings &amp; Preferences</h1>
         <p className="sub">Your own profile, notifications and sign-in activity. Changes here affect only your account.</p>
       </div>
-      <div className="settings">
+      <div className="settings settings-w2">
         <div className="card settingsnav" role="tablist" aria-label="Settings sections" aria-orientation="vertical" onKeyDown={onKey}>
           {TABS.map(({ key, label, Icon }) => (
             <button key={key} ref={(el) => { refs.current[key] = el; }} type="button" role="tab" id={`${id}-${key}`}
@@ -67,7 +92,7 @@ export function SettingsPage({ me }: { me: Pick<Me, "displayName"> }) {
 function ProfileSection({ fallbackName }: { fallbackName: string }) {
   const q = useQuery({ queryKey: settingsKeys.profile, queryFn: settingsApi.profile });
   if (q.isLoading) return <Loading />;
-  if (q.error || !q.data) return <p className="error" role="alert">{settingsError(q.error)}</p>;
+  if (q.error || !q.data) return <QueryError query={q} message={settingsError(q.error)} />;
   return <ProfileForm p={q.data} fallbackName={fallbackName} />;
 }
 
@@ -95,7 +120,7 @@ function ProfileForm({ p, fallbackName }: { p: Profile; fallbackName: string }) 
       <h2 id="profile-h">Profile</h2>
       <div className="drawerperson"><Avatar name={p.displayName || fallbackName} /><div><b>{p.displayName}</b><span className="block">{p.email}</span></div></div>
       <dl className="infogrid">
-        <div><dt>Display name</dt><dd>{p.displayName} <span className="muted">(from your Google account)</span></dd></div>
+        <div><dt>Display name</dt><dd>{p.displayName}{p.signIn?.provider === "google" && <> <span className="muted">(from your Google account)</span></>}</dd></div>
         <div><dt>Designation</dt><dd>{p.designation ?? "—"} <span className="muted">(set by your manager)</span></dd></div>
         <div><dt>Location</dt><dd>{p.location ?? "—"}</dd></div>
       </dl>
@@ -107,7 +132,7 @@ function ProfileForm({ p, fallbackName }: { p: Profile; fallbackName: string }) 
         {(a) => <textarea {...a} rows={4} maxLength={500} value={bio} onChange={(e) => setBio(e.target.value)} />}
       </Field>
       <div className="field">
-        <span className="label" id="bd-label" style={{ fontWeight: 600, fontSize: 13 }}>Birthday</span>
+        <span className="label settings-label" id="bd-label">Birthday</span>
         <BirthdayFields idPrefix="profile-bd" value={birthday} onChange={setBirthday} />
         <small className="hint fieldhint">Month and day only. HR and the CEO's morning birthday digest use it.{birthday && <> <button type="button" className="linkbtn" onClick={() => setBirthday(null)}>Clear</button></>}</small>
         {birthdayInvalid && <small className="error fielderr">That is not a calendar day.</small>}
@@ -133,11 +158,16 @@ function NotificationsSection() {
       <h2 id="notif-h">Notifications</h2>
       <p className="hint">In-app notifications in the bell. Emails follow your role and are not changed here.</p>
       {q.isLoading && <Loading />}
-      {q.error && <p className="error" role="alert">{settingsError(q.error)}</p>}
+      {q.error && <QueryError query={q} message={settingsError(q.error)} />}
       {set.error && <p className="error" role="alert">{settingsError(set.error)}</p>}
       <p role="status" className="livemsg">{msg}</p>
-      {q.data?.items.map((p) => <PreferenceRow key={p.type} p={p} busy={set.isPending && set.variables?.type === p.type}
-        onChange={(inApp) => { setMsg(""); set.mutate({ type: p.type, inApp }); }} />)}
+      {q.data && groupPreferences(q.data.items).map((g) => (
+        <div key={g.title} className="prefgroup" role="group" aria-labelledby={`pg-${g.title.replace(/\W+/g, "-")}`}>
+          <h3 id={`pg-${g.title.replace(/\W+/g, "-")}`}>{g.title}</h3>
+          {g.items.map((p) => <PreferenceRow key={p.type} p={p} busy={set.isPending && set.variables?.type === p.type}
+            onChange={(inApp) => { setMsg(""); set.mutate({ type: p.type, inApp }); }} />)}
+        </div>
+      ))}
     </section>
   );
 }
@@ -145,8 +175,11 @@ function NotificationsSection() {
 function PreferenceRow({ p, busy, onChange }: { p: Preference; busy: boolean; onChange: (inApp: boolean) => void }) {
   const id = useId();
   return (
-    <div className="prefrow">
-      <div><b id={`${id}-l`}>{p.label}</b><p id={`${id}-d`} className="hint">{p.description}{p.mandatory ? " Required: can't be turned off." : ""}</p></div>
+    <div className={p.mandatory ? "prefrow required" : "prefrow"}>
+      <div className="prefrow-text">
+        <b id={`${id}-l`}>{p.label}</b>{p.mandatory && <span className="badge" aria-hidden="true">Required</span>}
+        <p id={`${id}-d`} className="hint">{p.description}{p.mandatory ? " Required: can't be turned off." : ""}</p>
+      </div>
       <button type="button" role="switch" aria-checked={p.inApp} aria-labelledby={`${id}-l`} aria-describedby={`${id}-d`}
         className={`switch ${p.inApp ? "on" : ""}`} disabled={busy || p.mandatory} aria-busy={busy || undefined} onClick={() => onChange(!p.inApp)}>
         <span className="knob" aria-hidden="true" /> <span>{p.inApp ? "On" : "Off"}</span>
@@ -163,27 +196,32 @@ function SecuritySection() {
   useEffect(() => { if (msg) void qc.invalidateQueries({ queryKey: settingsKeys.sessions }); }, [msg, qc]);
   const others = (q.data?.items ?? []).filter((s) => !s.current && s.status === "active");
   const signIn = q.data?.signIn;
+  // The API reports every non-Google sign-in as "dev"; the methods this server offers say which it was.
+  const methods = useAuthMethods().data;
+  const localNote = methods?.password && !methods.dev ? "Signed in with your email and password."
+    : methods?.password ? "Signed in with your email and password, or the development sign-in."
+      : "Development sign-in (no password).";
   return (
     <section aria-labelledby="sec-h">
       <h2 id="sec-h">Security</h2>
       {signIn && <p className="signinnote"><ShieldCheck size={16} aria-hidden="true" />
-        {signIn.provider === "google" ? `Signed in with Google${signIn.domain ? ` (${signIn.domain})` : ""}. Your password and two-step verification are managed by Google.` : "Development sign-in (no password)."}</p>}
+        {signIn.provider === "google" ? `Signed in with Google${signIn.domain ? ` (${signIn.domain})` : ""}. Your password and two-step verification are managed by Google.` : localNote}</p>}
       <h3>Login activity</h3>
       <p className="hint">Your sign-ins from the last 30 days. IP addresses are shortened; device and browser are read from the browser's own description.</p>
       <p role="status" className="livemsg">{msg}</p>
       {q.isLoading && <Loading />}
-      {q.error && <p className="error" role="alert">{settingsError(q.error)}</p>}
+      {q.error && <QueryError query={q} message={settingsError(q.error)} />}
       {q.data && (
-        <div className="tablewrap"><table aria-label="Login activity">
-          <thead><tr><th>Signed in</th><th>Device</th><th>IP address</th><th>Last seen</th><th><span className="sr-only">Action</span></th></tr></thead>
+        <div className="tablewrap settings-sessions"><table className="dtable" aria-label="Login activity">
+          <thead><tr><th>Device</th><th>Signed in</th><th>Last seen</th><th>IP address</th><th className="c-act"><span className="sr-only">Action</span></th></tr></thead>
           <tbody>
             {q.data.items.map((s) => (
               <tr key={s.id}>
-                <td><time dateTime={s.signedInAt}>{fmtDateTime(s.signedInAt)}</time></td>
-                <td>{DEVICE_LABELS[s.device]} · {s.browser}{s.current && <span className="tag">Current session</span>}</td>
-                <td>{s.ip ?? "—"}</td>
-                <td>{s.status === "active" ? <time dateTime={s.lastSeenAt}>{fmtDateTime(s.lastSeenAt)}</time> : <span className="muted">{s.status === "signed_out" ? "Signed out" : "Expired"}</span>}</td>
-                <td className="rowactions">{!s.current && s.status === "active" && (
+                <td className="c-primary"><b>{DEVICE_LABELS[s.device]} · {s.browser}</b>{s.current && <span className="badge active">Current session</span>}</td>
+                <td data-label="Signed in"><time dateTime={s.signedInAt}>{fmtDateTime(s.signedInAt)}</time></td>
+                <td data-label="Last seen">{s.status === "active" ? <time dateTime={s.lastSeenAt}>{fmtDateTime(s.lastSeenAt)}</time> : <span className="muted">{s.status === "signed_out" ? "Signed out" : "Expired"}</span>}</td>
+                <td data-label="IP address">{s.ip ?? "—"}</td>
+                <td className="c-act">{!s.current && s.status === "active" && (
                   <button type="button" className="btn sm" aria-label={`Sign out the ${DEVICE_LABELS[s.device]} ${s.browser} session from ${fmtDateTime(s.signedInAt)}`}
                     onClick={() => setConfirm(s)}><LogOut size={14} aria-hidden="true" /> Sign out</button>)}</td>
               </tr>
