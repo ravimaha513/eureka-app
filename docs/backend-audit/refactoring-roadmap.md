@@ -302,7 +302,29 @@ Built on branch `ccr-6973b23a-g6dxmm` by parallel worktrees, with migrations 047
 | R-15 | Done | Per-user bulk-add budget of 2000 rows per day, stored in the DB; 429; counts in the audit row | — |
 | Also | Done | R-18 (calendar calls Google after commit; provider errors → 503/502), E-10 (coach/panel double-booking → 409), E-04, E-08, C-05, A-10, D-01, F-14 (`__Host-` cookie, legacy name read for one release), B-03, D-13, and the rule-5 fixes in auth and admin bulk audit rows | Remove the legacy cookie fallback next release |
 
-**Still open** from the next tier: R-16 state machines, R-17 god-service split, R-19 OpenAPI, R-20 `migrate.ts`, R-21 retention, R-23 pagination flags, R-24 shared limiter, R-25 single-query auth, R-26 catalog lint (partly covered by the DB least-privilege test), R-27 worker dead-letter, R-28 constraints, E-09 (interview board search). Web follow-ups: If-Match on edits, a message for `?error=`, messages for 429 and 503 + Retry-After, and the role violations report.
+### Waves 3–4 (2026-11-05)
+
+Owner decisions:
+* **Admin is only admin:** a user holding an admin-trait role holds no data roles, and the reverse. Roles that break the admin/data split cannot be assigned. Existing violators are reported (`GET /admin/roles/violations`, `GET /admin/users/violations`), not stripped.
+* **Restricted-document cap:** stays at 200 per user per day (`policy_setting restricted_opens_per_day`).
+
+Migrations 0480 and 0484–0491 (0481–0483 unused). Independent security gate on the wave-3 diff: **ship**. Its 2 minors are fixed (a concurrent grant race, `e563506`; audit prune skipping late commits, `f3790d0`).
+
+| Item | Status | What shipped | Notes / left |
+|---|---|---|---|
+| R-01b | Done | Per-user admin/data exclusivity (`separation_of_duties`); `role_violates_admin_separation`; `role_held_by_admin` trigger; role `classification`; users violations report; concurrency-safe (share locks, rows valid now or later) | Legacy mixed users keep their access until revoked (by decision) |
+| R-13b, E-09 | Done | `authz.person_name_matches` / `interview_name_candidate_ids`: scoped, index-backed InitPlan sets | Rare names 0.00–0.09× the previous time; timeouts gone; common 3-character terms slower (8 → 51 ms). `person_read` unchanged (rewrites measured slower) |
+| R-16 | Done | Jobs and batches in `state-machines.ts`; `job_guard` transition list; D-07 (Sales leads may set batch status, per TR-1); paperwork locked set; TS↔SQL parity test | Job lifecycle kept permissive (no rules defined in docs) |
+| R-17 | Done | `AdminService` → 8 services; `CandidatesService` → 5 services plus `candidate-common`; team-scope check deduplicated | `scopePredicate` / cursor helpers could move to `platform/` (D-14) |
+| R-19 | Done | `docs/openapi.json` (OpenAPI 3.1) generated from zod; `openapi:check` in CI; `@ApiBody` / `@ApiQuery` on all modules | Response bodies not yet described |
+| R-20, R-26, R-28, R-30 | Done | `migrate.ts`: fresh run = incremental run (`-- since:` markers, session reset, lock-wait timeout, checksum verify); 0484 CHECKs validated; catalog-wide DB lint; SCRAM role passwords; 0485 location function owner | Check the deploy log for `0484:` WARNINGs |
+| R-21, R-27 | Done | Separate outbox lane; dead-letter queue; session / step-up / applicant-session retention; `audit_event` kept forever unless `AUDIT_RETENTION_DAYS ≥ 365`, pruning only exported days | Set the production worker count ≥ 1 before go-live |
+| R-23 | Done | `truncated` / cursor on capped lists; pipeline report single-pass with keyset paging (org-scope 1.2–2.8 s → ~0.55 s) | `offset` deprecated where cursors were added |
+| R-24, R-25 | Done | Postgres-backed shared limiter for security limits; one statement per request for auth (no cache) | — |
+| Web | Done | `?error=` messages; 503 / Retry-After retry; 429 and 412 messages; If-Match on edits; separation reports | e2e not run here (no Docker) |
+| D-06 | Done | `set_batch_status` returns the previous status; the audit `from` is correct (0490) | — |
+
+**Still open:** D-14 (move shared SQL helpers to `platform/`); response schemas in OpenAPI; an e2e journey for the new flows; removing the legacy `eureka_sid` fallback next release; mandatory If-Match (needs approval).
 
 ## Appendix A — all findings
 
