@@ -10,13 +10,13 @@ export const RECORD_SCREENS = {
   application: "applications",
   paperwork: "paperwork",
   training: "training",
-  // No /<screen>/<id> route yet: these need `onOpen` (e.g. open a drawer); the href is the list screen.
   submission: "submissions",
-  job: "jobs",
   employee: "employees",
+  // No /<screen>/<id> link yet: needs `onOpen` (e.g. open a drawer); the href is the list screen.
+  job: "jobs",
 } as const;
 export type RecordKind = keyof typeof RECORD_SCREENS;
-const ROUTED: ReadonlySet<RecordKind> = new Set(["candidate", "placement", "interview", "application", "paperwork", "training"]);
+const ROUTED: ReadonlySet<RecordKind> = new Set(["candidate", "placement", "interview", "application", "paperwork", "training", "submission", "employee"]);
 
 /**
  * Cross-record link ("Jane Doe" in a submissions row, a placement in an interview drawer).

@@ -508,28 +508,28 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
                   )}
                 </>
               )
-              : current.key === "submissions" ? <SubmissionsPage me={me} onOpenPlacement={has("placements") ? (id) => go("placements", id) : undefined} />
-              : current.key === "placements" ? <PlacementsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("placements", id)} />
-              : current.key === "interviews" ? <InterviewsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("interviews", id)} />
+              : current.key === "submissions" ? <SubmissionsPage me={me} onOpenPlacement={has("placements") ? (id) => go("placements", id) : undefined} initialOpenId={recordId} onOpenChange={(id) => go("submissions", id)} />
+              : current.key === "placements" ? <PlacementsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("placements", id)} onOpenSubmission={has("submissions") ? (id) => go("submissions", id) : undefined} />
+              : current.key === "interviews" ? <InterviewsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("interviews", id)} onOpenSubmission={has("submissions") ? (id) => go("submissions", id) : undefined} />
               : current.key === "paperwork" ? <PaperworkPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("paperwork", id)} />
               : current.key === "access" ? <AccessPage me={me} />
               : current.key === "birthdays" ? <BirthdaysPage />
-              : current.key === "employees" ? <EmployeesPage me={me} />
+              : current.key === "employees" ? <EmployeesPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("employees", id)} />
               : current.key === "reports" ? <ReportsPage me={me} />
               : current.key === "performance" ? <PerformancePage me={me} />
               : current.key === "interview-reports" ? <InterviewReportsPage me={me} />
-              : current.key === "companies" ? <CompaniesPage key="companies" me={me} />
-              : current.key === "facilities" ? <FacilitiesPage key="facilities" me={me} />
+              : current.key === "companies" ? <CompaniesPage key="companies" me={me} initialOpenId={recordId} onOpenChange={(id) => go("companies", id)} />
+              : current.key === "facilities" ? <FacilitiesPage key="facilities" me={me} initialOpenId={recordId} onOpenChange={(id) => go("facilities", id)} />
               : current.key === "datahub" ? <DataHubPage />
               : current.key === "training" ? <TrainingPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("training", id)} />
               : current.key === "courses" ? <CoursesPage me={me} />
               : current.key === "settings" ? <SettingsPage me={me} />
               : current.key === "chat" ? <ChatPage me={me} initialConversationId={recordId} onOpenChange={(id) => go("chat", id)} />
-              : current.key === "jobs" ? <JobsPage me={me} />
+              : current.key === "jobs" ? <JobsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("jobs", id)} />
               : current.key === "applications" ? <ApplicationsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("applications", id)} />
               : current.key === "applicants" ? <ApplicantsPage />
-              : current.key === "payments" ? <PaymentsPage me={me} />
-              : current.key === "pipeline" ? <PipelineReportPage />
+              : current.key === "payments" ? <PaymentsPage me={me} initialOpenId={recordId} onOpenChange={(id) => go("payments", id)} />
+              : current.key === "pipeline" ? <PipelineReportPage onOpenCandidate={has("candidates") ? (id) => go("candidates", id) : undefined} />
               : current.key === "vendors" ? <PreferredVendorsPage />
               : current.key === "myteam" ? <MyTeamPage />
               : current.key === "coaching" ? <CoachingPage />

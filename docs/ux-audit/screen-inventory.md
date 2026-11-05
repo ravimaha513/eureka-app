@@ -93,39 +93,39 @@ Legend: ☐ not done · ☑ done · ◐ partial. The rebrand identity (tokens, t
 |---|---|---|---|---|---|---|
 | Hot List | | ☑ | ☑ | ☑ | ☑ | ◐ in review |
 | Candidates | | ☑ | ☑ | ☑ | ☑ | ◐ in review |
-| Candidate profile | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Submissions | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Interviews | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Placements | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Placement detail | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Dashboard | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| App shell | | ☑ | ☑ | ☑ | ◐ identity only (nav regroup and phone drawer pending) | ☐ |
-| Notifications | | ☑ | ☑ | ☐ | ☐ | ☐ |
+| Candidate profile | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Submissions | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Interviews | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Placements | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Placement detail | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Dashboard | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| App shell | | ☑ | ☑ | ☑ | ☑ (wave 2) | ◐ in review |
+| Notifications | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
 | Login | | ☑ | ☑ | ☑ | ☑ (brand panel, theme label, error placement) | ◐ in review |
-| Jobs | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Applications | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Application detail | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Applicants | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Applicant portal | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Public feedback | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Paperwork & BGC | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Paperwork workspace | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Documents section | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Employees | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Payments | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Companies / Facilities | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| DataHub | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Training Batches | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Training batch detail | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Courses | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Performance | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Reports | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Interview reports | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Candidate Pipeline | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Users & Access | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Staff birthdays | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Preferred vendors | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| My team | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Coach assignments | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Chat | | ☑ | ☑ | ☐ | ☐ | ☐ |
-| Settings | | ☑ | ☑ | ☐ | ☐ | ☐ |
+| Jobs | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Applications | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Application detail | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Applicants | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Applicant portal | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Public feedback | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Paperwork & BGC | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Paperwork workspace | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Documents section | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Employees | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Payments | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Companies / Facilities | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| DataHub | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Training Batches | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Training batch detail | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Courses | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Performance | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Reports | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Interview reports | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Candidate Pipeline | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Users & Access | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Staff birthdays | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Preferred vendors | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| My team | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Coach assignments | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Chat | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
+| Settings | | ☑ | ☑ | ☐ | ☑ (wave 2) | ◐ in review |
