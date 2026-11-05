@@ -1,13 +1,13 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api, can, setCsrf, type Me } from "./api";
-import { SETTINGS_NAV, parseScreenPath, screenPath, visibleNav, type NavItem } from "./nav";
+import { NAV_SECTIONS, SETTINGS_NAV, landingScreen, parseScreenPath, screenPath, visibleNav, type NavItem } from "./nav";
 import { lazyNamed } from "./lib/lazy";
 import { navigate, usePathname } from "./lib/router";
 import { HotListPage } from "./sales/HotListPage";
 import { NotificationBell, type InboxItem } from "./notifications/Inbox";
 import { ChatNavBadge } from "./chat/ChatNavBadge";
-import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun } from "lucide-react";
+import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, X } from "lucide-react";
 import { useTheme } from "./shell/theme";
 import { BrandMark, NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
 import { Loading } from "./ui/Loading";
@@ -15,6 +15,7 @@ import { QueryError } from "./ui/QueryError";
 import { useAuthMethods } from "./shell/useAuthMethods";
 import { QuickJump, isQuickJumpKey } from "./shell/QuickJump";
 import { OfflineBanner } from "./shell/OfflineBanner";
+import "./shell/shell.css";
 
 // Every screen but the default landing (the Hot List) is its own chunk, loaded on first visit.
 const SettingsPage = lazyNamed(() => import("./settings/SettingsPage"), "SettingsPage");
@@ -264,7 +265,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const has = (key: string) => items.some((i) => i.key === key);
   // The address bar holds the screen (/<key>) and any open record (/<key>/<id>), so refresh,
   // back/forward and shared links work. "/" and screens this role lacks land on the default screen.
-  const landing = items.find((i) => i.key === "hotlist")?.key ?? items[0]?.key;
+  const landing = landingScreen(items);
   const route = parseScreenPath(usePathname());
   const routed = route.key !== null && (route.key === SETTINGS_NAV.key || has(route.key));
   const active = routed ? route.key : landing;
@@ -306,7 +307,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     opener.current = document.activeElement as HTMLElement | null;
     go(candidateScreen, e.id);
   };
-  const sections = [...new Set(items.map((i) => i.section))];
+  const sections = NAV_SECTIONS.filter((s) => items.some((i) => i.section === s));
   const current = active === SETTINGS_NAV.key ? SETTINGS_NAV : items.find((i) => i.key === active);
   // Phones: the sidebar is an off-canvas drawer opened from the top bar's menu button.
   const [navOpen, setNavOpen] = useState(false);
@@ -378,22 +379,74 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   }, []);
   const menuBtn = useRef<HTMLButtonElement>(null);
   const sideRef = useRef<HTMLElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  // Phones: the open drawer is a modal. Focus moves to the current (or first) screen in it, Tab
+  // stays inside, the page behind is inert, and Escape or the close button returns to the menu button.
+  const closeNav = () => { setNavOpen(false); menuBtn.current?.focus(); };
   useEffect(() => {
     if (!navOpen) return;
-    sideRef.current?.querySelector<HTMLElement>(".nav")?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setNavOpen(false); menuBtn.current?.focus(); } };
+    const side = sideRef.current;
+    const main = mainRef.current;
+    main?.setAttribute("inert", "");
+    const focusFirst = () => (side?.querySelector<HTMLElement>('.nav[aria-current="page"]') ?? side?.querySelector<HTMLElement>(".nav"))?.focus();
+    focusFirst();
+    // The drawer becomes visible as its slide-in starts; focus again once it can take focus.
+    const frame = window.requestAnimationFrame(() => { if (!side?.contains(document.activeElement)) focusFirst(); });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setNavOpen(false); menuBtn.current?.focus(); return; }
+      if (e.key !== "Tab" || !side) return;
+      const focusable = [...side.querySelectorAll<HTMLElement>("button:not(:disabled), a[href]")].filter((el) => el.offsetParent !== null || el === document.activeElement);
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (!side.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => { window.cancelAnimationFrame(frame); document.removeEventListener("keydown", onKey); main?.removeAttribute("inert"); };
   }, [navOpen]);
+  // A desktop-wide window never shows the drawer: close it if the window grows past the phone layout.
+  useEffect(() => {
+    if (!navOpen || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(min-width: 769px)");
+    const onChange = () => { if (mq.matches) setNavOpen(false); };
+    mq.addEventListener?.("change", onChange);
+    return () => mq.removeEventListener?.("change", onChange);
+  }, [navOpen]);
+  const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+  // Collapsed rail: the screen name shows beside the icon on hover and on keyboard focus (a title
+  // tooltip shows on neither focus nor touch). Visual only; the button's name is already the label.
+  const [tip, setTip] = useState<{ label: string; top: number } | null>(null);
+  const showTip = (label: string, el: HTMLElement) => {
+    if (!collapsed || navOpen) return;
+    const r = el.getBoundingClientRect();
+    setTip({ label, top: r.top + r.height / 2 });
+  };
+  const tipHandlers = (label: string) => ({
+    onMouseEnter: (e: React.MouseEvent<HTMLElement>) => showTip(label, e.currentTarget),
+    onMouseLeave: () => setTip(null),
+    onFocus: (e: React.FocusEvent<HTMLElement>) => {
+      if (!collapsed) return;
+      let keyboard = true;
+      try { keyboard = e.currentTarget.matches(":focus-visible"); } catch { /* selector unsupported: show it */ }
+      if (keyboard) showTip(label, e.currentTarget);
+    },
+    onBlur: () => setTip(null),
+  });
   return (
     <div className={collapsed ? "app collapsed" : "app"}>
       <a href="#main-content" className="skiplink" onClick={skipToContent}>Skip to main content</a>
-      <aside id="mainnav" ref={sideRef} className={navOpen ? "side open" : "side"} aria-label="Main navigation">
+      <aside id="mainnav" ref={sideRef} className={navOpen ? "side open" : "side"} aria-label="Main navigation"
+        role={navOpen ? "dialog" : undefined} aria-modal={navOpen || undefined}>
         <div className="brandrow">
           <div className="brand"><BrandMark /><span className="brandtext">Eureka<small>Staffing</small></span></div>
           <button type="button" className="collapsebtn" onClick={() => setCollapsed(!collapsed)} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
             {collapsed ? <PanelLeftOpen size={17} aria-hidden="true" /> : <PanelLeftClose size={17} aria-hidden="true" />}
           </button>
+          {navOpen && (
+            <button type="button" className="navclose" onClick={closeNav} aria-label="Close menu"><X size={20} aria-hidden="true" /></button>
+          )}
         </div>
         <nav className="navlist">
           {sections.map((s) => (
@@ -402,7 +455,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
               {items.filter((i) => i.section === s).map((i) => {
                 const Icon = NAV_ICONS[i.key];
                 return (
-                  <button key={i.key} className="nav" title={collapsed ? i.label : undefined} aria-current={i.key === active ? "page" : undefined}
+                  <button key={i.key} className="nav" aria-current={i.key === active ? "page" : undefined} {...tipHandlers(i.label)}
                     aria-describedby={i.key === "chat" ? "chat-nav-unread" : undefined}
                     onClick={() => { go(i.key); setNavOpen(false); }}>
                     {Icon && <Icon className="navicon" size={19} strokeWidth={1.8} aria-hidden="true" />}<span className="navlabel">{i.label}</span>
@@ -416,16 +469,21 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         {items.some((i) => i.key === "chat") && <ChatNavBadge id="chat-nav-unread" part="text" />}
         <ThemeSwitch theme={theme} onChange={setTheme} />
       </aside>
+      {tip && collapsed && <span className="navtip" style={{ top: tip.top }} aria-hidden="true">{tip.label}</span>}
       {jumpOpen && <QuickJump items={jumpItems} onGo={(key) => go(key)} onClose={() => setJumpOpen(false)} />}
       {navOpen && <div className="navscrim" aria-hidden="true" onClick={() => setNavOpen(false)} />}
-      <main className="main">
+      <main className="main" ref={mainRef}>
         <div className="top">
           <button ref={menuBtn} type="button" className="menubtn" aria-label="Menu" aria-controls="mainnav" aria-expanded={navOpen}
             onClick={() => setNavOpen((o) => !o)}><Menu size={19} aria-hidden="true" /></button>
           <span className="topbrand"><BrandMark size={22} />Eureka</span>
+          {/* Desktop: a field-shaped button that names what it does and its shortcut; phones: an icon button. */}
+          <button type="button" className="qjfield" aria-label="Go to screen" aria-keyshortcuts="Control+K Meta+K"
+            onClick={() => setJumpOpen(true)}>
+            <Search size={16} aria-hidden="true" /><span className="qjfield-text" aria-hidden="true">Go to screen…</span>
+            <kbd className="qjfield-kbd" aria-hidden="true">{mac ? "⌘K" : "Ctrl K"}</kbd>
+          </button>
           <div className="topright">
-            <button type="button" className="bell" aria-label="Go to screen" aria-keyshortcuts="Control+K Meta+K" title="Go to screen (Ctrl+K)"
-              onClick={() => setJumpOpen(true)}><Search size={18} aria-hidden="true" /></button>
             <NotificationBell onOpen={openEntity} canOpen={canOpenEntity} />
             <UserMenu name={me.displayName} roles={me.roles.map((r) => r.label).join(", ")} onSignOut={onSignOut}
               onSettings={() => { go(SETTINGS_NAV.key); setNavOpen(false); }} />

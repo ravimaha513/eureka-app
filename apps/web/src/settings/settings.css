@@ -1,0 +1,50 @@
+/*
+ * Settings wave 2 (docs/ux-audit/screens/settings.md): heading levels that read as levels, grouped
+ * notification switches, required switches that look locked (not busy), a sessions table that fits.
+ * DESIGN.md tokens only.
+ */
+.settings-w2 { grid-template-columns: 200px minmax(0, 860px); }
+.settings-w2 > .card.pad { padding: 20px 24px 24px; }
+.settings-w2 h2 { font-size: 17px; letter-spacing: -.01em; margin: 0 0 2px; }
+.settings-w2 h3 { font-size: 13.5px; font-weight: 700; color: var(--text2); margin: 14px 0 0; }
+.settings-w2 .settings-label { font-size: 13px; font-weight: 600; color: var(--text2); }
+.settingsnav button { min-height: 36px; }
+
+/* Notification switches in groups: a hairline under each group head, 48px rows. */
+.prefgroup { display: flex; flex-direction: column; }
+.prefgroup h3 { padding-bottom: 6px; border-bottom: 1px solid var(--line); margin-top: 18px; }
+.prefgroup .prefrow { min-height: 48px; padding: 8px 0; }
+.prefgroup .prefrow:first-of-type { border-top: 0; }
+.prefrow-text { min-width: 0; }
+.prefrow-text .badge { margin-left: 8px; vertical-align: 1px; }
+.prefrow-text .hint { max-width: 62ch; }
+/* Required: locked on, not "busy". The Required chip and the description say why. */
+.prefrow.required .switch:disabled { cursor: default; opacity: .7; }
+.prefrow .switch { flex: none; }
+
+/* Sessions: the table fits the card (device wraps, action pinned right). */
+.settings-sessions { border: 1px solid var(--line); border-radius: var(--r-lg); }
+.settings-sessions > table.dtable { min-width: 0; width: 100%; }
+.settings-sessions .dtable th, .settings-sessions .dtable td { padding: 7px 10px; }
+.settings-sessions .dtable td.c-primary .badge { margin-left: 8px; }
+.settings-sessions .dtable td.c-act { width: 1%; white-space: nowrap; text-align: right; padding-block: 4px; }
+.settings-sessions .dtable td.c-act .btn.sm { height: 28px; }
+
+@media (max-width: 900px) {
+  .settings-w2 { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 768px) {
+  .settings-w2 > .card.pad { padding: 16px 14px 18px; }
+  /* Section tabs: one full-width row of three 44px buttons. */
+  .settings-w2 .settingsnav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px; }
+  .settings-w2 .settingsnav button { min-height: 44px; justify-content: center; padding: 0 6px; font-size: 13.5px; }
+  .settings-w2 .settingsnav button svg { display: none; }
+  .prefrow { flex-direction: row; align-items: center; }
+  .prefgroup .prefrow { padding: 10px 0; }
+  .settings-sessions { border: 0; }
+  .settings-sessions .dtable td.c-primary { grid-column: 1 / -1; }
+  .settings-sessions .dtable td.c-primary .badge { margin: 0 0 0 8px; vertical-align: 2px; }
+  .settings-sessions .dtable th, .settings-sessions .dtable td { padding: 0; }
+  .settings-sessions .dtable td.c-act { width: auto; }
+  .settings-sessions .dtable td.c-act:empty { display: none; }
+}

@@ -8,6 +8,8 @@ import { CHAT_BODY_MAX, CHAT_FILTERS, CHAT_NAME_MAX, CHAT_POLL, chatFileName, ty
 import type { Me } from "../api";
 import { useRoutedId } from "../lib/router";
 import { ConfirmDialog } from "../ui/Dialog";
+import { Loading } from "../ui/Loading";
+import { QueryError } from "../ui/QueryError";
 import { documentFileProblem, documentTypeOf } from "../documents/documentsApi";
 import { browser, postToStorage } from "../sales/resumesApi";
 import { Drawer } from "../sales/ui";
@@ -89,12 +91,12 @@ export function ChatPage({ me, initialConversationId = null, onOpenChange }: {
 
   return (
     <div className="chatpage">
-      <div className="pagehead">
+      <div className="pagehead chat-pagehead">
         <div>
           <h1 tabIndex={-1}>Chat</h1>
           <p className="sub">Message your colleagues directly or in groups.</p>
         </div>
-        <span className="push presence-me"><span className="dot on" aria-hidden="true" />Online</span>
+        <span className="push presence-me"><span className="chat-dot on" aria-hidden="true" />Online</span>
       </div>
       {notice && <p className="error" role="alert">{notice}</p>}
       <div className={`chat card${selected ? " has-conv" : ""}`}>
@@ -103,7 +105,7 @@ export function ChatPage({ me, initialConversationId = null, onOpenChange }: {
             <label className="chat-search">
               <Search size={16} aria-hidden="true" />
               <span className="sr-only">Search chats and people</span>
-              <input type="search" value={search} placeholder="Search users…" onChange={(e) => setSearch(e.target.value)} />
+              <input type="search" value={search} placeholder="Search chats and people" onChange={(e) => setSearch(e.target.value)} />
             </label>
             <button type="button" className="iconbtn chat-new" aria-label="Create group chat" onClick={() => setCreating(true)}>
               <Plus size={18} aria-hidden="true" />
@@ -114,8 +116,8 @@ export function ChatPage({ me, initialConversationId = null, onOpenChange }: {
               <button key={f} type="button" className="tab sm" aria-pressed={filter === f} onClick={() => setFilter(f)}>{FILTER_LABELS[f]}</button>
             ))}
           </div>
-          {list.isLoading ? <p className="muted chat-pad">Loading…</p>
-            : list.error ? <p className="error chat-pad" role="alert">Could not load conversations.</p>
+          {list.isLoading ? <Loading label="Loading conversations…" />
+            : list.error ? <QueryError query={list} message="Could not load conversations." />
             : (
               <>
                 {items.length === 0 && term === "" && (
@@ -169,7 +171,7 @@ function PresenceAvatar({ name, online }: { name: string | null; online?: boolea
   return (
     <span className="chat-avatar">
       <Avatar name={name} />
-      {online !== undefined && <span className={`dot ${online ? "on" : "off"}`} aria-hidden="true" />}
+      {online !== undefined && <span className={`chat-dot ${online ? "on" : "off"}`} aria-hidden="true" />}
     </span>
   );
 }
