@@ -449,7 +449,8 @@ export class AdminService {
             res.id = rows[0]!.id;
             await this.audit.record(c, {
               actorId: user.id, action: "admin.user.created", entityType: "app_user", entityId: res.id,
-              changes: { email, displayName, designation: designation ?? undefined, primaryLocationId: locationId ?? undefined, bulk: true },
+              // Rule 5: no email or free text in audit rows; keep the fields set, ids and the bulk flag.
+              changes: { fields: ["email", "displayName", ...(designation ? ["designation"] : [])], primaryLocationId: locationId ?? null, bulk: true },
             });
             for (const { key: role, label, is_location_bound } of wanted) {
               const roleLocation = is_location_bound ? locationId! : null;

@@ -343,7 +343,13 @@ describe("users", () => {
       expect(r.json()).toMatchObject({ committed: true, created: 2, failed: 0 });
       const list = (await call("admin", "GET", "/api/v1/admin/users?search=bulk.ok1")).json();
       expect(list.items[0]).toMatchObject({ designation: "Recruiter", primaryLocation: { id: LOC.dallas } });
-      expect((await audits("admin.user.created")).length).toBe(before + 2);
+      const created = await audits("admin.user.created");
+      expect(created.length).toBe(before + 2);
+      // Rule 5: no email or free-text names in the audit rows.
+      for (const row of created.slice(-2)) {
+        expect(JSON.stringify(row)).not.toMatch(/bulk\.ok[12]@|Ok One|Ok Two|Recruiter/);
+        expect(row.changes).toMatchObject({ bulk: true });
+      }
       expect((await audits("admin.user.bulk_created")).at(-1)).toMatchObject({ actor_id: U.admin });
     });
 
