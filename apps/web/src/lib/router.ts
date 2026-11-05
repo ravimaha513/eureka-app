@@ -37,10 +37,18 @@ export function navigate(path: string, { replace = false }: { replace?: boolean 
  */
 export function useRoutedId(routeId: string | null, onChange?: (id: string | null) => void): [string | null, (id: string | null) => void] {
   const [id, setId] = useState(routeId);
-  useEffect(() => { setId(routeId); }, [routeId]);
+  // The id the URL last said (or was last told). Only a change away from it is reported: the value seeded from the URL
+  // on mount, or synced in from back/forward, is already in the address bar. Reporting it anyway
+  // ran a navigate() from a passive effect that could land after a quick back/forward and undo it.
+  const fromUrl = useRef(routeId);
+  useEffect(() => { fromUrl.current = routeId; setId(routeId); }, [routeId]);
   const report = useRef(onChange);
   report.current = onChange;
-  useEffect(() => { report.current?.(id); }, [id]);
+  useEffect(() => {
+    if (id === fromUrl.current) return;
+    fromUrl.current = id; // reported: the URL follows (or the owner decided not to); either way it is known
+    report.current?.(id);
+  }, [id]);
   return [id, setId];
 }
 
