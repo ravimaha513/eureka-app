@@ -133,7 +133,7 @@ describe("Hot List visibility (team policy)", () => {
   it("team-policy Hot List pages are audited (filter summary, no free text)", async () => {
     await call("r2a", "GET", "/api/v1/hotlist?limit=2&search=Cand&visa=h1b&stay=remote");
     const last = (await audits("hotlist.read", U.r2a)).at(-1)!;
-    expect(last.changes.filters).toMatchObject({ search: true, visa: "h1b", stay: "remote" });
+    expect(last.changes.filters).toMatchObject({ search: true, visa: ["h1b"], stay: "remote" });
     expect(JSON.stringify(last.changes)).not.toContain("Cand");
   });
 });
@@ -177,6 +177,7 @@ describe("Hot List filters", () => {
   });
 
   const ceoIds = async (q: string) => sorted((await all("ceo", `/api/v1/hotlist?${q}`)).map((i) => i.id));
+  const adIds = async (q: string) => sorted((await all("ad", `/api/v1/hotlist?${q}`)).map((i) => i.id));
   const hotAll = () => candidates.filter((c) => hotlistVisible(resolveScope(toUserAccess("ceo"), "hotlist:read"), c));
 
   describe.each(["team", "everyone"] as const)("served under the %s policy", (policy) => {
@@ -207,6 +208,56 @@ describe("Hot List filters", () => {
       expect(await ceoIds("inPerson=no")).toEqual(ids(withLink));
       expect(await ceoIds(`ghLocationId=${LOC.dallas}`)).toEqual(ids(guestHouse));
       expect(await ceoIds(`priority=P1&teamId=${T.t2}`)).toEqual([]);
+    });
+
+    it("several values per filter (repeated parameter), and not= inverts a filter", async () => {
+      const ids = (cs: FixtureCandidate[]) => sorted(cs.map((c) => c.id));
+      // As the AD (org scope like the CEO), so the CEO's page budget is left for the tests above.
+      const hot = hotAll();
+      expect(await adIds("priority=P1&priority=P3")).toEqual(ids([...h1b, ...remote]));
+      expect(await adIds(`teamId=${T.t1}&teamId=${T.t2}`)).toEqual(ids(hot.filter((c) => c.teamId === T.t1 || c.teamId === T.t2)));
+      expect(await adIds("priority=P1&not=priority")).toEqual(ids(hot.filter((c) => !h1b.includes(c))));
+      expect(await adIds("documents=complete&documents=none")).toEqual(ids(hot));
+      expect(await adIds("documents=none&not=documents")).toEqual(ids(complete));
+      expect(await adIds("status=active&status=bench&not=status"))
+        .toEqual(ids(hot.filter((c) => c.marketingStatus !== "active" && c.marketingStatus !== "bench")));
+      // A candidate with no recruiter is "not Sam": NULL never matches a value list.
+      expect(await adIds(`recruiterId=${U.r1a}&not=recruiterId`)).toEqual(ids(hot.filter((c) => c.recruiterId !== U.r1a)));
+      expect(await adIds(`visa=h1b&not=visa&priority=P3`)).toEqual(ids(remote));
+      // `not` naming a filter with no values changes nothing.
+      expect(await adIds("not=teamId&priority=P3")).toEqual(ids(remote));
+    });
+
+    it("facet counts: each filter's values counted with the other filters applied", async () => {
+      const hot = hotAll();
+      const facets = async (q: string) => {
+        const r = await call("ad", "GET", `/api/v1/hotlist/facets?${q}`);
+        expect(r.statusCode, r.body).toBe(200);
+        return r.json() as { total: number; facets: Record<string, { value: string; count: number }[]> };
+      };
+      const count = (f: Awaited<ReturnType<typeof facets>>, k: string, v: string) => f.facets[k]!.find((x) => x.value === v)?.count ?? 0;
+      const all = await facets("");
+      expect(all.total).toBe(hot.length);
+      expect(count(all, "priority", "P1")).toBe(h1b.length);
+      expect(count(all, "visa", "h1b")).toBe(h1b.length);
+      expect(count(all, "stay", "remote")).toBe(remote.length);
+      expect(count(all, "documents", "none")).toBe(hot.length - complete.length);
+      expect(count(all, "teamId", T.t2)).toBe(hot.filter((c) => c.teamId === T.t2).length);
+      expect(all.facets.batchId).toBeUndefined();
+      // A filter does not narrow its own facet, only the others and the total.
+      const p1 = await facets("priority=P1");
+      expect(p1.total).toBe(h1b.length);
+      expect(count(p1, "priority", "P3")).toBe(remote.length);
+      expect(count(p1, "stay", "remote")).toBe(0);
+      const notP1 = await facets("priority=P1&not=priority");
+      expect(notP1.total).toBe(hot.length - h1b.length);
+      expect(count(notP1, "visa", "h1b")).toBe(0);
+    });
+
+    it("rejects unknown not= keys and over-long value lists", async () => {
+      expect((await call("ad", "GET", "/api/v1/hotlist?not=search")).statusCode).toBe(422);
+      const many = Array.from({ length: 51 }, () => `teamId=${T.t1}`).join("&");
+      expect((await call("ad", "GET", `/api/v1/hotlist?${many}`)).statusCode).toBe(422);
     });
 
     // As the AD (org scope like the CEO): the CEO's page budget (60 a minute) goes to the filter tests.
@@ -253,6 +304,18 @@ describe("Hot List filters", () => {
   it("the Candidates list takes the same filters", async () => {
     const ids = sorted((await all("hr", "/api/v1/candidates?visa=h1b")).map((i) => i.id));
     expect(ids).toEqual(sorted(h1b.map((c) => c.id)));
+    // Several values and not=, through the scoped (RLS) query rather than authz.hotlist_page.
+    const hrIds = async (q: string) => sorted((await all("hr", `/api/v1/candidates?${q}`)).map((i) => i.id));
+    const everyone = await hrIds("");
+    expect(await hrIds("priority=P1&priority=P3")).toEqual(sorted([...h1b, ...remote].map((c) => c.id)));
+    const notH1b = await hrIds("visa=h1b&not=visa");
+    expect(notH1b).toEqual(everyone.filter((id) => !h1b.some((c) => c.id === id)));
+    expect(await hrIds("documents=none&not=documents")).toEqual(sorted(complete.map((c) => c.id)));
+    const f = (await call("hr", "GET", "/api/v1/candidates/facets?visa=h1b")).json();
+    expect(f.total).toBe(h1b.length);
+    expect(f.facets.visa.find((x: { value: string }) => x.value === "h1b").count).toBe(h1b.length);
+    expect(f.facets.batchId).toEqual([]);
+    expect((await call("hr", "GET", "/api/v1/candidates/facets?limit=5")).statusCode).toBe(422);
   });
 
   it.each([["visa=xx"], ["documents=done"], ["resume=maybe"], ["stay=hotel"], ["locationId=dallas"]])(
@@ -273,7 +336,7 @@ describe("Hot List filters", () => {
   it("saved views keep the new filters", async () => {
     const r = await call("r1a", "POST", "/api/v1/hotlist/views", { name: "H1B remote", filters: { visa: "h1b", stay: "remote", resume: "yes" } });
     expect(r.statusCode).toBe(201);
-    expect(r.json().filters).toEqual({ visa: "h1b", stay: "remote", resume: "yes" });
+    expect(r.json().filters).toEqual({ visa: ["h1b"], stay: "remote", resume: "yes" });
   });
 });
 

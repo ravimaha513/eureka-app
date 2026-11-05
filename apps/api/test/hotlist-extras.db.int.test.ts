@@ -97,9 +97,28 @@ describe("saved views: RLS keeps each user's views private (differential)", () =
   it("filters must be a small JSON object; names are trimmed and bounded", async () => {
     await expect(asUser(db.app, U.r1a, (c) => c.query(`INSERT INTO eureka.hotlist_view (name, filters) VALUES ('a', '[]')`))).rejects.toThrow(/check constraint/);
     await expect(asUser(db.app, U.r1a, (c) => c.query(`INSERT INTO eureka.hotlist_view (name, filters) VALUES ('a', $1)`,
-      [JSON.stringify({ search: "x".repeat(5000) })]))).rejects.toThrow(/check constraint/);
+      [JSON.stringify({ search: "x".repeat(9000) })]))).rejects.toThrow(/check constraint/);
     await expect(asUser(db.app, U.r1a, (c) => c.query(`INSERT INTO eureka.hotlist_view (name) VALUES (' padded ')`))).rejects.toThrow(/check constraint/);
     await expect(asUser(db.app, U.r1a, (c) => c.query(`INSERT INTO eureka.hotlist_view (name) VALUES ('')`))).rejects.toThrow(/check constraint/);
+  });
+
+  it("a shared view: the server picks the team, teammates read it, nobody else changes it (0470)", async () => {
+    // shared_team_id is not a client column (rule 4).
+    await expect(asUser(db.app, U.r1a, (c) => c.query(
+      `INSERT INTO eureka.hotlist_view (name, shared_team_id) VALUES ('x', $1)`, [T.t2]))).rejects.toThrow(/permission denied/);
+    const id = await asUser(db.app, U.r1a, async (c) => (await c.query<{ id: string; shared_team_id: string }>(
+      `INSERT INTO eureka.hotlist_view (name, shared) VALUES ('Shared db', true) RETURNING id, shared_team_id`)).rows[0]!, true);
+    expect(id.shared_team_id).toBe(T.t1);
+    const sees = (u: string) => asUser(db.app, u, async (c) =>
+      (await c.query(`SELECT 1 FROM eureka.hotlist_view WHERE id = $1`, [id.id])).rowCount);
+    expect([await sees(U.r1b), await sees(U.l1), await sees(U.r2a), await sees(U.l2)]).toEqual([1, 1, 0, 0]);
+    expect(await asUser(db.app, U.r1b, async (c) =>
+      (await c.query(`UPDATE eureka.hotlist_view SET name = 'stolen', shared = false WHERE id = $1`, [id.id])).rowCount)).toBe(0);
+    expect(await asUser(db.app, U.r1b, async (c) =>
+      (await c.query(`DELETE FROM eureka.hotlist_view WHERE id = $1`, [id.id])).rowCount)).toBe(0);
+    await expect(asUser(db.app, U.r1a, (c) => c.query(
+      `UPDATE eureka.hotlist_view SET list = 'candidates' WHERE id = $1`, [id.id]))).rejects.toThrow(/permission denied/);
+    await asUser(db.app, U.r1a, (c) => c.query(`DELETE FROM eureka.hotlist_view WHERE id = $1`, [id.id]), true);
   });
 
   it("a user keeps at most 50 views", async () => {
