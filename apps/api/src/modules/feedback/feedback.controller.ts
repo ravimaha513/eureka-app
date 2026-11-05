@@ -7,6 +7,7 @@ import { clientIp, ipKey } from "../../platform/client-ip.js";
 import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
+import { ApiBody } from "../../platform/http/api-doc.js";
 
 const Feedback = z.object({ rating: z.number().int().min(1).max(5), notes: z.string().trim().max(4000).optional(),
   format: z.string().trim().max(80).optional(), topics: z.array(z.string().trim().max(100)).max(20).optional(),
@@ -40,6 +41,7 @@ export class FeedbackController {
     if (!row) throw new NotFoundException("Feedback link unavailable");
     return { firstName: row.first_name, clientName: row.client_name, startsAt: row.starts_at, expiresAt: row.expires_at };
   }
+  @ApiBody(Feedback)
   @Post(":token")
   async post(@Req() req: FastifyRequest, @Param("token") token: string, @Body() body: unknown) {
     const hash = this.check(req, token);

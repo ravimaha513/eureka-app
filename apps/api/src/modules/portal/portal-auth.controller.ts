@@ -9,6 +9,7 @@ import { DevMailbox, MAIL_PORT, type MailPort } from "../../platform/mail.js";
 import { PortalSessionService } from "../../platform/portal-session.service.js";
 import { PortalAuthService } from "./portal-auth.service.js";
 import { RequestLink, SignUp, VerifyLink } from "./portal.schemas.js";
+import { ApiBody, ApiQuery } from "../../platform/http/api-doc.js";
 
 export { PortalAuthService };
 
@@ -22,6 +23,7 @@ export class PortalAuthController {
   ) {}
 
   /** 202 with the same message whether or not the email already has an account. */
+  @ApiBody(SignUp)
   @PortalRoute("public")
   @Post("sign-up")
   @HttpCode(202)
@@ -30,6 +32,7 @@ export class PortalAuthController {
   }
 
   /** 202 with the same message whether or not the email has an account. */
+  @ApiBody(RequestLink)
   @PortalRoute("public")
   @Post("request-link")
   @HttpCode(202)
@@ -38,6 +41,7 @@ export class PortalAuthController {
   }
 
   /** The web page posts the token from the link's fragment; the link is burnt and a session cookie set. */
+  @ApiBody(VerifyLink)
   @PortalRoute("public")
   @Post("verify")
   @HttpCode(204)
@@ -95,6 +99,7 @@ const MailboxQuery = z.object({ to: z.string().email().max(254) }).strict();
 export class PortalDevMailboxController {
   constructor(@Inject(CONFIG) private readonly config: AppConfig, @Inject(MAIL_PORT) private readonly mail: MailPort) {}
 
+  @ApiQuery(MailboxQuery)
   @PortalRoute("public")
   @Get()
   inbox(@Query() q: unknown) {

@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } fr
 import { CurrentUser, SelfService, type AuthedUser } from "../../platform/auth.guard.js";
 import { ListQuery, ReadAll } from "./notifications.schemas.js";
 import { NotificationsService } from "./notifications.service.js";
+import { ApiBody, ApiQuery } from "../../platform/http/api-doc.js";
 
 /**
  * The signed-in user's own inbox (every user has one, so no permission beyond
@@ -12,6 +13,7 @@ import { NotificationsService } from "./notifications.service.js";
 export class NotificationsController {
   constructor(private readonly svc: NotificationsService) {}
 
+  @ApiQuery(ListQuery)
   @Get()
   list(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.list(user, ListQuery.parse(q ?? {}));
@@ -36,6 +38,7 @@ export class NotificationsController {
     await this.svc.mark(user, id, false);
   }
 
+  @ApiBody(ReadAll)
   @Post("read-all")
   @HttpCode(200)
   readAll(@CurrentUser() user: AuthedUser, @Body() body: unknown) {

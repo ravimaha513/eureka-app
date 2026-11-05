@@ -7,6 +7,7 @@ import {
   Preferences, Rename, SendMessage,
 } from "./chat.schemas.js";
 import { ChatService } from "./chat.service.js";
+import { ApiBody, ApiQuery } from "../../platform/http/api-doc.js";
 
 /**
  * Internal staff chat (docs/chat-api.md). Every route needs chat:use (every
@@ -18,6 +19,7 @@ import { ChatService } from "./chat.service.js";
 export class ChatController {
   constructor(private readonly svc: ChatService) {}
 
+  @ApiQuery(ConversationListQuery)
   @Get("conversations")
   list(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.listConversations(user, ConversationListQuery.parse(q ?? {}));
@@ -28,12 +30,14 @@ export class ChatController {
     return this.svc.unread(user);
   }
 
+  @ApiQuery(PeopleQuery)
   @Get("people")
   people(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.people(user, PeopleQuery.parse(q ?? {}));
   }
 
   /** The direct chat with another user: 201 when created, 200 when it existed. */
+  @ApiBody(OpenDirect)
   @Post("conversations/direct")
   async direct(@CurrentUser() user: AuthedUser, @Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
     const r = await this.svc.openDirect(user, OpenDirect.parse(body).userId);
@@ -41,6 +45,7 @@ export class ChatController {
     return r.conversation;
   }
 
+  @ApiBody(CreateGroup)
   @Post("conversations/group")
   createGroup(@CurrentUser() user: AuthedUser, @Body() body: unknown) {
     const b = CreateGroup.parse(body);
@@ -53,6 +58,7 @@ export class ChatController {
   }
 
   /** Rename a group (owners); `If-Match: "<rowVersion>"` (428 without, 412 `stale`). */
+  @ApiBody(Rename)
   @Patch("conversations/:id")
   rename(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
     @Headers("if-match") ifMatch: string | undefined) {
@@ -73,11 +79,13 @@ export class ChatController {
   }
 
   /** The caller's own flags (archived, favorite, muted); last write wins. */
+  @ApiBody(Preferences)
   @Patch("conversations/:id/preferences")
   preferences(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.setPreferences(user, id, Preferences.parse(body));
   }
 
+  @ApiBody(AddMembers)
   @Post("conversations/:id/members")
   @HttpCode(200)
   addMembers(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
@@ -91,18 +99,21 @@ export class ChatController {
     await this.svc.removeMember(user, id, userId);
   }
 
+  @ApiBody(MemberRole)
   @Patch("conversations/:id/members/:userId")
   setRole(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string,
     @Param("userId", ParseUUIDPipe) userId: string, @Body() body: unknown) {
     return this.svc.setMemberRole(user, id, userId, MemberRole.parse(body).role);
   }
 
+  @ApiQuery(MessagesQuery)
   @Get("conversations/:id/messages")
   messages(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Query() q: unknown) {
     return this.svc.messages(user, id, MessagesQuery.parse(q ?? {}));
   }
 
   /** 201 with the message and upload tickets; 200 for a retry with the same clientId. */
+  @ApiBody(SendMessage)
   @Post("conversations/:id/messages")
   async send(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown,
     @Res({ passthrough: true }) reply: FastifyReply) {
@@ -112,12 +123,14 @@ export class ChatController {
   }
 
   /** Marks the conversation read up to `messageId` (default: the newest) and records the view. */
+  @ApiBody(MarkRead)
   @Post("conversations/:id/read")
   @HttpCode(204)
   async read(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown): Promise<void> {
     await this.svc.markRead(user, id, MarkRead.parse(body ?? {}).messageId);
   }
 
+  @ApiBody(EditMessage)
   @Patch("messages/:messageId")
   edit(@CurrentUser() user: AuthedUser, @Param("messageId", ParseUUIDPipe) messageId: string, @Body() body: unknown) {
     return this.svc.editMessage(user, messageId, EditMessage.parse(body).body);

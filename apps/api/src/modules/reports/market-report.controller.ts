@@ -3,6 +3,7 @@ import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { MarketReportQuery } from "./market-report.schemas.js";
 import { MarketReportService } from "./market-report.service.js";
+import { ApiBody, ApiQuery } from "../../platform/http/api-doc.js";
 
 export { MarketReportService };
 
@@ -12,6 +13,7 @@ export class MarketReportController {
   constructor(private readonly svc: MarketReportService) {}
 
   /** MR-1: point-in-time counts per group. */
+  @ApiQuery(MarketReportQuery)
   @Get()
   @RequirePermission("report.market:read")
   get(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
@@ -19,6 +21,7 @@ export class MarketReportController {
   }
 
   /** MR-2. POST, not GET: audited and CSRF-protected, like the Hot List export. */
+  @ApiBody(MarketReportQuery)
   @Post("export")
   @HttpCode(200)
   @RequirePermission("report:export")

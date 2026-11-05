@@ -5,6 +5,7 @@ import {
   CreateAssessment, FlagNonResponse, PipelineQuery, ResolveNonResponse, UpdateAssessment,
 } from "./pipeline-report.schemas.js";
 import { PipelineReportService } from "./pipeline-report.service.js";
+import { ApiBody, ApiQuery } from "../../platform/http/api-doc.js";
 
 export { PipelineReportService };
 
@@ -13,6 +14,7 @@ export { PipelineReportService };
 export class PipelineReportController {
   constructor(private readonly svc: PipelineReportService) {}
 
+  @ApiQuery(PipelineQuery)
   @Get()
   @RequirePermission("report:read")
   report(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
@@ -31,6 +33,7 @@ export class AssessmentsController {
     return this.svc.listAssessments(user, id);
   }
 
+  @ApiBody(CreateAssessment)
   @Post("submissions/:id/assessments")
   @RequirePermission("submission:update")
   create(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
@@ -38,6 +41,7 @@ export class AssessmentsController {
   }
 
   /** `If-Match` carries the rowVersion the client saw (428 without it, 412 when stale). */
+  @ApiBody(UpdateAssessment)
   @Patch("assessments/:id")
   @RequirePermission("submission:update")
   update(
@@ -59,12 +63,14 @@ export class NonResponseController {
     return this.svc.nonResponse(user, id);
   }
 
+  @ApiBody(FlagNonResponse)
   @Post()
   @RequirePermission("candidate:update")
   flag(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
     return this.svc.flagNonResponse(user, id, FlagNonResponse.parse(body).reason);
   }
 
+  @ApiBody(ResolveNonResponse)
   @Post("resolve")
   @RequirePermission("candidate:update")
   resolve(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {

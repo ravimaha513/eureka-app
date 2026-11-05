@@ -35,6 +35,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r typecheck
+      - name: OpenAPI inventory is up to date
+        run: pnpm --filter @eureka/api openapi:check
       # Throwaway database: trade durability for speed, and leave room for every parallel test file's pools.
       - name: Tune Postgres for tests
         run: |

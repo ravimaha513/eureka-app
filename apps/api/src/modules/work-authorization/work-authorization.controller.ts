@@ -3,6 +3,7 @@ import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/
 import { parseIfMatch } from "../../platform/http/if-match.js";
 import { WorkAuthCreate, WorkAuthUpdate } from "./work-authorization.schemas.js";
 import { WorkAuthorizationService } from "./work-authorization.service.js";
+import { ApiBody } from "../../platform/http/api-doc.js";
 
 /** FR-VIS-01, 02: a candidate's work authorization records (docs/work-authorization-api.md). */
 @Controller("api/v1/candidates/:id/work-authorizations")
@@ -15,6 +16,7 @@ export class WorkAuthorizationController {
     return this.svc.list(user, id);
   }
 
+  @ApiBody(WorkAuthCreate)
   @Post()
   @RequirePermission("visa:update")
   create(@CurrentUser() user: AuthedUser, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
@@ -22,6 +24,7 @@ export class WorkAuthorizationController {
   }
 
   /** Optimistic concurrency: `If-Match` carries the rowVersion the client saw (428 without it, 412 when stale). */
+  @ApiBody(WorkAuthUpdate)
   @Patch(":waId")
   @RequirePermission("visa:update")
   update(

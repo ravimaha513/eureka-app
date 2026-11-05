@@ -9,6 +9,7 @@ import { CONFIG, type AppConfig } from "../../platform/config.js";
 import { DbService } from "../../platform/db.service.js";
 import { RateLimiter } from "../../platform/rate-limit.js";
 import { SessionService } from "../../platform/session.service.js";
+import { ApiBody } from "../../platform/http/api-doc.js";
 
 const PasswordLogin = z.object({ email: z.string().trim().email().max(254), password: z.string().min(1).max(200) }).strict();
 const SetupPassword = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/), newPassword: z.string().min(1).max(200) }).strict();
@@ -47,6 +48,7 @@ export class PasswordController {
     };
   }
 
+  @ApiBody(PasswordLogin)
   @Public()
   @Post("password-login")
   @HttpCode(200)
@@ -69,6 +71,7 @@ export class PasswordController {
    * or no longer usable (one message for all of them); 422 password_weak keeps
    * the link open.
    */
+  @ApiBody(SetupPassword)
   @Public()
   @Post("password/setup")
   @HttpCode(200)
@@ -88,6 +91,7 @@ export class PasswordController {
   }
 
   /** The signed-in user changes their own password (also the way out of a temporary one). */
+  @ApiBody(ChangePassword)
   @Post("password/change")
   @AllowPasswordChange()
   @HttpCode(204)
