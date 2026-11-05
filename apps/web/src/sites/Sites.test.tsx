@@ -67,6 +67,7 @@ const base = (): Record<string, Handler> => ({
 beforeEach(() => {
   utilities = [utility()];
   bills = [bill()];
+  window.history.replaceState(null, "", "/companies");
   api = mockApi(base());
 });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
@@ -74,7 +75,8 @@ afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 const rowOf = async (name: string) => (await screen.findByRole("button", { name: new RegExp(`^Open (company|facility) ${name}$`) })).closest("tr")!;
 const openCompany = async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Open company Eureka Info Tech" }));
-  return screen.findByRole("dialog", { name: "Company details" });
+  // The drawer is titled with the record name (its status and address lead the action strip).
+  return screen.findByRole("dialog", { name: "Eureka Info Tech" });
 };
 const openTab = async (drawer: HTMLElement, name: string) => {
   fireEvent.click(await within(drawer).findByRole("tab", { name }));
@@ -107,8 +109,8 @@ describe("Companies list", () => {
     expect(within(kpis).getByText("Employees assigned").closest("li")).toHaveTextContent("12");
     await waitFor(() => expect(within(kpis).getByText("Bills, last 12 months").closest("li")).toHaveTextContent("$512.40"));
 
-    const list = screen.getByRole("region", { name: "Companies List" });
-    expect(within(list).getByRole("link", { name: "Export companies as CSV" })).toHaveAttribute("href", "/api/v1/companies/export.csv");
+    expect(screen.getByRole("region", { name: "Companies list" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Export companies as CSV" })).toHaveAttribute("href", "/api/v1/companies/export.csv");
     expect(screen.getByRole("button", { name: "Add company" })).toBeInTheDocument();
     expect(within(r1).getByRole("button", { name: "Edit company Eureka Info Tech" })).toBeInTheDocument();
     expect(screen.getByText("2 companies on page 1.")).toBeInTheDocument();
@@ -120,6 +122,8 @@ describe("Companies list", () => {
     await rowOf("Eureka Info Tech");
     fireEvent.change(screen.getByRole("searchbox", { name: "Search companies" }), { target: { value: "Eure" } });
     await waitFor(() => expect(api.gets("/api/v1/companies").at(-1)!.url.searchParams.get("q")).toBe("Eure"));
+    // The export follows the search, and says so.
+    expect(screen.getByRole("link", { name: "Export matches companies as CSV" })).toHaveAttribute("href", "/api/v1/companies/export.csv?q=Eure");
     fireEvent.click(await screen.findByRole("button", { name: "Next" }));
     await waitFor(() => expect(api.gets("/api/v1/companies").at(-1)!.url.searchParams.get("cursor")).toBe("next1"));
     expect(await screen.findByText("Page 2")).toBeInTheDocument();
@@ -168,7 +172,7 @@ describe("Companies list", () => {
   it("opens the details drawer with header, address and pill tabs; employees are listed", async () => {
     wrap(<CompaniesPage me={opsAdmin} />);
     const drawer = await openCompany();
-    expect(within(drawer).getByText("Eureka Info Tech", { selector: "b" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("heading", { name: "Eureka Info Tech" })).toBeInTheDocument();
     expect(within(drawer).getAllByText("100 Main St, Irving, TX 75038, USA")[0]!.closest(".addr")).toBeInTheDocument();
     expect(within(drawer).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Overview", "Employees", "Incharges", "Utilities", "Bills"]);
     expect(await within(drawer).findByText("Head office")).toBeInTheDocument();
@@ -227,7 +231,7 @@ describe("Facilities", () => {
     expect(api.writes()).toHaveLength(0);
 
     // Reset clears the form.
-    fireEvent.click(within(dialog).getByRole("button", { name: "Reset" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reset form" }));
     expect(within(dialog).getByLabelText("Owner email")).toHaveValue("");
     expect(within(dialog).queryByText("Enter the facility name.")).toBeNull();
 
@@ -283,7 +287,7 @@ describe("Utilities", () => {
     const dialog = await screen.findByRole("dialog", { name: "Add utility" });
     expect(within(dialog).getByLabelText("Account number")).toHaveFocus();
     fireEvent.change(within(dialog).getByLabelText("Website URL"), { target: { value: "http://insecure.example" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Submit" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add utility" }));
     expect(await within(dialog).findByText("Choose the utility type.")).toBeInTheDocument();
     expect(within(dialog).getByText("Enter the service provider.")).toBeInTheDocument();
     expect(within(dialog).getByText("Enter a web address starting with https://.")).toBeInTheDocument();
@@ -298,7 +302,7 @@ describe("Utilities", () => {
     expect(pw).toHaveAttribute("type", "text");
     fireEvent.click(within(dialog).getByRole("button", { name: "Hide password" }));
     expect(pw).toHaveAttribute("type", "password");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Submit" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add utility" }));
 
     expect(await within(drawer).findByText("Utility added.")).toBeInTheDocument();
     expect(api.writes()[0]!.body).toEqual({ utilityType: "water", serviceProvider: "City of Irving", websiteUrl: "https://irving.example/pay", password: "S3cret-Water!" });
@@ -318,7 +322,7 @@ describe("Utilities", () => {
     await waitFor(() => expect(within(dialog).getByLabelText("Account number")).toHaveFocus());
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add utility" })).toBeNull());
-    expect(screen.getByRole("dialog", { name: "Company details" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Eureka Info Tech" })).toBeInTheDocument();
     await waitFor(() => expect(add).toHaveFocus());
   });
 
@@ -440,6 +444,24 @@ describe("Bills", () => {
     expect(await within(drawer).findByText(/was voided\./)).toBeInTheDocument();
     expect(api.writes()[0]).toMatchObject({ path: `/api/v1/bills/${B1}/void`, body: { reason: "Entered twice" } });
     expect(await within(panel).findByText("No bills yet.")).toBeInTheDocument();
+  });
+
+  it("shows each invoice's scan state; only a ready invoice can be downloaded", async () => {
+    bills = [
+      bill({ invoice: { documentId: "d1", fileName: "txu-aug.pdf", status: "pending" } }),
+      bill({ id: "b2", dueDate: "2026-08-20", invoice: { documentId: "d2", fileName: "txu-jul.pdf", status: "infected" } }),
+      bill({ id: "b3", dueDate: "2026-07-20", invoice: { documentId: "d3", fileName: "txu-jun.pdf", status: "clean" } }),
+    ];
+    wrap(<CompaniesPage me={opsAdmin} />);
+    const drawer = await openCompany();
+    const panel = await openTab(drawer, "Bills");
+    const rows = within(await within(panel).findByRole("table", { name: "Bills" })).getAllByRole("row").slice(1);
+    expect(within(rows[0]!).getByText("Scanning")).toHaveClass("badge", "inv-pending");
+    expect(within(rows[0]!).queryByRole("button", { name: /^Download invoice/ })).toBeNull();
+    expect(within(rows[1]!).getByText("Rejected")).toHaveClass("badge", "inv-rejected");
+    expect(within(rows[1]!).queryByRole("button", { name: /^Download invoice/ })).toBeNull();
+    expect(within(rows[2]!).getByText("Ready")).toHaveClass("badge", "inv-clean");
+    expect(within(rows[2]!).getByRole("button", { name: /^Download invoice/ })).toBeInTheDocument();
   });
 
   it("uploads an invoice straight to storage and downloads a scanned one", async () => {

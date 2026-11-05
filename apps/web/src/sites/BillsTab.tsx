@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, CalendarDays, Download, FileUp, Plus, Search } from "lucide-react";
+import { Ban, CalendarDays, Download, FileUp, Plus } from "lucide-react";
 import { Dialog, useSubmit } from "../ui/Dialog";
 import { DOCUMENT_CONTENT_TYPES } from "@eureka/shared";
 import { documentFileProblem, documentTypeOf } from "../documents/documentsApi";
@@ -11,6 +11,19 @@ import {
   type Bill, type PaymentMethod, type SiteKind,
 } from "./sitesApi";
 import { BillStatusPill, IconInput, Layer } from "./ui";
+import { Pager, useCursorPager } from "../ui/Pager";
+import { DueDate, fmtDay } from "../payments/cells";
+import "./sites.css";
+
+const BILLS_PAGE = 25;
+const INVOICE_POLL_MS = 4000;
+
+/** The invoice file's scan state as a plain chip: Scanning, Ready, or Rejected (never downloadable). */
+function InvoiceScan({ status }: { status: string | undefined }) {
+  if (!status) return null;
+  const [cls, text] = status === "clean" ? ["inv-clean", "Ready"] : status === "pending" ? ["inv-pending", "Scanning"] : ["inv-rejected", "Rejected"];
+  return <span className={`badge ${cls}`}>{text}</span>;
+}
 
 const ACCEPT = [".pdf", ".docx", ".png", ".jpg", ".jpeg", ...Object.keys(DOCUMENT_CONTENT_TYPES)].join(",");
 
@@ -30,6 +43,7 @@ export function BillsTab({ kind, ownerId, canManage }: { kind: SiteKind; ownerId
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [progress, setProgress] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const uploadFor = useRef<Bill | null>(null);
 
@@ -38,10 +52,14 @@ export function BillsTab({ kind, ownerId, canManage }: { kind: SiteKind; ownerId
     return () => clearTimeout(t);
   }, [text]);
 
+  const pager = useCursorPager();
+  useEffect(() => { pager.reset(); }, [search]);
   const q = useQuery({
-    queryKey: siteKeys.bills(kind, ownerId, search),
-    queryFn: () => sitesApi.bills(kind, ownerId, { q: search }),
+    queryKey: [...siteKeys.bills(kind, ownerId, search), pager.cursor ?? ""],
+    queryFn: () => sitesApi.bills(kind, ownerId, { q: search, limit: BILLS_PAGE, cursor: pager.cursor ?? undefined }),
     placeholderData: keepPreviousData,
+    // While an uploaded invoice is being scanned, look again until it is ready or rejected.
+    refetchInterval: (query) => (query.state.data?.items.some((b) => b.invoice?.status === "pending") ? INVOICE_POLL_MS : false),
   });
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: [kind, "detail", ownerId, "bills"] });
@@ -62,11 +80,13 @@ export function BillsTab({ kind, ownerId, canManage }: { kind: SiteKind; ownerId
     setBusy(b.id);
     try {
       const r = await sitesApi.startInvoice(b.id, { fileName: file.name, contentType: documentTypeOf(file)!, size: file.size });
-      setMessage("Uploading…");
+      setProgress(`Uploading the invoice for the ${billName(b)}…`);
       await postToStorage(r.upload, file);
+      setProgress("");
       setMessage(`Invoice uploaded for the ${billName(b)}. It can be downloaded once the malware scan passes.`);
       refresh();
     } catch (err) {
+      setProgress("");
       setMessage("");
       setError(sitesError(err, "bill"));
     } finally {
@@ -91,17 +111,18 @@ export function BillsTab({ kind, ownerId, canManage }: { kind: SiteKind; ownerId
   const items = q.data?.items ?? [];
   return (
     <div className="tabpanel">
-      <div className="panelhead">
+      <div className="panelhead si-billshead">
         <h3>Bills</h3>
-        <div className="searchbox">
-          <Search size={16} className="inicon" aria-hidden="true" />
+        <div className="field inline si-billsearch">
           <label htmlFor={`${id}-q`} className="sr-only">Search bills</label>
           <input id={`${id}-q`} type="search" placeholder="Search bills" value={text} maxLength={80} onChange={(e) => setText(e.target.value)} />
         </div>
-        <a className="btn outline sm" href={billsExportUrl(kind, ownerId)} download><Download size={15} aria-hidden="true" />Export<span className="sr-only"> bills as CSV</span></a>
+        <a className="btn sm" href={billsExportUrl(kind, ownerId, search)} download><Download size={15} aria-hidden="true" />{search ? "Export matches" : "Export"}<span className="sr-only"> bills as CSV</span></a>
         {canManage && <button type="button" className="btn primary sm" onClick={() => setAdding(true)}><Plus size={15} aria-hidden="true" />Add bill</button>}
       </div>
-      <p aria-live="polite" aria-atomic="true" className="livemsg">{message}</p>
+      {/* Progress is information, not success: a neutral banner while the file goes up. */}
+      <p aria-live="polite" aria-atomic="true" className="livemsg info">{progress}</p>
+      <p aria-live="polite" aria-atomic="true" className="livemsg">{progress ? "" : message}</p>
       {error && <p className="banner error formerr" role="alert" tabIndex={-1}>{error}</p>}
       <input ref={fileInput} type="file" accept={ACCEPT} hidden aria-hidden="true" tabIndex={-1} data-testid="invoice-file"
         onChange={(e) => void upload(e.target.files?.[0])} />
@@ -109,31 +130,36 @@ export function BillsTab({ kind, ownerId, canManage }: { kind: SiteKind; ownerId
         : q.error ? <p className="error" role="alert">{sitesError(q.error, "bill")}</p>
         : items.length === 0 ? <p className="muted">{search ? "No bills match this search." : "No bills yet."}</p>
         : (
-          <div className="tablewrap roundtable"><table aria-label="Bills" aria-busy={q.isFetching || undefined}>
+          <div className="tablewrap roundtable listcard"><table className="dtable si-bills" aria-label="Bills" aria-busy={q.isFetching || undefined}>
             <thead><tr>
-              <th scope="col">Utility</th><th scope="col">Payment</th><th scope="col" className="num">Amount</th>
-              <th scope="col">Billing start</th><th scope="col">Billing end</th><th scope="col">Due date</th>
-              <th scope="col">Status</th><th scope="col">Invoice</th><th scope="col"><span className="sr-only">Actions</span></th>
+              <th scope="col">Utility</th><th scope="col">Status</th><th scope="col" className="num">Amount</th>
+              <th scope="col">Period</th><th scope="col">Due</th><th scope="col">Payment</th>
+              <th scope="col">Invoice</th><th scope="col" className="c-act"><span className="sr-only">Actions</span></th>
             </tr></thead>
             <tbody>
               {items.map((b) => {
                 const name = billName(b);
+                const scan = b.invoice?.status;
+                const ready = b.invoice !== null && (!scan || scan === "clean");
                 return (
                   <tr key={b.id}>
-                    <td><b>{utilityLabel(b.utility.utilityType)}</b><span className="block">{b.utility.serviceProvider}</span></td>
-                    <td>{paymentLabel(b.paymentMethod)}</td>
-                    <td className="num">{fmtMoney(b.amount)}</td>
-                    <td>{fmtDate(b.billingStart)}</td>
-                    <td>{fmtDate(b.billingEnd)}</td>
-                    <td>{fmtDate(b.dueDate)}{b.paidOn && <span className="block">Paid {fmtDate(b.paidOn)}</span>}</td>
-                    <td><BillStatusPill status={b.status} /></td>
-                    <td>{b.invoice ? <span className="filename" title={b.invoice.fileName}>{b.invoice.fileName}</span> : <span className="muted">None</span>}</td>
-                    <td className="rowactions">
+                    <td className="c-primary"><b>{utilityLabel(b.utility.utilityType)}</b><span className="block">{b.utility.serviceProvider}</span></td>
+                    <td className="c-badge" data-label="Status"><BillStatusPill status={b.status} /></td>
+                    <td className="num" data-label="Amount">{fmtMoney(b.amount)}</td>
+                    <td data-label="Period"><span className="si-period">{fmtDay(b.billingStart)} – {fmtDay(b.billingEnd)}</span></td>
+                    <td data-label="Due"><DueDate on={b.dueDate} done={b.status === "paid"} />{b.paidOn && <span className="block">Paid {fmtDay(b.paidOn)}</span>}</td>
+                    <td data-label="Payment">{paymentLabel(b.paymentMethod)}</td>
+                    <td data-label="Invoice">
+                      {busy === b.id && uploadFor.current?.id === b.id ? <span className="badge inv-pending">Uploading…</span>
+                        : b.invoice ? <><InvoiceScan status={scan} /><span className="block filename" title={b.invoice.fileName}>{b.invoice.fileName}</span></>
+                        : <span className="muted">None</span>}
+                    </td>
+                    <td className="c-act">
                       {canManage && (
                         <button type="button" className="iconbtn sm" disabled={busy !== null} aria-busy={busy === b.id || undefined}
                           onClick={() => pickInvoice(b)} aria-label={`Upload invoice for ${name}`} title="Upload invoice"><FileUp size={15} aria-hidden="true" /></button>
                       )}
-                      {b.invoice && (
+                      {ready && (
                         <button type="button" className="iconbtn sm" disabled={busy !== null}
                           onClick={() => void download(b)} aria-label={`Download invoice for ${name}`} title="Download invoice"><Download size={15} aria-hidden="true" /></button>
                       )}
@@ -147,6 +173,12 @@ export function BillsTab({ kind, ownerId, canManage }: { kind: SiteKind; ownerId
             </tbody>
           </table></div>
         )}
+      {(pager.page > 0 || q.data?.nextCursor) && (
+        <div className="listfoot">
+          <p className="muted">{items.length} {items.length === 1 ? "bill" : "bills"} on page {pager.page + 1}, newest first.</p>
+          <Pager pager={pager} label="Bill pages" nextCursor={q.data?.nextCursor} pending={q.isPlaceholderData} />
+        </div>
+      )}
 
       {adding && (
         <Layer>

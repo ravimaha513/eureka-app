@@ -1,0 +1,35 @@
+/* Companies and Facilities: list, drawer, bills and utilities. Tokens only (DESIGN.md). */
+.si-count { font-variant-numeric: tabular-nums; font-size: 13px; }
+.sitetable td.c-primary { max-width: 260px; }
+.sitetable .si-name { text-align: left; min-height: 24px; }
+.sitetable .si-name b { color: var(--text); }
+.si-kpi { gap: 8px; padding: 14px 16px; }
+
+/* Drawer: the action strip replaces the icon header; underline tabs stay on one row and scroll. */
+.si-strip { gap: 8px 16px; }
+.si-strip .addr { display: inline-flex; align-items: center; gap: 4px; }
+.si-tabs { border-bottom: 1px solid var(--line); gap: 4px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.si-tabs .tab { white-space: nowrap; }
+.si-billshead { flex-wrap: wrap; }
+.si-billsearch input { width: 200px; }
+.si-period { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.si-bills td.c-act, .si-utils td.c-act { white-space: nowrap; }
+.si-bills .filename { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.si-bills td.c-act .iconbtn + .iconbtn { margin-left: 2px; }
+
+/* Invoice scan state: Scanning (info), Ready (ok), Rejected (bad). */
+.badge.inv-pending { background: var(--info-bg); color: var(--info-fg); }
+.badge.inv-clean { background: var(--ok-bg); color: var(--ok-fg); }
+.badge.inv-rejected { background: var(--bad-bg); color: var(--bad-fg); }
+
+/* Dialog footer: "Reset form" sits apart on the left so it is not mistaken for Cancel. */
+.actions .si-reset { margin-right: auto; }
+
+@media (max-width: 768px) {
+  .si-billshead .si-billsearch { flex: 1 1 100%; order: 3; }
+  .si-billsearch input { width: 100%; height: 44px; }
+  .si-billshead .btn { height: 40px; }
+  .si-bills .filename { max-width: 100%; }
+  .si-bills td.c-act .iconbtn, .si-utils td.c-act .iconbtn, .si-utils .secret .iconbtn { width: 44px; height: 44px; }
+  .si-utils td[data-label="Password"] .secret { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+}
