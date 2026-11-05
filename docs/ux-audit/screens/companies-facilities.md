@@ -1,5 +1,5 @@
 # Companies and Facilities — `/companies`, `/facilities`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Both routes render the same component, `SitesPage` with `kind` (SitesPage.tsx:20-21), so they share this one report. Differences are noted inline.
 Who / permission: `company:read` / `facility:read` (nav.ts:30-31) — location ops (locD), CEO/admin. Add/Edit with `company:manage` / `facility:manage`; Utilities tab `utility:read` (password reveal `utility.secret:read` + step-up); Bills `bill:read` / `bill:manage`.
 Source: `apps/web/src/sites/SitesPage.tsx`, `SiteDrawer.tsx`, `SiteFormDialog.tsx`, `PeopleTabs.tsx`, `UtilitiesTab.tsx`, `BillsTab.tsx`, `sites/ui.tsx`, `ui/Charts.tsx`
@@ -71,3 +71,23 @@ SitesPage.tsx, SiteDrawer.tsx, BillsTab.tsx, UtilitiesTab.tsx, styles.css. Possi
 
 ## Validation
 Visual inspection: desktop 1440 and mobile 390 as locD, list pages and drawer Overview/Bills/Utilities tabs for both kinds. Overflow measured: bills 873/830 (desktop drawer), 873/356 (mobile); utilities 640/356 (mobile); facilities list 899/360 (mobile). Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence (`screenshots/after/`) |
+|---|---|---|
+| #1 Bills unbounded, icons clipped (High) | Bills paged 25 at a time (API cursor), Period and Due columns, actions pinned right in one line; cards with 44px actions on phones | companies-bills-desktop.png, companies-bills-mobile.png |
+| #2 No per-row scan state (High) | Invoice cell shows Scanning / Ready / Rejected (the API already returns `invoice.status`), polls while scanning; Download only when ready | unit test |
+| #3 Upload looks like success (Medium) | In-progress text uses the info banner; the row shows Uploading… | — |
+| #4 Export ignores search (Medium) | List export passes q and status (the API accepts both) and reads "Export matches"; Bills export passes q | unit test |
+| #5 Different list language (Medium) | FilterBar above the card, dtable, Edit as a real button pinned right, undecorated KPI tiles, no icon avatars | companies-facilities-desktop.png |
+| #6 Generic drawer title (Medium) | Drawer titled with the site name; action strip with status, address, Edit; Overview no longer repeats Location/Address | companies-bills-desktop.png |
+| #7 "Dallas · Dallas" (Low) | City shown only when it differs | companies-facilities-desktop.png |
+| #9 Small Edit / name targets (Medium) | Edit is `.btn.sm`; rows open on click | — |
+| #10 Drawer on phone (High) | Tabs on one scrolling row; Utilities, Bills and Employees as cards with 44px reveal/copy/edit | companies-utilities-mobile.png |
+| #11 Reset / Submit (Low) | "Reset form" sits apart on the left; utility submit reads "Add utility" | unit test |
+| #12 Not routed (Low) | `initialOpenId` / `onOpenChange` props (App.tsx change requested) | app_requests |
+| #13 Totals card (Low) | Bills (12 mo) column on the list; the totals card stays (it covers sites beyond the page) and becomes cards on phones | companies-facilities-desktop.png |
+
+Not changed / deferred: #8 KPI cents kept (exact amounts).
+
+Validation (wave 2): typecheck clean; unit tests for paperwork, employees, payments, sites and datahub pass (87). The shared API on :3000 and its Postgres were down during this wave (the session could not restart them), so the visual check ran against the built screens with the network layer mocked by fictional fixtures (Playwright `page.route`), at 1440×900 and 390×844, light and dark. Page width at 390 is 390 on every screen and state; no table wrap scrolls sideways at either width; every row action column (`td.c-act`) is inside the viewport at 1440. Re-check against live seeded data when the API is back.

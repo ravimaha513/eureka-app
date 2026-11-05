@@ -11,8 +11,11 @@ import {
   FEE_LABELS, addressLine, fmtRent, siteKeys, sitesApi, sitesError,
   type Company, type FacilityDetail, type Site, type SiteDetail, type SiteKind,
 } from "./sitesApi";
-import { KIND, Layer, LayerProvider, PillTabs, SiteIcon, StatusPill, useLayers } from "./ui";
+import { KIND, Layer, LayerProvider, StatusPill, useLayers } from "./ui";
+import { Tabs } from "../ui/Tabs";
+import "./sites.css";
 import { Loading } from "../ui/Loading";
+import { fmtPhone } from "../payments/cells";
 
 type TabKey = "overview" | "employees" | "incharges" | "utilities" | "bills";
 
@@ -39,37 +42,37 @@ export function SiteDrawer({ kind, id, initial, me, onClose, onNotice }: {
     ...(caps.has("utility:read") ? [{ key: "utilities" as const, label: "Utilities" }] : []),
     ...(caps.has("bill:read") ? [{ key: "bills" as const, label: "Bills" }] : []),
   ];
-  const panelId = `site-${id}`;
 
   return (
     <LayerProvider api={layers.api}>
-      <Drawer title={`${k.One} details`} onClose={onClose} wide closeLabel={`Close ${k.one} details`}
+      <Drawer title={s?.name ?? `${k.One} details`} onClose={onClose} wide closeLabel={`Close ${k.one} details`}
         suspended={layers.open || editing} isSuspended={layers.isOpen}>
         {!s ? (
           q.isLoading ? <Loading /> : <p className="error" role="alert">{sitesError(q.error, k.one)}</p>
         ) : (
           <>
-            <div className="sitehead">
-              <SiteIcon kind={kind} size="lg" />
-              <div className="siteheadtext">
-                <div className="sitename"><b>{s.name}</b> <StatusPill status={s.status} /></div>
-                <span className="addr"><MapPin size={14} aria-hidden="true" /><span>{addressLine(s) || "No address"}</span></span>
-                <span className="muted small">{s.location.name}</span>
+            {/* Action strip: status and where it is, then Edit; the record name is the drawer title. */}
+            <div className="actionstrip sitehead si-strip">
+              <div className="as-status">
+                <StatusPill status={s.status} />
+                <span className="as-note addr"><MapPin size={14} aria-hidden="true" /><span>{addressLine(s) || "No address"}</span></span>
+                {!addressLine(s).includes(s.location.name) && <span className="as-note">{s.location.name}</span>}
               </div>
               {canManage && (
-                <button type="button" className="btn sm outline" onClick={() => setEditing(true)} aria-label={`Edit ${k.one} ${s.name}`}>
-                  <Pencil size={14} aria-hidden="true" />Edit
-                </button>
+                <div className="as-actions">
+                  <button type="button" className="btn" onClick={() => setEditing(true)} aria-label={`Edit ${k.one} ${s.name}`}>
+                    <Pencil size={14} aria-hidden="true" />Edit
+                  </button>
+                </div>
               )}
             </div>
-            <PillTabs tabs={tabs} value={tab} onChange={setTab} label={`${k.One} sections`} idPrefix={panelId} />
-            <section role="tabpanel" id={`${panelId}-panel`} aria-labelledby={`${panelId}-tab-${tab}`} className="panel">
-              {tab === "overview" ? <Overview kind={kind} s={s} loaded={Boolean(q.data)} error={q.error} />
-                : tab === "employees" ? <EmployeesTab companyId={id} canManage={canManage && caps.has("company:manage")} />
-                : tab === "incharges" ? <InchargesTab kind={kind} ownerId={id} canManage={canManage} />
-                : tab === "utilities" ? <UtilitiesTab kind={kind} ownerId={id} canManage={caps.has("utility:manage")} canReveal={caps.has("utility.secret:read")} />
+            <Tabs label={`${k.One} sections`} tabs={tabs} value={tab} onChange={setTab} className="si-tabs" panelClassName="panel">
+              {(t) => t === "overview" ? <Overview kind={kind} s={s} loaded={Boolean(q.data)} error={q.error} />
+                : t === "employees" ? <EmployeesTab companyId={id} canManage={canManage && caps.has("company:manage")} />
+                : t === "incharges" ? <InchargesTab kind={kind} ownerId={id} canManage={canManage} />
+                : t === "utilities" ? <UtilitiesTab kind={kind} ownerId={id} canManage={caps.has("utility:manage")} canReveal={caps.has("utility.secret:read")} />
                 : <BillsTab kind={kind} ownerId={id} canManage={caps.has("bill:manage")} />}
-            </section>
+            </Tabs>
           </>
         )}
       </Drawer>
@@ -91,13 +94,11 @@ function Overview({ kind, s, loaded, error }: { kind: SiteKind; s: Site & Partia
   return (
     <div className="tabpanel">
       <dl className="facts">
-        <dt>Location</dt><dd>{s.location.name}</dd>
-        <dt>Address</dt><dd>{addressLine(s) || "—"}</dd>
         <dt>Incharges</dt><dd>{s.incharges.length ? s.incharges.map((u) => u.name).join(", ") : "None"}</dd>
         {kind === "companies" && <><dt>Employees</dt><dd>{(s as Company).employeeCount}</dd></>}
         {kind === "facilities" && (
           <>
-            <dt>Rent</dt><dd>{fmtRent(f as FacilityDetail)}{f.feeFrequency ? ` (${FEE_LABELS[f.feeFrequency].toLowerCase()})` : ""}</dd>
+            <dt>Rent</dt><dd>{fmtRent(f as FacilityDetail)}{f.feeFrequency ? ` · ${FEE_LABELS[f.feeFrequency]}` : ""}</dd>
             <dt>Capacity</dt><dd>{f.capacity ?? "—"}{f.capacity !== null && f.capacity !== undefined ? " people" : ""}</dd>
             <dt>Beds / baths</dt><dd>{f.beds ?? "—"} / {f.baths === null || f.baths === undefined ? "—" : Number(f.baths)}</dd>
             <dt>Lease</dt><dd>{fmtDate(f.startDate)} – {f.endDate ? fmtDate(f.endDate) : "open"}</dd>
@@ -105,7 +106,7 @@ function Overview({ kind, s, loaded, error }: { kind: SiteKind; s: Site & Partia
               <>
                 <dt>Owner</dt><dd>{f.ownerName ?? "—"}</dd>
                 <dt>Owner email</dt><dd>{f.ownerEmail ? <a href={`mailto:${f.ownerEmail}`}>{f.ownerEmail}</a> : "—"}</dd>
-                <dt>Owner phone</dt><dd>{f.ownerPhone ? <a href={`tel:${f.ownerPhone}`}>{f.ownerPhone}</a> : "—"}</dd>
+                <dt>Owner phone</dt><dd>{f.ownerPhone ? <a href={`tel:${f.ownerPhone}`}>{fmtPhone(f.ownerPhone)}</a> : "—"}</dd>
               </>
             )}
           </>

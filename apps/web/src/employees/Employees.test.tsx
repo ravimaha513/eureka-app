@@ -46,6 +46,7 @@ const base = (): Record<string, Handler> => ({
     byClient: [{ client: { id: "cl1", name: "Northwind Financial" }, count: 3 }], byCompany: [{ company: null, count: 3 }] } }),
 });
 beforeEach(() => {
+  window.history.replaceState(null, "", "/employees");
   api = mockApi(base());
   vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date("2026-10-03T12:00:00") });
 });
@@ -77,8 +78,11 @@ describe("Employees list", () => {
     await waitFor(() => expect(lastList().get("status")).toBe("bench"));
     fireEvent.change(await screen.findByRole("combobox", { name: "Location" }), { target: { value: "loc" } });
     await waitFor(() => expect(lastList().get("locationId")).toBe("loc"));
+    // Client, vendor and payroll company sit behind "More filters"; the URL keeps every filter.
+    fireEvent.click(screen.getByRole("button", { name: "More filters" }));
     fireEvent.change(screen.getByRole("combobox", { name: "Client" }), { target: { value: "cl1" } });
     await waitFor(() => expect(lastList().get("clientId")).toBe("cl1"));
+    expect(new URLSearchParams(window.location.search).get("client")).toBe("cl1");
     expect(lastList().get("clientMatch")).toBeNull(); // 0150: any assignment by default
     fireEvent.click(screen.getByRole("checkbox", { name: /Current assignment only/ }));
     await waitFor(() => expect(lastList().get("clientMatch")).toBe("current"));
@@ -237,7 +241,7 @@ describe("Employee drawer", () => {
     api.routes["POST /api/v1/employees/e2/return-to-market"] = () => ({ body: { id: "e2", candidateStatus: "active" } });
     wrap(<EmployeesPage me={meFor("hr")} />);
     const d = await openDrawer("Divya Menon");
-    fireEvent.click(within(d).getByRole("button", { name: /Reassign: return to marketing/ }));
+    fireEvent.click(within(d).getByRole("button", { name: /Return to marketing…/ }));
     const conf = await screen.findByRole("dialog", { name: /Return Divya Menon to marketing/ });
     fireEvent.click(within(conf).getByRole("button", { name: "Return to marketing" }));
     await waitFor(() => expect(api.writes().map((w) => w.path)).toEqual(["/api/v1/employees/e2/return-to-market"]));

@@ -1,5 +1,5 @@
 # Paperwork & BGC (queue + templates) — `/paperwork`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `document:read` or `bgc:update` (nav.ts:25) — HR, Accounts, Immigration, CEO/org-wide; Templates tab only when `templates` query succeeds (org-wide roles)
 Source: `apps/web/src/paperwork/PaperworkPage.tsx`, `paperwork/ui.tsx`, `ui/Pager.tsx`
 Evidence: `paperwork-desktop.png`, `paperwork-mobile.png`, `paperwork-desktop-full.png`, `paperwork-mobile-full.png`, `paperwork-hr-desktop.png`, `paperwork-focus-desktop.png`
@@ -65,3 +65,19 @@ PaperworkPage.tsx plus styles.css (new underline tab and responsive card CSS). S
 
 ## Validation
 Visual inspection: desktop 1440 and mobile 390 as ceo and hr (`paperwork-*.png` listed above). Overflow measured: page 390/390 (no page overflow), table wrap 662/360. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence (`screenshots/after/`) |
+|---|---|---|
+| #1 Tabs and filter chips look alike (High) | Sections use `ui/Tabs` (underline, `?section=`); Show is a segmented `aria-pressed` toggle group in the FilterBar | paperwork-desktop.png |
+| #2 Urgency not sortable (High) | Overdue is its own right-aligned column (red chip); Next due flags "Nd overdue"; Sort: Most overdue first (default) / Next due / Queue order, in the URL; sorted within the loaded page (no API sort exists) | paperwork-desktop.png |
+| #3 BGC off-screen at 390 (High) | `.dtable` cards: name + BGC chip on line 1, then checklist bar, overdue, next due, placement | paperwork-mobile.png |
+| #4 Tab semantics (Medium) | `ui/Tabs`: tablist/tab/tabpanel, roving tabindex, arrows/Home/End | unit tests |
+| #5 Duplicate Open (Low) | Open column dropped; the name (RecordLink) and the row open the placement | paperwork-desktop.png |
+| #6 Double tablewrap (Low) | One `.card.tablewrap.listcard` | — |
+| #7 Placement line wraps (Low) | Client · type is its own p2 column; Starts is p3 | paperwork-desktop.png |
+| Filters in URL | view, role, mine, bgc, pstatus, ptype, sort via `useSearchParams`; Placement status/type behind More filters as chips; phone filter sheet | unit test |
+
+Not changed / deferred: #8 Template doc types as snake_case keys (Medium): not changed; needs a doc-type catalogue (product decision). #9 Checkbox target: label is the target; 44px row height on phones.
+
+Validation (wave 2): typecheck clean; unit tests for paperwork, employees, payments, sites and datahub pass (87). The shared API on :3000 and its Postgres were down during this wave (the session could not restart them), so the visual check ran against the built screens with the network layer mocked by fictional fixtures (Playwright `page.route`), at 1440×900 and 390×844, light and dark. Page width at 390 is 390 on every screen and state; no table wrap scrolls sideways at either width; every row action column (`td.c-act`) is inside the viewport at 1440. Re-check against live seeded data when the API is back.

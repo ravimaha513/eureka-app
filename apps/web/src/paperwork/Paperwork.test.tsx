@@ -89,6 +89,8 @@ describe("Paperwork queue", () => {
     await waitFor(() => expect(lastQueue().get("mine")).toBe("true"));
     fireEvent.change(screen.getByRole("combobox", { name: "BGC status" }), { target: { value: "failed" } });
     await waitFor(() => expect(lastQueue().get("bgcStatus")).toBe("failed"));
+    // Placement status and type sit behind "More filters" (shown as removable chips while set).
+    fireEvent.click(screen.getByRole("button", { name: "More filters" }));
     fireEvent.change(screen.getByRole("combobox", { name: "Placement status" }), { target: { value: "joined" } });
     await waitFor(() => expect(lastQueue().get("placementStatus")).toBe("joined"));
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
@@ -104,11 +106,17 @@ describe("Paperwork queue", () => {
 });
 
 describe("Paperwork page", () => {
-  it("opens from the candidate link with documents first; back returns to the queue", async () => {
+  it("opens on the tab with overdue work, with the summary strip first; back returns to the queue", async () => {
     wrap(<PaperworkPage me={HR} />);
     const panel = await openPage();
-    expect(screen.getByRole("tab", { name: "Documents" })).toHaveAttribute("aria-selected", "true");
-    expect(await within(panel).findByRole("heading", { name: "Placement documents" })).toBeInTheDocument();
+    // One item is overdue, so the page lands on the checklist rather than Documents.
+    expect(screen.getByRole("tab", { name: "Checklist" })).toHaveAttribute("aria-selected", "true");
+    expect(await within(panel).findByRole("table", { name: "Paperwork checklist" })).toBeInTheDocument();
+    const strip = screen.getByRole("region", { name: "Summary" });
+    expect(within(strip).getByText("1 overdue")).toHaveClass("badge", "overdue");
+    expect(within(strip).getByRole("button", { name: "1 checklist item overdue" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Documents" }));
+    expect(await within(screen.getByRole("tabpanel")).findByRole("heading", { name: "Placement documents" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     const rail = screen.getByRole("complementary", { name: "Placement summary" });
     expect(within(rail).getByText("Northwind Financial")).toBeInTheDocument();
@@ -128,6 +136,18 @@ describe("Paperwork page", () => {
     expect(await within(panel).findByRole("list", { name: "History of Sample doc b" })).toHaveTextContent("Received → Verified");
     fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
     expect(screen.getByRole("list", { name: "Background check history" })).toHaveTextContent("Not started → Initiated (BGC company)");
+  });
+
+  it("marks a pending item received in one click from its row", async () => {
+    api.routes["PATCH /api/v1/paperwork/items/i1"] = () => ({ body: { ...DETAIL.items[0], status: "received", version: 2 } });
+    wrap(<PaperworkPage me={HR} />);
+    const panel = await openPage("Checklist");
+    // Only the pending item that may move to received gets the quick action.
+    expect(within(panel).queryByRole("button", { name: "Mark Sample doc b received" })).not.toBeInTheDocument();
+    fireEvent.click(await within(panel).findByRole("button", { name: "Mark Sample doc a received" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.body).toEqual({ expectedVersion: 1, status: "received" });
+    expect(await screen.findByText("Sample doc a marked Received.")).toBeInTheDocument();
   });
 
   it("marks an item received with notes and the version it was read at", async () => {
@@ -225,6 +245,11 @@ describe("Paperwork page: background check", () => {
     expect(within(panel).getByLabelText("Reason")).toHaveAccessibleDescription(expect.stringContaining("Give a reason."));
     fireEvent.change(within(panel).getByLabelText("Reason"), { target: { value: "Fictional finding" } });
     fireEvent.click(within(panel).getByRole("button", { name: "Update status" }));
+    // Failing is final: nothing is sent until it is confirmed.
+    const confirm = await screen.findByRole("dialog", { name: "Fail this background check?" });
+    expect(api.writes()).toHaveLength(0);
+    expect(confirm).toHaveTextContent("The placement's status doesn't change here.");
+    fireEvent.click(within(confirm).getByRole("button", { name: "Fail check" }));
     await waitFor(() => expect(api.writes()).toHaveLength(1));
     expect(api.writes()[0]!.body).toEqual({ status: "failed", reason: "Fictional finding", expectedVersion: 2 });
     expect(await screen.findByText("Background check marked Failed.")).toBeInTheDocument();
@@ -256,6 +281,9 @@ describe("Paperwork page: background check", () => {
     fireEvent.change(within(panel).getByLabelText("Reason"), { target: { value: "Fictional finding" } });
     fireEvent.click(within(panel).getByRole("checkbox", { name: /Also mark the placement BGC failed/ }));
     fireEvent.click(within(panel).getByRole("button", { name: "Update status" }));
+    const confirm = await screen.findByRole("dialog", { name: "Fail this background check?" });
+    expect(confirm).toHaveTextContent("The placement is also marked BGC failed.");
+    fireEvent.click(within(confirm).getByRole("button", { name: "Fail check" }));
     await waitFor(() => expect(api.writes()).toHaveLength(1));
     expect(api.writes()[0]!.body).toMatchObject({ status: "failed", failPlacement: true });
   });

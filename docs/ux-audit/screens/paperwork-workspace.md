@@ -1,5 +1,5 @@
 # Paperwork workspace (one placement) — `/paperwork/<placementId>`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: same as `/paperwork` (`document:read` / `bgc:update`); actions per item come from `item.actions` / `bgc.actions` (server-decided)
 Source: `apps/web/src/paperwork/PaperworkWorkspace.tsx` (801 lines), `documents/DocumentsSection.tsx` (see `documents-section.md`)
 Evidence: `paperwork-detail-desktop.png`, `paperwork-detail-desktop-full.png`, `paperwork-detail-mobile.png`, `paperwork-detail-mobile-full.png`, `paperwork-detail-hr-documents-{desktop,mobile}.png`, `paperwork-detail-checklist-{desktop,mobile}.png`, `paperwork-detail-itemdialog-{desktop,mobile}.png`, `paperwork-detail-bgc-{desktop,mobile}.png`
@@ -71,3 +71,20 @@ PaperworkWorkspace.tsx (default tab, header strip, quick action, history sub-row
 
 ## Validation
 Visual inspection: desktop 1440 and mobile 390 as hr, on all four tabs plus the Update dialog. Overflow measured: page OK, checklist wrap 609/336 at 390. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence (`screenshots/after/`) |
+|---|---|---|
+| #1 Lands on Documents (High) | Opens on the first tab with attention, else Checklist; Documents only without a checklist | paperwork-workspace-desktop.png, unit test |
+| #2 Overdue hidden in rail (High) | Action strip under the h1: Checklist n of m, overdue and required-open chips, BGC chip, and the needs-attention buttons (first is primary) before the tabs; rail copy hidden on phones | paperwork-workspace-mobile.png |
+| #3 Checklist actions off-screen at 390 (High) | Checklist is a `.dtable`: cards with 40px Mark received / Update / History | paperwork-workspace-mobile.png |
+| #4 BGC fail unconfirmed (High) | Choosing Failed and Update status opens a danger ConfirmDialog that restates the "also mark placement BGC failed" choice; nothing is sent until Fail check | unit tests |
+| #5 History detached (Medium) | History expands as a sub-row under its item | unit test |
+| #6 Empty move form on a cleared check (Medium) | Cleared checks show the stepper and a Change status button; the form opens on demand | — |
+| #7 Three steps to mark received (Medium) | One-click Mark received on pending items whose actions allow it (same PATCH, status only, with the row version) | unit test |
+| #8 Received in amber next to Overdue (Medium) | Received uses the info tint; an overdue received item says "Verification overdue" | paperwork-workspace-desktop.png |
+| #9 Wrapping tabs (Low) | Underline tabs on one row, scroll sideways on phones | paperwork-workspace-mobile.png |
+
+Not changed / deferred: #10 Needs-attention targets: strip buttons are 30px desktop / 44px phone. #11 Coverage bar shares: unchanged.
+
+Validation (wave 2): typecheck clean; unit tests for paperwork, employees, payments, sites and datahub pass (87). The shared API on :3000 and its Postgres were down during this wave (the session could not restart them), so the visual check ran against the built screens with the network layer mocked by fictional fixtures (Playwright `page.route`), at 1440×900 and 390×844, light and dark. Page width at 390 is 390 on every screen and state; no table wrap scrolls sideways at either width; every row action column (`td.c-act`) is inside the viewport at 1440. Re-check against live seeded data when the API is back.
