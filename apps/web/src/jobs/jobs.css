@@ -4,11 +4,11 @@
 .richview { display: flex; flex-direction: column; gap: 8px; color: var(--text2); line-height: 1.55; overflow-wrap: anywhere; }
 .richview ul, .richview ol { padding-left: 22px; display: flex; flex-direction: column; gap: 2px; }
 .rtlabel { font-weight: 600; color: var(--text2); font-size: 13px; }
-.rteditor { border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.rteditor { border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface); overflow: hidden; }
 .rteditor.invalid { border-color: var(--bad-fg); }
 .rteditor:focus-within { border-color: var(--pri); box-shadow: 0 0 0 3px var(--pri-100); }
 .rttoolbar { display: flex; flex-wrap: wrap; gap: 2px; padding: 4px; border-bottom: 1px solid var(--line); background: var(--surface2); }
-.rtbtn { width: 32px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--text2); }
+.rtbtn { width: 32px; height: 30px; display: grid; place-items: center; border: 0; border-radius: var(--r-sm); background: none; color: var(--text2); }
 .rtbtn:hover { background: var(--hover); color: var(--text); }
 .rtbtn:focus-visible { outline: 2px solid var(--pri); outline-offset: 1px; }
 .rtsep { width: 1px; margin: 4px 4px; background: var(--line-strong); }
@@ -18,7 +18,7 @@
 .rtarea p + p { margin-top: 6px; }
 
 /* Skills tag input */
-.taginput { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border: 1px solid var(--line-strong); border-radius: 10px; padding: 6px 8px; background: var(--surface); }
+.taginput { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border: 1px solid var(--line-strong); border-radius: var(--r-md); padding: 6px 8px; background: var(--surface); }
 .taginput:focus-within { border-color: var(--pri); box-shadow: 0 0 0 3px var(--pri-100); }
 .taginput input { border: 0 !important; height: 28px !important; min-width: 120px !important; flex: 1; padding: 0 4px !important; box-shadow: none !important; background: none; }
 
@@ -42,7 +42,7 @@
 .portal { min-height: 100vh; display: flex; flex-direction: column; background: var(--bg); }
 .portaltop { height: 64px; display: flex; align-items: center; gap: 12px; padding: 0 24px; background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20; }
 .portaltop nav { display: flex; gap: 4px; margin-left: 12px; }
-.portaltop nav button { height: 38px; padding: 0 12px; border: 0; border-radius: 10px; background: none; color: var(--text2); font-weight: 600; }
+.portaltop nav button { height: 38px; padding: 0 12px; border: 0; border-radius: var(--r-md); background: none; color: var(--text2); font-weight: 600; }
 .portaltop nav button[aria-current="page"] { background: var(--pri-50); color: var(--pri); }
 .portaltop .grow { flex: 1; }
 .portalmain { width: min(1180px, 100%); margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
@@ -59,7 +59,7 @@
 .authcard h1 { font-size: 24px; margin-bottom: 4px; }
 .authcard .field input { width: 100%; }
 .authcard .alt { margin-top: 12px; color: var(--muted); text-align: center; }
-.okbox { padding: 12px 14px; border-radius: 10px; background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-line); }
+.okbox { padding: 12px 14px; border-radius: var(--r-md); background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-line); }
 .stars { color: var(--warn-fg); letter-spacing: 1px; }
 .scoregrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 @media (max-width: 768px) {

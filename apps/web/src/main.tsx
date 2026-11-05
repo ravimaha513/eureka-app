@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError } from "./api";
 import { lazyDefault, lazyNamed } from "./lib/lazy";
+import "@fontsource-variable/archivo/wdth.css";
 import "./styles.css";
 import { Loading } from "./ui/Loading";
 

@@ -19,7 +19,7 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}
 .jump svg{width:14px;height:14px;stroke:var(--tx3);fill:none;stroke-width:1.7}
 kbd{margin-left:auto;font:11px ui-sans-serif,system-ui;color:var(--tx3);border:1px solid var(--line);border-radius:4px;padding:1px 5px;background:var(--side)}
 .sp{flex:1}.bell{position:relative;width:30px;height:30px;border-radius:6px;display:grid;place-items:center}.bell svg{width:16px;height:16px;stroke:var(--tx2);fill:none;stroke-width:1.6}
-.bell b{position:absolute;top:3px;right:2px;font-size:10px;line-height:14px;min-width:14px;border-radius:7px;background:var(--ac);color:#fff;text-align:center;font-weight:500;border:2px solid var(--bg);box-sizing:content-box}
+.bell b{position:absolute;top:1px;right:-2px;font-size:10px;line-height:14px;min-width:14px;border-radius:7px;background:var(--ac);color:#fff;text-align:center;font-weight:500;border:2px solid var(--bg);box-sizing:content-box}
 .user{display:flex;align-items:center;gap:8px;color:var(--tx2);font-size:13px}.user em{font-style:normal;color:var(--tx);font-weight:500}
 .av{width:26px;height:26px;border-radius:50%;background:#e5e7eb;color:var(--tx2);display:grid;place-items:center;font-size:11px;font-weight:600}
 .page{padding:18px 24px 0;display:flex;flex-direction:column;flex:1;min-height:0}
@@ -28,7 +28,7 @@ h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0}.sub{color:var
 .f{display:flex;align-items:center;height:30px;border:1px solid var(--line);border-radius:6px;background:#fff;padding:0 9px;gap:6px;font-size:13px;color:var(--tx);white-space:nowrap}
 .f small{color:var(--tx3);font-size:12.5px}.f.ph{color:var(--tx3)}
 .f.sel:after{content:"";width:6px;height:6px;border-right:1.5px solid var(--tx3);border-bottom:1.5px solid var(--tx3);transform:rotate(45deg) translateY(-2px);margin-left:4px}
-.btn{height:30px;border:1px solid var(--line);border-radius:6px;background:#fff;padding:0 10px;font:inherit;font-size:13px;color:var(--tx);display:flex;align-items:center;gap:6px}
+.btn{height:30px;border:1px solid var(--line);border-radius:6px;background:#fff;padding:0 10px;font:inherit;font-size:13px;color:var(--tx);display:flex;align-items:center;gap:6px;white-space:nowrap}
 .btn .n{color:var(--ac);font-weight:600}
 .chips{display:flex;gap:6px;align-items:center;margin:10px 0 12px;height:24px}
 .chip{height:24px;border:1px solid var(--line);border-radius:6px;background:var(--side);padding:0 4px 0 8px;font-size:12.5px;display:flex;align-items:center;gap:4px;color:var(--tx2)}.chip b{color:var(--tx);font-weight:500}
@@ -87,8 +87,8 @@ tr:last-child td{border-bottom:0}tr.on td{background:#f5f8ff}tr.on td:first-chil
 <h1>Hot List</h1>
 <div class="sub">Team Rohit's candidates and every candidate open to all teams</div>
 <div class="fb">
-<div class="f ph" style="width:180px">Search name</div>
-<div class="f" style="width:130px"><small>Technology</small>Java</div>
+<div class="f ph" style="width:150px">Search name</div>
+<div class="f" style="width:120px"><small>Technology</small>Java</div>
 <div class="f sel"><small>Status</small>Active, Bench</div>
 <div class="f sel"><small>Priority</small>P1</div>
 <div class="f sel"><small>Team</small>Any team</div>
@@ -103,7 +103,7 @@ tr:last-child td{border-bottom:0}tr.on td{background:#f5f8ff}tr.on td:first-chil
 </div>
 <div class="selbar"><b>3 selected</b><button class="btn">Set status</button><button class="btn">Set priority</button><span class="ln">Clear</span></div>
 <div class="tw"><table>
-<colgroup><col style="width:40px"><col style="width:220px"><col style="width:120px"><col style="width:160px"><col style="width:56px"><col style="width:120px"><col style="width:110px"><col style="width:90px"><col style="width:60px"><col style="width:124px"><col style="width:130px"><col></colgroup>
+<colgroup><col style="width:36px"><col style="width:216px"><col style="width:108px"><col style="width:140px"><col style="width:52px"><col style="width:110px"><col style="width:96px"><col style="width:72px"><col style="width:50px"><col style="width:112px"><col style="width:116px"><col></colgroup>
 <thead><tr><th><span class="cb m"></span></th><th class="so">Candidate</th><th class="so">Technology</th><th class="so">Status</th><th class="so">Pri</th><th class="so">Team</th><th class="so">Recruiter</th><th class="so">Location</th><th>Visa</th><th class="s num">Days in market</th><th class="so">Stage</th><th></th></tr></thead>
 <tbody>
 <tr><td><span class="cb"></span></td><td class="nm">Cand25 Test</td><td>Java</td><td><span class="st" style="--c:var(--g)">Active</span></td><td><span class="pri">P1</span></td><td>Team Rohit</td><td>r1a</td><td>Dallas</td><td>H1B</td><td class="num">31</td><td>Hot list</td><td class="op">Open</td></tr>

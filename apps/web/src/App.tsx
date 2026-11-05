@@ -7,9 +7,9 @@ import { navigate, usePathname } from "./lib/router";
 import { HotListPage } from "./sales/HotListPage";
 import { NotificationBell, type InboxItem } from "./notifications/Inbox";
 import { ChatNavBadge } from "./chat/ChatNavBadge";
-import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, Sparkles, Sun } from "lucide-react";
+import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun } from "lucide-react";
 import { useTheme } from "./shell/theme";
-import { NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
+import { BrandMark, NAV_ICONS, ThemeSwitch, UserMenu } from "./shell/ui";
 import { Loading } from "./ui/Loading";
 import { QueryError } from "./ui/QueryError";
 import { useAuthMethods } from "./shell/useAuthMethods";
@@ -187,47 +187,28 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
   const [theme, setTheme] = useTheme();
   return (
     <div className="loginpage">
-      <section className="loginhero" aria-hidden="true">
-        <div className="herogrid" />
-        <div className="heroshots">
-          <div className="heroshot main">
-            <div className="heroshot-bar"><span className="logo sm"><Sparkles size={12} /></span>Eureka<i /><i /><i /></div>
-            <div className="heroshot-kpis">
-              {[["Submissions", "48"], ["Interviews", "28"], ["Placements", "8"], ["Joined", "5"]].map(([l, v]) => (
-                <div key={l}><small>{l}</small><b>{v}</b></div>
-              ))}
-            </div>
-            <svg className="heroshot-line" viewBox="0 0 300 80" preserveAspectRatio="none">
-              <defs><linearGradient id="hg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#14b8a6" stopOpacity=".35" /><stop offset="1" stopColor="#14b8a6" stopOpacity="0" /></linearGradient></defs>
-              <path d="M0 60 C30 40 45 70 70 50 S110 20 135 42 S180 62 205 30 S255 22 300 12 L300 80 L0 80Z" fill="url(#hg)" />
-              <path d="M0 60 C30 40 45 70 70 50 S110 20 135 42 S180 62 205 30 S255 22 300 12" fill="none" stroke="#14b8a6" strokeWidth="2.5" />
-            </svg>
-          </div>
-          <div className="heroshot funnel">
-            <b>Pipeline funnel</b>
-            <svg viewBox="0 0 260 70" preserveAspectRatio="none">
-              <defs><linearGradient id="hf" x1="0" x2="1"><stop offset="0" stopColor="#8b5cf6" /><stop offset=".5" stopColor="#6366f1" /><stop offset="1" stopColor="#5eead4" /></linearGradient></defs>
-              <path d="M0 0 H70 C100 0 100 14 130 14 H170 C200 14 200 24 230 24 H260 V46 H230 C200 46 200 56 170 56 H130 C100 56 100 70 70 70 H0Z" fill="url(#hf)" />
-            </svg>
-            <div className="heroshot-steps"><span>48</span><span>28</span><span>14</span><span>8</span></div>
-          </div>
-        </div>
+      <section className="loginhero" aria-label="About Eureka">
+        <div className="brand"><BrandMark size={30} /><span className="brandtext">Eureka<small>Staffing</small></span></div>
         <div className="herotext">
-          <h2>Welcome to Eureka</h2>
-          <p>Hot list, submissions, interviews and placements for your staffing teams, in one place.</p>
+          <h2>The bench, the pipeline and the paperwork, in one record.</h2>
+          <ul>
+            <li>Hot List and candidates, scoped to your team</li>
+            <li>Submissions, interview rounds and placements</li>
+            <li>Paperwork, BGC, employees and payments</li>
+          </ul>
         </div>
       </section>
       <main className="loginpanel">
         <div className="loginbox">
           <div className="loginbar">
-            <div className="brand"><span className="logo"><Sparkles size={16} aria-hidden="true" /></span>Eureka</div>
-            <button type="button" className="btn ghost themechip" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}>
-              {theme === "dark" ? <Moon size={15} aria-hidden="true" /> : <Sun size={15} aria-hidden="true" />}{theme === "dark" ? "Dark" : "Light"}
+            <div className="brand loginbrand"><BrandMark />Eureka</div>
+            <button type="button" className="btn ghost themechip" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+              {theme === "dark" ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}{theme === "dark" ? "Light theme" : "Dark theme"}
             </button>
           </div>
           <h1>Hi, welcome back!</h1>
           {passwordLogin && <PasswordForm onSignedIn={onSignedIn} onError={setErr} />}
+          {passwordLogin && err && <p className="error" role="alert">{err}</p>}
           {devMode ? (
             <>
               <p className="sub">{passwordLogin ? "Or, for development: sign in as a fictional user." : "Development sign-in with fictional users."}</p>
@@ -237,7 +218,7 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
                   {DEV_USERS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
                 </select>
               </div>
-              <button type="button" className="btn primary block" onClick={async () => {
+              <button type="button" className={passwordLogin ? "btn block" : "btn primary block"} onClick={async () => {
                 try {
                   await api("/api/auth/dev-login", { method: "POST", body: JSON.stringify({ email: `${who}@eureka.example` }) });
                   onSignedIn();
@@ -248,12 +229,12 @@ export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedI
             <>
               <p className="sub">{passwordLogin ? "Or sign in with your company Google account." : "Sign in with your company Google account."}</p>
               <a className="btn primary block googlebtn" href="/api/auth/login">
-                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="#fff" d="M21.35 11.1H12v2.9h5.35c-.25 1.5-1.7 4.4-5.35 4.4-3.2 0-5.85-2.65-5.85-5.9S8.8 6.6 12 6.6c1.85 0 3.05.8 3.75 1.45l2.55-2.45C16.7 4.1 14.55 3.1 12 3.1 7.05 3.1 3.1 7.05 3.1 12s3.95 8.9 8.9 8.9c5.15 0 8.55-3.6 8.55-8.7 0-.6-.05-1.05-.2-1.1z" /></svg>
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M21.35 11.1H12v2.9h5.35c-.25 1.5-1.7 4.4-5.35 4.4-3.2 0-5.85-2.65-5.85-5.9S8.8 6.6 12 6.6c1.85 0 3.05.8 3.75 1.45l2.55-2.45C16.7 4.1 14.55 3.1 12 3.1 7.05 3.1 3.1 7.05 3.1 12s3.95 8.9 8.9 8.9c5.15 0 8.55-3.6 8.55-8.7 0-.6-.05-1.05-.2-1.1z" /></svg>
                 Sign in with Google
               </a>
             </>
           )}
-          {err && <p className="error" role="alert">{err}</p>}
+          {!passwordLogin && err && <p className="error" role="alert">{err}</p>}
           <p className="loginfoot">Access is limited to your organisation's accounts. Every sign-in is recorded.</p>
         </div>
       </main>
@@ -409,7 +390,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
       <a href="#main-content" className="skiplink" onClick={skipToContent}>Skip to main content</a>
       <aside id="mainnav" ref={sideRef} className={navOpen ? "side open" : "side"} aria-label="Main navigation">
         <div className="brandrow">
-          <div className="brand"><span className="logo"><Sparkles size={16} aria-hidden="true" /></span><span className="brandtext">Eureka<small>Staffing pipeline</small></span></div>
+          <div className="brand"><BrandMark /><span className="brandtext">Eureka<small>Staffing</small></span></div>
           <button type="button" className="collapsebtn" onClick={() => setCollapsed(!collapsed)} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
             {collapsed ? <PanelLeftOpen size={17} aria-hidden="true" /> : <PanelLeftClose size={17} aria-hidden="true" />}
           </button>
@@ -441,7 +422,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         <div className="top">
           <button ref={menuBtn} type="button" className="menubtn" aria-label="Menu" aria-controls="mainnav" aria-expanded={navOpen}
             onClick={() => setNavOpen((o) => !o)}><Menu size={19} aria-hidden="true" /></button>
-          <span className="topbrand"><span className="logo"><Sparkles size={14} aria-hidden="true" /></span>Eureka</span>
+          <span className="topbrand"><BrandMark size={22} />Eureka</span>
           <div className="topright">
             <button type="button" className="bell" aria-label="Go to screen" aria-keyshortcuts="Control+K Meta+K" title="Go to screen (Ctrl+K)"
               onClick={() => setJumpOpen(true)}><Search size={18} aria-hidden="true" /></button>

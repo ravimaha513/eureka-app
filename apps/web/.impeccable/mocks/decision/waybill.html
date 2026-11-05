@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Eureka · Hot List</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&family=Martian+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#fbfbf8;--ink:#23264a;--ink2:#5a5d7a;--ink3:#696b84;--rule:#d9d9e0;--rule2:#ececf0;--red:#b3261e;--canary:#f6e9a6;--pink:#f3d3d6;--blue:#dbe5f3;--green:#d6eadc;--buff:#efe3cc;--shell:#1b1e3a;
+ --st1:#b3261e;--st2:#2f5fa7;--st3:#7a4fb0;--st4:#1d7a55;--st5:#b07a12;--st6:#23264a}
+*{box-sizing:border-box}
+html,body{width:1440px;height:900px;overflow:hidden;margin:0}
+body{background:var(--paper);color:var(--ink);font:400 13.5px/1.35 Archivo,system-ui,sans-serif;font-variant-numeric:tabular-nums;display:grid;grid-template-columns:224px 1fr}
+.lbl{font-family:Archivo;font-stretch:75%;font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+.mono{font-family:"Martian Mono",monospace;font-size:11.5px}
+aside{background:var(--shell);color:#e9e8e1;border-top:3px solid var(--red);padding:16px 0}
+.brand{display:flex;align-items:center;gap:9px;padding:0 18px 18px;font-stretch:75%;font-weight:700;font-size:21px;letter-spacing:.12em}
+.brand i{width:18px;height:18px;border:2px solid var(--red);display:grid;place-items:center;font:600 9px "Martian Mono";color:#fff;font-style:normal;background:var(--red);letter-spacing:0}
+aside h6{margin:14px 18px 4px;color:#a3a5bd}
+aside a{display:flex;justify-content:space-between;align-items:center;padding:5px 18px 5px 16px;color:#d4d4dc;text-decoration:none;font-size:13px;border-left:2px solid transparent}
+aside a.on{background:#2a2e52;color:#fff;border-left-color:var(--red);font-weight:600}
+.badge{background:var(--red);color:#fff;font-size:10.5px;font-weight:600;padding:0 5px;border-radius:2px}
+main{display:flex;flex-direction:column;min-width:0}
+.top{height:48px;border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:16px;padding:0 24px}
+.jump{width:340px;height:30px;border:1px solid var(--rule);border-radius:3px;background:#fff;display:flex;align-items:center;padding:0 10px;color:var(--ink3);font-size:13px}
+.jump kbd{margin-left:auto;font:500 10.5px "Martian Mono";border:1px solid var(--rule);border-radius:2px;padding:1px 4px;color:var(--ink2)}
+.sp{flex:1}.bell{position:relative;font-size:16px}.bell b{position:absolute;top:-6px;right:-9px;background:var(--red);color:#fff;font-size:10px;padding:0 4px;border-radius:2px}
+.user{display:flex;align-items:center;gap:8px;font-size:13px}.user i{width:26px;height:26px;border-radius:2px;background:var(--blue);display:grid;place-items:center;font-style:normal;font-weight:600;font-size:11px}
+.page{padding:18px 24px 0;display:flex;flex-direction:column;min-height:0}
+h1{margin:0;font-stretch:75%;font-size:26px;font-weight:700;letter-spacing:.01em;display:flex;align-items:center;gap:10px}
+h1 small{font-size:11px;color:var(--red);border:1px solid var(--red);padding:1px 5px;border-radius:2px;font-weight:600;letter-spacing:.06em}
+.sub{color:var(--ink2);margin:3px 0 14px;font-size:13px}
+.filters{display:flex;gap:8px;align-items:flex-end}
+.f{display:flex;flex-direction:column;gap:3px}.f .lbl{color:var(--ink2);font-size:10.5px}
+.in,.sel{height:30px;border:1px solid #c6c7d2;border-radius:3px;background:#fff;padding:0 9px;display:flex;align-items:center;font-size:13px;color:var(--ink)}
+.in.ph{color:var(--ink3)}.sel::after{content:"";margin-left:auto;width:0;height:0;border:4px solid transparent;border-top:5px solid var(--ink2);border-bottom:0}
+.btn{height:30px;border:1px solid #c6c7d2;border-radius:3px;background:#fff;padding:0 12px;font:500 13px Archivo;color:var(--ink);display:inline-flex;align-items:center;gap:6px}
+.btn.pri{background:var(--red);border-color:var(--red);color:#fff}
+.chips{display:flex;gap:6px;align-items:center;margin:10px 0 10px}
+.chip{border:1px solid var(--rule);background:#fff;border-radius:2px;padding:2px 7px;font-size:12px}.chip b{font-weight:600}.chip span{color:var(--ink3);margin-left:5px}
+.link{color:var(--red);font-size:12.5px;font-weight:500;text-decoration:underline;text-underline-offset:2px}
+.count{margin-left:auto;font-size:12.5px;color:var(--ink2)}.count b{color:var(--ink);font-weight:600}
+.selbar{display:flex;align-items:center;gap:14px;background:var(--canary);border:1px solid #e4d27a;border-bottom:0;height:34px;padding:0 10px;font-size:13px}
+.selbar b{font-weight:600}.selbar .btn{height:24px;font-size:12.5px;padding:0 9px;background:#fffdf0}
+.guide{margin-left:auto;color:var(--ink2)}.guide .mono{color:var(--ink)}
+table{width:100%;border-collapse:collapse;border-top:2px solid var(--red)}
+th{text-align:left;color:var(--ink2);height:30px;padding:0 8px;border-bottom:1px solid var(--ink);white-space:nowrap}
+th.s{color:var(--ink)}th .ar{color:var(--ink3);font-size:9px;margin-left:3px}th.s .ar{color:var(--red)}
+td{height:34px;padding:0 8px;border-bottom:1px solid var(--rule2);white-space:nowrap;font-size:13px}
+tr.ck td{background:#fcf6d6}tr.ck td:first-child{box-shadow:inset 3px 0 var(--red)}
+.cb{width:14px;height:14px;border:1.5px solid #9a9cb0;border-radius:2px;display:inline-block;vertical-align:middle;background:#fff}
+.cb.on{background:var(--ink);border-color:var(--ink);position:relative}.cb.on::after{content:"";position:absolute;left:3.5px;top:0.5px;width:3px;height:7px;border:solid #fff;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+.nm{font-weight:600}.nm .mono{color:var(--ink3);font-weight:400;margin-left:6px;font-size:10.5px}
+.pill{display:inline-block;padding:1px 7px;border-radius:2px;font-size:12px;font-weight:500;background:var(--blue)}
+.p-full{background:var(--buff)}.p-hold,.p-bench{background:var(--pink)}.p-conf{background:var(--green)}
+.pri{font-weight:600;color:var(--red)}.mute{color:var(--ink3)}
+.all{font-size:10px;color:var(--st2);margin-left:5px;letter-spacing:.06em}
+.days{display:flex;align-items:center;gap:8px}.days span{width:24px;text-align:right}.days s{height:3px;background:var(--ink);width:calc(var(--d) * .42px);display:block}.days s.old{background:var(--red)}
+.trk{position:relative;display:inline-flex;gap:7px;vertical-align:middle;margin-right:9px}
+.trk::before{content:"";position:absolute;left:3px;right:3px;top:50%;height:1px;background:#b9bac8}
+.trk i{position:relative;width:7px;height:7px;border:1px solid #b9bac8;background:var(--paper)}
+.trk i:nth-child(1){--c:var(--st1)}.trk i:nth-child(2){--c:var(--st2)}.trk i:nth-child(3){--c:var(--st3)}.trk i:nth-child(4){--c:var(--st4)}.trk i:nth-child(5){--c:var(--st5)}.trk i:nth-child(6){--c:var(--st6)}
+.k1 i:nth-child(-n+1),.k2 i:nth-child(-n+2),.k3 i:nth-child(-n+3),.k4 i:nth-child(-n+4){background:var(--c);border-color:var(--c)}
+.k1 i:nth-child(1),.k2 i:nth-child(2),.k3 i:nth-child(3),.k4 i:nth-child(4){outline:1px solid var(--c);outline-offset:1.5px}
+.stg{font-size:12.5px;font-weight:500}.c1{color:var(--st1)}.c2{color:var(--st2)}.c3{color:var(--st3)}.c4{color:var(--st4)}
+.open{color:var(--ink);font-size:12.5px;font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.pager{display:flex;align-items:center;gap:10px;justify-content:flex-end;padding:10px 0;font-size:12.5px;color:var(--ink2)}
+.legend{display:flex;gap:12px;margin-right:auto;color:var(--ink2)}.legend span::before{content:"";display:inline-block;width:7px;height:7px;margin-right:5px;background:var(--c)}
+</style></head><body>
+<aside>
+ <div class="brand"><i>01</i>EUREKA</div>
+ <h6 class="lbl">Work</h6><a class="on">Hot List</a><a>Candidates</a><a>Submissions</a><a>Interviews</a><a>Placements</a><a>Chat <span class="badge">3</span></a>
+ <h6 class="lbl">Hiring</h6><a>Jobs</a><a>Applications</a>
+ <h6 class="lbl">Operations</h6><a>Paperwork &amp; BGC</a><a>Employees</a><a>Payments</a><a>DataHub</a>
+ <h6 class="lbl">Insights</h6><a>Dashboard</a><a>Performance</a><a>Reports</a>
+</aside>
+<main>
+ <div class="top"><div class="jump">⌕&nbsp; Quick jump<kbd>Ctrl K</kbd></div><div class="sp"></div><span class="bell">🔔︎<b>2</b></span><div class="user"><i>RA</i><span><b>Riya A.</b> · Recruiter</span></div></div>
+ <div class="page">
+  <h1>Hot List <small>38</small></h1>
+  <div class="sub">Team Rohit's candidates and every candidate open to all teams</div>
+  <div class="filters">
+   <label class="f"><span class="lbl">Search name</span><span class="in ph" style="width:190px">Name or ID</span></label>
+   <label class="f"><span class="lbl">Technology</span><span class="in" style="width:120px">Java</span></label>
+   <label class="f"><span class="lbl">Status</span><span class="sel" style="width:150px">Active, Bench</span></label>
+   <label class="f"><span class="lbl">Priority</span><span class="sel" style="width:80px">P1</span></label>
+   <label class="f"><span class="lbl">Team</span><span class="sel" style="width:130px">Any team</span></label>
+   <label class="f"><span class="lbl">Recruiter</span><span class="sel" style="width:140px">Any recruiter</span></label>
+   <button class="btn">More filters · 2</button>
+   <span class="sp"></span>
+   <label class="f"><span class="lbl">Saved view</span><span class="sel" style="width:150px">My P1 Java</span></label>
+  </div>
+  <div class="chips">
+   <span class="chip"><b>Technology:</b> Java<span>×</span></span><span class="chip"><b>Status:</b> Active, Bench<span>×</span></span><span class="chip"><b>Priority:</b> P1<span>×</span></span><span class="chip"><b>Visa:</b> H1B<span>×</span></span><span class="chip"><b>Location:</b> Dallas<span>×</span></span><a class="link">Clear all</a>
+   <span class="count"><b>38</b> candidates</span>
+  </div>
+  <div class="selbar"><b>3 selected</b><button class="btn">Set status ▾</button><button class="btn">Set priority ▾</button><a class="link" style="color:var(--ink)">Clear</a>
+   <span class="guide"><span class="lbl">Range</span>&nbsp; <span class="mono">Cand25 – Cand12</span> · 1–38 of 38</span></div>
+  <table>
+   <thead><tr class="lbl"><th style="width:34px"><span class="cb"></span></th><th class="s">Candidate<span class="ar">▲</span></th><th>Technology<span class="ar">↕</span></th><th>Status<span class="ar">↕</span></th><th>Pri<span class="ar">↕</span></th><th>Team<span class="ar">↕</span></th><th>Recruiter<span class="ar">↕</span></th><th>Location</th><th>Visa</th><th>Days in market<span class="ar">↕</span></th><th>Stage<span class="ar">↕</span></th><th></th></tr></thead>
+   <tbody>
+<tr><td><span class="cb"></span></td><td class="nm">Cand25 Test</td><td>Java</td><td><span class="pill">Active</span></td><td class="pri">P1</td><td>Team Rohit</td><td>r1a</td><td>Dallas</td><td>H1B</td><td><div class="days"><span>31</span><s style="--d:31"></s></div></td><td><span class="trk k1"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="stg c1">Hot list</span></td><td><a class="open">Open</a></td></tr>
+<tr class="ck"><td><span class="cb on"></span></td><td class="nm">Cand18 Test</td><td>Java</td><td><span class="pill p-full">Full of interviews</span></td><td class="pri">P1</td><td>Team Rohit</td><td>r1b</td><td>Dallas</td><td>H1B</td><td><div class="days"><span>54</span><s style="--d:54"></s></div></td><td><span class="trk k3"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="stg c3">Interview R2</span></td><td><a class="open">Open</a></td></tr>
+<tr class="ck"><td><span class="cb on"></span></td><td class="nm">Cand10 Test</td><td>Java Spring</td><td><span class="pill">Active</span></td><td class="pri">P1</td><td>Team Rohit</td><td>r1a</td><td>Austin</td><td>H1B</td><td><div class="days"><span>12</span><s style="--d:12"></s></div></td><td><span class="trk k2"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="stg c2">Submitted ×3</span></td><td><a class="open">Open</a></td></tr>
+<tr><td><span class="cb"></span></td><td class="nm">Cand24 Test</td><td>Java</td><td><span class="pill p-full">Full of interviews</span></td><td class="pri">P1</td><td>Team Rohit</td><td>r1b</td><td>Dallas</td><td>H1B</td><td><div class="days"><span>77</span><s style="--d:77"></s></div></td><td><span class="trk k3"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="stg c3">Interview R1</span></td><td><a class="open">Open</a></td></tr>
+<tr class="ck"><td><span class="cb on"></span></td><td class="nm">Cand15 Test</td><td>Java / AWS</td><td><span class="pill p-full">Full of interviews</span></td><td class="pri">P1</td><td>Team Rohit</td><td>r1b</td><td>Dallas</td><td>H1B</td><td><div class="days"><span>40</span><s style="--d:40"></s></div></td><td><span class="trk k3"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="stg c3">Interview R3</span></td><td><a class="open">Open</a></td></tr>
+<tr><td><span class="cb"></span></td><td class="nm">Cand82 Test</td><td>Java</td><td><span class="pill">Active</span></td><td class="pri">P1</td><td>Team Vikram<span class="lbl all">Open to all teams</span></td><td>r3a</td><td>Austin</td><td>H1B</td><td><div class="days"><span>8</span><s style="--d:8"></s></div></td><td><span class="trk k1"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="stg c1">Hot list</span></td><td><a class="open">Open</a></td></tr>
+<tr><td><span class="cb"></span></td><td class="nm">Cand26 Test</td><td>Java</td><td><span class="pill p-hold">On hold</span></td><td class="pri">P1</td><td>Team Rohit</td><td class="mute">Unassigned</td><td>Dallas</td><td>H1B</td><td><div class="days"><span>103</span><s class="old" style="--d:103"></s></div></td><td><span class="trk k1"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="stg c1">Hot list</span></td><td><a class="open">Open</a></td></tr>
+<tr><td><span class="cb"></span></td><td class="nm">Cand9 Test</td><td>Java</td><td><span class="pill p-full">Full of interviews</span></td><td class="pri">P1</td><td>Team Rohit</td><td>r1a</td><td>Dallas</td><td>H1B</td><td><div class="days"><span>66</span><s style="--d:66"></s></div></td><td><span class="trk k3"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="stg c3">Interview R2</span></td><td><a class="open">Open</a></td></tr>
+<tr><td><span class="cb"></span></td><td class="nm">Cand84 Test</td><td>Java</td><td><span class="pill p-full">Full of interviews</span></td><td class="pri">P1</td><td>Team Vikram<span class="lbl all">Open to all teams</span></td><td class="mute">Unassigned</td><td>Austin</td><td>H1B</td><td><div class="days"><span>21</span><s style="--d:21"></s></div></td><td><span class="trk k3"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="stg c3">Interview R1</span></td><td><a class="open">Open</a></td></tr>
+<tr><td><span class="cb"></span></td><td class="nm">Cand11 Test</td><td>Java</td><td><span class="pill p-conf">Confirmation</span></td><td class="pri">P1</td><td>Team Rohit</td><td class="mute">Unassigned</td><td>Dallas</td><td>H1B</td><td><div class="days"><span>95</span><s class="old" style="--d:95"></s></div></td><td><span class="trk k4"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="stg c4">Placed</span></td><td><a class="open">Open</a></td></tr>
+<tr><td><span class="cb"></span></td><td class="nm">Cand54 Test</td><td>Java / Kafka</td><td><span class="pill p-full">Full of interviews</span></td><td class="pri">P1</td><td>Team Anjali<span class="lbl all">Open to all teams</span></td><td class="mute">Unassigned</td><td>Austin</td><td>H1B</td><td><div class="days"><span>49</span><s style="--d:49"></s></div></td><td><span class="trk k3"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="stg c3">Interview R1</span></td><td><a class="open">Open</a></td></tr>
+<tr><td><span class="cb"></span></td><td class="nm">Cand78 Test</td><td>Java</td><td><span class="pill p-full">Full of interviews</span></td><td class="pri">P1</td><td>Team Vikram</td><td class="mute">Unassigned</td><td>Dallas</td><td>H1B</td><td><div class="days"><span>18</span><s style="--d:18"></s></div></td><td><span class="trk k2"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="stg c2">Submitted ×1</span></td><td><a class="open">Open</a></td></tr>
+<tr><td><span class="cb"></span></td><td class="nm">Cand12 Test</td><td>Java</td><td><span class="pill p-bench">Bench</span></td><td class="pri">P1</td><td>Team Rohit</td><td>r1a</td><td>Austin</td><td>H1B</td><td><div class="days"><span>140</span><s class="old" style="--d:140"></s></div></td><td><span class="trk k1"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="stg c1">Hot list</span></td><td><a class="open">Open</a></td></tr>
+   </tbody>
+  </table>
+  <div class="pager"><span class="legend lbl"><span style="--c:var(--st1)">Hot list</span><span style="--c:var(--st2)">Submitted</span><span style="--c:var(--st3)">Interview</span><span style="--c:var(--st4)">Placed</span><span style="--c:var(--st5)">Paperwork</span><span style="--c:var(--st6)">Joined</span></span>
+   <span>Rows 50 ▾</span><span>1–38 of 38</span><button class="btn" disabled style="height:26px;opacity:.5">‹ Prev</button><button class="btn" disabled style="height:26px;opacity:.5">Next ›</button></div>
+ </div>
+</main>
+</body></html>

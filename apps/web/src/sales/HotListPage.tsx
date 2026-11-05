@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Person } from "../shell/ui";
 import type { Permission } from "@eureka/shared";
 import type { Candidate, Me } from "../api";
@@ -22,23 +22,33 @@ export interface ListPageProps {
 /** Whether this row's profile can be opened by the viewer (UI only; the API decides). */
 export const profileOpenable = (c: Candidate, caps: readonly Permission[]) => caps.includes("candidate:read") && c.canOpenProfile !== false;
 
-export function CandidateName({ c, caps, onOpenProfile }: { c: Candidate; caps: readonly Permission[]; onOpenProfile?: (id: string) => void }) {
+export function CandidateName({ c, caps, onOpenProfile, plain = false }: {
+  c: Candidate; caps: readonly Permission[]; onOpenProfile?: (id: string) => void;
+  /** Dense lists: no avatar, the name alone. */
+  plain?: boolean;
+}) {
+  const Wrap = plain ? PlainName : Person;
   if (onOpenProfile && profileOpenable(c, caps)) {
     return (
-      <Person name={c.name}>
+      <Wrap name={c.name}>
         <button type="button" className="linkbtn" onClick={() => onOpenProfile(c.id)} aria-label={`Open profile of ${c.name}`}>
           <b>{c.name}</b>
         </button>
-      </Person>
+      </Wrap>
     );
   }
   return (
-    <Person name={c.name}>
+    <Wrap name={c.name}>
       <b>{c.name}</b>
       {c.canOpenProfile === false && caps.includes("candidate:read") && <small className="block">Profile belongs to another team</small>}
-    </Person>
+    </Wrap>
   );
 }
+
+const PlainName = ({ children }: { name: string; children: ReactNode }) => <span className="persontext">{children}</span>;
+
+/** Clicks on a row open the profile, except on its own controls (checkbox, links, buttons). */
+const fromControl = (e: React.MouseEvent) => Boolean((e.target as HTMLElement).closest("a, button, input, select, label, textarea"));
 
 export function HotListPage({ me, onOpenProfile }: ListPageProps) {
   const caps = me?.capabilities ?? [];
@@ -50,9 +60,9 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
   const canVisibility = caps.includes("candidate.visibility:update");
   const canBulk = canStatus || canVisibility;
   const canExport = caps.includes("report:export");
-  // Selection covers the rows on this page; a new page or filter starts empty, but a background refetch keeps it.
+  // Selection survives paging (bulk changes often span pages) but a new filter starts it empty.
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const filterKey = s.filterKey;
+  const filterKey = JSON.stringify(s.applied);
   useEffect(() => setSelected(new Set()), [filterKey]);
   /** Rows the viewer cannot act on (profile in another team) are not selectable; the server would refuse them. */
   const selectable = items.filter((c) => c.canOpenProfile !== false);
@@ -62,69 +72,81 @@ export function HotListPage({ me, onOpenProfile }: ListPageProps) {
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  const cols = canBulk ? 15 : 14;
+  const cols = canBulk ? 13 : 12;
   const yesNo = (v: boolean | null | undefined) => (v === true ? "Yes" : v === false ? "No" : "—");
 
   return (
     <>
-      <div>
-        <h1 tabIndex={-1}>Hot List</h1>
-        <p className="sub">
-          Your team's candidates and every candidate open to all teams. Phones are shown only for candidates in your scope; others are masked.
-        </p>
+      <div className="pagehead">
+        <div>
+          <h1 tabIndex={-1}>Hot List</h1>
+          <p className="sub">Your team's candidates and every candidate open to all teams. Phones show only for candidates in your scope.</p>
+        </div>
+        <div className="pageactions">
+          <SavedViews s={s} />
+          {canExport && <ExportButton s={s} />}
+        </div>
       </div>
-      <SavedViews s={s} />
       <ListFilters s={s} label="Hot List" statuses={HOTLIST_STATUS_OPTIONS} options={options.data} />
-      {canExport && <ExportButton s={s} />}
       {canBulk && (
         <BulkBar selected={selected} items={items} canStatus={canStatus} canVisibility={canVisibility}
           onDone={() => setSelected(new Set())} />
       )}
-      <div className="card tablewrap">
+      <div className="card tablewrap listcard">
         {s.q.isLoading ? <Loading /> : s.q.error ? <QueryError query={s.q} message={salesError(s.q.error)} /> : (
-          <table aria-label="Hot List" aria-busy={s.q.isFetching || undefined}>
+          <table className="cardtable hotlist" aria-label="Hot List" aria-busy={s.q.isFetching || undefined}>
             <thead><tr>
               {canBulk && (
-                <th>
+                <th className="c-sel">
                   <input type="checkbox" aria-label="Select all candidates on this page" checked={allSelected}
                     disabled={selectable.length === 0}
-                    onChange={() => setSelected(allSelected ? new Set() : new Set(selectable.map((c) => c.id)))} />
+                    onChange={() => setSelected((prev) => {
+                      const next = new Set(prev);
+                      for (const c of selectable) { if (allSelected) next.delete(c.id); else next.add(c.id); }
+                      return next;
+                    })} />
                 </th>
               )}
-              <th>Candidate</th><th>Technology</th><th>Status</th><th>Pri</th><th>Team</th><th>Lead</th><th>Recruiter</th><th>Location</th>
-              <th>Visa</th><th>Stay</th><th>In person</th><th>Phone</th>
-              <th>Days</th><th><span className="sr-only">Actions</span></th>
+              <th>Candidate</th><th>Technology</th><th>Status</th><th>Pri</th><th>Team</th><th>Recruiter</th>
+              <th className="p2">Location</th><th className="p2">Visa</th><th className="p3">Stay</th><th className="p3">In person</th>
+              <th>Phone</th><th className="num">Days</th><th className="c-act"><span className="sr-only">Actions</span></th>
             </tr></thead>
             <tbody>
-              {items.map((c) => (
-                <tr key={c.id}>
+              {items.map((c) => {
+                const openable = Boolean(onOpenProfile) && profileOpenable(c, caps);
+                return (
+                <tr key={c.id} aria-selected={canBulk ? selected.has(c.id) : undefined} className={openable ? "rowopen" : undefined}
+                  onClick={openable ? (e) => { if (!fromControl(e)) onOpenProfile!(c.id); } : undefined}>
                   {canBulk && (
-                    <td>
+                    <td className="c-sel">
                       <input type="checkbox" aria-label={`Select ${c.name}`} checked={selected.has(c.id)}
                         disabled={c.canOpenProfile === false} onChange={() => toggle(c.id)} />
                     </td>
                   )}
-                  <td><CandidateName c={c} caps={caps} onOpenProfile={onOpenProfile} /></td>
-                  <td>{c.technology}</td>
-                  <td>
-                    <StatusBadge status={c.status} />{" "}{c.visibility === "all_teams" && <OpenToAllBadge />}{c.visibility === "selected_teams" && <SharedBadge />}
-                    {c.statusLabel && c.statusLabel.includes("/") && <small className="block">{c.statusLabel}</small>}
+                  <td className="c-name">
+                    <CandidateName c={c} caps={caps} onOpenProfile={onOpenProfile} plain />
                   </td>
-                  <td><Priority p={c.priority} /></td>
-                  <td>{c.team.name}</td>
-                  <td>{c.team.lead ?? "—"}</td>
-                  <td>{c.recruiter?.name ?? "Unassigned"}</td>
-                  <td>{c.location.name}</td>
-                  <td>{c.visaCategory ? visaLabel(c.visaCategory) : "—"}</td>
-                  <td>{c.stay ? stayLabel(c) : "—"}</td>
-                  <td>{yesNo(c.inPersonOk)}</td>
-                  <td className={c.phoneMasked ? "masked" : ""}><Phone c={c} /></td>
-                  <td>{c.daysInMarket ?? "—"}</td>
-                  <td className="rowactions">
-                    <button type="button" className="btn sm" aria-label={`Quick view of ${c.name}`} onClick={() => setPreview(c)}>Quick view</button>
+                  <td className="c-tech">{c.technology}</td>
+                  <td className="c-status">
+                    <span className="badges"><StatusBadge status={c.status} />
+                      {c.visibility === "all_teams" && <OpenToAllBadge />}{c.visibility === "selected_teams" && <SharedBadge />}</span>
+                    {c.statusLabel && c.statusLabel.includes("/") && !/\/all teams$/i.test(c.statusLabel) && <small className="block">{c.statusLabel}</small>}
+                  </td>
+                  <td className="c-pri"><Priority p={c.priority} /></td>
+                  <td className="c-team">{c.team.name}{c.team.lead && <small className="block">Lead <span>{c.team.lead}</span></small>}</td>
+                  <td className="c-rec">{c.recruiter?.name ?? <span className="muted">Unassigned</span>}</td>
+                  <td className="p2">{c.location.name}</td>
+                  <td className="p2">{c.visaCategory ? visaLabel(c.visaCategory) : "—"}</td>
+                  <td className="p3">{c.stay ? stayLabel(c) : "—"}</td>
+                  <td className="p3">{yesNo(c.inPersonOk)}</td>
+                  <td className={`c-phone${c.phoneMasked ? " masked" : ""}`}><Phone c={c} /></td>
+                  <td className="c-days num">{c.daysInMarket ?? "—"}<span className="cardonly"> days</span></td>
+                  <td className="c-act">
+                    <button type="button" className="btn sm" aria-label={`Quick view of ${c.name}`} onClick={() => setPreview(c)}>View</button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {items.length === 0 && <tr><td colSpan={cols} className="empty">{s.hasFilters ? "No candidates match these filters." : "No candidates on the Hot List."}</td></tr>}
             </tbody>
           </table>

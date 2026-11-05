@@ -208,14 +208,16 @@ describe("Hot List bulk actions", () => {
 
   it("a recruiter gets status changes only; a lead also gets visibility", async () => {
     const { unmount } = wrap(<HotListPage me={meFor("recruiter")} />);
-    await rowOf("Asha Iyer");
+    // The bulk bar appears once a row is selected.
+    expect(screen.queryByRole("region", { name: "Bulk actions" })).not.toBeInTheDocument();
+    fireEvent.click(within(await rowOf("Asha Iyer")).getByRole("checkbox", { name: "Select Asha Iyer" }));
     expect(within(bulk()).getByLabelText("Set status")).toBeInTheDocument();
     expect(within(bulk()).queryByLabelText("Set visibility")).not.toBeInTheDocument();
     expect([...within(within(bulk()).getByLabelText("Set status")).getAllByRole("option")].map((o) => o.textContent))
       .toEqual(["Choose a status", "Active", "On hold", "Full of interviews", "Stopped"]);
     unmount();
     wrap(<HotListPage me={meFor("lead")} />);
-    await rowOf("Asha Iyer");
+    fireEvent.click(within(await rowOf("Asha Iyer")).getByRole("checkbox", { name: "Select Asha Iyer" }));
     expect(within(bulk()).getByLabelText("Set visibility")).toBeInTheDocument();
   });
 
@@ -227,9 +229,10 @@ describe("Hot List bulk actions", () => {
     wrap(<HotListPage me={meFor("recruiter")} />);
     await rowOf("Asha Iyer");
     expect(within(await rowOf("Chitra Das")).getByRole("checkbox", { name: "Select Chitra Das" })).toBeDisabled();
-    expect(within(bulk()).getByRole("button", { name: "Apply status" })).toBeDisabled();
+    expect(screen.queryByRole("region", { name: "Bulk actions" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Select all candidates on this page" }));
+    expect(within(bulk()).getByRole("button", { name: "Apply status" })).toBeDisabled();
     expect(screen.getByRole("checkbox", { name: "Select Asha Iyer" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Select Bala Rao" })).toBeChecked();
     expect(within(bulk()).getByText("selected", { exact: false })).toHaveTextContent("2 candidates selected");

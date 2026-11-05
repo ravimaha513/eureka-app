@@ -28,6 +28,22 @@ export const NAV_ICONS: Record<string, LucideIcon> = {
   coaching: Network,
 };
 
+/**
+ * The Eureka mark: a signal-red square holding three ruled bars of falling length,
+ * an "E" that is also a short list. Decorative; the wordmark beside it carries the name.
+ */
+export function BrandMark({ size = 26 }: { size?: number }) {
+  return (
+    <span className="logo" style={{ width: size, height: size }} aria-hidden="true">
+      <svg width={size * 0.56} height={size * 0.56} viewBox="0 0 14 14" fill="currentColor">
+        <rect x="1" y="1.5" width="12" height="2.4" rx=".5" />
+        <rect x="1" y="5.8" width="9" height="2.4" rx=".5" />
+        <rect x="1" y="10.1" width="12" height="2.4" rx=".5" />
+      </svg>
+    </span>
+  );
+}
+
 const TINTS = ["indigo", "teal", "amber", "rose", "violet", "sky"] as const;
 
 export function initials(name: string | null | undefined): string {

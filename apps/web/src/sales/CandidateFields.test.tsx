@@ -73,6 +73,8 @@ describe("Hot List filters and columns", () => {
   it("sends the location, visa, documents, resume and stay filters", async () => {
     wrap(<HotListPage me={meFor("recruiter")} onOpenProfile={() => undefined} />);
     await screen.findByText("Asha Iyer", { selector: "b" });
+    // Location, visa, documents, resume and stay sit behind "More filters".
+    fireEvent.click(screen.getByRole("button", { name: "More filters" }));
     await waitFor(() => expect(screen.getByRole("option", { name: "Dallas" })).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText("Location"), { target: { value: LOC } });
     fireEvent.change(screen.getByLabelText("Visa"), { target: { value: "h1b" } });
