@@ -372,7 +372,7 @@ describe("interviews", () => {
       client: { id: CLIENT_ID, name: "Northwind Financial" }, callStatus: "scheduled", cleared: false, consentCaptured: false,
     });
     expect(got.editableFields).toEqual(["callStatus", "coachId", "durationMin", "endsAt", "interviewType", "inviteReceived", "leadId",
-      "meetingUrl", "otterUrl", "panelIds", "recordingUrl", "result", "round", "startsAt"]);
+      "meetingUrl", "otterUrl", "panelIds", "recordingUrl", "result", "round", "startsAt", "systemName"]);
   });
 
   it("creation is authorized against the parent submission", async () => {
@@ -433,11 +433,18 @@ describe("interviews", () => {
 
   it("column allowlist per role: forbidden fields are 422, unknown fields 422", async () => {
     const id = (await create(await newSubmission())).json().id;
-    for (const f of [{ cleared: true }, { consentCaptured: true }, { systemName: "PC-4" }]) {
+    for (const f of [{ cleared: true }, { consentCaptured: true }]) {
       const r = await call("r1a", "PATCH", `/api/v1/interviews/${id}`, f);
       expect(r.statusCode, JSON.stringify(f)).toBe(422);
       expect(r.json().detail).toMatch(/^field_not_permitted/);
     }
+    // IS-14: Sales and location grants can both edit the system name; other Sales scopes cannot reach the row.
+    const named = await call("r1a", "PATCH", `/api/v1/interviews/${id}`, { systemName: "PC-4" });
+    expect(named.statusCode).toBe(200);
+    expect(named.json()).toMatchObject({ systemName: "PC-4" });
+    expect(named.json().editableFields).toContain("systemName");
+    expect((await call("locD", "PATCH", `/api/v1/interviews/${id}`, { systemName: null })).statusCode).toBe(200);
+    expect([403, 404]).toContain((await call("r2a", "PATCH", `/api/v1/interviews/${id}`, { systemName: "PC-5" })).statusCode);
     for (const f of [{ startsAt: at(9000) }, { round: "L2" }, { otterUrl: null }, { coachId: U.coach }]) {
       expect((await call("locD", "PATCH", `/api/v1/interviews/${id}`, f)).statusCode, JSON.stringify(f)).toBe(422);
     }

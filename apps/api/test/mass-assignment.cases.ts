@@ -1277,7 +1277,7 @@ const CASES: RejectCase[] = [
       clearedBy: U.locD, clearedAt: PAST, feedbackEmailSentAt: PAST, row_version: 9,
     },
     // Location fields: a recruiter's grant covers only the sales fields (design B4.7).
-    notPermitted: { fields: { cleared: true, consentCaptured: true, systemName: "Zoom" }, detail: /^field_not_permitted: / },
+    notPermitted: { fields: { cleared: true, consentCaptured: true }, detail: /^field_not_permitted: / },
   },
   {
     route: "POST /api/v1/interviews/:id/feedback", actor: "r1a",

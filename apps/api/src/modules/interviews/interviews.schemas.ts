@@ -115,7 +115,7 @@ export type InterviewField = keyof UpdateInterview;
 /** Sales grants (own/team/hierarchy) on the interview's actor snapshot. */
 export const SALES_FIELDS: ReadonlySet<InterviewField> = new Set<InterviewField>([
   "round", "startsAt", "endsAt", "otterUrl", "recordingUrl", "coachId", "inviteReceived", "callStatus",
-  "interviewType", "meetingUrl", "durationMin", "panelIds", "leadId", "result",
+  "interviewType", "meetingUrl", "durationMin", "panelIds", "leadId", "result", "systemName",
 ]);
 /** Location grants on the interview's location. */
 export const LOCATION_FIELDS: ReadonlySet<InterviewField> = new Set<InterviewField>([

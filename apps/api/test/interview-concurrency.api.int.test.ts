@@ -103,7 +103,7 @@ describe("If-Match on interview edits (IS-12)", () => {
   it("the stale check follows the permission checks (404 / 403 / 422 first)", async () => {
     const id = await created({ startsAt: "2033-01-12T14:00:00Z" });
     expect([403, 404]).toContain((await patch(id, { round: "x" }, { "if-match": "9" }, "r2a")).statusCode);
-    const field = await patch(id, { systemName: "Zoom" }, { "if-match": "9" });
+    const field = await patch(id, { cleared: true }, { "if-match": "9" });
     expect(field.statusCode).toBe(422);
   });
 

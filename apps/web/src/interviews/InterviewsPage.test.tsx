@@ -41,6 +41,16 @@ describe("interview board", () => {
    expect(dateBoundary("2026-10-01")).toBe(new Date(2026, 9, 1).toISOString());
    expect(dateBoundary("2026-10-01", true)).toBe(new Date(2026, 9, 2).toISOString());
  });
+ it("lets a Sales editor set the system name without offering the location checks", async () => {
+   const fetch = setup({ ...row, editableFields: ["round", "callStatus", "result", "systemName"] });
+   await screen.findByText("Alex Doe");
+   openRowAction("Edit interview");
+   const dialog = screen.getByRole("dialog");
+   expect(within(dialog).queryByLabelText("Cleared for interview (readiness)")).not.toBeInTheDocument();
+   fireEvent.change(within(dialog).getByLabelText("System name"), { target: { value: "PC-4" } });
+   fireEvent.click(within(dialog).getByRole("button", { name: "Save interview" }));
+   await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/v1/interviews/i1", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ systemName: "PC-4" }) })));
+ });
  it("only offers location fields, sends changed fields, and never exposes links without consent", async () => {
    const fetch = setup(); await screen.findByText("Alex Doe");
    expect(screen.queryByRole("link", { name: "Otter" })).not.toBeInTheDocument();

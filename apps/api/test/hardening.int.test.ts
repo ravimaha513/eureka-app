@@ -84,7 +84,7 @@ describe("interview limits", () => {
       .rejects.toThrow(err);
   });
 
-  it("refuses system_name at insert (location-only field)", async () => {
+  it("refuses system_name at insert (set by editing the interview)", async () => {
     await expect(asUser(db.app, U.r1a, (c) => c.query(
       `INSERT INTO eureka.interview (submission_id, round, starts_at, ends_at, system_name)
        VALUES ($1, 'R1', '2031-02-01T10:00Z', '2031-02-01T11:00Z', 'SYS-9')`, [sub])))
