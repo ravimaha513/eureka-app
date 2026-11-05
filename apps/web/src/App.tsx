@@ -14,7 +14,7 @@ import { Loading } from "./ui/Loading";
 import { QueryError } from "./ui/QueryError";
 import { useAuthMethods } from "./shell/useAuthMethods";
 import { QuickJump, isQuickJumpKey } from "./shell/QuickJump";
-import { OfflineBanner } from "./shell/OfflineBanner";
+import { BusyBanner, OfflineBanner } from "./shell/OfflineBanner";
 
 // Every screen but the default landing (the Hot List) is its own chunk, loaded on first visit.
 const SettingsPage = lazyNamed(() => import("./settings/SettingsPage"), "SettingsPage");
@@ -179,9 +179,32 @@ export function SetPassword({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** The Google callback's `/login?error=<code>` (docs/admin-api.md, audit F-05). */
+export const SIGN_IN_ERRORS: Record<string, string> = {
+  expired: "Your sign-in took too long and expired. Sign in again.",
+  cancelled: "Sign-in was cancelled. Sign in again when you're ready.",
+  signin_failed: "We couldn't complete your sign-in. Try again.",
+  unavailable: "Google sign-in isn't responding right now. Wait a moment and try again.",
+  domain: "That Google account isn't a company account. Sign in with your company account.",
+  not_provisioned: "There's no active Eureka account for this Google account. Ask an administrator for access.",
+};
+
+const signInErrorText = (): string => {
+  const code = new URLSearchParams(window.location.search).get("error");
+  return code === null ? "" : SIGN_IN_ERRORS[code] ?? SIGN_IN_ERRORS.signin_failed!;
+};
+
 export function Login({ onSignedIn, devMode = import.meta.env.DEV }: { onSignedIn: () => void; devMode?: boolean }) {
   const [who, setWho] = useState<string>(DEV_USERS[0][0]);
-  const [err, setErr] = useState("");
+  const [err, setErr] = useState(signInErrorText);
+  // `?error=` is shown once, then dropped from the address bar so a refresh or a later sign-in doesn't repeat it.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("error")) return;
+    params.delete("error");
+    const qs = params.toString();
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`);
+  }, []);
   const methods = useAuthMethods();
   const passwordLogin = methods.data?.password === true;
   const [theme, setTheme] = useTheme();
@@ -451,6 +474,7 @@ export function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           </div>
         </div>
         <OfflineBanner />
+        <BusyBanner />
         <div className="content" id="main-content" tabIndex={-1}>
           <Suspense fallback={<PageLoading />}>
             {!current ? <p className="empty">Your role has no screens yet.</p>

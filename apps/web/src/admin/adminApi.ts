@@ -1,5 +1,5 @@
 /** Typed client for the admin and team API (docs/admin-api.md). */
-import { api, apiFetch } from "../api";
+import { api, apiFetch, ifMatch } from "../api";
 import type { Coach } from "../team/coachApi";
 
 export interface Ref { id: string; displayName: string }
@@ -26,7 +26,19 @@ export interface RoleDef {
   key: string; label: string; description: string | null; isSystem: boolean; restricted: boolean;
   traits: RoleTraits; track: string; level: number; department: Place | null; clonedFrom: string | null;
   holders: number; archivedAt: string | null; grants: Record<string, string>;
+  /** The optional If-Match of the two edits (C-02); absent on older servers. */
+  rowVersion?: number;
+  /** Admin/data separation class (R-01): admin roles combine only with `admin_compatible_only` ones. Absent on older servers. */
+  classification?: "admin" | "admin_compatible_only" | "data";
 }
+/** GET /admin/roles/violations: roles that break admin/data separation (reported, never stripped; R-01). */
+export interface RoleViolation {
+  key: string; label: string; isSystem: boolean; admin: boolean; archived: boolean; holders: number;
+  /** The permissions that break it: admin-only ones on a non-admin role, or business ones on an admin role. */
+  permissions: string[];
+}
+/** GET /admin/users/violations: people holding admin and data roles together (reported, never stripped). */
+export interface UserViolation { id: string; displayName: string; status: string; adminRoles: string[]; dataRoles: string[] }
 export interface PermissionDef { key: string; area: string; description: string; restricted: boolean; orgSensitive: boolean }
 export interface PermissionCatalog { scopes: string[]; items: PermissionDef[] }
 export const SCOPE_LABELS: Record<string, string> = {
@@ -133,6 +145,11 @@ export interface LocationDetail {
 
 const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
 const enc = encodeURIComponent;
+/** `ETag: "7"` (or `W/"7"`) → 7. */
+const etagVersion = (res: Response): number | undefined => {
+  const m = /^(?:W\/)?"?(\d+)"?$/.exec(res.headers.get("etag") ?? "");
+  return m ? Number(m[1]) : undefined;
+};
 
 export const adminApi = {
   meta: () => api<AdminMeta>("/api/v1/admin/meta"),
@@ -194,10 +211,14 @@ export const adminApi = {
   permissions: () => api<PermissionCatalog>("/api/v1/admin/permissions"),
   createRole: (b: { label: string; cloneFrom: string; description?: string; departmentId?: string; track?: string; level?: number }) =>
     api<{ key: string }>("/api/v1/admin/roles", { method: "POST", ...json(b) }),
-  updateRole: (key: string, b: { label?: string; description?: string | null; track?: string; level?: number; departmentId?: string | null; traits?: Partial<RoleTraits> }) =>
-    api<void>(`/api/v1/admin/roles/${enc(key)}`, { method: "PATCH", ...json(b) }),
-  setRoleGrants: (key: string, grants: Record<string, string | null>) =>
-    api<void>(`/api/v1/admin/roles/${enc(key)}/grants`, { method: "PUT", ...json({ grants }) }),
+  // `version` on the two edits: the role's rowVersion, sent as the optional If-Match (412 `stale` when another admin saved first).
+  // Both resolve with the role's new version from the `ETag` (undefined when the server sends none).
+  updateRole: (key: string, b: { label?: string; description?: string | null; track?: string; level?: number; departmentId?: string | null; traits?: Partial<RoleTraits> }, version?: number) =>
+    apiFetch(`/api/v1/admin/roles/${enc(key)}`, { method: "PATCH", ...json(b), headers: ifMatch(version) }).then(etagVersion),
+  setRoleGrants: (key: string, grants: Record<string, string | null>, version?: number) =>
+    apiFetch(`/api/v1/admin/roles/${enc(key)}/grants`, { method: "PUT", ...json({ grants }), headers: ifMatch(version) }).then(etagVersion),
+  roleViolations: () => api<{ items: RoleViolation[] }>("/api/v1/admin/roles/violations"),
+  userViolations: () => api<{ items: UserViolation[] }>("/api/v1/admin/users/violations"),
   archiveRole: (key: string) => api<void>(`/api/v1/admin/roles/${enc(key)}/archive`, { method: "POST" }),
   restoreRole: (key: string) => api<void>(`/api/v1/admin/roles/${enc(key)}/restore`, { method: "POST" }),
 

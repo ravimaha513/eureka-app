@@ -26,7 +26,7 @@ function resumeError(e: unknown, action: "upload" | "download" | "load"): string
       ? "Three uploads are already being scanned for this candidate. Wait for them to finish."
       : "This resume isn't available for download (it is still being scanned or did not pass).";
     case 422: return "The server refused this file. Choose a PDF or Word (.docx) file up to 15 MB.";
-    case 429: return e.detail ?? "Too many requests. Try again in a minute.";
+    case 429: return e.message;
     default: console.debug("Resume request failed", e.status, e.detail); return GENERIC_ERROR_MESSAGE;
   }
 }

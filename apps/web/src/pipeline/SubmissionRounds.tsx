@@ -46,7 +46,7 @@ export function SubmissionRounds({ submission: s, onPlace, onReject, onSchedule,
   const setResult = async (r: Interview, result: "pending" | "cleared") => {
     setBusy(r.id); setError("");
     try {
-      await pipelineApi.setInterviewResult(r.id, result);
+      await pipelineApi.setInterviewResult(r.id, result, r.rowVersion);
       onNotice(result === "cleared" ? `${r.round} marked cleared.` : `${r.round} reset to pending.`);
       refresh();
     } catch (e) { setError(pipelineError(e, "interview")); }
@@ -142,7 +142,7 @@ export function RejectRoundDialog({ submission, round, canRejectSubmission, onCl
         if (also && !reason.trim()) { setFieldErr("Give a rejection reason for the submission."); return; }
         setFieldErr("");
         void submit.run(async () => {
-          if (round.result !== "rejected") await pipelineApi.setInterviewResult(round.id, "rejected");
+          if (round.result !== "rejected") await pipelineApi.setInterviewResult(round.id, "rejected", round.rowVersion);
           if (also) await pipelineApi.changeSubmissionStatus(submission.id, "rejected", reason.trim());
           onDone(also);
         });

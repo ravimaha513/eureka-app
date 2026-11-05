@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { InterviewsPage, dateBoundary, type Interview } from "./InterviewsPage";
 import type { Me } from "../api";
 const me: Me = { id: "u", email: "a@example.com", displayName: "Recruiter", roles: [], capabilities: ["interview:read", "interview:create"], csrfToken: "t" };
-const row: Interview = { id: "i1", submissionId: "s1", candidate: { id: "c", name: "Alex Doe" }, recruiter: { id: "u", name: "Recruiter" }, team: null, location: null, client: null, round: "Technical", startsAt: "2026-10-01T14:00:00Z", endsAt: "2026-10-01T15:00:00Z", coach: null, inviteReceived: false, callStatus: "scheduled", cleared: false, consentCaptured: false, otterUrl: "https://example.com/secret", recordingUrl: null, systemName: null, editableFields: ["cleared", "consentCaptured", "systemName", "callStatus"], feedbackKinds: ["location"] };
+const row: Interview = { id: "i1", submissionId: "s1", candidate: { id: "c", name: "Alex Doe" }, recruiter: { id: "u", name: "Recruiter" }, team: null, location: null, client: null, round: "Technical", startsAt: "2026-10-01T14:00:00Z", endsAt: "2026-10-01T15:00:00Z", coach: null, inviteReceived: false, callStatus: "scheduled", cleared: false, consentCaptured: false, otterUrl: "https://example.com/secret", recordingUrl: null, systemName: null, editableFields: ["cleared", "consentCaptured", "systemName", "callStatus"], feedbackKinds: ["location"], rowVersion: 9 };
 const json = (value: unknown) => new Response(JSON.stringify(value));
 const lookups = (locations: { id: string; name: string }[]) => ({ technologies: [], clients: [], vendors: [], implementationPartners: [], roles: [], coaches: [], locations });
 function setup(item = row, capabilities = me.capabilities, locations = [{ id: "dal", name: "Dallas" }], feedbackItems: unknown[] = [], busy: { startsAt: string; endsAt: string }[] = [], block: unknown = null) {
@@ -41,7 +41,7 @@ describe("interview board", () => {
    expect(within(dialog).queryByLabelText("Recording URL")).not.toBeInTheDocument();
    fireEvent.click(within(dialog).getByLabelText("Cleared for interview (readiness)"));
    fireEvent.click(within(dialog).getByRole("button", { name: "Save interview" }));
-   await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/v1/interviews/i1", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ cleared: true }) })));
+   await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/v1/interviews/i1", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ cleared: true }), headers: expect.objectContaining({ "if-match": "\"9\"" }) })));
  });
  it("coach can add only coached feedback and has no edit or schedule actions", async () => {
    const fetch = setup({ ...row, editableFields: [], feedbackKinds: ["coach"] }, ["interview:read"]);

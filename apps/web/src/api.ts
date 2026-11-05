@@ -1,4 +1,5 @@
 import type { Permission } from "@eureka/shared";
+import { BUSY_MESSAGE, STALE_MESSAGE, limitText, serverSentence } from "./lib/errorText";
 
 export interface Me {
   id: string;
@@ -66,6 +67,33 @@ export class ApiError extends Error {
   constructor(public status: number, message: string, public detail?: string, public title?: string, public errors?: FieldIssue[]) {
     super(message);
   }
+  /** `Retry-After` in seconds (503/429), when the server sent one. */
+  retryAfter?: number;
+  /** apiFetch already waited out a 503's Retry-After and tried again (React Query must not retry it too). */
+  retried?: boolean;
+}
+
+/** Window events: BUSY_EVENT (`detail` +1 / -1) while a GET waits out a 503; STALE_EVENT after a 412 `stale`. */
+export const BUSY_EVENT = "eureka:busy";
+export const STALE_EVENT = "eureka:stale";
+/** Longest Retry-After a GET waits for before trying once more; a longer one fails at once. */
+const MAX_RETRY_WAIT_S = 10;
+
+/** Optional If-Match for an edit (docs/<area>-api.md); no header when the version is unknown. 0 is a version. */
+export const ifMatch = (version: number | null | undefined): Record<string, string> =>
+  version == null ? {} : { "if-match": `"${version}"` };
+
+/** Readable text for the API-wide 412 `stale`, 429 and 503 answers (else null: the screen's own mapping applies). */
+export const commonProblem = (e: unknown): string | null =>
+  e instanceof ApiError && ((e.status === 412 && e.detail === "stale") || e.status === 429 || e.status === 503) ? e.message : null;
+
+function retryAfterSeconds(res: Response): number | undefined {
+  const h = res.headers.get("retry-after");
+  if (!h) return undefined;
+  const n = Number(h);
+  if (Number.isFinite(n)) return Math.max(0, n);
+  const at = Date.parse(h);
+  return Number.isNaN(at) ? undefined : Math.max(0, Math.ceil((at - Date.now()) / 1000));
 }
 
 let csrfToken = "";
@@ -77,7 +105,7 @@ export const setCsrf = (t: string) => { csrfToken = t; };
  */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase();
-  const res = await fetch(path, {
+  const send = () => fetch(path, {
     ...init,
     credentials: "same-origin",
     headers: {
@@ -86,10 +114,31 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
       ...init.headers,
     },
   });
+  let res = await send();
+  let retried = false;
+  const wait = retryAfterSeconds(res);
+  // A busy server (503 + Retry-After) gets one more try for a read; writes are never repeated.
+  if (res.status === 503 && method === "GET" && wait !== undefined && wait <= MAX_RETRY_WAIT_S) {
+    window.dispatchEvent(new CustomEvent(BUSY_EVENT, { detail: 1 }));
+    try {
+      await new Promise((r) => setTimeout(r, wait * 1000));
+      res = await send();
+    } finally {
+      window.dispatchEvent(new CustomEvent(BUSY_EVENT, { detail: -1 }));
+    }
+    retried = true;
+  }
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { detail?: string; title?: string; errors?: unknown };
     const errors = Array.isArray(body.errors) ? (body.errors as FieldIssue[]) : undefined;
-    throw new ApiError(res.status, body.detail ?? body.title ?? res.statusText, body.detail, body.title, errors);
+    const stale = res.status === 412 && body.detail === "stale";
+    const message = stale ? STALE_MESSAGE : res.status === 429 ? limitText(body.detail)
+      : res.status === 503 ? serverSentence(body.detail, BUSY_MESSAGE) : body.detail ?? body.title ?? res.statusText;
+    const err = new ApiError(res.status, message, body.detail, body.title, errors);
+    err.retryAfter = retryAfterSeconds(res);
+    err.retried = retried;
+    if (stale) window.dispatchEvent(new Event(STALE_EVENT));
+    throw err;
   }
   return res;
 }

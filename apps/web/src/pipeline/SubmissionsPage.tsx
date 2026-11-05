@@ -208,7 +208,7 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
 
   const move = async (to: string) => {
     setBusy(to); setError(""); setMessage("");
-    try { await pipelineApi.changeSubmissionStatus(id, to); announce(`Status changed to ${pipelineLabel(to)}.`); refresh(); }
+    try { await pipelineApi.changeSubmissionStatus(id, to, undefined, s?.rowVersion); announce(`Status changed to ${pipelineLabel(to)}.`); refresh(); }
     catch (e) { setError(pipelineError(e, "submission")); }
     finally { setBusy(null); }
   };
@@ -302,7 +302,7 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
       )}
       {s && modal?.kind === "withdraw" && (
         <ConfirmDialog title="Withdraw this submission?" confirmLabel="Withdraw" danger formatError={(e) => pipelineError(e, "submission")}
-          action={() => pipelineApi.changeSubmissionStatus(s.id, "withdrawn")} onClose={() => setModal(null)}
+          action={() => pipelineApi.changeSubmissionStatus(s.id, "withdrawn", undefined, s.rowVersion)} onClose={() => setModal(null)}
           onDone={() => { setModal(null); announce("Submission withdrawn."); refresh(); }}>
           <p>{s.candidateName ?? "The candidate"} will be withdrawn from {s.jobTitle} at {s.client}. A withdrawn submission is closed and can't be reopened.</p>
         </ConfirmDialog>
@@ -324,7 +324,7 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
       )}
       {s && modal?.kind === "placement" && (
         <CreatePlacementDialog submission={s} onClose={() => setModal(null)}
-          clearRound={modal.round && { id: modal.round.id, round: modal.round.round, pending: modal.round.result !== "cleared" }}
+          clearRound={modal.round && { id: modal.round.id, round: modal.round.round, pending: modal.round.result !== "cleared", rowVersion: modal.round.rowVersion }}
           onSelectedOnly={() => {
             setModal(null); announce("Round cleared and submission moved to Selected. Create the placement when the offer is in.");
             refreshRounds(qc, s.id);
@@ -350,7 +350,7 @@ function RejectDialog({ submission, onClose, onDone }: { submission: Submission;
         const r = reason.trim();
         if (!r) { setFieldErr("Give a rejection reason."); e.currentTarget.querySelector<HTMLElement>("textarea")?.focus(); return; }
         setFieldErr("");
-        void submit.run(async () => { await pipelineApi.changeSubmissionStatus(submission.id, "rejected", r); onDone(); });
+        void submit.run(async () => { await pipelineApi.changeSubmissionStatus(submission.id, "rejected", r, submission.rowVersion); onDone(); });
       }}>
         <p className="dialogbody">{submission.candidateName ?? "The candidate"} · {submission.jobTitle} at {submission.client}. A rejected submission is closed.</p>
         <Field label="Rejection reason" hint="Shared with the team on the submission record. Up to 500 characters." error={fieldErr}>

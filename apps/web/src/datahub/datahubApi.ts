@@ -167,7 +167,7 @@ export function datahubError(e: unknown): string {
     case 403: return "You aren't allowed to do that here.";
     case 404: return "This isn't available from your account.";
     case 422: return e.errors?.[0]?.message ?? "Check the highlighted fields.";
-    case 429: return e.detail ?? "Too many requests. Try again in a minute.";
+    case 429: return e.message;
     default: return e.detail ?? "Something went wrong.";
   }
 }

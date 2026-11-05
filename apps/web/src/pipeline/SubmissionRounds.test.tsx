@@ -19,7 +19,7 @@ const round = (id: string, name: string, extra: Partial<Interview> = {}): Interv
 let api: ReturnType<typeof mockApi>;
 let rounds: Interview[];
 beforeEach(() => {
-  rounds = [round("i1", "Initial", { result: "cleared" }), round("i2", "L1", { result: "cleared" }), round("i3", "Manager")];
+  rounds = [round("i1", "Initial", { result: "cleared" }), round("i2", "L1", { result: "cleared" }), round("i3", "Manager", { rowVersion: 7 })];
   api = mockApi({
     "GET /api/v1/submissions/s1": () => ({ body: S1 }),
     "GET /api/v1/lookups": () => ({ body: LOOKUPS }),
@@ -51,7 +51,7 @@ describe("Submission drawer: interview rounds", () => {
     api.routes["PATCH /api/v1/interviews/i3"] = (_u, b) => ({ body: { ...rounds[2], ...(b as object) } });
     const drawer = await open();
     fireEvent.click(within(resultGroup(drawer, "Manager")).getByRole("button", { name: "Mark cleared" }));
-    await waitFor(() => expect(api.writes()).toEqual([expect.objectContaining({ method: "PATCH", path: "/api/v1/interviews/i3", body: { result: "cleared" } })]));
+    await waitFor(() => expect(api.writes()).toEqual([expect.objectContaining({ method: "PATCH", path: "/api/v1/interviews/i3", body: { result: "cleared" }, headers: expect.objectContaining({ "if-match": "\"7\"" }) })]));
   });
 
   it("Clear and place: clears the round and selects the submission, then creates the placement", async () => {
@@ -77,6 +77,7 @@ describe("Submission drawer: interview rounds", () => {
     fireEvent.click(screen.getByRole("button", { name: "Only clear the round and mark Selected" }));
     await waitFor(() => expect(within(drawer).getByRole("status")).toHaveTextContent("Round cleared and submission moved to Selected."));
     expect(api.writes().map((w) => w.path)).toEqual(["/api/v1/interviews/i3/clear-and-select"]);
+    expect(api.writes()[0]!.headers["if-match"]).toBe("\"7\"");
   });
 
   it("rejecting a round can also reject the submission, with a reason", async () => {

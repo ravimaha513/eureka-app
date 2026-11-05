@@ -24,7 +24,7 @@ export function workAuthError(e: unknown, action: "load" | "save" | "reveal"): s
     case 409: return "No number is stored for this record.";
     case 412: return "Someone else changed this record. Close the form and open it again to see the latest version.";
     case 422: return e.errors?.[0]?.message ?? (e.detail ? `Check the form: ${e.detail}.` : "Check the form.");
-    case 429: return e.detail ?? "Too many requests. Try again in a minute.";
+    case 429: return e.message;
     default: return e.detail ?? "Something went wrong.";
   }
 }

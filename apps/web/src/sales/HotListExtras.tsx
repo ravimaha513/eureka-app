@@ -132,7 +132,7 @@ export function ExportButton({ s }: { s: ListState }) {
       <small className="hint">Exports this view for candidates in your scope, up to {EXPORT_ROW_CAP.toLocaleString("en-US")} rows. Phones are masked.</small>
       {run.isError ? (
         <p className="error" role="alert">
-          {run.error instanceof ApiError && run.error.status === 429 ? (run.error.detail ?? "Too many exports. Try again later.")
+          {run.error instanceof ApiError && run.error.status === 429 ? run.error.message
             : run.error instanceof ApiError && run.error.status === 403 ? "You don't have permission to export."
             : "The export failed. Try again."}
         </p>
@@ -240,7 +240,7 @@ export function BulkBar({ selected, items, canStatus, canVisibility, onDone }: {
       )}
       {run.isError ? (
         <p className="error" role="alert">
-          {run.error instanceof ApiError && run.error.status === 429 ? (run.error.detail ?? "Too many requests. Try again in a minute.")
+          {run.error instanceof ApiError && run.error.status === 429 ? run.error.message
             : "The bulk change failed. Nothing was reported as changed; refresh and try again."}
         </p>
       ) : (
