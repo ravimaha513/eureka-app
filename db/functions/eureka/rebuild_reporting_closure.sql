@@ -1,8 +1,11 @@
 -- eureka.rebuild_reporting_closure: current definition (repeatable; db/functions/README.md).
 -- Earlier body: migration 0002. Change this file, not a new migration.
 -- Statement trigger on reporting_line: closure rebuild with cycle check, serialized by
--- advisory lock (B2.1, N10). The access_version bump is once per transaction, as in
--- eureka.bump_access_version.
+-- advisory lock (B2.1, N10). The rebuild itself is eureka.reporting_closure_rebuild
+-- (0476); the access_version bump is once per transaction, as in eureka.bump_access_version.
+-- While a bulk flow defers the rebuild (authz.reporting_closure_defer, 0476) the trigger
+-- only takes the lock and marks the closure pending: authz.reporting_closure_flush, or
+-- the deferred constraint trigger reporting_closure_at_commit, rebuilds once.
 
 SET ROLE eureka_owner;
 CREATE OR REPLACE FUNCTION eureka.rebuild_reporting_closure()
@@ -12,37 +15,12 @@ CREATE OR REPLACE FUNCTION eureka.rebuild_reporting_closure()
  SET search_path TO 'pg_catalog', 'pg_temp'
 AS $function$
 BEGIN
-  PERFORM pg_advisory_xact_lock(hashtext('eureka.reporting_closure'));
-  IF EXISTS (
-    WITH RECURSIVE up(u, path) AS (
-      SELECT rl.user_id, ARRAY[rl.user_id] FROM eureka.reporting_line rl WHERE rl.valid @> now()
-      UNION ALL
-      SELECT rl.manager_id, up.path || rl.manager_id
-      FROM up JOIN eureka.reporting_line rl ON rl.user_id = up.u AND rl.valid @> now()
-      WHERE NOT rl.manager_id = ANY(up.path) AND array_length(up.path,1) < 64
-    )
-    SELECT 1 FROM up JOIN eureka.reporting_line rl ON rl.user_id = up.u AND rl.valid @> now()
-    WHERE rl.manager_id = ANY(up.path)
-  ) THEN
-    RAISE EXCEPTION 'reporting line cycle detected' USING ERRCODE = 'check_violation';
+  IF pg_catalog.current_setting('eureka.closure_defer', true) IS NOT DISTINCT FROM pg_catalog.pg_current_xact_id()::text THEN
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('eureka.reporting_closure'));
+    INSERT INTO authz.reporting_closure_pending (xact) VALUES (pg_catalog.pg_current_xact_id()) ON CONFLICT DO NOTHING;
+    RETURN NULL;
   END IF;
-
-  DELETE FROM eureka.reporting_closure;
-  INSERT INTO eureka.reporting_closure (ancestor_id, descendant_id, depth)
-  WITH RECURSIVE c(anc, des, d) AS (
-    SELECT rl.manager_id, rl.user_id, 1 FROM eureka.reporting_line rl WHERE rl.valid @> now()
-    UNION ALL
-    SELECT rl.manager_id, c.des, c.d + 1
-    FROM c JOIN eureka.reporting_line rl ON rl.user_id = c.anc AND rl.valid @> now()
-    WHERE c.d < 64
-  )
-  SELECT anc, des, min(d) FROM c GROUP BY anc, des;
-
-  -- Bump access_version for everyone: org changes are rare, correctness first.
-  IF pg_catalog.current_setting('eureka.access_bumped', true) IS DISTINCT FROM pg_catalog.txid_current()::text THEN
-    UPDATE eureka.app_user SET access_version = access_version + 1;
-    PERFORM pg_catalog.set_config('eureka.access_bumped', pg_catalog.txid_current()::text, true);
-  END IF;
+  PERFORM eureka.reporting_closure_rebuild();
   RETURN NULL;
 END $function$;
 

@@ -86,6 +86,19 @@ const ROW_ROLE_ERRORS = new Set([
 /** admin_add_team_member failures that are a problem with one row (cycle: the member is above the team's lead, 0370). */
 const ROW_TEAM_ERRORS = new Set(["already_member", "user_inactive", "cycle"]);
 
+/** Per-user error code of a team members bulk add, as the single add answers it; null for anything else. */
+function memberAddError(err: unknown): string | null {
+  try {
+    mapAdminError(err);
+  } catch (mapped) {
+    if (!(mapped instanceof HttpException)) return null;
+    const res = mapped.getResponse();
+    const code = typeof res === "object" && res && "message" in res ? String((res as { message: unknown }).message) : mapped.message;
+    return mapped.getStatus() === 404 ? "user_not_found" : code;
+  }
+  return null;
+}
+
 /**
  * Admin and team operations (docs/admin-api.md). The controllers check the
  * permission; this service applies the self-change and location rules in the
@@ -463,7 +476,9 @@ export class AdminService {
         }
         // Second pass: reporting lines, then teams. New users have no reports yet, so a loop can only run
         // through rows of this file: it is found here and reported per row. The other lines go to
-        // authz.admin_bulk_set_managers in one call, so the reporting closure is rebuilt once, not per row.
+        // authz.admin_bulk_set_managers in one call. The closure rebuild is deferred over the whole pass
+        // (team adds move reporting lines too, 0370) and done once, before commit (0476).
+        if (links.length > 0) await c.query(`SELECT authz.reporting_closure_defer()`);
         const fail = (res: Row, code: string) => { res.status = "error"; res.error = code; delete res.id; res.roles = []; };
         const fileManager = new Map(links.filter((l) => l.managerEmail && fileEmails.has(l.managerEmail))
           .map((l) => [l.res.email.toLowerCase(), l.managerEmail!]));
@@ -518,6 +533,7 @@ export class AdminService {
         const report = { dryRun: body.dryRun, committed, created: committed ? results.length : 0, failed,
           rows: committed ? results : results.map(({ id: _id, ...rest }) => rest) };
         if (!committed) throw new BulkOutcome(report);
+        if (links.length > 0) await c.query(`SELECT authz.reporting_closure_flush()`);
         await this.audit.record(c, {
           actorId: user.id, action: "admin.user.bulk_created", entityType: "app_user",
           changes: { count: results.length, roles: results.reduce((n, x) => n + x.roles.length, 0), managers: lines.length, teams: teamAdds },
@@ -701,12 +717,17 @@ export class AdminService {
     });
   }
 
-  /** All or nothing: each move and team add runs its own definer function and audit row. */
+  /**
+   * All or nothing: each move and team add runs its own definer function and audit row.
+   * The reporting closure is rebuilt once, at the end (authz.reporting_closure_defer / flush,
+   * 0476); a loop is still refused on the move that closes it.
+   */
   async orgChartApply(user: AuthedUser, body: OrgChartApply) {
     const ids = [...body.moves.map((m) => m.userId), ...body.teamAdds.map((t) => t.userId)];
     if (new Set(ids).size !== ids.length) throw new UnprocessableEntityException("duplicate_user");
     for (const id of ids) this.notSelf(user, id);
     return this.tx(user, async (c) => {
+      await c.query(`SELECT authz.reporting_closure_defer()`);
       const warnings: { userId: string; code: string }[] = [];
       for (const m of body.moves) {
         const previous = (await c.query<{ m: string | null }>(
@@ -729,6 +750,7 @@ export class AdminService {
           actorId: user.id, action: "admin.team.member_added", entityType: "team", entityId: t.teamId, changes: { userId: t.userId, batch: true },
         });
       }
+      await c.query(`SELECT authz.reporting_closure_flush()`);
       return { applied: body.moves.length + body.teamAdds.length, warnings };
     });
   }
@@ -1080,28 +1102,38 @@ export class AdminService {
   }
 
   /**
-   * Adds several people to one team. Each add runs on its own (authz.admin_add_team_member),
-   * so one person already in a team does not block the rest; failures come back per user
-   * with the contract error code. 404 if the team does not exist.
+   * Adds several people to one team. Each add runs on its own (authz.admin_add_team_member,
+   * under a savepoint of one transaction), so one person already in a team does not block
+   * the rest; failures come back per user with the contract error code. 404 if the team
+   * does not exist. The reporting closure (0370: members report to the lead) is rebuilt
+   * once at the end (0476), not per person.
    */
   async addMembers(user: AuthedUser, teamId: string, userIds: string[]) {
-    const exists = await this.tx(user, async (c) =>
-      (await c.query(`SELECT 1 FROM eureka.team WHERE id = $1 AND deleted_at IS NULL`, [teamId])).rowCount === 1);
-    if (!exists) throw new NotFoundException();
-    const added: string[] = [];
-    const failed: { userId: string; error: string }[] = [];
-    for (const userId of [...new Set(userIds)]) {
-      try {
-        await this.addMember(user, teamId, userId);
-        added.push(userId);
-      } catch (err) {
-        if (!(err instanceof HttpException)) throw err;
-        const res = err.getResponse();
-        const code = typeof res === "object" && res && "message" in res ? String((res as { message: unknown }).message) : err.message;
-        failed.push({ userId, error: err.getStatus() === 404 ? "user_not_found" : code });
+    return this.tx(user, async (c) => {
+      if ((await c.query(`SELECT 1 FROM eureka.team WHERE id = $1 AND deleted_at IS NULL`, [teamId])).rowCount !== 1) {
+        throw new NotFoundException();
       }
-    }
-    return { added, failed };
+      await c.query(`SELECT authz.reporting_closure_defer()`);
+      const added: string[] = [];
+      const failed: { userId: string; error: string }[] = [];
+      for (const userId of [...new Set(userIds)]) {
+        if (userId === user.id) { failed.push({ userId, error: "self_change" }); continue; }
+        await c.query("SAVEPOINT team_member");
+        try {
+          await c.query(`SELECT authz.admin_add_team_member($1, $2)`, [teamId, userId]);
+          await this.audit.record(c, { actorId: user.id, action: "admin.team.member_added", entityType: "team", entityId: teamId, changes: { userId } });
+          await c.query("RELEASE SAVEPOINT team_member");
+          added.push(userId);
+        } catch (err) {
+          const error = memberAddError(err);
+          if (error === null) throw err;
+          await c.query("ROLLBACK TO SAVEPOINT team_member");
+          failed.push({ userId, error });
+        }
+      }
+      await c.query(`SELECT authz.reporting_closure_flush()`);
+      return { added, failed };
+    });
   }
 
   /**

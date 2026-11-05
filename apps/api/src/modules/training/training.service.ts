@@ -391,20 +391,12 @@ export class TrainingService {
       const b = await this.loadBatch(c, id);
       if (!b.staffable) throw new ForbiddenException("Not permitted");
       if (!["planned", "in_training"].includes(b.status)) throw new UnprocessableEntityException("batch_closed");
-      const added: string[] = [];
-      const skipped: string[] = [];
-      for (const candidateId of new Set(candidateIds)) {
-        await c.query("SAVEPOINT add_student");
-        try {
-          await c.query(`SELECT authz.set_batch_student($1, $2, true)`, [id, candidateId]);
-          added.push(candidateId);
-        } catch (err) {
-          if ((err as { message?: string }).message !== "candidate_not_eligible") return mapTrainingError(err);
-          await c.query("ROLLBACK TO SAVEPOINT add_student");
-          skipped.push(candidateId);
-        }
-        await c.query("RELEASE SAVEPOINT add_student");
-      }
+      // One call (0476): the rules of authz.set_batch_student per candidate, scope sets computed once,
+      // candidates locked in id order; one row per distinct candidate, in request order.
+      const outcomes = (await c.query<{ candidate_id: string; outcome: "added" | "skipped" }>(
+        `SELECT candidate_id, outcome FROM authz.set_batch_students($1, $2::uuid[])`, [id, candidateIds]).catch(mapTrainingError)).rows;
+      const added = outcomes.filter((o) => o.outcome === "added").map((o) => o.candidate_id);
+      const skipped = outcomes.filter((o) => o.outcome === "skipped").map((o) => o.candidate_id);
       await this.audit.record(c, {
         actorId: user.id, action: "training.students_added", entityType: "batch", entityId: id,
         changes: { candidateIds: added, skipped: skipped.length },
