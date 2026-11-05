@@ -1,5 +1,5 @@
 # Employees — `/employees`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `employee:read` (nav.ts:26) — HR, Accounts, CEO, managers by scope; lifecycle actions from `employee.actions`; Export with `report:export`
 Source: `apps/web/src/employees/EmployeesPage.tsx` (559 lines). `employees/MarketReport.tsx` is rendered inside Reports (`JoiningsExitsReport.tsx:7`), not on this route; it's covered in the appendix below.
 Evidence: `employees-desktop.png`, `employees-desktop-full.png`, `employees-mobile.png`, `employees-mobile-full.png`, `employees-detail-drawer-desktop.png`, `employees-detail-drawer-mobile.png`
@@ -75,3 +75,20 @@ Visual inspection: desktop 1440 and mobile 390 as ceo and hr, list and drawer. O
 | A2 | "Group by" wraps its select in a `<label>` inside `.field.inline` (:55-60), while the date fields use a separate `<label htmlFor>`. That's two label patterns in one toolbar. | Design consistency | Low |
 | A3 | The export hint text sits inside the toolbar under the button (:79) and shifts the layout whenever export permission varies. | Visual | Low |
 Fix: add `num` to the count cells and headers, use `<Field>` for all three controls, and move the hint to a `title` or the success message.
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence (`screenshots/after/`) |
+|---|---|---|
+| #1 Open clipped at 1440 (Critical) | `.dtable` with priority columns: Employee, Status, Client · assignment, Dates, Lead/recruiter, Location/team (p2), Contact (wide screens and phone cards); Open pinned right; row and name open the drawer | employees-desktop.png (c-act in view) |
+| #2 Four-line date cells (Medium) | One Dates cell: start → end/ongoing, planned end below | employees-desktop.png |
+| #3 Ending soon buried (Medium) | Ending within 30 days sits inline next to the Status toggles; planned ends within 30 days are flagged "in Nd" (warn) | employees-desktop.png |
+| #4 Drawer assignments 12 columns (High) | Four stacked columns (Client · vendor, Dates, Employment, Pay rate) + Edit; wraps inside the 572px drawer | employees-drawer-desktop.png |
+| #5 Drawer not routed (Medium) | `initialOpenId` / `onOpenChange` props via `useRoutedId` (App.tsx change requested) | app_requests |
+| #6 Raw E.164 phones (Low) | `fmtPhone` (+1 469 555 0001); tel: keeps the raw value | employees-mobile.png |
+| #7 Hand-rolled pay rate (Low) | `fmtUsd` (shared back-office formatter) | unit test |
+| #8 Action labels / destructive inline (Low) | Action strip: primary next step, then routine, then End assignment… and Record exit… in danger style last | employees-drawer-desktop.png |
+| #9 Phone: 2 of 9 columns (High) | Record cards; filters in the bottom sheet | employees-mobile.png |
+| #10 Export in the filter row (Low) | Export CSV in the page head | employees-desktop.png |
+| Filters in URL | status, loc, client, current, vendor, payroll, soon, q; Client/Vendor/Payroll behind More filters as chips | unit test |
+
+Validation (wave 2): typecheck clean; unit tests for paperwork, employees, payments, sites and datahub pass (87). The shared API on :3000 and its Postgres were down during this wave (the session could not restart them), so the visual check ran against the built screens with the network layer mocked by fictional fixtures (Playwright `page.route`), at 1440×900 and 390×844, light and dark. Page width at 390 is 390 on every screen and state; no table wrap scrolls sideways at either width; every row action column (`td.c-act`) is inside the viewport at 1440. Re-check against live seeded data when the API is back.

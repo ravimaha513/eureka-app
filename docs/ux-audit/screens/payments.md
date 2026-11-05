@@ -1,5 +1,5 @@
 # Payments — `/payments`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `invoice:read` (nav.ts:29). Accounts create and edit with `invoice:update` (:47); Sales see invoices by hierarchy, with amounts only with `rate:read`.
 Source: `apps/web/src/payments/PaymentsPage.tsx` (479 lines), `payments/paymentsApi.ts`
 Evidence: `payments-desktop.png`, `payments-mobile.png`, `payments-desktop-full.png`, `payments-mobile-full.png`, `payments-acct-desktop.png`, `payments-acct-mobile.png`, `payments-newinvoice-desktop.png`, `payments-newinvoice-mobile.png`
@@ -68,3 +68,22 @@ PaymentsPage.tsx (columns, drawer layout, dialog combobox), styles.css (fieldset
 
 ## Validation
 Visual inspection: desktop 1440 and mobile 390 as ceo (read-only) and acct (with New invoice), plus the New invoice dialog. The dev seed has no invoices, so the populated table, drawer and Payment dialog were reviewed from source only (`PaymentsPage.tsx:131-160, 198-260`). Overflow measured: table wrap 1130/1110 with 0 rows. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence (`screenshots/after/`) |
+|---|---|---|
+| #1 13 columns overflow (High) | Prioritised `.dtable`: Candidate, Status, Invoice, Amount, Expected, Received, Client/vendor, Recruiter/TL, Manager/AD (p2), Rate/part, Joined, Timesheet, Hours (p3); Open pinned; row opens | payments-desktop.png |
+| #2 Dead KPI tiles (Medium) | Delayed/Pending/Received tiles are `aria-pressed` shortcuts to the status filter; Outstanding first, says "for these filters" when scoped | unit test |
+| #3 Record payment below the fold (High) | Drawer action strip: status, expected (Nd late), amount still due, Record payment (primary), Edit, More → Void; facts grouped Invoice / Placement / People | payments-drawer-desktop.png |
+| #4 Money not aligned (Medium) | Amount is its own right-aligned tabular column; all money via one formatter | payments-desktop.png |
+| #5 Unstyled fieldset (Medium) | `.pay-fieldset`: titled sunk group | — |
+| #6 Placement error not linked (Medium) | `aria-describedby` to the error | — |
+| #7 Money inputs (Low) | $ prefix; the wheel no longer changes values | — |
+| #8 Field order (Low) | Timesheet → period → hours → amounts → invoice no./date/terms | — |
+| #9 Lone "to" label (Low) | "Invoiced to" | — |
+| #10 Phone tiles and table (Medium) | Outstanding full width, three counts in a row; invoice cards | payments-mobile.png |
+| #11 Invoice not routed (Medium) | `initialOpenId` / `onOpenChange` props (App.tsx change requested) | app_requests |
+
+Not changed / deferred: Placement picker stays search + select (no shared listbox combobox in the kit).
+
+Validation (wave 2): typecheck clean; unit tests for paperwork, employees, payments, sites and datahub pass (87). The shared API on :3000 and its Postgres were down during this wave (the session could not restart them), so the visual check ran against the built screens with the network layer mocked by fictional fixtures (Playwright `page.route`), at 1440×900 and 390×844, light and dark. Page width at 390 is 390 on every screen and state; no table wrap scrolls sideways at either width; every row action column (`td.c-act`) is inside the viewport at 1440. Re-check against live seeded data when the API is back.

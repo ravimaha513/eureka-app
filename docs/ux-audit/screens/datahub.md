@@ -1,5 +1,5 @@
 # DataHub — `/datahub`
-Status: Audited · Redesign proposed
+Status: Audited · Redesign proposed · Implemented (rebrand wave 2)
 Who / permission: `datahub:read` (nav.ts:28) — every staff role except org_admin. Folder management with `datahub:manage` (HR/Accounts org-wide, Location Ops by location) or `datahub:create` (own folders). Per-folder `actions` decide upload, manage and subfolder (docs/datahub-api.md DH-1..2a).
 Source: `apps/web/src/datahub/DataHubPage.tsx` (733 lines), `datahub/datahubApi.ts`, `documents/DocumentViewer.tsx`, `ui/StepUpDialog.tsx`
 Evidence: `datahub-desktop.png`, `datahub-mobile.png`, `datahub-desktop-full.png`, `datahub-mobile-full.png`, `datahub-folder-desktop.png`, `datahub-folder-mobile.png`, `datahub-upload-dialog-desktop.png`, `datahub-upload-dialog-mobile.png`
@@ -67,3 +67,18 @@ DataHubPage.tsx (dialog default, header buttons, routed selection, search placem
 
 ## Validation
 Visual inspection: desktop 1440 and mobile 390 as ceo, initial state, a selected folder ("Company policies") and the Upload dialog. Overflow: none at 390 (390/390). No files in the seed, so the file table, the Versions/Members/Access log dialogs and the viewer were reviewed from source only. Redesign validation: pending (not implemented).
+
+### Implemented (wave 2)
+| Audit item | Change | Evidence (`screenshots/after/`) |
+|---|---|---|
+| #1 Upload silently switches folder (High) | The open folder is preselected only when it takes uploads; otherwise nothing is preselected, the dialog says "You can't upload to X", and a target is required and echoed ("Uploads to …") | datahub-upload-desktop.png, unit test |
+| #2 Icon-only header actions (Medium) | "New folder" and "Upload" (primary) with icons; tagline replaced with the level rule | datahub-desktop.png |
+| #3 Empty pane, no deep link (Medium) | Open folder in the URL (`?folder=`); desktop opens the first readable folder | datahub-desktop.png |
+| #5 Member removal unconfirmed (Medium) | Remove asks in the row: "Remove X? They lose access to this folder now." Keep / Remove access | unit test |
+| #6 Six equal folder buttons (Low) | Upload to folder (primary), Subfolder, Manage menu (Settings, Members, Access log, Delete folder… in danger, last) | datahub-desktop.png |
+| #7 Title case and "*" (Low) | "New folder", "Create folder", "Folder name", "Description (optional)" | unit test |
+| #9 Phone master-detail (Medium) | Folder list is the phone screen until a folder opens; Folders back button; file cards with 44px actions | datahub-mobile.png |
+
+Not changed / deferred: #4 Search still replaces the panes (Low). #8 Native file input kept (no shared FileDrop yet). #10 Upload feedback unification: Bills now uses an info banner; a shared UploadProgress is requested.
+
+Validation (wave 2): typecheck clean; unit tests for paperwork, employees, payments, sites and datahub pass (87). The shared API on :3000 and its Postgres were down during this wave (the session could not restart them), so the visual check ran against the built screens with the network layer mocked by fictional fixtures (Playwright `page.route`), at 1440×900 and 390×844, light and dark. Page width at 390 is 390 on every screen and state; no table wrap scrolls sideways at either width; every row action column (`td.c-act`) is inside the viewport at 1440. Re-check against live seeded data when the API is back.
