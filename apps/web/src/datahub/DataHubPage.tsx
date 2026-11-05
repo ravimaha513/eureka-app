@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Download, Eye, FolderOpen, FolderPlus, Globe, History, Lock, Search, Settings2, Shield, Trash2, Upload, Users, X, ScrollText,
+  ArrowLeft, Download, Eye, FolderOpen, FolderPlus, Globe, History, Lock, Search, Shield, Trash2, Upload, X,
 } from "lucide-react";
 import {
   DATAHUB_LEVELS, DATAHUB_LEVEL_LABELS, DOCUMENT_CONTENT_TYPES, datahubFolderNameProblem,
@@ -19,6 +19,9 @@ import {
   type FileItem, type Folder, type FolderInput, type Person, type Version,
 } from "./datahubApi";
 import { fmtDateTime } from "../lib/format";
+import { useSearchParam } from "../lib/router";
+import { Menu } from "../ui/Menu";
+import "./datahub.css";
 
 export const DATAHUB_POLL_MS = 3000;
 const ACCEPT = [".pdf", ".docx", ".png", ".jpg", ".jpeg", ...Object.keys(DOCUMENT_CONTENT_TYPES)].join(",");
@@ -180,13 +183,13 @@ function FolderDialog({ folder, parent, createScope, onClose, onSaved }: {
     }
   };
 
-  const title = editing ? "Folder settings" : parent ? `New subfolder in ${parent.name}` : "Create New Folder";
+  const title = editing ? "Folder settings" : parent ? `New subfolder in ${parent.name}` : "New folder";
   return (
     <Dialog title={title} onClose={onClose}>
       <form ref={formRef} onSubmit={(e) => void submit(e)} noValidate className="dh-form">
         <div className="grid2">
-          <Field label="Folder name *" error={errors.name}>
-            {(p) => <input {...p} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} data-autofocus placeholder="Eg. Java Resumes" />}
+          <Field label="Folder name" error={errors.name}>
+            {(p) => <input {...p} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} data-autofocus placeholder="e.g. Java resumes" />}
           </Field>
           <Field label="Security level" hint={DATAHUB_LEVEL_LABELS[level].help}>
             {(p) => (
@@ -212,8 +215,8 @@ function FolderDialog({ folder, parent, createScope, onClose, onSaved }: {
             )}
           </Field>
         )}
-        <Field label="Description (Optional)" error={errors.description}>
-          {(p) => <textarea {...p} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Enter folder description" />}
+        <Field label="Description (optional)" error={errors.description}>
+          {(p) => <textarea {...p} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What belongs in this folder" />}
         </Field>
         {editing && (
           <label className="check dh-check"><input type="checkbox" checked={membersCanUpload} onChange={(e) => setMembersCanUpload(e.target.checked)} />
@@ -222,7 +225,7 @@ function FolderDialog({ folder, parent, createScope, onClose, onSaved }: {
         {editing && folder.level === "restricted" && level !== "restricted" && (
           <p className="note warn">Lowering the level removes the folder's member list.</p>
         )}
-        <DialogActions onCancel={onClose} submitLabel={editing ? "Save" : "Create Folder"} busy={busy} error={error} />
+        <DialogActions onCancel={onClose} submitLabel={editing ? "Save" : "Create folder"} busy={busy} error={error} />
       </form>
     </Dialog>
   );
@@ -234,7 +237,12 @@ function UploadDialog({ folders, initialFolderId, onClose, onUploaded }: {
   folders: Folder[]; initialFolderId: string | null; onClose: () => void; onUploaded: (folderId: string, name: string, version: number) => void;
 }) {
   const targets = folders.filter((f) => f.actions.upload);
-  const [folderId, setFolderId] = useState(initialFolderId && targets.some((t) => t.id === initialFolderId) ? initialFolderId : targets[0]?.id ?? "");
+  // The open folder is the target when it takes uploads; otherwise nothing is preselected and the user must choose
+  // (never a silent switch to another folder).
+  const open = initialFolderId ? folders.find((f) => f.id === initialFolderId) ?? null : null;
+  const openUploadable = open !== null && targets.some((t) => t.id === open.id);
+  const [folderId, setFolderId] = useState(openUploadable ? open.id : targets.length === 1 && !open ? targets[0]!.id : "");
+  const [folderErr, setFolderErr] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [problem, setProblem] = useState("");
   const [error, setError] = useState("");
@@ -246,9 +254,10 @@ function UploadDialog({ folders, initialFolderId, onClose, onUploaded }: {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    const p = !folderId ? "Choose a folder." : !file ? "Choose a file to upload." : datahubFileProblem(file);
-    setProblem(p ?? "");
-    if (p || !file) { failed(); return; }
+    const fp = !file ? "Choose a file to upload." : datahubFileProblem(file);
+    setFolderErr(folderId ? "" : "Choose the folder to upload to.");
+    setProblem(fp ?? "");
+    if (!folderId || fp || !file) { failed(); return; }
     setProgress(0);
     try {
       const r = await datahubApi.requestUpload(folderId, file.name.trim(), documentTypeOf(file)!, file.size);
@@ -271,9 +280,13 @@ function UploadDialog({ folders, initialFolderId, onClose, onUploaded }: {
         </>
       ) : (
         <form ref={formRef} onSubmit={(e) => void submit(e)} noValidate>
-          <Field label="Folder">
+          {open && !openUploadable && (
+            <p className="note warn">You can't upload to {open.name}. Choose a folder that takes uploads.</p>
+          )}
+          <Field label="Folder" error={folderErr} hint={folderId ? `Uploads to ${targets.find((t) => t.id === folderId)?.name ?? "this folder"}.` : undefined}>
             {(p) => (
-              <select {...p} value={folderId} onChange={(e) => setFolderId(e.target.value)}>
+              <select {...p} value={folderId} onChange={(e) => { setFolderId(e.target.value); setFolderErr(""); }}>
+                <option value="">Choose a folder…</option>
                 {targets.map((f) => <option key={f.id} value={f.id}>{f.name} ({DATAHUB_LEVEL_LABELS[f.level].label})</option>)}
               </select>
             )}
@@ -333,6 +346,7 @@ function MembersDialog({ folder, onClose }: { folder: Folder; onClose: () => voi
   const q = useQuery({ queryKey: datahubKeys.members(folder.id), queryFn: () => datahubApi.members(folder.id) });
   const [error, setError] = useState("");
   const [adding, setAdding] = useState<Person[]>([]);
+  const [removing, setRemoving] = useState<string | null>(null);
   const change = async (fn: () => Promise<void>) => {
     setError("");
     try {
@@ -349,9 +363,23 @@ function MembersDialog({ folder, onClose }: { folder: Folder; onClose: () => voi
       {q.isLoading ? <p className="muted">Loading…</p> : (
         <ul className="members" aria-label="Members">
           {(q.data?.items ?? []).map((m) => (
-            <li key={m.id}>{m.name ?? m.id}
-              <button type="button" className="btn sm danger" onClick={() => void change(() => datahubApi.removeMember(folder.id, m.id))}>
-                Remove<span className="sr-only"> {m.name}</span></button>
+            <li key={m.id} className={removing === m.id ? "dh-removing" : undefined}>
+              {removing === m.id ? (
+                <>
+                  <span role="alert" className="dh-confirmtext">Remove {m.name ?? "this member"}? They lose access to this folder now.</span>
+                  <span className="dh-confirmbtns">
+                    <button type="button" className="btn sm" onClick={() => setRemoving(null)}>Keep<span className="sr-only"> {m.name}</span></button>
+                    <button type="button" className="btn sm danger" data-autofocus
+                      onClick={() => { setRemoving(null); void change(() => datahubApi.removeMember(folder.id, m.id)); }}>
+                      Remove access<span className="sr-only"> for {m.name}</span></button>
+                  </span>
+                </>
+              ) : (
+                <>
+                  {m.name ?? m.id}
+                  <button type="button" className="btn sm danger" onClick={() => setRemoving(m.id)}>Remove<span className="sr-only"> {m.name}</span></button>
+                </>
+              )}
             </li>
           ))}
           {q.data?.items.length === 0 && <li className="muted">No members yet.</li>}
@@ -419,7 +447,10 @@ type Modal =
 export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
   const qc = useQueryClient();
   const folders = useQuery({ queryKey: datahubKeys.folders, queryFn: datahubApi.folders });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The open folder lives in the URL (?folder=), so it survives refresh and can be linked.
+  const [folderParam, setFolderParam] = useSearchParam("folder");
+  const selectedId = folderParam || null;
+  const setSelectedId = (id: string | null) => setFolderParam(id ?? "");
   const [modal, setModal] = useState<Modal | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -432,6 +463,13 @@ export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
 
   const items = folders.data?.items ?? [];
   const selected = items.find((f) => f.id === selectedId) ?? null;
+  const foldersPane = useRef<HTMLElement>(null);
+  // Land on a folder, not an empty pane: the first one the user can read (desktop; phones start on the folder list).
+  useEffect(() => {
+    if (selectedId || !folders.data || window.matchMedia?.("(max-width: 768px)").matches) return;
+    const first = folders.data.items.find((f) => f.actions.read);
+    if (first) setSelectedId(first.id);
+  }, [folders.data, selectedId]);
   const tree = useMemo(() => {
     const ids = new Set(items.map((f) => f.id));
     const roots = items.filter((f) => !f.parentId || !ids.has(f.parentId));
@@ -497,17 +535,17 @@ export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
       <div className="pagehead">
         <div>
           <h1 tabIndex={-1}>DataHub</h1>
-          <p className="sub">Secure document management and collaboration</p>
+          <p className="sub">Shared files by folder. Internal folders are open to everyone, confidential ones to chosen roles, restricted ones to named people.</p>
         </div>
-        <div className="push dh-headactions">
+        <div className="pageactions dh-headactions">
           {folders.data?.canCreate && (
-            <button type="button" className="btn dh-iconbtn" aria-label="New folder" title="New folder" onClick={() => setModal({ kind: "create", parent: null })}>
-              <FolderPlus size={18} aria-hidden="true" />
+            <button type="button" className="btn" onClick={() => setModal({ kind: "create", parent: null })}>
+              <FolderPlus size={16} aria-hidden="true" />New folder
             </button>
           )}
-          <button type="button" className="btn primary dh-iconbtn" aria-label="Upload" title="Upload" disabled={!canUploadSomewhere}
+          <button type="button" className="btn primary" disabled={!canUploadSomewhere}
             onClick={() => setModal({ kind: "upload" })}>
-            <Upload size={18} aria-hidden="true" />
+            <Upload size={16} aria-hidden="true" />Upload
           </button>
         </div>
       </div>
@@ -564,7 +602,7 @@ export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
         </section>
       ) : (
         <div className="dh-layout">
-          <section className="card dh-folders" aria-labelledby="dh-folders-h">
+          <section className="card dh-folders" aria-labelledby="dh-folders-h" ref={foldersPane}>
             <h2 id="dh-folders-h" className="dh-paneltitle">Folders</h2>
             {folders.isLoading ? <p className="muted">Loading…</p>
               : folders.error ? <p className="error">{datahubError(folders.error)}</p>
@@ -606,13 +644,19 @@ export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
                       {selected.description && <p className="dh-desc">{selected.description}</p>}
                     </div>
                   </div>
-                  <div className="rowactions">
+                  <div className="dh-folderactions">
+                    <button type="button" className="btn sm dh-back" onClick={() => foldersPane.current?.scrollIntoView?.({ block: "start" })}>
+                      <ArrowLeft size={14} aria-hidden="true" />Folders</button>
                     {selected.actions.upload && <button type="button" className="btn sm primary" onClick={() => setModal({ kind: "upload" })}><Upload size={14} aria-hidden="true" /> Upload to folder</button>}
                     {selected.actions.createSubfolder && <button type="button" className="btn sm" onClick={() => setModal({ kind: "create", parent: selected })}><FolderPlus size={14} aria-hidden="true" /> Subfolder</button>}
-                    {selected.actions.manage && <button type="button" className="btn sm" onClick={() => setModal({ kind: "edit", folder: selected })}><Settings2 size={14} aria-hidden="true" /> Settings</button>}
-                    {selected.actions.manage && selected.level === "restricted" && <button type="button" className="btn sm" onClick={() => setModal({ kind: "members", folder: selected })}><Users size={14} aria-hidden="true" /> Members</button>}
-                    {selected.actions.manage && <button type="button" className="btn sm" onClick={() => setModal({ kind: "log", folder: selected })}><ScrollText size={14} aria-hidden="true" /> Access log</button>}
-                    {selected.actions.manage && <button type="button" className="btn sm danger" onClick={() => setModal({ kind: "deleteFolder", folder: selected })}><Trash2 size={14} aria-hidden="true" /> Delete folder</button>}
+                    {selected.actions.manage && (
+                      <Menu label="Manage folder" text="Manage" items={[
+                        { label: "Settings", onSelect: () => setModal({ kind: "edit", folder: selected }) },
+                        selected.level === "restricted" && { label: "Members", onSelect: () => setModal({ kind: "members", folder: selected }) },
+                        { label: "Access log", onSelect: () => setModal({ kind: "log", folder: selected }) },
+                        { label: "Delete folder…", danger: true, onSelect: () => setModal({ kind: "deleteFolder", folder: selected }) },
+                      ]} />
+                    )}
                   </div>
                 </div>
                 {!selected.actions.read ? (
@@ -621,21 +665,21 @@ export function DataHubPage({ pollMs = DATAHUB_POLL_MS }: { pollMs?: number }) {
                   : files.error ? <p className="error">{datahubError(files.error)}</p>
                   : !files.data?.items.length ? <div className="dh-empty"><p>No documents in this folder yet.</p></div>
                   : (
-                    <div className="tablewrap"><table aria-label={`Files in ${selected.name}`}>
+                    <div className="tablewrap listcard dh-filewrap"><table className="dtable dh-filetable" aria-label={`Files in ${selected.name}`}>
                       <thead><tr>
-                        <th scope="col">Name</th><th scope="col">Version</th><th scope="col">Size</th><th scope="col">Uploaded by</th>
-                        <th scope="col">Date</th><th scope="col">Status</th><th scope="col"><span className="sr-only">Actions</span></th>
+                        <th scope="col">Name</th><th scope="col">Status</th><th scope="col" className="num">Version</th><th scope="col" className="num">Size</th>
+                        <th scope="col" className="p2">Uploaded by</th><th scope="col">Date</th><th scope="col" className="c-act"><span className="sr-only">Actions</span></th>
                       </tr></thead>
                       <tbody>
                         {files.data.items.map((f) => (
                           <tr key={f.id}>
-                            <td className="wrap dh-name">{f.name}</td>
-                            <td>v{f.latestVersion.version}</td>
-                            <td>{fmtBytes(f.latestVersion.sizeBytes)}</td>
-                            <td>{f.latestVersion.uploadedBy.name ?? "—"}</td>
-                            <td><time dateTime={f.latestVersion.createdAt}>{fmtDateTime(f.latestVersion.createdAt)}</time></td>
-                            <td><StatusPill v={f.latestVersion} /></td>
-                            <td className="rowactions">
+                            <td className="c-primary wrap dh-name">{f.name}</td>
+                            <td className="c-badge" data-label="Status"><StatusPill v={f.latestVersion} /></td>
+                            <td className="num" data-label="Version">v{f.latestVersion.version}</td>
+                            <td className="num" data-label="Size">{fmtBytes(f.latestVersion.sizeBytes)}</td>
+                            <td className="p2" data-label="Uploaded by">{f.latestVersion.uploadedBy.name ?? "—"}</td>
+                            <td data-label="Date"><time dateTime={f.latestVersion.createdAt}>{fmtDateTime(f.latestVersion.createdAt)}</time></td>
+                            <td className="c-act">
                               <button type="button" className="iconbtn" aria-label={`View ${f.name}`} title="View"
                                 disabled={!f.actions.download || busy !== null} onClick={() => void download(f.latestVersion, f.name, true)}>
                                 <Eye size={16} aria-hidden="true" />
