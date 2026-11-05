@@ -126,7 +126,8 @@ describe("FilterBar", () => {
         search={<div className="field inline fb-search"><label htmlFor="q">Search</label><input id="q" /></div>}
         primary={<div className="field inline"><label htmlFor="st">Status</label><select id="st"><option>Any</option></select></div>}
         more={<div className="field inline"><label htmlFor="loc">Location</label><select id="loc"><option>Any</option></select></div>}
-        chips={loc ? [{ key: "loc", label: "Location: X", onRemove: () => setLoc("") }] : []} />
+        chips={loc ? [{ key: "loc", label: "Location: X", onRemove: () => setLoc("") }] : []}
+        showLabel={loc ? "Show 3 jobs" : "Show 9 jobs"} />
     );
   }
 
@@ -141,5 +142,16 @@ describe("FilterBar", () => {
     expect(screen.getByRole("group", { name: "More filters" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Remove filter Location: X" }));
     expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+  });
+
+  it("sheet footer: Reset clears every filter, the show button carries the result count", () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: /^Filters/ }));
+    expect(screen.getByRole("button", { name: "Show 3 jobs" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(screen.getByRole("button", { name: "Show 9 jobs" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reset" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Show 9 jobs" }));
+    expect(screen.getByRole("button", { name: /^Filters/ })).toHaveAttribute("aria-expanded", "false");
   });
 });
