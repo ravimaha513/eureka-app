@@ -27,6 +27,10 @@ const RATIO_FORMULA: Record<keyof Ratios, string> = {
   submissionToInterview: "interviews ÷ submissions", interviewToPlacement: "placements ÷ interviews", placement: "placements ÷ submissions",
 };
 
+/** People shown before "Show all"; a list only a few longer than this is shown whole. */
+const PEOPLE_PAGE = 15;
+const NO_TEAM = "__none";
+
 type SortKey = "activity" | "name" | Kind | keyof Ratios;
 interface Sort { key: SortKey; desc: boolean }
 const activityOf = (p: PersonRow) => Object.values(p.counts).reduce((n, v) => n + v, 0);
@@ -85,6 +89,10 @@ export function PerformancePage({ me }: { me: Pick<Me, "capabilities"> }) {
   const [drill, setDrill] = useState<{ kind: Kind; userId: string | null; name: string } | null>(null);
   const [offset, setOffset] = useState(0);
   const [sort, setSort] = useState<Sort>({ key: "activity", desc: true });
+  const [find, setFind] = useState("");
+  const [teamFilter, setTeamFilter] = useState("");
+  const [showIdle, setShowIdle] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const [dialog, setDialog] = useState<
     | { kind: "target"; target?: Target } | { kind: "deleteTarget"; target: Target }
     | { kind: "designation"; person: Person } | { kind: "move"; person: Person } | null>(null);
@@ -126,7 +134,21 @@ export function PerformancePage({ me }: { me: Pick<Me, "capabilities"> }) {
   const setPeriod = (f: string, t: string) => { setFrom(f); setThrough(t); setDrill(null); };
   const s = summary.data;
   const rows = useMemo(() => (s ? sortPeople(s.people, sort) : []), [s, sort]);
-  const idle = rows.filter((p) => activityOf(p) === 0).length;
+  const teams = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of s?.people ?? []) if (p.team) m.set(p.team.id, p.team.name);
+    return [...m].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [s]);
+  const hasNoTeam = (s?.people ?? []).some((p) => !p.team);
+  const term = find.trim().toLowerCase();
+  // Team and search narrow the list; people with no activity stay hidden unless asked for or searched by name.
+  const inScope = rows.filter((p) => (!teamFilter || (teamFilter === NO_TEAM ? !p.team : p.team?.id === teamFilter))
+    && (!term || p.user.name.toLowerCase().includes(term) || (p.user.designation ?? "").toLowerCase().includes(term)));
+  const idle = inScope.filter((p) => activityOf(p) === 0).length;
+  const matching = showIdle || term ? inScope : inScope.filter((p) => activityOf(p) > 0);
+  const capped = !showAll && matching.length > PEOPLE_PAGE + 5;
+  const shown = capped ? matching.slice(0, PEOPLE_PAGE) : matching;
+  const sortValue = `${sort.key}:${sort.desc ? "desc" : "asc"}`;
   const periodText = s ? `${fmtInstant(s.period.from)} – ${fmtInstant(new Date(Date.parse(s.period.to) - 1).toISOString())}` : "";
   const drillCols = drill?.userId === null ? 6 : 5;
 
@@ -190,8 +212,45 @@ export function PerformancePage({ me }: { me: Pick<Me, "capabilities"> }) {
           <section className="ins-section" aria-labelledby={`${id}-people-h`}>
             <div className="ins-head">
               <h2 id={`${id}-people-h`}>By person <span className="ins-count">{s.people.length}</span></h2>
-              <span className="muted">{sort.key === "activity" ? "Most active first" : "Sorted by the chosen column"}{idle > 0 ? `, ${idle} with no activity last` : ""}. Select a count to see its rows.</span>
+              <span className="muted">{sort.key === "activity" ? "Most active first" : "Sorted by the chosen column"}. Select a count to see its rows.</span>
             </div>
+            {s.people.length > 0 && (
+              <div className="toolbar perf-filters" role="group" aria-label="Filter people">
+                <div className="field inline perf-find">
+                  <label htmlFor={`${id}-find`}>Find a person</label>
+                  <input id={`${id}-find`} type="search" placeholder="Name or designation" value={find} onChange={(e) => setFind(e.target.value)} />
+                </div>
+                {teams.length + (hasNoTeam ? 1 : 0) > 1 && (
+                  <div className="field inline">
+                    <label htmlFor={`${id}-team`}>Team</label>
+                    <select id={`${id}-team`} value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)}>
+                      <option value="">All teams</option>
+                      {teams.map(([tid, name]) => <option key={tid} value={tid}>{name}</option>)}
+                      {hasNoTeam && <option value={NO_TEAM}>No team</option>}
+                    </select>
+                  </div>
+                )}
+                <div className="field inline perf-sortpick">
+                  <label htmlFor={`${id}-sort`}>Sort by</label>
+                  <select id={`${id}-sort`} value={sortValue} onChange={(e) => {
+                    const [key, dir] = e.target.value.split(":");
+                    setSort({ key: key as SortKey, desc: dir === "desc" });
+                  }}>
+                    <option value="activity:desc">Most active</option>
+                    <option value="name:asc">Name A–Z</option>
+                    {s.kinds.map((k) => <option key={k} value={`${k}:desc`}>{KIND_LABELS[k]} (most first)</option>)}
+                    {RATIO_KEYS.map((r) => <option key={r} value={`${r}:desc`}>{RATIO_LABELS[r]} (highest first)</option>)}
+                    {!["activity:desc", "name:asc"].includes(sortValue) && !sortValue.endsWith(":desc") && <option value={sortValue}>Current column order</option>}
+                  </select>
+                </div>
+                {idle > 0 && !term && (
+                  <label className="perf-idletoggle">
+                    <input type="checkbox" checked={showIdle} onChange={(e) => setShowIdle(e.target.checked)} />
+                    Show {idle} with no activity
+                  </label>
+                )}
+              </div>
+            )}
             <div className="card tablewrap listcard">
               <table className="dtable perf-people" aria-label="By person">
                 <thead>
@@ -207,7 +266,7 @@ export function PerformancePage({ me }: { me: Pick<Me, "capabilities"> }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((p) => (
+                  {shown.map((p) => (
                     <tr key={p.user.id} className={activityOf(p) === 0 ? "perf-idle" : undefined}>
                       <td className="c-primary"><b>{p.user.name}</b>{p.user.designation && <span className="block muted">{p.user.designation}</span>}</td>
                       <td className="perf-team" data-label="Team">{p.team?.name ?? "—"}</td>
@@ -221,10 +280,24 @@ export function PerformancePage({ me }: { me: Pick<Me, "capabilities"> }) {
                       {RATIO_KEYS.map((r) => <td key={r} className="num perf-ratio" data-label={RATIO_SHORT[r]}>{pct(p.ratios[r])}</td>)}
                     </tr>
                   ))}
-                  {s.people.length === 0 && <tr><td colSpan={2 + s.kinds.length + RATIO_KEYS.length} className="empty">No one in your scope yet.</td></tr>}
+                  {shown.length === 0 && (
+                    <tr><td colSpan={2 + s.kinds.length + RATIO_KEYS.length} className="empty">
+                      {s.people.length === 0 ? "No one in your scope yet."
+                        : inScope.length === 0 ? "No one matches these filters."
+                          : `No activity in this period. ${idle === 1 ? "1 person has" : `${idle} people have`} none.`}
+                    </td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
+            {(capped || (showAll && matching.length > PEOPLE_PAGE + 5)) && (
+              <div className="toolbar perf-more">
+                <span className="muted" role="status">Showing {shown.length} of {matching.length}</span>
+                <button type="button" className="btn sm" aria-expanded={!capped} onClick={() => setShowAll(capped)}>
+                  {capped ? `Show all ${matching.length}` : `Show top ${PEOPLE_PAGE}`}
+                </button>
+              </div>
+            )}
           </section>
         </>
       ))}

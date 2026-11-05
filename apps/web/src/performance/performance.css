@@ -56,3 +56,16 @@ th[aria-sort] .ins-sorticon { opacity: 1; }
   .perf-people td.perf-ratio:last-child { grid-column: 5 / 6; }
   .drawer.wide:has(.perf-drill) { width: 100%; }
 }
+
+/* Person list filters: search, team, the no-activity toggle; the sort picker is for the card layout only. */
+.perf-filters { align-items: flex-end; margin-bottom: 10px; }
+.perf-filters .field input, .perf-filters .field select { min-width: 180px; }
+.perf-sortpick { display: none; }
+.perf-idletoggle { display: inline-flex; align-items: center; gap: 8px; min-height: var(--h-control); font-size: 13.5px; color: var(--text2); cursor: pointer; }
+.perf-more { justify-content: center; align-items: center; margin-top: 10px; }
+@media (max-width: 768px) {
+  .perf-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .perf-filters .perf-find, .perf-filters .perf-idletoggle { grid-column: 1 / -1; }
+  .perf-filters .field input, .perf-filters .field select { min-width: 0; width: 100%; }
+  .perf-sortpick { display: flex; }
+}
