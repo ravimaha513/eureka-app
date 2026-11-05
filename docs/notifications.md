@@ -10,7 +10,7 @@ Code: `apps/api/src/worker/notify-types.ts` (types, templates), `apps/api/src/wo
 1. A module records an `outbox_event` row in the same transaction as the change, from a SECURITY DEFINER
    function owned by `authz_definer` (the outbox guard refuses every other writer). Payload: ids, dates,
    enum codes and counts only, never names, contacts, rates or free text (HANDOFF rule 5).
-2. The worker job `outbox-delivery` (every tick, one `job_run` key per event) looks the type up in
+2. The worker job `outbox-delivery` (its own lane, every `OUTBOX_TICK_SECONDS`, default 10 s; one `job_run` key per event) looks the type up in
    `EVENT_SPECS`, resolves the recipients in the database with `authz.notification_recipients(event)` and
    delivers each channel the type has:
    - **inbox**: one `eureka.notification` row per recipient plus the `inbox_fanout` marker, in one
@@ -27,7 +27,8 @@ Code: `apps/api/src/worker/notify-types.ts` (types, templates), `apps/api/src/wo
 3. The event is published when every channel is done. Without a mail mode (`OUTBOX_MAIL_MODE=disabled`) the
    job still runs: in-app-only events are delivered and published; events that also email get their inbox
    rows under the run key `inbox:<event id>` and stay unpublished until mail is enabled (as placement
-   events always have). An event with no recipient stays unpublished and alerts (retried with backoff).
+   events always have). An event with no recipient stays unpublished and alerts (retried with backoff, then
+   dead-lettered: see "Dead letter").
 4. A type that is not in `EVENT_SPECS` is never delivered (and so never pruned): add the spec in the same
    change that starts emitting the type.
 5. **Detail lines (interview-alerts, 0089):** a spec may name a `details(event, db)` reader that calls a
@@ -101,6 +102,27 @@ It records `(job, key)` in `eureka.notification_ledger` and writes the event onl
 event id, or NULL when already emitted). Nobody but `authz_definer` can execute it; expose your own narrow
 definer function (like `authz.emit_bench_time(day, threshold)`) to `eureka_worker`, and refuse future days.
 
+## Worker lanes and dead letter (migration 0488, audit F-10)
+
+- **Two lanes, one process.** `worker.ts` runs two `JobRunner`s on one pool: the scheduled lane (every job below,
+  `JOB_TICK_SECONDS`, default 60) and the outbox lane (`outbox-delivery` only, `OUTBOX_TICK_SECONDS`, default 10).
+  A long audit export or key rotation no longer delays notifications. Both lanes claim keys through the same fenced
+  `job_run` leases, so they (and several worker tasks) never run a key twice. Each lane holds at most one client at a
+  time; `DB_POOL_MAX` defaults to 4. On SIGTERM both lanes stop scheduling and drain in parallel within
+  `SHUTDOWN_GRACE_SECONDS`.
+- **Dead letter.** A key fails, backs off exponentially (1 min doubling, capped at 6 h) and is retried; from
+  `OUTBOX_DEAD_LETTER_ATTEMPTS` failed attempts (default 12, about a day) it is given up: the event gets `dead_at`
+  (server time, set once, only while unpublished) and its `job_run` row the terminal status `dead` (error kept in
+  `detail`). A dead event is never claimed, delivered, published or pruned, and does not hold up the events behind
+  it. Each dead-lettering logs one alert line with `"metric":"outbox_dead_lettered"` (event id, attempts) and one
+  with `"metric":"job_dead_lettered"`. Inspect with
+  `SELECT e.id, e.type, e.dead_at, j.attempts, j.detail FROM eureka.outbox_event e JOIN eureka.job_run j
+   ON j.job_name = 'outbox-delivery' AND j.run_key IN (e.id::text, 'inbox:' || e.id) WHERE e.dead_at IS NOT NULL`.
+  There is no revive path: fix the cause and re-emit from the producer if the notice still matters.
+- **Backlog metric.** At most once a minute the outbox lane logs `"metric":"outbox_backlog"` with `pending`
+  (unpublished, not dead), `oldestPendingSeconds` and `deadLettered`. Alarm on `oldestPendingSeconds` and on
+  `deadLettered` growing. Note: with `OUTBOX_MAIL_MODE=disabled`, emailing events stay pending by design.
+
 ## Scheduled jobs (worker)
 
 | Job | Schedule | Run key | Notes |
@@ -111,6 +133,9 @@ definer function (like `authz.emit_bench_time(day, threshold)`) to `eureka_worke
 | `bench-time` | daily 07:45 America/New_York | the New York date | Only when `NOTIFY_BENCH_DAYS` is set (threshold is OD-05, open). One `employee.bench_time` per candidate and bench period (ledger key `candidate:bench_since`, whatever the threshold; a changed threshold does not re-notify), only for candidates whose N-th bench day falls within the last `NOTIFY_BENCH_WINDOW_DAYS` (default 7) days, so a first enable does not notify the whole bench; a worker down longer than the window misses those crossings. The database refuses a future day (0051) |
 | `birthday-digest` | daily 08:00 America/New_York | the New York date | interview-alerts (0087). One `staff.birthdays_today` per day with at least one staff birthday (ledger key = the date); 29 February counts on 28 February in non-leap years; the database refuses a future day |
 | `performance-below-target` | daily 07:15 America/New_York | the New York date | performance (0112). One `performance.below_target` per target whose period ended within the last 14 days with a metric short of its target (ledger key = the target id); the database refuses a future day |
+| `session-retention` | daily 05:15 America/New_York | UTC date (maintenance) | Always on (0488, audit G-08). Deletes staff sessions that ended (expired or revoked) more than `SESSION_RETENTION_DAYS` (default and floor 30, the Settings login-activity window) ago with their step-up rows, step-up challenges/grants expired more than `STEP_UP_RETENTION_DAYS` (default 7) ago, and ended applicant (portal) sessions after `SESSION_RETENTION_DAYS`, verified applicants included. Definer functions `eureka.prune_staff_sessions`, `eureka.prune_step_up`, `authz.prune_applicant_sessions` (worker-only EXECUTE; the database refuses shorter retention). Counts only in `job_run` |
+| `audit-retention` | daily 05:30 America/New_York | UTC date (maintenance) | **Off unless `AUDIT_RETENTION_DAYS` is set** (see "Retention") |
+| `rate-limit-purge` | hourly (5 min past) | UTC hour `YYYY-MM-DDTHH` | Calls `authz.rate_purge()` (shared rate limiter, migrations 0486/0487) when `to_regprocedure('authz.rate_purge()')` exists; until then records `available: false` and does nothing |
 | `notification-prune` | daily 04:30 America/New_York | UTC date (maintenance) | Deletes inbox rows older than `NOTIFICATION_RETENTION_DAYS` (default 180); the database refuses fewer than 30 days |
 | `candidate-nonresponse` | daily 07:40 America/New_York | the New York date | Always on. Open "not responding" flags raised at least `NONRESPONSE_HOLD_DAYS` (default 3) New York days before reach the hold stage once (`hold_reached_at`, ledger key `<flag>:hold`); the database refuses a future day and a delay outside 1-60 (0171) |
 | `candidate-nonresponse-mail` | every tick | `<flag id>:<stage>` | Only with a candidate mail transport (`FEEDBACK_MAIL_MODE`). The warning and hold emails to the candidate's personal email (fixed text), at most once per flag and stage, within 14 days of the stage, never after the flag is resolved (0171, docs/pipeline-vendors-api.md PV-8) |
@@ -148,6 +173,29 @@ placement or candidate when the user has that screen.
 - Triggers refuse every other write (owner and superuser included): notification inserts only by the worker,
   updates only of `read_at` by the app, deletes only by the worker past 30 days, no TRUNCATE; markers go only
   with their pruned event; the ledger is append-only.
+
+## Retention (migration 0488, audit G-08)
+
+- **Sessions and step-up rows:** `session-retention` above. Personal metadata (masked IP, browser, device) of ended
+  sessions is kept 30 days by default.
+- **`audit_event` archival policy:** audit rows are **kept for ever by default**. The daily `audit-export` (03:30 New
+  York) writes each closed UTC day to S3 and records it in the append-only `audit_export` ledger (row count, seq
+  range, SHA-256). Pruning is opt-in: setting `AUDIT_RETENTION_DAYS` (at least 365) schedules `audit-retention`, which
+  calls `eureka.audit_prune_exported(days)` to delete rows older than that whose UTC day has a ledger row and whose
+  `seq` lies in that day's exported range. A day that was never exported (or a row outside its exported range) is
+  never deleted. The same predicate is the owner's RLS delete policy, so no other path can prune more; the worker
+  and the API definer role have no DELETE on `audit_event`. Once pruned, the S3 export is the
+  record. Decide the period with compliance (AS-13) before setting it. Partitioning by month was
+  not done (G-08 alternative chosen: delete exported rows after the retention period).
+
+## Go-live: production worker (audit F-09)
+
+`infra/live/production/env.hcl` sets `worker_desired_count = 0` ("worker ships in Phase 2"). **This must be at least
+1 before production go-live.** Without a worker nothing in this document runs: no outbox delivery (inbox included),
+no document or resume promotion out of quarantine, no audit export, no idempotency/outbox/session cleanup, no user
+purge, and no alert fires (the alerting lives in the worker). Staging runs one worker. Also set the worker's
+`DB_POOL_MAX` to 4 there (two lanes; it is 3 in `infra/modules/stack/app.tf`) and alarm on the `outbox_backlog`
+metric line.
 
 ## Open questions and follow-ups
 

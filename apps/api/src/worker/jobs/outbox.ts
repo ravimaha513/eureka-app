@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { MANDATORY_NOTIFICATION_TYPES } from "@eureka/shared";
 import { MailRejected, type MailTransport } from "../feedback-mail.js";
-import type { Logger } from "../log.js";
+import { errorFields, type Logger } from "../log.js";
 import { DEFAULT_RUNNER_OPTIONS, type JobDefinition } from "../runner.js";
 import { IDEMPOTENCY_CLEANUP_SCHEDULE, OUTBOX_PRUNE_SCHEDULE, dueMaintenanceKeys } from "../schedule.js";
 import { DELIVERED_TYPES, EMAIL_TYPES, INBOX_TYPES, inboxBodyWith, renderEmail, specOf, type EventSpec, type OutboxEvent } from "../notify-types.js";
@@ -50,6 +50,14 @@ import { DELIVERED_TYPES, EMAIL_TYPES, INBOX_TYPES, inboxBodyWith, renderEmail, 
  * alert log). Everything before the `sending` mark is retried (at least once
  * up to that point). Inbox rows are written exactly once per recipient.
  *
+ * Dead letter (migration 0488): a key that fails `deadLetterAfter` times in a
+ * row (backoff between attempts) is given up: the event gets `dead_at` (it is
+ * never delivered, published or pruned; kept for inspection) and its job_run
+ * row the terminal status `dead`, with an alert and a `job_dead_lettered`
+ * metric line. A poison event therefore never blocks or loads the queue.
+ * Every minute the job logs an `outbox_backlog` metric line (pending count,
+ * oldest pending age, dead-lettered count).
+ *
  * Emails and inbox rows carry no personal data (see notify-types.ts).
  * Addresses are read at send time and never stored, logged or written to job_run.
  */
@@ -61,6 +69,9 @@ export const IDEMPOTENCY_CLEANUP_JOB = "idempotency-cleanup";
 export const INBOX_KEY_PREFIX = "inbox:";
 
 const DELETE_BATCH = 1000;
+/** Failed attempts after which an outbox key is dead-lettered (about a day of backoff with the runner defaults). */
+export const DEFAULT_OUTBOX_DEAD_LETTER_AFTER = 12;
+const BACKLOG_METRIC_EVERY_MS = 60_000;
 
 /** "inbox" runs only the in-app channel; "full" runs every channel of the type. */
 export type DeliveryMode = "full" | "inbox";
@@ -80,7 +91,7 @@ async function prepare(
     await c.query("BEGIN");
     const r = await c.query<OutboxEvent & { created_at: Date }>(
       `SELECT id, type, aggregate_id, payload, created_at FROM eureka.outbox_event
-        WHERE id = $1 AND published_at IS NULL FOR UPDATE`, [id]);
+        WHERE id = $1 AND published_at IS NULL AND dead_at IS NULL FOR UPDATE`, [id]);
     const row = r.rows[0];
     if (!row) { await c.query("COMMIT"); return null; }
     const { created_at: createdAt, ...ev } = row;
@@ -319,7 +330,7 @@ export async function dueOutboxEvents(pool: pg.Pool, batchSize: number, mailEnab
        SELECT e.created_at, e.id,
               CASE WHEN $4 OR NOT (e.type = ANY ($5::text[])) THEN e.id::text ELSE $6 || e.id::text END AS key
          FROM eureka.outbox_event e
-        WHERE e.published_at IS NULL AND e.type = ANY ($1::text[])
+        WHERE e.published_at IS NULL AND e.dead_at IS NULL AND e.type = ANY ($1::text[])
           AND ($4 OR NOT (e.type = ANY ($5::text[]))
                OR (e.type = ANY ($7::text[]) AND NOT EXISTS (SELECT 1 FROM eureka.inbox_fanout f WHERE f.event_id = e.id)))
      ) k
@@ -340,7 +351,7 @@ export async function dueOutboxEvents(pool: pg.Pool, batchSize: number, mailEnab
 export async function skipBacklog(pool: pg.Pool, since: Date, log: Logger): Promise<number> {
   const r = await pool.query(
     `UPDATE eureka.outbox_event e SET published_at = now()
-      WHERE e.published_at IS NULL AND e.created_at < $1 AND e.type = ANY ($2::text[])
+      WHERE e.published_at IS NULL AND e.dead_at IS NULL AND e.created_at < $1 AND e.type = ANY ($2::text[])
         AND (NOT (e.type = ANY ($3::text[])) OR EXISTS (SELECT 1 FROM eureka.inbox_fanout f WHERE f.event_id = e.id))`,
     [since, EMAIL_TYPES, INBOX_TYPES]);
   const skipped = r.rowCount ?? 0;
@@ -351,10 +362,41 @@ export async function skipBacklog(pool: pg.Pool, since: Date, log: Logger): Prom
   return skipped;
 }
 
+/**
+ * Dead-letters one event (migration 0488): sets dead_at once, only while it is
+ * unpublished. The database guard allows nothing else. True when it was marked now.
+ */
+export async function deadLetterEvent(pool: pg.Pool, id: string): Promise<boolean> {
+  const r = await pool.query(
+    "UPDATE eureka.outbox_event SET dead_at = now() WHERE id = $1 AND published_at IS NULL AND dead_at IS NULL", [id]);
+  return r.rowCount === 1;
+}
+
+export interface OutboxBacklog {
+  /** Unpublished, not dead-lettered events of delivered types. */
+  pending: number;
+  /** Age of the oldest of those, in whole seconds (0 when none). */
+  oldestPendingSeconds: number;
+  /** Dead-lettered events (kept for inspection). */
+  deadLettered: number;
+}
+
+/** Backlog gauges for the `outbox_backlog` metric line (uses the unpublished partial index). */
+export async function outboxBacklog(pool: pg.Pool): Promise<OutboxBacklog> {
+  const r = await pool.query<OutboxBacklog>(
+    `SELECT count(*) FILTER (WHERE dead_at IS NULL)::int AS "pending",
+            coalesce(floor(extract(epoch FROM now() - min(created_at) FILTER (WHERE dead_at IS NULL))), 0)::int AS "oldestPendingSeconds",
+            count(*) FILTER (WHERE dead_at IS NOT NULL)::int AS "deadLettered"
+       FROM eureka.outbox_event WHERE published_at IS NULL AND type = ANY ($1::text[])`, [DELIVERED_TYPES]);
+  return r.rows[0]!;
+}
+
 export interface OutboxDeliveryJobOptions extends Partial<Omit<DeliveryOptions, "mode">> {
   batchSize: number;
   /** Events created before this are never emailed (see skipBacklog; only with mail). */
   deliverSince?: Date;
+  /** Failed attempts after which an event is dead-lettered (default DEFAULT_OUTBOX_DEAD_LETTER_AFTER). */
+  deadLetterAfter?: number;
 }
 
 /**
@@ -363,11 +405,32 @@ export interface OutboxDeliveryJobOptions extends Partial<Omit<DeliveryOptions, 
  */
 export function outboxDeliveryJob(mail: MailTransport | null, origin: string | null, o: OutboxDeliveryJobOptions): JobDefinition {
   const mailEnabled = mail !== null && origin !== null;
+  const afterAttempts = o.deadLetterAfter ?? DEFAULT_OUTBOX_DEAD_LETTER_AFTER;
+  if (!Number.isInteger(afterAttempts) || afterAttempts < 1 || afterAttempts > 100) {
+    throw new Error("outbox dead-letter attempts must be 1 to 100");
+  }
+  let lastMetricAt = -Infinity;
   return {
     name: OUTBOX_DELIVERY_JOB,
-    async dueKeys(_now, { pool, log }) {
+    async dueKeys(now, { pool, log }) {
       if (mailEnabled && o.deliverSince) await skipBacklog(pool, o.deliverSince, log);
+      if (now.getTime() - lastMetricAt >= BACKLOG_METRIC_EVERY_MS) {
+        lastMetricAt = now.getTime();
+        // A metric failure must not stop delivery.
+        await outboxBacklog(pool).then(
+          (b) => log.info("outbox backlog", { job: OUTBOX_DELIVERY_JOB, metric: "outbox_backlog", ...b }),
+          (err: unknown) => log.warn("outbox backlog metric failed", { job: OUTBOX_DELIVERY_JOB, ...errorFields(err) }));
+      }
       return dueOutboxEvents(pool, o.batchSize, mailEnabled);
+    },
+    deadLetter: {
+      afterAttempts,
+      async mark(key, { pool, log, attempt }) {
+        const id = key.startsWith(INBOX_KEY_PREFIX) ? key.slice(INBOX_KEY_PREFIX.length) : key;
+        const marked = await deadLetterEvent(pool, id);
+        log.error("outbox event dead-lettered; kept unpublished for inspection", {
+          job: OUTBOX_DELIVERY_JOB, eventId: id, attempt, marked, alert: true, metric: "outbox_dead_lettered" });
+      },
     },
     async run(key, ctx) {
       const inbox = key.startsWith(INBOX_KEY_PREFIX);

@@ -8,9 +8,13 @@
  * set; documents also need RESTRICTED_KMS_KEY_ARN with S3), notification inbox
  * prune (daily), the bench-time reminder (daily, when NOTIFY_BENCH_DAYS is set),
  * assignment-ending-soon outbox rows (daily), field key rotation (monthly) and
- * work authorization expiry notices and paperwork-overdue reminders (daily). The outbox delivery job always
- * runs: without a mail mode it delivers the in-app inbox channel only
- * (docs/notifications.md).
+ * work authorization expiry notices and paperwork-overdue reminders (daily),
+ * session retention (daily), audit retention (daily, only with
+ * AUDIT_RETENTION_DAYS) and the shared rate-limit purge (hourly, once
+ * authz.rate_purge exists). The outbox delivery job always runs, in its own
+ * lane (a second JobRunner on OUTBOX_TICK_SECONDS) so long scheduled jobs never
+ * delay notifications: without a mail mode it delivers the in-app inbox
+ * channel only (docs/notifications.md).
  */
 import { utimes, writeFile } from "node:fs/promises";
 import { S3Client } from "@aws-sdk/client-s3";
@@ -24,7 +28,7 @@ import { userPurgeJob } from "./worker/jobs/user-purge.js";
 import { loadWorkerConfig } from "./worker/config.js";
 import { auditExportJob } from "./worker/jobs/audit-export.js";
 import { createLogger, errorFields } from "./worker/log.js";
-import { JobRunner } from "./worker/runner.js";
+import { JobRunner, stopRunners } from "./worker/runner.js";
 import { DirSink, S3Sink, type ExportSink } from "./worker/sink.js";
 import { LocalDocumentStore, S3DocumentStore } from "./worker/document-store.js";
 import { DEFAULT_RESUME_SCAN_OPTIONS, resumeScanJob } from "./worker/jobs/resume-scan.js";
@@ -39,6 +43,7 @@ import { visaExpiryJob } from "./worker/jobs/visa-expiry.js";
 import { birthdayDigestJob } from "./worker/jobs/birthdays.js";
 import { performanceBelowTargetJob } from "./worker/jobs/performance-below-target.js";
 import { candidateNonresponseJob, candidateNonresponseMailJob } from "./worker/jobs/candidate-nonresponse.js";
+import { auditRetentionJob, rateLimitPurgeJob, sessionRetentionJob } from "./worker/jobs/retention.js";
 
 const log = createLogger({ service: "worker" });
 const config = loadWorkerConfig();
@@ -88,17 +93,22 @@ const jobs = [
   performanceBelowTargetJob(),
   // pipeline-vendors: "candidate not responding" flags still open after NONRESPONSE_HOLD_DAYS (migration 0171).
   candidateNonresponseJob(config.NONRESPONSE_HOLD_DAYS),
+  // Retention (G-08, migration 0488): ended staff/applicant sessions and expired step-up rows.
+  sessionRetentionJob({ sessionDays: config.SESSION_RETENTION_DAYS, stepUpDays: config.STEP_UP_RETENTION_DAYS }),
+  // Shared rate-limit windows: a no-op until authz.rate_purge() exists (migrations 0486/0487).
+  rateLimitPurgeJob(),
 ];
-{
-  // Without a mail mode only the in-app channel is delivered; emailing events stay unpublished.
-  const mail = config.OUTBOX_MAIL_MODE === "disabled" ? null
-    : config.OUTBOX_MAIL_MODE === "local" ? new LocalMail(config.OUTBOX_MAIL_DIR!) : new SesMail(config.AWS_REGION!, config.OUTBOX_FROM_EMAIL!);
-  jobs.push(outboxDeliveryJob(mail, mail ? new URL(config.APP_PUBLIC_ORIGIN!).origin : null, {
-    batchSize: config.OUTBOX_BATCH_SIZE,
-    maxRejections: config.OUTBOX_MAX_REJECTIONS,
-    deliverSince: config.OUTBOX_DELIVER_SINCE ? new Date(config.OUTBOX_DELIVER_SINCE) : undefined,
-  }));
-}
+// audit_event is kept for ever unless AUDIT_RETENTION_DAYS is set; then only exported days are pruned.
+if (config.AUDIT_RETENTION_DAYS) jobs.push(auditRetentionJob(config.AUDIT_RETENTION_DAYS));
+// Without a mail mode only the in-app channel is delivered; emailing events stay unpublished.
+const outboxMail = config.OUTBOX_MAIL_MODE === "disabled" ? null
+  : config.OUTBOX_MAIL_MODE === "local" ? new LocalMail(config.OUTBOX_MAIL_DIR!) : new SesMail(config.AWS_REGION!, config.OUTBOX_FROM_EMAIL!);
+const outboxJob = outboxDeliveryJob(outboxMail, outboxMail ? new URL(config.APP_PUBLIC_ORIGIN!).origin : null, {
+  batchSize: config.OUTBOX_BATCH_SIZE,
+  maxRejections: config.OUTBOX_MAX_REJECTIONS,
+  deliverSince: config.OUTBOX_DELIVER_SINCE ? new Date(config.OUTBOX_DELIVER_SINCE) : undefined,
+  deadLetterAfter: config.OUTBOX_DEAD_LETTER_ATTEMPTS,
+});
 if (config.NOTIFY_BENCH_DAYS) jobs.push(benchTimeJob(config.NOTIFY_BENCH_DAYS, config.NOTIFY_BENCH_WINDOW_DAYS));
 else log.warn("bench-time reminder is off (NOTIFY_BENCH_DAYS unset; threshold is open decision OD-05)");
 if (config.FEEDBACK_MAIL_MODE !== "disabled") {
@@ -133,9 +143,16 @@ if (config.DOCUMENTS_BUCKET || config.LOCAL_STORAGE_DIR) {
 } else {
   log.warn("resume-scan and document-scan are off (set DOCUMENTS_BUCKET or LOCAL_STORAGE_DIR); uploads stay pending");
 }
+// Two lanes, one process: scheduled jobs and outbox delivery each run one key at a time, side by side.
+// Concurrency is safe either way: every (job, run key) is claimed under a fenced job_run lease.
 const runner = new JobRunner(pool, jobs, log, heartbeat);
+const outboxRunner = new JobRunner(pool, [outboxJob], log, heartbeat);
 runner.start(config.JOB_TICK_SECONDS * 1000);
-log.info("worker started", { jobs: jobs.map((j) => j.name), sink: sink.kind, tickSeconds: config.JOB_TICK_SECONDS });
+outboxRunner.start(config.OUTBOX_TICK_SECONDS * 1000);
+log.info("worker started", {
+  jobs: jobs.map((j) => j.name), outboxLane: [outboxJob.name], sink: sink.kind,
+  tickSeconds: config.JOB_TICK_SECONDS, outboxTickSeconds: config.OUTBOX_TICK_SECONDS,
+});
 
 const POOL_END_TIMEOUT_MS = 3_000;
 let shuttingDown = false;
@@ -143,7 +160,8 @@ const shutdown = async (signal: string) => {
   if (shuttingDown) return;
   shuttingDown = true;
   log.info("worker stopping", { signal, graceSeconds: config.SHUTDOWN_GRACE_SECONDS });
-  const clean = await runner.stop(config.SHUTDOWN_GRACE_SECONDS * 1000);
+  // Both lanes drain in parallel within the same grace period.
+  const clean = await stopRunners([runner, outboxRunner], config.SHUTDOWN_GRACE_SECONDS * 1000);
   if (!clean) log.warn("job still running at shutdown; it is retried once its lease expires", { signal });
   let timer: NodeJS.Timeout | undefined;
   const poolClosed = await Promise.race([

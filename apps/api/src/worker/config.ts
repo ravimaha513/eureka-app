@@ -9,9 +9,21 @@ const WorkerConfigSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     DATABASE_URL: z.string().url(),
-    DB_POOL_MAX: z.coerce.number().int().min(2).max(10).default(3),
+    // Two lanes share the pool (scheduled jobs, outbox delivery); each holds at most one client at a time.
+    DB_POOL_MAX: z.coerce.number().int().min(2).max(10).default(4),
     // How often the scheduler checks for due jobs.
     JOB_TICK_SECONDS: z.coerce.number().int().min(5).max(3600).default(60),
+    // Outbox delivery runs in its own lane with this tick, never behind long scheduled jobs (F-10).
+    OUTBOX_TICK_SECONDS: z.coerce.number().int().min(1).max(3600).default(10),
+    // Failed attempts (exponential backoff between them) after which an outbox event is dead-lettered.
+    OUTBOX_DEAD_LETTER_ATTEMPTS: z.coerce.number().int().min(3).max(100).default(12),
+    // Retention (session-retention job): ended staff and applicant sessions are deleted after this many
+    // days (at least LOGIN_ACTIVITY_DAYS = 30), expired step-up rows after STEP_UP_RETENTION_DAYS.
+    SESSION_RETENTION_DAYS: z.coerce.number().int().min(30).max(3650).default(30),
+    STEP_UP_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(7),
+    // audit_event archival: unset (default) keeps every row for ever. Set, rows older than this many days
+    // whose day is in the audit_export ledger (exported to S3) are deleted (audit-retention job).
+    AUDIT_RETENTION_DAYS: z.coerce.number().int().min(365).max(36500).optional(),
     // On SIGTERM, how long a running job may continue before the process exits
     // (ECS stopTimeout is 30 s).
     SHUTDOWN_GRACE_SECONDS: z.coerce.number().int().min(0).max(25).default(20),
