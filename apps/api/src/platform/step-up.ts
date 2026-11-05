@@ -14,3 +14,21 @@ export async function requireStepUp(c: pg.PoolClient, user: Pick<AuthedUser, "se
   if (!g) throw new ForbiddenException("step_up_required");
   return g.grant_id;
 }
+
+/**
+ * GET /api/auth/step-up in one statement (audit F-03): the session's live grant
+ * (authz.step_up_current) and, when password sign-in is on, whether the caller
+ * has a password (authz.password_has_credential). Run inside the caller's withUser.
+ */
+export async function stepUpStatus(
+  c: pg.PoolClient, user: Pick<AuthedUser, "sessionHash">, passwordLogin: boolean,
+): Promise<{ grant: { method: string; expires_at: Date } | undefined; hasPassword: boolean }> {
+  const r = (await c.query<{ method: string | null; expires_at: Date | null; has_password: boolean }>(
+    `SELECT g.method, g.expires_at, CASE WHEN $2::boolean THEN authz.password_has_credential() ELSE false END AS has_password
+     FROM (SELECT 1) one LEFT JOIN LATERAL (SELECT method, expires_at FROM authz.step_up_current($1) LIMIT 1) g ON true`,
+    [user.sessionHash, passwordLogin])).rows[0]!;
+  return {
+    grant: r.method !== null && r.expires_at !== null ? { method: r.method, expires_at: r.expires_at } : undefined,
+    hasPassword: r.has_password === true,
+  };
+}

@@ -11,9 +11,7 @@ import {
 import { Reflector } from "@nestjs/core";
 import type { FastifyRequest } from "fastify";
 import { can, type Permission, type UserAccess } from "@eureka/shared";
-import { AccessService } from "./access.service.js";
 import { CONFIG, type AppConfig } from "./config.js";
-import { DbService } from "./db.service.js";
 import { SessionService } from "./session.service.js";
 import { apiLog } from "./logger.js";
 import { PORTAL_HEADER, PortalSessionService } from "./portal-session.service.js";
@@ -24,6 +22,11 @@ export interface AuthedUser {
   access: UserAccess;
   sessionHash: Buffer;
   authTime: Date;
+  /**
+   * The temporary-password flag read with the session (PASSWORD_LOGIN=on;
+   * otherwise false). Set by the AuthGuard; absent on users built elsewhere.
+   */
+  mustChangePassword?: boolean;
 }
 
 /** jobs-portal: the signed-in applicant of a portal request. */
@@ -91,8 +94,6 @@ export class AuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly sessions: SessionService,
-    private readonly db: DbService,
-    private readonly accessService: AccessService,
     private readonly portalSessions: PortalSessionService,
     @Inject(CONFIG) private readonly config: AppConfig,
   ) {}
@@ -106,7 +107,10 @@ export class AuthGuard implements CanActivate {
     if (/^\/api\/portal(\/|\?|$)/.test(req.url)) throw new UnauthorizedException("Applicant sign-in required");
     if (this.reflector.getAllAndOverride<boolean>(PUBLIC_ROUTE, targets)) return true;
 
-    const session = await this.sessions.resolve(this.sessions.readSessionId(req.cookies));
+    // One statement on one connection (authz.request_context, audit F-03): the session check and
+    // touch, the access facts loaded from current rows (no time-based cache, so a revoked role
+    // applies on the next request) and the temporary-password flag, on one snapshot (0083).
+    const session = await this.sessions.authenticate(this.sessions.readSessionId(req.cookies), this.config.PASSWORD_LOGIN === "on");
     if (!session) throw new UnauthorizedException("Sign in required");
 
     if (!SAFE_METHODS.has(req.method)) {
@@ -116,16 +120,12 @@ export class AuthGuard implements CanActivate {
       }
     }
 
-    // Access facts are loaded per request from current rows (no time-based cache), in the same
-    // transaction as the temporary-password check (migration 0083).
-    const checkPassword = this.config.PASSWORD_LOGIN === "on" && !this.reflector.getAllAndOverride<boolean>(ALLOW_PASSWORD_CHANGE, targets);
-    const { access, mustChange } = await this.db.withUser(session.userId, async (c) => ({
-      access: await this.accessService.load(c, session.userId),
-      mustChange: checkPassword && (await c.query<{ m: boolean }>(`SELECT authz.password_must_change() AS m`)).rows[0]!.m,
-    }));
-    req.user = { id: session.userId, access, sessionHash: session.idHash, authTime: session.authTime };
+    const { access, mustChangePassword } = session;
+    req.user = { id: session.userId, access, sessionHash: session.idHash, authTime: session.authTime, mustChangePassword };
     // A temporary (admin-set) password must be changed before anything else.
-    if (mustChange) throw new ForbiddenException("password_change_required");
+    if (mustChangePassword && !this.reflector.getAllAndOverride<boolean>(ALLOW_PASSWORD_CHANGE, targets)) {
+      throw new ForbiddenException("password_change_required");
+    }
 
     const needed = this.reflector.getAllAndOverride<Permission | undefined>(REQUIRED_PERMISSION, targets);
     if (needed) {

@@ -1,6 +1,8 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import type { FastifyReply } from "fastify";
+import type { UserAccess } from "@eureka/shared";
+import { accessFromFacts, type AccessFacts } from "./access.service.js";
 import type { ClientInfo } from "./client-info.js";
 import { CONFIG, type AppConfig } from "./config.js";
 import { DbService } from "./db.service.js";
@@ -26,6 +28,13 @@ export interface SessionInfo {
   userId: string;
   idHash: Buffer;
   authTime: Date;
+}
+
+/** A valid session with the facts the AuthGuard needs (authz.request_context). */
+export interface RequestAuth extends SessionInfo {
+  access: UserAccess;
+  /** The temporary-password flag; false unless asked for (PASSWORD_LOGIN=on). */
+  mustChangePassword: boolean;
 }
 
 /**
@@ -96,29 +105,27 @@ export class SessionService {
   }
 
   /**
-   * Returns the session if valid; enforces absolute and idle timeouts and user status. last_seen_at is
-   * written at most once a minute (not on every request), so the idle timeout is exact to a minute.
+   * The request's authentication in one statement on one connection (audit F-03):
+   * authz.request_context validates the session (absolute and idle timeouts, user
+   * status; last_seen_at is written at most once a minute, so the idle timeout is
+   * exact to a minute), loads the access facts from current rows (no cache) and,
+   * when `checkPassword`, the temporary-password flag. Null = no valid session.
    */
-  async resolve(sid: string | undefined): Promise<SessionInfo | null> {
+  async authenticate(sid: string | undefined, checkPassword: boolean): Promise<RequestAuth | null> {
     if (!sid || sid.length > 100) return null;
     const idHash = SessionService.hash(sid);
     const { rows } = await this.db.system((c) =>
-      c.query<{ user_id: string; auth_time: Date }>(
-        `WITH live AS (
-           SELECT s.id_hash, s.user_id, s.auth_time, s.last_seen_at FROM eureka.session s
-           JOIN eureka.app_user u ON u.id = s.user_id AND u.status = 'active'
-           WHERE s.id_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now()
-             AND s.last_seen_at > now() - make_interval(mins => $2)
-         ), touch AS (
-           UPDATE eureka.session s SET last_seen_at = now() FROM live
-           WHERE s.id_hash = live.id_hash AND live.last_seen_at < now() - interval '1 minute'
-         )
-         SELECT user_id, auth_time FROM live`,
-        [idHash, this.config.SESSION_IDLE_MINUTES],
+      c.query<{ user_id: string; auth_time: Date; access: AccessFacts; must_change: boolean }>(
+        `SELECT user_id, auth_time, access, must_change FROM authz.request_context($1, $2, $3)`,
+        [idHash, this.config.SESSION_IDLE_MINUTES, checkPassword],
       ),
     );
     const row = rows[0];
-    return row ? { userId: row.user_id, idHash, authTime: row.auth_time } : null;
+    if (!row) return null;
+    return {
+      userId: row.user_id, idHash, authTime: row.auth_time,
+      access: accessFromFacts(row.user_id, row.access), mustChangePassword: row.must_change,
+    };
   }
 
   async revoke(idHash: Buffer): Promise<void> {

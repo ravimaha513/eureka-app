@@ -65,7 +65,7 @@ advisory lock, assignment row, employee row.
   per API task (`REPORT_MAX_CONCURRENT`, default 2): all taken → 503 + `Retry-After: 5`.
 - `POST /api/v1/reports/joinings-exits/export` `{ from, to }` (`report:export`) → CSV (`Event, Date, Candidate, Assignment
   no., Client, Team, Recruiter, Location, First placement, End reason`), additionally limited to the `report:export` scope,
-  capped at 50,000 lines (`x-export-truncated`), 25 s timeout, 5 per user per 10 minutes, formula-injection safe, audited
+  capped at 50,000 lines (`x-export-truncated`), 25 s timeout, 5 per user per 10 minutes (counted across all API tasks, migration 0486), formula-injection safe, audited
   as `report.export` `{ report: "joinings_exits", from, to, rows, truncated, cap }`. No phone, email, rate or reason text.
 - interviews-settings (`docs/interviews-settings-api.md` EM-C1, EM-X1): list and detail items carry
   `contact: { email, phone, masked }` (masked unless `candidate.phone:read` over the candidate), and

@@ -4,7 +4,7 @@ import { resolveScope, type EffectiveScope, type UserAccess } from "@eureka/shar
 import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
-import { RateLimiter } from "../../platform/rate-limit.js";
+import { RateLimiter, SharedRateLimiter } from "../../platform/rate-limit.js";
 import { ReportExecutor } from "../../platform/report-executor.js";
 import { toCsv } from "../hotlist/csv.js";
 import { EXPORTS_PER_WINDOW, EXPORT_ROW_CAP, EXPORT_WINDOW_MS } from "../hotlist/hotlist.service.js";
@@ -131,7 +131,8 @@ const PC = `pc AS MATERIALIZED (SELECT id, name FROM authz.payroll_companies())`
 
 @Injectable()
 export class ReportsService {
-  private readonly exportLimiter = new RateLimiter(EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
+  // Per user, shared by all tasks and kept across deploys (R-24, F-06).
+  private readonly exportLimiter = new SharedRateLimiter("employees.reports.export", EXPORTS_PER_WINDOW, EXPORT_WINDOW_MS);
   private readonly viewLimiter = new RateLimiter(REPORT_VIEWS_PER_MINUTE, 60_000);
 
   constructor(private readonly db: DbService, private readonly audit: AuditService, private readonly reports: ReportExecutor) {}
@@ -319,7 +320,7 @@ export class ReportsService {
     const exportScope = resolveScope(user.access, "report:export");
     if (!exportScope) throw new ForbiddenException();
     const src = this.source(user.access, [exportScope]);
-    if (!this.exportLimiter.take(user.id)) {
+    if (!(await this.exportLimiter.take(user.id, this.db))) {
       throw new HttpException("Too many exports; try again in a few minutes", HttpStatus.TOO_MANY_REQUESTS);
     }
     const truncatedOf = (rows: Row[], p: ReportPeriod) =>

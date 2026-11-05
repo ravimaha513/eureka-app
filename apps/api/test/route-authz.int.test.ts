@@ -5,12 +5,10 @@ import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fa
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { can } from "@eureka/shared";
 import { AppModule } from "../src/app.module.js";
-import { AccessService } from "../src/platform/access.service.js";
 import {
   AuthGuard, PORTAL_ROUTE, PUBLIC_ROUTE, Public, REQUIRED_PERMISSION, RequirePermission, SELF_SERVICE_ROUTE, SelfService,
 } from "../src/platform/auth.guard.js";
 import { CONFIG, loadConfig } from "../src/platform/config.js";
-import { DbService } from "../src/platform/db.service.js";
 import { setLogWriter } from "../src/platform/logger.js";
 import { PortalSessionService } from "../src/platform/portal-session.service.js";
 import { SessionService } from "../src/platform/session.service.js";
@@ -219,11 +217,11 @@ describe("AuthGuard: fail-closed for staff routes", () => {
         { provide: CONFIG, useValue: { PASSWORD_LOGIN: "off" } },
         { provide: SessionService, useValue: {
           readSessionId: () => "sid",
-          resolve: async () => (signedIn ? { userId: U.hr, idHash: Buffer.from("h"), authTime: new Date() } : null),
+          authenticate: async () => (signedIn
+            ? { userId: U.hr, idHash: Buffer.from("h"), authTime: new Date(), access: HR, mustChangePassword: false }
+            : null),
           verifyCsrf: () => true,
         } },
-        { provide: DbService, useValue: { withUser: async (_u: string, fn: (c: unknown) => unknown) => fn({}) } },
-        { provide: AccessService, useValue: { load: async () => HR } },
         { provide: PortalSessionService, useValue: {} },
         { provide: APP_GUARD, useClass: AuthGuard },
       ],

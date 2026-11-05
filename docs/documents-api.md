@@ -50,7 +50,7 @@ uploadedBy: {id,name}, createdAt, scannedAt, title, version, replacement: { stat
 ## Error codes
 
 `invalid_upload`, `invalid_change`, `classification_change` (422); `too_many_pending`, `version_mismatch`, `not_available` (409);
-not permitted (403); not found (404); too many uploads or downloads, `too_many_restricted_opens` (429). No document route
+not permitted (403); not found (404); too many uploads or downloads (per user per minute, counted across all API tasks since migration 0486), `too_many_restricted_opens` (429). No document route
 answers `step_up_required`: restricted documents need no step-up (see above).
 
 ## Web

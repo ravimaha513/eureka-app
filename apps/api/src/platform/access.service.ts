@@ -2,15 +2,40 @@ import { Injectable } from "@nestjs/common";
 import type pg from "pg";
 import type { Grants, RoleTraits, UserAccess } from "@eureka/shared";
 
-/** Loads the access facts the engine needs (design B4.3), from current rows. */
+/** The access facts as the database returns them (AccessService.load columns, authz.request_context `access` keys). */
+export interface AccessFacts {
+  roles: { role_key: string; label: string; location_id: string | null; grants: Grants; traits: RoleTraits }[];
+  teams: string[]; subs: string[]; subtree: string[]; coached: string[]; subtree_coached: string[]; shared: string[];
+}
+
+/** The engine's view of a user's access facts (one mapping for both loaders). */
+export function accessFromFacts(userId: string, r: AccessFacts): UserAccess {
+  return {
+    userId,
+    roles: r.roles.map((x) => ({
+      role: x.role_key, label: x.label, locationId: x.location_id ?? undefined, grants: x.grants, traits: x.traits,
+    })),
+    teamIds: r.teams,
+    subordinateUserIds: r.subs,
+    subtreeTeamIds: r.subtree,
+    coachedTeamIds: r.coached,
+    subtreeCoachedTeamIds: r.subtree_coached,
+    sharedCandidateIds: r.shared,
+  };
+}
+
+/**
+ * Loads the access facts the engine needs (design B4.3), from current rows.
+ * Requests no longer call this: the AuthGuard gets the same facts from
+ * authz.request_context (session + access + temporary-password flag in one
+ * statement, audit F-03). The query here is kept as the reference
+ * implementation; test/request-context.db.int.test.ts asserts both agree for
+ * every seeded user. A change to one must be made to the other.
+ */
 @Injectable()
 export class AccessService {
   async load(c: pg.PoolClient, userId: string): Promise<UserAccess> {
-    // One round trip: this runs before every authenticated request.
-    const { rows: [r] } = await c.query<{
-      roles: { role_key: string; label: string; location_id: string | null; grants: Grants; traits: RoleTraits }[];
-      teams: string[]; subs: string[]; subtree: string[]; coached: string[]; subtree_coached: string[]; shared: string[];
-    }>(
+    const { rows: [r] } = await c.query<AccessFacts>(
       `SELECT
          -- Each current role with its grants and traits as stored (docs/roles-api.md): system and
          -- custom roles alike; the catalog is not consulted at runtime. An archived role still
@@ -45,17 +70,6 @@ export class AccessService {
          authz.shared_candidate_ids('candidate:read')::text[] AS shared`,
       [userId],
     );
-    return {
-      userId,
-      roles: r!.roles.map((x) => ({
-        role: x.role_key, label: x.label, locationId: x.location_id ?? undefined, grants: x.grants, traits: x.traits,
-      })),
-      teamIds: r!.teams,
-      subordinateUserIds: r!.subs,
-      subtreeTeamIds: r!.subtree,
-      coachedTeamIds: r!.coached,
-      subtreeCoachedTeamIds: r!.subtree_coached,
-      sharedCandidateIds: r!.shared,
-    };
+    return accessFromFacts(userId, r!);
   }
 }
