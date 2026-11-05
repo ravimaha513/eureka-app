@@ -46,6 +46,7 @@ const NO_RLS_INTERNAL: Record<string, string> = {
   "authz.placement_status_context": "transaction-local context of authz.transition_placement",
   "authz.employment_team_context": "transaction-local context of the employment definers",
   "authz.checklist_template": "read by checklist definers",
+  "authz.rate_window": "shared rate-limit windows (0486); only authz.rate_take / rate_purge (definers) touch it, keys stored hashed",
   "authz.user_credential": "password hashes; password_* definers only",
   "authz.password_setup_token": "token hashes; password_setup_* definers only",
   "authz.reporting_closure_pending": "deferred closure rebuild queue",
