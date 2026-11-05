@@ -2289,8 +2289,9 @@ const IGNORED: IgnoreCase[] = [
       });
       expect(r.statusCode, r.body).toBe(422);
       await ok("admin", "PATCH", `/api/v1/admin/roles/${key}`, { label: "MA Role Patched", traits: { recruiter: true } }, 204);
-      expect(await rows(`SELECT key, label, is_system, is_recruiter, archived_at FROM eureka.role WHERE key = $1`, [key]))
-        .toEqual([{ key, label: "MA Role Patched", is_system: false, is_recruiter: true, archived_at: null }]);
+      // row_version is the server's (0471): one accepted edit bumps it from 1 to 2, whatever rowVersion the body named.
+      expect(await rows(`SELECT key, label, is_system, is_recruiter, archived_at, row_version FROM eureka.role WHERE key = $1`, [key]))
+        .toEqual([{ key, label: "MA Role Patched", is_system: false, is_recruiter: true, archived_at: null, row_version: 2 }]);
       expect(await rows(`SELECT 1 FROM eureka.role_permission WHERE role_key = $1 AND permission = 'rate:read'`, [key])).toEqual([]);
     },
   },
@@ -2304,7 +2305,8 @@ const IGNORED: IgnoreCase[] = [
       expect(r.statusCode, r.body).toBe(422);
       await ok("admin", "PUT", `/api/v1/admin/roles/${key}/grants`, { grants: { "candidate:read": "team" } }, 204);
       expect(await rows(`SELECT permission, scope FROM eureka.role_permission WHERE role_key = $1`, [key])).toEqual([{ permission: "candidate:read", scope: "team" }]);
-      expect(await rows(`SELECT label, is_admin FROM eureka.role WHERE key = $1`, [key])).toEqual([{ label: "MA Role Grants", is_admin: false }]);
+      expect(await rows(`SELECT label, is_admin, row_version FROM eureka.role WHERE key = $1`, [key]))
+        .toEqual([{ label: "MA Role Grants", is_admin: false, row_version: 2 }]);
     },
   },
   {

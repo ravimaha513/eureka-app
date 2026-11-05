@@ -3,6 +3,8 @@ import { BadGatewayException, ForbiddenException, HttpException, Inject, Injecta
 import type pg from "pg";
 import { z } from "zod";
 import {
+  ADMIN_COMPATIBLE_PERMISSIONS,
+  ADMIN_PERMISSIONS,
   PERMISSIONS,
   PERMISSION_DESCRIPTIONS,
   ORG_SENSITIVE_PERMISSIONS,
@@ -46,11 +48,11 @@ type RoleRow = {
   key: string; label: string; description: string | null; is_system: boolean; is_restricted: boolean;
   is_sales: boolean; is_location_bound: boolean; is_admin: boolean; is_recruiter: boolean; is_coach: boolean;
   track: string; level: number; department_id: string | null; department_name: string | null; cloned_from: string | null;
-  archived_at: Date | null; holders: number;
+  archived_at: Date | null; holders: number; row_version: number;
 };
 const ROLE_ROWS_SQL = `
   SELECT r.key, r.label, r.description, r.is_system, r.is_restricted, r.is_sales, r.is_location_bound, r.is_admin,
-         r.is_recruiter, r.is_coach, r.track, r.level, r.department_id, d.name AS department_name, r.cloned_from, r.archived_at,
+         r.is_recruiter, r.is_coach, r.track, r.level, r.department_id, d.name AS department_name, r.cloned_from, r.archived_at, r.row_version,
          (SELECT count(DISTINCT ur.user_id) FROM eureka.user_role ur JOIN eureka.app_user u ON u.id = ur.user_id
            WHERE ur.role_key = r.key AND ur.valid @> now() AND u.status = 'active')::int AS holders
   FROM eureka.role r LEFT JOIN eureka.department d ON d.id = r.department_id`;
@@ -59,7 +61,7 @@ const roleItem = (r: RoleRow, grants?: Record<string, string>) => ({
   traits: { sales: r.is_sales, locationBound: r.is_location_bound, admin: r.is_admin, recruiter: r.is_recruiter, coach: r.is_coach },
   track: r.track, level: r.level,
   department: r.department_id ? { id: r.department_id, name: r.department_name! } : null,
-  clonedFrom: r.cloned_from, holders: r.holders, archivedAt: r.archived_at,
+  clonedFrom: r.cloned_from, holders: r.holders, archivedAt: r.archived_at, rowVersion: r.row_version,
   ...(grants ? { grants } : {}),
 });
 
@@ -339,9 +341,10 @@ export class AdminService {
         [body.email, body.displayName, body.designation ?? null, body.primaryLocationId ?? null]);
       const id = rows[0]!.id;
       if (body.temporaryPassword !== undefined) await c.query(`SELECT authz.admin_set_password($1, $2)`, [id, body.temporaryPassword]);
+      // Names and designations are free text: the audit row keeps ids and the fields set (rule 5, as renames do).
       await this.audit.record(c, {
         actorId: user.id, action: "admin.user.created", entityType: "app_user", entityId: id,
-        changes: { email: body.email, displayName: body.displayName, designation: body.designation, primaryLocationId: body.primaryLocationId },
+        changes: { fields: Object.keys(body), primaryLocationId: body.primaryLocationId ?? null },
       });
       return { id };
     });
@@ -590,6 +593,7 @@ export class AdminService {
       items: PERMISSIONS.map((key) => ({
         key, area: permissionArea(key), description: PERMISSION_DESCRIPTIONS[key],
         restricted: RESTRICTED_PERMISSIONS.includes(key), orgSensitive: ORG_SENSITIVE_PERMISSIONS.includes(key),
+        adminOnly: ADMIN_PERMISSIONS.includes(key), adminCompatible: ADMIN_COMPATIBLE_PERMISSIONS.includes(key),
       })),
     };
   }
@@ -609,29 +613,58 @@ export class AdminService {
     });
   }
 
-  async updateRole(user: AuthedUser, key: string, body: UpdateRole) {
-    await this.tx(user, async (c) => {
+  /** The role's row_version after a write in this transaction (the definer function holds the row lock). */
+  private async roleVersion(c: pg.PoolClient, key: string): Promise<number> {
+    return (await c.query<{ v: number }>(`SELECT row_version AS v FROM eureka.role WHERE key = $1`, [key])).rows[0]!.v;
+  }
+
+  /**
+   * expected: the optional If-Match rowVersion (docs/roles-api.md "Concurrency"); the definer function
+   * refuses a stale one (412) under the row lock. Returns the role's rowVersion after the edit.
+   */
+  async updateRole(user: AuthedUser, key: string, body: UpdateRole, expected: number | null = null): Promise<number> {
+    return this.tx(user, async (c) => {
       await this.roleRow(c, key);
-      const { rows } = await c.query<{ changed: string[] }>(`SELECT authz.role_update($1, $2::jsonb) AS changed`, [key, JSON.stringify(body)]);
-      if (rows[0]!.changed.length === 0) return;
-      await this.audit.record(c, {
-        actorId: user.id, action: "admin.role.updated", entityType: "role",
-        changes: { key, fields: rows[0]!.changed, ...(rows[0]!.changed.includes("traits") ? { traits: body.traits } : {}) },
-      });
+      const { rows } = await c.query<{ changed: string[] }>(
+        `SELECT authz.role_update($1, $2::jsonb, $3) AS changed`, [key, JSON.stringify(body), expected]);
+      if (rows[0]!.changed.length > 0) {
+        await this.audit.record(c, {
+          actorId: user.id, action: "admin.role.updated", entityType: "role",
+          changes: { key, fields: rows[0]!.changed, ...(rows[0]!.changed.includes("traits") ? { traits: body.traits } : {}) },
+        });
+      }
+      return this.roleVersion(c, key);
     });
   }
 
-  async setRoleGrants(user: AuthedUser, key: string, body: SetRoleGrants) {
-    await this.tx(user, async (c) => {
+  async setRoleGrants(user: AuthedUser, key: string, body: SetRoleGrants, expected: number | null = null): Promise<number> {
+    return this.tx(user, async (c) => {
       await this.roleRow(c, key);
       const { rows } = await c.query<{ d: { added: string[]; removed: string[]; changed: string[] } }>(
-        `SELECT authz.role_set_grants($1, $2::jsonb) AS d`, [key, JSON.stringify(body.grants)]);
+        `SELECT authz.role_set_grants($1, $2::jsonb, $3) AS d`, [key, JSON.stringify(body.grants), expected]);
       const d = rows[0]!.d;
-      if (d.added.length + d.removed.length + d.changed.length === 0) return;
-      await this.audit.record(c, {
-        actorId: user.id, action: "admin.role.grants_changed", entityType: "role",
-        changes: { key, added: d.added, removed: d.removed, changed: d.changed },
-      });
+      if (d.added.length + d.removed.length + d.changed.length > 0) {
+        await this.audit.record(c, {
+          actorId: user.id, action: "admin.role.grants_changed", entityType: "role",
+          changes: { key, added: d.added, removed: d.removed, changed: d.changed },
+        });
+      }
+      return this.roleVersion(c, key);
+    });
+  }
+
+  /** Roles that break admin/data separation (docs/roles-api.md "Admin separation"); read-only report. */
+  async listRoleViolations(user: AuthedUser) {
+    return this.tx(user, async (c) => {
+      const { rows } = await c.query<{
+        role_key: string; label: string; is_system: boolean; is_admin: boolean; archived: boolean; holders: number; permissions: string[];
+      }>(`SELECT * FROM authz.role_admin_violations()`);
+      return {
+        items: rows.map((r) => ({
+          key: r.role_key, label: r.label, isSystem: r.is_system, admin: r.is_admin, archived: r.archived,
+          holders: r.holders, permissions: r.permissions,
+        })),
+      };
     });
   }
 
@@ -861,7 +894,11 @@ export class AdminService {
       const { rows } = await c.query<{ id: string }>(`SELECT authz.admin_create_team($1, $2, $3) AS id`,
         [body.name, body.leadId, body.locationId ?? null]);
       const id = rows[0]!.id;
-      await this.audit.record(c, { actorId: user.id, action: "admin.team.created", entityType: "team", entityId: id, changes: body });
+      // The name is free text: ids only (rule 5, as renameTeam).
+      await this.audit.record(c, {
+        actorId: user.id, action: "admin.team.created", entityType: "team", entityId: id,
+        changes: { leadId: body.leadId, locationId: body.locationId ?? null },
+      });
       return { id };
     });
   }
@@ -1050,7 +1087,11 @@ export class AdminService {
       const { rows } = await c.query<{ id: string }>(`SELECT authz.admin_create_location($1, $2, $3, $4) AS id`,
         [body.name, body.kind, body.state ?? null, body.timezone ?? null]);
       const id = rows[0]!.id;
-      await this.audit.record(c, { actorId: user.id, action: "admin.location.created", entityType: "location", entityId: id, changes: body });
+      // Name and state are free text: the kind and the fields set only (rule 5, as renameLocation).
+      await this.audit.record(c, {
+        actorId: user.id, action: "admin.location.created", entityType: "location", entityId: id,
+        changes: { kind: body.kind, fields: Object.keys(body) },
+      });
       return { id };
     });
   }

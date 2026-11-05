@@ -62,7 +62,7 @@ type RoleItem = {
   key: string; label: string; isSystem: boolean; restricted: boolean; holders: number; archivedAt: string | null;
   traits: { sales: boolean; locationBound: boolean; admin: boolean; recruiter: boolean; coach: boolean };
   track: string; level: number; grants: Record<string, string>; clonedFrom: string | null;
-  department: { id: string; name: string } | null;
+  department: { id: string; name: string } | null; rowVersion: number;
 };
 const roleOf = async (key: string, includeArchived = false): Promise<RoleItem | undefined> =>
   ((await call("admin", "GET", `/api/v1/admin/roles${includeArchived ? "?includeArchived=true" : ""}`)).json().items as RoleItem[])
@@ -233,7 +233,11 @@ describe("custom roles", () => {
     const req = await call("admin", "POST", "/api/v1/admin/role-requests", { userId: U.admin2, role: "c_deputy_admin" });
     expect(req.json().status).toBe("pending_approval");
     expect((await call("admin2", "POST", `/api/v1/admin/role-requests/${req.json().id}/approve`)).statusCode).toBe(403);
-    // Trait edits are refused while a request is pending? No: only holders count. Turning admin off is fine here.
+    // Trait edits are refused while a request is pending? No: only holders count. But turning admin off while the
+    // role still holds the admin-only permissions breaks admin separation (C-01); drop them first.
+    expect(detail(await call("admin", "PATCH", "/api/v1/admin/roles/c_deputy_admin", { traits: { admin: false } })))
+      .toBe("admin_permission_needs_admin_role");
+    expect((await call("admin", "PUT", "/api/v1/admin/roles/c_deputy_admin/grants", { grants: { "chat:use": "own" } })).statusCode).toBe(204);
     expect((await call("admin", "PATCH", "/api/v1/admin/roles/c_deputy_admin", { traits: { admin: false } })).statusCode).toBe(204);
     expect((await roleOf("c_deputy_admin"))!.restricted).toBe(false);
   });
@@ -268,5 +272,123 @@ describe("custom roles", () => {
     expect((await call("admin", "POST", "/api/v1/admin/role-requests", { userId: U.imm, role: "c_sourcer" })).json().status).toBe("applied");
     expect((await call("l3", "POST", `/api/v1/teams/${T.t3}/members`, { userId: U.imm })).statusCode).toBe(204);
     expect(detail(await call("l3", "POST", `/api/v1/teams/${T.t3}/members`, { userId: U.hr }))).toBe("not_a_recruiter");
+  });
+});
+
+describe("admin separation (security review C-01)", () => {
+  it("admin-only permissions go to admin-trait roles only, held or not", async () => {
+    expect((await call("admin", "POST", "/api/v1/admin/roles", { label: "Ops Helper", cloneFrom: "recruiter" })).statusCode).toBe(201);
+    for (const p of ["access:manage", "audit:read"]) {
+      expect(detail(await call("admin", "PUT", "/api/v1/admin/roles/c_ops_helper/grants", { grants: { ...GRANTS.recruiter, [p]: "org" } })))
+        .toBe("admin_permission_needs_admin_role");
+    }
+    // c_sourcer is held (previous block): no instant admin for its holders either.
+    expect(detail(await call("admin", "PUT", "/api/v1/admin/roles/c_sourcer/grants", { grants: { ...GRANTS.recruiter, "access:manage": "org" } })))
+      .toBe("admin_permission_needs_admin_role");
+    expect((await roleOf("c_sourcer"))!.grants["access:manage"]).toBeUndefined();
+    // A role with business permissions cannot take the admin trait.
+    expect(detail(await call("admin", "PATCH", "/api/v1/admin/roles/c_ops_helper", { traits: { admin: true } })))
+      .toBe("business_permission_on_admin_role");
+    expect((await roleOf("c_ops_helper"))!.traits.admin).toBe(false);
+  });
+
+  it("admin-trait roles take no business permission; admin-compatible ones are fine", async () => {
+    expect((await call("admin", "POST", "/api/v1/admin/roles", { label: "Access Admin", cloneFrom: "org_admin" })).statusCode).toBe(201);
+    expect(detail(await call("admin", "PUT", "/api/v1/admin/roles/c_access_admin/grants", { grants: { ...GRANTS.org_admin, "candidate:read": "org" } })))
+      .toBe("business_permission_on_admin_role");
+    expect(detail(await call("admin", "PUT", "/api/v1/admin/roles/c_access_admin/grants", { grants: { ...GRANTS.org_admin, "rate:read": "own" } })))
+      .toBe("business_permission_on_admin_role");
+    // Removing an admin-compatible permission and putting it back is allowed.
+    const { "chat:use": _chat, ...noChat } = GRANTS.org_admin;
+    expect((await call("admin", "PUT", "/api/v1/admin/roles/c_access_admin/grants", { grants: noChat })).statusCode).toBe(204);
+    expect((await call("admin", "PUT", "/api/v1/admin/roles/c_access_admin/grants", { grants: GRANTS.org_admin })).statusCode).toBe(204);
+    expect((await roleOf("c_access_admin"))!.grants).toEqual(GRANTS.org_admin);
+    const perms = (await call("admin", "GET", "/api/v1/admin/permissions")).json().items as { key: string; adminOnly: boolean; adminCompatible: boolean }[];
+    expect(perms.filter((p) => p.adminOnly).map((p) => p.key).sort()).toEqual(["access:manage", "audit:read"]);
+    expect(perms.find((p) => p.key === "chat:use")).toMatchObject({ adminOnly: false, adminCompatible: true });
+  });
+
+  describe("an older role that already breaks the rule", () => {
+    beforeAll(async () => {
+      await db.admin.query(`INSERT INTO eureka.role (key, label, cloned_from) VALUES ('c_legacy_mixed', 'Legacy Mixed', 'lead')`);
+      await db.admin.query(`INSERT INTO eureka.role_permission (role_key, permission, scope)
+        VALUES ('c_legacy_mixed', 'access:manage', 'org'), ('c_legacy_mixed', 'candidate:read', 'team')`);
+      // HR holds it: access:manage without the admin trait.
+      await db.admin.query(`INSERT INTO eureka.user_role (user_id, role_key) VALUES ($1, 'c_legacy_mixed')`, [U.hr]);
+      await db.admin.query(`UPDATE eureka.app_user SET access_version = access_version + 1 WHERE id = $1`, [U.hr]);
+    });
+
+    it("is listed by GET /admin/roles/violations, with every built-in role compliant", async () => {
+      const r = await call("admin", "GET", "/api/v1/admin/roles/violations");
+      expect(r.statusCode).toBe(200);
+      expect(r.json().items).toEqual([
+        { key: "c_legacy_mixed", label: "Legacy Mixed", isSystem: false, admin: false, archived: false, holders: 1, permissions: ["access:manage"] },
+      ]);
+      expect((await call("r1a", "GET", "/api/v1/admin/roles/violations")).statusCode).toBe(403);
+    });
+
+    it("its holder passes the API's access:manage check but not authz.admin_guard (admin trait)", async () => {
+      expect((await call("hr", "GET", "/api/v1/me")).json().capabilities).toContain("access:manage");
+      const sneaky = await call("hr", "POST", "/api/v1/admin/roles", { label: "Sneaky", cloneFrom: "org_admin" });
+      expect(sneaky.statusCode).toBe(403);
+      expect((await call("hr", "GET", "/api/v1/admin/roles/violations")).statusCode).toBe(403);
+      expect((await call("hr", "POST", "/api/v1/admin/role-requests", { userId: U.r1a, role: "c_legacy_mixed" })).statusCode).toBe(403);
+      expect(await roleOf("c_sneaky")).toBeUndefined();
+    });
+
+    it("can still be edited without adding a violation, not cloned, and cleaned up", async () => {
+      // Label and a business grant change: no new violation.
+      expect((await call("admin", "PATCH", "/api/v1/admin/roles/c_legacy_mixed", { label: "Legacy Mixed II" })).statusCode).toBe(204);
+      expect((await call("admin", "PUT", "/api/v1/admin/roles/c_legacy_mixed/grants",
+        { grants: { "access:manage": "org", "candidate:read": "org" } })).statusCode).toBe(204);
+      // Adding another admin-only permission is refused; so is a copy.
+      expect(detail(await call("admin", "PUT", "/api/v1/admin/roles/c_legacy_mixed/grants",
+        { grants: { "access:manage": "org", "candidate:read": "org", "audit:read": "org" } }))).toBe("admin_permission_needs_admin_role");
+      expect(detail(await call("admin", "POST", "/api/v1/admin/roles", { label: "Legacy Copy", cloneFrom: "c_legacy_mixed" })))
+        .toBe("admin_permission_needs_admin_role");
+      // Dropping access:manage clears it from the report.
+      expect((await call("admin", "PUT", "/api/v1/admin/roles/c_legacy_mixed/grants", { grants: { "candidate:read": "org" } })).statusCode).toBe(204);
+      expect((await call("admin", "GET", "/api/v1/admin/roles/violations")).json().items).toEqual([]);
+    });
+  });
+});
+
+describe("optional If-Match on role edits (C-02)", () => {
+  const version = async (key: string) => (await roleOf(key))!.rowVersion;
+  const send = async (method: Method, url: string, payload: unknown, ifMatch?: string) => {
+    const s = await login("admin");
+    return app.inject({
+      method, url, payload: payload as never,
+      headers: { cookie: s.cookie, "x-csrf-token": s.csrf, ...(ifMatch !== undefined ? { "if-match": ifMatch } : {}) },
+    });
+  };
+
+  it("GET /admin/roles returns rowVersion; a matching If-Match succeeds and the new version comes back as ETag", async () => {
+    expect((await call("admin", "POST", "/api/v1/admin/roles", { label: "Versioned", cloneFrom: "lead" })).statusCode).toBe(201);
+    expect(await version("c_versioned")).toBe(1);
+    const put = await send("PUT", "/api/v1/admin/roles/c_versioned/grants", { grants: { ...GRANTS.lead, "report:read": "hierarchy" } }, `"1"`);
+    expect(put.statusCode).toBe(204);
+    expect(put.headers.etag).toBe(`"2"`);
+    const patch = await send("PATCH", "/api/v1/admin/roles/c_versioned", { level: 3 }, "2");
+    expect(patch.statusCode).toBe(204);
+    expect(patch.headers.etag).toBe(`"3"`);
+    expect(await version("c_versioned")).toBe(3);
+    // A no-op edit keeps the version.
+    expect((await send("PATCH", "/api/v1/admin/roles/c_versioned", { traits: { sales: true } }, "3")).headers.etag).toBe(`"3"`);
+  });
+
+  it("a stale If-Match is 412 and changes nothing; no header behaves as before", async () => {
+    const before = (await roleOf("c_versioned"))!;
+    const stale = await send("PUT", "/api/v1/admin/roles/c_versioned/grants", { grants: { "candidate:read": "own" } }, `"1"`);
+    expect([stale.statusCode, detail(stale)]).toEqual([412, "stale"]);
+    expect((await send("PATCH", "/api/v1/admin/roles/c_versioned", { label: "Lost" }, "2")).statusCode).toBe(412);
+    expect(await roleOf("c_versioned")).toMatchObject({ label: before.label, grants: before.grants, rowVersion: before.rowVersion });
+    // Two admins from the same screen: the first wins, the second is told.
+    const v = before.rowVersion;
+    const a = await send("PUT", "/api/v1/admin/roles/c_versioned/grants", { grants: GRANTS.lead }, `"${v}"`);
+    const b = await send("PUT", "/api/v1/admin/roles/c_versioned/grants", { grants: { ...GRANTS.lead, "rate:read": "team" } }, `"${v}"`);
+    expect([a.statusCode, b.statusCode]).toEqual([204, 412]);
+    expect((await send("PATCH", "/api/v1/admin/roles/c_versioned", { label: "Versioned II" })).statusCode).toBe(204);
+    expect((await roleOf("c_versioned"))!.grants).toEqual(GRANTS.lead);
   });
 });

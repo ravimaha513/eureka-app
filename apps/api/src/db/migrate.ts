@@ -4,7 +4,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import {
-  GRANTS, HOTLIST_VISIBILITY, ORG_SENSITIVE_PERMISSIONS, PERMISSIONS, RESTRICTED_PERMISSIONS, ROLES, ROLE_LABELS, ROLE_LADDER,
+  ADMIN_COMPATIBLE_PERMISSIONS, ADMIN_PERMISSIONS, GRANTS, HOTLIST_VISIBILITY, ORG_SENSITIVE_PERMISSIONS, PERMISSIONS, RESTRICTED_PERMISSIONS, ROLES, ROLE_LABELS, ROLE_LADDER,
   ROLE_TRAITS,
 } from "@eureka/shared";
 
@@ -122,12 +122,15 @@ export async function applyFunctions(client: pg.Client | pg.PoolClient): Promise
 export async function seedCatalog(client: pg.Client | pg.PoolClient, opts: { production?: boolean } = {}): Promise<void> {
   await client.query("BEGIN");
   try {
-    // Permissions first: role_permission references them (0311). Flags drive role.is_restricted.
+    // Permissions first: role_permission references them (0311). Flags drive role.is_restricted
+    // and the admin/data separation checks (0470).
     for (const key of PERMISSIONS) {
       await client.query(
-        `INSERT INTO eureka.permission (key, is_restricted, is_org_sensitive) VALUES ($1,$2,$3)
-         ON CONFLICT (key) DO UPDATE SET is_restricted = EXCLUDED.is_restricted, is_org_sensitive = EXCLUDED.is_org_sensitive`,
-        [key, RESTRICTED_PERMISSIONS.includes(key), ORG_SENSITIVE_PERMISSIONS.includes(key)],
+        `INSERT INTO eureka.permission (key, is_restricted, is_org_sensitive, is_admin_only, is_admin_compatible) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (key) DO UPDATE SET is_restricted = EXCLUDED.is_restricted, is_org_sensitive = EXCLUDED.is_org_sensitive,
+           is_admin_only = EXCLUDED.is_admin_only, is_admin_compatible = EXCLUDED.is_admin_compatible`,
+        [key, RESTRICTED_PERMISSIONS.includes(key), ORG_SENSITIVE_PERMISSIONS.includes(key),
+          ADMIN_PERMISSIONS.includes(key), ADMIN_COMPATIBLE_PERMISSIONS.includes(key)],
       );
     }
     // System roles: label, traits and ladder position come from the catalog on every run

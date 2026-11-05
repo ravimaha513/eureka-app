@@ -96,6 +96,8 @@ const ADMIN_ENDPOINTS: { method: Method; url: string; body?: unknown; adminStatu
   { method: "DELETE", url: `/api/v1/admin/teams/${NIL}/members/${U.r1a}`, adminStatus: 404 },
   { method: "GET", url: `/api/v1/admin/teams/${NIL}/delete-impact`, adminStatus: 404 },
   { method: "DELETE", url: `/api/v1/admin/teams/${NIL}`, adminStatus: 404 },
+  // admin separation report (migration 0470, docs/roles-api.md).
+  { method: "GET", url: "/api/v1/admin/roles/violations", adminStatus: 200 },
 ];
 const MOVE = { method: "POST" as const, url: `/api/v1/teams/${T.t1}/move-member`, body: {} };
 
@@ -221,7 +223,10 @@ describe("locations", () => {
     const { id } = r.json();
     const row = (await db.admin.query(`SELECT name, kind, state, timezone FROM eureka.location WHERE id = $1`, [id])).rows[0];
     expect(row).toEqual({ name: "Houston", kind: "office", state: "TX", timezone: "America/Chicago" });
-    expect((await audits("admin.location.created")).at(-1)).toMatchObject({ actor_id: U.admin, entity_id: id });
+    // Name and state are free text: not in the audit row (rule 5, security review C-05).
+    expect((await audits("admin.location.created")).at(-1)).toEqual({
+      actor_id: U.admin, entity_id: id, changes: { kind: "office", fields: ["name", "kind", "state", "timezone"] },
+    });
 
     expect((await call("admin", "POST", "/api/v1/admin/locations", { name: "Houston", kind: "office" })).statusCode).toBe(409);
     expect((await call("admin", "POST", "/api/v1/admin/locations", { name: "Nowhere", kind: "warehouse" })).statusCode).toBe(422);
@@ -306,7 +311,11 @@ describe("users", () => {
     expect(list.items).toEqual([expect.objectContaining({
       id, designation: "Recruiter", primaryLocation: { id: LOC.dallas, name: "Dallas" }, roles: [], teams: [], manager: null,
     })]);
-    expect((await audits("admin.user.created")).at(-1)).toMatchObject({ actor_id: U.admin, entity_id: id });
+    // No display name, designation or email in the audit row (rule 5, security review C-05).
+    expect((await audits("admin.user.created")).at(-1)).toEqual({
+      actor_id: U.admin, entity_id: id,
+      changes: { fields: ["email", "displayName", "designation", "primaryLocationId"], primaryLocationId: LOC.dallas },
+    });
   });
 
   describe("bulk create", () => {
@@ -667,6 +676,7 @@ describe("teams", () => {
     const r = await call("admin", "POST", "/api/v1/admin/teams", { name: "Team New", leadId: U.l3, locationId: LOC.dallas });
     expect(r.statusCode).toBe(201);
     const id = r.json().id as string;
+    expect((await audits("admin.team.created")).at(-1)).toEqual({ actor_id: U.admin, entity_id: id, changes: { leadId: U.l3, locationId: LOC.dallas } });
     expect((await call("admin", "PUT", `/api/v1/admin/teams/${id}/lead`, { leadId: U.m2 })).statusCode).toBe(204);
     expect((await call("admin", "POST", `/api/v1/admin/teams/${id}/members`, { userId: U.hr })).statusCode).toBe(204);
     const dup = await call("admin", "POST", `/api/v1/admin/teams/${T.t1}/members`, { userId: U.hr });
