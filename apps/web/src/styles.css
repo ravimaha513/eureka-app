@@ -491,7 +491,7 @@ th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .savedviews p, .export p, .bulkbar p { margin: 6px 0 0; min-height: 1em; }
 .export { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .bulkteams { margin-top: 8px; max-width: 28rem; }
-.bulkbar { position: sticky; top: 64px; z-index: 6; padding: 8px 12px; border: 1px solid var(--sel-line); border-radius: var(--r-md); background: var(--sel); }
+.bulkbar { position: sticky; top: 64px; z-index: 6; padding: 8px 12px; border: 1px solid var(--sel-line); border-radius: var(--r-md); /* --sel is translucent in dark; rows scroll under this bar */ background: linear-gradient(var(--sel), var(--sel)), var(--surface); }
 .bulkbar .toolbar { align-items: center; gap: 8px; }
 .bulkbar .field.inline label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .bulkbar .field select { min-width: 0; width: 150px; }
