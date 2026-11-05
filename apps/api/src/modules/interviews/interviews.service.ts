@@ -14,7 +14,7 @@ import { AuditService } from "../../platform/audit.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import { inPickerScope, pickerScopePerm } from "../../platform/people-scope.js";
-import { likeContains } from "../../platform/sql.js";
+import { likeContains, nameSearch, trigramUsable } from "../../platform/sql.js";
 import { activityPredicate } from "../submissions/submissions.service.js";
 import { TERMINAL_SUBMISSION_STATUSES, fromMicros, mapPipelineError, splitCursor, toMicros } from "../submissions/pipeline.js";
 import { interviewTimesProblem } from "../submissions/pipeline.js";
@@ -82,6 +82,25 @@ interface InterviewRow {
 /** The name the board shows: an org-wide reader whose candidate join came back empty (RLS) still gets it (0141). */
 const CANDIDATE_NAME = `CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name
               ELSE authz.interview_candidate_name(i.id) END`;
+
+/**
+ * Candidate-name match for the board filters (E-09), the same rows as `(CANDIDATE_NAME) ILIKE pat`
+ * without a definer call per row. authz.interview_name_candidate_ids (db/functions/authz) returns,
+ * once per statement (InitPlan, rule 3), the candidates whose board name the caller sees and that
+ * match: readable candidates (person_read), plus for an org interview reader every interviewed
+ * candidate, which is exactly when authz.interview_candidate_name answers. Where the person row is
+ * visible its own name decides (the ILIKE, as before); where it is not, the set decides, as
+ * interview_candidate_name would have, with a hash probe instead of a definer call.
+ * `indexed` (a top-level AND term whose `term` has a full trigram) adds `= ANY (set)`, so the set
+ * becomes an index condition on interview_candidate_time and the board starts from the matching
+ * candidates; a short term or the OR with the coach name keeps the ordered walk with LIMIT, where
+ * the cheap per-row test matters (perf-baseline.md "R-13b").
+ */
+export const candidateNameMatch = (pat: string, term: string, indexed: boolean) => {
+  const set = `(SELECT authz.interview_name_candidate_ids(${pat}::text))`;
+  if (indexed && trigramUsable(term)) return `(i.candidate_id = ANY (${set}::uuid[]) AND (p.id IS NULL OR ${nameSearch("p", pat)}))`;
+  return `(CASE WHEN p.id IS NOT NULL THEN ${nameSearch("p", pat)} ELSE i.candidate_id IN (SELECT pg_catalog.unnest(${set})) END)`;
+};
 
 const SELECT = `
   SELECT i.id, i.submission_id, i.candidate_id, i.recruiter_id, i.team_id, i.location_id, i.client_id,
@@ -227,7 +246,7 @@ export class InterviewsService {
     if (q.teamId) where.push(`i.team_id = ${p(q.teamId)}`);
     if (q.locationId) where.push(`i.location_id = ${p(q.locationId)}`);
     if (q.candidateId) where.push(`i.candidate_id = ${p(q.candidateId)}`);
-    if (q.candidate) where.push(`(${CANDIDATE_NAME}) ILIKE ${p(likeContains(q.candidate))} ESCAPE '\\'`);
+    if (q.candidate) where.push(candidateNameMatch(p(likeContains(q.candidate)), q.candidate, true));
     if (q.batchId) where.push(`c.batch_id = ${p(q.batchId)}::uuid`);
     if (q.clientId) where.push(`i.client_id = ${p(q.clientId)}`);
     if (q.submissionId) where.push(`i.submission_id = ${p(q.submissionId)}`);
@@ -235,7 +254,7 @@ export class InterviewsService {
     if (q.result) where.push(`i.result = ${p(q.result)}`);
     if (q.search) {
       const pat = p(likeContains(q.search));
-      where.push(`(${CANDIDATE_NAME} ILIKE ${pat} ESCAPE '\\' OR cu.display_name ILIKE ${pat} ESCAPE '\\')`);
+      where.push(`(${candidateNameMatch(pat, q.search, false)} OR cu.display_name ILIKE ${pat} ESCAPE '\\')`);
     }
     const desc = q.sort === "desc";
     if (q.cursor) {

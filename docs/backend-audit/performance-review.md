@@ -384,6 +384,11 @@ Authz facts must **not** be cached: revocation must take effect immediately, and
 - Regression risks: Name visibility rules for non-org readers must not widen.
 - Required tests: A coordinator search returns names. A Sales team reader cannot match names of hidden candidates. EXPLAIN shows no per-row function scan.
 - Breaking API change?: no
+- **Measured (R-13b, wave 3; [perf-baseline.md](perf-baseline.md) "R-13b / E-09"):** the filter now uses
+  `authz.interview_name_candidate_ids` once per statement (InitPlan) instead of a definer call per row.
+  Coordinator searches that hit the 5 s timeout (rare or missing names) now take 1.7–115 ms; common
+  names 137–785 → 58–119 ms; rows identical. `search` for org/team readers is unchanged (OR with the
+  coach name).
 
 #### E-11 · Interview report totals come from a separate transaction and scan; daily totals come from capped rows
 
@@ -486,6 +491,12 @@ Authz facts must **not** be cached: revocation must take effect immediately, and
   use it, because ILIKE is not leakproof and so cannot run ahead of the RLS security quals. They are
   unchanged at 40–540 ms, and most of that time is the per-row `person_read` EXISTS. Index-backing
   them needs a scoped definer search (security review). See the follow-up in perf-baseline.md.
+- **Measured (R-13b, wave 3; [perf-baseline.md](perf-baseline.md) "R-13b / E-09"):** the lists now add
+  `= ANY ((SELECT authz.person_name_matches($n))::uuid[])` (a scoped definer set, index-backed, rows
+  identical) for 3+ character terms: rare or missing names 0.00–0.09× at org scope (candidates
+  `zzqx` 198.5 → 0.9 ms, submissions 336.2 → 1.1 ms), 0.06–0.61× at team scope; common 3-character
+  terms got slower (`ana`, 2,500 matches: 8.0 → 51.1 ms). The person_read policy is unchanged (both
+  InitPlan rewrites measured slower).
 
 #### G-07 · Every org change rewrites every app_user row to bump access_version, which nothing reads
 

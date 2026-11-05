@@ -1,6 +1,6 @@
 # Name search performance: baseline and R-13 result
 
-Measurements for R-13 (findings G-04, A-05, B-06; E-09 interviews is out of scope here). Before = the
+Measurements for R-13 (findings G-04, A-05, B-06; E-09 and the eureka_app lists: see "R-13b / E-09" at the end). Before = the
 schema at 6db3a53 with no trigram index; after = migration `0479_name_search_trgm.sql` (pg_trgm + GIN
 trigram indexes `person_name_trgm`, `applicant_name_trgm` on `(first_name || ' ' || last_name)`).
 The SQL text the services send is the same before and after (it is now written by `nameSearch()` in
@@ -3505,3 +3505,254 @@ index can serve it; the cost is the aggregation itself.
   on each call (≈ 0.5 s on this data). The finding's further option, a persisted "furthest stage" per
   candidate maintained by triggers or the outbox, or a short per-user summary cache, would be the next step
   if the report becomes hot; both need a design decision (trigger upkeep and backfill, or staleness).
+
+## R-13b / E-09: scoped name-match sets for the eureka_app lists (wave 3)
+
+Follow-up to "Follow-up (not done here)" above. Before = 6cc3ad5 (R-13 shipped, lists unchanged);
+after = this change: `authz.person_name_matches(pattern)` and `authz.interview_name_candidate_ids(pattern)`
+(`db/functions/authz/`, SECURITY DEFINER, EXECUTE for eureka_app only, no migration needed), used by
+`scopedNameSearch()` / `nameMatch()` in `apps/api/src/platform/sql.ts` and `candidateNameMatch()` in
+`interviews.service.ts`.
+
+### What changed
+
+- **Person lists** (candidates and the default-policy Hot List, submissions, placements, employees): for
+  a term with a run of 3+ letters/digits (`trigramUsable`), the existing `nameSearch()` ILIKE gets
+  `AND <person id> = ANY ((SELECT authz.person_name_matches($n))::uuid[])`. The function runs once per
+  statement (InitPlan), as authz_definer, so its ILIKE uses `person_name_trgm`; it returns only persons
+  the caller can read: the candidate_read predicate over the same `authz.*` scope helpers (org scope
+  short-circuits to "has a candidate"), i.e. exactly what person_read shows. The ILIKE stays, so the rows
+  are the same as before; the planner can now start from the matching ids (`Index Cond: (id = ANY ($0))`
+  on person_pkey / employee_pkey) instead of walking the whole list. 1–2 character terms are left as
+  they were (no trigram; the walk with LIMIT is faster for them).
+- **Interviews board (E-09):** the `candidate` and `search` filters no longer call
+  `authz.interview_candidate_name` per row in WHERE. The set function returns the candidates whose board
+  name the caller sees and that match (readable candidates; for an org interview reader, every
+  interviewed candidate, which is when `interview_candidate_name` answers). Where the person row is
+  visible its own name is still checked with the ILIKE; where it is not, the set decides (hash probe).
+  For the `candidate` filter with a 3+ character term the set is also an index condition
+  (`interview_candidate_time`); `search` (OR coach name) and short terms keep the ordered walk.
+- **Not changed:** applicants (the applicant policies are already InitPlans and the search ORs the
+  unindexed email; 1–24 ms before), payments (no invoice data in the load seed, so not measurable here),
+  the Hot List definer paths (R-13), and the `person_read` policy (see "person_read" below).
+
+### Method
+
+As R-13 ("Method" above): a fresh `db:seed-load` (default volume) in a scratch database
+`eureka_perf_w3b`, the same scratch additions (perf-ceo, 6 `Zebrowski`, 50,000 applicants, 10,000
+employees) plus one interview coordinator `perf-coord` (`interview_coordinator`: interview:read at org,
+no candidate:read). Data: 50,000 persons/candidates, 58,294 submissions, 16,287 interviews, 835
+placements. Same PostgreSQL 16 on tmpfs, shared with other agents' test runs (noise up to ±30 %).
+Users: org = perf-ceo, team = load-lead-01, coord = perf-coord, hr = load-hr-01. Terms as R-13 plus
+`ana` (a common 3-character term: 2,500 persons) and "(none)" (the list without a search). The capture
+script booted the real API, sent each request 5 times after a warm-up, recorded the list SQL and ran
+`EXPLAIN (ANALYZE, BUFFERS)` on it 5 times as eureka_app with `eureka.user_id` set; medians shown.
+Equality: every before/after SQL pair was then run again as eureka_app without a statement timeout and
+the full result rows compared: **107 of 107 identical**, including the pages that timed out over HTTP
+before.
+
+### Results
+
+| Query (user) | Term | Rows | Exec before (ms) | Exec after (ms) | After/before | HTTP before (ms) | HTTP after (ms) |
+|---|---|--:|--:|--:|--:|--:|--:|
+| candidates/org | (none) | 50 | 2.3 | 2.2 | 0.97 | 21.3 | 21.4 |
+| candidates/org | `Aarav Agarwal` | 50 | 115.3 | 6.3 | 0.05 | 109.8 | 21 |
+| candidates/org | `Kumar` | 50 | 138.6 | 35.9 | 0.26 | 123.7 | 48.1 |
+| candidates/org | `an` | 50 | 2.7 | 2.7 | 0.99 | 18.6 | 20.1 |
+| candidates/org | `ana` | 50 | 8.0 | 51.1 | 6.39 | 23.3 | 54.7 |
+| candidates/org | `Zebrowski` | 6 | 86.2 | 1.9 | 0.02 | 96.7 | 17.1 |
+| candidates/org | `zzqx` | 0 | 198.5 | 0.9 | 0.00 | 212.3 | 15.7 |
+| candidates-sort-name/org | `Aarav Agarwal` | 50 | 92.6 | 5.9 | 0.06 | 101.4 | 19.4 |
+| candidates-sort-name/org | `Kumar` | 50 | 134.9 | 34.7 | 0.26 | 129.9 | 41.3 |
+| candidates-sort-name/org | `an` | 50 | 141.2 | 142.6 | 1.01 | 114.6 | 104.8 |
+| candidates-sort-name/org | `ana` | 50 | 125.7 | 46.6 | 0.37 | 90.3 | 51.8 |
+| candidates-sort-name/org | `Zebrowski` | 6 | 99.7 | 1.8 | 0.02 | 99.5 | 17.3 |
+| candidates-sort-name/org | `zzqx` | 0 | 87.8 | 1.0 | 0.01 | 99.9 | 16.3 |
+| submissions/org | (none) | 50 | 6.0 | 8.7 | 1.45 | 19.7 | 15.1 |
+| submissions/org | `Aarav Agarwal` | 50 | 107.8 | 9.5 | 0.09 | 111.8 | 19.9 |
+| submissions/org | `Kumar` | 50 | 212.9 | 45.1 | 0.21 | 164.2 | 50.8 |
+| submissions/org | `an` | 50 | 6.9 | 10.4 | 1.51 | 17.9 | 22.4 |
+| submissions/org | `ana` | 50 | 20.2 | 56.7 | 2.81 | 23.2 | 61.9 |
+| submissions/org | `Zebrowski` | 10 | 88.3 | 4.6 | 0.05 | 95 | 14.4 |
+| submissions/org | `zzqx` | 0 | 336.2 | 1.1 | 0.00 | 321.1 | 11.4 |
+| placements/org | (none) | 50 | 2.3 | 2.7 | 1.14 | 23.6 | 24.5 |
+| placements/org | `Aarav Agarwal` | 2 | 6.5 | 4.3 | 0.65 | 24 | 21.1 |
+| placements/org | `Kumar` | 35 | 11.1 | 18.2 | 1.63 | 35.5 | 30.4 |
+| placements/org | `an` | 50 | 4.0 | 3.4 | 0.84 | 24.1 | 18.3 |
+| placements/org | `ana` | 43 | 6.9 | 16.5 | 2.39 | 29.2 | 32.6 |
+| placements/org | `Zebrowski` | 0 | 7.7 | 2.1 | 0.28 | 22.8 | 18.2 |
+| placements/org | `zzqx` | 0 | 6.6 | 1.3 | 0.20 | 30.7 | 16.8 |
+| interviews-search/org | (none) | 50 | 8.0 | 7.0 | 0.88 | 31.8 | 29.6 |
+| interviews-search/org | `Aarav Agarwal` | 50 | 120.8 | 125.3 | 1.04 | 127.1 | 132.6 |
+| interviews-search/org | `Kumar` | 50 | 17.9 | 15.5 | 0.87 | 43.3 | 46.4 |
+| interviews-search/org | `an` | 50 | 12.6 | 8.4 | 0.66 | 39.8 | 32.7 |
+| interviews-search/org | `ana` | 50 | 19.1 | 15.3 | 0.80 | 50.9 | 41.8 |
+| interviews-search/org | `Zebrowski` | 3 | 163.5 | 138.2 | 0.84 | 187.6 | 150 |
+| interviews-search/org | `zzqx` | 0 | 145.9 | 129.7 | 0.89 | 150.3 | 129.9 |
+| interviews-candidate/org | `Aarav Agarwal` | 50 | 112.4 | 9.7 | 0.09 | 139.9 | 22.9 |
+| interviews-candidate/org | `Kumar` | 50 | 17.1 | 45.2 | 2.65 | 38.9 | 59.3 |
+| interviews-candidate/org | `an` | 50 | 10.2 | 7.8 | 0.76 | 39.2 | 40.6 |
+| interviews-candidate/org | `ana` | 50 | 21.8 | 66.0 | 3.02 | 35.5 | 69.8 |
+| interviews-candidate/org | `Zebrowski` | 3 | 128.6 | 3.0 | 0.02 | 155.7 | 15.4 |
+| interviews-candidate/org | `zzqx` | 0 | 162.8 | 1.2 | 0.01 | 148.1 | 12.9 |
+| candidates/team | (none) | 50 | 9.7 | 7.3 | 0.76 | 41.4 | 23.6 |
+| candidates/team | `Aarav Agarwal` | 50 | 38.3 | 12.0 | 0.31 | 55.4 | 26.1 |
+| candidates/team | `Kumar` | 50 | 46.2 | 18.8 | 0.41 | 55.5 | 33 |
+| candidates/team | `an` | 50 | 13.2 | 9.9 | 0.74 | 25.4 | 25.8 |
+| candidates/team | `ana` | 50 | 22.2 | 23.0 | 1.04 | 56.4 | 40.1 |
+| candidates/team | `Zebrowski` | 2 | 40.5 | 10.8 | 0.27 | 46.9 | 26.6 |
+| candidates/team | `zzqx` | 0 | 32.1 | 4.5 | 0.14 | 52.4 | 18.5 |
+| candidates-sort-name/team | `Aarav Agarwal` | 50 | 44.3 | 12.3 | 0.28 | 53.7 | 26 |
+| candidates-sort-name/team | `Kumar` | 50 | 42.3 | 19.7 | 0.47 | 53.9 | 33.9 |
+| candidates-sort-name/team | `an` | 50 | 56.5 | 45.0 | 0.80 | 56 | 55 |
+| candidates-sort-name/team | `ana` | 50 | 37.4 | 22.9 | 0.61 | 48.1 | 35.2 |
+| candidates-sort-name/team | `Zebrowski` | 2 | 31.8 | 9.7 | 0.31 | 46.1 | 31.1 |
+| candidates-sort-name/team | `zzqx` | 0 | 32.3 | 4.2 | 0.13 | 45.9 | 16.5 |
+| submissions/team | (none) | 50 | 31.0 | 27.2 | 0.88 | 40.2 | 42.5 |
+| submissions/team | `Aarav Agarwal` | 50 | 71.9 | 21.4 | 0.30 | 86.2 | 34 |
+| submissions/team | `Kumar` | 50 | 73.1 | 24.8 | 0.34 | 82.1 | 36.3 |
+| submissions/team | `an` | 50 | 88.9 | 94.8 | 1.07 | 97 | 100.5 |
+| submissions/team | `ana` | 0 | 63.5 | 22.1 | 0.35 | 72.1 | 39.9 |
+| submissions/team | `Zebrowski` | 2 | 70.3 | 12.2 | 0.17 | 75.6 | 23.4 |
+| submissions/team | `zzqx` | 0 | 67.4 | 4.2 | 0.06 | 75.5 | 14.3 |
+| placements/team | (none) | 23 | 24.5 | 20.9 | 0.85 | 37.4 | 39.3 |
+| placements/team | `Aarav Agarwal` | 1 | 22.6 | 39.1 | 1.73 | 41.6 | 44.6 |
+| placements/team | `Kumar` | 0 | 23.4 | 33.4 | 1.42 | 34.9 | 60.2 |
+| placements/team | `an` | 1 | 22.8 | 30.3 | 1.33 | 36.6 | 36.7 |
+| placements/team | `ana` | 0 | 31.2 | 37.9 | 1.21 | 38.9 | 60.3 |
+| placements/team | `Zebrowski` | 0 | 22.4 | 31.7 | 1.42 | 34.5 | 43.8 |
+| placements/team | `zzqx` | 0 | 22.6 | 7.1 | 0.31 | 37 | 21.6 |
+| interviews-search/team | (none) | 50 | 29.9 | 40.9 | 1.37 | 48.5 | 51.7 |
+| interviews-search/team | `Aarav Agarwal` | 14 | 54.0 | 47.5 | 0.88 | 72.4 | 65.4 |
+| interviews-search/team | `Kumar` | 18 | 51.7 | 39.9 | 0.77 | 69.2 | 62.2 |
+| interviews-search/team | `an` | 17 | 52.3 | 49.5 | 0.95 | 71.6 | 59.8 |
+| interviews-search/team | `ana` | 0 | 46.2 | 36.7 | 0.79 | 89.2 | 60.7 |
+| interviews-search/team | `Zebrowski` | 0 | 48.1 | 45.1 | 0.94 | 64 | 52.5 |
+| interviews-search/team | `zzqx` | 0 | 49.4 | 37.5 | 0.76 | 82.9 | 53.8 |
+| interviews-candidate/team | `Aarav Agarwal` | 14 | 53.8 | 32.9 | 0.61 | 72.9 | 58.1 |
+| interviews-candidate/team | `Kumar` | 18 | 58.5 | 35.7 | 0.61 | 71.6 | 47.8 |
+| interviews-candidate/team | `an` | 17 | 93.3 | 48.6 | 0.52 | 106.7 | 64.8 |
+| interviews-candidate/team | `ana` | 0 | 79.9 | 29.9 | 0.37 | 72.3 | 47 |
+| interviews-candidate/team | `Zebrowski` | 0 | 57.3 | 22.2 | 0.39 | 72.9 | 32.8 |
+| interviews-candidate/team | `zzqx` | 0 | 51.8 | 5.4 | 0.10 | 90.6 | 16.4 |
+| interviews-search/coord | (none) | 50 | 87.2 | 60.2 | 0.69 | 104.6 | 80.8 |
+| interviews-search/coord | `Aarav Agarwal` | 50 | 7483.0 | 115.0 | 0.02 | 5008.7 (503) | 127.1 |
+| interviews-search/coord | `Kumar` | 50 | 596.5 | 74.7 | 0.13 | 730.6 | 99.6 |
+| interviews-search/coord | `an` | 50 | 192.8 | 84.3 | 0.44 | 246.2 | 111.5 |
+| interviews-search/coord | `ana` | 50 | 785.3 | 82.6 | 0.11 | 650 | 95.4 |
+| interviews-search/coord | `Zebrowski` | 3 | 8063.0 | 93.8 | 0.01 | 5010.6 (503) | 100.4 |
+| interviews-search/coord | `zzqx` | 0 | 6265.5 | 64.8 | 0.01 | 5020.4 (503) | 75.5 |
+| interviews-candidate/coord | `Aarav Agarwal` | 50 | 4137.8 | 58.4 | 0.01 | 4494.5 | 72.6 |
+| interviews-candidate/coord | `Kumar` | 50 | 410.1 | 92.6 | 0.23 | 442.8 | 105.6 |
+| interviews-candidate/coord | `an` | 50 | 137.4 | 81.0 | 0.59 | 176.9 | 98.8 |
+| interviews-candidate/coord | `ana` | 50 | 458.3 | 118.6 | 0.26 | 529.9 | 124 |
+| interviews-candidate/coord | `Zebrowski` | 3 | 5267.9 | 22.8 | 0.00 | 5008 (503) | 38.6 |
+| interviews-candidate/coord | `zzqx` | 0 | 7301.7 | 1.7 | 0.00 | 5012.2 (503) | 14.5 |
+| employees/org(hr) | (none) | 50 | 141.4 | 104.7 | 0.74 | 130 | 102.5 |
+| employees/org(hr) | `Aarav Agarwal` | 31 | 64.4 | 4.9 | 0.08 | 61.7 | 16.5 |
+| employees/org(hr) | `Kumar` | 50 | 85.8 | 12.9 | 0.15 | 84.8 | 30.6 |
+| employees/org(hr) | `an` | 50 | 82.0 | 72.1 | 0.88 | 74.8 | 85 |
+| employees/org(hr) | `ana` | 50 | 74.6 | 16.0 | 0.21 | 65.1 | 27.8 |
+| employees/org(hr) | `Zebrowski` | 6 | 51.6 | 2.8 | 0.06 | 62.7 | 15.5 |
+| employees/org(hr) | `zzqx` | 0 | 40.9 | 1.3 | 0.03 | 52.7 | 11.5 |
+| applicants/org(hr) | (none) | 50 | 1.1 | 1.2 | 1.14 | 8.6 | 7.7 |
+| applicants/org(hr) | `Aarav Agarwal` | 50 | 12.7 | 12.3 | 0.97 | 19.1 | 20.7 |
+| applicants/org(hr) | `Kumar` | 50 | 12.0 | 11.7 | 0.98 | 17.7 | 18.2 |
+| applicants/org(hr) | `an` | 50 | 1.2 | 1.0 | 0.84 | 6.8 | 7.3 |
+| applicants/org(hr) | `ana` | 50 | 1.8 | 1.7 | 0.92 | 6.9 | 7.6 |
+| applicants/org(hr) | `Zebrowski` | 11 | 23.2 | 10.3 | 0.44 | 20.7 | 15.8 |
+| applicants/org(hr) | `zzqx` | 0 | 23.9 | 22.0 | 0.92 | 54.9 | 28.9 |
+
+Rows = rows on the page (limit 50); "(503)" = the API's 5 s statement timeout fired (the EXPLAIN, without
+the timeout, shows the full time).
+
+### Findings
+
+1. **Rare names and misses are now index-driven.** Org scope: candidates `Zebrowski` 86.2 → 1.9 ms and
+   `zzqx` 198.5 → 0.9 ms; submissions `zzqx` 336.2 → 1.1 ms; employees `Aarav Agarwal` 64.4 → 4.9 ms.
+   Team scope: 0.06–0.61× for the candidate and submission lists with a 3+ character term (one
+   exception: `ana` on candidates/team, 1.04×). The plans start with the InitPlan and
+   `Index Cond: (id = ANY ($0))` (excerpts below); the person_read EXISTS now runs only for matching rows.
+2. **E-09 is fixed for coordinators.** Interview coordinators (whose candidate join is hidden by RLS)
+   timed out at 5 s on rare-name and missing-name searches (`search` and `candidate`), and took
+   137–785 ms for common names. After: 1.7–119 ms for `candidate`, 60–115 ms for `search`. No
+   `interview_candidate_name` call remains in any WHERE (`name-search-scope.db.int.test.ts` checks the
+   plan); it still runs for the ≤51 rows of the page (SELECT list), as before.
+3. **Common 3-character terms got slower (trade-off, kept).** Cost now grows with the number of matches
+   (about 20 µs per matching person) instead of with the distance the walk must go to fill the page:
+   `ana` (2,500 matches) candidates/org 8.0 → 51.1 ms, submissions/org 20.2 → 56.7 ms, interviews
+   `candidate`/org 21.8 → 66.0 ms; `Kumar` (1,785) interviews `candidate`/org 17.1 → 45.2 ms. For team
+   scope the function also resolves the five candidate:read scope sets (~1.5–2 ms each, the same work the
+   RLS InitPlans do): placements/team, a 23-row list that was already cheap to walk, went from 22–31 to
+   30–39 ms (1.2–1.7×; `an`, whose SQL is unchanged, moved 1.33×, so part of that is noise). The worst case after
+   (≈ 50–120 ms for a term matching thousands) is below the worst case before (200–340 ms for a miss,
+   5 s for coordinators). Seed names are far less diverse than real data (280 full names), so these
+   common-term numbers are pessimistic.
+4. **Short terms (1–2 characters) are unchanged** on the person lists (`an` rows ≈ before; the SQL is
+   the same). On the interviews board they use the hashed set as well (no trigram, the function falls
+   back to a sequential scan as authz_definer, ~25 ms for `an`), because a short rare term (a two-letter
+   surname) would otherwise time out for coordinators.
+5. **`interviews?search=` for org/team readers is unchanged** (OR with the coach name cannot be an index
+   condition; 0.66–1.04× org, 0.76–1.37× team). Index-backing it would need a UNION of the two arms.
+
+### Forms that were measured and not shipped
+
+| Variant | Example (exec ms, median of 5) | Verdict |
+|---|---|---|
+| `p.id IN (SELECT unnest((SELECT authz.person_name_matches($n))))` (the brief's InitPlan form) | candidates/org `ana` 443.1, `Kumar` 304.9, sort=name `ana` 439.2 (vs 51.1 / 35.9 / 46.6 with `= ANY`) | Not shipped. The unnest is estimated at 10 rows, so the planner chose a nested-loop semi-join over a Materialize with a linear join filter (`Rows Removed by Join Filter: 3123750`). `= ANY ((SELECT ..)::uuid[])` as a top-level AND term is an index condition (one probe per id). Under OR the shipped interview SQL uses the hashed `IN (SELECT unnest(..))` instead, where it is a hash probe |
+| Interview `candidate` filter always as the walk form (CASE + hashed set), no `= ANY` | org `Zebrowski` 130.0, `zzqx` 126.1, `Aarav Agarwal` 104.0 (vs 3.0 / 1.2 / 9.7 shipped); `Kumar` 17.0, `ana` 17.7 (vs 45.2 / 66.0) | Used only for short terms and for `search`; 3+ character `candidate` terms use the index form |
+| person_read rewritten as `id IN (SELECT c.person_id FROM eureka.candidate c)` | candidates/org (none) 2.2 → 181.9, submissions/org (none) 8.7 → 171.2, placements/org `ana` 16.5 → 489.0 | Not shipped: planned as one hashed scan of every readable candidate per statement |
+| person_read as an InitPlan set (`id IN (SELECT unnest((SELECT authz.readable_person_ids())))`, a scratch definer function returning every readable person) | candidates/org (none) 2.2 → 22.9, `Zebrowski` 1.9 → 21.6, employees (none) 104.7 → 114.3 | Not shipped: building the set (50k ids at org scope) costs ~20 ms on every statement that touches person, including single-row reads |
+
+### person_read
+
+The per-row `EXISTS (SELECT 1 FROM eureka.candidate c WHERE c.person_id = person.id)` costs one
+`candidate_person_id_key` probe (plus the candidate_read filter, whose sets are InitPlans) per person row
+the query touches: about 3 µs. It was expensive before because the search lists touched every person.
+With the name sets the lists touch only matching persons, and both equivalent InitPlan-style rewrites
+measured above are slower for the common case, so the policy is unchanged. The remaining list where it
+shows is `employees` without a search (104.7 ms after, 141.4 ms before: the plan joins all 10,000
+employees before the top-N sort); that is the employee list's ordering, not the policy, and is left for
+a separate change. Migrations 0481–0482 were therefore not needed.
+
+### Security notes
+
+- `person_name_matches` re-implements the candidate_read predicate inside the definer (team, recruiter,
+  location, all-teams and selected-teams share branches, NULL-safe via `coalesce(.., false)`), so it can
+  only name persons the caller already reads; `name-search-scope.db.int.test.ts` compares it with the
+  RLS result for every fixture user (plus a coordinator, an unknown user and no user) and 11 terms, and
+  pins the candidate_read and person_read policy text so a policy change fails the test until the
+  function is reviewed with it. A person without a candidate is never returned (as person_read).
+- `interview_name_candidate_ids` returns, for a caller without org interview read, only readable
+  candidates; with org interview read, only candidates that have an interview (all readable at org,
+  with the name via 0141). The same test proves the board rows are identical to the per-row predicate
+  for every user and that every returned id is readable or an interviewed candidate for an org reader.
+
+### Plan excerpts (term `Zebrowski` unless noted, last of five runs)
+
+candidates/org, before (84.4 ms): walk of every candidate, person_read EXISTS per row:
+```
+Filter: ((SubPlan 15) AND (((first_name || ' '::text) || last_name) ~~* '%Zebrowski%'::text))
+  SubPlan 15
+    ->  Index Scan using candidate_person_id_key on candidate c_1  (... rows=1 loops=50000)
+Execution Time: 84.400 ms
+```
+candidates/org, after (1.7 ms):
+```
+InitPlan 1 (returns $0)
+...
+Index Cond: (id = ANY ($0))            -- person_pkey, the matching ids
+Index Cond: (person_id = p.id)         -- candidate_person_id_key
+Execution Time: 1.727 ms
+```
+submissions/org, term `zzqx`: before 330.3 ms (`Memoize ... loops=58294`, every submission joined to its
+person); after 1.1 ms (`Index Cond: (id = ANY ($7))`, then `Index Cond: (candidate_id = c.id)`).
+
+interviews `candidate`/coord, before (4,790 ms; the API answered 503 at 5 s):
+```
+Filter: (CASE WHEN (p.id IS NOT NULL) THEN ((p.first_name || ' '::text) || p.last_name) ELSE authz.interview_candidate_name(i.id) END ~~* '%Zebrowski%'::text)
+Rows Removed by Filter: 16284
+  ->  Index Scan using interview_starts_at on interview i  (... rows=16287 loops=1)
+```
+after (22.8 ms): `Index Cond: (candidate_id = ANY ($0))` on interview_candidate_time; no
+`interview_candidate_name` in any Filter or Cond.
