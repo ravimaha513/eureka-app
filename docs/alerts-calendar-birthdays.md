@@ -37,7 +37,7 @@ detail. The payload / inbox rule is unchanged; the producers' no-personal-data t
 
 ### Endpoints
 
-- `GET /api/v1/placements/:id/contracts` (`placement:read`) → `{ items: [{ id, placementId, kind, title, reference, startsOn, endsOn, notes, createdAt, createdBy: { id, name } }], canAdd }`, newest first; 404 outside the caller's scope.
+- `GET /api/v1/placements/:id/contracts` (`placement:read`) → `{ items: [{ id, placementId, kind, title, reference, startsOn, endsOn, notes, createdAt, createdBy: { id, name } }], canAdd, truncated }`, newest first, at most 500 (`truncated` when cut, R-23); 404 outside the caller's scope.
 - `POST /api/v1/placements/:id/contracts` (`placement:read`; the database decides, CT-2) body `{ kind, title, reference?, startsOn?, endsOn?, notes? }` (strict) → 201 the contract; 403 / 404 / 422 `placement_closed`.
 
 ## Staff birthdays and the CEO digest (BD)

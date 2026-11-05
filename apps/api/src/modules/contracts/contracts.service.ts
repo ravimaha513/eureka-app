@@ -6,6 +6,9 @@ import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
 import type { CreateContract } from "./contracts.schemas.js";
 
+/** Contracts per placement are few; the cap only bounds the query (R-23). `truncated` says when it bit. */
+export const CONTRACT_LIST_CAP = 500;
+
 interface ContractRow {
   id: string; placement_id: string; kind: string; title: string; reference: string | null; starts_on: string | null;
   ends_on: string | null; notes: string | null; created_at: Date; created_by: string; created_by_name: string | null;
@@ -50,9 +53,10 @@ export class ContractsService {
         `SELECT k.id, k.placement_id, k.kind, k.title, k.reference, k.starts_on::text AS starts_on, k.ends_on::text AS ends_on, k.notes,
                 k.created_at, k.created_by, u.display_name AS created_by_name
            FROM eureka.contract k LEFT JOIN eureka.app_user u ON u.id = k.created_by
-          WHERE k.placement_id = $1 ORDER BY k.created_at DESC, k.id DESC`, [placementId]);
+          WHERE k.placement_id = $1 ORDER BY k.created_at DESC, k.id DESC LIMIT $2`, [placementId, CONTRACT_LIST_CAP + 1]);
       return {
-        items: rows.map(present),
+        items: rows.slice(0, CONTRACT_LIST_CAP).map(present),
+        truncated: rows.length > CONTRACT_LIST_CAP,
         canAdd: ContractsService.canAdd(user.access, p) && !CLOSED_BEFORE_JOIN_STATUSES.has(p.status),
       };
     });

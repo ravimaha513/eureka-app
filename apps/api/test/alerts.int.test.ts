@@ -221,6 +221,7 @@ describe("contracts (CT-1..CT-6)", () => {
     const hr = await call("hr", "GET", `/api/v1/placements/${placementId}/contracts`);
     expect(hr.statusCode).toBe(200);
     expect(hr.json().items.map((c: { kind: string }) => c.kind)).toEqual(["msa", "po"]);
+    expect(hr.json().truncated).toBe(false);
     expect(hr.json().canAdd).toBe(false);
     expect((await call("acct", "GET", `/api/v1/placements/${placementId}/contracts`)).json().canAdd).toBe(true);
     expect((await call("l1", "GET", `/api/v1/placements/${placementId}/contracts`)).json().canAdd).toBe(true);

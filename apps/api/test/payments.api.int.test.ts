@@ -318,6 +318,11 @@ describe("dashboard filters, summary and billable placements", () => {
     expect(un).not.toContain(a.placementId);
     const r2a = (await call("r2a", "GET", "/api/v1/invoices/placements")).json().items.map((p: { id: string }) => p.id);
     expect(r2a).toContain(a.placementId);
+    // R-23: the list says when `limit` cut it.
+    const all = (await call("acct", "GET", "/api/v1/invoices/placements?limit=200")).json();
+    expect(all.truncated).toBe(false);
+    const one = (await call("acct", "GET", "/api/v1/invoices/placements?limit=1")).json();
+    expect([one.items.length, one.truncated]).toEqual([1, all.items.length > 1]);
     expect(r2a).not.toContain(b.placementId);
   });
 });

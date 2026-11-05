@@ -306,11 +306,15 @@ export class PaymentsService {
       FROM eureka.placement pl
       ${PLACEMENT_JOINS}
       WHERE ${where.join(" AND ")}
-      ORDER BY pl.joined_at DESC, pl.id DESC LIMIT ${p(q.limit)}`;
-    const rows = await this.db.withUser(user.id, async (c) => (await c.query<InvoiceRow & {
+      ORDER BY pl.joined_at DESC, pl.id DESC LIMIT ${p(q.limit + 1)}`;
+    const fetched = await this.db.withUser(user.id, async (c) => (await c.query<InvoiceRow & {
       id: string; invoice_count: number; last_invoice_date: string | null;
     }>(sql, params)).rows);
+    // One extra row tells the client the list was cut at `limit` (R-23; additive).
+    const truncated = fetched.length > q.limit;
+    const rows = fetched.slice(0, q.limit);
     return {
+      truncated,
       items: rows.map((r) => ({
         id: r.id,
         status: r.placement_status,
