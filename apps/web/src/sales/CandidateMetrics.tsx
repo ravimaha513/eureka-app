@@ -30,6 +30,17 @@ export function CandidateMetrics({ candidateId }: { candidateId: string }) {
   if (!d || (!d.submissions && !d.interviews && !d.placements)) return null;
   const s = d.submissions, i = d.interviews, p = d.placements;
 
+  // Nothing yet: one quiet line instead of a row of zeros.
+  if ((s?.total ?? 0) === 0 && (i?.total ?? 0) === 0 && (p?.total ?? 0) === 0) {
+    const what = [s && "submissions", i && "interviews", p && "placements"].filter(Boolean).join(", ").replace(/, ([^,]*)$/, " or $1");
+    return (
+      <section className="card pad cp-metrics" aria-labelledby={`${id}-h`}>
+        <h2 id={`${id}-h`}>Metrics</h2>
+        <p className="muted cp-nometrics">No {what} yet.</p>
+      </section>
+    );
+  }
+
   const tiles: { label: string; value: number | string; hint: string }[] = [];
   if (s) {
     tiles.push({ label: "Submissions", value: s.total,
@@ -57,9 +68,12 @@ export function CandidateMetrics({ candidateId }: { candidateId: string }) {
   return (
     <section className="card pad cp-metrics" aria-labelledby={`${id}-h`}>
       <h2 id={`${id}-h`}>Metrics</h2>
-      <ul className="tiles kpis" aria-label="Candidate metrics">
+      {/* One compact row of figures (wraps to a grid on phones); zeros are muted. */}
+      <ul className="cp-stats" aria-label="Candidate metrics">
         {tiles.map((t) => (
-          <li key={t.label} className="tile"><span className="tilelabel">{t.label}</span><span className="tilevalue">{t.value}</span><span className="tilehint">{t.hint}</span></li>
+          <li key={t.label} className={t.value === 0 ? "zero" : undefined}>
+            <span className="cp-statlabel">{t.label}</span><span className="cp-statvalue">{t.value}</span><span className="cp-stathint">{t.hint}</span>
+          </li>
         ))}
       </ul>
       {(s || i) && (

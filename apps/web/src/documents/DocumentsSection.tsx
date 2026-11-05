@@ -5,13 +5,14 @@ import { ApiError } from "../api";
 import { Dialog } from "../ui/Dialog";
 import { browser, fmtBytes, postToStorage, resumeStatusText } from "../sales/resumesApi";
 import {
-  documentFileProblem, documentKeys, documentName, documentTypeOf, documentsApi, isStepUpRequired, uploadableTypes,
+  documentFileProblem, documentKeys, documentName, documentStorage, documentTypeOf, documentsApi, isStepUpRequired, uploadableTypes,
   type DocumentItem, type DocumentList, type DocumentOwner,
 } from "./documentsApi";
 import { StepUpDialog } from "../ui/StepUpDialog";
 import { DocumentViewer } from "./DocumentViewer";
 import { UPLOAD_FAILED_MESSAGE } from "../lib/uploadErrors";
 import { fmtDateTime } from "../lib/format";
+import "./documents.css";
 
 const ACCEPT = [".pdf", ".docx", ".png", ".jpg", ".jpeg", ...Object.keys(DOCUMENT_CONTENT_TYPES)].join(",");
 export const DOCUMENT_POLL_MS = 3000;
@@ -145,6 +146,88 @@ function DocumentEditor({ doc, list, onCancel, onDone }: {
 }
 
 /**
+ * Upload form for one document (type, file, Upload) with upload progress. Exported so other screens
+ * (e.g. the paperwork checklist item dialog) can upload and link in one step: `onUploaded` gets the new
+ * document id while it is still being scanned (status "pending"); the server gates opening on the scan.
+ */
+export function DocumentUploader({ owner, list, onUploaded, onStart, heading = "Upload a document", submitLabel = "Upload document", defaultType = "" }: {
+  owner: DocumentOwner;
+  /** The section's listing: decides which types are offered (restricted only with canUploadRestricted). */
+  list: Pick<DocumentList, "canUploadRestricted">;
+  onUploaded: (doc: { id: string; docType: DocumentType; fileName: string }) => void;
+  /** Called when an upload starts (to clear older messages). */
+  onStart?: () => void;
+  heading?: string | null; submitLabel?: string; defaultType?: DocumentType | "";
+}) {
+  const qc = useQueryClient();
+  const inputId = useId(), typeId = useId(), hintId = useId(), errId = useId(), headId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [docType, setDocType] = useState<DocumentType | "">(defaultType);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
+  const types = uploadableTypes(list);
+
+  const upload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setError(""); onStart?.();
+    const problem = !docType ? "Choose the document type." : file ? documentFileProblem(file) : "Choose a file to upload.";
+    if (problem || !file || !docType) { setError(problem ?? ""); (docType ? inputRef.current : document.getElementById(typeId))?.focus(); return; }
+    setBusy(true); setProgress(0);
+    try {
+      const r = await documentsApi.requestUpload(owner, docType, documentTypeOf(file)!, file.size);
+      await documentStorage.post(r.upload, file, (f) => setProgress(Math.round(f * 100)));
+      const name = file.name;
+      setFile(null); setDocType(defaultType);
+      if (inputRef.current) inputRef.current.value = "";
+      onUploaded({ id: r.id, docType, fileName: name });
+      await qc.invalidateQueries({ queryKey: documentKeys.list(owner) });
+    } catch (err) {
+      setError(documentError(err, "upload"));
+      inputRef.current?.focus();
+    } finally {
+      setBusy(false); setProgress(null);
+    }
+  };
+
+  return (
+    <form className="docupload" onSubmit={(e) => void upload(e)} noValidate aria-labelledby={heading ? headId : undefined} aria-label={heading ? undefined : submitLabel}>
+      {heading && <h3 id={headId}>{heading}</h3>}
+      <div className="du-row">
+        <div className="field du-type">
+          <label htmlFor={typeId}>Document type</label>
+          <select id={typeId} value={docType} disabled={busy} onChange={(e) => { setDocType(e.target.value as DocumentType | ""); setError(""); }}>
+            <option value="">Choose…</option>
+            {types.map((t) => (
+              <option key={t} value={t}>{DOCUMENT_TYPES[t].label}{DOCUMENT_TYPES[t].classification === "restricted" ? " (restricted)" : ""}</option>
+            ))}
+          </select>
+        </div>
+        <div className="field du-file">
+          <label htmlFor={inputId}>Document file</label>
+          <input ref={inputRef} id={inputId} type="file" accept={ACCEPT} disabled={busy} aria-describedby={`${hintId}${error ? ` ${errId}` : ""}`}
+            aria-invalid={error ? true : undefined}
+            onChange={(e) => { setFile(e.target.files?.[0] ?? null); setError(""); }} />
+        </div>
+        <button type="submit" className="btn du-submit" disabled={busy} aria-busy={busy || undefined}>{submitLabel}</button>
+      </div>
+      <small id={hintId} className="hint">
+        PDF, Word (.docx), PNG or JPEG, up to 15 MB{file ? `. Chosen: ${file.name}, ${fmtBytes(file.size)}` : ""}. Files are scanned for malware before anyone can open them.
+      </small>
+      {progress !== null && (
+        <div className="du-progress" role="status">
+          <progress max={100} value={progress} aria-label="Upload progress" />
+          <span>Uploading… {progress}%</span>
+        </div>
+      )}
+      {error && <p id={errId} className="banner error formerr" role="alert" tabIndex={-1}>{error}</p>}
+    </form>
+  );
+}
+
+/**
  * Paperwork and compliance documents of a candidate or placement (FR-PPR-01
  * to 03). Uploads go straight to storage through a short-lived signed form and
  * are usable after the malware scan. Restricted documents (I-9, driving
@@ -157,15 +240,11 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
 }) {
   const qc = useQueryClient();
   const hid = useId();
-  const inputId = useId();
-  const typeId = useId();
-  const hintId = useId();
-  const errId = useId();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [docType, setDocType] = useState<DocumentType | "">("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  // Live message tone: info while scanning or working, ok when ready, error when refused.
+  const [tone, setTone] = useState<"ok" | "info" | "error">("ok");
+  const say = (m: string, t: "ok" | "info" | "error" = "ok") => { setMessage(m); setTone(t); };
   const [busy, setBusy] = useState<string | null>(null);
   const [stepUpFor, setStepUpFor] = useState<{ doc: DocumentItem; mode: OpenMode } | null>(null);
   const [viewing, setViewing] = useState<{ doc: DocumentItem; url: string } | null>(null);
@@ -183,8 +262,9 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
     for (const d of q.data?.items ?? []) {
       if (!watching.current.has(d.id) || d.status === "pending" || d.replacement?.status === "pending") continue;
       watching.current.delete(d.id);
-      if (d.replacement) setMessage(`New file for ${documentName(d)} not accepted. ${resumeStatusText(d.replacement)}. The earlier file is still in use.`);
-      else setMessage(d.status === "clean" ? `${documentName(d)} is ready.` : `Upload not accepted. ${resumeStatusText(d)}.`);
+      if (d.replacement) say(`New file for ${documentName(d)} not accepted. ${resumeStatusText(d.replacement)}. The earlier file is still in use.`, "error");
+      else if (d.status === "clean") say(`${documentName(d)} is ready.`);
+      else say(`Upload not accepted. ${resumeStatusText(d)}.`, "error");
     }
   }, [q.data]);
 
@@ -198,39 +278,14 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
   if (q.error instanceof ApiError && (q.error.status === 403 || q.error.status === 404)) return null;
 
   const items = q.data?.items ?? [];
-  const types = q.data ? uploadableTypes(q.data) : [];
-
-  const upload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setMessage(""); setError("");
-    const problem = !docType ? "Choose the document type." : file ? documentFileProblem(file) : "Choose a file to upload.";
-    if (problem || !file || !docType) { setError(problem ?? ""); (docType ? inputRef.current : document.getElementById(typeId))?.focus(); return; }
-    setBusy("upload");
-    try {
-      const r = await documentsApi.requestUpload(owner, docType, documentTypeOf(file)!, file.size);
-      setMessage("Uploading…");
-      await postToStorage(r.upload, file);
-      watching.current.add(r.id);
-      setMessage("Uploaded. Scanning for malware; the document is available once the scan passes.");
-      setFile(null); setDocType("");
-      if (inputRef.current) inputRef.current.value = "";
-      await qc.invalidateQueries({ queryKey: documentKeys.list(owner) });
-    } catch (err) {
-      setMessage("");
-      setError(documentError(err, "upload"));
-      inputRef.current?.focus();
-    } finally {
-      setBusy(null);
-    }
-  };
 
   /** View in the app or download; both take a fresh signed link (one access-log row each). */
   const open = async (d: DocumentItem, mode: OpenMode) => {
-    setMessage(""); setError(""); setBusy(d.id);
+    say(""); setError(""); setBusy(d.id);
     try {
       const { url } = await documentsApi.downloadLink(d.id);
       if (mode === "view") setViewing({ doc: d, url });
-      else { browser.download(url); setMessage(`Downloading ${documentName(d)}.`); }
+      else { browser.download(url); say(`Downloading ${documentName(d)}.`, "info"); }
       if (d.classification === "restricted") void qc.invalidateQueries({ queryKey: documentKeys.accessLog(d.id) });
     } catch (err) {
       if (isStepUpRequired(err)) setStepUpFor({ doc: d, mode });
@@ -243,21 +298,25 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
   return (
     <section className="card pad" aria-labelledby={hid}>
       <h2 id={hid}>{title}</h2>
-      <p aria-live="polite" aria-atomic="true" className="livemsg">{message}</p>
-      {error && <p id={errId} className="banner error formerr" role="alert" tabIndex={-1}>{error}</p>}
+      <p aria-live="polite" aria-atomic="true" className={`livemsg${tone === "ok" ? "" : ` ${tone}`}`}>{message}</p>
+      {error && <p className="banner error formerr" role="alert" tabIndex={-1}>{error}</p>}
 
       {q.isLoading ? <p className="muted">Loading…</p>
-        : q.error ? <p className="error">{documentError(q.error, "load")}</p>
-        : items.length === 0 ? <p className="muted">No documents yet.</p>
-        : (
-          <div className="tablewrap"><table aria-label={`${title}, newest first`}>
-            <thead><tr><th scope="col">Document</th><th scope="col">Status</th><th scope="col">Uploaded</th><th scope="col">Size</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
+        // Announced politely: a load failure is not the result of something the user just did.
+        : q.error ? <p className="error" aria-live="polite">{documentError(q.error, "load")}</p>
+        : items.length === 0 ? (
+          <p className="muted">
+            No documents yet.{!q.data?.canUpload && " HR, Accounts and Immigration upload paperwork here."}
+          </p>
+        ) : (
+          <div className="tablewrap docs-tablewrap"><table className="dtable docs-table" aria-label={`${title}, newest first`}>
+            <thead><tr><th scope="col">Document</th><th scope="col">Status</th><th scope="col">Uploaded</th><th scope="col" className="num">Size</th><th scope="col" className="c-act"><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {items.map((d) => editing === d.id && q.data ? (
-                <tr key={d.id} className="editing"><td colSpan={5}>
+                <tr key={d.id} className="editing"><td colSpan={5} className="docs-editcell">
                   <DocumentEditor doc={d} list={q.data} onCancel={() => setEditing(null)}
                     onDone={(m, watch) => {
-                      setEditing(null); setError(""); setMessage(m);
+                      setEditing(null); setError(""); say(m, watch ? "info" : "ok");
                       if (watch) watching.current.add(d.id);
                       void qc.invalidateQueries({ queryKey: documentKeys.list(owner) });
                       void qc.invalidateQueries({ queryKey: ["documents"] });
@@ -265,8 +324,8 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
                 </td></tr>
               ) : (
                 <tr key={d.id}>
-                  <td className="wrap">
-                    {documentName(d)}
+                  <td className="wrap c-primary">
+                    <b>{documentName(d)}</b>
                     {d.classification === "restricted" && <> <span className="badge restricted">Restricted</span></>}
                     {owner.kind === "candidate" && d.placementId && <span className="muted"> · placement</span>}
                     {d.title && <span className="block">{d.docTypeLabel}</span>}
@@ -277,10 +336,10 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
                       </span>
                     )}
                   </td>
-                  <td><span className={`badge resume-${d.status}`}>{resumeStatusText(d)}</span></td>
-                  <td><time dateTime={d.createdAt}>{fmtDateTime(d.createdAt)}</time>{d.uploadedBy.name ? ` · ${d.uploadedBy.name}` : ""}</td>
-                  <td>{fmtBytes(d.sizeBytes)}</td>
-                  <td className="rowactions">
+                  <td className="c-badge"><span className={`badge resume-${d.status}`}>{resumeStatusText(d)}</span></td>
+                  <td data-label="Uploaded"><span><time dateTime={d.createdAt}>{fmtDateTime(d.createdAt)}</time>{d.uploadedBy.name ? ` · ${d.uploadedBy.name}` : ""}</span></td>
+                  <td data-label="Size" className="num">{fmtBytes(d.sizeBytes)}</td>
+                  <td className="c-act">
                     {d.status === "clean" && (<>
                       <button type="button" className="btn sm" disabled={busy !== null} aria-busy={busy === d.id || undefined} onClick={() => void open(d, "view")}>
                         View<span className="sr-only"> {documentName(d)}</span>
@@ -295,7 +354,7 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
                       </button>
                     )}
                     {q.data && canEdit(q.data, d) && (
-                      <button type="button" className="btn sm" disabled={busy !== null} onClick={() => { setEditing(d.id); setMessage(""); }}>
+                      <button type="button" className="btn sm" disabled={busy !== null} onClick={() => { setEditing(d.id); say(""); }}>
                         Edit<span className="sr-only"> {documentName(d)}</span>
                       </button>
                     )}
@@ -307,27 +366,11 @@ export function DocumentsSection({ owner, title = "Documents", pollMs = DOCUMENT
         )}
 
       {q.data?.canUpload && (
-        <form className="manageblock" onSubmit={(e) => void upload(e)} noValidate>
-          <h3>Upload a document</h3>
-          <div className="field">
-            <label>Document type
-              <select id={typeId} value={docType} onChange={(e) => { setDocType(e.target.value as DocumentType | ""); setError(""); }}>
-                <option value="">Choose…</option>
-                {types.map((t) => (
-                  <option key={t} value={t}>{DOCUMENT_TYPES[t].label}{DOCUMENT_TYPES[t].classification === "restricted" ? " (restricted)" : ""}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="field">
-            <label htmlFor={inputId}>Document file</label>
-            <input ref={inputRef} id={inputId} type="file" accept={ACCEPT} aria-describedby={`${hintId}${error ? ` ${errId}` : ""}`}
-              aria-invalid={error ? true : undefined}
-              onChange={(e) => { setFile(e.target.files?.[0] ?? null); setError(""); }} />
-            <small id={hintId} className="hint">PDF, Word (.docx), PNG or JPEG, up to 15 MB. Files are scanned for malware before anyone can open them.</small>
-          </div>
-          <button type="submit" className="btn primary" disabled={busy !== null} aria-busy={busy === "upload" || undefined}>Upload document</button>
-        </form>
+        <DocumentUploader owner={owner} list={q.data} onStart={() => { say(""); setError(""); }}
+          onUploaded={({ id }) => {
+            watching.current.add(id);
+            say("Uploaded. Scanning for malware; the document is available once the scan passes.", "info");
+          }} />
       )}
 
       {stepUpFor && (
