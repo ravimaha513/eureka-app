@@ -1,0 +1,85 @@
+/* Interviews board, interview drawer and Interview reports. Tokens only (DESIGN.md); kit classes untouched. */
+
+.ivpage { display: flex; flex-direction: column; gap: 14px; }
+.ivpage > .pagehead { margin-bottom: 0; align-items: flex-end; }
+.iv-headacts { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
+.iv-zone select { width: 230px; }
+
+/* Call status chips: quiet tints, plain words (the result carries ok / bad). */
+.badge.cs-scheduled { background: var(--info-bg); color: var(--info-fg); }
+.badge.cs-in_progress, .badge.cs-rescheduled { background: var(--warn-bg); color: var(--warn-fg); }
+.badge.cs-completed, .badge.cs-cancelled, .badge.cs-no_invite { background: var(--neutral-bg); color: var(--neutral-fg); }
+
+/* Agenda: a day head per date, compact rows. */
+.iv-board tr.iv-day th { position: sticky; top: 0; z-index: 1; padding: 6px 10px; background: var(--surface2); border-bottom: 1px solid var(--line);
+  color: var(--text); font-size: 13px; font-weight: 700; text-transform: none; letter-spacing: 0; font-stretch: 100%; text-align: left; }
+.iv-daycount { margin-left: 8px; padding: 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); border: 1px solid var(--line-strong); border-radius: var(--r-sm); font-variant-numeric: tabular-nums; }
+.iv-board td.iv-time { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--text); font-weight: 600; }
+.iv-board td.c-primary { min-width: 170px; }
+.iv-sub { font-size: 12.5px; }
+.iv-client.linkbtn { min-height: 24px; padding: 2px 0; font-size: 12.5px; color: var(--pri-700); }
+.iv-ready { display: inline-flex; align-items: center; gap: 4px 8px; flex-wrap: nowrap; white-space: nowrap; }
+.iv-flag { display: inline-flex; align-items: center; gap: 2px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.iv-flag.on { color: var(--ok-fg); }
+.iv-links { display: inline-flex; gap: 10px; }
+.iv-board td.iv-fb { max-width: 200px; }
+.iv-board .cf-notes { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--muted); }
+.iv-board td .iv-sub { white-space: nowrap; }
+/* Below 1600px the feedback column hides; its stars ride under the result. */
+.iv-fbinline { display: none; }
+@media (max-width: 1599px) { .iv-board td .iv-fbinline { display: block; } }
+
+/* Drawer: action strip, then the cross-record links. */
+.iv-strip .as-note { font-variant-numeric: tabular-nums; }
+.iv-links-dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(170px, 100%), 1fr)); gap: 8px 16px; margin: 0; }
+.iv-links-dl dt { color: var(--muted); font-size: 12px; font-weight: 600; }
+.iv-links-dl dd { margin: 2px 0 0; min-width: 0; overflow-wrap: anywhere; }
+
+/* Edit dialog: checkboxes as one group of plain checks (not stretched fields). */
+.iv-checks { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 4px 0 12px; }
+.iv-editfor { color: var(--text2); }
+
+/* Interview reports */
+.ir-page { display: flex; flex-direction: column; gap: 16px; }
+.ir-page > .pagehead { margin-bottom: 0; }
+.ir-toolbar { display: flex; align-items: flex-end; gap: 8px 12px; flex-wrap: wrap; }
+.ir-toolbar .ir-export { margin-left: auto; }
+.ir-presets { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--r-md); overflow: hidden; }
+.ir-presets button { height: var(--h-compact, 30px); padding: 0 12px; border: 0; border-left: 1px solid var(--line-strong); background: var(--surface); color: var(--text2); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.ir-presets button:first-child { border-left: 0; }
+.ir-presets button[aria-pressed="true"] { background: var(--pri-btn); color: var(--on-pri); }
+.ir-stepper { display: inline-flex; align-items: flex-end; gap: 6px; }
+.ir-stepper .field input { width: 160px; }
+.ir-page .tiles { margin: 0; }
+.ir-note { margin: 0; font-size: 12.5px; color: var(--muted); }
+.ir-table td.num, .ir-table th.num { font-variant-numeric: tabular-nums; }
+.ir-table .ir-group { white-space: nowrap; }
+th .ir-sort { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+th .ir-sort:focus-visible { outline: 2px solid var(--pri); outline-offset: 2px; border-radius: var(--r-sm); }
+th[aria-sort="ascending"] .ir-sort, th[aria-sort="descending"] .ir-sort { color: var(--text); }
+
+@media (max-width: 768px) {
+  .ivpage, .ir-page { gap: 12px; }
+  .ivpage > .pagehead { align-items: stretch; }
+  .iv-headacts { width: 100%; flex-wrap: nowrap; align-items: flex-end; }
+  .iv-headacts .iv-zone { flex: 1 1 auto; min-width: 0; }
+  .iv-zone select { width: 100%; height: 44px; }
+  .iv-headacts .btn { height: 44px; flex: 0 0 auto; }
+  /* Day head: a plain label between the cards. */
+  .dtable.iv-board tr.iv-day { display: block; padding: 6px 2px 0; background: none; border: 0; }
+  .dtable.iv-board tr.iv-day th { position: static; display: block; padding: 0; background: none; border: 0; font-size: 13.5px; }
+  .iv-board td.c-primary { min-width: 0; }
+  .iv-board td.iv-fb { max-width: none; }
+  .iv-board td .iv-sub { white-space: normal; }
+  .iv-board td .iv-fbinline { display: none; }
+  .iv-ready { flex-wrap: wrap; white-space: normal; }
+  .iv-board td.iv-time { font-size: 14px; }
+  .iv-client.linkbtn { min-height: 32px; font-size: 13.5px; }
+  .ir-toolbar { align-items: stretch; }
+  .ir-toolbar > .field, .ir-toolbar > .ir-presets, .ir-stepper { flex: 1 1 100%; }
+  .ir-presets button { flex: 1 1 0; height: 40px; }
+  .ir-stepper { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: end; }
+  .ir-stepper .field input { width: 100%; height: 44px; }
+  .ir-stepper > .btn { height: 44px; padding: 0; }
+  .ir-toolbar .ir-export { margin-left: 0; }
+}

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type MouseEvent } from "react";
+import { useEffect, useId, useState } from "react";
 import { Pencil } from "lucide-react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { INTERVIEW_STAGE_LABELS } from "@eureka/shared";
@@ -19,7 +19,7 @@ import {
 } from "./pipelineApi";
 import { ScheduleInterviewDialog, nextRoundOf, refreshAfterSchedule } from "./ScheduleInterviewDialog";
 import { RejectRoundDialog, SubmissionRounds, nextRoundName, refreshRounds } from "./SubmissionRounds";
-import { PipelineFunnel, PipelineStatus, ReachedFilter, StageTrail, parseReached, reachedValue, useBatchOptions, useDebouncedParam, type Reached } from "./ui";
+import { PipelineFunnel, PipelineStatus, ReachedFilter, StageTrail, parseReached, reachedValue, fromControl, useBatchOptions, useDebouncedParam, type Reached } from "./ui";
 import { Pager, useCursorPager } from "../ui/Pager";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
@@ -33,8 +33,6 @@ const PARAMS = ["status", "from", "to", "reached", "batchId"] as const;
 /** "Sep 20, 2026" (the time is in the drawer). */
 export const fmtDay = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" }) : "—");
 
-/** Ignore row clicks that land on a control inside the row (links, buttons, fields). */
-export const fromControl = (e: MouseEvent) => Boolean((e.target as HTMLElement).closest("a, button, input, select, textarea, label, [role='menu']"));
 
 /** "Reached L1", "Got an interview", … for the Interview filter chip. */
 function reachedLabel(r: Reached): string {
@@ -124,7 +122,7 @@ export function SubmissionsPage({ me, onOpenPlacement, initialOpenId = null, onO
     <section className="panel plpage">
       <div className="pagehead">
         <div>
-          <h1 tabIndex={-1}>Submissions{!q.isLoading && !q.error && !invalidRange && <span className="h1count">{n}{q.data?.nextCursor ? "+" : ""}</span>}</h1>
+          <h1 tabIndex={-1}>Submissions{!q.isLoading && !q.error && !invalidRange && <span className="h1count" aria-hidden="true">{n}{q.data?.nextCursor ? "+" : ""}</span>}</h1>
           <p className="sub">Track each submission from first send to a decision. Open one to move it forward, schedule an interview or create a placement.</p>
         </div>
       </div>
@@ -210,10 +208,10 @@ export function SubmissionsPage({ me, onOpenPlacement, initialOpenId = null, onO
                       <td className="c-primary">
                         <RecordLink kind="candidate" id={s.candidateId} allowed={canSearchCandidates}><b>{name}</b></RecordLink>
                       </td>
-                      <td data-label="Job">{s.jobTitle}<small className="block muted">{s.client}</small></td>
+                      <td data-label="Job"><span>{s.jobTitle}<small className="block muted">{s.client}</small></span></td>
                       <td className="c-badge"><PipelineStatus status={s.status} /></td>
                       <td data-label="Rounds"><StageTrail s={s} /></td>
-                      <td data-label="Submitted" className="pl-nowrap">{fmtDay(s.submittedAt)}<small className="block muted">{s.recruiterName ?? "—"}</small></td>
+                      <td data-label="Submitted" className="pl-nowrap"><span>{fmtDay(s.submittedAt)}<small className="block muted">{s.recruiterName ?? "—"}</small></span></td>
                       {showRate && <td className="num p2" data-label="Rate">{"rate" in s ? fmtRate(s.rate) : <span className="muted">—</span>}</td>}
                       <td className="c-act">
                         <div className="pl-act">
@@ -279,8 +277,8 @@ const BEFORE_SCHEDULED = new Set(["submitted", "under_review", "interview_reques
 
 /**
  * Submission drawer. The action strip comes first: status, what is next (the upcoming round or the
- * last change), the next action (create placement, or schedule the next round), the allowed status
- * moves, then Reject / Withdraw under More. Then the details, the rounds and assessments.
+ * last change), the next action (create placement, or schedule the next round), then the allowed
+ * status moves with Reject / Withdraw (confirmed in a dialog). Then the details, the rounds and assessments.
  */
 export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlacement, canOpenCandidate = false, canOpenInterview = false }: {
   id: string; initial: Submission | null; onClose: () => void; onNotice: (m: string) => void; onOpenPlacement?: (id: string) => void;
@@ -344,18 +342,16 @@ export function SubmissionDrawer({ id, initial, onClose, onNotice, onOpenPlaceme
                     <button type="button" className={actions.createPlacement ? "btn" : "btn primary"}
                       onClick={() => setModal({ kind: "interview", defaultRound: nextRoundName(latest?.round) })}>{scheduleLabel}</button>
                   )}
-                  {forward.length > 0 && (
+                  {actions.transition.length > 0 && (
                     <div className="pl-moves" role="group" aria-label="Change status">
                       {forward.map((t) => (
                         <button key={t} type="button" className="btn" disabled={busy !== null} aria-busy={busy === t || undefined}
                           onClick={() => void move(t)}>Move to {pipelineLabel(t)}</button>
                       ))}
+                      {canReject && <button type="button" className="btn danger" disabled={busy !== null} onClick={() => setModal({ kind: "reject" })}>Reject…</button>}
+                      {canWithdraw && <button type="button" className="btn danger" disabled={busy !== null} onClick={() => setModal({ kind: "withdraw" })}>Withdraw…</button>}
                     </div>
                   )}
-                  <Menu label="More status actions" text="More" items={[
-                    canReject && { label: "Reject…", danger: true, disabled: busy !== null, onSelect: () => setModal({ kind: "reject" }) },
-                    canWithdraw && { label: "Withdraw…", danger: true, disabled: busy !== null, onSelect: () => setModal({ kind: "withdraw" }) },
-                  ]} />
                 </div>
               )}
             </div>

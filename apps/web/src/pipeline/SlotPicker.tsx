@@ -8,6 +8,9 @@ export interface Slot { day: string; time: string; durationMin: number }
 /** Lengths offered (minutes); the API accepts 15..240. */
 export const DURATIONS = INTERVIEW_DURATIONS;
 const DAY_CHIPS = 5;
+/** Start times offered: 6:00 to 22:45 in the chosen zone, every 15 minutes. */
+const FIRST_SLOT = 6 * 60;
+const LAST_SLOT = 22 * 60 + 45;
 
 const pad = (n: number) => String(n).padStart(2, "0");
 export const isoDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -64,7 +67,7 @@ export function SlotPicker({ value, onChange, zone, onZoneChange, errors = {} }:
   const set = (patch: Partial<Slot>) => onChange({ ...value, ...patch });
 
   const times: string[] = [];
-  for (let m = 0; m < 24 * 60; m += 15) times.push(`${pad(Math.floor(m / 60))}:${pad(m % 60)}`);
+  for (let m = FIRST_SLOT; m <= LAST_SLOT; m += 15) times.push(`${pad(Math.floor(m / 60))}:${pad(m % 60)}`);
   const durations: number[] = (DURATIONS as readonly number[]).includes(value.durationMin) ? [...DURATIONS] : [...DURATIONS, value.durationMin].sort((a, b) => a - b);
 
   const start = slotStart(value, zone);

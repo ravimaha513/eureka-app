@@ -10,7 +10,7 @@ import { pipelineError } from "./errors";
 import { pipelineKeys, type Page, type Submission } from "./pipelineApi";
 import { SlotPicker, slotStart, type Slot } from "./SlotPicker";
 import { nextRoundName } from "./SubmissionRounds";
-import { useInterviewZone } from "./zones";
+import { localStamp, useInterviewZone } from "./zones";
 
 const FIELDS = ["round", "startsAt", "endsAt", "durationMin", "coachId", "meetingUrl", "interviewType", "submissionId"] as const;
 type Sub = Pick<Submission, "id" | "candidateName" | "jobTitle" | "client">;
@@ -18,11 +18,6 @@ type Sub = Pick<Submission, "id" | "candidateName" | "jobTitle" | "client">;
 type PickRow = Sub & { status: string; canUpdate?: boolean };
 const CLOSED = ["selected", "rejected", "withdrawn"];
 
-/** "YYYY-MM-DDTHH:MM" local wall time of an instant (the support calendar's input). */
-const localStamp = (d: Date) => {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-};
 
 /**
  * Schedule an interview (POST /api/v1/interviews). The one booking form, from a submission (the
@@ -140,6 +135,11 @@ export function ScheduleInterviewDialog({ submission, pickSubmission = false, on
         <Coaches title="Coach (optional)" value={v.coachId} onChange={(c) => set("coachId", c)} error={errors.coachId} />
         {withPanel && <PanelPicker panel={v.panel} lead={v.lead} onPanel={(ids) => set("panel", ids)} onLead={(lid) => set("lead", lid)} />}
         <label className="check"><input type="checkbox" checked={v.invite} onChange={(e) => set("invite", e.target.checked)} /> Invite received</label>
+        {pickSubmission && (
+          <div className="actions left">
+            <button type="button" className="btn sm" onClick={() => { setV(blank); setSlot({ day: "", time: "", durationMin: 60 }); setSearch(""); setErrors({}); }}>Reset form</button>
+          </div>
+        )}
         <DialogActions onCancel={onClose} submitLabel="Schedule" busy={busy} error={formError} />
       </form>
     </Dialog>

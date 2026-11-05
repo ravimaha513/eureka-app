@@ -15,7 +15,8 @@ const NAMED: [string, string][] = [
 
 /** [zone, label] options: the viewer's own zone first, then the firm's usual zones (no duplicates). */
 export function zoneOptions(current?: string): [string, string][] {
-  const opts: [string, string][] = [[LOCAL_ZONE, `${LOCAL_ZONE} (your time)`], ...NAMED.filter(([z]) => z !== LOCAL_ZONE)];
+  const city = (LOCAL_ZONE.split("/").pop() ?? LOCAL_ZONE).replace(/_/g, " ");
+  const opts: [string, string][] = [[LOCAL_ZONE, `Your time (${city})`], ...NAMED.filter(([z]) => z !== LOCAL_ZONE)];
   if (current && !opts.some(([z]) => z === current)) opts.push([current, current]);
   return opts;
 }
@@ -72,13 +73,38 @@ export function zoneAbbr(zone: string, at: Date | string = new Date()): string {
   return parts.find((p) => p.type === "timeZoneName")?.value ?? zone;
 }
 
+/** "YYYY-MM-DDTHH:MM" wall time of an instant in `zone` (a datetime-local value read in that zone). */
+export function zoneStamp(iso: string | Date, zone: string = LOCAL_ZONE): string {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: zone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+    .formatToParts(new Date(iso));
+  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  return `${g("year")}-${g("month")}-${g("day")}T${g("hour") === "24" ? "00" : g("hour")}:${g("minute")}`;
+}
+
+/** A datetime-local value read in `zone` as an instant, or null. */
+export const stampToInstant = (stamp: string, zone: string = LOCAL_ZONE) => wallToInstant(stamp.slice(0, 10), stamp.slice(11, 16), zone);
+
+/** "YYYY-MM-DDTHH:MM" in the browser's own zone (what the support calendar line reads). */
+export function localStamp(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 /** "2:00 PM" in `zone`. */
 export const fmtTime = (iso: string, zone: string) =>
   new Date(iso).toLocaleTimeString(undefined, { timeZone: zone, hour: "numeric", minute: "2-digit" });
 
 /** "2:00 – 3:00 PM EST" (one slot, one zone mark). */
 export function fmtSlot(startsAt: string, endsAt: string, zone: string) {
-  return `${fmtTime(startsAt, zone)} – ${fmtTime(endsAt, zone)} ${zoneAbbr(zone, startsAt)}`;
+  return `${fmtRange(startsAt, endsAt, zone)} ${zoneAbbr(zone, startsAt)}`;
+}
+
+/** "2:00 – 3:00 PM" (one AM/PM mark when both ends share it), no zone. */
+export function fmtRange(startsAt: string, endsAt: string, zone: string) {
+  const a = fmtTime(startsAt, zone); const b = fmtTime(endsAt, zone);
+  const am = /\s?(AM|PM)$/i;
+  const ma = a.match(am); const mb = b.match(am);
+  return ma && mb && ma[1] === mb[1] ? `${a.replace(am, "")} – ${b}` : `${a} – ${b}`;
 }
 
 /** "Fri, Nov 6, 2026" in `zone`. */

@@ -1,6 +1,6 @@
 import { useId, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { INTERVIEW_DURATIONS, INTERVIEW_ROUNDS, INTERVIEW_TYPES, INTERVIEW_TYPE_LABELS, PANEL_MAX, type InterviewType } from "@eureka/shared";
+import { INTERVIEW_DURATIONS, INTERVIEW_ROUNDS, INTERVIEW_TYPES, INTERVIEW_TYPE_LABELS, PANEL_MAX, type InterviewResult, type InterviewType } from "@eureka/shared";
 import { api } from "../api";
 
 /**
@@ -8,6 +8,22 @@ import { api } from "../api";
  * Edit interview): one label style, one set of controls, so booking looks the same everywhere.
  */
 type Named = { id: string; name: string | null };
+
+export const RESULT_LABELS: Record<InterviewResult, string> = { pending: "Pending", cleared: "Cleared", rejected: "Rejected" };
+/** The round's outcome as a badge (cleared / rejected) or muted text while pending. */
+export const ResultBadge = ({ result }: { result?: InterviewResult }) =>
+  result === "cleared" ? <span className="badge st-selected">Cleared</span>
+    : result === "rejected" ? <span className="badge st-rejected">Rejected</span>
+      : <span className="muted">Result pending</span>;
+
+/** Call statuses (the board filter and the Edit dialog), in workflow order. */
+export const CALL_STATUSES = ["scheduled", "in_progress", "completed", "rescheduled", "cancelled", "no_invite"] as const;
+const CALL_STATUS_LABELS: Record<string, string> = {
+  scheduled: "Scheduled", in_progress: "In progress", completed: "Completed", rescheduled: "Rescheduled", cancelled: "Cancelled", no_invite: "No invite",
+};
+export const callStatusLabel = (s: string) => CALL_STATUS_LABELS[s] ?? s.replace(/_/g, " ");
+/** Call status as a quiet chip (`.badge.cs-<status>` in interviews.css). */
+export const CallStatus = ({ status }: { status: string }) => <span className={`badge cs-${status}`}>{callStatusLabel(status)}</span>;
 
 /** Labelled control: `<label class="field"><span>Title</span>{control}</label>`. */
 export function Field({ title, children }: { title: string; children: ReactNode }) {

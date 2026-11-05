@@ -12,7 +12,7 @@ const json = (value: unknown, headers: Record<string, string> = {}) => new Respo
 const wrap = (ui: React.ReactNode) =>
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>);
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); window.history.replaceState(null, "", "/"); });
 
 describe("interview reports navigation", () => {
   it.each([
@@ -58,10 +58,12 @@ describe("interview reports page", () => {
     const fetch = setupReports(["report:read", "interview:read", "report:export"]);
     const table = await screen.findByRole("table", { name: "Interviews by interview coach" });
     expect(within(table).getByText("Coach One")).toBeInTheDocument();
-    expect(within(table).getByText("4 h 0 min")).toBeInTheDocument();
+    expect(within(table).getByText("4 h")).toBeInTheDocument();
     expect(screen.getByText("50% of interviews")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Group by"), { target: { value: "duration" } });
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("groupBy=duration"), expect.anything()));
+    // The grouping is kept in the address bar.
+    expect(new URLSearchParams(window.location.search).get("groupBy")).toBe("duration");
     fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/v1/reports/interviews/export", expect.objectContaining({ method: "POST" })));
     expect(await screen.findByText("Exported 1 row.")).toBeInTheDocument();
@@ -85,6 +87,18 @@ describe("interview reports page", () => {
     expect(within(rows[0]!).getByText("Next step: Round 2")).toBeInTheDocument();
     expect(within(rows[1]!).getByText("No feedback yet")).toBeInTheDocument();
     expect(screen.getByText("2 interviews, 1 cleared, 1 with candidate feedback.")).toBeInTheDocument();
+    // Each row drills to its interview; the tab is in the address bar.
+    expect(within(rows[0]!).getByRole("link", { name: "Open the L1 interview of Alex Doe" })).toHaveAttribute("href", "/interviews/i1");
+    expect(new URLSearchParams(window.location.search).get("tab")).toBe("daily");
+  });
+
+  it("candidate rows open the board for that candidate and period", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => json({ from: "x", to: "y", groupBy: "candidate", truncated: false,
+      groups: [{ ...group, key: "c9", label: "Cand Nine" }], totals: { interviews: 4, cleared: 2, completed: 3, totalDurationMin: 240, avgDurationMin: 60 } }));
+    window.history.replaceState(null, "", "/interview-reports?groupBy=candidate");
+    wrap(<InterviewReportsPage me={{ capabilities: ["report:read", "interview:read"] }} />);
+    const link = await screen.findByRole("link", { name: "Open Cand Nine's interviews in this period" });
+    expect(new URL(link.getAttribute("href")!, "http://x").searchParams.get("candidate")).toBe("Cand Nine");
   });
 });
 
