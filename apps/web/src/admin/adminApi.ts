@@ -152,7 +152,35 @@ const etagVersion = (res: Response): number | undefined => {
   return m ? Number(m[1]) : undefined;
 };
 
+/** GET /admin/access-explain (docs/admin-api.md AD-16). */
+export type ExplainKind = "candidate" | "submission" | "interview" | "placement";
+export type NamedRef = { id: string; name: string } | null;
+export type ExplainPath =
+  | { via: "org" | "all_teams" | "selected_teams" }
+  | { via: "self"; on: "record" | "candidate" }
+  | { via: "report"; on: "record" | "candidate"; user: NamedRef }
+  | { via: "team"; on: "record" | "candidate"; team: NamedRef }
+  | { via: "location"; on: "record" | "candidate"; location: NamedRef };
+export type ExplainMiss = "open_to_all_not_marketable" | "open_to_all_not_sales" | "open_to_all_not_for_activity" | "out_of_scope";
+export interface AccessExplanation {
+  user: { id: string; displayName: string; status: string };
+  record: {
+    kind: ExplainKind; id: string; candidateId: string;
+    actor?: { recruiter: NamedRef; team: NamedRef; location: NamedRef };
+    owner: { recruiter: NamedRef; team: NamedRef; location: NamedRef };
+    visibility: "team" | "all_teams" | "selected_teams"; marketingStatus: string;
+  };
+  permission: string;
+  allowed: boolean;
+  rls: { allowed: boolean; agrees: boolean };
+  phone?: "full" | "masked" | "none";
+  roles: { role: string; label: string; location: NamedRef; scope: string | null; paths: ExplainPath[]; miss?: ExplainMiss }[];
+  facts: { teams: NamedRef[]; subtreeTeams: NamedRef[]; coachedTeams: NamedRef[]; reports: number };
+}
 export const adminApi = {
+  explainAccess: (userId: string, kind: ExplainKind, id: string) =>
+    api<AccessExplanation>(`/api/v1/admin/access-explain?${new URLSearchParams({ userId, kind, id })}`),
+
   meta: () => api<AdminMeta>("/api/v1/admin/meta"),
 
   users: (p: UserFilters) => {

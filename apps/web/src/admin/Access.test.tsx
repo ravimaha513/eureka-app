@@ -121,7 +121,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-const renderPage = (tab?: "users" | "approvals" | "teams" | "locations" | "roles" | "orgchart", me: Me = ME) =>
+const renderPage = (tab?: "users" | "approvals" | "teams" | "locations" | "roles" | "orgchart" | "explain", me: Me = ME) =>
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <AccessPage me={me} initialTab={tab} />
@@ -1237,5 +1237,53 @@ describe("Org chart tab", () => {
     expect(screen.queryByRole("list", { name: "Pending changes" })).not.toBeInTheDocument();
     fireEvent.click(within(chart).getByLabelText("Ada Admin, Org Admin"));
     expect(screen.getByRole("combobox", { name: "Reports to" })).toBeDisabled();
+  });
+});
+
+describe("Explain access (AD-16)", () => {
+  const CID = "3f2c9a10-1111-4222-8333-444455556666";
+  const ANSWER = {
+    user: { id: "u-priya", displayName: "Priya Rao", status: "active" },
+    record: { kind: "candidate", id: CID, candidateId: CID,
+      owner: { recruiter: { id: "u-sam", name: "Sam Member" }, team: { id: "t1", name: "Team Rohit" }, location: { id: "loc-dal", name: "Dallas" } },
+      visibility: "team", marketingStatus: "active" },
+    permission: "candidate:read", allowed: true, rls: { allowed: true, agrees: true }, phone: "masked",
+    roles: [
+      { role: "recruiter", label: "Recruiter", location: null, scope: "team", paths: [{ via: "team", on: "candidate", team: { id: "t1", name: "Team Rohit" } }] },
+      { role: "trainer", label: "Trainer", location: null, scope: null, paths: [] },
+    ],
+    facts: { teams: [{ id: "t1", name: "Team Rohit" }], subtreeTeams: [], coachedTeams: [], reports: 0 },
+  };
+
+  it("takes the id from a pasted link and explains the path role by role", async () => {
+    routes["GET /api/v1/admin/access-explain"] = () => ({ body: ANSWER });
+    renderPage("explain");
+    const box = await screen.findByRole("combobox", { name: "Person" });
+    fireEvent.change(box, { target: { value: "priya" } });
+    await screen.findByRole("option", { name: /Priya Rao/ });
+    fireEvent.keyDown(box, { key: "Enter" });
+    fireEvent.change(screen.getByLabelText("Record id or link"), { target: { value: `https://app.example/candidates/${CID.toUpperCase()}?tab=overview` } });
+    fireEvent.click(screen.getByRole("button", { name: "Explain" }));
+    expect(await screen.findByRole("heading", { name: /Priya Rao can see this candidate/ })).toBeInTheDocument();
+    const q = calls.find((c) => c.path === "/api/v1/admin/access-explain")!.url.searchParams;
+    expect([q.get("userId"), q.get("kind"), q.get("id")]).toEqual(["u-priya", "candidate", CID]);
+    expect(screen.getByText("The candidate's team Team Rohit is in their scope.")).toBeInTheDocument();
+    expect(screen.getByText(/does not hold this permission/)).toBeInTheDocument();
+    expect(screen.getByText(/The database agrees/)).toBeInTheDocument();
+  });
+
+  it("flags an engine / RLS mismatch and refuses input without an id", async () => {
+    routes["GET /api/v1/admin/access-explain"] = () => ({ body: { ...ANSWER, rls: { allowed: false, agrees: false } } });
+    renderPage("explain");
+    const box = await screen.findByRole("combobox", { name: "Person" });
+    fireEvent.change(box, { target: { value: "priya" } });
+    await screen.findByRole("option", { name: /Priya Rao/ });
+    fireEvent.keyDown(box, { key: "Enter" });
+    fireEvent.change(screen.getByLabelText("Record id or link"), { target: { value: "not an id" } });
+    fireEvent.click(screen.getByRole("button", { name: "Explain" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Paste a record id");
+    fireEvent.change(screen.getByLabelText("Record id or link"), { target: { value: CID } });
+    fireEvent.click(screen.getByRole("button", { name: "Explain" }));
+    expect(await screen.findByText(/Mismatch: the app says visible, the database says hidden/)).toBeInTheDocument();
   });
 });

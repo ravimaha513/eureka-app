@@ -92,3 +92,20 @@
   .searchfield.push { flex: 1 1 100%; }
   .searchfield.push input { width: 100%; height: 44px; }
 }
+
+/* Explain access (AD-16) */
+.explain { max-width: 760px; }
+.explain-result { margin-top: 20px; }
+.explain-verdict { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 18px; }
+.explain-verdict.yes { color: var(--ok-fg); }
+.explain-verdict.no { color: var(--text2); }
+.explain-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 14px 0; font-size: 13px; }
+.explain-facts dt { color: var(--text2); }
+.explain-facts dd { margin: 0; overflow-wrap: anywhere; }
+.explain-roles { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.explain-roles > li { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); border-left-width: 3px; }
+.explain-roles > li.yes { border-left-color: var(--ok-fg); }
+.explain-roles > li.no { border-left-color: var(--line); }
+.explain-roles ul { margin: 6px 0 0; padding-left: 18px; }
+.explain-roles p { margin: 6px 0 0; }
+@media (max-width: 640px) { .explain-facts { grid-template-columns: 1fr; } }
