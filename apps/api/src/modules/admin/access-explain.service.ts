@@ -23,6 +23,7 @@ interface RecordFacts {
   actor_recruiter_id: string | null;
   actor_team_id: string | null;
   actor_location_id: string | null;
+  actor_coach_id: string | null;
   recruiter_id: string | null;
   team_id: string | null;
   location_id: string | null;
@@ -73,7 +74,7 @@ export class AccessExplainService {
     const e: Explanation = q.kind === "candidate"
       ? explainCandidate(access, candidate)
       : explainActivity(access, q.kind, {
-        recruiterId: facts.actor_recruiter_id!, teamId: facts.actor_team_id, locationId: facts.actor_location_id, candidate,
+        recruiterId: facts.actor_recruiter_id!, teamId: facts.actor_team_id, locationId: facts.actor_location_id, candidate, coachId: facts.actor_coach_id,
       });
 
     return this.tx.run(user, async (c) => {
@@ -147,6 +148,7 @@ function describePath(p: AccessPath, n: Names) {
     case "report": return { via: p.via, on: p.on, user: n.user(p.userId) };
     case "team": return { via: p.via, on: p.on, team: n.team(p.teamId) };
     case "location": return { via: p.via, on: p.on, location: n.location(p.locationId) };
+    case "assigned_coach": return { via: p.via, user: n.user(p.coachId) };
     default: return p;
   }
 }
@@ -162,6 +164,7 @@ async function nameLookup(c: pg.PoolClient, e: Explanation, f: RecordFacts, a: U
   [...a.teamIds, ...a.subtreeTeamIds, ...a.subtreeCoachedTeamIds].forEach((t) => add(teams, t));
   for (const r of e.roles) for (const p of r.paths) {
     if (p.via === "report") add(users, p.userId);
+    if (p.via === "assigned_coach") add(users, p.coachId);
     if (p.via === "team") add(teams, p.teamId);
     if (p.via === "location") add(locs, p.locationId);
   }

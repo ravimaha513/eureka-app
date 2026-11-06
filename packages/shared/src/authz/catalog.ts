@@ -801,6 +801,7 @@ export const GRANTS: Record<Role, Grants> = {
     "coach_calendar:read": "own",
     "candidate:read": "coached",
     "hotlist:read": "coached",
+    // coached = the teams they coach, plus any interview they are assigned to (interview.coach_id, 0570)
     "interview:read": "coached",
     "interview.feedback:create": "coached",
     // datahub

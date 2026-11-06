@@ -81,6 +81,8 @@ export interface EffectiveScope {
   sharedCandidateIds: ReadonlySet<string>;
   /** hotlist:read only: every Hot List candidate is visible (HOTLIST_VISIBILITY = "everyone"). */
   hotlistOpen: boolean;
+  /** Coaches whose assigned interviews a coached grant covers (mirrors authz.assigned_coach_ids, 0570). */
+  coachIds: ReadonlySet<string>;
 }
 
 const HOTLIST_STATUS_SET: ReadonlySet<string> = new Set(HOTLIST_STATUSES);
@@ -109,6 +111,7 @@ export function resolveScope(
   const recruiterIds = new Set<string>();
   const teamIds = new Set<string>();
   const locationIds = new Set<string>();
+  const coachIds = new Set<string>();
   let all = false;
   let granted = false;
   let allTeams = false;
@@ -130,9 +133,12 @@ export function resolveScope(
         break;
       case "coached":
         user.coachedTeamIds.forEach((t) => teamIds.add(t));
+        coachIds.add(user.userId);
         break;
       case "coached_hierarchy":
         user.subtreeCoachedTeamIds.forEach((t) => teamIds.add(t));
+        coachIds.add(user.userId);
+        user.subordinateUserIds.forEach((u) => coachIds.add(u));
         break;
       case "hierarchy":
         recruiterIds.add(user.userId);
@@ -154,7 +160,7 @@ export function resolveScope(
 
   if (!granted && !hotlistOpen) return null;
   const sharedCandidateIds: ReadonlySet<string> = new Set(user.sharedCandidateIds ?? []);
-  return { all, recruiterIds, teamIds, locationIds, allTeams, sharedCandidateIds, hotlistOpen };
+  return { all, recruiterIds, teamIds, locationIds, allTeams, sharedCandidateIds, hotlistOpen, coachIds };
 }
 
 /**
@@ -239,6 +245,8 @@ export interface ActivityRef {
   teamId: string | null;
   locationId: string | null;
   candidate: CandidateRef;
+  /** Interviews only: the coach assigned to it. A coached grant covers it through `coachIds`. */
+  coachId?: string | null;
 }
 
 /**
@@ -252,6 +260,7 @@ export function activityVisible(scope: EffectiveScope | null, a: ActivityRef): b
   if (scope.recruiterIds.has(a.recruiterId)) return true;
   if (a.teamId !== null && scope.teamIds.has(a.teamId)) return true;
   if (a.locationId !== null && scope.locationIds.has(a.locationId)) return true;
+  if (a.coachId != null && scope.coachIds.has(a.coachId)) return true;
   return ownsCandidate(scope, a.candidate);
 }
 

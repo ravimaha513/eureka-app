@@ -29,7 +29,8 @@ status; `busy` = times only.
 **Coaches** are active holders of the `interview_coach` role, the set the scheduling picker offers;
 an Interview Lead has no column. **Source:** `eureka.interview` by `coach_id`; `cancelled`, `rescheduled` and `no_invite` are left
 out. A coach's own Google events are layered on once they connect (CC-6 below). **Limit:** this gates the grid only. `interview:read` still shows interviews and their coach
-on the Interviews page, on its own scope.
+on the Interviews page, on its own scope. A coach can open every interview in their own column: being assigned
+grants read (`interview_read`, 0570, IS-15 in `docs/interviews-settings-api.md`).
 
 | Id | Route | Permission | Notes |
 |---|---|---|---|

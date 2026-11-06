@@ -631,7 +631,7 @@ The all-teams flag is set when a Sales role grants `candidate:read`, `hotlist:re
 | Entity | Visible when |
 |---|---|
 | Candidate | all; or recruiter_id ∈ recruiter ids; or team_id ∈ team ids; or location_id ∈ location ids; or (all-teams flag and visibility = all_teams and status ∈ {active, full_of_interviews}) |
-| Submission, interview, placement | all; or recruiter_id (actor) ∈ recruiter ids; or team_id snapshot ∈ team ids; or location_id ∈ location ids; or the candidate is visible through ownership (not through the all-teams rule). The team that owns a candidate therefore sees other teams' activity on it, while all-teams viewers see only their own activity. |
+| Submission, interview, placement | all; or recruiter_id (actor) ∈ recruiter ids; or team_id snapshot ∈ team ids; or location_id ∈ location ids; or, interviews only, coach_id ∈ the coaches a coached grant covers (IS-15, migration 0570); or the candidate is visible through ownership (not through the all-teams rule). The team that owns a candidate therefore sees other teams' activity on it, while all-teams viewers see only their own activity. |
 | Interview location scope | `interview.location_id` (where the candidate interviews) |
 | Documents, BGC, work authorization | document:read scope over the owning candidate or placement; restricted classification additionally needs `document.restricted:read` |
 | Employees, assignments | employee:read (org-scoped roles only) |

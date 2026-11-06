@@ -303,6 +303,7 @@ Updated 2026-10-05. Read this first, then `docs/design.md`, `docs/implementation
 - Coaches' Google Calendars on the coach grid (migration 0550, `docs/coach-calendar-api.md` CC-6..CC-8): each coach connects their own account; events are read live and never stored; CEO grants still decide who sees them, with titles for full-detail viewers only.
 - Explain access (PR #123, migration 0560, docs/admin-api.md AD-16): Users & Access tab answers why a user can or cannot see a candidate, submission, interview or placement, role by role, and checks the answer against RLS by probing the record as that user (READ ONLY); admins see owner/actor ids and names, visibility and status (owner-approved, revisit if the org grows).
 - Row action menus paint above later rows on every table with a sticky actions cell: `.c-act:has(.menu)` lifts the cell while its menu is open (general rule replaces the Access-only copy).
+- Assigned coach (PR #124, migration 0570, docs/interviews-settings-api.md IS-15): an Interview Coach reads the interviews whose Coach field is them, whichever team they belong to, and their Interview Lead does too; coach calendar "Open interview" no longer 404s.
 
 ## Next tasks (Phase 2 to MVP), in suggested order
 

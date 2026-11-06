@@ -7,6 +7,7 @@ import {
   resolveScopeFor,
   submissionTransitionTargets,
   type ActivityRef,
+  type EffectiveScope,
   type Scope,
   type UserAccess,
 } from "@eureka/shared";
@@ -79,7 +80,7 @@ interface InterviewRow {
   c_location: string | null;
 }
 
-/** The name the board shows: an org-wide reader whose candidate join came back empty (RLS) still gets it (0141). */
+/** The name the board shows: an org-wide reader or the assigned coach whose candidate join came back empty (RLS) still gets it (0141, 0570). */
 const CANDIDATE_NAME = `CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name
               ELSE authz.interview_candidate_name(i.id) END`;
 
@@ -88,7 +89,8 @@ const CANDIDATE_NAME = `CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p
  * without a definer call per row. authz.interview_name_candidate_ids (db/functions/authz) returns,
  * once per statement (InitPlan, rule 3), the candidates whose board name the caller sees and that
  * match: readable candidates (person_read), plus for an org interview reader every interviewed
- * candidate, which is exactly when authz.interview_candidate_name answers. Where the person row is
+ * candidate and for a coach the candidates of interviews assigned to them (0570), which is when
+ * authz.interview_candidate_name answers. Where the person row is
  * visible its own name decides (the ILIKE, as before); where it is not, the set decides, as
  * interview_candidate_name would have, with a hash probe instead of a definer call.
  * `indexed` (a top-level AND term whose `term` has a full trigram) adds `= ANY (set)`, so the set
@@ -146,7 +148,16 @@ const ref = (r: InterviewRow): ActivityRef => ({
   teamId: r.team_id,
   locationId: r.location_id,
   candidate: { recruiterId: r.c_recruiter, teamId: r.c_team, locationId: r.c_location, visibility: "team", marketingStatus: "" },
+  coachId: r.coach_id,
 });
+
+/** Who reads an interview: the activity rule, plus the coach assigned to it (mirrors interview_read, 0570). */
+function interviewPredicate(scope: EffectiveScope, params: unknown[]): string {
+  const activity = activityPredicate(scope, params, "i", "c");
+  if (scope.coachIds.size === 0) return activity;
+  params.push([...scope.coachIds]);
+  return `(${activity} OR i.coach_id = ANY($${params.length}::uuid[]))`;
+}
 
 /** Which interview fields the caller may change on this row (mirrors eureka.interview_guard). */
 export function editableFields(access: UserAccess, r: Pick<ActivityRef, "recruiterId" | "teamId" | "locationId">): Set<InterviewField> {
@@ -239,7 +250,7 @@ export class InterviewsService {
     if (!scope) throw new ForbiddenException();
     const params: unknown[] = [];
     const p = (v: unknown) => { params.push(v); return `$${params.length}`; };
-    const where = [activityPredicate(scope, params, "i", "c")];
+    const where = [interviewPredicate(scope, params)];
     if (q.from) where.push(`i.starts_at >= ${p(q.from)}::timestamptz`);
     if (q.to) where.push(`i.starts_at < ${p(q.to)}::timestamptz`);
     if (q.status) where.push(`i.call_status = ${p(q.status)}`);
@@ -276,7 +287,7 @@ export class InterviewsService {
     const scope = resolveScope(user.access, "interview:read");
     if (!scope) throw new NotFoundException();
     const params: unknown[] = [id];
-    const { rows } = await c.query<InterviewRow>(`${SELECT} WHERE i.id = $1 AND ${activityPredicate(scope, params, "i", "c")}`, params);
+    const { rows } = await c.query<InterviewRow>(`${SELECT} WHERE i.id = $1 AND ${interviewPredicate(scope, params)}`, params);
     if (!rows[0]) throw new NotFoundException();
     return rows[0];
   }
