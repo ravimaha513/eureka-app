@@ -11,6 +11,7 @@ import { TeamsTab } from "./TeamsTab";
 import { LocationsTab } from "./LocationsTab";
 import { RolesTab } from "./RolesTab";
 import { OrgChartTab } from "./OrgChartTab";
+import { ExplainTab } from "./ExplainTab";
 import "./admin.css";
 
 const TABS = [
@@ -20,6 +21,7 @@ const TABS = [
   { key: "locations", label: "Locations" },
   { key: "roles", label: "Roles" },
   { key: "orgchart", label: "Org chart" },
+  { key: "explain", label: "Explain access" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 const PARAMS = ["tab", ...USER_FILTER_KEYS] as const;
@@ -61,6 +63,7 @@ export function AccessPage({ me, initialTab = "users" }: { me: Me; initialTab?: 
           })} />
           : active === "locations" ? <LocationsTab />
           : active === "roles" ? <RolesTab />
+          : active === "explain" ? <ExplainTab />
           : <OrgChartTab />}
       </Tabs>
     </AccessContext.Provider>

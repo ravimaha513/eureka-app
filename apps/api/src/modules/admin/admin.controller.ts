@@ -3,6 +3,7 @@ import type { FastifyReply } from "fastify";
 import { CurrentUser, RequirePermission, type AuthedUser } from "../../platform/auth.guard.js";
 import { optionalIfMatch } from "../../platform/http/if-match.js";
 import {
+  AccessExplainQuery,
   AddMember,
   AddMembers,
   BulkCreateUsers,
@@ -32,6 +33,7 @@ import {
   SetDesignation,
   SetDepartment,
 } from "./admin.schemas.js";
+import { AccessExplainService } from "./access-explain.service.js";
 import { CoachService } from "./coach.service.js";
 import { OrgChartService } from "./org-chart.service.js";
 import { OrgUnitsService } from "./org-units.service.js";
@@ -55,7 +57,15 @@ export class AdminController {
     private readonly orgUnits: OrgUnitsService,
     private readonly teams: TeamsService,
     private readonly coach: CoachService,
+    private readonly explainer: AccessExplainService,
   ) {}
+
+  /** AD-16: why a user can or cannot see a record, checked against RLS as that user. */
+  @ApiQuery(AccessExplainQuery)
+  @Get("access-explain")
+  explainAccess(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
+    return this.explainer.explain(user, AccessExplainQuery.parse(q));
+  }
 
   @Get("meta")
   meta(@CurrentUser() user: AuthedUser) {

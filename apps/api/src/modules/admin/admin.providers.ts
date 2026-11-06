@@ -1,3 +1,4 @@
+import { AccessExplainService } from "./access-explain.service.js";
 import { AdminTx } from "./admin-tx.js";
 import { CoachService } from "./coach.service.js";
 import { OrgChartService } from "./org-chart.service.js";
@@ -14,5 +15,5 @@ import { AdminUsersService } from "./users.service.js";
  * does not touch the hot module file.
  */
 export const ADMIN_PROVIDERS = [
-  AdminTx, AdminUsersService, UserImportService, RolesService, RoleRequestsService, OrgChartService, OrgUnitsService, TeamsService, CoachService,
+  AdminTx, AdminUsersService, UserImportService, RolesService, RoleRequestsService, OrgChartService, OrgUnitsService, TeamsService, CoachService, AccessExplainService,
 ];

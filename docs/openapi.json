@@ -1211,6 +1211,67 @@
         }
       }
     },
+    "/api/v1/admin/access-explain": {
+      "get": {
+        "operationId": "AdminController_explainAccess",
+        "tags": [
+          "admin"
+        ],
+        "description": "Staff session; the guard requires the permission in x-eureka-permission (data scope from RLS).",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "permission",
+        "x-eureka-permission": "access:manage",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "userId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "candidate",
+                "submission",
+                "interview",
+                "placement"
+              ]
+            },
+            "required": true,
+            "name": "kind",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
     "/api/v1/admin/departments": {
       "get": {
         "operationId": "AdminController_listDepartments",

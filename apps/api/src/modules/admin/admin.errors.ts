@@ -23,6 +23,8 @@ const CODES: Record<string, (code: string) => HttpException> = {
   invalid_token: (c) => new UnprocessableEntityException(c),
   not_in_scope: (c) => new ForbiddenException(c),
   user_not_found: () => new NotFoundException(),
+  record_not_found: () => new NotFoundException(),
+  invalid_kind: (c) => new UnprocessableEntityException(c),
   invalid_designation: (c) => new UnprocessableEntityException(c),
   team_not_found: () => new NotFoundException(),
   department_not_found: () => new NotFoundException(),

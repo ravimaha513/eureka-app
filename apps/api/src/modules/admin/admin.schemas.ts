@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SCOPES } from "@eureka/shared";
+import { EXPLAIN_KINDS, SCOPES } from "@eureka/shared";
 
 const uuid = z.string().uuid();
 
@@ -191,3 +191,7 @@ export const OrgChartApply = z
   .refine((v) => v.moves.length + v.teamAdds.length > 0, "Nothing to apply.")
   .refine((v) => v.moves.length + v.teamAdds.length <= 100, "At most 100 changes per batch.");
 export type OrgChartApply = z.infer<typeof OrgChartApply>;
+
+/** AD-16: explain whether a user can see a record. */
+export const AccessExplainQuery = z.object({ userId: uuid, kind: z.enum(EXPLAIN_KINDS), id: uuid }).strict();
+export type AccessExplainQuery = z.infer<typeof AccessExplainQuery>;
