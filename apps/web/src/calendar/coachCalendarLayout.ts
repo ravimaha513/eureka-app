@@ -81,3 +81,21 @@ export function mergeGoogleEvents<I extends { coachId: string; startsAt: string;
 
 /** Whether an all-day event (end date exclusive) covers a day. */
 export const coversDay = (e: { startDate: string; endDate: string }, day: string) => e.startDate <= day && day < e.endDate;
+
+interface Timed { coachId: string; startsAt: string; endsAt: string }
+const overlapsIn = (a: Timed, b: Timed) =>
+  a.coachId === b.coachId && Date.parse(a.startsAt) < Date.parse(b.endsAt) && Date.parse(b.startsAt) < Date.parse(a.endsAt);
+
+/** Events that overlap another event of the same coach. Touching slots do not. */
+export function findClashes<T extends Timed>(events: readonly T[]): Set<T> {
+  const byCoach = new Map<string, T[]>();
+  for (const e of events) byCoach.set(e.coachId, [...(byCoach.get(e.coachId) ?? []), e]);
+  const out = new Set<T>();
+  const span = (e: T) => ({ start: Date.parse(e.startsAt), end: Date.parse(e.endsAt) });
+  for (const list of byCoach.values()) for (const l of layOutLanes(list, span)) if (l.overlaps) out.add(l.item);
+  return out;
+}
+
+/** The other events of the same coach that overlap `event`. */
+export const overlapping = <T extends Timed>(event: T, events: readonly T[]): T[] =>
+  events.filter((o) => o !== event && overlapsIn(event, o));

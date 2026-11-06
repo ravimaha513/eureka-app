@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, hourRange, layOutLanes, minutesWithinDay, mondayOf, coversDay, mergeGoogleEvents } from "./coachCalendarLayout";
+import { addDays, hourRange, layOutLanes, minutesWithinDay, mondayOf, coversDay, mergeGoogleEvents, findClashes, overlapping } from "./coachCalendarLayout";
 
 const span = (s: { start: number; end: number }) => s;
 
@@ -53,5 +53,16 @@ describe("Google events on the grid", () => {
   it("treats an all-day end date as exclusive", () => {
     const e = { startDate: "2033-03-02", endDate: "2033-03-04" };
     expect(["2033-03-01", "2033-03-02", "2033-03-03", "2033-03-04"].map((d) => coversDay(e, d))).toEqual([false, true, true, false]);
+  });
+});
+
+describe("double-bookings across the grid", () => {
+  const at = (coachId: string, s: string, e: string) => ({ coachId, startsAt: `2033-03-02T${s}:00Z`, endsAt: `2033-03-02T${e}:00Z` });
+  it("flags only events that overlap the same coach, not touching ones or other coaches", () => {
+    const a = at("a", "15:00", "16:00"), b = at("a", "15:30", "16:30"), c = at("a", "16:30", "17:00"), d = at("b", "15:00", "16:00");
+    const clashes = findClashes([a, b, c, d]);
+    expect([a, b, c, d].map((e) => clashes.has(e))).toEqual([true, true, false, false]);
+    expect(overlapping(a, [a, b, c, d])).toEqual([b]);
+    expect(overlapping(c, [a, b, c, d])).toEqual([]);
   });
 });
