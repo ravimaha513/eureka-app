@@ -160,14 +160,29 @@ describe("no account oracle (timing, work after the reply)", () => {
     await drainPortal(app);
     await ageLinks(db, "oracle@example.com");
     const svc = app.get(PortalAuthService);
-    const before = (await app.inject({ method: "GET", url: "/api/portal/dev/mailbox?to=oracle%40example.com" })).json().items.length;
-    const known = await svc.requestLink({ email: "oracle@example.com" }, "10.5.5.5");
-    const unknown = await svc.requestLink({ email: "ghost@example.com" }, "10.5.5.6");
-    expect(known).toEqual(unknown);
-    // Nothing happened yet for the known address: the work is queued, not done.
-    expect((await app.inject({ method: "GET", url: "/api/portal/dev/mailbox?to=oracle%40example.com" })).json().items.length).toBe(before);
-    await svc.drain();
-    expect((await app.inject({ method: "GET", url: "/api/portal/dev/mailbox?to=oracle%40example.com" })).json().items.length).toBe(before + 1);
+    const mailbox = async () => (await app.inject({ method: "GET", url: "/api/portal/dev/mailbox?to=oracle%40example.com" })).json().items.length;
+    const before = await mailbox();
+    // Hold the deferred mail until the answers are in, so the check below cannot race the event loop
+    // (the deferred work starts on setImmediate, and any await in the test may let it finish first).
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const target = svc as unknown as { send: (...args: unknown[]) => Promise<void> };
+    const realSend = target.send.bind(svc);
+    const held = vi.spyOn(target, "send").mockImplementation(async (...args) => { await gate; return realSend(...args); });
+    try {
+      const known = await svc.requestLink({ email: "oracle@example.com" }, "10.5.5.5");
+      const unknown = await svc.requestLink({ email: "ghost@example.com" }, "10.5.5.6");
+      expect(known).toEqual(unknown);
+      // Both answers came back while the known address's mail is still held: the reply did not wait for it.
+      expect(await mailbox()).toBe(before);
+      release();
+      await svc.drain();
+      expect(held).toHaveBeenCalledTimes(1);
+      expect(await mailbox()).toBe(before + 1);
+    } finally {
+      release();
+      held.mockRestore();
+    }
   });
 });
 
