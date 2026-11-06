@@ -3,6 +3,7 @@ export * from "./authz/engine.js";
 export * from "./authz/state-machines.js";
 export * from "./authz/actions.js";
 export * from "./authz/employment.js";
+export * from "./authz/explain.js";
 export * from "./normalize.js";
 export * from "./documents.js";
 export * from "./workAuthorization.js";
