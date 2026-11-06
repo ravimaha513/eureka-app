@@ -1,5 +1,5 @@
 -- authz.interview_name_candidate_ids: current definition (repeatable; db/functions/README.md).
--- since: 0521
+-- since: 0570
 -- Created for E-09 (docs/backend-audit/perf-baseline.md "R-13b"). Change this file, not a new migration.
 --
 -- The candidate ids whose name, as the Interviews board shows it, matches p_pattern (a
@@ -8,7 +8,9 @@
 -- (0141) for a caller holding interview:read at org scope. So the set is:
 --   * interview:read at org: candidates that have an interview (every interview is readable at org,
 --     with its candidate id and, through interview_candidate_name, its name) and whose name matches;
---   * otherwise: the candidates of authz.person_name_matches (readable persons; person_id is unique).
+--   * otherwise: the candidates of authz.person_name_matches (readable persons; person_id is unique),
+--     plus the candidates of interviews assigned to the caller's coaches (authz.assigned_coach_ids,
+--     0570), whose name interview_candidate_name also answers.
 -- Nothing outside what the board already shows the caller is revealed. Used once per statement
 -- (InitPlan, rule 3) by candidateNameMatch() in interviews.service.ts in place of the per-row
 -- interview_candidate_name call of E-09: rows with a visible person keep their own name ILIKE, rows
@@ -25,6 +27,8 @@ AS $function$
 DECLARE
   v_ids uuid[];
   v_persons uuid[];
+  v_coaches uuid[];
+  v_assigned uuid[];
 BEGIN
   IF p_pattern IS NULL OR authz.current_user_id() IS NULL THEN
     RETURN '{}'::uuid[];
@@ -42,6 +46,18 @@ BEGIN
     SELECT coalesce(pg_catalog.array_agg(c.id), '{}'::uuid[]) INTO v_ids
       FROM pg_catalog.unnest(v_persons) m(id)
       JOIN eureka.candidate c ON c.person_id = m.id;
+    v_coaches := authz.assigned_coach_ids('interview:read');
+    IF coalesce(pg_catalog.cardinality(v_coaches), 0) > 0 THEN
+      EXECUTE $q$
+      SELECT coalesce(pg_catalog.array_agg(DISTINCT c.id), '{}'::uuid[])
+        FROM eureka.interview i
+        JOIN eureka.candidate c ON c.id = i.candidate_id
+        JOIN eureka.person p ON p.id = c.person_id
+       WHERE i.coach_id = ANY ($1::uuid[])
+         AND (p.first_name || ' ' || p.last_name) ILIKE $2::text ESCAPE '\'
+      $q$ INTO v_assigned USING v_coaches, p_pattern;
+      v_ids := v_ids || coalesce(v_assigned, '{}'::uuid[]);
+    END IF;
   END IF;
   RETURN v_ids;
 END

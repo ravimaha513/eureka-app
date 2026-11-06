@@ -210,6 +210,23 @@ describe("candidateVisible", () => {
     expect(candidateVisible(s, cand({ teamId: "T1" }))).toBe(false);
   });
 
+  it("an assigned coach reads that interview outside their coached teams (IS-15)", () => {
+    const iv = (coachId: string | null) => ({
+      recruiterId: "R9", teamId: "T9", locationId: null, coachId,
+      candidate: { recruiterId: "R9", teamId: "T9", locationId: null, visibility: "team" as const, marketingStatus: "" },
+    });
+    const coach = resolveScope(COACH, "interview:read");
+    expect(activityVisible(coach, iv("C"))).toBe(true);
+    expect(activityVisible(coach, iv("X"))).toBe(false);
+    expect(activityVisible(coach, iv(null))).toBe(false);
+    const lead = resolveScope(IL, "interview:read");
+    expect(activityVisible(lead, iv("C"))).toBe(true);
+    expect(activityVisible(lead, iv("IL"))).toBe(true);
+    expect(activityVisible(lead, iv("X"))).toBe(false);
+    // Sales grants never gain a path through the coach column.
+    expect(resolveScope(COACH, "chat:use")?.coachIds.size).toBe(0);
+  });
+
   it("interview lead sees teams coached by them and their coaches, nothing else", () => {
     for (const p of ["candidate:read", "hotlist:read", "interview:read", "interview.feedback:create", "training:read"] as const) {
       const s = resolveScope(IL, p);

@@ -159,6 +159,7 @@ export type ExplainPath =
   | { via: "org" | "all_teams" | "selected_teams" }
   | { via: "self"; on: "record" | "candidate" }
   | { via: "report"; on: "record" | "candidate"; user: NamedRef }
+  | { via: "assigned_coach"; user: NamedRef }
   | { via: "team"; on: "record" | "candidate"; team: NamedRef }
   | { via: "location"; on: "record" | "candidate"; location: NamedRef };
 export type ExplainMiss = "open_to_all_not_marketable" | "open_to_all_not_sales" | "open_to_all_not_for_activity" | "out_of_scope";

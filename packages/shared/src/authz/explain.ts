@@ -45,6 +45,8 @@ export type AccessPath =
   | { via: "team"; on: ExplainSubject; teamId: string }
   /** The record's location is the location of a location-bound role. */
   | { via: "location"; on: ExplainSubject; locationId: string }
+  /** The user, or a coach reporting to them, is assigned to coach this interview. */
+  | { via: "assigned_coach"; coachId: string }
   /** Candidate is "Open to all teams" and marketable; the role is a Sales role. */
   | { via: "all_teams" }
   /** Candidate is shared with one of the user's teams ("Selected teams") and marketable. */
@@ -139,7 +141,8 @@ export function explainCandidate(user: UserAccess, c: CandidateRef): Explanation
 export function explainActivity(user: UserAccess, kind: Exclude<ExplainKind, "candidate">, a: ActivityRef): Explanation {
   const permission = EXPLAIN_PERMISSION[kind];
   const roles = perRole(user, permission, (scope) => {
-    const paths = [...ownerPaths(user, scope, "record", a), ...ownerPaths(user, scope, "candidate", a.candidate)];
+    const paths: AccessPath[] = [...ownerPaths(user, scope, "record", a), ...ownerPaths(user, scope, "candidate", a.candidate)];
+    if (!scope.all && a.coachId != null && scope.coachIds.has(a.coachId)) paths.push({ via: "assigned_coach", coachId: a.coachId });
     // De-duplicate: an org grant matches both subjects.
     const unique = paths.filter((p, i) => paths.findIndex((q) => JSON.stringify(q) === JSON.stringify(p)) === i);
     if (unique.length) return { paths: unique };

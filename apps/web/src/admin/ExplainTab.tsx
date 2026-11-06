@@ -35,6 +35,7 @@ export function pathText(p: ExplainPath, kind: ExplainKind): string {
     case "selected_teams": return "The candidate is shared with one of their teams and marketable, and this is a Sales role.";
     case "self": return `They are ${subject(p.on, kind)} recruiter.`;
     case "report": return `${name(p.user)}, ${subject(p.on, kind)} recruiter, reports to them.`;
+    case "assigned_coach": return `${name(p.user)} is the coach assigned to this interview.`;
     case "team": return `${subject(p.on, kind).replace(/^./, (c) => c.toUpperCase())} team ${name(p.team)} is in their scope.`;
     case "location": return `${subject(p.on, kind).replace(/^./, (c) => c.toUpperCase())} location ${name(p.location)} is this role's location.`;
   }
