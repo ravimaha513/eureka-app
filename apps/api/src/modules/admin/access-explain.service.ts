@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { HttpException, Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
 import type pg from "pg";
 import {
   explainActivity,
@@ -13,6 +13,8 @@ import {
 import { AccessService } from "../../platform/access.service.js";
 import type { AuthedUser } from "../../platform/auth.guard.js";
 import { DbService } from "../../platform/db.service.js";
+import { pgCodeOf } from "../../platform/errors.js";
+import { apiLog, errorFields } from "../../platform/logger.js";
 import type { AccessExplainQuery } from "./admin.schemas.js";
 import { AdminTx } from "./admin-tx.js";
 
@@ -52,35 +54,33 @@ export class AccessExplainService {
   constructor(private readonly tx: AdminTx, private readonly db: DbService, private readonly access: AccessService) {}
 
   async explain(user: AuthedUser, q: AccessExplainQuery) {
-    return this.tx.run(user, async (c) => {
-      const target = (await c.query<{ id: string; display_name: string; status: string }>(
+    // Three transactions in sequence, never two connections at once (a nested probe could
+    // exhaust the pool under parallel calls). The admin check runs first and gates the probe.
+    const { target, facts } = await this.tx.run(user, async (c) => {
+      const t = (await c.query<{ id: string; display_name: string; status: string }>(
         `SELECT id, display_name, status FROM eureka.app_user WHERE id = $1 AND deleted_at IS NULL`, [q.userId])).rows[0];
-      if (!target) throw new NotFoundException("user_not_found");
-      const facts = (await c.query<RecordFacts>(`SELECT * FROM authz.admin_explain_record($1, $2)`, [q.kind, q.id])).rows[0]!;
+      const f = (await c.query<RecordFacts>(`SELECT * FROM authz.admin_explain_record($1, $2)`, [q.kind, q.id])).rows[0]!;
+      if (!t) throw new NotFoundException("user_not_found");
+      return { target: t, facts: f };
+    });
 
-      const { access, rlsVisible } = await this.db.withUser(q.userId, async (t) => {
-        await t.query("SET LOCAL transaction_read_only = on");
-        const loaded = await this.access.load(t, q.userId);
-        const { rows: [r] } = await t.query<{ v: boolean }>(
-          `SELECT EXISTS (SELECT 1 FROM ${TABLE[q.kind]} WHERE id = $1) AS v`, [q.id]);
-        return { access: loaded, rlsVisible: r!.v };
+    const { access, rlsVisible } = await this.probe(q);
+
+    const candidate: CandidateRef = {
+      id: facts.candidate_id, recruiterId: facts.recruiter_id, teamId: facts.team_id, locationId: facts.location_id,
+      visibility: facts.visibility, marketingStatus: facts.marketing_status,
+    };
+    const e: Explanation = q.kind === "candidate"
+      ? explainCandidate(access, candidate)
+      : explainActivity(access, q.kind, {
+        recruiterId: facts.actor_recruiter_id!, teamId: facts.actor_team_id, locationId: facts.actor_location_id, candidate,
       });
 
-      const candidate: CandidateRef = {
-        id: facts.candidate_id, recruiterId: facts.recruiter_id, teamId: facts.team_id, locationId: facts.location_id,
-        visibility: facts.visibility, marketingStatus: facts.marketing_status,
-      };
-      const e: Explanation = q.kind === "candidate"
-        ? explainCandidate(access, candidate)
-        : explainActivity(access, q.kind, {
-          recruiterId: facts.actor_recruiter_id!, teamId: facts.actor_team_id, locationId: facts.actor_location_id, candidate,
-        });
-
+    return this.tx.run(user, async (c) => {
       await this.tx.audit.record(c, {
         actorId: user.id, action: "admin.access.explained", entityType: q.kind, entityId: q.id,
         changes: { userId: q.userId, allowed: e.allowed, rlsAllowed: rlsVisible },
       });
-
       const names = await nameLookup(c, e, facts, access);
       const record = {
         kind: q.kind,
@@ -116,6 +116,26 @@ export class AccessExplainService {
         },
       };
     });
+  }
+
+  /**
+   * As the target user, READ ONLY: their access facts and one RLS probe. Only a boolean leaves.
+   * Errors here are not the admin's: logged with its pg code, then a 500, never mapped to 403/404.
+   */
+  private async probe(q: AccessExplainQuery): Promise<{ access: UserAccess; rlsVisible: boolean }> {
+    try {
+      return await this.db.withUser(q.userId, async (t) => {
+        await t.query("SET LOCAL transaction_read_only = on");
+        const loaded = await this.access.load(t, q.userId);
+        const { rows: [r] } = await t.query<{ v: boolean }>(
+          `SELECT EXISTS (SELECT 1 FROM ${TABLE[q.kind]} WHERE id = $1) AS v`, [q.id]);
+        return { access: loaded, rlsVisible: r!.v };
+      });
+    } catch (err) {
+      if (err instanceof HttpException) throw err; // e.g. 503 database_busy from the pool
+      apiLog.error("access explain probe failed", { pgCode: pgCodeOf(err), ...errorFields(err) });
+      throw new InternalServerErrorException("access_probe_failed", { cause: err });
+    }
   }
 }
 

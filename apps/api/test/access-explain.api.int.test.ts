@@ -132,6 +132,18 @@ describe("access explainer", () => {
     expect(Object.keys(rows[0].changes).sort()).toEqual(["allowed", "rlsAllowed", "userId"]);
   });
 
+  it("parallel calls never hold two connections at once, and the probe's user does not leak into the pool", async () => {
+    // More calls than the default pool (10): a nested probe connection would deadlock into 503s.
+    const c = candidates[0]!;
+    const results = await Promise.all([
+      ...Array.from({ length: 24 }, () => explain(U.r1a, "candidate", c.id)),
+      ...Array.from({ length: 12 }, () => call("admin", "GET", "/api/v1/me")),
+    ]);
+    expect(results.map((r) => r.statusCode)).toEqual(results.map(() => 200));
+    // Every /me answered as the admin, never as the probed user.
+    for (const r of results.slice(24)) expect(r.json().id).toBe(U.admin);
+  }, 60_000);
+
   it("is admin-only; unknown user or record is 404; bad input is 422", async () => {
     const c = candidates[0]!;
     expect((await explain(U.r1a, "candidate", c.id, "ceo")).statusCode).toBe(403);
