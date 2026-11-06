@@ -1254,6 +1254,9 @@ tr.rowopen:hover .linkbtn b { text-decoration: underline; text-underline-offset:
 .cardonly { display: none; }
 .c-sel { width: 36px; }
 .c-act { width: 1%; text-align: right; position: sticky; right: 0; background: var(--surface); box-shadow: inset 1px 0 0 var(--line2); }
+/* Sticky makes each cell a stacking context, so an open .menu's z-index stops at its own cell and later rows paint
+   over it. Lift the cell while its menu is open: above .bulkbar (6), below .top (20). */
+.c-act:has(.menu) { z-index: 7; }
 thead .c-act { background: var(--surface2); }
 tbody tr:hover td.c-act { background: var(--surface2); }
 tbody tr[aria-selected="true"] td.c-act { background: var(--sel); }

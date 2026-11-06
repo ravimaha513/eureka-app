@@ -38,8 +38,6 @@
 .ua-roles .chip { padding: 1px 1px 1px 7px; min-height: 26px; }
 /* Revoke: a 24px target with a visible glyph (WCAG 2.5.8), bad-red on hover like a filter chip. */
 .ua-roles .chipx { width: 24px; height: 24px; }
-/* Kit .menu is position:fixed but lives inside the sticky .c-act cell (its own stacking context); lift the open row so later rows do not paint over the menu. */
-.ua-table td.c-act:has(.menu) { z-index: 3; }
 .ua-act { display: inline-flex; align-items: center; gap: 4px; justify-content: flex-end; }
 .ua-self { font-size: 12.5px; white-space: normal; display: inline-block; max-width: 160px; text-align: right; }
 
