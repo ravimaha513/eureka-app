@@ -17,6 +17,37 @@ All sample data in this repository is fictional.
 | `infra` | AWS Terraform/Terragrunt and deploy runbook ([infra/README.md](infra/README.md)) |
 | `Dockerfile` | One ARM64 image for the API, worker and migration task |
 
+## Tools and technology
+
+### What you need installed
+
+| Tool | Version | Needed for |
+|---|---|---|
+| [Node.js](https://nodejs.org) | 22+ (image pins 22.20) | Everything (`engines.node >= 22`) |
+| [pnpm](https://pnpm.io) | 10 (`packageManager: pnpm@10.28.0`; `corepack enable` picks it up) | Workspace install and scripts |
+| [Docker](https://www.docker.com) (Desktop or Engine + Compose) | current | `pnpm local` (dev Postgres on :55432) and `pnpm test:api` (throwaway test Postgres on :55433) |
+| Git | any recent | Source control |
+| PostgreSQL client tools (`psql`, `createdb`) | 16 | Optional: only for the manual setup under "Develop" without Docker |
+| Chromium for Playwright | from `@playwright/test` 1.x | Optional: E2E journeys (`playwright install chromium`, or point `PW_CHROMIUM` at a binary) |
+| [k6](https://k6.io) | current | Optional: load test in [loadtest/](loadtest/README.md) |
+| Terraform / Terragrunt | 1.10.5 / 0.77.22 (as in CI) | Optional: only for infra work; staging deploys run in GitHub Actions, no local install needed |
+| AWS CLI | v2 | Optional: only for the one-time infra setup in [infra/README.md](infra/README.md) |
+
+### Stack
+
+| Area | Technology |
+|---|---|
+| Language | TypeScript 5 throughout (pnpm monorepo) |
+| API + worker | NestJS 10 on Fastify 4, Zod 3 validation (OpenAPI via `zod-to-openapi`), `pg` driver, `jose` (JWT), SWC build |
+| Web | React 18, Vite 5, TanStack Query 5, Recharts, lucide-react, pdf.js / mammoth (resume preview), DOMPurify |
+| Shared | `packages/shared`: authorization catalog and engine (Zod) |
+| Database | PostgreSQL 16 with row-level security, SECURITY DEFINER functions, plain SQL migrations in `db/migrations` |
+| Files and mail | Amazon S3 (presigned uploads), AWS KMS, Amazon SES v2; local disk storage in dev |
+| Spreadsheets | ExcelJS, read-excel-file (Sheets import/export) |
+| Testing | Vitest 2 (unit + integration against real Postgres), Testing Library + jsdom (web), Playwright (E2E), k6 (load), OWASP ZAP baseline (CI) |
+| Infrastructure | AWS: ECS Fargate (ARM64), RDS PostgreSQL, CloudFront + WAF, API Gateway, S3; Terraform + Terragrunt |
+| CI/CD | GitHub Actions with AWS OIDC (`ci.yml`, `deploy.yml`, `zap-baseline.yml`, ...); one Docker image (`Dockerfile`) for API, worker and migrations |
+
 ## Run it locally (one command)
 
 Needs Node 22+ and Docker Desktop running.
