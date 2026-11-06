@@ -10,7 +10,9 @@
 --     with its candidate id and, through interview_candidate_name, its name) and whose name matches;
 --   * otherwise: the candidates of authz.person_name_matches (readable persons; person_id is unique),
 --     plus the candidates of interviews assigned to the caller's coaches (authz.assigned_coach_ids,
---     0570), whose name interview_candidate_name also answers.
+--     0570), whose name interview_candidate_name also answers. The set is per candidate: another
+--     readable interview of that candidate also matches, showing no name. The assigned row already
+--     pairs that candidate id with the name, so this reveals nothing new.
 -- Nothing outside what the board already shows the caller is revealed. Used once per statement
 -- (InitPlan, rule 3) by candidateNameMatch() in interviews.service.ts in place of the per-row
 -- interview_candidate_name call of E-09: rows with a visible person keep their own name ILIKE, rows

@@ -80,7 +80,7 @@ interface InterviewRow {
   c_location: string | null;
 }
 
-/** The name the board shows: an org-wide reader whose candidate join came back empty (RLS) still gets it (0141). */
+/** The name the board shows: an org-wide reader or the assigned coach whose candidate join came back empty (RLS) still gets it (0141, 0570). */
 const CANDIDATE_NAME = `CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p.last_name
               ELSE authz.interview_candidate_name(i.id) END`;
 
@@ -89,7 +89,8 @@ const CANDIDATE_NAME = `CASE WHEN p.id IS NOT NULL THEN p.first_name || ' ' || p
  * without a definer call per row. authz.interview_name_candidate_ids (db/functions/authz) returns,
  * once per statement (InitPlan, rule 3), the candidates whose board name the caller sees and that
  * match: readable candidates (person_read), plus for an org interview reader every interviewed
- * candidate, which is exactly when authz.interview_candidate_name answers. Where the person row is
+ * candidate and for a coach the candidates of interviews assigned to them (0570), which is when
+ * authz.interview_candidate_name answers. Where the person row is
  * visible its own name decides (the ILIKE, as before); where it is not, the set decides, as
  * interview_candidate_name would have, with a hash probe instead of a definer call.
  * `indexed` (a top-level AND term whose `term` has a full trigram) adds `= ANY (set)`, so the set

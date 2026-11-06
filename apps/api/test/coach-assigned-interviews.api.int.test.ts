@@ -150,6 +150,29 @@ describe("the reach of the assignment path", () => {
     await asUser(db.app, U.r3a, (c) => c.query(`UPDATE eureka.interview SET coach_id = NULL WHERE id = $1`, [belowLead]), true);
   });
 
+  it("an Interview Lead may add coach feedback on a coach below them, not on another coach's", async () => {
+    const below = await interview(U.coach, "2034-03-05T15:00:00Z");
+    const ok = await call("il", "POST", `/api/v1/interviews/${below}/feedback`, { rating: 3, notes: "Lead review" });
+    expect(ok.statusCode, ok.body).toBe(201);
+    expect((await call("il", "POST", `/api/v1/interviews/${mine}/feedback`, { rating: 3, notes: "x" })).statusCode).toBe(404);
+    await asUser(db.app, U.r3a, (c) => c.query(`UPDATE eureka.interview SET coach_id = NULL WHERE id = $1`, [below]), true);
+  });
+
+  it("gives the name only: the candidate record stays 404", async () => {
+    const candidateId = (await board("lonecoach"))[0]!.candidate.id;
+    expect((await call("lonecoach", "GET", `/api/v1/candidates/${candidateId}`)).statusCode).toBe(404);
+  });
+
+  it("ends with the coach role", async () => {
+    const leaver = await extraUser(db, "leavercoach", "interview_coach");
+    const iv = await interview(leaver.id, "2034-03-06T15:00:00Z");
+    expect((await call("leavercoach", "GET", `/api/v1/interviews/${iv}`)).statusCode).toBe(200);
+    await db.admin.query(`DELETE FROM eureka.user_role WHERE user_id = $1`, [leaver.id]);
+    const seen = await asUser(db.app, leaver.id, async (c) =>
+      (await c.query(`SELECT 1 FROM eureka.interview WHERE id = $1`, [iv])).rowCount);
+    expect(seen).toBe(0);
+  });
+
   it("a recruiter on another team gains nothing", async () => {
     expect((await call("r1a", "GET", `/api/v1/interviews/${mine}`)).statusCode).toBe(404);
   });

@@ -192,6 +192,8 @@ describe("authz.interview_name_candidate_ids (E-09)", () => {
       const readable = new Set((await c.query<{ id: string }>(`SELECT id FROM eureka.candidate`)).rows.map((r) => r.id));
       const orgInterviews = (await c.query<{ o: boolean }>(`SELECT coalesce(authz.has_org('interview:read'), false) AS o`)).rows[0]!.o;
       const interviewed = new Set((await c.query<{ id: string }>(`SELECT DISTINCT candidate_id AS id FROM eureka.interview WHERE candidate_id IS NOT NULL`)).rows.map((r) => r.id));
+      const assigned = new Set((await c.query<{ id: string }>(
+        `SELECT DISTINCT candidate_id AS id FROM eureka.interview WHERE coach_id = ANY ((SELECT authz.assigned_coach_ids('interview:read'))::uuid[])`)).rows.map((r) => r.id));
       for (const term of TERMS) {
         const pat = [likeContains(term)];
         const old = (await c.query(board(OLD), pat)).rows;
@@ -199,7 +201,7 @@ describe("authz.interview_name_candidate_ids (E-09)", () => {
         expect((await c.query(board(WALK), pat)).rows, `${userId} ${term} walk`).toEqual(old);
         expect((await c.query(board(`(${WALK} OR false)`), pat)).rows, `${userId} ${term} OR`).toEqual(old);
         const set = (await c.query<{ ids: string[] }>(`SELECT authz.interview_name_candidate_ids($1) AS ids`, pat)).rows[0]!.ids;
-        for (const id of set) expect(readable.has(id) || (orgInterviews && interviewed.has(id)), `${userId} ${term} leaks ${id}`).toBe(true);
+        for (const id of set) expect(readable.has(id) || assigned.has(id) || (orgInterviews && interviewed.has(id)), `${userId} ${term} leaks ${id}`).toBe(true);
       }
     });
   });
