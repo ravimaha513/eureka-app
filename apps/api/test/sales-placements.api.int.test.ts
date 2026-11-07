@@ -306,18 +306,18 @@ describe("sales reports by manager and by candidate", () => {
     expect(byName(await dash("m1", "groupBy=manager"), "submissions")).toEqual({ m1: 3 });
   });
 
-  it("gives location roles one row per candidate by default (location sales view)", async () => {
-    const d = await dash("locD", "");
+  it("groups by candidate on request; location roles no longer get the dashboard (dashboard:read)", async () => {
+    const d = await dash("ceo", "groupBy=candidate");
     expect(d.groupBy).toBe("candidate");
     const rows = Object.fromEntries(d.groups.map((g: { id: string; name: string; counts: Record<string, number> }) => [g.id, g]));
     expect(rows[cands.c1!]).toMatchObject({ counts: { submissions: 2, interviewsScheduled: 1, interviewsCleared: 1 } });
     expect(rows[cands.c1!].name).toMatch(/Placed$/);
     expect(rows[cands.c3!]).toMatchObject({ counts: { submissions: 1, interviewsScheduled: 1, interviewsCleared: 0 } });
     expect(rows[cands.c4!]).toMatchObject({ counts: { submissions: 2 } });
-    expect(rows[cands.c2!]).toBeUndefined(); // Austin
-    // Austin's incharge sees only c2.
-    const a = await dash("locA", "");
-    expect(a.groups.map((g: { id: string }) => g.id)).toEqual([cands.c2]);
+    expect(rows[cands.c2!]).toBeDefined(); // Austin: the CEO sees every location
+    for (const key of ["locD", "locA"] as const) {
+      expect((await call(key, "GET", `/api/v1/dashboard?${PERIOD}`)).statusCode, key).toBe(403);
+    }
   });
 
   it("exports the grouped counts with a total row for report:export holders, audited", async () => {

@@ -7,11 +7,12 @@ implementation plan Phase 2, design B7). Code: `apps/api/src/modules/dashboard`;
 
 ## Access
 
-- Requires `report:read` (403 otherwise). Holders: Recruiter (own), Lead (team), Manager and
-  Associate Director (hierarchy), CEO, HR, Accounts and BU Head (org), Location
-  Incharge and Location Ops Admin (location). No new permission was added.
-- The web nav shows Dashboard to `report:read` holders only (it used to also list `performance:read`;
-  every holder of that also holds `report:read`). The default landing page is unchanged.
+- Requires `dashboard:read` **and** `report:read` (403 otherwise). Since migration 0580 the dashboard is for
+  **Manager and above, plus BU Head**: `dashboard:read` is held by Manager and Associate Director (hierarchy),
+  CEO and BU Head (org). Recruiter, Lead, HR, Accounts, Immigration and the location roles keep `report:read`
+  for the other reports (Reports, Interview reports, Candidate Pipeline) but no longer see the dashboard.
+  The counts still narrow to the caller's `report:read` scope (below).
+- The web nav shows Dashboard to `dashboard:read` holders only. The default landing page is unchanged.
 
 ## Scope rule
 
@@ -51,7 +52,9 @@ else keeps the 5-second default.
 | Query | Meaning |
 |---|---|
 | `from`, `to` | Period `[from, to)`, date or ISO date-time with offset. Default: the 7 days ending now. `from < to`, at most 366 days; otherwise 422. |
-| `groupBy` | `recruiter`, `team` or `location`. Default from the broadest `report:read` grant: own/team → recruiter, hierarchy → team, location/org → location. |
+| `groupBy` | `recruiter`, `team`, `location`, `manager`, `candidate`, `coach` or `technology`. Default from the broadest `report:read` grant: own/team → recruiter, hierarchy → team, location → candidate, org → location. `coach` and `technology` count placements only (below). |
+| `technologyId` | Placements of this technology only (`placement.technology_id`, snapshotted at creation). |
+| `coachId` | Placements whose final coached round had this coach (`placement.coach_id`, migration 0580). |
 | `tz` | IANA time zone (e.g. `America/New_York`) the daily `series` is bucketed in. Default `UTC`. Unknown zones are rejected (422). |
 
 Unknown parameters are rejected (422).
@@ -72,6 +75,25 @@ The response also carries `series`: one `{ date: "yyyy-mm-dd", counts }` entry p
 
 Activity is attributed with the snapshots taken when it happened (FR-ORG-04), so a recruiter's
 past work stays with their old team. A `null` group id means unassigned / no team / no location.
+
+## Coach and technology (migration 0580)
+
+A **placement** is the client's confirmation after the final round; a **cleared** interview is a
+passed round (L1, L2, …) and is never a placement. So coach and technology are attributes of the
+placement only:
+
+- `placement.coach_id` is snapshotted by `authz.create_placement`: the coach of the submission's latest
+  interview that has a coach and was not cancelled, rescheduled or no_invite ("final coached round").
+  No such round: no coach ("No coach"). Existing placements were back-filled with the same rule.
+  A snapshot, so BU Head (no `interview:read`) can use it and later interview edits do not move counts.
+- `technologyId`, `coachId`, `groupBy=coach` or `groupBy=technology` → `metrics` holds only
+  `placementsCreated` and `placementsJoined`; the other metrics are left out (not zero), including
+  `interviewsCleared`. The response echoes `filters: { technologyId?, coachId? }`.
+- Needs attention is not filtered (current state of the caller's scope).
+- The CSV export takes the same parameters; its audit row records the filter ids.
+- `GET /api/v1/dashboard/filters` (`dashboard:read` and `report:read`) returns
+  `{ coaches: [{id,name}], technologies: [{id,name}] }`: the coaches and technologies of the placements the
+  caller counts (same predicate, any period), sorted by name. The web hides a filter with no choices.
 
 ## Needs attention
 
@@ -113,7 +135,7 @@ clauses match the service's SQL; change both together.
 
 ## Tests
 
-- Hand-calculated totals for every role with `report:read` against a small fixed data set
+- Hand-calculated totals for every `dashboard:read` holder (Manager, AD, CEO, BU Head; everyone else 403) against a small fixed data set
   (recruiter own, lead team, manager teams, AD/OM/CEO all, location admins their location, HR /
   Accounts / BU Head without submission and interview access).
 - Differential: for every fixture user, the totals equal the counts from the list endpoints
@@ -134,7 +156,7 @@ clauses match the service's SQL; change both together.
   now gets `candidate`; org scope keeps `location`; others unchanged.
 - At most `MAX_GROUPS` (500) groups are returned (the most active ones, then by name); `groupsTruncated: true` says so; totals and
   the series stay exact.
-- **`POST /api/v1/dashboard/export`** (`report:read` **and** `report:export`; body: the dashboard query `from`, `to`, `groupBy`,
+- **`POST /api/v1/dashboard/export`** (`dashboard:read`, `report:read` **and** `report:export`; body: the dashboard query `from`, `to`, `groupBy`,
   `tz`, strict) returns CSV of the grouped counts with a final "Total" row, same scope, period and grouping rules as the page
   (`x-export-rows` = groups, `x-export-truncated`). 5 exports per 10 minutes per user (separate from the page's limit), audited
   `dashboard.export` with the grouping, period, metrics and row count (counts only). The page shows "Export CSV" to

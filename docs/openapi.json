@@ -10521,7 +10521,7 @@
           }
         ],
         "x-eureka-auth": "permission",
-        "x-eureka-permission": "report:read",
+        "x-eureka-permission": "dashboard:read",
         "parameters": [
           {
             "schema": {
@@ -10565,7 +10565,9 @@
                 "team",
                 "location",
                 "manager",
-                "candidate"
+                "candidate",
+                "coach",
+                "technology"
               ]
             },
             "required": false,
@@ -10579,6 +10581,24 @@
             },
             "required": false,
             "name": "tz",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "technologyId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "coachId",
             "in": "query"
           }
         ],
@@ -10647,12 +10667,22 @@
                       "team",
                       "location",
                       "manager",
-                      "candidate"
+                      "candidate",
+                      "coach",
+                      "technology"
                     ]
                   },
                   "tz": {
                     "type": "string",
                     "maxLength": 64
+                  },
+                  "technologyId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "coachId": {
+                    "type": "string",
+                    "format": "uuid"
                   }
                 },
                 "additionalProperties": false
@@ -10660,6 +10690,33 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/dashboard/filters": {
+      "get": {
+        "operationId": "DashboardController_filters",
+        "tags": [
+          "dashboard"
+        ],
+        "description": "Staff session; the guard requires the permission in x-eureka-permission (data scope from RLS).",
+        "security": [
+          {
+            "staffSession": []
+          }
+        ],
+        "x-eureka-auth": "permission",
+        "x-eureka-permission": "dashboard:read",
         "responses": {
           "200": {
             "description": "Success"

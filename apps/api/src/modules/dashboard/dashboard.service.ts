@@ -26,9 +26,13 @@ const DAY_MS = 86_400_000;
 /**
  * `manager` (sales reports by manager) and `candidate` (location sales view:
  * submissions, interviews and cleared calls per candidate) since migration 0160.
+ * `coach` and `technology` (migration 0580) group placements only: the coach of
+ * the final coached round and the candidate's technology, both snapshotted on the placement.
  */
-export const GROUP_BY = ["recruiter", "team", "location", "manager", "candidate"] as const;
+export const GROUP_BY = ["recruiter", "team", "location", "manager", "candidate", "coach", "technology"] as const;
 export type GroupBy = (typeof GROUP_BY)[number];
+/** Groupings that exist for placements only. */
+const PLACEMENT_GROUPS: readonly GroupBy[] = ["coach", "technology"];
 
 export const DashboardQuery = z
   .object({
@@ -37,6 +41,10 @@ export const DashboardQuery = z
     groupBy: z.enum(GROUP_BY).optional(),
     /** IANA time zone the daily series is bucketed in (the client's); default UTC. */
     tz: z.string().max(64).refine(validTimeZone, "unknown time zone").optional(),
+    /** Placements of this technology only (placement.technology_id); other metrics are left out. */
+    technologyId: z.string().uuid().optional(),
+    /** Placements whose final coached round had this coach (placement.coach_id); other metrics are left out. */
+    coachId: z.string().uuid().optional(),
   })
   .strict();
 export type DashboardQuery = z.infer<typeof DashboardQuery>;
@@ -62,6 +70,14 @@ const OPEN_SUBMISSION_SQL = `('submitted', 'under_review', 'interview_requested'
 const OPEN_PLACEMENT_SQL = `('confirmed', 'paperwork', 'bgc', 'ready')`;
 /** Interviews that happen (or happened): not cancelled, rescheduled or without an invite. */
 const LIVE_INTERVIEW_SQL = `NOT IN ('cancelled', 'rescheduled', 'no_invite')`;
+
+/** The metrics a coach or technology filter or grouping keeps: those are attributes of the placement. */
+const PLACEMENT_METRICS: readonly Metric[] = ["placementsCreated", "placementsJoined"];
+
+/** True when the request asks for a placements-only view (coach / technology filter or grouping). */
+export function placementsOnly(q: Pick<DashboardQuery, "technologyId" | "coachId">, groupBy: GroupBy): boolean {
+  return q.technologyId !== undefined || q.coachId !== undefined || PLACEMENT_GROUPS.includes(groupBy);
+}
 
 const SCOPE_RANK = { own: 0, coached: 0, coached_hierarchy: 0, team: 0, hierarchy: 1, location: 2, org: 3 } as const;
 
@@ -92,9 +108,11 @@ export function resolvePeriod(q: Pick<DashboardQuery, "from" | "to">, now = Date
 /** CSV headings and the label of the null group, per grouping. */
 const GROUP_LABELS: Record<GroupBy, string> = {
   recruiter: "Recruiter", team: "Team", location: "Location", manager: "Manager", candidate: "Candidate",
+  coach: "Coach", technology: "Technology",
 };
 const UNGROUPED: Record<GroupBy, string> = {
   recruiter: "Unassigned", team: "No team", location: "No location", manager: "No manager", candidate: "No candidate",
+  coach: "No coach", technology: "No technology",
 };
 const METRIC_LABELS: Record<Metric, string> = {
   submissions: "Submissions", interviewsScheduled: "Interviews", interviewsCleared: "Interviews cleared",
@@ -112,6 +130,9 @@ interface Scopes {
   report: EffectiveScope;
   read: Partial<Record<Permission, EffectiveScope>>;
 }
+
+/** Placement filters of the request (migration 0580). */
+export interface Filters { technologyId?: string; coachId?: string }
 
 /** WHERE fragments for an activity table: the list predicate for `perm`, narrowed to report:read. */
 function activityWhere(s: Scopes, perm: Permission, params: Params, alias: string): string | null {
@@ -180,7 +201,7 @@ export class DashboardService {
 
   private async run(user: AuthedUser, q: DashboardQuery, mode: "view" | "export") {
     const report = resolveScope(user.access, "report:read");
-    if (!report) throw new ForbiddenException();
+    if (!report || !resolveScope(user.access, "dashboard:read")) throw new ForbiddenException();
     const { from, to } = resolvePeriod(q);
     const limiter = mode === "export" ? this.exportLimiter : this.limiter;
     if (!limiter.take(user.id)) {
@@ -194,19 +215,48 @@ export class DashboardService {
       if (scope) read[perm] = scope;
     }
     const scopes: Scopes = { report, read };
-    const metrics = METRIC_KEYS.filter((m) => read[METRICS[m]]);
+    const only = placementsOnly(q, groupBy);
+    const metrics = METRIC_KEYS.filter((m) => read[METRICS[m]] && (!only || PLACEMENT_METRICS.includes(m)));
+    const filters: Filters = { technologyId: q.technologyId, coachId: q.coachId };
 
-    return this.load(user, scopes, metrics, groupBy, from, to, q.tz ?? "UTC", mode);
+    return this.load(user, scopes, metrics, groupBy, filters, from, to, q.tz ?? "UTC", mode);
   }
 
-  private async load(user: AuthedUser, scopes: Scopes, metrics: Metric[], groupBy: GroupBy, from: Date, to: Date, tz: string,
-    mode: "view" | "export") {
+  /**
+   * Choices for the Coach and Technology filters: the coaches and technologies of the
+   * placements the caller counts (same predicate as the placement metrics), any period.
+   */
+  async filterOptions(user: AuthedUser) {
+    const report = resolveScope(user.access, "report:read");
+    if (!report || !resolveScope(user.access, "dashboard:read")) throw new ForbiddenException();
+    const read = resolveScope(user.access, "placement:read");
+    if (!read) return { coaches: [], technologies: [] };
+    const scopes: Scopes = { report, read: { "placement:read": read } };
+    return this.reports.run(user.id, { heavy: report.all, timeoutDetail: "The report took too long; try again" }, async (c) => {
+      const params: Params = [];
+      const where = activityWhere(scopes, "placement:read", params, "pl")!;
+      const { rows } = await c.query<{ kind: "coach" | "technology"; id: string; name: string }>(
+        `WITH pl AS (SELECT DISTINCT pl.coach_id, pl.technology_id FROM eureka.placement pl
+                       LEFT JOIN eureka.candidate c ON c.id = pl.candidate_id WHERE ${where})
+         SELECT 'coach' AS kind, u.id, u.display_name AS name FROM eureka.app_user u
+           WHERE u.id IN (SELECT coach_id FROM pl WHERE coach_id IS NOT NULL)
+         UNION ALL
+         SELECT 'technology', t.id, t.name FROM eureka.technology t
+           WHERE t.id IN (SELECT technology_id FROM pl WHERE technology_id IS NOT NULL)
+         ORDER BY 1, 3, 2`, params);
+      const pick = (k: "coach" | "technology") => rows.filter((r) => r.kind === k).map(({ id, name }) => ({ id, name }));
+      return { coaches: pick("coach"), technologies: pick("technology") };
+    });
+  }
+
+  private async load(user: AuthedUser, scopes: Scopes, metrics: Metric[], groupBy: GroupBy, filters: Filters, from: Date, to: Date,
+    tz: string, mode: "view" | "export") {
     const report = scopes.report;
     // Org-wide reports get the longer report timeout (design B4.8 N9) and a report slot (report executor);
     // query_canceled (the statement timeout fired) becomes 503 + Retry-After.
     const run = { heavy: report.all, timeoutDetail: "The report took too long; narrow the period and try again" };
     return this.reports.run(user.id, run, async (c) => {
-      let counts = metrics.length ? await this.counts(c, scopes, groupBy, from, to, tz) : [];
+      let counts = metrics.length ? await this.counts(c, scopes, metrics, groupBy, filters, from, to, tz) : [];
       if (groupBy === "manager") counts = await this.toManagers(c, counts);
       const names = await this.names(c, groupBy, [...new Set(counts.map((r) => r.k).filter((k): k is string => k !== null))]);
       const zero = () => Object.fromEntries(metrics.map((m) => [m, 0])) as Record<Metric, number>;
@@ -236,13 +286,16 @@ export class DashboardService {
       if (mode === "export") {
         await this.audit.record(c, {
           actorId: user.id, action: "dashboard.export", entityType: "report",
-          changes: { groupBy, from: period.from, to: period.to, rows: groupList.length, truncated: groupsTruncated, metrics },
+          changes: { groupBy, from: period.from, to: period.to, rows: groupList.length, truncated: groupsTruncated, metrics,
+            technologyId: filters.technologyId ?? null, coachId: filters.coachId ?? null },
         });
-        return { period, groupBy, metrics, totals, groups: groupList, groupsTruncated, series: [], needsAttention: null };
+        return { period, groupBy, filters, metrics, totals, groups: groupList, groupsTruncated, series: [], needsAttention: null };
       }
       return {
         period,
         groupBy,
+        /** The placement filters applied (ids); a filter or a coach/technology grouping keeps placement metrics only. */
+        filters,
         metrics,
         totals,
         groups: groupList,
@@ -260,7 +313,8 @@ export class DashboardService {
   }
 
   /** One round trip: per metric and group key, under RLS with the list predicates. */
-  private async counts(c: pg.PoolClient, s: Scopes, groupBy: GroupBy, from: Date, to: Date, tz: string): Promise<CountRow[]> {
+  private async counts(c: pg.PoolClient, s: Scopes, metrics: Metric[], groupBy: GroupBy, f: Filters, from: Date, to: Date,
+    tz: string): Promise<CountRow[]> {
     const params: Params = [];
     const p = bind(params);
     const $from = p(from.toISOString());
@@ -275,16 +329,20 @@ export class DashboardService {
         case "candidate": return cand ? `${a}.id::text` : `${a}.candidate_id::text`;
         // Resolved to the manager in toManagers: the team's lead, or the recruiter when there is no team.
         case "manager": return `CASE WHEN ${a}.team_id IS NOT NULL THEN 't:' || ${a}.team_id ELSE 'r:' || ${a}.recruiter_id END`;
+        // Placement snapshots (0160, 0580); only placement metrics run with these groupings.
+        case "coach": return `${a}.coach_id::text`;
+        case "technology": return `${a}.technology_id::text`;
       }
     };
+    const want = (m: Metric) => metrics.includes(m);
     const inPeriod = (expr: string) => `${expr} >= ${$from}::timestamptz AND ${expr} < ${$to}::timestamptz`;
     const branches: string[] = [];
 
-    const sub = activityWhere(s, "submission:read", params, "s");
+    const sub = want("submissions") ? activityWhere(s, "submission:read", params, "s") : null;
     if (sub) branches.push(`SELECT 'submissions' AS m, ${key("s")} AS k, s.submitted_at AS ts FROM eureka.submission s
       LEFT JOIN eureka.candidate c ON c.id = s.candidate_id WHERE ${sub} AND ${inPeriod("s.submitted_at")}`);
 
-    const int = activityWhere(s, "interview:read", params, "i");
+    const int = want("interviewsScheduled") ? activityWhere(s, "interview:read", params, "i") : null;
     if (int) {
       branches.push(`SELECT 'interviewsScheduled', ${key("i")}, i.starts_at FROM eureka.interview i
         LEFT JOIN eureka.candidate c ON c.id = i.candidate_id
@@ -294,8 +352,10 @@ export class DashboardService {
         WHERE ${int} AND i.cleared AND ${inPeriod("i.cleared_at")}`);
     }
 
-    const pl = activityWhere(s, "placement:read", params, "pl");
+    let pl = want("placementsCreated") ? activityWhere(s, "placement:read", params, "pl") : null;
     if (pl) {
+      if (f.technologyId) pl += ` AND pl.technology_id = ${p(f.technologyId)}::uuid`;
+      if (f.coachId) pl += ` AND pl.coach_id = ${p(f.coachId)}::uuid`;
       branches.push(`SELECT 'placementsCreated', ${key("pl")}, pl.created_at FROM eureka.placement pl
         LEFT JOIN eureka.candidate c ON c.id = pl.candidate_id WHERE ${pl} AND ${inPeriod("pl.created_at")}`);
       branches.push(`SELECT 'placementsJoined', ${key("pl")}, pl.joined_at FROM eureka.placement pl
@@ -303,7 +363,7 @@ export class DashboardService {
         WHERE ${pl} AND pl.joined_at IS NOT NULL AND ${inPeriod("pl.joined_at")}`);
     }
 
-    const candRead = s.read["candidate:read"];
+    const candRead = want("candidatesAdded") ? s.read["candidate:read"] : undefined;
     if (candRead) {
       const where = [scopePredicate(candRead, params, "c")];
       if (!s.report.all) where.push(ownsCandidateSql(s.report, params, "c"));
@@ -350,6 +410,8 @@ export class DashboardService {
       recruiter: `SELECT id, display_name AS name FROM eureka.app_user WHERE id = ANY($1::uuid[])`,
       manager: `SELECT id, display_name AS name FROM eureka.app_user WHERE id = ANY($1::uuid[])`,
       team: `SELECT id, name FROM eureka.team WHERE id = ANY($1::uuid[])`,
+      coach: `SELECT id, display_name AS name FROM eureka.app_user WHERE id = ANY($1::uuid[])`,
+      technology: `SELECT id, name FROM eureka.technology WHERE id = ANY($1::uuid[])`,
       location: `SELECT id, name FROM eureka.location WHERE id = ANY($1::uuid[])`,
       // Under RLS: a candidate the caller cannot read keeps its counts but no name.
       candidate: `SELECT c.id, p.first_name || ' ' || p.last_name AS name FROM eureka.candidate c

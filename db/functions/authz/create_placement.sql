@@ -1,5 +1,6 @@
 -- authz.create_placement: current definition (repeatable; db/functions/README.md).
 -- Earlier bodies: migrations 0022, 0023, 0160. Change this file, not a new migration.
+-- since: 0580
 
 SET ROLE authz_definer;
 CREATE OR REPLACE FUNCTION authz.create_placement(p_submission uuid, p_type text, p_rate numeric, p_work_mode text, p_city text, p_state text, p_start date, p_partner uuid, p_contacts jsonb, p_reconfirmed boolean DEFAULT false)
@@ -53,11 +54,16 @@ BEGIN
 
   INSERT INTO eureka.placement (submission_id, candidate_id, person_id, recruiter_id, team_id, location_id,
       client_id, vendor_id, implementation_partner_id, placement_type, rate, work_mode, project_city,
-      project_state, tentative_start, is_first_placement, status, created_by, reconfirmed, technology_id)
+      project_state, tentative_start, is_first_placement, status, created_by, reconfirmed, technology_id, coach_id)
   VALUES (s.id, s.candidate_id, c.person_id, s.recruiter_id, s.team_id, s.location_id,
       s.client_id, s.vendor_id, p_partner, p_type, p_rate, p_work_mode, nullif(pg_catalog.btrim(p_city), ''),
       nullif(pg_catalog.btrim(p_state), ''), p_start, first, 'confirmed', actor,
-      coalesce(p_reconfirmed, false), c.technology_id)
+      coalesce(p_reconfirmed, false), c.technology_id,
+      -- 0580: coach of the final coached round (latest live interview with a coach).
+      (SELECT i.coach_id FROM eureka.interview i
+       WHERE i.submission_id = s.id AND i.coach_id IS NOT NULL
+         AND i.call_status NOT IN ('cancelled', 'rescheduled', 'no_invite')
+       ORDER BY i.starts_at DESC, i.id DESC LIMIT 1))
   RETURNING id INTO new_id;
 
   FOR ct IN SELECT e FROM pg_catalog.jsonb_array_elements(coalesce(p_contacts, '[]'::jsonb)) AS e LOOP

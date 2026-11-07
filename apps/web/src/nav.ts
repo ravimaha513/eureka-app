@@ -40,7 +40,7 @@ export const NAV: NavItem[] = [
   // training
   { key: "training", label: "Training Batches", section: "Training", anyOf: ["training:read"] },
   { key: "courses", label: "Courses", section: "Training", anyOf: ["training:manage"] },
-  { key: "dashboard", label: "Dashboard", section: "Insights", anyOf: ["report:read"] }, // GET /api/v1/dashboard needs report:read
+  { key: "dashboard", label: "Dashboard", section: "Insights", anyOf: ["dashboard:read"] }, // GET /api/v1/dashboard: Manager and above, BU Head
   { key: "performance", label: "Performance", section: "Insights", anyOf: ["performance:read"] },
   { key: "reports", label: "Reports", section: "Insights", anyOf: ["report:read", "report.market:read"] },
   // interview-reports: interviews the user can read, where they may read reports.

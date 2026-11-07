@@ -1076,7 +1076,7 @@ const CASES: RejectCase[] = [
   },
   // sales report export (migration 0160): only the dashboard query
   {
-    route: "POST /api/v1/dashboard/export", actor: "l1",
+    route: "POST /api/v1/dashboard/export", actor: "m1",
     prepare: async () => ({
       url: "/api/v1/dashboard/export", body: {},
       state: () => rows(`SELECT count(*)::int AS n FROM eureka.audit_event WHERE action = 'dashboard.export'`),
