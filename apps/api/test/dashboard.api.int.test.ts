@@ -5,7 +5,7 @@ import { createApp } from "../src/app.module.js";
 import { DASHBOARD_REQUESTS_PER_MINUTE, DASHBOARD_THRESHOLDS, NEEDS_ATTENTION_LIMIT } from "../src/modules/dashboard/dashboard.config.js";
 import { loadConfig } from "../src/platform/config.js";
 import { asUser, createTestDb, type TestDb } from "./db-harness.js";
-import { CLIENT_ID, LOC, T, U, seedFixtures, toUserAccess } from "./fixtures.js";
+import { CLIENT_ID, LOC, T, TECH_ID, U, seedFixtures, toUserAccess } from "./fixtures.js";
 import { createPlacement, extraUser, newCandidate, selectedSubmission } from "./placement-seed.js";
 
 /**
@@ -128,6 +128,68 @@ async function seedPeriod() {
   await placement(U.l1, { teamId: T.t1, recruiterId: null, locationId: LOC.austin }, { createdAt: inP(3, 12) });
 }
 
+/** Coach / technology data set (migration 0580), in its own period so the March totals stay as they are. */
+const Q_FROM = "2030-04-01T00:00:00.000Z";
+const Q_TO = "2030-04-08T00:00:00.000Z";
+const QPERIOD = `from=${encodeURIComponent(Q_FROM)}&to=${encodeURIComponent(Q_TO)}`;
+const PYTHON_ID = "00000000-0000-0000-0000-000000000502";
+const coached = { X1: "", X2: "", X3: "", X4: "" };
+
+/** A placement made after the given interview rounds (inserted directly; the snapshot is taken by authz.create_placement). */
+async function placedAfter(actor: string, cand: Parameters<typeof newCandidate>[1], technologyId: string,
+  rounds: { coachId: string | null; startsAt: string; callStatus: string; cleared?: boolean }[],
+  state: { createdAt: string; joinedAt?: string }): Promise<string> {
+  const c = await newCandidate(db, cand);
+  await force(`UPDATE eureka.candidate SET created_at = '2020-01-01', technology_id = $2 WHERE id = $1`, [c.id, technologyId]);
+  const sub = await selectedSubmission(db, actor, c.id);
+  await force(`UPDATE eureka.submission SET submitted_at = '2030-01-01' WHERE id = $1`, [sub]);
+  for (const [n, r] of rounds.entries()) {
+    await force(`INSERT INTO eureka.interview (submission_id, candidate_id, recruiter_id, team_id, location_id, round, starts_at, ends_at,
+        coach_id, call_status, cleared, cleared_at)
+      SELECT s.id, s.candidate_id, s.recruiter_id, s.team_id, s.location_id, $2, $3::timestamptz, $3::timestamptz + interval '1 hour',
+        $4, $5, $6, CASE WHEN $6 THEN $3::timestamptz + interval '1 hour' END
+      FROM eureka.submission s WHERE s.id = $1`, [sub, `L${n + 1}`, r.startsAt, r.coachId, r.callStatus, r.cleared ?? false]);
+  }
+  const { id } = await createPlacement(db, actor, sub, { start: "2031-01-05" });
+  await force(`UPDATE eureka.placement SET created_at = $2, status = $3, joined_at = $4 WHERE id = $1`,
+    [id, state.createdAt, state.joinedAt ? "joined" : "confirmed", state.joinedAt ?? null]);
+  return id;
+}
+
+/**
+ * X1 r1a/t1 Java: L1 il (cleared), L2 coach -> coach; created and joined in Q.
+ * X2 r1a/t1 Python: L1 il, L2 coach cancelled -> il (a round that did not happen does not count).
+ * X3 r2a/t2 Python: L1 coach, L2 without a coach -> coach (the final coached round).
+ * X4 r2a/t2 Java: no interviews -> no coach.
+ * Also a cleared round with a coach that never became a placement: not counted anywhere here.
+ */
+async function seedCoached() {
+  await db.admin.query(`INSERT INTO eureka.technology (id, name) VALUES ($1,'Python')`, [PYTHON_ID]);
+  const t1 = { teamId: T.t1, recruiterId: U.r1a, locationId: LOC.dallas };
+  const t2 = { teamId: T.t2, recruiterId: U.r2a, locationId: LOC.austin };
+  coached.X1 = await placedAfter(U.r1a, t1, TECH_ID, [
+    { coachId: U.il, startsAt: "2030-03-20T10:00:00Z", callStatus: "completed", cleared: true },
+    { coachId: U.coach, startsAt: "2030-03-25T10:00:00Z", callStatus: "completed" },
+  ], { createdAt: "2030-04-03T10:00:00Z", joinedAt: "2030-04-05T10:00:00Z" });
+  coached.X2 = await placedAfter(U.r1a, t1, PYTHON_ID, [
+    { coachId: U.il, startsAt: "2030-03-20T12:00:00Z", callStatus: "completed" },
+    { coachId: U.coach, startsAt: "2030-03-26T12:00:00Z", callStatus: "cancelled" },
+  ], { createdAt: "2030-04-04T10:00:00Z" });
+  coached.X3 = await placedAfter(U.r2a, t2, PYTHON_ID, [
+    { coachId: U.coach, startsAt: "2030-03-21T10:00:00Z", callStatus: "completed" },
+    { coachId: null, startsAt: "2030-03-27T10:00:00Z", callStatus: "completed" },
+  ], { createdAt: "2030-04-04T12:00:00Z" });
+  coached.X4 = await placedAfter(U.r2a, t2, TECH_ID, [], { createdAt: "2030-04-06T10:00:00Z" });
+  // Cleared but not placed.
+  const c = await newCandidate(db, t1);
+  await force(`UPDATE eureka.candidate SET created_at = '2020-01-01' WHERE id = $1`, [c.id]);
+  const sub = await submit(U.r1a, c.id, "2030-01-02T10:00:00Z");
+  await force(`INSERT INTO eureka.interview (submission_id, candidate_id, recruiter_id, team_id, location_id, round, starts_at, ends_at,
+      coach_id, call_status, cleared, cleared_at)
+    SELECT s.id, s.candidate_id, s.recruiter_id, s.team_id, s.location_id, 'L2', '2030-04-02T10:00:00Z', '2030-04-02T11:00:00Z',
+      $2, 'completed', true, '2030-04-02T11:00:00Z' FROM eureka.submission s WHERE s.id = $1`, [sub, U.coach]);
+}
+
 /** "Needs attention" rows, relative to now, all for r1a's candidates in Dallas (team t1). */
 async function seedAttention() {
   const mk = async () => {
@@ -167,6 +229,7 @@ beforeAll(async () => {
   await force(`UPDATE eureka.candidate SET created_at = '2020-01-01'`, []);
   await seedPeriod();
   await seedAttention();
+  await seedCoached();
   bu = await extraUser(db, "bu", "bu_head");
   const url = new URL(process.env.TEST_PG_ADMIN_URL ?? "postgres://postgres:postgres@127.0.0.1:5432");
   app = await createApp(loadConfig({
@@ -216,27 +279,17 @@ const all = (s: number, is: number, ic: number, pc: number, pj: number, ca: numb
 });
 
 /** Hand-calculated from the data set above (see seedPeriod). */
+/** Hand-calculated for the dashboard:read holders: Manager and above, plus BU Head. */
 const EXPECTED: Record<string, { groupBy: string; totals: Record<string, number> }> = {
-  r1a: { groupBy: "recruiter", totals: all(2, 1, 1, 1, 1, 1) }, // own only: candidates the recruiter owns, not the team's
-  r1b: { groupBy: "recruiter", totals: all(1, 1, 0, 0, 0, 0) },
-  r2a: { groupBy: "recruiter", totals: all(2, 2, 1, 1, 0, 1) },
-  r3a: { groupBy: "recruiter", totals: all(2, 1, 1, 1, 1, 2) }, // sees r2a's work on their candidates
-  l1: { groupBy: "recruiter", totals: all(4, 2, 1, 2, 1, 2) },
-  l2: { groupBy: "recruiter", totals: all(2, 2, 1, 1, 0, 1) },
-  l3: { groupBy: "recruiter", totals: all(2, 1, 1, 1, 1, 2) },
   m1: { groupBy: "team", totals: all(6, 4, 2, 3, 1, 3) },
   m2: { groupBy: "team", totals: all(2, 1, 1, 1, 1, 2) },
   ad: { groupBy: "team", totals: all(7, 4, 3, 3, 2, 5) },
   ceo: { groupBy: "location", totals: all(7, 4, 3, 3, 2, 5) },
-  locD: { groupBy: "candidate", totals: all(4, 2, 1, 1, 2, 3) },
-  locA: { groupBy: "candidate", totals: all(3, 2, 2, 2, 0, 2) },
-  // No submission or interview access: those metrics are absent, not zero.
-  hr: { groupBy: "location", totals: { placementsCreated: 3, placementsJoined: 2, candidatesAdded: 5 } },
-  acct: { groupBy: "location", totals: { placementsCreated: 3, placementsJoined: 2, candidatesAdded: 5 } },
+  // No submission, interview or candidate access: those metrics are absent, not zero.
   bu: { groupBy: "location", totals: { placementsCreated: 3, placementsJoined: 2 } },
-  // report:read since 0150 (joinings/exits): only candidate:read among the metric permissions.
-  imm: { groupBy: "location", totals: { candidatesAdded: 5 } },
 };
+/** report:read holders below Manager (and other tracks): their other reports stay, the dashboard does not. */
+const NO_DASHBOARD = ["r1a", "r2a", "l1", "l3", "locD", "locA", "hr", "acct", "imm", "coach", "il", "admin"] as const;
 
 describe("dashboard totals per role scope (hand-calculated)", () => {
   it.each(Object.keys(EXPECTED))("%s", async (key) => {
@@ -268,27 +321,22 @@ describe("dashboard totals per role scope (hand-calculated)", () => {
     ]);
   });
 
-  it("a lead's dashboard is grouped by recruiter, unassigned candidates last", async () => {
-    const d = await dashboard("l1");
-    expect(d.groups).toEqual([
-      { id: U.l1, name: "l1", counts: all(1, 0, 0, 1, 0, 0) },
-      { id: U.r1a, name: "r1a", counts: all(2, 1, 1, 1, 1, 1) },
-      { id: U.r1b, name: "r1b", counts: all(1, 1, 0, 0, 0, 0) },
-      { id: null, name: null, counts: all(0, 0, 0, 0, 0, 1) },
-    ]);
+  it("a manager can regroup by recruiter, and the CEO by team", async () => {
+    const byRecruiter = await dashboard("m1", `${PERIOD}&groupBy=recruiter`);
+    expect(byRecruiter.groups.find((g) => g.id === U.r1a)?.counts).toEqual(all(2, 1, 1, 1, 1, 1));
+    expect(byRecruiter.groups.at(-1)).toEqual({ id: null, name: null, counts: all(0, 0, 0, 0, 0, 1) });
+    const byTeam = await dashboard("ceo", `${PERIOD}&groupBy=team`);
+    expect(byTeam.groups.find((g) => g.id === T.t1)?.counts).toEqual(all(4, 2, 1, 2, 1, 2));
   });
 
-  it("a location admin sees only their location and can regroup by team", async () => {
-    expect((await dashboard("locD", `${PERIOD}&groupBy=location`)).groups).toEqual([{ id: LOC.dallas, name: "Dallas", counts: all(4, 2, 1, 1, 2, 3) }]);
-    const byTeam = await dashboard("locD", `${PERIOD}&groupBy=team`);
-    expect(byTeam.groupBy).toBe("team");
-    expect(byTeam.groups.map((g) => [g.name, g.counts.submissions])).toEqual([["Team Anjali", 1], ["Team Rohit", 3], ["Team Vikram", 0]]);
-  });
-
-  it("refuses roles without report:read", async () => {
-    for (const key of ["coach", "admin"] as const) {
+  it("refuses everyone below Manager and roles without dashboard:read (403), reports stay", async () => {
+    for (const key of NO_DASHBOARD) {
       expect((await get(key, `/api/v1/dashboard?${PERIOD}`)).statusCode, key).toBe(403);
+      expect((await get(key, "/api/v1/dashboard/filters")).statusCode, key).toBe(403);
     }
+    // Lead and HR keep report:read for the other reports.
+    expect(can(toUserAccess("l1"), "report:read")).toBe(true);
+    expect(can(toUserAccess("hr"), "report:read")).toBe(true);
   });
 
   it("validates the period and grouping", async () => {
@@ -373,7 +421,7 @@ describe("RLS alone yields the same counts (no definer bypass)", () => {
     placementsJoined: `SELECT count(*)::int AS n FROM eureka.placement WHERE joined_at >= $1 AND joined_at < $2`,
   };
   // For these roles report:read covers at least the read scope, so the report narrowing changes nothing.
-  it.each(["r1a", "l1", "l3", "m1", "m2", "ad", "ceo", "locD", "locA", "hr"] as const)("%s", async (key) => {
+  it.each(["m1", "m2", "ad", "ceo"] as const)("%s", async (key) => {
     const d = await dashboard(key);
     for (const m of d.metrics.filter((x) => x in sql)) {
       const n = await asUser(db.app, U[key], async (c) => (await c.query<{ n: number }>(sql[m]!, [P_FROM, P_TO])).rows[0]!.n);
@@ -386,7 +434,7 @@ describe("needs attention", () => {
   const sections = async (key: Key) => Object.fromEntries((await dashboard(key)).needsAttention.sections.map((s) => [s.kind, s]));
 
   it("lists stale submissions, interviews without staff feedback and stalled placements, oldest first", async () => {
-    const s = await sections("r1a");
+    const s = await sections("m1");
     expect(Object.keys(s)).toEqual(["submissionStale", "interviewFeedbackMissing", "placementStalled"]);
     expect(s.submissionStale!.total).toBe(1);
     expect(s.submissionStale!.items.map((i) => i.id)).toEqual([attention.stale]);
@@ -406,8 +454,7 @@ describe("needs attention", () => {
   });
 
   it.each([
-    ["l1", [1, 2, 2]], ["m1", [1, 2, 2]], ["ceo", [1, 2, 2]], ["locD", [1, 2, 2]],
-    ["r1b", [0, 0, 0]], ["m2", [0, 0, 0]], ["locA", [0, 0, 0]],
+    ["m1", [1, 2, 2]], ["ad", [1, 2, 2]], ["ceo", [1, 2, 2]], ["m2", [0, 0, 0]],
   ] as const)("%s sees only its scope", async (key, [sub, int, pl]) => {
     const s = await sections(key);
     expect([s.submissionStale!.total, s.interviewFeedbackMissing!.total, s.placementStalled!.total]).toEqual([sub, int, pl]);
@@ -415,16 +462,81 @@ describe("needs attention", () => {
   });
 
   it("omits lists the role cannot read", async () => {
-    for (const key of ["hr", "bu"] as const) {
+    for (const key of ["bu"] as const) {
       const s = await sections(key);
       expect(Object.keys(s), key).toEqual(["placementStalled"]);
       expect(s.placementStalled!.total).toBe(2);
     }
   });
 
-  it("the report permission holders are exactly the roles with a dashboard", () => {
+  it("the dashboard:read holders are exactly the roles with a dashboard", () => {
     for (const key of Object.keys(U) as (keyof typeof U)[]) {
-      expect(can(toUserAccess(key), "report:read"), key).toBe(key in EXPECTED);
+      expect(can(toUserAccess(key), "dashboard:read"), key).toBe(key in EXPECTED);
+    }
+  });
+});
+
+describe("coach and technology (migration 0580)", () => {
+  const pl = (created: number, joined: number) => ({ placementsCreated: created, placementsJoined: joined });
+  const byId = (d: Dashboard) => Object.fromEntries(d.groups.map((g) => [g.id ?? "none", g.counts]));
+
+  it("create_placement snapshots the coach of the final coached round", async () => {
+    const { rows } = await db.admin.query<{ id: string; coach_id: string | null }>(
+      `SELECT id, coach_id FROM eureka.placement WHERE id = ANY($1::uuid[])`, [Object.values(coached)]);
+    const coachOf = Object.fromEntries(rows.map((r) => [r.id, r.coach_id]));
+    expect([coached.X1, coached.X2, coached.X3, coached.X4].map((id) => coachOf[id])).toEqual([U.coach, U.il, U.coach, null]);
+  });
+
+  it("groups placements by coach; cleared rounds are not placements", async () => {
+    const d = await dashboard("ceo", `${QPERIOD}&groupBy=coach`);
+    expect(d.groupBy).toBe("coach");
+    expect(d.metrics).toEqual(["placementsCreated", "placementsJoined"]);
+    expect(d.totals).toEqual(pl(4, 1));
+    expect(d.groups).toEqual([
+      { id: U.coach, name: "coach", counts: pl(2, 1) },
+      { id: U.il, name: "il", counts: pl(1, 0) },
+      { id: null, name: null, counts: pl(1, 0) },
+    ]);
+    for (const m of d.metrics) expect(d.series.reduce((n, x) => n + (x.counts[m] ?? 0), 0), m).toBe(d.totals[m]);
+  });
+
+  it("groups placements by technology", async () => {
+    const d = await dashboard("ceo", `${QPERIOD}&groupBy=technology`);
+    expect(d.groups).toEqual([
+      { id: TECH_ID, name: "Java", counts: pl(2, 1) },
+      { id: PYTHON_ID, name: "Python", counts: pl(2, 0) },
+    ]);
+  });
+
+  it("filters by technology and coach, with any grouping", async () => {
+    expect(byId(await dashboard("ceo", `${QPERIOD}&groupBy=coach&technologyId=${PYTHON_ID}`))).toEqual({ [U.coach]: pl(1, 0), [U.il]: pl(1, 0) });
+    const d = await dashboard("ceo", `${QPERIOD}&coachId=${U.coach}`);
+    expect(d.groupBy).toBe("location");
+    expect(d.metrics).toEqual(["placementsCreated", "placementsJoined"]);
+    expect(d.totals).toEqual(pl(2, 1));
+    expect((await dashboard("ceo", `${QPERIOD}&coachId=${U.coach}&technologyId=${TECH_ID}`)).totals).toEqual(pl(1, 1));
+  });
+
+  it("stays in the caller's scope; BU Head (no interview:read) gets the coach from the snapshot", async () => {
+    expect(byId(await dashboard("m1", `${QPERIOD}&groupBy=coach`))).toEqual({ [U.coach]: pl(2, 1), [U.il]: pl(1, 0), none: pl(1, 0) });
+    expect((await dashboard("m2", `${QPERIOD}&groupBy=coach`)).groups).toEqual([]);
+    expect(byId(await dashboard("bu", `${QPERIOD}&groupBy=coach`))).toEqual({ [U.coach]: pl(2, 1), [U.il]: pl(1, 0), none: pl(1, 0) });
+  });
+
+  it("lists the filter choices from the placements the caller counts", async () => {
+    const res = await get("ceo", "/api/v1/dashboard/filters");
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toEqual({
+      coaches: [{ id: U.coach, name: "coach" }, { id: U.il, name: "il" }],
+      technologies: [{ id: TECH_ID, name: "Java" }, { id: PYTHON_ID, name: "Python" }],
+    });
+    const m2 = (await get("m2", "/api/v1/dashboard/filters")).json() as { coaches: unknown[] };
+    expect(m2.coaches).toEqual([]);
+  });
+
+  it("validates the filter ids", async () => {
+    for (const q of ["coachId=nope", "technologyId=1", "groupBy=coaches"]) {
+      expect((await get("ceo", `/api/v1/dashboard?${q}`)).statusCode, q).toBe(422);
     }
   });
 });
@@ -450,16 +562,16 @@ describe("expensive-query guards", () => {
     const statuses: number[] = [];
     // The fixed window l2 opened earlier may end mid-loop and restart the count, so allow for one more window.
     for (let i = 0; i <= 2 * DASHBOARD_REQUESTS_PER_MINUTE; i++) {
-      statuses.push((await get("l2", `/api/v1/dashboard?${PERIOD}`)).statusCode);
+      statuses.push((await get("m2", `/api/v1/dashboard?${PERIOD}`)).statusCode);
       if (statuses.at(-1) === 429) break;
     }
-    // l2 already used some of its window in earlier tests; every call before the limit succeeded.
+    // m2 already used some of its window in earlier tests; every call before the limit succeeded.
     expect(statuses.at(-1)).toBe(429);
     expect(statuses.slice(0, -1).every((s) => s === 200)).toBe(true);
-    const res = await get("l2", `/api/v1/dashboard?${PERIOD}`);
+    const res = await get("m2", `/api/v1/dashboard?${PERIOD}`);
     expect(res.statusCode).toBe(429);
     expect(res.json().detail).toMatch(/Too many dashboard requests/);
     // Other users are unaffected.
-    expect((await get("l3", `/api/v1/dashboard?${PERIOD}`)).statusCode).toBe(200);
+    expect((await get("ad", `/api/v1/dashboard?${PERIOD}`)).statusCode).toBe(200);
   });
 });

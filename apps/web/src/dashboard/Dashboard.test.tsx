@@ -48,7 +48,10 @@ const HR: Dashboard = {
 };
 
 let api: ReturnType<typeof mockApi>;
-beforeEach(() => { api = mockApi({ "GET /api/v1/dashboard": () => ({ body: LEAD }) }); });
+const OPTIONS = { coaches: [{ id: "co1", name: "Meera Coach" }], technologies: [{ id: "t-java", name: "Java" }, { id: "t-py", name: "Python" }] };
+beforeEach(() => {
+  api = mockApi({ "GET /api/v1/dashboard": () => ({ body: LEAD }), "GET /api/v1/dashboard/filters": () => ({ body: OPTIONS }) });
+});
 afterEach(() => vi.restoreAllMocks());
 const lastQuery = () => api.gets("/api/v1/dashboard").at(-1)!.url.searchParams;
 
@@ -227,12 +230,13 @@ describe("Dashboard", () => {
 });
 
 describe("Dashboard navigation", () => {
-  it.each(["recruiter", "lead", "manager", "assoc_director", "location_incharge", "location_ops_admin", "ceo", "hr", "bu_head", "immigration"] as Role[])(
+  it.each(["manager", "assoc_director", "ceo", "bu_head"] as Role[])(
     "%s has a Dashboard", (role) => {
       expect(visibleNav(meFor(role).capabilities).map((n) => n.key)).toContain("dashboard");
     });
-  it.each(["interview_coach", "org_admin", "documents_team", "associate_hr"] as Role[])(
-    "%s has no Dashboard (no report:read)", (role) => {
+  it.each(["recruiter", "lead", "location_incharge", "location_ops_admin", "hr", "immigration", "interview_coach", "org_admin",
+    "documents_team", "associate_hr"] as Role[])(
+    "%s has no Dashboard (no dashboard:read: Manager and above only)", (role) => {
       expect(visibleNav(meFor(role).capabilities).map((n) => n.key)).not.toContain("dashboard");
     });
 });
@@ -269,5 +273,59 @@ describe("Sales reports (migration 0160)", () => {
     await screen.findByRole("table", { name: "Activity by recruiter" });
     expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
     expect(screen.getByText(/most active; totals include everyone/)).toBeInTheDocument();
+  });
+});
+
+describe("Coach and technology (migration 0580)", () => {
+  const PLACED: Dashboard = {
+    ...LEAD,
+    groupBy: "coach",
+    metrics: ["placementsCreated", "placementsJoined"],
+    totals: { placementsCreated: 3, placementsJoined: 1 },
+    groups: [
+      { id: "co1", name: "Meera Coach", counts: { placementsCreated: 2, placementsJoined: 1 } },
+      { id: null, name: null, counts: { placementsCreated: 1, placementsJoined: 0 } },
+    ],
+  };
+
+  it("groups placements by coach and explains that cleared rounds are not placements", async () => {
+    wrap(<DashboardPage />);
+    await screen.findByRole("table", { name: "Activity by recruiter" });
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    api.routes["GET /api/v1/dashboard"] = () => ({ body: PLACED });
+    fireEvent.change(screen.getByLabelText("Group by"), { target: { value: "coach" } });
+    await waitFor(() => expect(lastQuery().get("groupBy")).toBe("coach"));
+    const table = await screen.findByRole("table", { name: "Activity by coach" });
+    expect(within(table).getAllByRole("row")[1]).toHaveTextContent("Meera Coach");
+    expect(within(table).getByText("No coach")).toBeInTheDocument();
+    expect(screen.getByRole("note")).toHaveTextContent(/Cleared L1\/L2 rounds are not placements/);
+  });
+
+  it("filters by technology and coach, and exports with the same filters", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    api.routes["POST /api/v1/dashboard/export"] = () => ({ body: "csv" });
+    wrap(<DashboardPage canExport />);
+    const tech = await screen.findByRole("combobox", { name: "Technology" });
+    expect(within(tech).getAllByRole("option").map((o) => o.textContent)).toEqual(["All technologies", "Java", "Python"]);
+    fireEvent.change(tech, { target: { value: "t-py" } });
+    await waitFor(() => expect(lastQuery().get("technologyId")).toBe("t-py"));
+    fireEvent.change(screen.getByRole("combobox", { name: "Coach" }), { target: { value: "co1" } });
+    await waitFor(() => expect(lastQuery().get("coachId")).toBe("co1"));
+    expect(lastQuery().get("technologyId")).toBe("t-py");
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+    await waitFor(() => expect(api.writes()).toHaveLength(1));
+    expect(api.writes()[0]!.body).toMatchObject({ technologyId: "t-py", coachId: "co1" });
+    // Back to all technologies drops the parameter.
+    fireEvent.change(tech, { target: { value: "" } });
+    await waitFor(() => expect(lastQuery().get("technologyId")).toBeNull());
+  });
+
+  it("hides the filters when there is nothing to choose", async () => {
+    api.routes["GET /api/v1/dashboard/filters"] = () => ({ body: { coaches: [], technologies: [] } });
+    wrap(<DashboardPage />);
+    await screen.findByRole("table", { name: "Activity by recruiter" });
+    expect(screen.queryByRole("combobox", { name: "Technology" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Coach" })).not.toBeInTheDocument();
   });
 });

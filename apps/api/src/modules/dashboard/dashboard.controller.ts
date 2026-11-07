@@ -11,14 +11,25 @@ export { DashboardService };
 export class DashboardController {
   constructor(private readonly svc: DashboardService) {}
 
+  /** Manager and above, plus BU Head (dashboard:read); counts still narrow to report:read. */
   @ApiQuery(DashboardQuery)
   @Get()
-  @RequirePermission("report:read")
+  @RequirePermission("dashboard:read")
   get(@CurrentUser() user: AuthedUser, @Query() q: unknown) {
     return this.svc.get(user, DashboardQuery.parse(q));
   }
 
-  /** Sales report CSV (grouped counts; migration 0160). POST, not GET: audited and CSRF-protected, like the Hot List export. */
+  /** Choices for the Coach and Technology filters (migration 0580). Static path before any :param route. */
+  @Get("filters")
+  @RequirePermission("dashboard:read")
+  filters(@CurrentUser() user: AuthedUser) {
+    return this.svc.filterOptions(user);
+  }
+
+  /**
+   * Sales report CSV (grouped counts; migration 0160). POST, not GET: audited and CSRF-protected, like the Hot List export.
+   * Needs report:export here and dashboard:read (checked by the service).
+   */
   @ApiBody(DashboardQuery)
   @Post("export")
   @HttpCode(200)

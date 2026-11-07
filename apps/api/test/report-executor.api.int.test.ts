@@ -51,7 +51,7 @@ async function get(key: Key, url: string) {
 /** Org-scope dashboard callers that count submissions (their report waits on a submission lock). */
 const orgKeys = (Object.keys(U) as Key[]).filter((k) => {
   const a = toUserAccess(k);
-  return resolveScope(a, "report:read")?.all && resolveScope(a, "submission:read");
+  return resolveScope(a, "report:read")?.all && resolveScope(a, "submission:read") && resolveScope(a, "dashboard:read");
 });
 
 /** Holds an ACCESS EXCLUSIVE lock on eureka.submission until release(). */

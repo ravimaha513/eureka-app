@@ -197,6 +197,8 @@ export const PERMISSIONS = [
   "invoice:read",
   "invoice:update",
   // insight
+  /** The Dashboard (docs/dashboards-api.md): Manager and above, plus BU Head. Counts still narrow to report:read. */
+  "dashboard:read",
   "report:read",
   "report:export",
   "performance:read",
@@ -290,6 +292,7 @@ export const PERMISSION_AREAS: Record<string, string> = {
   invoice: "Finance",
   bill: "Finance",
   report: "Insight",
+  dashboard: "Insight",
   performance: "Insight",
   vendor: "Vendors",
   company: "Companies & facilities",
@@ -356,7 +359,8 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   "assignment:update": "Edit client assignments",
   "invoice:read": "See invoices and payments",
   "invoice:update": "Record invoices and payments",
-  "report:read": "See reports and the dashboard",
+  "dashboard:read": "See the dashboard",
+  "report:read": "See reports",
   "report:export": "Export reports",
   "performance:read": "See recruiter performance",
   "performance.target:manage": "Set recruiter targets",
@@ -525,6 +529,7 @@ export const GRANTS: Record<Role, Grants> = {
     "bgc:update": "hierarchy",
     "rate:read": "hierarchy",
     "report:export": "hierarchy",
+    "dashboard:read": "hierarchy",
     // Superiors keep their own preferred vendors too; others' entries stay read-only
     "vendor.preferred:create": "own",
     "vendor.preferred:read": "hierarchy",
@@ -563,6 +568,7 @@ export const GRANTS: Record<Role, Grants> = {
     "bgc:update": "hierarchy",
     "rate:read": "hierarchy",
     "report:export": "hierarchy",
+    "dashboard:read": "hierarchy",
     // Superiors keep their own preferred vendors too; others' entries stay read-only
     "vendor.preferred:create": "own",
     "vendor.preferred:read": "hierarchy",
@@ -627,6 +633,7 @@ export const GRANTS: Record<Role, Grants> = {
     "performance:read": "org",
     "report:read": "org",
     "report:export": "org",
+    "dashboard:read": "org",
     "vendor.preferred:create": "own",
     "vendor.preferred:read": "org",
     // market-reports
@@ -862,6 +869,7 @@ export const GRANTS: Record<Role, Grants> = {
     "employee:read": "org",
     "placement:read": "org",
     "report:read": "org",
+    "dashboard:read": "org",
     // datahub
     "datahub:read": "own",
     // training

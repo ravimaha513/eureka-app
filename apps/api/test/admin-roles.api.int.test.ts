@@ -180,7 +180,7 @@ describe("custom roles", () => {
     expect(detail(await call("admin", "PUT", `/api/v1/admin/roles/${key}/grants`, { grants: { "candidate:read": "location" } }))).toBe("location_scope_needs_location");
     expect((await call("admin", "PUT", `/api/v1/admin/roles/${key}/grants`, { grants: { "candidate:read": "galaxy" } })).statusCode).toBe(422);
     // Back to a non-restricted set for the grant below.
-    expect((await call("admin", "PUT", `/api/v1/admin/roles/${key}/grants`, { grants: { ...GRANTS.lead, "report:read": "hierarchy" } })).statusCode).toBe(204);
+    expect((await call("admin", "PUT", `/api/v1/admin/roles/${key}/grants`, { grants: { ...GRANTS.lead, "report:read": "hierarchy", "dashboard:read": "hierarchy" } })).statusCode).toBe(204);
     expect((await roleOf(key))!.restricted).toBe(false);
   });
 
@@ -192,7 +192,7 @@ describe("custom roles", () => {
     const me = (await call("r1b", "GET", "/api/v1/me")).json();
     expect(me.roles).toEqual(expect.arrayContaining([{ key, label: "Senior Lead II", locationId: null }]));
     expect(me.capabilities).toContain("candidate:create"); // a lead's grant the recruiter role lacks
-    // Hierarchy-scoped report:read from the custom role: the dashboard groups by team like a manager would.
+    // dashboard:read and hierarchy-scoped report:read from the custom role: the dashboard groups by team like a manager would.
     expect((await call("r1b", "GET", "/api/v1/dashboard")).json().groupBy).toBe("team");
     const users = (await call("admin", "GET", `/api/v1/admin/users?role=${key}`)).json().items as { id: string; roles: { key: string; label: string }[] }[];
     expect(users.map((u) => u.id)).toEqual([U.r1b]);

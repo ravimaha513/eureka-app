@@ -9,7 +9,8 @@ import { pipelineLabel } from "../pipeline/pipelineApi";
 import { fmtDate } from "../sales/ui";
 import {
   GROUP_LABELS, METRICS, METRIC_HINTS, METRIC_LABELS, PERIODS, UNGROUPED,
-  dashboardApi, periodRange, type AttentionItem, type AttentionKind, type Dashboard, type GroupBy, type Metric,
+  dashboardApi, periodRange, placementsOnly, type AttentionItem, type AttentionKind, type Dashboard, type DashboardFilters,
+  type FilterOptions, type GroupBy, type Metric,
 } from "./dashboardApi";
 import { QueryError } from "../ui/QueryError";
 import { Loading } from "../ui/Loading";
@@ -82,17 +83,48 @@ function jumpTo(elementId: string) {
   el.focus({ preventScroll: true });
 }
 
+/** Technology and Coach filters (placements only, migration 0580); hidden when there is nothing to choose. */
+function PlacementFilters({ id, options, value, onChange, className = "field" }: {
+  id: string; options: FilterOptions | undefined; value: DashboardFilters;
+  onChange: (f: DashboardFilters) => void; className?: string;
+}) {
+  if (!options) return null;
+  return (
+    <>
+      {options.technologies.length > 0 && (
+        <div className={className}>
+          <label htmlFor={`${id}-tech`}>Technology</label>
+          <select id={`${id}-tech`} value={value.technologyId ?? ""} onChange={(e) => onChange({ ...value, technologyId: e.target.value || undefined })}>
+            <option value="">All technologies</option>
+            {options.technologies.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+      )}
+      {options.coaches.length > 0 && (
+        <div className={className}>
+          <label htmlFor={`${id}-coach`}>Coach</label>
+          <select id={`${id}-coach`} value={value.coachId ?? ""} onChange={(e) => onChange({ ...value, coachId: e.target.value || undefined })}>
+            <option value="">All coaches</option>
+            {options.coaches.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+      )}
+    </>
+  );
+}
+
 /**
- * Small-screen filters: a bottom sheet with the period and grouping. Choices are a
+ * Small-screen filters: a bottom sheet with the period, grouping and placement filters. Choices are a
  * draft until Apply, so the page does not refetch on every tap.
  */
-function FilterSheet({ periodDays, groupBy, onApply, onClose }: {
-  periodDays: number; groupBy: GroupBy;
-  onApply: (periodDays: number, groupBy: GroupBy) => void; onClose: () => void;
+function FilterSheet({ periodDays, groupBy, filters, options, onApply, onClose }: {
+  periodDays: number; groupBy: GroupBy; filters: DashboardFilters; options: FilterOptions | undefined;
+  onApply: (periodDays: number, groupBy: GroupBy, filters: DashboardFilters) => void; onClose: () => void;
 }) {
   const id = useId();
   const [p, setP] = useState(periodDays);
   const [g, setG] = useState<GroupBy>(groupBy);
+  const [f, setF] = useState<DashboardFilters>(filters);
   return (
     <Dialog title="Filters" onClose={onClose} className="sheet">
       <button type="button" className="sheetclose" aria-label="Close filters" onClick={onClose}><X size={20} aria-hidden="true" /></button>
@@ -111,10 +143,11 @@ function FilterSheet({ periodDays, groupBy, onApply, onClose }: {
             {(Object.keys(GROUP_LABELS) as GroupBy[]).map((k) => <option key={k} value={k}>{GROUP_LABELS[k]}</option>)}
           </select>
         </div>
+        <PlacementFilters id={id} options={options} value={f} onChange={setF} />
       </div>
       <div className="sheetfoot">
-        <button type="button" className="btn" onClick={() => { setP(PERIODS[0].days); setG(groupBy); }}>Reset</button>
-        <button type="button" className="btn primary" onClick={() => { onApply(p, g); onClose(); }}>Apply</button>
+        <button type="button" className="btn" onClick={() => { setP(PERIODS[0].days); setG(groupBy); setF({}); }}>Reset</button>
+        <button type="button" className="btn primary" onClick={() => { onApply(p, g, f); onClose(); }}>Apply</button>
       </div>
     </Dialog>
   );
@@ -221,18 +254,20 @@ export function DashboardPage({ canOpen = () => false, onOpen, firstName, canExp
   const id = useId();
   const [periodDays, setPeriodDays] = useState<number>(PERIODS[0].days);
   const [groupBy, setGroupBy] = useState<GroupBy | undefined>(undefined);
+  const [filters, setFilters] = useState<DashboardFilters>({});
   const range = useMemo(() => periodRange(periodDays), [periodDays]);
+  const options = useQuery({ queryKey: ["dashboard", "filters"], queryFn: dashboardApi.filters, staleTime: 5 * 60_000 });
   const q = useQuery({
-    queryKey: ["dashboard", range, groupBy ?? null],
-    queryFn: () => dashboardApi.get({ ...range, groupBy }),
+    queryKey: ["dashboard", range, groupBy ?? null, filters],
+    queryFn: () => dashboardApi.get({ ...range, groupBy, ...filters }),
     placeholderData: keepPreviousData,
   });
   const d = q.data;
   // The period just before, for the change shown on each tile (same length and grouping).
   const prevRange = useMemo(() => ({ from: new Date(2 * Date.parse(range.from) - Date.parse(range.to)).toISOString(), to: range.from }), [range]);
   const prev = useQuery({
-    queryKey: ["dashboard", prevRange, groupBy ?? null],
-    queryFn: () => dashboardApi.get({ ...prevRange, groupBy }),
+    queryKey: ["dashboard", prevRange, groupBy ?? null, filters],
+    queryFn: () => dashboardApi.get({ ...prevRange, groupBy, ...filters }),
     enabled: Boolean(d),
   });
   const [rankMetric, setRankMetric] = useState<Metric | undefined>(undefined);
@@ -244,7 +279,7 @@ export function DashboardPage({ canOpen = () => false, onOpen, firstName, canExp
   const trend = d ? d.series.map((x) => ({ date: x.date, ...Object.fromEntries(d.metrics.map((m) => [m, x.counts[m] ?? 0])) })) as ({ date: string } & Record<string, number | string>)[] : [];
   const shownGroup = d?.groupBy ?? groupBy ?? "recruiter";
   const exportRun = useMutation({
-    mutationFn: () => dashboardApi.exportCsv({ ...range, groupBy: d?.groupBy ?? groupBy }),
+    mutationFn: () => dashboardApi.exportCsv({ ...range, groupBy: d?.groupBy ?? groupBy, ...filters }),
     onSuccess: (r) => saveBlob(r.blob, r.filename),
   });
 
@@ -253,6 +288,7 @@ export function DashboardPage({ canOpen = () => false, onOpen, firstName, canExp
   const prevGroup = useMemo(() => new Map((prev.data?.groups ?? []).map((g) => [g.id ?? "none", g.counts])), [prev.data]);
   const openTotal = d ? d.needsAttention.sections.reduce((n, s) => n + s.total, 0) : 0;
   const groupWord = d ? GROUP_LABELS[d.groupBy].toLowerCase() : "";
+  const onlyPlacements = placementsOnly(filters, shownGroup);
 
   return (
     <>
@@ -272,6 +308,7 @@ export function DashboardPage({ canOpen = () => false, onOpen, firstName, canExp
                 {(Object.keys(GROUP_LABELS) as GroupBy[]).map((g) => <option key={g} value={g}>{GROUP_LABELS[g]}</option>)}
               </select>
             </div>
+            <PlacementFilters id={id} options={options.data} value={filters} onChange={setFilters} className="field inline groupselect" />
           </div>
           <button type="button" className="iconbtn dashfilters-btn" aria-label="Filters" aria-haspopup="dialog" onClick={() => setSheetOpen(true)}>
             <SlidersHorizontal size={18} aria-hidden="true" />
@@ -289,8 +326,8 @@ export function DashboardPage({ canOpen = () => false, onOpen, firstName, canExp
         </form>
       </div>
       {sheetOpen && (
-        <FilterSheet periodDays={periodDays} groupBy={shownGroup} onClose={() => setSheetOpen(false)}
-          onApply={(p, g) => { setPeriodDays(p); if (g !== shownGroup) setGroupBy(g); }} />
+        <FilterSheet periodDays={periodDays} groupBy={shownGroup} filters={filters} options={options.data} onClose={() => setSheetOpen(false)}
+          onApply={(p, g, f) => { setPeriodDays(p); if (g !== shownGroup) setGroupBy(g); setFilters(f); }} />
       )}
 
       {q.isLoading ? <Loading /> : q.error || !d ? (
@@ -314,6 +351,12 @@ export function DashboardPage({ canOpen = () => false, onOpen, firstName, canExp
               <h2 id={`${id}-totals`}>Activity<span className="sr-only">, {fmtDay(Date.parse(d.period.from))} – {fmtDay(Date.parse(d.period.to) - 1)}</span></h2>
               {d.metrics.length > 0 && prev.data && <span className="muted">Change vs previous {days(periodDays)}</span>}
             </div>
+            {onlyPlacements && (
+              <p className="muted dash-note" role="note">
+                Coach and technology apply to placements only: the final round passed and the client confirmed. Cleared L1/L2 rounds are
+                not placements, so other activity is hidden. Coach = coach of the final coached round.
+              </p>
+            )}
             {d.metrics.length === 0 ? <p className="muted">Your role has no activity counts.</p> : (
               <ul className="ins-tiles" aria-label="Activity totals">
                 {d.metrics.map((m) => (
