@@ -820,6 +820,10 @@ export const GRANTS: Record<Role, Grants> = {
     "candidate:read": "coached_hierarchy",
     "hotlist:read": "coached_hierarchy",
     "interview:read": "coached_hierarchy",
+    // Schedules interviews on the submissions of the teams they and their coaches coach. Creation
+    // takes submission:update or a coached interview:create grant over the submission (0580).
+    "submission:read": "coached_hierarchy",
+    "interview:create": "coached_hierarchy",
     "interview.feedback:create": "coached_hierarchy",
     "coach:assign": "hierarchy",
     // datahub

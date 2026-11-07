@@ -7,13 +7,14 @@ Every Interview Coach's interviews in one grid, and who may see it. Built in mig
 **Who decides:** the CEO alone, meaning a current holder of the system role `ceo`. The database
 checks that role itself (`authz.is_ceo()`), so a custom role can't gain this: `coach_calendar:*` is
 refused on custom roles, left out when cloning `ceo`, and not offered in the role editor. No access
-by default: Interview Leads and Coordinators need a grant like anyone else. **Admins still control
+by default, except the Interview Lead (below, 0580): Coordinators and everyone else need a grant. **Admins still control
 role membership:** whoever an admin makes `ceo` gets this control, and giving someone a role that has
 a grant gives them that grant. Use a user grant where that matters.
 
 | Viewer | Sees |
 |---|---|
 | CEO | every coach, full detail |
+| Interview Lead | every coach, full detail (fixed, migration 0580; an active holder of the system role `interview_lead`; cannot manage grants) |
 | Interview Coach | their own column, full detail (fixed) |
 | A role or user with a grant | the coaches the grant covers, at its detail |
 
@@ -34,7 +35,7 @@ grants read (`interview_read`, 0570, IS-15 in `docs/interviews-settings-api.md`)
 
 | Id | Route | Permission | Notes |
 |---|---|---|---|
-| CC-1 | `GET /api/v1/coach-calendar?from&to` | CEO, coach or a grant, else 403 | Window up to 31 days, else 422. `{ canManage, coaches: [{ id, name, detail }], events: [{ coachId, startsAt, endsAt, interviewId, candidateName, round, callStatus }] }`; the last four are null at `busy` |
+| CC-1 | `GET /api/v1/coach-calendar?from&to` | CEO, Interview Lead, coach or a grant, else 403 | Window up to 31 days, else 422. `{ canManage, coaches: [{ id, name, detail }], events: [{ coachId, startsAt, endsAt, interviewId, candidateName, round, callStatus }] }`; the last four are null at `busy` |
 | CC-2 | `GET /api/v1/coach-calendar/grants` | `coach_calendar:manage` | `{ items, coaches, roles }`; `roles` leaves out `ceo`, admin and archived roles |
 | CC-3 | `GET /api/v1/coach-calendar/people?q=` | `coach_calendar:manage` | Active non-admin people by name, up to 20; id and name only |
 | CC-4 | `POST /api/v1/coach-calendar/grants` | `coach_calendar:manage` | `{ granteeRole \| granteeUserId, allCoaches, coachIds?, detail }`. One grant per grantee: granting again replaces it. 422: `invalid_grantee`, `invalid_coaches`, `invalid_detail` |
@@ -53,7 +54,7 @@ kept is the refresh token, AES-256-GCM under `CALENDAR_TOKEN_KEY`, in
 
 | Id | Route | Who | Notes |
 |---|---|---|---|
-| CC-6 | `GET /api/v1/coach-calendar/google?from&to` | CEO, coach or a grant, else 403 | Up to 31 days; 60 calls a minute per user, else 429; waits at most 20 seconds, and coaches still pending show as `unavailable`. `{ enabled, me: { canConnect, connected, accountEmail }, coaches: [{ coachId, status }], events: [{ coachId, startsAt, endsAt, title }], allDay: [{ coachId, startDate, endDate, title }] }`. `endDate` is exclusive. `status`: `connected`, `not_connected`, `reconnect`, `unavailable`. One coach failing never fails the rest |
+| CC-6 | `GET /api/v1/coach-calendar/google?from&to` | CEO, Interview Lead, coach or a grant, else 403 | Up to 31 days; 60 calls a minute per user, else 429; waits at most 20 seconds, and coaches still pending show as `unavailable`. `{ enabled, me: { canConnect, connected, accountEmail }, coaches: [{ coachId, status }], events: [{ coachId, startsAt, endsAt, title }], allDay: [{ coachId, startDate, endDate, title }] }`. `endDate` is exclusive. `status`: `connected`, `not_connected`, `reconnect`, `unavailable`. One coach failing never fails the rest |
 | CC-7 | `GET /api/v1/coach-calendar/google/connect`, then `.../callback` | Holders of `interview_coach` only, else 403 at connect | Browser navigation to Google and back to `/coach-calendar?google=connected\|cancelled\|wrong_account\|scope_missing\|failed` |
 | CC-8 | `DELETE /api/v1/coach-calendar/google/connection` | Self | 204, also when nothing was connected. Revokes at Google, best effort, except when that account also holds the support calendar: Google revokes per account and OAuth client, so it would end that for everyone |
 

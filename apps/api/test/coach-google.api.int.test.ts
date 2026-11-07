@@ -217,8 +217,8 @@ describe("who sees what", () => {
   });
 
   it("a busy-only grant gets times and never a title", async () => {
-    await grant({ granteeUserId: U.il, allCoaches: true, detail: "busy" });
-    const g = await google(U.il);
+    await grant({ granteeUserId: U.hr, allCoaches: true, detail: "busy" });
+    const g = await google(U.hr);
     expect(g.events).toHaveLength(2);
     expect(g.events.every((e) => e.title === null)).toBe(true);
     expect(g.allDay.every((e) => e.title === null)).toBe(true);
@@ -226,10 +226,10 @@ describe("who sees what", () => {
   });
 
   it("a full grant gets titles, only for the coaches it names", async () => {
-    await grant({ granteeUserId: U.il, allCoaches: false, coachIds: [coach2], detail: "full" });
-    expect((await google(U.il)).events).toEqual([]);
-    await grant({ granteeUserId: U.il, allCoaches: false, coachIds: [U.coach], detail: "full" });
-    expect((await google(U.il)).events[0]!.title).toBe(TITLE);
+    await grant({ granteeUserId: U.hr, allCoaches: false, coachIds: [coach2], detail: "full" });
+    expect((await google(U.hr)).events).toEqual([]);
+    await grant({ granteeUserId: U.hr, allCoaches: false, coachIds: [U.coach], detail: "full" });
+    expect((await google(U.hr)).events[0]!.title).toBe(TITLE);
   });
 
   it("no access means 403, and the database gives no tokens either", async () => {

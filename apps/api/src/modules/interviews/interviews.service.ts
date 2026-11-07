@@ -2,6 +2,7 @@ import { ConflictException, ForbiddenException, HttpException, HttpStatus, Injec
 import type pg from "pg";
 import {
   activityVisible,
+  canScheduleInterview,
   ownsActivity,
   resolveScope,
   resolveScopeFor,
@@ -385,8 +386,8 @@ export class InterviewsService {
          WHERE s.id = $1 AND ${activityPredicate(readScope, params)}`, params);
       const sub = rows[0];
       if (!sub) throw new NotFoundException();
-      if (!ownsActivity(resolveScope(user.access, "submission:update"),
-        { recruiterId: sub.recruiter_id, teamId: sub.team_id, locationId: sub.location_id })) {
+      // submission:update over it, or a coached interview:create grant over its team (Interview Lead, 0580).
+      if (!canScheduleInterview(user.access, { recruiterId: sub.recruiter_id, teamId: sub.team_id, locationId: sub.location_id })) {
         throw new ForbiddenException("Not permitted");
       }
       if (TERMINAL_SUBMISSION_STATUSES.has(sub.status as never)) throw new UnprocessableEntityException("submission_closed");
