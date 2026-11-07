@@ -306,11 +306,11 @@ describe("Coach and technology (migration 0580)", () => {
     URL.revokeObjectURL = vi.fn();
     api.routes["POST /api/v1/dashboard/export"] = () => ({ body: "csv" });
     wrap(<DashboardPage canExport />);
-    const tech = await screen.findByRole("combobox", { name: "Technology", exact: true });
+    const tech = await screen.findByRole("combobox", { name: "Technology" });
     expect(within(tech).getAllByRole("option").map((o) => o.textContent)).toEqual(["All technologies", "Java", "Python"]);
     fireEvent.change(tech, { target: { value: "t-py" } });
     await waitFor(() => expect(lastQuery().get("technologyId")).toBe("t-py"));
-    fireEvent.change(screen.getByRole("combobox", { name: "Coach", exact: true }), { target: { value: "co1" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Coach" }), { target: { value: "co1" } });
     await waitFor(() => expect(lastQuery().get("coachId")).toBe("co1"));
     expect(lastQuery().get("technologyId")).toBe("t-py");
     fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
@@ -325,7 +325,7 @@ describe("Coach and technology (migration 0580)", () => {
     api.routes["GET /api/v1/dashboard/filters"] = () => ({ body: { coaches: [], technologies: [] } });
     wrap(<DashboardPage />);
     await screen.findByRole("table", { name: "Activity by recruiter" });
-    expect(screen.queryByRole("combobox", { name: "Technology", exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "Coach", exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Technology" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Coach" })).not.toBeInTheDocument();
   });
 });
