@@ -90,21 +90,33 @@ describe("who sees the grid", () => {
     expect(e.candidateName).toEqual(expect.any(String));
   });
 
+  it("the Interview Lead sees every coach at full detail without a grant, but cannot manage", async () => {
+    await clearGrants();
+    const g = await grid(U.il);
+    expect(g.canManage).toBe(false);
+    expect(g.coaches.map((c) => c.id).sort()).toEqual([U.coach, coach2].sort());
+    expect(g.coaches.every((c) => c.detail === "full")).toBe(true);
+    expect(g.events).toHaveLength(2);
+    expect(g.events.find((x) => x.coachId === U.coach)).toMatchObject({ interviewId: live, round: "R1", callStatus: "scheduled" });
+    const me = (await call(U.il, "GET", "/api/v1/me")).json<{ capabilities: string[] }>();
+    expect(me.capabilities).toContain("coach_calendar:read");
+  });
+
   it("a coach sees only themself; holding interview:read gives no access; nobody else is in by default", async () => {
     await clearGrants();
     const g = await grid(U.coach);
     expect(g.canManage).toBe(false);
     expect(g.coaches.map((c) => c.id)).toEqual([U.coach]);
     expect(g.events.every((e) => e.coachId === U.coach)).toBe(true);
-    for (const u of [U.il, U.ad, U.m1, U.r1a, U.admin, U.hr]) {
+    for (const u of [U.ad, U.m1, U.r1a, U.admin, U.hr]) {
       expect((await call(u, "GET", `/api/v1/coach-calendar${WINDOW}`)).statusCode, u).toBe(403);
     }
   });
 
   it("a busy-only grant carries times and nothing else", async () => {
     await clearGrants();
-    await grant({ granteeRole: "interview_lead", allCoaches: true, detail: "busy" });
-    const g = await grid(U.il);
+    await grant({ granteeRole: "hr", allCoaches: true, detail: "busy" });
+    const g = await grid(U.hr);
     expect(g.coaches.every((c) => c.detail === "busy")).toBe(true);
     expect(g.events).toHaveLength(2);
     for (const e of g.events) expect(e).toMatchObject({ interviewId: null, candidateName: null, round: null, callStatus: null });

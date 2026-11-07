@@ -79,6 +79,17 @@ export interface SubmissionActions {
 }
 
 /**
+ * Who may schedule an interview on a submission (design B4.8, migration 0580 interview_insert): an
+ * interview:create grant, plus submission:update over it or a coached interview:create grant over its
+ * team (the Interview Lead). Status is checked separately.
+ */
+export function canScheduleInterview(user: UserAccess, s: Pick<ActivityRef, "recruiterId" | "teamId" | "locationId">): boolean {
+  if (resolveScope(user, "interview:create") === null) return false;
+  return ownsActivity(resolveScope(user, "submission:update"), s)
+    || ownsActivity(resolveScopeFor(user, "interview:create", ["coached", "coached_hierarchy"]), s);
+}
+
+/**
  * For a submission the caller can read. `candidate` is the candidate as the
  * caller sees it (null when the candidate is not readable to them).
  */
@@ -97,7 +108,7 @@ export function submissionActions(
   const open = status === "selected" || !TERMINAL_SUBMISSION_STATUSES.has(status);
   return {
     transition: canUpdate ? submissionTransitionTargets(status) : [],
-    createInterview: canUpdate && resolveScope(user, "interview:create") !== null && !TERMINAL_SUBMISSION_STATUSES.has(status),
+    createInterview: canScheduleInterview(user, s) && !TERMINAL_SUBMISSION_STATUSES.has(status),
     createPlacement: canPlace && status === "selected",
     clearAndPlace: canPlace && open,
     placeBlocked: placeScope && open && !canPlace ? candidate!.marketingStatus : null,
